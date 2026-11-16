@@ -878,6 +878,9 @@ function makeConnection(
             // A runtime launched open never serves a sandboxed session, nor
             // the reverse: the wall is fixed when the process starts.
             input.executionPolicy === "full-access" && input.fullAccessSandbox === true,
+            // Strict changes the launch's environment, channels and protected
+            // files, so a warm runtime never crosses a change of it.
+            input.strict,
             tools,
           ]);
           let runtime =

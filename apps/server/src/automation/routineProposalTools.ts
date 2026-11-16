@@ -96,6 +96,11 @@ export function createRoutineProposalTools(input: {
    * creates the agent's own suggestion paused, with no card.
    */
   readonly readPosture?: () => ProviderExecutionPolicy | undefined;
+  /**
+   * Settings' "Start agent-created routines active at Full access", read at
+   * each call. Absent is off: every routine the agent creates starts paused.
+   */
+  readonly startsActiveAtFullAccess?: () => boolean;
   readonly now: () => number;
 }): AppManagedToolSet {
   const mode = input.thread.mode;
@@ -133,14 +138,16 @@ export function createRoutineProposalTools(input: {
       // The agent attests that the person asked; the host cannot check that,
       // so the routine it creates is paused and takes only the authority a
       // confirmed proposal gets. At Full access the agent's own suggestion
-      // is created the same way. A follow-up stays on the card because a
-      // paused one would never fire, and Plan changes nothing.
-      const createsPaused =
-        decideRoutineFromAgent({
-          requestedByPerson: parsed.requestedByPerson,
-          followUp: parsed.followUp,
-          posture: input.readPosture?.(),
-        }) === "create-paused";
+      // is created the same way, or enabled when the person's Settings start
+      // such routines active. A follow-up stays on the card because a paused
+      // one would never fire, and Plan changes nothing.
+      const decided = decideRoutineFromAgent({
+        requestedByPerson: parsed.requestedByPerson,
+        followUp: parsed.followUp,
+        posture: input.readPosture?.(),
+        startActiveAtFullAccess: input.startsActiveAtFullAccess?.() === true,
+      });
+      const createsActive = decided === "create-active";
       const receipt = (id: AutomationId, paused: boolean): ThreadRoutineReceipt => ({
         routineId: String(id),
         name: parsed.name,
@@ -148,15 +155,33 @@ export function createRoutineProposalTools(input: {
         firstRunAt: parsed.firstRunAt,
         paused,
       });
-      const outcome = createsPaused
-        ? input.proposals.createRequested({ windowId: input.windowId, proposal })
-        : await input.proposals.propose({
-            windowId: input.windowId,
-            proposal,
-            ...(signal === undefined ? {} : { signal }),
-          });
+      const outcome =
+        decided !== "ask-on-card"
+          ? input.proposals.createRequested({
+              windowId: input.windowId,
+              proposal,
+              ...(createsActive ? { active: true } : {}),
+            })
+          : await input.proposals.propose({
+              windowId: input.windowId,
+              proposal,
+              ...(signal === undefined ? {} : { signal }),
+            });
       switch (outcome.status) {
         case "created":
+          if (createsActive) {
+            return {
+              result: {
+                status: "created",
+                routineId: String(outcome.automationId),
+                paused: false,
+                firstRunAt: parsed.firstRunAt,
+                message:
+                  "The routine was created enabled, because this thread runs at Full access and the person's Settings start such routines active. It is shown in this thread and in Automation Center; tell them it will run.",
+              },
+              routine: receipt(outcome.automationId, false),
+            };
+          }
           return {
             result: {
               status: "created",

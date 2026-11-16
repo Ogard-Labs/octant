@@ -59,10 +59,11 @@ export interface OllamaDriverOptions {
 const TOOL_CHECK_PROMPT = `Call the ${OCTANT_CAPABILITY_ECHO_TOOL_NAME} tool with echo set to "ready". Do not answer in text.`;
 
 /**
- * The local Ollama service as an Octant Harness endpoint, through the
- * provider-sdk harness endpoint port. The host's harness loop owns the
- * conversation, every tool call, and retries; this driver supplies one
- * request attempt over Ollama's native chat API on literal loopback, and the
+ * An Ollama service, on this computer, the local network, or hosted, as an
+ * Octant Harness endpoint, through the provider-sdk harness endpoint port.
+ * The host's harness loop owns the conversation, every tool call, and
+ * retries; this driver supplies one request attempt over Ollama's native chat
+ * API, and the
  * per-model Verify tools check that gates which models are offered tools.
  */
 export function makeOllamaDriver(options: OllamaDriverOptions): HarnessEndpointDriver {

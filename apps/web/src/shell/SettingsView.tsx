@@ -156,6 +156,7 @@ import {
   settingId,
 } from "../settings/registry";
 import { octantSettingsRegistry } from "../settings/octantSettingsRegistry";
+import { OctantLimitsSettings } from "../settings/OctantLimitsSettings";
 import { KeybindingSettings } from "../keybindings/KeybindingSettings";
 import { NavigatorAssistantSettingsView } from "../settings/NavigatorAssistantSettingsView";
 import { VoiceSettingsView } from "../settings/VoiceSettingsView";
@@ -1830,6 +1831,11 @@ function ActiveSectionContent({
               </SettingRow>
             </div>
           </SettingsSection>
+          <OctantLimitsSettings
+            focusedSetting={focusedSetting}
+            onSettingsChange={props.onSettingsChange}
+            settings={props.settings}
+          />
           {props.canvasClient?.publicLinkSettings === undefined ? null : (
             <SettingsSection title="Public links">
               <div className="setgroup">

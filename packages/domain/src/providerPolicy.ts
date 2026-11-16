@@ -17,6 +17,7 @@ import {
   isAcpAgentKind,
 } from "@octant/contracts/acp-agent-profiles";
 import { gatewayDirectoryOrigin, isAzureFoundryDirectoryHost } from "./directorySignIn";
+import { classifyRemoteListenerAddress } from "./remoteAccessPolicy";
 import {
   DirectoryIssuer,
   DirectoryIssuerClientId,
@@ -810,6 +811,29 @@ export interface OllamaConfigurationInput {
   readonly baseUrl: string;
 }
 
+/** Where an Ollama address points, judged from its host alone. */
+export type OllamaAddressReach = "loopback" | "private-network" | "public";
+
+/**
+ * Whether an Ollama host is this computer, a private network (a LAN, an
+ * overlay network such as Tailscale, or an mDNS `.local` name), or anything
+ * else, read as a paired device's listener address is. Nothing here resolves
+ * DNS, so any other name counts as public.
+ */
+export function ollamaAddressReach(hostname: string): OllamaAddressReach {
+  const host = hostname.toLowerCase().replace(/^\[(.*)\]$/, "$1");
+  if (host.endsWith(".local")) return "private-network";
+  const kind = classifyRemoteListenerAddress(host);
+  if (kind === "loopback") return "loopback";
+  return kind === "lan-private" || kind === "tailscale" ? "private-network" : "public";
+}
+
+/**
+ * An Ollama address: HTTPS anywhere, as a hosted Ollama is reached, or plain
+ * HTTP on loopback or a private network (maintainer decision, 2026-11-16).
+ * A public address still needs HTTPS, so prompts never cross the internet
+ * in the clear. The address is an origin with no path or credentials.
+ */
 export function normalizeOllamaBaseUrl(baseUrl: string): string {
   const normalized = baseUrl.trim();
   if (normalized.includes("?") || normalized.includes("#")) {
@@ -821,19 +845,42 @@ export function normalizeOllamaBaseUrl(baseUrl: string): string {
   } catch {
     return reject("invalid-base-url", "Ollama base URL is invalid.");
   }
-  const hostname = url.hostname.toLowerCase();
   if (
-    url.protocol !== "http:" ||
-    !["127.0.0.1", "[::1]", "localhost"].includes(hostname) ||
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
     url.username !== "" ||
     url.password !== "" ||
     url.search !== "" ||
     url.hash !== "" ||
     url.pathname !== "/"
   ) {
-    reject("invalid-base-url", "Ollama base URL must be an exact literal-loopback HTTP origin.");
+    reject(
+      "invalid-base-url",
+      "Ollama base URL must be an HTTP or HTTPS origin with no path, credentials, query, or fragment.",
+    );
+  }
+  if (url.protocol === "http:" && ollamaAddressReach(url.hostname) === "public") {
+    reject(
+      "invalid-base-url",
+      "Ollama on a public address must use HTTPS; plain HTTP is allowed on this computer or a private network.",
+    );
   }
   return url.origin;
+}
+
+/**
+ * The warning an Ollama address carries, or undefined: plain HTTP off this
+ * computer sends prompts and replies unencrypted across the local network.
+ */
+export function ollamaAddressWarning(baseUrl: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(baseUrl.trim());
+  } catch {
+    return undefined;
+  }
+  return url.protocol === "http:" && ollamaAddressReach(url.hostname) === "private-network"
+    ? "This address is on your network over plain HTTP, so prompts and replies travel unencrypted and anyone on the network can read them."
+    : undefined;
 }
 
 function normalizeOllamaConfiguration(
