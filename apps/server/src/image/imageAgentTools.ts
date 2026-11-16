@@ -506,7 +506,7 @@ export function createThreadImageAgentTools(input: {
   readonly threadKind: "chat-thread" | "work-thread" | "code-thread";
   readonly scopeId: ImageGenerationScopeId;
   readonly offers: Pick<ImageGenerationOfferService, "offer">;
-  readonly kept: Pick<KeptImageGenerationChoices, "remembered" | "forget">;
+  readonly kept: Pick<KeptImageGenerationChoices, "remembered" | "forget" | "asksAgain">;
   /** The host runs this turn as itself: a routine, a goal loop, a resume. */
   readonly unattended?: boolean;
   /** Whether the turn's thread runs at Full access now; Work and Code only. */
