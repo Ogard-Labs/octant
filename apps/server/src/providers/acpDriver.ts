@@ -2108,14 +2108,12 @@ function makeConnection(
             }).pipe(
               Effect.flatMap(() => {
                 const prompt = renderProviderTurnPrompt(input);
-                // An agent with a reviewed inventory runs no slash command in
-                // Plan or Chat, since a command can write; elsewhere it runs
-                // only a command on that inventory, and one its session
-                // listed once it has listed any, so an unreviewed command
-                // cannot run.
+                // An agent with a reviewed inventory runs only a command on
+                // that inventory, and one its session listed once it has
+                // listed any, so an unreviewed command cannot run. It does so
+                // in every mode; the level's tool rules decide what it does.
                 const reviewed = profile.reviewedCommands;
                 const opensWithSlash = prompt.trimStart().startsWith("/");
-                const readOnly = mode === "chat" || state.executionPolicy === "plan";
                 const listed = [...state.runtime.commands];
                 const command = providerCommandOf(
                   input.prompt,
@@ -2123,17 +2121,11 @@ function makeConnection(
                     .filter((commandName) => listed.length === 0 || listed.includes(commandName))
                     .map((commandName) => ({ name: commandName })),
                 );
-                if (
-                  reviewed !== undefined &&
-                  opensWithSlash &&
-                  (readOnly || command === undefined)
-                ) {
+                if (reviewed !== undefined && opensWithSlash && command === undefined) {
                   return Effect.fail(
                     failure(
                       "unauthorized",
-                      readOnly
-                        ? `${name} slash commands do not run in Plan or Chat. Rephrase the request without a leading slash.`
-                        : `${name} runs only the slash commands it listed and Octant reviewed. Rephrase the request without a leading slash.`,
+                      `${name} runs only the slash commands it listed and Octant reviewed. Rephrase the request without a leading slash.`,
                     ),
                   );
                 }

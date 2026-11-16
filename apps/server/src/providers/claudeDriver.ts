@@ -3,7 +3,7 @@ import { readClaudeInstructionFiles } from "./claudeInstructionFiles";
 import { providerApprovalCall } from "./providerApprovalCall";
 import { claudeGitIdentityEnvironment, type ClaudeGitIdentity } from "./claudeGitIdentity";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
@@ -780,8 +780,9 @@ function claudeConfigurationDirectory(
  * load: the account's `CLAUDE.md` without the `user` source, the Project's
  * without the `project` source (an untrusted Project). Where a source is on,
  * Claude Code loads the files itself and nothing is added, so nothing is read
- * twice. Chat has no folder and a single-use session no Project to follow,
- * so neither reads any.
+ * twice. Chat has no folder, so it reads the account's `CLAUDE.md` alone,
+ * as read-only memory (maintainer decision, 2026-11-16); a single-use session
+ * has no Project to follow and reads none.
  *
  * The host reads the files outside every gate, so below Full access a file
  * or import the secret guard protects is skipped, as Claude's Read of it
@@ -798,7 +799,8 @@ export async function claudeSessionInstructions(input: {
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly onDiagnostic: (message: string) => void;
 }): Promise<string | undefined> {
-  if (input.mode === "chat" || input.singleUse) return undefined;
+  if (input.singleUse) return undefined;
+  const chat = input.mode === "chat";
   const sources = claudeNativeQueryOptions(input.nativeSetup).settingSources;
   const ownAccountPaths = claudeOwnAccountPaths(input.environment);
   const accountDir = ownAccountPaths[0];
@@ -809,7 +811,7 @@ export async function claudeSessionInstructions(input: {
     // account's folder, so that folder stays an import root.
     ...(accountDir === undefined || sources.includes("user") ? {} : { configDir: accountDir }),
     ...(accountDir === undefined ? {} : { importRoots: [accountDir] }),
-    ...(sources.includes("project") ? {} : { projectRoot: input.projectRoot }),
+    ...(chat || sources.includes("project") ? {} : { projectRoot: input.projectRoot }),
     refuses: (path) =>
       isClaudeAccountCredentialFile(path, input.environment) ||
       (guarded &&
@@ -996,6 +998,84 @@ function claudeToolPathIsInKeychainFolder(candidate: string): boolean {
   const target = canonicalClaudeAccountDirectory(candidate).path;
   return target === folder || target.startsWith(`${folder}/`);
 }
+
+/** Claude's message when Chat or Plan refuses a write into its own memory. */
+export const CLAUDE_MEMORY_WRITE_REFUSAL =
+  "Claude's memory is read-only in Chat and Plan. Save a memory from a Work or Code thread outside Plan.";
+
+/**
+ * Why a file write into Claude's own memory is refused: in Chat and Plan the
+ * memory is loaded read-only (maintainer decision, 2026-11-16), and Claude
+ * Code's own permission check allows a Markdown write into its memory folder
+ * without asking, so this gate is what keeps it read-only in Chat. The memory
+ * is the account's `CLAUDE.md` and every `projects/<folder>/memory/` beneath
+ * the account's configuration directory. Both sides are compared with
+ * symlinks resolved, so a link into the folder is refused like the folder.
+ * Plan's sandbox also binds the folder read-only; this answers first with
+ * the reason.
+ */
+export function claudeMemoryWriteRefusal(input: {
+  readonly mode: ProviderAcquireInput["mode"];
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly toolName: string;
+  readonly target: string;
+  readonly workingDirectory: string;
+  readonly configurationDirectory: string;
+}): string | undefined {
+  if (input.mode !== "chat" && input.executionPolicy !== "plan") return undefined;
+  if (!CLAUDE_EDIT_TOOLS.has(input.toolName)) return undefined;
+  const configurations = new Set([
+    resolve(input.configurationDirectory),
+    canonicalClaudeAccountDirectory(input.configurationDirectory).path,
+  ]);
+  // The written path is judged as named and with symlinks resolved, and the
+  // protected paths are too: a `CLAUDE.md` or `memory` folder that is itself
+  // a link must not let a write through its destination or its link.
+  const written = resolve(input.workingDirectory, input.target);
+  const targets = new Set([written, canonicalClaudeAccountDirectory(written).path]);
+  const instructions = new Set<string>();
+  const memoryFolders = new Set<string>();
+  for (const configuration of configurations) {
+    const file = join(configuration, "CLAUDE.md");
+    instructions.add(file);
+    instructions.add(canonicalClaudeAccountDirectory(file).path);
+    const projects = join(configuration, CLAUDE_PROJECTS_FOLDER);
+    for (const entry of claudeProjectFolders(projects)) {
+      const folder = join(projects, entry, CLAUDE_MEMORY_FOLDER);
+      memoryFolders.add(folder);
+      memoryFolders.add(canonicalClaudeAccountDirectory(folder).path);
+    }
+  }
+  for (const target of targets) {
+    if (instructions.has(target)) return CLAUDE_MEMORY_WRITE_REFUSAL;
+    for (const configuration of configurations) {
+      // A memory folder the runtime has not created yet is still memory.
+      const projects = join(configuration, CLAUDE_PROJECTS_FOLDER);
+      if (target.startsWith(`${projects}/`)) {
+        const [, folder] = target.slice(projects.length + 1).split("/");
+        if (folder === CLAUDE_MEMORY_FOLDER) return CLAUDE_MEMORY_WRITE_REFUSAL;
+      }
+    }
+    for (const folder of memoryFolders) {
+      if (target === folder || target.startsWith(`${folder}/`)) return CLAUDE_MEMORY_WRITE_REFUSAL;
+    }
+  }
+  return undefined;
+}
+
+/** The per-checkout folders under the runtime's projects folder; none when it is absent. */
+function claudeProjectFolders(projects: string): ReadonlyArray<string> {
+  try {
+    return readdirSync(projects);
+  } catch {
+    return [];
+  }
+}
+
+/** The runtime's folder of per-checkout session state under its configuration directory. */
+const CLAUDE_PROJECTS_FOLDER = "projects";
+/** The folder beside a checkout's transcripts where Claude keeps its auto-memory. */
+const CLAUDE_MEMORY_FOLDER = "memory";
 
 function claudeAccountDirectoryBroadensPlan(
   projectRoot: string,
@@ -3841,6 +3921,25 @@ function makeConnection(
               )
             : undefined;
           if (secretRefusal !== undefined) return deny(secretRefusal);
+          // Answered before any posture, Full access's unasked allow included.
+          const memoryTarget = claudeConfinedTarget(
+            request.toolName,
+            requestInput,
+            projectRoot,
+            request.projectRoot,
+          );
+          const memoryRefusal =
+            typeof memoryTarget === "string"
+              ? claudeMemoryWriteRefusal({
+                  mode,
+                  executionPolicy: input.executionPolicy,
+                  toolName: request.toolName,
+                  target: memoryTarget,
+                  workingDirectory: request.projectRoot,
+                  configurationDirectory: claudeConfigurationDirectory(environment.environment),
+                })
+              : undefined;
+          if (memoryRefusal !== undefined) return deny(memoryRefusal);
           // Full access with its sandbox keeps the Project's folders, where
           // the sandbox holds every command, so a worktree outside them is
           // refused there rather than held.
@@ -4109,10 +4208,15 @@ function makeConnection(
           : launchEnvironment;
         // Read at each launch, like the artifact switch: the next turn after
         // the person turns the account's memory off launches guarded again.
+        // Claude loads its memory when the session starts, and only its own
+        // file tools write it: Plan holds none and its sandbox binds the
+        // account folder read-only, and Chat's gate refuses a write into the
+        // memory folder (`claudeMemoryWriteRefusal`).
         const keepsOwnMemory = providerOwnMemoryLaunches({
           accountAllows: options.ownMemory?.() === true,
           mode,
           executionPolicy: input.executionPolicy,
+          memoryWrites: "session-tools",
         });
         // The runtime initializes with the first turn, so a new session's id
         // is assigned here and the initialized message is later held to it.

@@ -174,12 +174,14 @@ describe("OpenCode driver", () => {
       expect(fixture.calls.some((call) => call.startsWith("mcp.disconnect:"))).toBe(true);
     } else {
       expect(probe.capabilities.appManagedTools).toBe("unsupported");
-      // Off macOS turns run only in Work and Code outside Plan, so the probe
-      // attests that jail.
-      expect(fixture.processInputs[0]).toMatchObject({
-        mode: "code",
-        executionPolicy: "approval-gated",
-      });
+      // Linux's Chat and Plan capsule admits processes, so the probe attests
+      // it; elsewhere turns run only in Work and Code outside Plan, so the
+      // probe attests that jail.
+      expect(fixture.processInputs[0]).toMatchObject(
+        process.platform === "linux"
+          ? { mode: "chat", executionPolicy: "plan" }
+          : { mode: "code", executionPolicy: "approval-gated" },
+      );
       expect(fixture.processInputs[0]?.loopbackPorts).toBeUndefined();
       expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(false);
     }
@@ -1690,9 +1692,10 @@ describe("OpenCode driver", () => {
       userQuestions: "supported",
       fileChanges: "unsupported",
     });
-    // Off macOS the launch refuses Chat and Plan, and the report says so.
+    // Where the Chat and Plan jail starts no process the launch refuses both,
+    // and the report says so.
     expect(probe.capabilities.turnModes).toEqual(
-      process.platform === "darwin"
+      process.platform === "darwin" || process.platform === "linux"
         ? undefined
         : {
             chat: "unsupported",
@@ -1906,7 +1909,7 @@ describe("OpenCode driver", () => {
     expect(String(resumed)).toContain("did not run its command");
   });
 
-  it("refuses a listed OpenCode command in Plan before it reaches the runtime", async () => {
+  it("runs a listed OpenCode command in Plan through its command route, under the session's Plan rules", async () => {
     const fixture = betaDriver({ commands: [{ name: "review" }] });
     const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
     fixture.registry.setObservedState(probe);
@@ -1929,8 +1932,8 @@ describe("OpenCode driver", () => {
           ),
       ),
     );
-    expect(String(result)).toContain("Plan runs none");
-    expect(fixture.calls.some((call) => call.startsWith("session.command:"))).toBe(false);
+    expect(Exit.isSuccess(result)).toBe(true);
+    expect(fixture.calls).toContain("session.command:review::");
     expect(fixture.calls).not.toContain("session.promptAsync");
   });
 
