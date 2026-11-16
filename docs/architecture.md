@@ -249,7 +249,10 @@ The design rests on a small set of invariants that every package obeys:
   read-only. Below Full access, Octant's
   own tool launches are OS-confined; one provider runtime is not yet
   (Claude outside Plan) and relies on the runtime's own sandbox, per the confinement matrix in
-  [Security and authority](#security-and-authority). Every driver starts a
+  [Security and authority](#security-and-authority). A provider with a
+  sandbox of its own is to run in it below Full access, with Octant's sandbox
+  as the opt-in Strict setting and the fallback (designed, not built;
+  [Providers run in their own sandbox](#security-and-authority)). Every driver starts a
   Work session with its shell and Git at the thread's level, as in Code, and
   Work threads reach Full access
   ([Modes](#modes-chat-work-and-code) lists what each driver does).
@@ -1740,7 +1743,9 @@ starts a Code session at the same level, and a Work turn journals `shell` and
   thread reads the folder's `AGENTS.md` as Code does (maintainer decision,
   2026-11-14).
 - **OpenCode:** the session rules no longer deny `bash` and `task` in Work;
-  the posture's rules apply as in Code.
+  the posture's rules apply as in Code (`task` is to be allowed outside Plan
+  at every level; designed, not built,
+  [Security and authority](#security-and-authority)).
 - **Pi:** the Work session starts with its shell tool.
 - **ACP agents, Mistral Vibe included:** an `execute` request reaches the
   person at Guarded as in Code, and a Work launch gets the exec and fork a
@@ -3290,8 +3295,10 @@ Which path reaches the forge depends on the thread's
   use, not a requirement. The Octant Harness, whose shell is Octant's own,
   still refuses a recognizable push or pull-request write before its shell
   runs it and sends the agent to those tools. Claude Code runs its commands
-  in its own sandbox below Full access, which cannot read `~/.ssh`,
-  `~/.gitconfig` or `~/.config/gh`; a push or `gh` call the sandbox stopped
+  in its own sandbox below Full access, which today cannot read `~/.ssh`,
+  `~/.gitconfig` or `~/.config/gh` (once
+  [Providers run in their own sandbox](#security-and-authority) is built,
+  that sandbox follows the person's own Claude Code settings instead); a push or `gh` call the sandbox stopped
   is retried outside it (`dangerouslyDisableSandbox`), and Octant always
   asks about that retry itself, whatever the person's own permission rules
   allow, naming it as a command outside the sandbox, so once approved git
@@ -13742,9 +13749,12 @@ mechanisms are:
     1. Every hard line: no telemetry, secrets never journaled, signed
        updates, authority checked on the host, the journal, Plan read-only,
        spend ceilings, and an agent never marking a thread Done.
-    2. Merge, plain force-push, and push to the default branch, which follow
-       the pull-request merge rules and the Project's "Agents may merge"
-       switch.
+    2. Merge, plain force-push, and push to the default branch through
+       Octant's own pull-request tool or Octant Harness, which follow the
+       pull-request merge rules and the Project's "Agents may merge"
+       switch. A provider's own commands are not on the list outside
+       Strict ([Octant adds no restrictions of its own unless Strict is on](#security-and-authority);
+       designed, not built).
     3. Computer use: the first action in each application asks, once per
        thread, because it drives the person's real desktop.
     4. The Browser on a signed-in profile: a site approval per origin and
@@ -14187,6 +14197,110 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   | Plan         | `plan`                           | Guarded, read-only | `plan`                                                  | `read-only` + `never`                                               |
   | Full access  | `full-access`                    | Full access        | `bypassPermissions`, no sandbox                         | `danger-full-access` + `never`                                      |
 
+  The Claude Code and Codex columns are today's; their sandboxes change per
+  [Providers run in their own sandbox](#security-and-authority) (designed,
+  not built). Today Claude Code's Accept edits runs Claude's `default` mode
+  and Octant waives in-root edits itself, and Octant's gate judges each call
+  before Claude's own rules see the ones it would ask about
+  ([Provider runtimes: Full built-in tool set](design/provider-runtimes.md#full-built-in-tool-set)).
+
+  **The provider's own permission system decides, as on its own**
+  (maintainer decision, 2026-11-15; designed, not built):
+  - **Claude Code's own permission modes.** Octant maps its levels onto
+    Claude Code's native modes: Ask first to `default`, Accept edits to
+    `acceptEdits`, Auto to `auto`, Full access to `bypassPermissions`, and
+    Plan to `plan`. Claude Code's own permission engine and the person's
+    Claude Code rules decide each tool call, and Octant no longer
+    second-guesses a call Claude's rules allow. When Claude Code asks, the
+    ask reaches the person as an Octant approval, decided and journaled on
+    the server as today. Plan stays read-only and Chat has no shell.
+  - **Claude Code's full tool preset.** Outside Plan and Chat, Octant offers
+    Claude Code's full built-in tool preset with no Octant deny list.
+  - **OpenCode's `task` subagents** are always allowed outside Plan, instead
+    of following the level; Plan still denies them.
+
+  Rationale: each provider then behaves as its own documentation says, and
+  Octant's server still answers every ask the provider raises and journals
+  it, so no approval leaves the server's authority.
+
+  **Octant adds no restrictions of its own unless Strict is on**
+  (maintainer decision, 2026-11-16; designed, not built). A person who moves
+  from a provider's own CLI to Octant keeps every workflow that worked
+  there, and Octant restricts a provider no more than any other agent
+  workspace does. Outside Strict, the provider's own sandbox, permission
+  modes, settings and tools decide; Octant shows the provider's asks,
+  answers them on the server and journals them. At Full access Octant adds
+  nothing. Strict, set per thread, per Project or in Settings as above,
+  restores each of these protections:
+  - **Environment.** A provider receives the host's environment (proxies,
+    custom certificate authorities, `ANTHROPIC_BASE_URL`, Bedrock and Vertex
+    routing, `GH_TOKEN` and the rest), less Octant's own secrets and other
+    providers' keys. Today Claude Code receives a fixed list of variables;
+    Strict keeps that list.
+  - **Outside content.** Reading outside content still marks the thread
+    and shows it, but no longer withdraws the provider's own web search or
+    turns off Claude's `auto` or Codex's `auto_review` reviewer. Strict
+    keeps today's withdrawal.
+  - **Protected files.** A provider's own tools may read and write the
+    files Octant protects (`~/.aws`, kube, docker, npm and `gh`
+    configuration, `.netrc`) at every level, as on its own, so `aws`,
+    `kubectl`, `docker push`, private registries and `gh` work. Octant's own
+    file tools keep refusing them below Full access, and provider sign-ins
+    at Full access. Strict refuses them for every tool.
+  - **Denials.** A denied request goes back to the model, which adjusts, as
+    on its own; three denials no longer end a Code turn, in Strict too.
+  - **Git and pull requests.** A provider's own `git push`, `gh` writes,
+    merge, force-push and push to the default branch follow its own
+    permission mode, and at Full access run unasked; the journal still
+    records each one with the hard line it crossed. Octant's own
+    pull-request tool and Octant Harness keep the merge rules and the
+    Project's "Agents may merge" switch. Strict asks for the provider's
+    commands too, as today.
+  - **Provider channels.** Telemetry, error reports, `/bug`, `/feedback`
+    and marketplace installs follow the person's own provider settings.
+    Self-update stays off, because Octant installs and updates provider
+    CLIs itself. Strict turns every channel off, as today. Octant itself
+    still sends nothing.
+  - **Codex sign-ins.** Codex may use Amazon Bedrock through an AWS profile
+    or exported credentials. Strict refuses them, as today.
+  - **Slash commands.** A provider's own slash commands run in every mode
+    and level, Chat and Plan included; the level's tool rules decide what a
+    command may then do, so Plan stays read-only.
+  - **Claude artifacts and Claude Design.** With the account's switch on,
+    Claude's `Artifact` tool works as in Claude Code: every action (`publish`,
+    `quickstart`, `read`, `list`, updates and publishing from a type), so
+    `/design` and `/slides` work. The thread's Canvas or artifacts choice
+    decides only where Octant's own delivery instructions point, never
+    whether the tool is offered. A publish naming a local file follows the
+    thread's file rules (a file outside the Project asks below Full access).
+    Chat and Plan offer the read-only actions; publishing needs Work or
+    Code. Each thread publishes as its own Claude account; see
+    [Provider runtimes: Claude artifacts](design/provider-runtimes.md#claude-code).
+  - **Project trust.** A Project the person already trusted in the
+    provider's own CLI (Claude Code's accepted folder trust, Codex's trusted
+    projects) counts as trusted in Octant without a second click. Octant's
+    one card stays only where the provider has no trust record, standing in
+    for the prompt the provider's CLI would show. Strict requires Octant's
+    own trust for every Project.
+  - **Default level.** A new thread still starts asking, as the providers'
+    CLIs do, and a person may choose Full access as their default level in
+    Settings.
+  - **Plan in Work.** Work threads get the Plan level, so the provider's
+    own plan mode, `EnterPlanMode` and `ExitPlanMode` work there as in Code.
+  - **Opt-in extras.** A per-person list of provider tools to block, and in
+    Strict a notice saying what Strict withheld.
+
+  Kept as product rules, since no provider feature depends on them: Plan is
+  read-only, Chat has no folder or shell (it is an extra mode, not a limit
+  on Work or Code), folders outside the Project ask below Full access as in
+  the providers, a question asking for a secret is refused and secrets are
+  never recorded, an account with Run as itself off keeps its own web tools
+  off, and one provider never receives another's credentials.
+
+  Rationale: people choose Octant for what it adds beside the provider, not
+  to lose what the provider already does. Protection stays available to
+  anyone who turns Strict on, and the server keeps answering and
+  journaling every ask either way.
   Option names were read from the installed Agent SDK (0.3.211
   `PermissionMode`) and the Codex app-server schema (codex-cli 0.164.0
   `SandboxMode`, `AskForApproval`, `ApprovalsReviewer`). Auto is offered
@@ -14722,15 +14836,87 @@ approval-gated` command that undoes it. The terminal shows no one-time
   journal compatibility.
   A provider runtime launch is wrapped when the process carries exactly one
   thread's authority. The state below, which `providerProcessConfinement.test.ts`
-  pins against this table, is the accepted one: Claude keeps its own sandbox
+  pins against this table, is the accepted one today: Claude keeps its own sandbox
   outside Plan, and closing that gap is not an open goal. Octant says so rather than promising a boundary it
-  does not draw; a runtime that can be wrapped without losing what it needs is
-  taken as its own change. Full access gets no wrapper at all: every
+  does not draw. Full access gets no wrapper at all: every
   runtime and every command it runs launches as the program itself, with no
   profile, no Bubblewrap bind, and no credential-file or extension denials
   (maintainer decision, 2026-10-31: "softer guard — full access is full
   access"). Programs that apply a sandbox of their own, such as `swift package`
-  and headless Chromium, therefore run without extra flags.
+  and headless Chromium, therefore run without extra flags. The table and the
+  per-runtime notes after it describe the build as it ships; below Full access
+  they change per provider as the next rule says.
+
+  **Providers run in their own sandbox** (maintainer decision, 2026-11-15;
+  designed, not built). Octant's sandbox becomes the opt-in and the fallback:
+  - **The provider's own sandbox by default.** Below Full access, every
+    provider that has a sandbox of its own runs in it, as it does on its own.
+    Octant configures that sandbox, Claude Code excepted (below), rather
+    than wrapping it in Octant's Seatbelt or Bubblewrap profile: its writable roots are the Project's
+    folders, its network follows Network limits
+    ([provider runtime network](#provider-runtime-network)), and Octant's
+    protected paths ([secret guard](#secret-guard)) become its deny rules
+    wherever the provider supports them.
+  - **Native escalation is an Octant approval.** When the provider asks to
+    run one command outside its sandbox, the ask reaches the person as an
+    Octant approval at Guarded and Accept edits and Reviewed's reviewer at
+    Reviewed. Approved runs that one command; denied or unanswered stays
+    refused, and nothing is remembered for a later command.
+  - **Strict: Octant's sandbox as an opt-in.** Strict is set in the same
+    places as the [opt-in sandbox at Full access](#security-and-authority):
+    per thread, as a Project's default, and as the default in Settings, a
+    thread's request taking its Project's choice, else Settings', else off.
+    It runs the provider inside Octant's profile instead of its own sandbox
+    (for Codex, the profile the table below shows). Strict keeps provider
+    sign-ins, `~/.ssh` and cloud keys unreadable. A provider inside
+    Octant's profile has no native escalation, so a command that needs to
+    leave fails; Claude Code keeps its own request to leave its sandbox,
+    asked every time (below).
+  - **Octant's sandbox stays the default** for providers with no sandbox of
+    their own: OpenCode, Mistral Vibe and Pi.
+  - **Per provider.** Codex runs its native workspace-write sandbox and its
+    own escalation; macOS refuses a Seatbelt profile inside another, so the
+    native sandbox replaces Octant's profile rather than running in it.
+    Claude Code is the exception to Octant configuring the native sandbox:
+    Octant leaves Claude's sandbox alone. It runs exactly as the person's own
+    Claude Code settings configure it, as in Claude Code on its own, and
+    Octant passes it no sandbox settings at all: no writable roots, no
+    network, no read or deny rules, and no change to when sandboxed commands
+    run unasked. Claude's own request to run a command outside its sandbox
+    becomes the Octant approval above. Plan keeps its read-only confinement.
+    Under Strict, Octant cannot wrap Claude's sandbox in its own profile,
+    since macOS refuses nested Seatbelt, so Strict for Claude Code is
+    today's configuration of Claude's own sandbox: reads and writes held to
+    the Project's folders, network per Network limits, and
+    `autoAllowBashIfSandboxed: false`, and Claude's own request to run one
+    command outside it still asks every time, as today (maintainer decision,
+    2026-11-16). Gemini CLI and Qwen Code use their
+    native sandboxes. Copilot CLI and Cursor follow once their ACP releases
+    are checked for a sandbox Octant can configure, and Grok Build once it is
+    known why its launch sets `GROK_SANDBOX=off`; until then each keeps
+    Octant's profile.
+  - **Unchanged.** Server-side approval authority and journaling; Plan's
+    read-only enforcement and no shell in Chat; the paired-device and
+    routine rules; never handing one provider another's credentials;
+    marking and showing outside content; and Full access, which keeps no
+    sandbox unless the thread keeps one. The rest of what Octant adds
+    moves into Strict under
+    [Octant adds no restrictions of its own unless Strict is on](#security-and-authority).
+  - **Not built, and not part of this rule:** a host-side command executor
+    that runs a provider's commands for it, and restarting a session at wider
+    authority.
+
+  Rationale: a provider's own sandbox carries its native escalation, so a
+  command that needs to leave asks the person instead of failing at Octant's
+  wall (Codex cannot raise that ask under an external sandbox, as the Codex
+  notes below record), and the provider then behaves as its own
+  documentation says; Claude Code is left wholly to the person's own Claude
+  Code settings for the same reason. Octant's profile cannot hold a native sandbox inside
+  it on macOS, which refuses nested Seatbelt, so keeping the wall means
+  giving the native sandbox up. The accepted trade-off: below Full access a
+  provider's native sandbox may allow reads outside the Project, other
+  credentials included, as the provider on its own does; a person who wants
+  those reads closed turns Strict on.
 
   | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                  | Plan's read-only enforced by                                                                                                                                                                                                               |
   | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -14795,7 +14981,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   wall; Ask first and Accept edits run `untrusted` and keep asking. Codex
   cannot ask to leave Octant's wall under an external sandbox, so a command
   that needs to fails there (not built yet: carrying that ask; see
-  [Provider runtimes: Codex](design/provider-runtimes.md#codex)). Approving a command no
+  [Provider runtimes: Codex](design/provider-runtimes.md#codex)). Under
+  [Providers run in their own sandbox](#security-and-authority) (designed,
+  not built) Codex leaves Octant's profile below Full access for its native
+  workspace-write sandbox, whose escalation carries that ask, and stays in
+  Octant's profile, as described here, only under Strict. Approving a command no
   longer lifts any sandbox: it runs inside Octant's profile. Under that
   profile a Codex command cannot read `HOME` outside the root and the account
   home, and cannot write the account home's configuration, `.env`, rules,
@@ -14812,7 +15002,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   (`allowUnsandboxedCommands` with `dangerouslyDisableSandbox` on `Bash`),
   only after it asks at Guarded and Accept edits or passes the reviewer at
   Reviewed, and never in Plan (maintainer decision, 2026-11-14;
-  [detail](design/provider-runtimes.md#full-built-in-tool-set)).
+  [detail](design/provider-runtimes.md#full-built-in-tool-set)). Today Octant
+  sets that sandbox's folders and network and keeps sandboxed commands
+  asking; under [Providers run in their own sandbox](#security-and-authority)
+  (designed, not built) it passes Claude's sandbox no settings at all, and
+  keeps today's configuration only under Strict.
   At Full access a Codex command reaches the whole disk,
   and the launch environment is the same in every posture. Octant
   therefore gives the Codex runtime no reusable cloud credential the person
@@ -15417,7 +15611,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     and `features.unified_exec` on and its own approval policy for the level;
     Reviewed uses its own approval review or Octant Shield.
   - **OpenCode** stops denying `bash` and `task` in Work; the person's own
-    OpenCode permission rules apply over the level. It has no reviewer of
+    OpenCode permission rules apply over the level. (`task` is to be allowed
+    outside Plan at every level, per
+    [the provider's own permission system decides](#security-and-authority);
+    designed, not built.) It has no reviewer of
     its own, so Reviewed uses [Octant Shield](#octant-shield).
   - **Pi** starts with its shell tool; Reviewed uses Octant Shield there too.
   - **ACP agents**, Mistral Vibe included, get their `execute` requests sent
