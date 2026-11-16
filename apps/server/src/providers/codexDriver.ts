@@ -1222,6 +1222,10 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           accountAllows: options.ownMemory?.() === true,
           mode,
           executionPolicy,
+          // Codex writes memories by itself after a turn, into
+          // `~/.codex/memories`, outside any tool call Octant's gate sees, so
+          // its memory stays off in Plan and Chat.
+          memoryWrites: "background",
         });
       const leaseKey = (
         executionPolicy: ProviderExecutionPolicy,

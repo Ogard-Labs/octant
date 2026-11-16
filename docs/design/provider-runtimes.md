@@ -242,9 +242,14 @@ level. The provider's own memory is on by default in Work and Code outside
 Plan, as in the provider's own app, and the person turns it off per
 provider account (maintainer decision, 2026-11-14; the account stores only
 the off, as `ownMemory: false`, and an older stored `true` reads as on).
-Plan and Chat keep it off. With it on, Claude Code launches
-without `CLAUDE_CODE_DISABLE_AUTO_MEMORY` and Codex's app-server starts
-without the `features.memories=false` override, on a process of its own;
+With it on, Claude Code launches without `CLAUDE_CODE_DISABLE_AUTO_MEMORY`,
+in Plan and Chat too with its memory read-only (Octant's gate refuses a file
+write into the account's `CLAUDE.md` or a `projects/<folder>/memory/` folder
+there, since Claude Code's own check allows one unasked), and Codex's
+app-server starts without the `features.memories=false` override, on a
+process of its own, in Work and Code outside Plan only, because Codex writes
+`~/.codex/memories` by itself after a turn (maintainer decision, 2026-11-16;
+[architecture](../architecture.md#security-and-authority));
 OpenCode and Mistral Vibe have no such memory and no setting
 ([architecture](../architecture.md#modes-chat-work-and-code)). Work and Code share one capability set, so each runtime starts a Work
 session with its shell at the thread's level exactly as it starts a Code
@@ -1383,23 +1388,28 @@ registration closed. 2.0.22 names the calling session in the call's
 another session. App-managed tools are reported only for 2.0.22 and 2.0.27 exactly,
 the 2.x releases the hostile-configuration check was repeated against (2.0.27
 passed the same check and the same app-tool round trip through a real launch
-as 2.0.22, with no change to routes or events), and
-only on macOS, where the probe registers an empty bridge and OpenCode lists
-its tools. Decided under [Provider reach Octant no longer narrows](../architecture.md#security-and-authority) (designed, not built):
-at Full access a newer 2.x release is offered the tools as "unverified"
-instead of losing them, and Linux reports them as macOS does. Project resolution
+as 2.0.22, with no change to routes or events), on macOS and Linux, where
+the probe registers an empty bridge and OpenCode lists its tools (Linux
+built under [Provider reach Octant no longer narrows](../architecture.md#security-and-authority),
+maintainer decision, 2026-11-16). A Linux launch reaches the bridge as Pi's
+does: on the shared host network a provider launch has by default, or, when
+Network limits proxy the launch, through the egress forwarder's loopback
+relay, which opens only the bridge's port; Windows is not offered the tools.
+Decided under the same entry (designed, not built): at Full access a newer
+2.x release is offered the tools as "unverified" instead of losing them. Project resolution
 starts Git, which the Chat, Plan, and Work jail refuses; on macOS those
 launches get the failing `git` stand-in described under
 [Security and authority](../architecture.md#security-and-authority), so 2.x offers turns in
-every mode there. On Linux (maintainer decision, 2026-11-14) 2.x runs turns
-in Work and Code outside Plan, at Ask first, Auto, Accept edits and Full
-access, where the launch already allows a shell; a Chat or Plan launch is
-refused before it starts with a sentence naming why, and the probe attests
-the Code jail at Ask first and reports `turnModes` with Chat and Plan
-unsupported (`host-confinement`), which the provider's Settings page shows
-as where it runs turns. Rationale: Linux confinement can only deny
-fork outright, so it cannot give Chat and Plan the one `git` exec the
-stand-in needs, while Work and Code outside Plan launch with a shell anyway. 2.0.22 names its turn events without the `session.next.`
+every mode there. On Linux 2.x runs turns in every mode too (maintainer
+decision, 2026-11-16, replacing the 2026-11-14 refusal of Chat and Plan): its
+Chat and Plan launches start processes inside a read-only capsule with the
+same stand-in first on `PATH`, and the probe attests that capsule
+([Plan and Chat tool parity](../architecture.md#security-and-authority)). A
+host that is neither macOS nor Linux refuses a 2.x Chat or Plan launch before
+it starts with a sentence naming why and reports `turnModes` with Chat and
+Plan unsupported (`host-confinement`), which the provider's Settings page
+shows as where it runs turns. Rationale: there the jail Chat and Plan need can
+start no process, so it cannot give them the `git` the runtime starts. 2.0.22 names its turn events without the `session.next.`
 prefix earlier 2.x builds used (`session.text.*`, `session.reasoning.*`,
 `session.tool.*`, `session.step.*`, `session.execution.*`), identifies a
 tool call by `id`, and names the tool only on `session.tool.input.started`;
@@ -1554,12 +1564,13 @@ reports through the same events as a prompt. A command route that fails
 after the context was admitted leaves that context queued in the session,
 where the next run would read it stale beside the next turn's own; the turn
 fails as `stale-resume` and the driver never resumes that session again (in
-this host process), so the thread starts on a new session. The host refuses such a turn in
-Plan and in Chat, and the driver refuses it again. A command may run a shell
-before the model sees it: a configured command's template expands
-`` !`…` `` through OpenCode's shell, which asks no approval, inside the
-launch's own confinement; only Work and Code outside Plan run one, as
-OpenCode's own client does. 1.x lists none: its `POST /session/{id}/command`
+this host process), so the thread starts on a new session. Such a turn runs
+in every mode, Chat and Plan included (maintainer decision, 2026-11-16;
+built). A command may run a shell before the model sees it: a configured
+command's template expands `` !`…` `` through OpenCode's shell, which asks no
+approval, inside the launch's own confinement, so in Chat and Plan, whose
+launch allows no process and binds the root read-only, that expansion fails
+and the command cannot write, as the level's tool rules require. 1.x lists none: its `POST /session/{id}/command`
 answers only once the whole run has ended (1.18.21), so no turn can start
 from it, and it has no asynchronous form.
 
@@ -1736,14 +1747,17 @@ the subagent may have done so unseen (maintainer decision, 2026-11-14). A
 later request naming the same call adds only its card. The run stays shown
 as running, because nothing reports its end.
 
-Kimi Code's own slash commands run in Work and Code outside Plan, as in its
-own app (maintainer decision, 2026-11-14); the probe still pins the reviewed
-command inventory, so a release with a new command fails closed (decided: at
-Full access such a release is offered as "unverified" instead, under
-[Provider reach Octant no longer narrows](../architecture.md#security-and-authority); designed, not built). Plan and
-Chat refuse a prompt starting with `/`, since a command such as
-`update-config` writes. The earlier refusal everywhere was Octant's default,
-not a protocol limit: ACP carries the command as prompt text.
+Kimi Code's own slash commands run in every mode, Chat and Plan included, as
+in its own app (maintainer decisions, 2026-11-14 and 2026-11-16; built); the
+probe still pins the reviewed command inventory, so a release with a new
+command fails closed (decided: at Full access such a release is offered as
+"unverified" instead, under
+[Provider reach Octant no longer narrows](../architecture.md#security-and-authority); designed, not built), and a
+prompt opening with `/` runs only a reviewed command the session listed. In
+Plan and Chat the session's own mode, set for the level, decides what a
+command such as `update-config` may do. The earlier refusal everywhere was
+Octant's default, not a protocol limit: ACP carries the command as prompt
+text.
 
 ### What an ACP agent cannot do
 
@@ -1783,8 +1797,11 @@ infers them from the driver kind.
 Octant's tools reach an ACP session only through the session MCP bridge, and
 only when the agent's `initialize` result advertises `mcpCapabilities.http`
 (or the profile names an exact release that accepts it unadvertised) and the
-host is macOS (decided: Linux as macOS, under
-[Provider reach Octant no longer narrows](../architecture.md#security-and-authority); designed, not built).
+host is macOS or Linux (Linux built under
+[Provider reach Octant no longer narrows](../architecture.md#security-and-authority),
+maintainer decision, 2026-11-16). A Linux launch reaches the bridge on the
+shared host network, or through the egress forwarder's loopback relay for
+the bridge's port alone when Network limits proxy it.
 Otherwise the session reports app-managed tools `unsupported`,
 and a session that is offered tools is refused before `session/new` rather
 than started without them.
@@ -1967,7 +1984,7 @@ runtime outside the sandbox the receipt rests on, so a release that proves
 exclusivity below Full access is mixed there too, unless the thread keeps the
 opt-in sandbox. The capability is reported only when the connection check saw
 the runtime accept the tool endpoint's declaration; that check runs on macOS
-only, so on Linux nothing is reported as mixed. Every reader of the tool
+and Linux, so both report mixed. Every reader of the tool
 gate follows the level the turn runs at (maintainer decision, 2026-11-13): a
 child agent session reads the level its own session runs at; a routine's own
 Browser target reads its running turn's level; a saved flow, which runs

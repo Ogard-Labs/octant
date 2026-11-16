@@ -1,4 +1,5 @@
-import { providerCommandOf, providerCommandRefusal, providerRunsAsItself } from "@octant/domain";
+import { providerCommandOf, providerRunsAsItself } from "@octant/domain";
+import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
 import { readBoundedResponseBody } from "../extensions/boundedResponseBody";
 import { advertisedSlashCommands } from "./providerSlashCommands";
 import { OpenCodeChildSessions } from "./openCodeChildSessions";
@@ -62,6 +63,7 @@ import {
   type OpenCodeManagedToolsBridge,
 } from "./openCodeManagedTools";
 import {
+  openCodeChatPlanJailStartsProcesses,
   openCodeServesCommandRoutes,
   openCodeServesNativeRoutes,
   openCodeServesQuestionForms,
@@ -466,8 +468,9 @@ function openCodeBetaCapabilities(
     fileChanges: native ? "supported" : "unsupported",
     sessionCompaction: { chat: compaction, work: compaction, code: compaction },
     appManagedTools: reported.appManagedTools,
-    // Off macOS the launch refuses Chat and Plan (`openCodeRefusesTurnHere`).
-    ...(platform === "darwin"
+    // On a host whose Chat and Plan jail starts no process the launch refuses
+    // both (`openCodeRefusesTurnHere`).
+    ...(openCodeChatPlanJailStartsProcesses(platform)
       ? {}
       : {
           turnModes: {
@@ -1493,30 +1496,30 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
             // Probe the app-owned transport with an empty, private catalogue.
             // This is a non-generating declaration check: it does not send a
             // model prompt and its bridge is closed before the probe scope
-            // returns. Linux intentionally skips it because bwrap cannot
-            // express the exact loopback-only rule required by the bridge.
-            const bridge =
-              process.platform === "darwin"
-                ? yield* Effect.acquireRelease(
-                    Effect.tryPromise({
-                      try: () =>
-                        createOpenCodeManagedToolsBridge([], async () => ({
-                          resultJson: '{"error":"probe-only"}',
-                          isError: true,
-                        })),
-                      catch: () => fail("unavailable", "OpenCode MCP probe bridge is unavailable."),
-                    }),
-                    (ownedBridge) => Effect.promise(() => ownedBridge.close()),
-                  )
-                : undefined;
-            // On macOS, probe under the Chat/Plan jail, not the Code jail:
-            // the git stand-in (fork plus exec of /usr/bin/false only) is
-            // what makes a 2.x runtime serve a Git work tree in Chat and
-            // Plan. Attesting under Code confinement would pass even without
-            // it. Elsewhere a 2.x Chat or Plan launch is refused, so the probe
+            // returns. It runs wherever the launch can reach the bridge (macOS
+            // and Linux).
+            const bridge = appToolBridgeReachesLaunchOn(process.platform)
+              ? yield* Effect.acquireRelease(
+                  Effect.tryPromise({
+                    try: () =>
+                      createOpenCodeManagedToolsBridge([], async () => ({
+                        resultJson: '{"error":"probe-only"}',
+                        isError: true,
+                      })),
+                    catch: () => fail("unavailable", "OpenCode MCP probe bridge is unavailable."),
+                  }),
+                  (ownedBridge) => Effect.promise(() => ownedBridge.close()),
+                )
+              : undefined;
+            // Probe under the Chat/Plan jail, not the Code jail, wherever
+            // that jail can start the git stand-in (macOS's single exec,
+            // Linux's read-only capsule that admits processes): it is what
+            // makes a 2.x runtime serve a Git work tree in Chat and Plan, and
+            // attesting under Code confinement would pass even without it.
+            // Elsewhere a 2.x Chat or Plan launch is refused, so the probe
             // attests the jail turns do run in there: Work and Code at Ask
             // first, which allows a process.
-            const probesTurnJail = process.platform !== "darwin";
+            const probesTurnJail = !openCodeChatPlanJailStartsProcesses(process.platform);
             const runtime = yield* acquireRuntime(
               options,
               projectRoot,
@@ -1610,14 +1613,13 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               };
             }
             if (
-              process.platform === "linux" &&
+              !appToolBridgeReachesLaunchOn(process.platform) &&
               normalized.models.length > 0 &&
               normalized.capabilities.appManagedTools === "unsupported"
             ) {
               return {
                 ...normalized,
-                message:
-                  "OpenCode app-managed tools require macOS loopback confinement on this host.",
+                message: "OpenCode app-managed tools are not offered on this host.",
               };
             }
             return normalized;
@@ -2805,9 +2807,9 @@ function makeConnection(
             if (rejected !== undefined) return Effect.fail(rejected);
             // A prompt that opens with one of OpenCode's listed commands runs
             // through its command route, as OpenCode's own client sends it;
-            // as plain text the model would only read the slash. The host
-            // refused it in Chat and Plan before this; the driver holds the
-            // same line for any caller that did not.
+            // as plain text the model would only read the slash. It runs in
+            // every mode; the session's own permissions, set for the level,
+            // decide what it may do.
             const runCommand = runtimeClient.command;
             const listCommands = runtimeClient.commands;
             // The observation holds the list of whichever Project's session
@@ -2830,18 +2832,12 @@ function makeConnection(
               Effect.flatMap((listed) => {
                 const command =
                   runCommand === undefined ? undefined : providerCommandOf(input.prompt, listed);
+                // A command another Project lists, or one OpenCode no longer
+                // lists here, is refused rather than sent to the model as text.
                 const commandRefusal =
-                  providerCommandRefusal({
-                    prompt: input.prompt,
-                    commands: command === undefined ? undefined : listed,
-                    mode,
-                    executionPolicy: state.executionPolicy,
-                  }) ??
-                  // A command another Project lists, or one OpenCode no longer
-                  // lists here, is refused rather than sent to the model as text.
-                  (command === undefined && runCommand !== undefined
+                  command === undefined && runCommand !== undefined
                     ? commandNotListedHere(input.prompt, observed?.commands)
-                    : undefined);
+                    : undefined;
                 if (commandRefusal !== undefined) {
                   return Effect.fail(fail("unauthorized", commandRefusal));
                 }

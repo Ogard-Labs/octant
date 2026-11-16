@@ -1,4 +1,5 @@
 import { compactAcpConversation } from "./acpCompaction";
+import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
 import { readAcpFileReview } from "./acpFileReview";
 import { isAbsolute, resolve } from "node:path";
 import { providerCommandOf } from "@octant/domain";
@@ -316,10 +317,7 @@ function negotiatedAppManagedTools(
   profile: AcpProviderProfile,
   version: string,
 ): ProviderCapabilitySupport {
-  // The managed bridge is a loopback HTTP endpoint. The current Linux
-  // Bubblewrap launch has no narrow host-loopback rule; sharing its network
-  // namespace would grant wider egress, so Linux stays fail-closed here.
-  return process.platform === "darwin" &&
+  return appToolBridgeReachesLaunchOn(process.platform) &&
     (initialized.agentCapabilities.mcpCapabilities?.http === true ||
       (initialized.agentCapabilities.mcpCapabilities?.http === undefined &&
         profile.unadvertisedHttpMcpVersions?.includes(version) === true))
@@ -1585,7 +1583,7 @@ function makeConnection(
                 : undefined;
             if (projectRefusal !== undefined) throw failure("incompatible", projectRefusal);
             const { bridgeTools } = partitionTools(input.tools);
-            if (bridgeTools.length > 0 && process.platform !== "darwin") {
+            if (bridgeTools.length > 0 && !appToolBridgeReachesLaunchOn(process.platform)) {
               throw failure(
                 "unsupported",
                 "App-managed tools are unsupported by this ACP runtime on this platform.",
@@ -2099,14 +2097,12 @@ function makeConnection(
             }).pipe(
               Effect.flatMap(() => {
                 const prompt = renderProviderTurnPrompt(input);
-                // An agent with a reviewed inventory runs no slash command in
-                // Plan or Chat, since a command can write; elsewhere it runs
-                // only a command on that inventory, and one its session
-                // listed once it has listed any, so an unreviewed command
-                // cannot run.
+                // An agent with a reviewed inventory runs only a command on
+                // that inventory, and one its session listed once it has
+                // listed any, so an unreviewed command cannot run. It does so
+                // in every mode; the level's tool rules decide what it does.
                 const reviewed = profile.reviewedCommands;
                 const opensWithSlash = prompt.trimStart().startsWith("/");
-                const readOnly = mode === "chat" || state.executionPolicy === "plan";
                 const listed = [...state.runtime.commands];
                 const command = providerCommandOf(
                   input.prompt,
@@ -2114,17 +2110,11 @@ function makeConnection(
                     .filter((commandName) => listed.length === 0 || listed.includes(commandName))
                     .map((commandName) => ({ name: commandName })),
                 );
-                if (
-                  reviewed !== undefined &&
-                  opensWithSlash &&
-                  (readOnly || command === undefined)
-                ) {
+                if (reviewed !== undefined && opensWithSlash && command === undefined) {
                   return Effect.fail(
                     failure(
                       "unauthorized",
-                      readOnly
-                        ? `${name} slash commands do not run in Plan or Chat. Rephrase the request without a leading slash.`
-                        : `${name} runs only the slash commands it listed and Octant reviewed. Rephrase the request without a leading slash.`,
+                      `${name} runs only the slash commands it listed and Octant reviewed. Rephrase the request without a leading slash.`,
                     ),
                   );
                 }

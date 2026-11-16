@@ -816,8 +816,11 @@ adjustment; Pause holds new managed commands and helper agents. Running processe
 are not suspended or killed. Existing per-operation Stop controls remain available.
 
 The host journals the policy with its managed-agent settings aggregate and checks
-its version on writes. Only an authenticated local window can change it or read
-`/api/agent-run-settings/resources`. Old journals without a policy use Automatic.
+its version on writes. Only the host's own person changes it or reads
+`/api/agent-run-settings/resources`: at an authenticated local window, or on a
+device that person paired, whose change is journaled with the device as the
+actor (maintainer decision, 2026-11-16; built). A device the hub's roster
+introduced is refused. Old journals without a policy use Automatic.
 The panel shows hardware, last sampled load, effective ceilings and waiting/running
 command counts, with an explicit Refresh; it does not poll while closed.
 
@@ -1841,9 +1844,14 @@ and keeps every other guard, and a Codex process is leased without the
 `features.memories=false` override, so Codex's own configuration decides and
 Octant never forces the feature on; that lease is a process of its own, like
 the one that runs Codex's subagents. It applies to Work and Code sessions
-outside Plan. A Plan launch keeps memory off at every setting: Plan may write
+outside Plan, and to Claude Code in Plan and Chat. Plan and Chat may write
 nothing a later session would load, and the runtime's memory folder is exactly
-that ([Plan launch writes](design/decisions.md#plan-launch-writes-and-sign-in)).
+that ([Plan launch writes](design/decisions.md#plan-launch-writes-and-sign-in)),
+so there a provider's memory loads only read-only: Claude Code's, which only
+its file tools write, loads with its writes refused, and Codex's, which Codex
+writes in the background, stays off at every setting
+([Plan and Chat tool parity](#security-and-authority); maintainer decision,
+2026-11-16).
 OpenCode and Mistral Vibe keep no memory of their own behind a switch Octant
 sets, so their accounts carry no setting. Chat keeps a provider's memory off
 at every setting, as Plan does (maintainer decision, 2026-11-14), because no
@@ -1876,9 +1884,10 @@ authoritative.
   write Project memory without asking" (off by default) does the same
   (maintainer request, 2026-11-12; built). The setting is on every mode's
   Project, in Project Overview; a person sets it from a local window or a
-  paired device (maintainer decision, 2026-11-12; not built yet: today a
-  paired device is refused), and each change is journaled as
-  `project.agent-memory-writes-changed@1`. A Chat thread has no Full access,
+  device the host's own person paired (maintainer decision, 2026-11-12;
+  built; a device the hub's roster introduced is refused), and each change is
+  journaled as `project.agent-memory-writes-changed@1` with the device as the
+  actor when one set it. A Chat thread has no Full access,
   so in Chat only the setting skips the card. The tool call is the thread's
   record of such a write: its result reports `written` with the entry's
   text. The write goes through the same memory command path and checks as a
@@ -3163,8 +3172,8 @@ hold for every action in it:
   setting **Agents may push to the default branch** (`agentDefaultBranchPush`
   on the Project, `change-code-project-agent-default-branch-push`, journaled
   as `project.code-agent-default-branch-push-changed@1`), off by default and
-  set from a local window or a paired device (maintainer decision, 2026-11-12;
-  not built yet: today a paired device is answered 403). Its
+  set from a local window or a device the host's own person paired, journaled
+  with that device as the actor (maintainer decision, 2026-11-12; built). Its
   switch is hidden in the app until an agent push path to the default branch
   exists; the server field, command and rule stay (maintainer decision,
   2026-11-12). With
@@ -3197,8 +3206,8 @@ hold for every action in it:
   a host that cannot tell whether the thread is marked asks. Built: the switch is `agentPullRequestComments`
   on the Project (`change-code-project-agent-pull-request-comments`, journaled
   as `project.code-agent-pull-request-comments-changed@1`), off by default and
-  set from a local window or a paired device (maintainer decision, 2026-11-12;
-  not built yet: today a paired device is answered 403). With
+  set from a local window or a device the host's own person paired, journaled
+  with that device as the actor (maintainer decision, 2026-11-12; built). With
   it in force the tool sends the post as `authorization: standing` naming
   `project`; the host does not take that word, it reads the switch again at
   the post, with the thread's outside-content mark, and refuses with
@@ -4375,17 +4384,16 @@ runtime's message, which holds whenever the turn carries no other context
 or Claude's prompt hook carries it. OpenCode 2 runs a listed command through
 its own command route rather than as text, with the turn's context admitted
 first as input that starts no run (detail in
-[Provider runtimes](design/provider-runtimes.md)). The host refuses, before the turn
-reaches any driver, a turn whose prompt opens with a command-shaped `/name`
-in Plan, which stays read-only, and in Chat, which keeps no folder and no
-shell, whenever the provider lists commands at all, whether or not the list
-the host holds names it: that list is the one a session last wrote for the
-provider, which may be another Project's. The refusal is the existing turn
-refusal, so a remote client meets it too; those composers still list the
-commands and say why they cannot run. An ACP agent with a reviewed command
-inventory (Kimi Code) keeps its probe check, refuses every leading slash in
-Plan and Chat, and elsewhere runs only a reviewed command its session
-listed. Codex lists none: its app-server
+[Provider runtimes](design/provider-runtimes.md)). Every mode and level
+forwards them, Chat and Plan included, and every composer lists them, a Chat
+thread's too (maintainer decision, 2026-11-16, under
+[Octant adds no restrictions of its own unless Strict is on](#security-and-authority);
+built): the host refuses no turn for opening with `/name`, because the runtime
+was launched under the level's tool rules, which decide what the command may
+then do, so a command in Plan still cannot write and one in Chat still has no
+folder or shell. An ACP agent with a reviewed command inventory (Kimi Code)
+keeps its probe check and, in every mode, runs only a reviewed command its
+session listed. Codex lists none: its app-server
 (rust-v0.162.1) lists skills, which are invoked by `$name`, and no prompts,
 and its slash commands are its terminal client's own. OpenCode 1.x lists
 none: its command route answers only once the whole run has ended. Side Chat is a Chat-mode sidecar about
@@ -4533,9 +4541,13 @@ journals nothing new for them, so no event naming the purged thread is left
 behind.
 The agent may list and delete only its own thread's. Work and Code outside
 Plan take them; Chat runs Claude in Plan, so a Chat thread is never offered
-the tools, and Plan and single-use sessions are not either. Only a local
-window that can open the thread lists, cancels, or runs one (not built yet
-for a paired device). Rationale: this is the usage-resume timer's shape (an
+the tools, and Plan and single-use sessions are not either. Only the
+person lists, cancels, or runs one: at a local window that can open the
+thread, or on a device the host's own person paired, which reaches a Work
+Project's thread and an active Code Project's thread as its own send would
+(`/api/thread-wakeups`, forwarded for that device; built), journaled with the
+device as the actor. A device the hub's roster introduced and an agent grant
+are refused. Rationale: this is the usage-resume timer's shape (an
 in-process host timer over journaled records, rescanned at start) rather
 than a routine, because a routine creates threads, captures its own
 authority, and is enabled by the person, while a wake-up belongs to one
@@ -6788,8 +6800,8 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   otherwise holds back, Kimi Code reads its home skills, servers, plugins,
   and hooks with the setup, Kilo its own skills, each agent's own subagents
   run in Work and Code outside Plan with an honest approval card for a
-  request naming no call Octant saw, and Kimi Code's own slash commands run
-  outside Plan; each reports only those features
+  request naming no call Octant saw, and Kimi Code's own reviewed slash
+  commands run in every mode; each reports only those features
   ([detail](design/provider-runtimes.md#acp-agents-run-as-themselves)).
   Every other provider keeps the deny rules for Project code and skills under
   [Extensions and skills](#extensions-and-skills) until it is promoted the
@@ -11314,8 +11326,10 @@ places and, at Auto, Octant Shield may allow an unlisted host for one call
 ([harness tool egress rules](#harness-tool-egress-rules)). For commands, on
 is the wider setting. The switch is journaled whole as
 `safe-networks.limits-set@1` (on its own fixed aggregate id under
-`safe-networks`), changes from a local window or a paired device (maintainer
-decision, 2026-11-12; not built yet: today only from a local window), and replays at startup.
+`safe-networks`), changes from a local window or a device the host's own
+person paired, which the event's actor names (maintainer decision,
+2026-11-12; built; a device the hub's roster introduced is refused), and
+replays at startup.
 `ProviderRuntimeNetwork.start` reads it at each launch: off, it answers
 `open` for every runtime (open network as before, and Claude's sandbox without
 the proxy port); on, it does what follows. A Full access launch answers
@@ -11669,7 +11683,11 @@ that is not yet effective for the thread is refused and never reaches the model.
   app, whose app bundle is then the runtime's install) and takes a stricter
   profile from the shared confinement builder (no network, no exec but its
   runtime, no fork, a read-only package, one temporary folder, of the system
-  only what a runtime reads to start, and a fixed environment), and on any host but macOS its component is `host-prohibited`
+  only what a runtime reads to start, and a fixed environment). Linux has no
+  extension-process confinement, so a driver the person installed, trusted
+  and enabled runs there without one, with the same fixed environment, and
+  its provider row says so (maintainer decision, 2026-11-16); on any other
+  host its component is `host-prohibited`
   ([Outside provider drivers](design/outside-provider-drivers.md#driver-process-rules)).
 
 - Skills are discovered only from valid `.agents/skills/` and `.claude/skills/`
@@ -12121,11 +12139,14 @@ that is not yet effective for the thread is refused and never reaches the model.
     host-owned turn (a routine, a goal loop, a usage-limit resume, a child-run
     delivery) can create one. A host-owned turn in the Project may use one,
     but the prompt it raises covers that one call and records nothing, even
-    when a person answers it: nobody chose to send that turn. Only an answer
-    to a prompt raised by the own turn of the local window, or of a device the
-    host's own person paired, is kept; any other device's turn may use a
-    grant, and its prompt covers one call and records nothing, whether the
-    device or a local window answers.
+    when a person answers it: nobody chose to send that turn. An answer is
+    kept from the local window whose own turn raised the prompt, and from a
+    device the host's own person paired, which is that person: it lists and
+    answers any prompt whose thread still stands in the recorded Project,
+    whichever window's turn raised it, and its answer is journaled as the
+    device (maintainer decision, 2026-11-16; built). A hub-introduced device's
+    turn may use a grant, and its prompt covers one call and records nothing,
+    whoever answers; that device answers only its own turn's prompts, once.
   - A package update signed by the same key keeps the package's trust and its
     remembered tool approvals; a new or missing signing key asks again
     (maintainer decision, 2026-11-12). Built for a package whose signature the
@@ -13379,6 +13400,15 @@ before the bundled pin moves. The driver
 never uses a standalone CuaDriver installation. Plan refuses computer-use
 control.
 
+A window lists, inspects, answers and stops the Computer use sessions its own
+turns started (`/api/computer-use/*`). A device the host's own person paired
+is that person, so it lists and stops every session on the host, whichever
+window's turn started it, naming the session by its exact thread and
+authority; the stop is recorded as the person's from a device they paired
+(maintainer decision, 2026-11-16; built). Its approval answers stay with the
+sessions its own turns started. A device the hub's roster introduced, an
+agent grant and a caller with no session are refused.
+
 **Composer window capture.** In the macOS desktop app, the composer's attach
 menu offers **Capture window…** beside **Choose file…**: the person picks one open
 window and a PNG of it attaches through the ordinary image path, so the same
@@ -13532,8 +13562,8 @@ their inspection and quarantined install from a local folder, and the host
 proxy that runs one over the harness endpoint wire protocol (closed failures,
 a capability ceiling, and a brokered request with this instance's key to its
 configured origin only), the confined process per instance that carries that
-protocol on macOS, and admission (trust at a digest, a provider added off from
-a local window (or, not built yet, a paired device), host-run Verify tools, and the process stopped whenever the
+protocol on macOS (on Linux without confinement, labelled), and admission (trust at a digest, a provider added off from
+a local window or a device the host's own person paired, host-run Verify tools, and the process stopped whenever the
 driver stops being effective) are built, as is moving an instance to a newly
 trusted digest of its driver with its records cleared, and a crash-limit hold
 journaled at the digest that crashed, which a restart does not lift. Publisher
@@ -14233,7 +14263,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   it, so no approval leaves the server's authority.
 
   **Octant adds no restrictions of its own unless Strict is on**
-  (maintainer decision, 2026-11-16; designed, not built). A person who moves
+  (maintainer decision, 2026-11-16; partly built: slash commands are built,
+  each other item below is designed, not built). A person who moves
   from a provider's own CLI to Octant keeps every workflow that worked
   there, and Octant restricts a provider no more than any other agent
   workspace does. Outside Strict, the provider's own sandbox, permission
@@ -14274,7 +14305,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     or exported credentials. Strict refuses them, as today.
   - **Slash commands.** A provider's own slash commands run in every mode
     and level, Chat and Plan included; the level's tool rules decide what a
-    command may then do, so Plan stays read-only.
+    command may then do, so Plan stays read-only. Built: the host and the
+    drivers refuse no `/name` for the mode, and every composer lists the
+    provider's commands without a refusal row.
   - **Claude artifacts and Claude Design.** With the account's switch on,
     Claude's `Artifact` tool works as in Claude Code: every action (`publish`,
     `quickstart`, `read`, `list`, updates and publishing from a type), so
@@ -14406,16 +14439,25 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   bound what an agent does.
 
   **Paired devices act as the person** (maintainer decision, 2026-11-16;
-  designed, not built). "An authenticated paired device is the person" (the
+  partly built). "An authenticated paired device is the person" (the
   [Full access rule](#security-and-authority)) is to be built for each place
   that still refuses a device the host's own person paired, stopping computer
-  use first: a Project terminal and Project browser, the Browser's Take over
-  and Hand back, `sign-in`, profile pages and saved flows, connector sign-in,
-  growing an MCP grant, Safe networks and Network limits, creating an agent
-  grant, approving a coordinator proposal, Canvas HTML import, provider cloud
-  sessions, server Projects, local work resource limits and extension
-  install. Each owning section keeps its own "not built yet" line until it is
-  built. A device the host knows only through the hub's roster is unchanged.
+  use first. Built: stopping computer use, which such a device does for every
+  session on the host
+  ([Computer use plugin](#extensions-and-skills)); the Project switches for
+  agents writing Project memory, pushing to the default branch and commenting
+  on pull requests; a thread's wake-ups
+  ([wake-ups](#modes-chat-work-and-code)); Safe networks and Network limits;
+  local work resource limits; growing an MCP grant by answering any prompt
+  whose thread still stands in its Project; and Full access and extension
+  install, built earlier. Each is journaled with the device as the actor. Not
+  built yet: a Project terminal and Project browser, the Browser's Take over
+  and Hand back, `sign-in`, profile pages and saved flows, finishing a
+  connector sign-in, creating an agent grant, approving a coordinator proposal
+  from the paired clients, Canvas HTML import, provider cloud sessions and
+  server Projects. Each owning section keeps its own "not built yet" line
+  until it is built. A device the host knows only through the hub's roster is
+  unchanged.
 
   **Provider reach Octant no longer narrows** (maintainer decision,
   2026-11-16; designed, not built):
@@ -14432,9 +14474,80 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     OpenCode's Octant tools, an ACP probe's claims); below Full access the
     pin holds ([Provider runtimes](design/provider-runtimes.md)).
   - **Linux parity.** Octant's tools reach OpenCode and ACP agents on Linux
-    as on macOS, and an outside provider driver is admitted on Linux under
-    the same trust steps as on macOS
-    ([Outside provider drivers](design/outside-provider-drivers.md)).
+    as on macOS (built: the launch reaches the tool bridge on the shared host
+    network, or through the egress forwarder's loopback relay for the
+    bridge's port alone when Network limits proxy it;
+    [Provider runtimes](design/provider-runtimes.md)), and an outside
+    provider driver is admitted on Linux under the same trust steps as on
+    macOS (built: it runs without confinement and its provider row says so;
+    Strict, once built, keeps it `host-prohibited` there;
+    [Outside provider drivers](design/outside-provider-drivers.md)).
+
+  **Plan and Chat tool parity** (maintainer decision, 2026-11-16; partly
+  built). Plan and Chat keep their rules (Plan writes nothing, Chat has no
+  folder), and inside those rules a provider keeps what it offers on its own:
+  - **Read-only MCP servers in Plan** (designed, not built). A server's own
+    `readOnlyHint` is the server's claim and is never trusted. The person may
+    mark one MCP server "Read-only — allowed in Plan", per server and per
+    host, from the Settings surfaces that manage MCP servers today; the mark
+    is journaled, and a tool's `readOnlyHint` may pre-suggest the mark in the
+    dialog but never sets it. In Plan the tools of a marked server are offered
+    and run under the thread's ask rules; an unmarked server stays withheld,
+    as every server is in Plan today. It is to be wired for every provider
+    whose MCP servers Octant controls: Claude Code, Codex and OpenCode at
+    least. Until built, Plan starts no MCP server but Octant's own.
+  - **Provider memory, read-only** (built for Claude Code and Codex). Claude
+    Code loads its memory in Plan and Chat with the account's memory setting
+    on: the account's `CLAUDE.md` (in Chat the only instruction file, since
+    Chat has no Project) and its auto-memory under
+    `projects/<folder>/memory/`. Plan holds no write tool and its sandbox
+    binds the account folder read-only; Claude Code's own permission check
+    allows a Markdown write into its memory folder without asking, so in Chat
+    and Plan Octant's gate refuses every file write into the account's
+    `CLAUDE.md` or a memory folder, links resolved, before any level's allow,
+    with a sentence saying memory is read-only there. A shell command in Chat
+    stays held by Claude's own command sandbox. Codex keeps its memory off in
+    Plan and Chat at every setting, because Codex writes memories by itself
+    after a turn into `~/.codex/memories`, outside any tool call Octant's gate
+    could refuse. OpenCode, Mistral Vibe and the other providers keep no
+    memory behind a switch Octant sets, so nothing changes for them.
+  - **Linux Plan and Chat confinement admits processes** (built for OpenCode
+    2; Claude Code's Plan shell on Linux designed, not built). A Linux Chat or
+    Plan launch that needs to start processes runs in the same Bubblewrap
+    capsule with the process-denying seccomp filter left off: every bound
+    folder read-only, a private writable temp and the runtime's own state
+    folders the only writable roots, the launch's existing network rule, all
+    capabilities dropped, and Bubblewrap's no-new-privileges. Every other
+    rule of the capsule stays, and a capsule that cannot be built is refused
+    as today; a launch that needs no process (OpenCode 1.x, Pi, ACP agents)
+    keeps the filter. OpenCode 2 therefore runs Chat and Plan on Linux,
+    with its permission rules still denying its shell and delegation and the
+    always-failing `git` stand-in first on its `PATH`, as on macOS, so a
+    repository's own Git configuration never runs there. Claude Code's Bash
+    in Plan stays macOS only until Linux can hold it to macOS's rules: on
+    macOS the profile keeps the command from the runtime's network, its
+    account state (every session's transcript and, on Linux, the sign-in
+    file `.credentials.json`) and writes into its transcript, judged by the
+    program asking. One Bubblewrap capsule cannot tell the shell from the
+    runtime, so on Linux a Plan command could read the account's sign-in and
+    send it anywhere the runtime may reach. Building it needs a nested capsule
+    for the shell alone, or the maintainer's acceptance of that reach.
+  - **Files of any kind as attachments** (designed, not built). A person may
+    attach any file in every mode. Octant keeps it in an Octant-owned
+    attachments folder per thread under the host's data directory, never
+    inside the Project, journaled like an image attachment and under the same
+    size and count limits, and grants the session read access to that one
+    folder at every level, Plan and Chat included, read-only. A provider that
+    takes the file natively (a PDF where its API takes one, OpenCode's PDF
+    capability) gets it natively; any other gets the file's path in the
+    message and reads it with its own tools. The composer accepts any file
+    by choosing or dropping it and shows it as an attachment chip. Until
+    built, attachments are images only.
+
+  Rationale: Plan's and Chat's limits are what the person relies on, not
+  the absence of a tool; each of these keeps the limit at the boundary that
+  enforces it (the sandbox, the gate, or the person's own mark) instead of
+  withholding the tool.
 
   Option names were read from the installed Agent SDK (0.3.211
   `PermissionMode`) and the Codex app-server schema (codex-cli 0.164.0
@@ -14929,7 +15042,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   that cannot cover a denied file is refused.
   Plan and Chat also load a seccomp filter that denies process-creating
   fork/clone (while allowing `clone` with `CLONE_THREAD` for pthreads) and
-  `execveat` after start, because Bubblewrap cannot block the first `execve`.
+  `execveat` after start, because Bubblewrap cannot block the first `execve`,
+  except a launch whose Chat and Plan capsule admits processes, which keeps
+  the read-only binds and leaves the filter off
+  ([Plan and Chat tool parity](#security-and-authority)).
   A launch that needs that filter fails closed as `incompatible` on a CPU
   other than x64 or arm64 or without an executable `/bin/sh`.
   Sensitive system roots remain denied even where runtime compatibility
@@ -15161,7 +15277,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   without the shared builder unless it is named here. The ACP/OpenCode/Pi row has one
   carve-out from "no exec or fork". On macOS, an OpenCode 2 Chat, Plan or Work
   launch may fork and may exec exactly `/usr/bin/false`, which is its Git
-  stand-in (described below). Oh My Pi's probe is a held gap, not
+  stand-in (described below). On Linux, where one exec cannot be granted
+  alone, an OpenCode 2 Chat or Plan launch may start processes inside its
+  read-only capsule, with the same stand-in first on its `PATH`
+  ([Plan and Chat tool parity](#security-and-authority)). Oh My Pi's probe is a held gap, not
   an exception. Octant-owned tools those threads reach stay confined either
   way. A runtime's own built-in tools run under the sandbox its row names:
   Codex's shell under Octant's, Claude's Bash on the postures that write under
@@ -15194,7 +15313,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   without `CLAUDE_CODE_DISABLE_AUTO_MEMORY` alone, which the bundled runtime
   (Agent SDK 0.3.211) reads on no other path; its memory then lives under the
   account's configuration directory, in `projects/<session folder>/memory/`.
-  A Plan launch, a Chat launch, and the version read keep the guard.
+  The version read keeps the guard. A Plan or Chat launch goes without it on
+  the same setting, its memory read-only
+  ([Plan and Chat tool parity](#security-and-authority)).
   Telemetry and self-update stay off. The runtime's release-note,
   PR-badge, and availability checks are therefore its own traffic to
   Anthropic under the person's account; they carry no Project content.
@@ -15204,8 +15325,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   person chose Claude artifacts, below: its launches go without
   `DISABLE_TELEMETRY` and so send the runtime's usage telemetry. A channel with no switch of its own is closed by the
   launch shape instead: `/share`, like any slash command, runs only when the
-  person sends it from a Work or Code composer outside Plan, as in the
-  runtime's own terminal (the model cannot invoke one, and Octant itself
+  person sends it from a composer, as in the runtime's own terminal, under
+  the level's tool rules (the model cannot invoke one, and Octant itself
   sends none but `/compact`); a plugin's background `command`
   runs only where the person's own setup loads it: with that setup off the
   query is opened with no setting sources, plugins, skills, agents, or MCP
@@ -15435,7 +15556,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   provider), and write the launch's temporary
   directory, which is removed when the runtime exits. On Linux the Plan
   launch keeps its fork-denying seccomp filter, and Plan offers no Bash
-  tool there. Before a confined launch starts, the
+  tool there until a Linux capsule can hold the shell apart from the runtime
+  ([Plan and Chat tool parity](#security-and-authority), designed, not
+  built). Before a confined launch starts, the
   `claude auth status` check that readiness uses runs inside that launch's
   sandbox: a sign-in the sandbox cannot read refuses the turn with the step
   that fixes it, instead of failing after the turn has started. Octant
@@ -15479,15 +15602,17 @@ approval-gated` command that undoes it. The terminal shows no one-time
   attests at a directory with a `.git` marker under the Chat/Plan
   confinement and fails closed — listing-only, no turns — if a future
   OpenCode treats the failing git as fatal. Linux confinement cannot express
-  that one exec without also allowing fork, which is the hole the Plan jail
-  exists to close. On Linux a 2.x runtime therefore runs turns where a shell
-  is already allowed, Work and Code at Ask first, Auto, Accept edits and Full
-  access, whose launches allow fork and exec as they do on macOS; a Chat or
-  Plan launch is refused before it starts, naming that reason (maintainer
-  decision, 2026-11-14). The Linux probe attests the Code jail at Ask first,
-  and the capability report says so per mode (`turnModes`: Chat and Plan
-  unsupported, `host-confinement`). App-managed tools stay macOS only and
-  pinned to the measured releases.
+  that one exec without also allowing fork, so a Linux 2.x Chat or Plan launch
+  runs in the read-only capsule that admits processes, with the same stand-in
+  first on its `PATH`, and the Linux probe attests that capsule (maintainer
+  decision, 2026-11-16, replacing the 2026-11-14 refusal;
+  [Plan and Chat tool parity](#security-and-authority)). On a host that is
+  neither, a 2.x runtime runs turns only where a shell is already allowed,
+  Work and Code outside Plan; a Chat or Plan launch is refused before it
+  starts, naming that reason, and the capability report says so per mode
+  (`turnModes`: Chat and Plan unsupported, `host-confinement`). App-managed
+  tools are offered on macOS and Linux and stay pinned to the measured
+  releases.
   Discovery re-allowances — a runtime asking whether a path exists and what it
   resolves to, not to read it — follow one rule. Each names an exact literal
   node, never a subpath, so entries inside it stay denied; a subpath grant is
@@ -15678,7 +15803,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     only from the 2.x release whose events and routes were read (2.2.0); an
     older 2.x release reports no file changes, and it and every 1.x release
     report compaction `unavailable` (not built yet for 1.x, whose server was
-    not read for either). It offers Octant's tools only on macOS
+    not read for either). It offers Octant's tools only on macOS and Linux
     in the verified isolated configuration, which is the release and platform
     boundary, not a gap. A 2.x runtime whose confined jail cannot serve a Git
     work tree is listing-only: models show, no turn is offered. Rationale: a
@@ -15699,10 +15824,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     ([Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface)).
     A spend ceiling leaves other ACP turns out and says so. They report no file changes or diffs, ask no user
     questions on Mistral Vibe and fx, resume only when the agent offers load or
-    resume, and offer Octant's tools only on macOS when the agent serves HTTP
-    MCP (decided: on Linux too, under
+    resume, and offer Octant's tools only on macOS and Linux when the agent
+    serves HTTP MCP (Linux under
     [Provider reach Octant no longer narrows](#security-and-authority);
-    designed, not built). fx is also refused in Chat and Plan.
+    built). fx is also refused in Chat and Plan.
   - **Ollama** carries the Octant Harness agent loop over the local service on
     literal loopback, like the harness endpoints: no provider approvals,
     questions, or file changes, Octant's tools per verified model (a model
@@ -18446,8 +18571,11 @@ link-local address is refused. Each list is journaled whole, journal first, as
 fixed id, or the Project's), and `safe-networks.project-override-cleared@1`
 returns a Project to the default, and `safe-networks.limits-set@1` records the
 Network limits switch; startup replays them. Only the person changes them, at a
-local window or, not built yet, a paired device (`GET`/`POST
-/api/access/safe-networks`). A harness
+local window or on a device the host's own person paired (`GET`/`POST
+/api/access/safe-networks`, forwarded for that device; built): the payload's
+`principal` reads `local-window` or `person-paired-device` and the event's
+actor names the device. A device the hub's roster introduced is refused
+(`needs-local-window`). A harness
 command's proxy falls back to the places of its thread's Project after the
 thread's and Project's rules refuse, and a private answer passes for it only
 through a place, as for a runtime. Taint suspends places for a command as it

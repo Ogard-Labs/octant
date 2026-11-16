@@ -2,7 +2,9 @@ import {
   type HostResourceBudgetSnapshot,
   decodeUpdateAgentRunPolicySettings,
 } from "@octant/contracts";
-import { authenticateRouteWindowId } from "../principalRouteContext";
+import { principalActsAsHostPerson, type ClientPrincipal } from "../clientPrincipal";
+import { eventActorForPrincipal } from "../principalEventActor";
+import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import { AgentRunSettingsStoreError, type AgentRunSettingsStore } from "./agentRunSettingsStore";
@@ -38,9 +40,11 @@ function failure(message: string, status: number, origin: string | null): Respon
 
 /**
  * Authenticated Agents settings routes: Off / Automatic creation posture
- * with server-authoritative persistence. No client value from any other
- * route is ever trusted as the effective posture; delegation admission reads
- * `store.current()` directly.
+ * and the local work resource limits, with server-authoritative persistence.
+ * No client value from any other route is ever trusted as the effective
+ * posture; delegation admission reads `store.current()` directly. The host's
+ * own person reads and changes them, at a local window or on a device they
+ * paired, which a change is journaled with as the actor.
  */
 export function createAgentRunSettingsRouteHandler(
   dependencies: AgentRunSettingsRouteDependencies,
@@ -60,17 +64,21 @@ export function createAgentRunSettingsRouteHandler(
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
+    let principal: ClientPrincipal;
     try {
-      authenticateRouteWindowId({
+      principal = authenticateRoutePrincipal({
         request,
         store: dependencies.windowAuthorityStore,
         now: now(),
-      });
+      }).principal;
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failure("AgentRun settings request is unauthorized.", 401, origin);
       }
       return failure("AgentRun settings request is invalid.", 400, origin);
+    }
+    if (!principalActsAsHostPerson(principal)) {
+      return failure("Agents settings are the host's own person's.", 403, origin);
     }
 
     if (url.pathname.endsWith("/resources")) {
@@ -98,7 +106,7 @@ export function createAgentRunSettingsRouteHandler(
         return failure("AgentRun settings update is invalid.", 400, origin);
       }
       try {
-        const settings = dependencies.store.update(command);
+        const settings = dependencies.store.update(command, eventActorForPrincipal(principal));
         return json({ settings }, 200, origin);
       } catch (error) {
         if (error instanceof AgentRunSettingsStoreError) {
