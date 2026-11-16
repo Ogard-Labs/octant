@@ -4,6 +4,7 @@ import {
   decodeCodeOperationId,
   decodeCodeThreadId,
   decodeProjectId,
+  decodeThreadBoardPullRequestSummaries,
   decodeWorkspaceTab,
   decodeWorkspaceTabId,
   type CodeEnvironmentObservation,
@@ -443,6 +444,49 @@ describe("CodeThreadEnvironment", () => {
     // The Environment reads the journaled snapshot only — never the live
     // repository catalogue the old group used.
     expect(queryProjectPullRequests).toHaveBeenCalledWith({ version: 1 });
+  });
+
+  it("lists this thread's pull requests in the Changes card and counts them in its folded summary", async () => {
+    const onOpenThreadPullRequest = vi.fn();
+    const threadPullRequests = decodeThreadBoardPullRequestSummaries({
+      items: [
+        {
+          identity: {
+            projectId: String(codeProjectId),
+            repositoryOwner: "acme",
+            repositoryName: "repo",
+            number: 12,
+          },
+          title: "Deliver the change",
+          state: "merged",
+          checks: "passing",
+          review: "approved",
+          mergeability: "mergeable",
+          freshness: "fresh",
+          readyToMerge: false,
+        },
+      ],
+      hiddenCount: 0,
+    });
+    render(
+      <CodeThreadEnvironment
+        environmentOpen
+        onOpenThreadPullRequest={onOpenThreadPullRequest}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+        threadPullRequests={threadPullRequests}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+    const changes = screen.getByRole("group", { name: "Changes" });
+    fireEvent.click(within(changes).getByRole("button", { name: /^Pull request 12/ }));
+    expect(onOpenThreadPullRequest).toHaveBeenCalledTimes(1);
+    // Folded, the section still says there is one.
+    fireEvent.click(within(changes).getByRole("button", { name: /^Changes/ }));
+    expect(within(changes).getByText(/· 1 PR$/)).toBeInTheDocument();
   });
 
   it("opens Review from View changes without leaving the thread surface", async () => {

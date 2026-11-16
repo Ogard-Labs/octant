@@ -18,6 +18,8 @@ import type {
   CodeProjectPullRequestRow,
   LocalServerOpenTarget,
   ProjectSummary,
+  ThreadBoardPullRequestIdentity,
+  ThreadBoardPullRequestSummaries,
   WorkspaceTab,
 } from "@octant/contracts";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
@@ -42,6 +44,10 @@ import { EnvironmentCard, EnvironmentGroup, EnvironmentRow } from "./Environment
 import { EnvironmentRunningReport } from "./environmentSections";
 import { EnvironmentExtraFolders } from "./EnvironmentExtraFolders";
 import { EnvironmentPullRequests } from "./EnvironmentPullRequests";
+import {
+  EnvironmentThreadPullRequests,
+  threadPullRequestCount,
+} from "./EnvironmentThreadPullRequests";
 import { countGroupedLocalServerListenersByScope } from "./localServerGroups";
 import { LocalServersGroup } from "./LocalServersGroup";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
@@ -124,6 +130,15 @@ export interface CodeThreadEnvironmentProps {
   readonly onOpenPullRequests?: () => void;
   /** Opens a pull request's Review surface; absent leaves rows inert. */
   readonly onSelectPullRequest?: (row: CodeProjectPullRequestRow) => void;
+  /**
+   * This thread's own pull requests, from the host's cached snapshot. Absent
+   * when it has none; the renderer never reads GitHub to fill it.
+   */
+  readonly threadPullRequests?: ThreadBoardPullRequestSummaries;
+  /** Opens one of this thread's pull requests in the app. Absent leaves its rows inert. */
+  readonly onOpenThreadPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
+  /** Opens one of this thread's pull requests on GitHub. Absent hides that menu entry. */
+  readonly onOpenThreadPullRequestOnGithub?: (identity: ThreadBoardPullRequestIdentity) => void;
   readonly hostBridge?: OctantHostBridge;
   readonly openInApplications?: ReadonlyArray<OpenInApplicationId>;
   readonly agentRunClient?: AgentRunClient;
@@ -307,7 +322,11 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
             caption="Changes"
             className="environment-checkout"
             foldId="changes"
-            summary={changesSummary(controller.status, controller.observation)}
+            summary={changesSummary(
+              controller.status,
+              controller.observation,
+              threadPullRequestCount(props.threadPullRequests),
+            )}
             {...(changesMenu.length === 0
               ? {}
               : {
@@ -352,6 +371,14 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                 onClick={props.onCreatePullRequest}
               />
             ) : null}
+            {/* Last in the card: the thread's pull requests arrive with the
+                host's snapshot, and a row that appears there pushes nothing the
+                pointer may be on. */}
+            <EnvironmentThreadPullRequests
+              onOpen={props.onOpenThreadPullRequest}
+              onOpenOnGithub={props.onOpenThreadPullRequestOnGithub}
+              summaries={props.threadPullRequests}
+            />
           </EnvironmentCard>
         }
         mode="code"
@@ -604,6 +631,16 @@ function deliveryOutcomeLabel(outcome: CodeDeliveryOutcomeKind): string {
  * while the first read is out.
  */
 function changesSummary(
+  status: ReturnType<typeof useCodeEnvironmentController>["status"],
+  observation: ReturnType<typeof useCodeEnvironmentController>["observation"],
+  pullRequests: number,
+): string | undefined {
+  const changes = changesFigure(status, observation);
+  if (changes === undefined || pullRequests === 0) return changes;
+  return `${changes} \u00b7 ${String(pullRequests)} ${pullRequests === 1 ? "PR" : "PRs"}`;
+}
+
+function changesFigure(
   status: ReturnType<typeof useCodeEnvironmentController>["status"],
   observation: ReturnType<typeof useCodeEnvironmentController>["observation"],
 ): string | undefined {

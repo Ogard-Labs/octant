@@ -3284,6 +3284,25 @@ unreadable checkout. New task in this Project and Worktrees are the items of a
 "…" menu (More for changes) at the right end of the Changes title row, shown
 while the section is open. Routines keeps its row; Follow up later and New
 routine are the two items of one "+" menu (Add a routine) at its right end.
+
+**The thread's pull requests.** Under its other rows, a Code thread's Changes
+section lists the pull requests this thread opened or is tied to, newest first,
+under a small "Pull requests" caption: each is one row of fixed height with the
+state's mark in its colour (open, draft, merged, closed, or a neutral mark when
+the state is not known), the title on one line, then the repository, the
+number and the state in the meta ink, with "Ready to merge" and a stale or
+unavailable reading said in words. An open or draft pull request ends with a
+small dot for its checks (passing, failing, pending), and the row's name says
+the state and the checks, so colour is never the only sign. Pressing a row
+opens that pull request in the app; a "…" menu beside it (More for pull request
+#N), shown on hover and keyboard focus and always on touch, offers Open on
+GitHub and Copy link. The list is the host's cached reading: opening the strip
+reaches no forge, and the link is built from the repository and number, never
+taken as text. The host sends at most three and a count of the rest, which the
+list says as "N more not shown". A thread with no pull request shows no caption
+and no row, and the folded Changes summary adds the count ("Clean · 1 PR").
+The Project's own open pull requests stay under Delivery (maintainer request,
+2026-11-16).
 Chat's fact list leaves out a fact whose value is none.
 
 On the phone, a thread's header button (Views and panes) is the one way to

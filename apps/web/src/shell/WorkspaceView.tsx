@@ -52,6 +52,7 @@ import type {
   CodeProjectPullRequestRow,
   MovedThreadReference,
   ThreadBoardPullRequestIdentity,
+  ThreadBoardPullRequestSummaries,
 } from "@octant/contracts";
 import type {
   ProjectAction,
@@ -179,6 +180,7 @@ import {
 } from "../browser/dedicatedBrowserContext";
 import { MarkdownLinkActionsContext } from "../markdown/Markdown";
 import { openExternalUrl } from "./openExternalUrl";
+import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import { WorkPromotionFlow } from "../work/WorkPromotionFlow";
 import type { WorkPromotionController } from "../work/useWorkPromotionController";
@@ -1717,6 +1719,7 @@ function renderCodeTab(
               : { localServerClient: props.localServerClient })}
             {...(props.githubClient === undefined ? {} : { githubClient: props.githubClient })}
             pullRequestClient={codeController.client}
+            {...threadPullRequestProps(props, codeController, String(tab.threadId))}
             {...(props.onOpenPullRequests === undefined
               ? {}
               : { onOpenPullRequests: props.onOpenPullRequests })}
@@ -3026,6 +3029,36 @@ function threadBrowserPreview(
   return {
     browserVisible,
     ...(open === undefined ? {} : { onShowBrowser: () => open({ paneId, threadId }) }),
+  };
+}
+
+/**
+ * What the Environment's Changes section needs to list this thread's pull
+ * requests: the host's cached summaries from the navigation item, the app
+ * route the sidebar row already uses, and the same external-link path. Each is
+ * left out when the host has none, so the section draws nothing for it.
+ */
+function threadPullRequestProps(
+  props: WorkspaceViewProps,
+  codeController: CodeController,
+  threadId: string,
+): {
+  readonly threadPullRequests?: ThreadBoardPullRequestSummaries;
+  readonly onOpenThreadPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
+  readonly onOpenThreadPullRequestOnGithub?: (identity: ThreadBoardPullRequestIdentity) => void;
+} {
+  const summaries = codeController.navigation?.find(
+    (item) => String(item.threadId) === threadId,
+  )?.pullRequestSummaries;
+  const open = props.onSelectPullRequest;
+  const hostBridge = props.hostBridge;
+  return {
+    ...(summaries === undefined ? {} : { threadPullRequests: summaries }),
+    ...(open === undefined ? {} : { onOpenThreadPullRequest: open }),
+    onOpenThreadPullRequestOnGithub: (identity: ThreadBoardPullRequestIdentity) => {
+      const url = githubPullRequestUrl(identity);
+      if (url !== undefined) openExternalUrl(hostBridge, url);
+    },
   };
 }
 
