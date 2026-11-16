@@ -1722,8 +1722,10 @@ starts a Code session at the same level, and a Work turn journals `shell` and
   turns as in Code, and an empty Work thread can continue a Claude Code
   session begun outside Octant in the folder its turns run in
   ([Provider runtimes](design/provider-runtimes.md#background-commands-and-runtime-started-turns)).
-  Claude's own plan-then-approve stays Code's: it moves a thread into and
-  out of Plan, and Work has no Plan.
+  Claude's own plan-then-approve works as in Code: `EnterPlanMode` and,
+  from Plan, `ExitPlanMode` reach the person as level changes, and a Work
+  Plan session starts with Code Plan's read-only tool list and profile
+  ([Provider runtimes](design/provider-runtimes.md#plan-mode-as-level-changes)).
 - **Codex:** Work threads start and resume with the shell features on and the
   approval policy and sandbox the level maps to in Code; `command` and
   `permissions` requests inside the root reach the person at Guarded. A Work
@@ -3994,13 +3996,19 @@ the thread it came from.
   Events arriving while a run is active, and CI from the routine's reserved
   `automation/` branches, are held for review. This conservative attribution
   and the finite allowance bound feedback without claiming to identify every
-  outside writer. The activity check retains at most 64 owned runs (decided:
-  the person may clear or raise it, under
-  [Octant's own limits become settings](#security-and-authority); designed, not built), including
-  cancelled runs whose ordinary turn or children remain active. Missing or
-  overflowing evidence is unknown and blocks automatic admission and re-arm;
-  finish and review tasks and children, then archive and explicitly configure a
-  new routine when its history is full. Code completion is observed from the
+  outside writer. The activity check retains 64 owned runs by default,
+  including cancelled runs whose ordinary turn or children remain active; the
+  person may raise the window up to 1,024 runs or clear it on the routine's
+  detail ([Octant's own limits become settings](#security-and-authority);
+  built). Each change is journaled on the routine
+  (`automation-file-source-window-changed@1`) with the whole resulting
+  checkpoint, so replay rebuilds the same window and the same overflow, and
+  is made from a window on this host or a device its person paired. Missing
+  or overflowing evidence is unknown and blocks automatic admission and
+  re-arm; when the history is full, finish and review tasks and children,
+  then clear it. A clear is refused while any run it holds, or the routine's
+  current run, is active, and returns the input to arming, so it needs one
+  quiet check before an arrival counts again; a held batch stays held. Code completion is observed from the
   exact recorded operation, session, prompt, checkout and provider, never from
   the thread's latest unrelated turn. Pause, restart, quiet time and ordinary Save reset no budget.
   Explicit Review/Re-arm requires current source and Project authority from a
@@ -4910,10 +4918,18 @@ thread's [guardrail level](#security-and-authority). New tasks may choose an app
   An extra working folder is shared, including for a child worktree. Code Git,
   PRs, changed-file receipts and Review still describe that thread's primary
   checkout only; the UI states that limit.
-- **What can be a folder.** The domain policy refuses the home folder (decided:
-  allowed behind a warning outside Strict, credential folders still protected,
-  under [Octant adds no restrictions of its own unless Strict is on](#security-and-authority);
-  designed, not built) and any folder above it, a system folder (`/`, `/System`, `/Library`, `/usr`,
+- **What can be a folder.** The home folder is an extra folder only once the
+  person confirms its warning (under
+  [Octant adds no restrictions of its own unless Strict is on](#security-and-authority);
+  built): the add command answers a home folder with
+  `project-extra-folder-needs-confirmation`, the warning, and a fresh
+  single-use receipt for the same folder, window and Project type in place of
+  the spent one, and only a resend with `confirmHomeFolder` spends it. The
+  confirmed home folder may hold the main folder and the other extra folders;
+  its credential folders stay denied for every confined launch, because the
+  secret guard's denials follow every folder grant. Relinking the main folder
+  inside it is refused until it is removed. The domain policy refuses any
+  folder above home, a system folder (`/`, `/System`, `/Library`, `/usr`,
   `/etc`, `/private`, `/Volumes` itself and their peers) or a folder inside
   a system-owned tree, a credential folder in home (`.ssh`, `.aws`,
   `.azure`, `.gnupg`, `.kube`, `.docker`, `.password-store`,
@@ -7514,10 +7530,20 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   stays Azure AI Foundry's opt-in.
   Amazon Bedrock speaks `cloud-iam`: the person signs in at the organization's
   single sign-on portal with a device code from the host-local
-  `octant provider sign-in` command, or opts in to "Use my AWS profile",
-  which reads the person's existing cloud profile (maintainer request,
-  2026-11-12; not built yet: today only the device-code sign-in exists), and the broker keeps that session and the
-  temporary credentials it mints for the instance's one account and role. The
+  `octant provider sign-in` command, or, at a window on this host, opts in to
+  "Use my AWS profile" or long-lived access keys (maintainer request,
+  2026-11-12, and decision, 2026-11-16; built), and the broker keeps that
+  session and the temporary credentials it mints for the instance's one
+  account and role. A profile is read in place by the broker on every
+  renewal, the way the AWS CLI reads it (`AWS_CONFIG_FILE` and
+  `AWS_SHARED_CREDENTIALS_FILE` honoured): shared-file keys, the single
+  sign-on token `aws sso login` cached under `~/.aws/sso/cache`, then
+  `credential_process` run through the platform shell; a profile that only
+  assumes a role is refused as unsupported (not built yet). A key pair goes
+  to the broker's `/v1/cloud-iam/connect` route once and is kept there; the
+  card warns that long-lived keys work until revoked. Either grant is cloud
+  material the raw resolve refuses, and the server stores only the pointer
+  and journals only the reference. The
   server describes each Converse request to the broker's
   `/v1/cloud-iam/sign` route by its fields (method, host, path, query, the
   content type and accept headers, and the body's hash); the broker checks
@@ -10488,10 +10514,13 @@ the model at another size.
   person, so the server keeps three rules of its own: it never answers an
   approval or any other request listed for the person (only a harness
   question or a Chat turn's question, through the routes line mode uses);
-  it refuses `full-access` (decided: the CLI is to take a per-run Full access
-  flag the person sets, under
-  [Octant adds no restrictions of its own unless Strict is on](#security-and-authority); designed, not built),
-  which would save Full access on the Project, so
+  it refuses `full-access`, which would save Full access on the Project (the
+  person's own per-run flag, `octant agent --full-access`, starts that run's
+  new thread alone at Full access and journals `fullAccessRunFlag` on it,
+  saving nothing on the Project; the host accepts the flag only from a window
+  on this host, so no agent grant, device or routine sets it, and the MCP
+  server never sends it; under
+  [Octant adds no restrictions of its own unless Strict is on](#security-and-authority); built), so
   a thread starts at Full access only where the person already set it (the
   same tools served to an agent grant accept it when the person chose Full
   access for that grant, and give it to the thread alone, never the Project;
@@ -10553,9 +10582,11 @@ the model at another size.
      stored as approval-gated, auto-accept-edits, or Full access has its
      write, edit, command, or check refused as `plan-mode-denied`, including
      a call from tools composed before the narrowing. A turn's posture only
-     narrows the thread's, never widens it. Work and Chat have no Plan
-     posture (a Work turn is ask-first or auto-accept-edits; Chat is
-     approval-gated), so no narrowed turn reaches them. A child agent
+     narrows the thread's, never widens it. Chat has no Plan posture (it is
+     approval-gated), so no narrowed turn reaches it; a Work thread in Plan
+     runs every turn at Plan, and its harness calls are judged by the level
+     the running turn holds, so its writes and commands are refused the same
+     way. A child agent
      is admitted, and a scheduled resume is granted, under the same narrower
      posture: the parent's live grant is its thread (with the window's session
      grant) clamped to the posture its running turn holds, so a turn narrowed to
@@ -14032,11 +14063,12 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     default for every new thread, Work and
     Code; Settings › Work and Settings › Code change it, a Project, Work or Code, may override
     it, and any thread can switch mode at any time from the composer in one
-    click (maintainer decision, 2026-10-31). Work has no Plan, so a Plan
-    answer leaves new Work threads at Ask first. A new Work thread takes its
-    Project's mode, else Work's default; a Project override can be Auto, Ask
-    first, Accept edits, or Full access, and a device the host's own person
-    did not pair cannot pick Full access for it.
+    click (maintainer decision, 2026-10-31). No Work thread starts in Plan,
+    so a Plan answer leaves new Work threads at Ask first. A new Work thread
+    takes its Project's mode, else Work's default; a Project override can be
+    Auto, Ask first, Accept edits, or Full access, and a device the host's
+    own person did not pair cannot pick Full access for it. A Work thread
+    moves to Plan from its own mode picker, as a Code thread does.
   - **Computer keeps its first-action ask** at every level, Full access
     included: it asks at the first action in each application, once per
     thread. The Browser asks at Full access only on a signed-in profile; a
@@ -14266,8 +14298,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   **Octant adds no restrictions of its own unless Strict is on**
   (maintainer decision, 2026-11-16; partly built: slash commands, the
   Strict setting, Project trust from Claude Code and Codex, the default
-  level, image generation, the resource queue and the items marked built
-  below). A person who moves
+  level, image generation, the resource queue, Work's Browser page scripts,
+  the local CLI's Full access flag, the home folder as an extra folder and
+  the items marked built below). A person who moves
   from a provider's own CLI to Octant keeps every workflow that worked
   there, and Octant restricts a provider no more than any other agent
   workspace does. Outside Strict, the provider's own sandbox, permission
@@ -14359,6 +14392,25 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     default access, behind the one-time warning).
   - **Plan in Work.** Work threads get the Plan level, so the provider's
     own plan mode, `EnterPlanMode` and `ExitPlanMode` work there as in Code.
+    Built: Plan is a Work thread's level (`access: "plan"`, never a Settings
+    or Project default), journaled through `change-work-thread-access` like
+    any level change and offered by the web and phone mode pickers, the
+    owner posture card and `octant agent --access plan`. In Plan, Work is
+    read-only on the host as Code's Plan is: the provider launches with
+    Code Plan's read-only profile and tool set (Claude's Plan tool list,
+    Codex's Plan collaboration mode), Octant Harness writes and commands are
+    refused, and every Work tool family refuses what changes something
+    (Browser effects past reading the open page, every Computer action,
+    Project memory writes, image generation and saves, sibling messages)
+    while helpers it starts run in Plan, and the artifact mirror and replica
+    sync refuse its Canvases. It may still propose a side task or a routine
+    and write its own Canvas. The agent's ask to plan first or to leave Plan
+    is a level-change request (a structured `levelChange` on the Work
+    approval, carrying the plan whole with paths and secrets redacted) that
+    Octant Shield and a provider's reviewer never answer; approving it moves
+    the thread as the person who answered and ends the turn, and an approved
+    plan returns the thread to the guarded level it left (its
+    `planReturnAccess`), never to Full access.
   - **Project terminal.** The person's own Project terminal runs unconfined
     by default, as the person's shell does outside Octant, and a Work
     Project's terminal no longer runs at the approval-gated posture. Octant's
@@ -14387,21 +14439,25 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   - **Browser page scripts in Work.** Below Full access a Work thread gets
     Code's one-use, exact-source script permission under the same rules
     ([Browser for agents: Bounded page scripts](design/browser-agent-tool.md#bounded-page-scripts));
-    today Work below Full access is refused. Strict keeps Work refused.
+    built: both tools ask through one shared function
+    (`browserPageScriptPermission.ts`), and Work's `oneUsePermission` is
+    where Strict will keep Work refused.
   - **Local CLI at Full access.** `octant agent` takes an explicit per-run
     Full access flag the person sets on the command line: that run's thread
     starts at Full access alone, journaled with the flag, never saving Full
     access on the Project. A tool call another agent makes through
     `octant agent mcp` still cannot choose it, outside an agent grant the
-    person set to Full access. Today the CLI refuses `full-access`
-    ([Native harness: scripted callers](#native-harness)). Strict refuses
+    person set to Full access. Built as `octant agent --full-access`
+    ([Native harness: scripted callers](#native-harness)); Strict will refuse
     the flag.
   - **Home folder as an extra folder.** A Project's extra folder may be the
     home folder, behind a warning naming what it opens; the credential
     folders inside it (`.ssh`, `.aws`, `.gnupg`, `Library/Keychains` and the
     rest) stay protected, a folder above home and the system folders stay
-    refused ([Projects with several folders](#projects-with-several-folders)). Strict
-    refuses the home folder, as today.
+    refused ([Projects with several folders](#projects-with-several-folders));
+    built: the host answers the home folder with its warning and a fresh
+    single-use receipt, and a confirmed resend adds it. Strict will refuse
+    the home folder; `homeFolderConfirmed` in the domain policy is where.
   - **Stalled-turn limit.** At Full access the stalled-turn limit defaults
     to Off; below Full access it stays 30 minutes, and the person may set
     either. Strict keeps 30 minutes at every level (built: Settings ›
@@ -14425,10 +14481,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   journaling every ask either way.
 
   **Octant's own limits become settings** (maintainer decision, 2026-11-16;
-  partly built: each limit below but the routine window is a host setting in
+  built: each limit below but the routine window is a host setting in
   Settings › Permissions, journaled with the host's other settings, changed
   at a local window or a device the host's own person paired, and read by the
-  server where it applies). Under the
+  server where it applies; the routine window is set per routine and
+  journaled with it). Under the
   [unattended-work rule](#security-and-authority) a fixed constant needs a
   reason beside it; these have none that protects a hard line, so each
   becomes a setting with today's value as its default, and each owner keeps
@@ -14457,9 +14514,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   - **Routines.** A file routine's 64-run activity window can be cleared or
     raised, and a setting, off by default, **Start agent-created routines
     active at Full access** lets a routine an agent creates at Full access
-    start enabled instead of paused. Not built yet: the routine window keeps
-    its fixed 64 runs, because a raised or cleared window has to be journaled
-    with the routine so replay rebuilds the same overflow.
+    start enabled instead of paused. The window is raised (up to 1,024 runs)
+    or cleared on the routine's detail and journaled with the routine, so
+    replay rebuilds the same overflow.
 
   Rationale: a limit the person cannot change stops the workflow it was
   meant to bound; the journal, spend ceilings and the person's Stop still
@@ -14487,14 +14544,15 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   unchanged.
 
   **Provider reach Octant no longer narrows** (maintainer decision,
-  2026-11-16; partly built: Ollama off loopback is built, the rest is
-  designed, not built):
+  2026-11-16; partly built: Ollama off loopback and Bedrock's AWS profile and
+  access keys are built, the rest is designed, not built):
   - **Ollama off loopback.** An Ollama address on the local network or a
     hosted Ollama is allowed, and plain HTTP to a private-network address is
     allowed with a warning; a public address still needs HTTPS
     ([Native harness](#native-harness)).
   - **Bedrock request signing.** The designed "Use my AWS profile" is built,
-    and long-lived access keys are allowed with a warning
+    and long-lived access keys are allowed with a warning (built; a profile
+    that only assumes a role is not read yet)
     ([Providers and model endpoints: Amazon Bedrock](design/model-endpoints.md#organization-sign-in-amazon-bedrock)).
   - **Unreviewed releases.** At Full access a provider release newer than
     the one a version pin was reviewed against is offered as "unverified"
@@ -14641,7 +14699,7 @@ access` agree); a thread's own change is journaled as
   `full-access` is remembered for the Code Project through the same
   `change-code-project-access` command `octant project access` sends, so it
   works the same on a host with no desktop window; a Work thread takes the
-  level through `change-work-thread-access` (no Plan overlay). Because the
+  level through `change-work-thread-access`, Plan included. Because the
   flag saves Full access on the Project rather than only on the new thread,
   the terminal says so and prints the `octant project access <name>
 approval-gated` command that undoes it. The terminal shows no one-time
@@ -14650,8 +14708,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `octant settings access <mode> [--work]` sets the global default new
   threads start at, Code unless `--work`, through `update-code-settings` /
   `update-work-settings`. A Work thread
-  takes the same levels without Plan: Settings › Work sets the one a new
-  thread starts at and its composer changes it
+  takes the same levels, Plan included, though Plan is never a default:
+  Settings › Work sets the one a new thread starts at and its composer
+  changes it
   ([Modes](#modes-chat-work-and-code)).
   One provider-owned exception is accepted: on OpenCode 2.x, approval-gated
   honours permission grants the person saved in OpenCode itself for the same
@@ -15557,10 +15616,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Linux keeps the login in
   a file inside the account directory, which the launch already holds, and
   Seatbelt rules do not apply there.
-  A Code Plan turn on macOS may run read-only commands through the Bash
-  tool (`claudePlanRunsCommands`, `planCommandRules`). Only a launch that
-  offers the Bash tool gets the grants below; a Chat or Work Plan launch
-  and the readiness probes keep no fork and no exec but their own. The
+  A Work or Code Plan turn on macOS may run read-only commands through the
+  Bash tool (`claudePlanRunsCommands`, `planCommandRules`). Only a launch
+  that offers the Bash tool gets the grants below; a Chat launch and the
+  readiness probes keep no fork and no exec but their own. The
   launch may fork,
   and may exec exactly these programs, by literal and resolved path:
   `/bin/zsh` (pinned as the tool's shell through `CLAUDE_CODE_SHELL`;
@@ -19240,7 +19299,7 @@ documents its authority, privacy, and release boundaries):
 - The [guardrail levels](#security-and-authority) and the
   [key providers' native features](#providers). Built in Code: Ask first,
   Accept edits, Auto (with the key CLI providers' own reviewers), Plan and Full
-  access. Built in Work: Auto, Ask first, Accept edits and Full access.
+  access. Built in Work: Auto, Ask first, Accept edits, Plan and Full access.
   [Octant Shield](#octant-shield) is in scope; its Judge is built for every
   runtime that routes approvals through Octant, and its Watcher for the
   results Octant hands a model.

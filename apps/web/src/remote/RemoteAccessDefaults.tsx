@@ -22,7 +22,7 @@ const CODE_MODE_OPTIONS = PERMISSION_MODE_OPTIONS.map((option) => ({
   id: option.id,
   label: option.label,
 }));
-// Work shares Code's levels and has no Plan overlay.
+// Work shares Code's levels; Plan is a thread's own level, never a default.
 const WORK_MODE_OPTIONS = CODE_MODE_OPTIONS.filter((option) => option.id !== "plan");
 
 export interface RemoteAccessDefaultsProps {

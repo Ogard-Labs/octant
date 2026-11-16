@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AutomationSummary,
   decodeAutomationRun,
@@ -34,6 +34,7 @@ import {
   AutomationEventStore,
   registerAutomationEvents,
 } from "./automationEventStore";
+import { AutomationCommandService } from "./automationCommandService";
 import { AutomationProjection } from "./automationProjection";
 import {
   automationSourceSnapshotDigest,
@@ -45,6 +46,7 @@ import {
   AUTOMATION_TEST_IDS,
   AUTOMATION_TEST_NOW,
   automationDefinitionFixture,
+  automationLocalWindowPrincipal,
   automationRunForDefinition,
 } from "./automationTestFixtures";
 
@@ -158,6 +160,109 @@ describe("automation projection", () => {
     const rebuilt = new AutomationProjection();
     store.replayEach((frame) => rebuilt.applyEnvelope(frame));
     expect(rebuilt.getFileSource(definition.id)).toEqual(source);
+  });
+
+  it("holds more runs once the person raises a file routine's activity window, and clears it only after its runs and their delegated children finish, including replay", () => {
+    const { store, projection } = createHarness();
+    let childStatus: "running" | "completed" = "running";
+    const commands = new AutomationCommandService({
+      store,
+      projection,
+      hostId: String(automationDefinitionFixture().hostId),
+      clock: () => now,
+      readChildren: (threadId) =>
+        threadId === "thread-of-finished-run" ? [{ lifecycleStatus: childStatus }] : [],
+    });
+    const definition = automationDefinitionFixture({
+      trigger: {
+        kind: "file-arrival",
+        directory: "Inbox",
+        includeExtensions: ["txt"],
+        excludeDirectories: [],
+        settleSeconds: 2,
+        automaticStartLimit: 8,
+      },
+      nextDueAt: null,
+    });
+    store.appendDefinitionCreated({
+      automation: definition,
+      fileSource: initialAutomationFileCheckpoint("a".repeat(64), now),
+    });
+    const change = (
+      change:
+        | { readonly kind: "raise"; readonly activityWindowLimit: number }
+        | { readonly kind: "clear" },
+    ) =>
+      commands.execute({
+        kind: "change-file-automation-activity-window",
+        automationId: definition.id,
+        expectedVersion: projection.getDefinition(definition.id)?.version ?? 0,
+        principal: automationLocalWindowPrincipal(),
+        origin: { kind: "interactive" },
+        change,
+      } as never);
+    expect(change({ kind: "raise", activityWindowLimit: 128 }).kind).toBe("automation-updated");
+    const start = (index: number, finished: boolean) => {
+      const suffix = String(4000 + index);
+      const run = automationRunForDefinition(definition, {
+        id: runId(suffix),
+        runNowRequestId: `ad000000-0000-4000-8000-00000000${suffix}`,
+      });
+      store.appendRunCreated({ run });
+      if (finished)
+        store.appendRunStatusChanged({
+          automationId: run.automationId,
+          runId: run.id,
+          previousLifecycle: "queued",
+          lifecycle: "cancelled",
+          version: 2,
+          expectedVersion: 1,
+          updatedAt: now,
+        });
+      return run;
+    };
+    for (let index = 0; index < 65; index++) start(index, true);
+    expect(projection.getFileSource(definition.id)).toMatchObject({
+      phase: "arming",
+      activityWindowLimit: 128,
+    });
+    expect(projection.getFileSource(definition.id)?.activityWindow).toHaveLength(65);
+    expect(change({ kind: "raise", activityWindowLimit: 64 })).toMatchObject({ reason: "invalid" });
+
+    const running = start(99, false);
+    expect(change({ kind: "clear" })).toMatchObject({ reason: "active-occurrence" });
+    expect(projection.getFileSource(definition.id)?.activityWindow).toHaveLength(66);
+    store.appendRunStatusChanged({
+      automationId: running.automationId,
+      runId: running.id,
+      previousLifecycle: "queued",
+      lifecycle: "cancelled",
+      version: 2,
+      expectedVersion: 1,
+      updatedAt: now,
+    });
+    // The run has finished but a child it delegated is still writing.
+    const readRun = projection.getRun.bind(projection);
+    const withThread = vi.spyOn(projection, "getRun").mockImplementation((id) => {
+      const run = readRun(id);
+      return run !== undefined && String(run.id) === String(running.id)
+        ? ({ ...run, threadId: "thread-of-finished-run" } as typeof run)
+        : run;
+    });
+    expect(change({ kind: "clear" })).toMatchObject({ reason: "active-occurrence" });
+    childStatus = "completed";
+    expect(change({ kind: "clear" }).kind).toBe("automation-updated");
+    withThread.mockRestore();
+    const cleared = projection.getFileSource(definition.id);
+    expect(cleared).toMatchObject({
+      phase: "arming",
+      reason: "activity-unknown",
+      activityWindow: [],
+      activityWindowLimit: 128,
+    });
+    const rebuilt = new AutomationProjection();
+    store.replayEach((frame) => rebuilt.applyEnvelope(frame));
+    expect(rebuilt.getFileSource(definition.id)).toEqual(cleared);
   });
 
   it("atomically retains a complete file observation and one debit with its deterministic run through replay", () => {

@@ -30,7 +30,7 @@ import { ProjectBrandKitSection } from "./ProjectBrandKitSection";
 import { ProjectDesignSystemSection } from "./ProjectDesignSystemSection";
 import { ProjectActionsSection } from "./ProjectActionsSection";
 import { ProjectFoldersSection } from "./ProjectFoldersSection";
-import type { ProjectChange } from "./useProjectController";
+import type { ExtraFolderChange, ProjectChange } from "./useProjectController";
 import { ProjectDesktopRecipeSection } from "./ProjectDesktopRecipeSection";
 import { ProjectAutoReviewerSection } from "./ProjectAutoReviewerSection";
 import {
@@ -69,7 +69,11 @@ export interface ProjectOverviewProps {
   readonly onNewThread?: () => void;
   readonly onRelink: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
   /** Absent when the host cannot accept the change; the Project's folders are then read-only. */
-  readonly onAddExtraFolder?: (projectId: ProjectId, receiptId: string) => Promise<ProjectChange>;
+  readonly onAddExtraFolder?: (
+    projectId: ProjectId,
+    receiptId: string,
+    confirmHomeFolder?: boolean,
+  ) => Promise<ExtraFolderChange>;
   readonly onRemoveExtraFolder?: (
     projectId: ProjectId,
     canonicalRoot: string,
@@ -371,7 +375,8 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               {...(onAddExtraFolder === undefined
                 ? {}
                 : {
-                    onAdd: (receiptId: string) => onAddExtraFolder(props.project.id, receiptId),
+                    onAdd: (receiptId: string, confirmHomeFolder?: boolean) =>
+                      onAddExtraFolder(props.project.id, receiptId, confirmHomeFolder),
                   })}
               {...(onRemoveExtraFolder === undefined
                 ? {}

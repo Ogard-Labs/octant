@@ -986,6 +986,30 @@ describe("Project extra folders", () => {
     expect(() => add(around, "/Users/example/Work")).toThrow(/main folder/);
   });
 
+  it("adds the home folder only once the person confirms it, keeping folders above it refused", () => {
+    expect(() => add(work(), "/Users/example")).toThrow(/needs your confirmation/);
+    const confirmed = addProjectExtraFolder(work(), {
+      canonicalRoot: "/Users/example",
+      actor,
+      addedAt: updatedAt,
+      homeDirectory: home,
+      homeFolderConfirmed: true,
+    });
+    expect(projectExtraFolderRoots(confirmed.project)).toEqual(["/Users/example"]);
+    // A confirmation covers the home folder alone, never a folder above it or a credential folder.
+    for (const candidate of ["/Users", "/Users/example/.ssh"]) {
+      expect(() =>
+        addProjectExtraFolder(work(), {
+          canonicalRoot: candidate,
+          actor,
+          addedAt: updatedAt,
+          homeDirectory: home,
+          homeFolderConfirmed: true,
+        }),
+      ).toThrow(ProjectPolicyRejected);
+    }
+  });
+
   it("refuses the home folder, anything above it, system folders and secret folders", () => {
     for (const candidate of [
       "/Users/example",

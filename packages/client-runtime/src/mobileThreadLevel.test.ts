@@ -5,6 +5,7 @@ import {
   changeMobileThreadLevel,
   mobileDefaultLevel,
   mobileProjectLevel,
+  mobileDefaultLevelChoices,
   mobileThreadLevel,
   mobileThreadLevelChoices,
 } from "./mobileThreadLevel";
@@ -40,9 +41,22 @@ describe("a thread's level on the phone", () => {
   it("reads a Code and a Work thread's level in the product's own five modes", () => {
     expect(mobileThreadLevel({ mode: "code", thread: codeThread as never })).toBe("auto");
     expect(mobileThreadLevel({ mode: "work", thread: workThread as never })).toBe("accept-edits");
-    expect(mobileThreadLevelChoices("code")).toContain("plan");
-    expect(mobileThreadLevelChoices("work")).not.toContain("plan");
-    expect(mobileThreadLevelChoices("work")).toContain("full-access");
+    expect(
+      mobileThreadLevel({ mode: "work", thread: { ...workThread, access: "plan" } as never }),
+    ).toBe("plan");
+  });
+
+  it("offers Plan for a Work thread as for a Code thread, but never as a Work default", () => {
+    expect(mobileThreadLevelChoices()).toEqual([
+      "auto",
+      "ask-first",
+      "accept-edits",
+      "plan",
+      "full-access",
+    ]);
+    expect(mobileDefaultLevelChoices("code")).toContain("plan");
+    expect(mobileDefaultLevelChoices("work")).not.toContain("plan");
+    expect(mobileDefaultLevelChoices("work")).toContain("full-access");
   });
 
   it("sends a Code thread's Full access as the command a window sends, with nothing unlocked first", async () => {
@@ -90,7 +104,7 @@ describe("a thread's level on the phone", () => {
     ]);
   });
 
-  it("reports the host's refusal instead of a change, and never sends Work a Plan", async () => {
+  it("reports the host's refusal instead of a change", async () => {
     const refusing = host(403, { category: "unauthorized" });
     expect(
       await changeMobileThreadLevel({
@@ -99,7 +113,9 @@ describe("a thread's level on the phone", () => {
         level: "full-access",
       }),
     ).toEqual({ status: "refused", message: "The host did not change this thread's mode." });
+  });
 
+  it("sends a Work thread's Plan as the level change a window sends", async () => {
     const work = host(200, { kind: "thread-updated" });
     expect(
       await changeMobileThreadLevel({
@@ -107,8 +123,18 @@ describe("a thread's level on the phone", () => {
         subject: { mode: "work", thread: workThread as never },
         level: "plan",
       }),
-    ).toMatchObject({ status: "refused" });
-    expect(work.sent).toEqual([]);
+    ).toEqual({ status: "changed" });
+    expect(work.sent).toEqual([
+      {
+        path: "/api/work/threads/commands",
+        body: {
+          kind: "change-work-thread-access",
+          threadId: workThread.id,
+          expectedVersion: 3,
+          access: "plan",
+        },
+      },
+    ]);
   });
 });
 

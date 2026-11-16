@@ -423,6 +423,67 @@ describe("automation routes", () => {
     expect(projection.getDefinition(automationId("6103"))).toBeUndefined();
   });
 
+  it("raises a file routine's activity history for the host's own person and refuses a restricted device", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-file-window-device-")));
+    directories.push(root);
+    mkdirSync(join(root, "Inbox"));
+    const { handler, projection } = createHarness({
+      personPairedDeviceCurrent: () => true,
+      prepareFileSource: (input) =>
+        prepareAutomationFileDefinition({
+          automationId: input.command.automationId,
+          expectedVersion: input.command.expectedVersion,
+          filesystem: liveWorkFilesystem,
+          authority: {
+            canonicalRoot: root,
+            bindingIdentity: "fixture host-owned Project binding",
+            current: input.current,
+          },
+          definition: input.command.definition,
+          current: input.current,
+          signal: input.signal,
+          now: () => Schema.decodeUnknownSync(UtcTimestamp)(now),
+        }),
+    });
+    const id = automationId("6111");
+    await handler(
+      fromDevice(
+        postCommand({
+          kind: "create-automation",
+          automationId: id,
+          expectedVersion: 0,
+          definition: automationDefinitionDraftFixture({
+            trigger: {
+              kind: "file-arrival",
+              directory: "Inbox",
+              includeExtensions: ["txt"],
+              excludeDirectories: [],
+              settleSeconds: 2,
+              automaticStartLimit: 8,
+            },
+          }),
+        }),
+        "host-person",
+      ),
+    );
+    const raise = () =>
+      postCommand({
+        kind: "change-file-automation-activity-window",
+        automationId: id,
+        expectedVersion: projection.getDefinition(id)?.version ?? 0,
+        change: { kind: "raise", activityWindowLimit: 256 },
+      });
+    expect(await json(await handler(fromDevice(raise(), "hub-roster")))).toMatchObject({
+      kind: "automation-command-failed",
+      reason: "unauthorized",
+    });
+    expect(projection.getFileSource(id)?.activityWindowLimit).toBeUndefined();
+    expect(await json(await handler(fromDevice(raise(), "host-person")))).toMatchObject({
+      kind: "automation-updated",
+    });
+    expect(projection.getFileSource(id)?.activityWindowLimit).toBe(256);
+  });
+
   it("saves a routine in a server Project for the host's own person, refuses a restricted device, and refuses a file trigger there", async () => {
     let prepared = 0;
     const { handler, projection } = createHarness({

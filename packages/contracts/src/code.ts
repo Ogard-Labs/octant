@@ -477,6 +477,13 @@ export const CodeThread = Schema.Struct({
    */
   fullAccessSandbox: Schema.optional(Schema.Boolean),
   /**
+   * This thread started at Full access because the person passed the per-run
+   * Full access flag to `octant agent` on this host. It is the thread's alone:
+   * the Project's remembered level is untouched. Optional so an older journal
+   * replays without it; the host drops it once the thread leaves Full access.
+   */
+  fullAccessRunFlag: Schema.optional(Schema.Literal(true)),
+  /**
    * Strict, the thread's own choice. Absent follows its Project, else
    * Settings, else off (`resolveStrict`); the host reads it at each launch
    * and call, so a thread that never chose follows those as they are now.
