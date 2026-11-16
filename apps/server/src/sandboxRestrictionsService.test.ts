@@ -119,6 +119,75 @@ function fixture(strict = true) {
   };
 }
 describe.skipIf(process.platform !== "linux")("trusted sandbox restrictions", () => {
+  it("does not label a Project's mixed running policies as one newly active setting", async () => {
+    const f = fixture();
+    f.save({ kind: "set-policy", scope: f.settings, policy: f.policy, expectedVersion: 0 });
+    const first = f.start();
+    if (first.status !== "admitted") throw new Error("Missing first turn");
+    f.setStrict(false);
+    const second = f.service.beginTurn({
+      threadId: "10000000-0000-4000-8000-000000000002",
+      projectId,
+      mode: "work",
+      root: f.root,
+      provider: "codex",
+    });
+    if (second.status !== "admitted") throw new Error("Missing second turn");
+    const view = f.service.snapshot({ kind: "project", projectId: f.project.id });
+    expect(view).toMatchObject({
+      running: true,
+      pending: true,
+      summary: expect.stringContaining("different admitted policies"),
+    });
+    expect(view.activeStrict).toBeUndefined();
+    expect(view.activePolicy).toBeUndefined();
+    await first.turn.end();
+    await second.turn.end();
+  });
+  it("shows the admitted policy and pending change at Project and Settings scopes while a turn still runs", async () => {
+    const f = fixture();
+    f.save({ kind: "set-policy", scope: f.settings, policy: f.policy, expectedVersion: 0 });
+    const active = f.start();
+    if (active.status !== "admitted") throw new Error("Missing active turn");
+    f.save({
+      kind: "set-policy",
+      scope: f.settings,
+      policy: { ...f.policy, network: "deny" },
+      expectedVersion: 1,
+    });
+    for (const scope of [f.settings, { kind: "project" as const, projectId: f.project.id }])
+      expect(f.service.snapshot(scope)).toMatchObject({
+        running: true,
+        pending: true,
+        activeStrict: true,
+        policy: { network: "deny" },
+        activePolicy: { network: "existing-policy" },
+      });
+    await active.turn.end();
+    expect(f.service.snapshot(f.settings)).toMatchObject({ running: false, pending: false });
+  });
+  it("admits a personal terminal from its Project policy without pretending that it is a provider session", async () => {
+    const f = fixture();
+    f.save({
+      kind: "set-policy",
+      scope: { kind: "project", projectId: f.project.id },
+      policy: { ...f.policy, network: "deny" },
+      expectedVersion: 0,
+    });
+    const terminal = f.service.beginTurn({
+      executionRoute: "terminal",
+      threadId: "30000000-0000-4000-8000-000000000099",
+      projectId,
+      mode: "work",
+      root: f.root,
+      provider: "terminal",
+    });
+    expect(terminal.status).toBe("admitted");
+    if (terminal.status !== "admitted") return;
+    expect(terminal.turn.selection?.policy.network).toBe("deny");
+    expect(terminal.turn.selection?.context.provider).toBe("terminal");
+    await terminal.turn.end();
+  });
   it("keeps command consent bound to the admitted policy while a requested change is pending", async () => {
     const f = fixture();
     f.save({ kind: "set-policy", scope: f.settings, policy: f.policy, expectedVersion: 0 });

@@ -131,7 +131,7 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
     "browserAuthority" | "workThreadProjection" | "resolveThreadStrict" | "resolveProjectStrict"
   > &
   Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
-  Pick<IntegrationsWiring, "toolEgressRules"> &
+  Pick<IntegrationsWiring, "toolEgressRules" | "providerRuntimeNetwork"> &
   Pick<
     ProvidersWiring,
     | "extensionLifecycleService"
@@ -264,6 +264,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       sharedTerminals === undefined
         ? undefined
         : new ProjectTerminalService({
+            network: deps.providerRuntimeNetwork,
             ...serverActions,
             strict: ({ projectId, workThreadId }) =>
               workThreadId === undefined

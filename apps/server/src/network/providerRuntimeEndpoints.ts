@@ -77,6 +77,7 @@ const RUNTIME_ENDPOINTS: Readonly<
   // own inference, so it has no provider endpoint of its own: a command
   // reaches the Project's rules and the safe networks.
   "claude-sandbox": [],
+  terminal: [],
 };
 
 export function providerRuntimeDomains(input: {

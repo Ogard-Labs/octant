@@ -62,6 +62,22 @@ function fixture() {
   return { settings, change };
 }
 describe("sandbox restrictions settings", () => {
+  it("shows mixed active protection separately from the saved default", async () => {
+    const client = fixture();
+    client.settings.mockImplementation(async (scope) => ({
+      ...snapshot(scope),
+      strict: false,
+      activeStrict: undefined,
+      running: true,
+      pending: true,
+      summary: "Running work uses different admitted policies. Saved changes apply to new runs.",
+    }));
+    render(<SandboxRestrictionsSettings client={client} />);
+    expect(
+      await screen.findByText("Multiple running protection states · changes pending"),
+    ).toBeVisible();
+    expect(screen.getByText(/Running work uses different admitted policies/)).toBeVisible();
+  });
   it("validates and saves an exact local service while blocking other ambient services", async () => {
     const client = fixture();
     const user = userEvent.setup();

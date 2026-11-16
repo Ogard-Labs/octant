@@ -189,7 +189,6 @@ export function hostSandboxRefusal(input: {
   readonly access: ThreadAccess;
 }): string | undefined {
   return input.platform === "win32" &&
-    input.access.strict !== false &&
     (input.access.strict === true || input.access.fullAccessSandbox === true)
     ? WINDOWS_SANDBOX_MISSING_REASON
     : undefined;

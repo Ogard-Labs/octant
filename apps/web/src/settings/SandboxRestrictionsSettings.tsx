@@ -284,11 +284,13 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
               >
                 <span className="oct-meta">
                   {snapshot.running
-                    ? snapshot.activeStrict === true
-                      ? snapshot.activeLegacyStrict
-                        ? "Legacy sandbox active"
-                        : "Strict active"
-                      : "Strict off for this turn"
+                    ? snapshot.activeStrict === undefined
+                      ? "Multiple running protection states"
+                      : snapshot.activeStrict === true
+                        ? snapshot.activeLegacyStrict
+                          ? "Legacy sandbox active"
+                          : "Strict active"
+                        : "Strict off for this turn"
                     : snapshot.strict === true
                       ? snapshot.legacyStrict
                         ? "Legacy sandbox on"

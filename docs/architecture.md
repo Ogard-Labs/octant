@@ -14020,6 +14020,14 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     when an ordinary child exits. Brokers never retry without confinement.
     Kernel-owned scopes cover detached descendants, not only a process group.
 
+    Personal Project terminals own an admitted policy and broker lifetime;
+    Work terminals also inherit their thread's current protection ceiling.
+    Configured folder grants and network policy reach the actual PTY launcher,
+    including at Full access under Strict. Their proxy grants no inference
+    endpoints, and closing the terminal revokes it and verifies the native
+    scope. Failed cleanup remains retryable and blocks replacement admission.
+    An explicit Strict-off terminal runs natively; Plan cannot start a terminal.
+
     Settings › Permissions › **Configure protections**, thread pickers and
     Project defaults open the same panel. It shows actual Strict/legacy state,
     provenance, active versus pending policy, full folder paths and supported

@@ -331,8 +331,11 @@ in Secret stores.
 
 Running protection and requested changes are distinct. **Changes pending** means
 the old admitted policy remains in effect; stop the turn and start a new run to
-apply the change. Merely editing a setting cannot alter a running process. Scope
-changes retain drafts; stale-version refusals preserve them, Reload discards only
+apply the change. Merely editing a setting cannot alter a running process.
+Views in Settings and Projects include their matching running sessions and
+personal terminals. When those sessions use different admitted policies the
+panel says so, rather than presenting one saved default as already active.
+Scope changes retain drafts; stale-version refusals preserve them, Reload discards only
 the current draft, and denial refreshes never replace it. One grouped composer
 card explains the exact resource, operation and scope before **Allow for this
 session**, **Remember for this Project**, or **Keep blocked**. Only supported

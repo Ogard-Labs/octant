@@ -246,6 +246,16 @@ describe("levels on a host without Octant's sandbox", () => {
         access: { executionPolicy: "full-access", fullAccessSandbox: true },
       }),
     ).toBe(WINDOWS_SANDBOX_MISSING_REASON);
+    expect(
+      hostSandboxRefusal({
+        platform: "win32",
+        access: {
+          executionPolicy: "full-access",
+          fullAccessSandbox: true,
+          strict: false,
+        },
+      }),
+    ).toBe(WINDOWS_SANDBOX_MISSING_REASON);
   });
 
   it("counts a host as starting threads at open Full access only when a Code or Work default is Full access without the sandbox", () => {

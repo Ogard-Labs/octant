@@ -312,7 +312,10 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
     } as const;
     let projectId: string | undefined;
     try {
-      projectId = this.#options.resolveProject(input.root);
+      projectId =
+        input.sandboxPolicy === undefined
+          ? this.#options.resolveProject(input.root)
+          : String(input.sandboxPolicy.context.projectId);
     } catch {
       projectId = undefined;
     }

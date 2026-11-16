@@ -184,6 +184,24 @@ function proxyOf(endpoint: EgressProxyEndpoint) {
 }
 
 describe("provider runtime network", () => {
+  it("does not give a personal terminal the provider's inference endpoints", async () => {
+    const host = runtimeHost();
+    const launch = await started(
+      host.network.start({
+        runtime: "terminal",
+        root: "/projects/app",
+        executionPolicy: "approval-gated",
+      }),
+    );
+    const result = await openTunnel(
+      proxyOf(launch.endpoint),
+      "api.openai.com:443",
+      basicAuthorization(tokenOf(launch.environment)),
+    );
+    sockets.push(result.socket);
+    expect(result.status).toBe(403);
+    expect(host.dialed).toEqual([]);
+  });
   it("grants only an exact local service through the scoped proxy and closes its live tunnel on release", async () => {
     const origin = await tcpFixture();
     const neighbor = await tcpFixture();

@@ -104,6 +104,9 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
     string,
     {
       readonly selection?: SandboxPolicySelection;
+      readonly projectId: string;
+      readonly mode: "code" | "work";
+      readonly policyScope: SandboxRestrictionsScope;
       readonly strict?: boolean;
       readonly legacy?: boolean;
       readonly launches: SandboxPolicyLaunchDetails[];
@@ -249,6 +252,44 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
         );
     }
   }
+  #resolvedPolicy(scope: SandboxRestrictionsScope, projectId: string, parentThreadId?: string) {
+    const strictResolution = this.#strictPolicy(scope);
+    const parentTurn = parentThreadId === undefined ? undefined : this.#turns.get(parentThreadId);
+    const strictEnabled = strictResolution.enabled || parentTurn?.strict === true;
+    const legacyStrict =
+      strictEnabled &&
+      (parentTurn?.strict === true
+        ? parentTurn.legacy === true && (!strictResolution.enabled || strictResolution.legacy)
+        : strictResolution.legacy);
+    const record =
+      this.#activeRecord(scope, legacyStrict) ??
+      this.#activeRecord(
+        {
+          kind: "project",
+          projectId: Schema.decodeUnknownSync(ProjectId)(projectId),
+        },
+        legacyStrict,
+      );
+    const parentRecord =
+      parentThreadId === undefined
+        ? undefined
+        : this.#effective({ kind: "session", threadId: parentThreadId });
+    const parentPolicy =
+      parentThreadId === undefined ? undefined : this.#turns.get(parentThreadId)?.selection?.policy;
+    const selectedPolicy =
+      parentPolicy === undefined
+        ? (record?.policy ?? (strictEnabled && !legacyStrict ? defaultStrictPolicy : undefined))
+        : record?.policy === undefined
+          ? parentPolicy
+          : intersectSandboxPolicies(parentPolicy, record.policy);
+    return {
+      strictEnabled,
+      legacyStrict,
+      record,
+      parentRecord,
+      selectedPolicy: strictEnabled ? selectedPolicy : undefined,
+    };
+  }
   snapshot(scope: SandboxRestrictionsScope) {
     const effective = this.#effective(scope);
     const strictPolicy = this.#strictPolicy(scope);
@@ -297,7 +338,22 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
         error instanceof Error ? error.message : "The saved grant is unavailable.",
       );
     }
-    const held = threadId === undefined ? undefined : this.#turns.get(threadId);
+    const matching = [...this.#turns.entries()].filter(([id, turn]) =>
+      scope.kind === "session"
+        ? id === scope.threadId
+        : scope.kind === "project"
+          ? turn.projectId === String(scope.projectId)
+          : turn.mode === scope.mode,
+    );
+    const first = matching[0]?.[1];
+    const mixed =
+      first !== undefined &&
+      matching.some(
+        ([, turn]) =>
+          JSON.stringify([turn.strict, turn.legacy, turn.selection?.policy]) !==
+          JSON.stringify([first.strict, first.legacy, first.selection?.policy]),
+      );
+    const held = mixed ? undefined : first;
     const requestedPolicy = this.#activeRecord(scope, strictPolicy.legacy)?.policy;
     const actualPolicy =
       held === undefined
@@ -307,23 +363,18 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
         : held.selection?.policy;
     const actualStrict = held?.strict ?? strictPolicy.enabled;
     const actualLegacy = held?.legacy ?? strictPolicy.legacy;
-    const actualSummary = !actualStrict
-      ? "Strict is off. Saved protection settings are inactive."
-      : actualLegacy
-        ? "The previous sandbox choice remains active until you explicitly choose Strict."
-        : actualPolicy === undefined
-          ? "Strict restores the standard protection rules."
-          : `Strict protections apply; some actions still require approval. Writes: Project + ${actualPolicy.filesystem.readWriteRoots.length} allowed folders. Read only: ${actualPolicy.filesystem.readOnlyRoots.length} folders. Network: ${actualPolicy.network === "existing-policy" ? "recorded Safe networks settings" : actualPolicy.network}.`;
+    const actualSummary = mixed
+      ? "Running work uses different admitted policies. Saved changes apply to new runs."
+      : !actualStrict
+        ? "Strict is off. Saved protection settings are inactive."
+        : actualLegacy
+          ? "The previous sandbox choice remains active until you explicitly choose Strict."
+          : actualPolicy === undefined
+            ? "Strict restores the standard protection rules."
+            : `Strict protections apply; some actions still require approval. Writes: Project + ${actualPolicy.filesystem.readWriteRoots.length} allowed folders. Read only: ${actualPolicy.filesystem.readOnlyRoots.length} folders. Network: ${actualPolicy.network === "existing-policy" ? "recorded Safe networks settings" : actualPolicy.network}.`;
     return decodeSandboxRestrictionsSnapshot({
       kind: "sandbox-restrictions",
-      runtimeDetails: [...this.#turns.entries()]
-        .filter(([id, turn]) =>
-          threadId !== undefined
-            ? id === threadId
-            : projectId === undefined || String(turn.selection?.context.projectId) === projectId,
-        )
-        .flatMap(([, turn]) => turn.launches)
-        .slice(-16),
+      runtimeDetails: matching.flatMap(([, turn]) => turn.launches).slice(-16),
       enrollmentEnabled:
         backendReady && (this.#dependencies.enrollmentEnabled !== false || policy !== undefined),
       version: this.#version,
@@ -331,29 +382,25 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
       source: effective?.scope.kind ?? "legacy",
       ...(policy === undefined ? {} : { policy }),
       inherited: effective !== undefined && keyOf(scope) !== keyOf(effective.scope),
-      running: threadId !== undefined && this.#turns.has(threadId),
+      running: matching.length > 0,
       strict: strictPolicy.enabled,
       legacyStrict: strictPolicy.legacy,
       strictSource: strictPolicy.source,
-      ...(threadId === undefined || !this.#turns.has(threadId)
-        ? {}
-        : {
-            activeStrict: this.#turns.get(threadId)?.strict ?? false,
-            activeLegacyStrict: this.#turns.get(threadId)?.legacy ?? false,
-          }),
-      ...(threadId === undefined || this.#turns.get(threadId)?.selection === undefined
-        ? {}
-        : { activePolicy: this.#turns.get(threadId)?.selection?.policy }),
-      pending:
-        threadId !== undefined &&
-        this.#turns.has(threadId) &&
-        (this.#turns.get(threadId)?.strict !== strictPolicy.enabled ||
-          this.#turns.get(threadId)?.legacy !== strictPolicy.legacy ||
-          ((strictPolicy.enabled || this.#turns.get(threadId)?.strict === true) &&
-            JSON.stringify(
-              (strictPolicy.enabled ? requestedPolicy : undefined) ??
-                (strictPolicy.enabled && !strictPolicy.legacy ? defaultStrictPolicy : undefined),
-            ) !== JSON.stringify(this.#turns.get(threadId)?.selection?.policy))),
+      ...(first !== undefined && matching.every(([, turn]) => turn.strict === first.strict)
+        ? { activeStrict: first.strict ?? false }
+        : {}),
+      ...(first !== undefined && matching.every(([, turn]) => turn.legacy === first.legacy)
+        ? { activeLegacyStrict: first.legacy ?? false }
+        : {}),
+      ...(held?.selection === undefined ? {} : { activePolicy: held.selection.policy }),
+      pending: matching.some(([, turn]) => {
+        const desired = this.#resolvedPolicy(turn.policyScope, turn.projectId, turn.parentThreadId);
+        return (
+          turn.strict !== desired.strictEnabled ||
+          turn.legacy !== desired.legacyStrict ||
+          JSON.stringify(turn.selection?.policy) !== JSON.stringify(desired.selectedPolicy)
+        );
+      }),
       summary: actualSummary,
       limitations,
       capabilities: {
@@ -537,39 +584,21 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
     let selection: SandboxPolicySelection | undefined;
     let strictEnabled = false;
     let legacyStrict = false;
+    let policyScope: SandboxRestrictionsScope = { kind: "session", threadId: request.threadId };
     try {
-      const strictResolution = this.#strictPolicy({ kind: "session", threadId: request.threadId });
-      const parentTurn =
-        request.parentThreadId === undefined ? undefined : this.#turns.get(request.parentThreadId);
-      strictEnabled = strictResolution.enabled || parentTurn?.strict === true;
-      legacyStrict =
-        strictEnabled &&
-        (parentTurn?.strict === true
-          ? parentTurn.legacy === true && (!strictResolution.enabled || strictResolution.legacy)
-          : strictResolution.legacy);
-      const record =
-        this.#activeRecord({ kind: "session", threadId: request.threadId }, legacyStrict) ??
-        this.#activeRecord(
-          {
-            kind: "project",
-            projectId: Schema.decodeUnknownSync(ProjectId)(request.projectId),
-          },
-          legacyStrict,
-        );
-      const parentRecord =
-        request.parentThreadId === undefined
-          ? undefined
-          : this.#effective({ kind: "session", threadId: request.parentThreadId });
-      const parentPolicy =
-        request.parentThreadId === undefined
-          ? undefined
-          : this.active(request.parentThreadId)?.policy;
-      const selectedPolicy =
-        parentPolicy === undefined
-          ? (record?.policy ?? (strictEnabled && !legacyStrict ? defaultStrictPolicy : undefined))
-          : record?.policy === undefined
-            ? parentPolicy
-            : intersectSandboxPolicies(parentPolicy, record.policy);
+      policyScope =
+        request.executionRoute === "terminal"
+          ? request.parentThreadId === undefined
+            ? {
+                kind: "project" as const,
+                projectId: Schema.decodeUnknownSync(ProjectId)(request.projectId),
+              }
+            : { kind: "session" as const, threadId: request.parentThreadId }
+          : { kind: "session" as const, threadId: request.threadId };
+      const resolved = this.#resolvedPolicy(policyScope, request.projectId, request.parentThreadId);
+      strictEnabled = resolved.strictEnabled;
+      legacyStrict = resolved.legacyStrict;
+      const { record, parentRecord, selectedPolicy } = resolved;
       if (strictEnabled && selectedPolicy !== undefined) {
         if (!legacyStrict && selectedPolicy.network === "unrestricted" && sandboxNetworkLimitsOn())
           throw new Error(
@@ -608,8 +637,12 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
           throw new Error(
             `Unsupported sandbox restrictions: ${admission.rules.join(", ")}. Review the unsupported rows in Sandbox restrictions.`,
           );
-        const kind = Schema.decodeUnknownSync(ProviderDriverKind)(request.provider);
+        const kind =
+          request.executionRoute === "terminal"
+            ? undefined
+            : Schema.decodeUnknownSync(ProviderDriverKind)(request.provider);
         if (
+          kind !== undefined &&
           refusesFullAccessSandbox({
             access: { executionPolicy: "full-access", fullAccessSandbox: true },
             driverKind: kind,
@@ -758,6 +791,9 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
         revision: selection.policy.revision,
       });
     this.#turns.set(request.threadId, {
+      projectId: request.projectId,
+      mode: request.mode,
+      policyScope,
       nonce,
       launches: [],
       strict: strictEnabled,

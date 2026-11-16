@@ -58,6 +58,12 @@ export interface TerminalLauncher {
 }
 
 export interface TerminalLaunchRequest {
+  readonly sandboxPolicy?: TerminalLaunchInput["sandboxPolicy"];
+  readonly strict?: boolean;
+  readonly networkEgress?: TerminalLaunchInput["networkEgress"];
+  readonly environment?: Readonly<Record<string, string>>;
+  /** Host-owned scope cleanup; never accepted from a terminal command payload. */
+  readonly onClosed?: () => Promise<void>;
   readonly command?: string;
   readonly admit?: () => boolean;
   readonly terminalId: string;
@@ -147,6 +153,7 @@ interface TerminalServiceOptions {
 }
 
 interface TerminalRecord {
+  protectionCleanup?: () => Promise<void>;
   readonly terminalId: string;
   readonly transcript: TranscriptBuffer;
   readonly process?: TerminalProcessHandle;
@@ -230,8 +237,12 @@ export class TerminalService {
     const previous = this.#terminals.get(request.terminalId);
     if (previous?.status === "running") throw new Error("Terminal identifier is already in use.");
     validateTerminalId(request.terminalId);
+    if (previous?.protectionCleanup !== undefined) await this.#finishProtection(previous);
 
-    const environment = sanitizeInheritedEnvironment(this.#options.inheritedEnvironment);
+    const environment = {
+      ...sanitizeInheritedEnvironment(this.#options.inheritedEnvironment),
+      ...request.environment,
+    };
     const secrets: string[] = [];
     for (const credential of request.credentialReferences) {
       validateEnvironmentName(credential.environmentName);
@@ -262,6 +273,13 @@ export class TerminalService {
       request.server !== undefined
         ? startServerTerminal(request.server, { columns: request.columns, rows: request.rows })
         : this.#options.port.start({
+            ...(request.sandboxPolicy === undefined
+              ? {}
+              : { sandboxPolicy: request.sandboxPolicy }),
+            ...(request.strict === undefined ? {} : { strict: request.strict }),
+            ...(request.networkEgress === undefined
+              ? {}
+              : { networkEgress: request.networkEgress }),
             shell: request.shell,
             ...(request.command === undefined ? {} : { command: request.command }),
             cwd: request.cwd,
@@ -280,6 +298,7 @@ export class TerminalService {
               : { extraFolders: request.extraFolders }),
           });
     const record: TerminalRecord = {
+      ...(request.onClosed === undefined ? {} : { protectionCleanup: request.onClosed }),
       terminalId: request.terminalId,
       transcript: new TranscriptBuffer(),
       process,
@@ -308,16 +327,18 @@ export class TerminalService {
       record.exitCode = exitCode;
       this.#scheduleOutput(record, true);
       this.#markEnded(record);
+      void this.#finishProtection(record).catch(() => undefined);
     });
     try {
       await process.receiptReady;
     } catch (error) {
+      await process.close();
+      await this.#finishProtection(record);
       if (previous === undefined) this.#terminals.delete(request.terminalId);
       else {
         this.#terminals.set(request.terminalId, previous);
         this.#markEnded(previous);
       }
-      await process.close().catch(() => undefined);
       throw error;
     }
     const snapshot = this.#snapshot(record);
@@ -420,6 +441,7 @@ export class TerminalService {
       await record.process!.close();
       if (record.status === "running") record.status = "interrupted";
     }
+    await this.#finishProtection(record);
     this.#publishOutput(record);
     const snapshot = this.#snapshot(record);
     this.#markEnded(record);
@@ -427,11 +449,14 @@ export class TerminalService {
   }
 
   async closeAll(): Promise<void> {
-    const live = [...this.#terminals.values()].filter((record) => record.status === "running");
+    const live = [...this.#terminals.values()].filter(
+      (record) => record.status === "running" || record.protectionCleanup !== undefined,
+    );
     const results = await Promise.allSettled(
       live.map(async (record) => {
-        await record.process!.close();
+        if (record.status === "running") await record.process!.close();
         if (record.status === "running") record.status = "interrupted";
+        await this.#finishProtection(record);
         this.#markEnded(record);
       }),
     );
@@ -445,6 +470,13 @@ export class TerminalService {
     if (record.status === "running" || this.#terminals.get(record.terminalId) !== record) return;
     this.#ended.add(record.terminalId);
     this.#forgetOldestEnded();
+  }
+  async #finishProtection(record: TerminalRecord): Promise<void> {
+    const cleanup = record.protectionCleanup;
+    if (cleanup === undefined) return;
+    await cleanup();
+    if (record.protectionCleanup === cleanup) delete record.protectionCleanup;
+    this.#markEnded(record);
   }
 
   /** Forgets the oldest ended terminals nobody observes past the retention bound. */
@@ -460,7 +492,7 @@ export class TerminalService {
         this.#ended.delete(terminalId);
         continue;
       }
-      if (record.observers.size > 0) continue;
+      if (record.observers.size > 0 || record.protectionCleanup !== undefined) continue;
       this.#terminals.delete(terminalId);
       this.#ended.delete(terminalId);
       unobserved -= 1;

@@ -11,6 +11,7 @@ import { sandboxLocalServiceAllowed } from "@octant/domain/sandbox-policy";
 import type { SandboxPolicySelection, SandboxPolicyDenial } from "@octant/contracts/sandbox-policy";
 
 export interface SandboxTurnRequest {
+  readonly executionRoute?: "terminal";
   readonly threadId: string;
   readonly projectId: string;
   readonly mode: "code" | "work";

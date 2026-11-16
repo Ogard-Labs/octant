@@ -1,4 +1,7 @@
 import type { ChildWorktreeSourceService } from "./childWorktreeSourceService";
+import { prepareProjectTerminalProtections } from "./projectTerminalProtections";
+import type { ProjectTerminalProtection } from "./projectTerminalProtections";
+import type { ProviderRuntimeNetworkPort } from "../network/providerRuntimeNetwork";
 import {
   ActorId,
   AggregateId,
@@ -31,7 +34,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { Schema } from "effect";
-import { statSync } from "node:fs";
+import { statSync, realpathSync } from "node:fs";
 import { projectExtraFolderRoots } from "@octant/domain";
 import type { Journal } from "../persistence/journal";
 import { LINUX_BUBBLEWRAP_MISSING_NOTICE } from "../process/linuxConfinement";
@@ -85,6 +88,7 @@ export type ProjectActionPlacementRequest = Extract<
 >;
 
 export interface ProjectTerminalServiceOptions {
+  readonly network?: ProviderRuntimeNetworkPort;
   /**
    * Whether Strict is on for the terminal: the task's, for a terminal opened
    * for a Work task, else the Project's. Outside Strict the person's own
@@ -780,7 +784,27 @@ export class ProjectTerminalService {
         );
       }
     }
+    let protections:
+      | Extract<ProjectTerminalProtection, { readonly status: "admitted" }>
+      | undefined;
     try {
+      const prepared = await prepareProjectTerminalProtections(
+        {
+          terminalId: String(command.terminalId),
+          projectId: String(command.projectId),
+          root: workThread?.workingRoot ?? workThread?.root ?? root,
+          mode: authority.project.type === "work" ? "work" : "code",
+          executionPolicy: launchPolicy,
+          ...(command.workThreadId === undefined ? {} : { workThreadId: command.workThreadId }),
+        },
+        this.#options.network,
+      );
+      if (prepared.status === "refused") {
+        if (action !== undefined)
+          this.#safeJournalEnded(command.projectId, command.terminalId, "stopped", undefined);
+        return refused("unavailable", prepared.message);
+      }
+      protections = prepared;
       await this.#options.terminals.launch({
         terminalId: String(command.terminalId),
         ...(action === undefined
@@ -814,7 +838,17 @@ export class ProjectTerminalService {
             ? [root, ...(workThread === undefined ? [] : [workThread.root])]
             : [workThread?.root ?? root]),
           ...projectExtraFolderRoots(authority.project).filter(isDirectory),
-        ].filter((candidate) => candidate !== folder),
+        ].filter((candidate) => {
+          if (candidate === folder) return false;
+          const selection = prepared.launch.sandboxPolicy;
+          if (selection === undefined) return true;
+          const canonical = realpathSync(candidate);
+          return [
+            selection.context.root,
+            ...(selection.context.extraRoots ?? []),
+            ...selection.policy.filesystem.readWriteRoots,
+          ].some((allowed) => canonical === allowed || canonical.startsWith(`${allowed}/`));
+        }),
         // Its own shell history and state, apart from every thread's shells in
         // the same repository.
         stateScope: `project:${String(command.projectId)}`,
@@ -822,8 +856,33 @@ export class ProjectTerminalService {
         rows: command.rows,
         credentialReferences: [],
         executionPolicy: launchPolicy,
+        ...prepared.launch,
+        ...(prepared.managed
+          ? {
+              onClosed: prepared.end,
+              admit: () =>
+                prepared.current() &&
+                workThread?.current() !== false &&
+                (() => {
+                  const current = this.#authority(windowId, command.projectId);
+                  return (
+                    current.kind === "allowed" &&
+                    placed?.checkout?.current() !== false &&
+                    String(current.bindingRevisionId) === String(authority.bindingRevisionId) &&
+                    (action === undefined ||
+                      current.project.actions?.some(
+                        (candidate) =>
+                          candidate.id === action.id &&
+                          candidate.command === action.command &&
+                          candidate.directory === action.directory,
+                      ) === true)
+                  );
+                })(),
+            }
+          : {}),
       });
     } catch (error) {
+      await protections?.end();
       if (action !== undefined)
         this.#safeJournalEnded(command.projectId, command.terminalId, "stopped", undefined);
       console.warn(
@@ -833,9 +892,12 @@ export class ProjectTerminalService {
       // any other confinement message may carry paths and stays in the log.
       return refused(
         "unavailable",
-        error instanceof ProcessConfinementError && error.userFixable === "linux-bubblewrap-missing"
-          ? LINUX_BUBBLEWRAP_MISSING_NOTICE
-          : "The terminal could not start.",
+        error instanceof ProcessConfinementError && error.policyRefusal !== undefined
+          ? `The terminal cannot enforce these protection rules: ${error.policyRefusal.rules.join(", ")}. Review Configure protections before retrying.`
+          : error instanceof ProcessConfinementError &&
+              error.userFixable === "linux-bubblewrap-missing"
+            ? LINUX_BUBBLEWRAP_MISSING_NOTICE
+            : "The terminal could not start.",
       );
     }
     return this.#own(
