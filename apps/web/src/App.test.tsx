@@ -7042,10 +7042,16 @@ describe("App", () => {
     const panel = await screen.findByRole("region", { name: "Bottom panel" });
     expect(within(panel).getByRole("tab", { name: "Files" })).toBeVisible();
 
+    // Another tool is shown beside the thread while Files is below.
+    await user.click(bandTool("Review"));
+    await screen.findByRole("region", { name: "Review" });
+
     await user.pointer({ target: bandTool("Files"), keys: "[MouseRight]" });
     await user.click(await screen.findByRole("menuitem", { name: "Move to the side" }));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Bottom panel" })).toBeNull());
     expect(await screen.findByRole("region", { name: "Files" })).toBeVisible();
+    // Files joins the tools already shown: it does not take Review's place.
+    expect(screen.getByRole("region", { name: "Review" })).toBeVisible();
   });
 
   it("retains the restored Terminal tab when another bottom tool opens", async () => {

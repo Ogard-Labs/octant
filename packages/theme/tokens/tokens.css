@@ -258,6 +258,7 @@
   --oct-touch-min: 44px;
   /* ── Opacity ── */
   --oct-disabled-opacity: 0.75;
+  --oct-window-inactive-opacity: 0.55;
   /* ── Radii ── */
   --oct-radius-bubble: 22px;
   --oct-radius-bubble-tail: 8px;

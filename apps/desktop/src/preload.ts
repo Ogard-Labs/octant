@@ -423,6 +423,8 @@ export interface OctantHostBridge {
     listener: (material: ResolvedSidebarMaterial) => void,
   ) => () => void;
   readonly subscribeWindowFullScreen: (listener: (fullScreen: boolean) => void) => () => void;
+  /** Whether this window is the one in front; false while another window or app is. */
+  readonly subscribeWindowActive: (listener: (active: boolean) => void) => () => void;
   readonly subscribeResolvedSidebarVibrancy: (
     listener: (vibrancy: "sidebar" | null) => void,
   ) => () => void;
@@ -1158,6 +1160,13 @@ export function createHostBridge(
       };
       ipc.on(IPC_CHANNELS.windowFullScreen, receive);
       return () => ipc.removeListener(IPC_CHANNELS.windowFullScreen, receive);
+    },
+    subscribeWindowActive: (listener: (active: boolean) => void) => {
+      const receive: MaterialListener = (_event, active) => {
+        if (typeof active === "boolean") listener(active);
+      };
+      ipc.on(IPC_CHANNELS.windowActive, receive);
+      return () => ipc.removeListener(IPC_CHANNELS.windowActive, receive);
     },
     subscribeResolvedMaterial: (listener: (material: ResolvedSidebarMaterial) => void) => {
       const receive: MaterialListener = (_event, material) => {

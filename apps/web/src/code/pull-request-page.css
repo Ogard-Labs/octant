@@ -169,6 +169,10 @@
   background: var(--oct-wash-hover);
 }
 
+.pr-page__chip:active {
+  background: var(--oct-wash-pressed);
+}
+
 .pr-page__chip[aria-pressed="true"] {
   background: var(--oct-wash-selected);
   color: var(--oct-fg);
@@ -191,6 +195,10 @@
 
 .pr-page .work-list__row:hover {
   background: var(--oct-wash-hover);
+}
+
+.pr-page .work-list__row:active {
+  background: var(--oct-wash-pressed);
 }
 
 .pr-page .work-list__row[aria-pressed="true"] {
@@ -345,6 +353,10 @@
 .pr-detail .pr-detail__tablist [data-slot="tabs-trigger"]:hover {
   background: var(--oct-wash-hover);
   color: var(--oct-fg);
+}
+
+.pr-detail .pr-detail__tablist [data-slot="tabs-trigger"]:active {
+  background: var(--oct-wash-pressed);
 }
 
 .pr-detail .pr-detail__tablist [data-slot="tabs-trigger"][data-active] {

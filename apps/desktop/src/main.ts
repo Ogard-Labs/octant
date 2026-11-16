@@ -1927,6 +1927,22 @@ function reportWindowFullScreen(window: BrowserWindow): void {
   window.on("leave-full-screen", () => send(false));
 }
 
+/**
+ * Tells the window's renderer whether it is the window in front. A Mac window
+ * that is not in front greys its toolbar and its accent, and a page cannot
+ * know this by itself: its own focus leaves whenever a Browser page inside
+ * the same window takes the keyboard, while the window is still in front.
+ */
+function reportWindowActive(window: BrowserWindow): void {
+  const send = () => {
+    if (!window.isDestroyed()) {
+      window.webContents.send(IPC_CHANNELS.windowActive, window.isFocused());
+    }
+  };
+  window.on("focus", send);
+  window.on("blur", send);
+}
+
 function popupWindowOf(window: BrowserWindow): ExtensionPopupShellWindow {
   return {
     isDestroyed: () => window.isDestroyed(),
@@ -2680,6 +2696,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
         window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, resolvedSidebarVibrancy);
         window.webContents.send(IPC_CHANNELS.resolvedGlassRefusal, resolvedGlassRefusal);
         window.webContents.send(IPC_CHANNELS.windowFullScreen, window.isFullScreen());
+        window.webContents.send(IPC_CHANNELS.windowActive, window.isFocused());
         while (pendingCodeDeepLinks.length > 0) {
           window.webContents.send(IPC_CHANNELS.codeDeepLink, pendingCodeDeepLinks.shift());
         }
@@ -2701,6 +2718,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
         window.show();
       });
       reportWindowFullScreen(window);
+      reportWindowActive(window);
       window.on("close", (event) => {
         if (quitPrepared) return;
         event.preventDefault();
@@ -2985,6 +3003,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, resolvedSidebarVibrancy);
           window.webContents.send(IPC_CHANNELS.resolvedGlassRefusal, resolvedGlassRefusal);
           window.webContents.send(IPC_CHANNELS.windowFullScreen, window.isFullScreen());
+          window.webContents.send(IPC_CHANNELS.windowActive, window.isFocused());
         });
         window.webContents.on("render-process-gone", () => {
           codeOperationApprovalViews?.closeWindow(windowId);
@@ -3001,6 +3020,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           window.show();
         });
         reportWindowFullScreen(window);
+        reportWindowActive(window);
         window.once("closed", () => {
           codeOperationApprovalViews?.closeWindow(windowId);
           browserExtensionPopupHost?.close(windowId);

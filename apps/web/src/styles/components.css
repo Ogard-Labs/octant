@@ -861,7 +861,6 @@ html[data-octant-increased-contrast="true"] .folder-picker {
   z-index: 1;
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--oct-motion-fast) ease;
 }
 
 .turn-action-menu:hover .turn-action-menu__more,
@@ -896,16 +895,6 @@ html[data-octant-increased-contrast="true"] .turn-action-menu__more {
 
 html[data-octant-increased-contrast="true"] .turn-action-menu__more .shell-icon-button {
   border-color: var(--octant-border-strong);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .turn-action-menu__more {
-    transition: none;
-  }
-}
-
-html[data-octant-reduced-motion="true"] .turn-action-menu__more {
-  transition: none;
 }
 
 /* ── Thread Search overlay ─────────────────────────────────────── */
@@ -1959,6 +1948,10 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
 /* The pointer gets the soft wash the sidebar's rows take. */
 .turn-activity__disclosure > summary:hover {
   background: var(--oct-wash-hover);
+}
+
+.turn-activity__disclosure > summary:active {
+  background: var(--oct-wash-pressed);
 }
 
 .turn-activity__disclosure > summary::-webkit-details-marker {

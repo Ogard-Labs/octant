@@ -688,7 +688,9 @@ describe("WindowChrome", () => {
     expect(styles).toContain("@media (max-width: 680px)");
     expect(styles).not.toContain(".project-memory-inspector--narrow");
     expect(styles).toContain("@media (prefers-reduced-motion: reduce)");
-    expect(styles).toContain(".workspace-split__resize::before,");
+    // The divider's line answers the pointer at once, so reduced motion has
+    // nothing of its to switch off.
+    expect(cssRule(".workspace-split__resize::before")).not.toContain("transition");
     expect(styles).toContain(".project-memory-inspector *");
     expect(styles).toContain("@media (prefers-reduced-transparency: reduce)");
     expect(styles).toContain(".shell--material-translucent.shell-frame > .sidebar");

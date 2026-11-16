@@ -484,6 +484,10 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   color: var(--oct-fg);
 }
 
+.sidebar-rail__button:active .sidebar-rail__face {
+  --sidebar-rail-fill: var(--oct-wash-pressed);
+}
+
 .sidebar-rail__button[aria-current="page"] .sidebar-rail__face {
   --sidebar-rail-fill: var(--oct-wash-selected);
   color: var(--oct-fg);
@@ -711,6 +715,10 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   background: var(--oct-fg-soft);
 }
 
+.window-chrome__new-thread:active {
+  background: var(--oct-wash-pressed);
+}
+
 /* The checkout's diff size, always shown on a Code thread and the Code start
    screen. It is the first control of the trailing cluster, so a longer number
    grows leftward; the floor keeps the common "+12 −3", "+0 −0" and the dash
@@ -737,6 +745,10 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
 .window-chrome__changes:hover,
 .window-chrome__changes:focus-visible {
   background: var(--oct-fg-soft);
+}
+
+.window-chrome__changes:active {
+  background: var(--oct-wash-pressed);
 }
 
 .window-chrome__changes-added {
@@ -853,6 +865,10 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
 .window-chrome__disclosure-action:focus-visible {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
+}
+
+.window-chrome__disclosure-action:active {
+  background: var(--oct-wash-pressed);
 }
 
 /* The container recipe (flex column, min-width, border, base surface) comes
@@ -1526,6 +1542,10 @@ html[data-octant-native-host="true"] .sidebar__chrome {
   background: var(--oct-wash-hover);
 }
 
+.sidebar-navigation__thread:active {
+  background: var(--oct-wash-pressed);
+}
+
 /* The open thread reads louder than a hovered one: the pointer gets the soft
    ink wash, the row the workspace is showing gets the selection fill and a
    hairline edge, the two states the thread tab strip draws. This row is the
@@ -1538,6 +1558,13 @@ html[data-octant-native-host="true"] .sidebar__chrome {
 .sidebar-navigation__thread[aria-current="page"] {
   color: var(--oct-fg);
   background: var(--oct-wash-selected);
+}
+
+/* A press shows on the open row too. Its selected fill has the weight of the
+   plain row's pressed step and comes later, so without this the one row a
+   person is most likely to press was the only one that gave no answer. */
+.sidebar-navigation__thread[aria-current="page"]:active {
+  background: var(--oct-wash-pressed);
 }
 
 /* A window can show several threads at once, and exactly one marked row
@@ -1951,7 +1978,6 @@ html[data-octant-density="compact"]
   transform: translateY(-50%);
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--oct-motion-fast) ease;
 }
 
 .sidebar-navigation__thread-row:hover .sidebar-navigation__thread-actions,
@@ -2005,6 +2031,10 @@ html[data-octant-density="compact"]
 .sidebar-navigation__thread-action:focus-visible {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
+}
+
+.sidebar-navigation__thread-action:active {
+  background: var(--oct-wash-pressed);
 }
 
 /* The overflow action is reserved for coarse/narrow pointers where inline
@@ -2092,12 +2122,6 @@ html[data-octant-density="compact"]
 
   .sidebar-navigation__thread-action--overflow {
     display: inline-flex;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sidebar-navigation__thread-actions {
-    transition: none;
   }
 }
 
@@ -3097,6 +3121,10 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
 .thread-row-info-card__pr-github:hover,
 .draft-thread__recent-item:hover {
   background: var(--muted);
+}
+
+.draft-thread__recent-item:active {
+  background: var(--oct-wash-pressed);
 }
 
 .draft-thread__recent-item {
@@ -4517,9 +4545,6 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   background: var(--octant-card);
   text-align: left;
   white-space: normal;
-  transition:
-    border-color var(--oct-motion-base) var(--oct-ease-standard),
-    box-shadow var(--oct-motion-base) var(--oct-ease-standard);
 }
 
 .draft-thread__intent-cards > button:hover:not(:disabled),

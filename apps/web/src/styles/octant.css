@@ -316,6 +316,8 @@
   --oct-menu-row-inset: var(--oct-space-2);
   --oct-menu-inset: var(--oct-space-1);
   --oct-disabled-opacity: 0.75;
+  /* The toolbar's ink in a desktop window that is not in front. */
+  --oct-window-inactive-opacity: 0.55;
 
   --oct-icon-xs: 12px;
   --oct-icon-sm: 14px;
@@ -877,7 +879,6 @@ html {
   text-decoration: underline;
   text-decoration-color: var(--oct-border);
   text-underline-offset: 3px;
-  transition: text-decoration-color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 .link:hover {
   text-decoration-color: var(--oct-accent-fg);
@@ -969,9 +970,6 @@ html {
   margin-bottom: var(--oct-space-4);
 }
 .card-interactive {
-  transition:
-    border-color var(--oct-motion-fast) var(--oct-ease-standard),
-    background var(--oct-motion-fast) var(--oct-ease-standard);
 }
 .card-interactive:hover {
   border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
@@ -1836,9 +1834,6 @@ input.switch:checked::after {
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-detail);
-  transition:
-    background var(--oct-motion-fast) var(--oct-ease-standard),
-    color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 .segment:hover {
   color: var(--oct-fg);
@@ -3083,6 +3078,10 @@ input.switch:checked::after {
 .toolrow > summary:hover {
   background: var(--oct-wash-hover);
   color: var(--oct-fg-2);
+}
+
+.toolrow > summary:active {
+  background: var(--oct-wash-pressed);
 }
 .toolrow > summary .icon {
   color: var(--oct-meta);
@@ -4708,7 +4707,6 @@ input.switch:checked::after {
   box-shadow: none;
   outline: 1px solid var(--oct-border);
   outline-offset: -1px;
-  transition: box-shadow var(--oct-motion-fast) var(--oct-ease-color);
 }
 .composer[data-drop-target="true"] .thread-composer__surface {
   position: relative;

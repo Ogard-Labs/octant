@@ -1659,7 +1659,6 @@ textarea.settings-view__text-input {
   text-align: center;
   border-radius: var(--oct-radius-md);
   cursor: default;
-  transition: background-color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
 /* A card-shaped button: the bare variant draws nothing, so the card takes the
@@ -2980,21 +2979,10 @@ html[data-octant-increased-contrast="true"]
   gap: 2px;
   background: color-mix(in oklab, var(--oct-bg) 86%, transparent);
   border-radius: var(--oct-radius-sm);
-  transition:
-    border-color var(--oct-motion-fast) ease,
-    background-color var(--oct-motion-fast) ease;
 }
 
 .provider-card:hover {
   border-color: var(--octant-border-strong);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .workspace-pane__grip,
-  .provider-card {
-    animation: none;
-    transition: none;
-  }
 }
 
 .provider-card__edit label {

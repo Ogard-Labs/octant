@@ -111,6 +111,7 @@ export const DESKTOP_IPC_CHANNELS = {
   hostCapabilities: "octant:window:host-capabilities",
   resolvedMaterial: "octant:window:resolved-material",
   windowFullScreen: "octant:window:full-screen",
+  windowActive: "octant:window:active",
   resolvedSidebarVibrancy: "octant:window:resolved-sidebar-vibrancy",
   resolvedGlassRefusal: "octant:window:resolved-glass-refusal",
   sidebarMaterialPreference: "octant:window:sidebar-material-preference",

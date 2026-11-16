@@ -854,6 +854,7 @@ describe("desktop preload bridge", () => {
       "subscribeResolvedMaterial",
       "subscribeResolvedSidebarVibrancy",
       "subscribeStartNewAgent",
+      "subscribeWindowActive",
       "subscribeWindowFullScreen",
       "tabBrowserSurface",
       "testComputerUse",

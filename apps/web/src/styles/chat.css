@@ -712,9 +712,6 @@
   /* The frame owns the composer's ring and lift. Adding a shadow here drew a
      second, solid outline a step brighter than the hairline, so the box read
      as two stacked borders. */
-  transition:
-    background-color var(--oct-motion-fast) var(--oct-ease-color),
-    box-shadow var(--oct-motion-fast) var(--oct-ease-color);
 }
 
 .chat-composer__bar {

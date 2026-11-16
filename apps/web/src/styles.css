@@ -39,6 +39,7 @@
 @import "./styles/surface.css";
 @import "./styles/board.css";
 @import "./styles/colour.css";
+@import "./styles/window-inactive.css";
 
 :root {
   color-scheme: dark;
@@ -445,7 +446,6 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
     transparent
   );
   opacity: 0;
-  transition: opacity var(--oct-motion-fast) ease;
 }
 
 .thread-activity-pip__card:hover .thread-activity-pip__controls,
@@ -796,10 +796,6 @@ strong {
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
   text-align: left;
-  transition:
-    background-color var(--oct-motion-fast) ease,
-    border-color var(--oct-motion-fast) ease,
-    color var(--oct-motion-fast) ease;
 }
 
 .octant-menu__trigger:hover,
@@ -845,6 +841,10 @@ strong {
   background: var(--octant-control-hover);
 }
 
+.octant-menu__item:active {
+  background: var(--octant-control-pressed);
+}
+
 .octant-menu__item-icon,
 .octant-menu__indicator {
   display: inline-flex;
@@ -880,9 +880,6 @@ strong {
 .new-project {
   border: 0;
   cursor: default;
-  transition:
-    background-color var(--oct-motion-fast) ease,
-    color var(--oct-motion-fast) ease;
 }
 
 .new-project {
@@ -1342,7 +1339,6 @@ strong {
   background: var(--octant-border);
   content: "";
   pointer-events: none;
-  transition: background-color var(--oct-motion-fast) ease;
 }
 
 .workspace-split[data-orientation="horizontal"] > .workspace-split__resize {
@@ -1657,9 +1653,6 @@ html[data-octant-native-host="true"]
   font-weight: var(--oct-weight-medium);
   user-select: none;
   -webkit-user-select: none;
-  transition:
-    background-color var(--oct-motion-fast) ease,
-    color var(--oct-motion-fast) ease;
 }
 
 .workspace-pane__grip:hover {
@@ -1670,7 +1663,6 @@ html[data-octant-native-host="true"]
 .workspace-pane__grip > svg {
   flex: 0 0 auto;
   opacity: 0.45;
-  transition: opacity var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
 .workspace-pane__grip:hover > svg,
@@ -2092,10 +2084,6 @@ html[data-octant-native-host="true"]
   cursor: default;
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
-  transition:
-    background-color var(--oct-motion-fast) var(--oct-ease-standard),
-    border-color var(--oct-motion-fast) var(--oct-ease-standard),
-    color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
 .shell-boundary__action:hover {
@@ -4957,15 +4945,6 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   .shell-state__spinner {
     animation: none;
   }
-  .octant-menu__trigger,
-  .octant-menu__item,
-  .new-project,
-  .workspace-split__resize::before,
-  .workspace-split__resize,
-  .settings-view__action,
-  .shell-boundary__action {
-    transition: none;
-  }
 }
 
 :root[data-octant-increased-contrast="true"] {
@@ -5832,6 +5811,10 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 .empty-start__row--action:hover:not(:disabled) {
   background: var(--oct-wash-hover);
+}
+
+.empty-start__row--action:active:not(:disabled) {
+  background: var(--oct-wash-pressed);
 }
 
 .empty-start__row--action:disabled {

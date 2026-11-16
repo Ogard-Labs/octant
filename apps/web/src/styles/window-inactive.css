@@ -1,0 +1,33 @@
+/* A desktop window that is not in front. A Mac window greys its toolbar and
+   gives up its accent while another window or app has the keyboard, so the
+   one in front is told apart at a glance; a window that kept its full ink
+   and its blue send button behind another app read as a web page in a frame.
+   The desktop host sets the attribute (a page cannot know: its own focus
+   leaves whenever a Browser page inside the same window takes the keyboard),
+   and a browser tab never carries it. The change is immediate, as the
+   system's own is: nothing fades and nothing moves. */
+
+/* The accent steps back to the neutral control: a default button, a switch
+   that is on, a checked box, accent text and glyphs. Only the aliases the
+   components read are repointed. The theme's own role (`--octant-accent`) is
+   left as it is, because the drawn ground takes its colours from it and a
+   ground that changed colour with the window would be movement. `:root`
+   doubles the selector's weight so it stands over the theme's own blocks
+   wherever a component's stylesheet loads. */
+html:root[data-octant-window-inactive="true"] {
+  --primary: var(--octant-control-hover);
+  --primary-foreground: var(--octant-text-primary);
+  --sidebar-primary: var(--octant-control-hover);
+  --sidebar-primary-foreground: var(--octant-text-primary);
+  --oct-accent: var(--octant-control-hover);
+  --oct-accent-on: var(--octant-text-primary);
+  --oct-accent-fg: var(--octant-text-muted);
+}
+
+/* The toolbar's ink: the title band, each pane's title row and the sidebar's
+   header. Their words and glyphs drop to a muted step together; rows, the
+   thread and the composer keep theirs, as a Mac window's content does. */
+html[data-octant-window-inactive="true"]
+  :is(.window-chrome, .workspace-pane__header, .sidebar__chrome) {
+  opacity: var(--oct-window-inactive-opacity);
+}

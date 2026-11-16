@@ -8,30 +8,12 @@ export const WELCOME_QUESTION = "What are we building today?";
 const WELCOME_PROJECT_LEAD = "What should we work on in ";
 
 /**
- * The mark above the question: the Octant aperture from the icon sprite. It is
- * drawn in the text ink, so it follows the theme without a colour of its own.
- */
-function OctantMark() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="welcome__mark"
-      focusable="false"
-      height={22}
-      viewBox="0 0 100 100"
-      width={22}
-    >
-      <use href="./icons.svg#aperture" />
-    </svg>
-  );
-}
-
-/**
- * The start screen's hero: the mark, one question, and one quiet line under
- * it. It names no time of day and counts nothing: what is running and what
- * waits for review live in the sidebar, so the start screen asks one thing
- * and hands the rest of the page to the composer. Renders into the caller's
- * heading grid.
+ * The start screen's hero: one question and one quiet line under it. It names
+ * no time of day and counts nothing: what is running and what waits for
+ * review live in the sidebar, so the start screen asks one thing and hands
+ * the rest of the page to the composer. No mark stands over it: a logo above
+ * a large centred headline is how a web page opens, and the app's own mark is
+ * already in the Dock and the window. Renders into the caller's heading grid.
  */
 export function WelcomeHeading(props: {
   readonly projectChosen?: boolean;
@@ -43,7 +25,6 @@ export function WelcomeHeading(props: {
   const projectName = props.projectName?.trim();
   return (
     <Fragment>
-      <OctantMark />
       {projectName === undefined || projectName === "" ? (
         <h1 className="oct-title oct-title--hero welcome__question">{WELCOME_QUESTION}</h1>
       ) : (

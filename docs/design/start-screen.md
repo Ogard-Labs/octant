@@ -599,14 +599,15 @@ composer `/` list never carries it.
 
 Chat, Work, and Code open on the same screen: one question in the middle of
 the page and one soft composer docked at its foot, where it stays once the
-thread starts, so the first message is typed where every later one is. Above
-the question sits the Octant aperture mark (`icons.svg#aperture`) at 22px,
-drawn in the primary ink and set 2px closer to the question than the
-heading's usual gap. The hero asks "What are we building today?" (the hero
-role: regular weight, -0.012em tracking, the primary ink in every style and
-never the accent). The approved size is 24px on a 30px line; the type scale
-has no 24px step and `ui:check` refuses a raw size, so the nearest token,
-`--oct-text-2xl` (26px), carries it on the 30px line, and phone width uses 20px.
+thread starts, so the first message is typed where every later one is. No
+mark stands over the question. The hero asks "What are we building today?"
+(the hero role: regular weight, -0.012em tracking, the primary ink in every
+style and never the accent) at a window title's size, `--oct-text-xl` (20px)
+on a 26px line, at every width. Until 2026-11-16 the Octant aperture stood
+above it at 22px and the question was 26px (24px approved, which the type
+scale has no step for); a logo over a large centred headline read as a web
+page's hero, and the app's mark is already in the Dock and the window
+(maintainer request).
 With a Project chosen the question names it, "What should we work on in
 {Project}?", on one line: a long name truncates with an ellipsis and the full
 name is its title, and choosing another Project changes the words in place
@@ -632,8 +633,8 @@ start screen's composer asks "Ask anything…", and the message field keeps its
 accessible name.
 
 The question belongs to a new task only. When the same composer serves a
-decision, such as reviewing a planner's proposal, the caller replaces the mark,
-question, and quiet line with a heading that names the decision ("Review the
+decision, such as reviewing a planner's proposal, the caller replaces the
+question and quiet line with a heading that names the decision ("Review the
 planner's proposal") and the proposal's title, set at the dialog's top-left with
 the fixed proposal text directly under them in the composer. Rendered review
 showed the question above a fixed proposal read as an invitation to write a

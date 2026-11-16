@@ -95,6 +95,14 @@
     var(--octant-text-primary) calc(4% * var(--oct-contrast-scale, 1)),
     transparent
   );
+  /* The step under a pointer held down on a row: past hover (3%) and the
+     selected fill (4%), so a press shows on any row without a transition and
+     without moving it. */
+  --oct-wash-pressed: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(10% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
   --oct-hairline: color-mix(
     in oklab,
     var(--octant-text-primary) calc(10% * var(--oct-contrast-scale, 1)),

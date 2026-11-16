@@ -331,6 +331,7 @@ import {
   glassOffNote,
   useHostReportedGlassRefusal,
   useHostFullScreen,
+  useHostWindowActive,
   useHostReportedSidebarVibrancy,
   useNarrowViewport,
   useSidebarDrawerViewport,
@@ -896,6 +897,21 @@ function LaunchedShell(
       delete root.dataset.octantNativeHost;
     };
   }, [hostReservesTitlebarInset]);
+  // A Mac window that is not in front greys its toolbar and its accent. Only
+  // the desktop host knows which window that is, so the mark stands on its
+  // word alone and a browser tab is never greyed.
+  const hostWindowActive = useHostWindowActive(props.hostBridge);
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (hostWindowActive) {
+      delete root.dataset.octantWindowInactive;
+      return;
+    }
+    root.dataset.octantWindowInactive = "true";
+    return () => {
+      delete root.dataset.octantWindowInactive;
+    };
+  }, [hostWindowActive]);
   // The near-opaque native sidebar wash relaxes only on the host's word that
   // window vibrancy is applied — never on the renderer's own preference, which
   // the host may have refused (Reduce Transparency, thermals, high contrast).
@@ -4516,12 +4532,7 @@ function LaunchedShell(
     });
     openDockTab("agents");
   }
-  function openDockTab(
-    surface: RightUtilityDockSurfaceId,
-    opener?: HTMLElement,
-    // The caller has already taken the tool out of the bottom panel's tabs.
-    options?: { readonly leavesBottomPanel?: true },
-  ) {
+  function openDockTab(surface: RightUtilityDockSurfaceId, opener?: HTMLElement) {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
     if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
     if (surface === "review") setRequestedAgentReview(undefined);
@@ -4531,7 +4542,7 @@ function LaunchedShell(
     widenDockFor(surface);
     markInteraction("renderer", "dock-open-requested");
     markInteractionAfterPaint("dock-open");
-    if (options?.leavesBottomPanel !== true) closeBottomPanelHolding(surface);
+    closeBottomPanelHolding(surface);
     if (opener !== undefined) dockOpener.current = { element: opener, logicalTarget: "dock" };
     setActivePaneDockVisible(true);
     if (dockThreadKey === undefined) {
@@ -5075,7 +5086,23 @@ function LaunchedShell(
       // a forgotten copy back; beside, it opens as the same tool, not a
       // second one.
       closeBottomPanelTab(surface, false);
-      openDockTab(surface, undefined, { leavesBottomPanel: true });
+      // Under the tools already shown beside the thread, as a tool button's
+      // press places a tool. Opened the plain way it took the focused tile's
+      // place, and the tool that stood there left the view (seen in the real
+      // window: Files gone when Review came back from the panel).
+      if (surface === "review") setRequestedAgentReview(undefined);
+      if (surface === "terminal") {
+        dockTabActivation.noteActivated(workspaceDockTabId(undefined, "terminal"));
+      }
+      const placed = (state: ThreadUtilityDockState) =>
+        state.tabs.some((tab) => tab.id === surface)
+          ? showUtilityTabStacked(state, surface)
+          : openUtilityTabBesideState(state, surface, surface, "stacked");
+      // A Browser or Terminal asks for its width again wherever it opens.
+      widenDockFor(surface);
+      widenDockForColumns(placed(displayedDockState));
+      setActivePaneDockVisible(true);
+      changeDockTiles(placed);
       return;
     }
     const button = [...dockToolButtons.buttons, ...dockToolButtons.more].find(

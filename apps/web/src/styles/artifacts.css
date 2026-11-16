@@ -281,17 +281,10 @@
   font: inherit;
   text-align: left;
   cursor: default;
-  transition: background-color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
 .artifact-card__button:hover {
   background: color-mix(in oklab, var(--oct-surface) 94%, var(--oct-fg));
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .artifact-card__button {
-    transition: none;
-  }
 }
 
 .artifact-card__preview {

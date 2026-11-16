@@ -167,6 +167,10 @@
 .git-history__commit:hover {
   background: var(--oct-wash-hover);
 }
+
+.git-history__commit:active {
+  background: var(--oct-wash-pressed);
+}
 .git-history__commit-subject,
 .git-history__meta {
   display: block;

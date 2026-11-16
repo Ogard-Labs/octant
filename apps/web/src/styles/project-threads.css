@@ -258,7 +258,6 @@
   /* The Add button takes the group's tint; hover reads in the foreground. */
   color: var(--oct-meta);
   opacity: 0;
-  transition: opacity var(--oct-motion-fast) ease;
 }
 
 /* Hover-only while there are Projects to look at. An empty section has one
@@ -270,12 +269,6 @@
 .project-section__header-actions:has([aria-expanded="true"]),
 .project-section__header-actions:has([data-popup-open]) {
   opacity: 1;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .project-section__header-actions {
-    transition: none;
-  }
 }
 
 /* Compact header actions: a full 34px square would give the quiet header
@@ -298,6 +291,10 @@
 .project-section__header .octant-menu__trigger:focus-visible {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
+}
+
+.project-section__header .octant-menu__trigger:active {
+  background: var(--oct-wash-pressed);
 }
 
 .project-row {
@@ -342,6 +339,13 @@
    the row never shows a second, smaller fill. */
 .project-row:hover {
   background: var(--oct-fg-soft);
+}
+
+/* The row answers a press on its name (its first child), not one on a
+   control after it: the New task or menu button shows its own pressed fill,
+   and the whole row pressed behind it read as two things pressed at once. */
+.project-row:has(> :first-child:active) {
+  background: var(--oct-wash-pressed);
 }
 
 /* The active Project is marked by its label's ink alone: a filled chip would
@@ -465,7 +469,6 @@
   padding-right: var(--oct-space-2);
   overflow: hidden;
   color: var(--oct-meta);
-  transition: opacity var(--oct-motion-fast) ease;
 }
 
 /* A single thread needs no count: the mark alone already says which state the
@@ -485,12 +488,6 @@
   min-width: 0;
   padding: 0;
   opacity: 0;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .project-row__rollup {
-    transition: none;
-  }
 }
 
 /* The folder that tells two same-named Projects apart, quieter than the name. */

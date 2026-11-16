@@ -170,6 +170,7 @@ weight on any fill and on glass:
 | ----------------------------------- | ------------------- | -------------------------------------------------------------- |
 | `--oct-wash-hover`                  | ink 3% (oklab)      | A pointed-at row in the sidebar, rail, Settings rail and lists |
 | `--oct-wash-selected`               | ink 4% (oklab)      | The row a list is showing; the rail's current face             |
+| `--oct-wash-pressed`                | ink 10% (oklab)     | A row or rail face under a pointer held down                   |
 | `--oct-fill-4` / `-3` / `-2` / `-1` | ink 4 / 6 / 8 / 14% | Tile faces, chips, count tiles                                 |
 | `--oct-fg-soft`                     | ink 7%              | A chip's resting fill; the thread row's open mark              |
 
@@ -404,9 +405,24 @@ pixel stays on one: a dragged pane width is saved whole and drawn rounded,
 hairlines are 1px, and icons are 16px in even boxes so no stroke is centred on a
 half pixel.
 
+**A window that is not in front.** In the desktop app a window steps back while
+another window or app has the keyboard, as a Mac window does: the toolbar's ink
+(the title band, each pane's title row and the sidebar's header) drops to
+`--oct-window-inactive-opacity` (0.55), and the accent gives way to the neutral
+control (a default button, a switch that is on, a checked box, accent text and
+glyphs). Rows, the thread and the composer keep their ink. The change is
+immediate in both directions and nothing moves. The desktop host says which
+window is in front, because a page's own focus leaves whenever a Browser page
+inside the same window takes the keyboard; a browser tab is never greyed. Only
+the aliases components read are repointed, never the theme's accent role: the
+drawn ground takes its colours from that role and must not change with the
+window. The glass keeps its lit material (see Translucency). Before
+2026-11-16 a window behind another app kept its full ink and its accent, which
+read as a web page in a frame.
+
 | Role             | Size            | Weight | Leading | Ink         | Recipe and where                                                                                                                                        |
 | ---------------- | --------------- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Hero             | 26 (20 phone)   | 400    | 30px    | primary     | `oct-title--hero`: the welcome question only                                                                                                            |
+| Hero             | 20              | 400    | 26px    | primary     | `oct-title--hero`: the welcome question only                                                                                                            |
 | Title            | 28              | 700    | 1.15    | primary     | `oct-title`: a page about one thing (a Project, a thread under review)                                                                                  |
 | Page title       | 26              | 600    | 1.15    | primary     | `oct-page-title`: every destination and Settings page, the platform's tracking at 24 and up; its one line of state sits on the baseline, 13px secondary |
 | Dialog title     | 17              | 600    | 1.35    | primary     | `.octant-dialog__title`; a part of a dialog 15 / 600                                                                                                    |
@@ -617,6 +633,14 @@ its fills from the float (`--octant-float-control`, `-hover`, `-pressed`,
   popup settles from 98% at its anchor, a dialog from 98% about its centre, the
   sheet rises 8px. Only opacity, scale and translate change. A recipe carries
   no arrival classes of its own.
+- **Pointer answers are instant.** Hover, focus and press change a fill, ink,
+  border, shadow or underline in the same frame, with no `transition`: a
+  fill that fades in over 150 to 200ms reads as a web page (seen 2026-11-16).
+  The motion tokens above belong to movement and arrival: overlays, a panel
+  sliding, a chevron turning, a switch thumb, a progress bar. A control that
+  fills on hover also has a pressed step one darker (`-pressed` on a control,
+  `--oct-wash-pressed` on a row), disabled shows neither, and nothing scales
+  or shifts.
 - **Press** darkens a fill and moves nothing. Chrome text does not select on a
   drag; controls keep the arrow cursor; the hand is for a real link. Disabled
   is `--oct-disabled-opacity` (0.75), no hover fill, no pointer events.

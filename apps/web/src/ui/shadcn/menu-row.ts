@@ -14,7 +14,7 @@
  * padding is repainting the recipe.
  */
 export const menuRow =
-  "relative flex min-h-(--oct-menu-row-h) has-[.oct-menu-detail]:min-h-(--oct-menu-row-two-h) cursor-default items-center gap-(--oct-menu-row-gap) rounded-md px-(--oct-menu-row-inset) py-1 oct-menu-option outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-(--oct-disabled-opacity) data-highlighted:bg-accent data-highlighted:text-accent-foreground [&>svg]:shrink-0 [&>svg:not([class*='size-'])]:size-(--oct-icon-md)";
+  "relative flex min-h-(--oct-menu-row-h) has-[.oct-menu-detail]:min-h-(--oct-menu-row-two-h) cursor-default items-center gap-(--oct-menu-row-gap) rounded-md px-(--oct-menu-row-inset) py-1 oct-menu-option outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-(--oct-disabled-opacity) data-highlighted:bg-accent data-highlighted:text-accent-foreground active:bg-(--octant-float-pressed) [&>svg]:shrink-0 [&>svg:not([class*='size-'])]:size-(--oct-icon-md)";
 
 /** The 16px box an icon stands in, so labels without one can reserve it. */
 export const menuIconColumn = "flex size-(--oct-icon-md) shrink-0 items-center justify-center";

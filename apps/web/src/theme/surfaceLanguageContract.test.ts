@@ -53,12 +53,14 @@ describe("surface language", () => {
     expect(surface).not.toMatch(/font-size:\s*1[12]\.5px/);
   });
 
-  it("sets the start screen's question in the primary ink at regular weight, in every style", () => {
+  it("sets the start screen's question in the primary ink at regular weight and a window title's size, in every style", () => {
     const question = read("composer/welcome-heading.css");
     const rule = question.match(/\.welcome__question \{[^}]*\}/)?.[0] ?? "";
     expect(rule).toContain("color: var(--oct-fg);");
     expect(rule).toContain("font-weight: var(--oct-weight-regular);");
-    expect(rule).toContain("font-size: var(--oct-text-2xl);");
+    expect(rule).toContain("font-size: var(--oct-text-xl);");
+    // One size at every width: no narrower step to swap to.
+    expect(question).not.toMatch(/@media/);
     expect(rule).toContain("letter-spacing: -0.012em;");
     // No style recolours the question with its accent.
     expect(read("styles/colour.css")).not.toMatch(/oct-title--hero/);

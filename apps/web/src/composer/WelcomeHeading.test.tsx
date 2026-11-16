@@ -53,12 +53,9 @@ describe("WelcomeHeading", () => {
     expect(heading).toHaveTextContent("What should we work on in Two?");
   });
 
-  it("draws the aperture mark at 22px above the question", () => {
+  it("draws no mark above the question: the heading comes first", () => {
     const { container } = render(<WelcomeHeading />);
-    const mark = container.querySelector("svg.welcome__mark");
-    expect(mark).toHaveAttribute("width", "22");
-    expect(mark).toHaveAttribute("height", "22");
-    expect(mark?.querySelector("use")).toHaveAttribute("href", "./icons.svg#aperture");
-    expect(mark?.nextElementSibling).toBe(screen.getByRole("heading"));
+    expect(container.querySelector("svg")).toBeNull();
+    expect(container.firstElementChild).toBe(screen.getByRole("heading"));
   });
 });

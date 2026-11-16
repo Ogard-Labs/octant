@@ -118,6 +118,23 @@ describe("native feel", () => {
     );
   });
 
+  it("greys the toolbar and the accent of a window that is not in front, at once, and leaves the theme's own accent alone", () => {
+    const inactive = read("styles/window-inactive.css");
+    const accent = rule(inactive, 'html:root[data-octant-window-inactive="true"]');
+    for (const alias of ["--primary", "--sidebar-primary", "--oct-accent", "--oct-accent-fg"]) {
+      expect(accent, `${alias} steps back to a neutral`).toMatch(
+        new RegExp(`${alias}: var\\(--octant-(control-hover|text-muted)\\);`),
+      );
+    }
+    // The drawn ground reads the theme's role, so the role itself stays.
+    expect(inactive).not.toMatch(/^\s*--octant-accent:/m);
+    expect(inactive).toMatch(
+      /:is\(\.window-chrome, \.workspace-pane__header, \.sidebar__chrome\) \{\s*opacity: var\(--oct-window-inactive-opacity\);/,
+    );
+    expect(inactive).not.toMatch(/transition|animation/);
+    expect(read("App.tsx")).toContain("root.dataset.octantWindowInactive");
+  });
+
   it("puts a dragged sidebar width on a whole pixel", () => {
     expect(read("shell/ShellFrame.tsx")).toContain("Math.round(props.sidebarWidth)");
     expect(read("shell/ShellFrame.tsx")).toContain("Math.round(props.contextSidebarWidth)");

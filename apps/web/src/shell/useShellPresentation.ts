@@ -189,6 +189,20 @@ export function useHostFullScreen(hostBridge: OctantHostBridge | undefined): boo
   return fullScreen;
 }
 
+/**
+ * Whether the desktop window is the one in front. A browser tab, or a host
+ * that does not say, counts as in front: nothing there is ever greyed.
+ */
+export function useHostWindowActive(hostBridge: OctantHostBridge | undefined): boolean {
+  const [active, setActive] = useState(true);
+  useEffect(() => {
+    setActive(true);
+    if (hostBridge?.subscribeWindowActive === undefined) return;
+    return hostBridge.subscribeWindowActive(setActive);
+  }, [hostBridge]);
+  return active;
+}
+
 export function useSidebarVibrancySupported(hostBridge: OctantHostBridge | undefined): boolean {
   const [supported, setSupported] = useState(false);
   useEffect(() => {

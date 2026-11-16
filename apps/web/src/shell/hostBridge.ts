@@ -703,6 +703,8 @@ export interface OctantHostBridge
    * screen macOS hides the traffic lights, so no titlebar inset is reserved.
    */
   readonly subscribeWindowFullScreen?: (listener: (fullScreen: boolean) => void) => () => void;
+  /** Whether this window is the one in front; false while another window or app is. */
+  readonly subscribeWindowActive?: (listener: (active: boolean) => void) => () => void;
   /**
    * The host's word that native window vibrancy is actually applied. The
    * renderer keeps its near-opaque native sidebar wash until this reports

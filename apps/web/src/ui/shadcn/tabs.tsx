@@ -23,7 +23,7 @@ export function TabsTab({ className, ...props }: ComponentProps<typeof TabsPrimi
   return (
     <TabsPrimitive.Tab
       className={cn(
-        "inline-flex h-[round(1.714rem,2px)] flex-none cursor-default items-center justify-center gap-1 rounded-md border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap text-muted-foreground transition-[color,background-color,box-shadow] outline-none hover:bg-muted/60 hover:text-foreground disabled:pointer-events-none disabled:cursor-default disabled:opacity-(--oct-disabled-opacity) data-active:bg-muted data-active:text-foreground",
+        "inline-flex h-[round(1.714rem,2px)] flex-none cursor-default items-center justify-center gap-1 rounded-md border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none hover:bg-muted/60 hover:text-foreground active:bg-muted disabled:pointer-events-none disabled:cursor-default disabled:opacity-(--oct-disabled-opacity) data-active:bg-muted data-active:text-foreground",
         className,
       )}
       data-slot="tabs-trigger"

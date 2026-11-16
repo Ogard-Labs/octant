@@ -4,6 +4,7 @@ import {
   glassOffNote,
   readBottomPanelPresentation,
   useHostReportedGlassRefusal,
+  useHostWindowActive,
   readSidebarCollapsed,
   useBackgroundImageLibrary,
   useAutomaticUpdateCheckSync,
@@ -195,5 +196,31 @@ describe("saying why Glass is off", () => {
     expect(result.current).toBeNull();
     unmount();
     expect(unsubscribe).toHaveBeenCalled();
+  });
+});
+
+describe("knowing whether the desktop window is in front", () => {
+  it("counts a browser tab, and a host that does not say, as in front", () => {
+    expect(renderHook(() => useHostWindowActive(undefined)).result.current).toBe(true);
+    expect(renderHook(() => useHostWindowActive({} as never)).result.current).toBe(true);
+  });
+
+  it("follows the desktop host when the window leaves the front and returns", () => {
+    let report: ((active: boolean) => void) | undefined;
+    const unsubscribe = vi.fn();
+    const host = {
+      subscribeWindowActive: (listener: (active: boolean) => void) => {
+        report = listener;
+        return unsubscribe;
+      },
+    };
+    const { result, unmount } = renderHook(() => useHostWindowActive(host as never));
+    expect(result.current).toBe(true);
+    act(() => report?.(false));
+    expect(result.current).toBe(false);
+    act(() => report?.(true));
+    expect(result.current).toBe(true);
+    unmount();
+    expect(unsubscribe).toHaveBeenCalledOnce();
   });
 });

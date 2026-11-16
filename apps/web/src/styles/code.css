@@ -1549,9 +1549,6 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   min-height: 28px;
   border-radius: var(--oct-radius-sm);
   color: var(--octant-text-muted);
-  transition:
-    background var(--oct-motion-fast) ease,
-    color var(--oct-motion-fast) ease;
 }
 
 .code-project-views__inline-button:focus-visible {

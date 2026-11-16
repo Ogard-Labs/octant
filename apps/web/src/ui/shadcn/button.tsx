@@ -18,7 +18,7 @@ import { cn } from "./utils";
  * glass of an OLED preset.
  */
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 cursor-default items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color] outline-none select-none disabled:pointer-events-none disabled:cursor-default disabled:opacity-(--oct-disabled-opacity) aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-(--oct-icon-md)",
+  "group/button inline-flex shrink-0 cursor-default items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap outline-none select-none disabled:pointer-events-none disabled:cursor-default disabled:opacity-(--oct-disabled-opacity) aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-(--oct-icon-md)",
   {
     variants: {
       variant: {
@@ -50,7 +50,7 @@ const buttonVariants = cva(
         // A small outlined chip that suggests something to type or pick: a
         // suggestion chip. Quiet until hovered, so a row of them reads as a
         // set rather than a row of calls to action.
-        chip: "border-transparent bg-(--oct-fill-4) text-muted-foreground hover:bg-(--oct-fill-2) hover:text-foreground focus-visible:bg-(--oct-fill-2) focus-visible:text-foreground",
+        chip: "border-transparent bg-(--oct-fill-4) text-muted-foreground hover:bg-(--oct-fill-2) active:bg-(--oct-fill-1) hover:text-foreground focus-visible:bg-(--oct-fill-2) focus-visible:text-foreground",
       },
       // Heights are rem so a control grows with the interface size. The root is
       // 13px, not the 16px these steps assume, so the odd steps landed between
