@@ -42,6 +42,7 @@ describe("remoteSurfaceMatrix", () => {
       "provider-setup",
       "provider-credentials",
       "device-management",
+      "agent-access",
       "listener-controls",
       "host-controls",
     ]);
@@ -56,7 +57,7 @@ describe("remoteSurfaceMatrix", () => {
   });
 
   it("lists every declared surface exactly once", () => {
-    expect(listRemoteShellSurfaces()).toHaveLength(19);
+    expect(listRemoteShellSurfaces()).toHaveLength(20);
   });
 });
 
@@ -134,6 +135,7 @@ describe("what a session that acts as the host's own person reaches", () => {
       "provider-setup",
       "provider-credentials",
       "device-management",
+      "agent-access",
       "host-controls",
     ]);
   });
@@ -159,6 +161,7 @@ describe("what a session that acts as the host's own person reaches", () => {
       "provider-setup",
       "provider-credentials",
       "device-management",
+      "agent-access",
       "listener-controls",
       "host-controls",
     ];

@@ -22,6 +22,7 @@ import { ModeSwitcher } from "../shell/ModeSwitcher";
 import { SyncStatusReadOnly } from "../settings/SyncMembershipSections";
 import { RemoteDeviceSelfPanel } from "./RemoteDeviceSelfPanel";
 import {
+  createRemoteAgentGrantClient,
   createRemoteExtensionClient,
   createRemotePairedDeviceAdministrationClient,
   createRemoteProductClients,
@@ -87,6 +88,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
     [props.bridge],
   );
   const providerOAuth = useMemo(() => createRemoteProviderOAuth(props.bridge), [props.bridge]);
+  const agentGrants = useMemo(() => createRemoteAgentGrantClient(props.bridge), [props.bridge]);
   // The matrix names what the host forwards for this session; a restricted
   // session reaches neither settings surface, so it is shown none.
   const reachableSettings = useMemo(
@@ -203,9 +205,11 @@ export function RemoteShellView(props: RemoteShellViewProps) {
       </ContinuityScreenContext.Provider>
 
       <RemoteHostSettings
+        agentGrants={agentGrants}
         extensionClient={extensionClient}
         origin={origin}
         pairedDevices={pairedDevices}
+        projectClient={clients.project}
         providerClient={clients.provider}
         providerKeys={providerKeys}
         providerOAuth={providerOAuth}

@@ -404,6 +404,23 @@ describe("remote route policy", () => {
     ).toBeUndefined();
   });
 
+  it("forwards agent grant commands for a device the host's person paired, and names no catalogued action for any other device", async () => {
+    const fixture = handler();
+    const post = await fixture.route(
+      request("/api/agent-grants/commands", {
+        method: "POST",
+        headers: { origin, "sec-fetch-site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    await post.arrayBuffer();
+    expect(post.status).toBe(200);
+    expect(fixture.authenticatedProduct).toHaveBeenCalledTimes(1);
+    expect(
+      classifyProductAction(new Request(`${origin}/api/agent-grants/commands`, { method: "POST" })),
+    ).toBeUndefined();
+  });
+
   it("forwards a thread's wake-ups for a device the host's person paired, and names no catalogued action for any other device", async () => {
     const fixture = handler();
     const read = await fixture.route(

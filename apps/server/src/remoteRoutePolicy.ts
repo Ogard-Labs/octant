@@ -1283,6 +1283,17 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     methods: ["POST"] as const,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
   },
+  // Making, changing and revoking a grant, connection codes and keys, from a
+  // device the host's own person paired; the route refuses every other
+  // session and journals the device as the actor.
+  {
+    kind: "exact" as const,
+    path: "/api/agent-grants/commands",
+    methods: ["POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 64 * 1_024,
+  },
   ...[
     "/api/agent-profiles",
     "/api/apple/",
