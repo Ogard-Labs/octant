@@ -35,7 +35,7 @@ jobs:
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends bubblewrap
+          sudo apt-get install -y --no-install-recommends bubblewrap socat
       - run: bun run build --filter='@octant/server^...' --concurrency=1
       - name: Native process ownership and policy effects
         env:

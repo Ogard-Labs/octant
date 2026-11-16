@@ -1,3 +1,5 @@
+import { pinLinuxLaunch } from "../process/linuxPinnedLaunch";
+import { claudeLinuxLifetimeArguments } from "../process/claudeLinuxLifetime";
 import {
   trackSandboxChild,
   sandboxAuthorityDirectory,
@@ -1086,27 +1088,27 @@ function confineClaudeLaunch(
     }
     if (process.platform === "linux") {
       requireLinuxConfinement(DEFAULT_BWRAP_PATH);
-      return {
-        spawnOptions: {
-          ...spawnOptions,
+      const launch = pinLinuxLaunch(
+        {
           command: DEFAULT_BWRAP_PATH,
           args: [
-            "--unshare-user",
-            "--unshare-pid",
-            "--die-with-parent",
-            "--cap-drop",
-            "ALL",
-            "--dev-bind",
-            "/",
-            "/",
-            "--proc",
-            "/proc",
-            "--chdir",
-            confinement.projectRoot,
-            "--",
+            ...claudeLinuxLifetimeArguments(
+              confinement.projectRoot,
+              selection.context.rootIdentities?.map((entry) => entry.path) ?? writableRoots,
+            ),
             spawnOptions.command,
             ...spawnOptions.args,
           ],
+        },
+        authority,
+        selection,
+        true,
+      );
+      return {
+        spawnOptions: {
+          ...spawnOptions,
+          command: launch.command,
+          args: [...launch.args],
           env: environment,
         },
         release: () => undefined,

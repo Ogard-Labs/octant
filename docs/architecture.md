@@ -14031,7 +14031,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     code outside its command sandbox. Native web tools are withheld when tool
     networking is filtered. A standalone native CLI outside writable roots is
     required; interpreted launchers cannot claim the protected startup path.
-    The panel distinguishes these withheld features from enforced command
+    In-process REPL/Workflow scripts, native worktree creation and future
+    unreviewed native execution routes are also withheld through an explicit
+    supported tool list. The panel distinguishes these withheld features from enforced command
     confinement. This integration does not claim completion of the separate
     migration of every application limit or provider feature into Strict.
 
@@ -14044,6 +14046,15 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     production access-time mediation dependency; enumeration and watchers are
     not proof. These capability gaps must remain visible without blocking
     unrelated native provider features.
+
+    Claude's native command read boundary includes the disclosed public system
+    toolchains and loader/resolver files, without adding home/account folders
+    or system writes. Linux lifetime setup materializes top-level directory
+    aliases for merged-`/usr` compatibility, then pins selected folders by
+    their immutable admitted identities before native CLI code starts. Native
+    command rules, not that lifetime root, enforce effects. Real vendor-runtime
+    probes pair a successful Project write with an outside-write denial and
+    an unrestricted positive control.
 
     Desktop and headless artifacts carry the native launch helper as a verified
     native executable. The Linux server snapshots its installed helper image

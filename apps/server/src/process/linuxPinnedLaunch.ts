@@ -1,3 +1,4 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -65,6 +66,8 @@ export function linuxPinnedLaunchAvailable(authority: string | undefined): boole
 export function pinLinuxLaunch(
   launch: ConfinedProcessLaunch,
   authority: string,
+  selection?: SandboxPolicySelection,
+  trustedNativeOwner = false,
 ): ConfinedProcessLaunch {
   const helper = prepareLinuxSandboxRuntime(authority);
   let executable = launch.command;
@@ -87,7 +90,10 @@ export function pinLinuxLaunch(
     throw new Error(
       "Strict requires a privately owned or system-installed Bubblewrap executable without writable aliases.",
     );
-  for (let i = 0; i < args.length; i++) {
+  // A native provider owner intentionally retains host access for its explicit
+  // one-command escape. Its command sandbox, not this lifetime wrapper, holds
+  // writes. Confined workload launches must still protect the launcher itself.
+  for (let i = 0; !trustedNativeOwner && i < args.length; i++) {
     if (args[i] === "--") break;
     if (args[i] !== "--bind" && args[i] !== "--dev-bind") continue;
     const source = args[i + 1];
@@ -111,7 +117,21 @@ export function pinLinuxLaunch(
   const addPin = (index: number, path: string) => {
     const canonical = realpathSync(path);
     const stat = statSync(canonical, { bigint: true });
-    pins.push(String(index), canonical, String(stat.dev), String(stat.ino));
+    const admitted = selection?.context.rootIdentities?.find(
+      (entry) => entry.path === path || entry.path === canonical,
+    );
+    const expected = admitted?.identity.split(":");
+    if (
+      expected !== undefined &&
+      (expected.length !== 2 || !expected.every((part) => /^\d+$/.test(part)))
+    )
+      throw new Error("Invalid admitted folder identity");
+    pins.push(
+      String(index),
+      canonical,
+      expected?.[0] ?? String(stat.dev),
+      expected?.[1] ?? String(stat.ino),
+    );
   };
   for (let i = 0; i < args.length; i++) {
     const option = args[i];

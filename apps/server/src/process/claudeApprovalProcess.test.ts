@@ -1,3 +1,5 @@
+import { claudeSandboxToolchainReads } from "../providers/claudeSandboxToolchain";
+import { claudeLinuxLifetimeArguments } from "./claudeLinuxLifetime";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -17,6 +19,14 @@ function nativeClaude(): string | undefined {
     return undefined;
   }
 }
+const nativeSandboxReady =
+  process.platform !== "linux" ||
+  process.env["OCTANT_REQUIRE_LINUX_ISOLATION"] === "1" ||
+  (spawnSync("/usr/bin/bwrap", ["--unshare-user", "--ro-bind", "/", "/", "--", "/bin/true"], {
+    timeout: 2000,
+    stdio: "ignore",
+  }).status === 0 &&
+    spawnSync("socat", ["-V"], { timeout: 2000, stdio: "ignore" }).status === 0);
 const executable = nativeClaude();
 const fixture = fileURLToPath(
   new URL("../providers/fixtures/nativeClaudeApproval.mjs", import.meta.url),
@@ -56,6 +66,38 @@ describe.skipIf(process.platform === "win32" || executable === undefined)(
         commandWrites: "xx",
       });
     }, 35000);
+    it.skipIf(!nativeSandboxReady)(
+      "permits a native sandbox write inside the Project and denies the same write outside it, with an unrestricted control",
+      () => {
+        const boundaryOptions = JSON.stringify({
+          readRoots: claudeSandboxToolchainReads(),
+          ...(process.platform === "linux"
+            ? { lifetimeArguments: claudeLinuxLifetimeArguments("__PROJECT_ROOT__") }
+            : {}),
+        });
+        const run = (variant: string) =>
+          spawnSync(
+            process.execPath,
+            [fixture, executable ?? "", "bypassPermissions", variant, boundaryOptions],
+            { encoding: "utf8", timeout: 30000 },
+          );
+        const control = run("no-hook-boundary");
+        expect(control.status, control.stderr).toBe(0);
+        expect(JSON.parse(control.stdout.trim())).toMatchObject({
+          commandWrites: "x",
+          outsideWrites: "x",
+        });
+        const protectedRun = run("native-boundary");
+        expect(protectedRun.status, protectedRun.stderr).toBe(0);
+        expect(JSON.parse(protectedRun.stdout.trim()), protectedRun.stdout).toMatchObject({
+          commandWrites: "x",
+          outsideWrites: "",
+          result: { subtype: "success", is_error: false },
+        });
+      },
+      65000,
+    );
+
     it.skipIf(process.platform !== "linux")(
       "refuses missing native sandbox prerequisites before model or tool execution, with a matching unrestricted control",
       () => {

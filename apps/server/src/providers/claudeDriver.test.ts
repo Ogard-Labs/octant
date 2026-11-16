@@ -1,3 +1,4 @@
+import { claudeSandboxToolchainReads } from "./claudeSandboxToolchain";
 import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
@@ -2589,7 +2590,11 @@ describe("Claude execution policy", () => {
         expect(open.sandbox).toMatchObject({
           enabled: true,
           allowUnsandboxedCommands: true,
-          filesystem: { denyRead: ["/"], allowRead: [projectRoot], allowWrite: [projectRoot] },
+          filesystem: {
+            denyRead: ["/"],
+            allowRead: [projectRoot, ...(strict ? claudeSandboxToolchainReads() : [])],
+            allowWrite: [projectRoot],
+          },
         });
         const signal = new AbortController().signal;
         const approvals: Array<{
@@ -4661,6 +4666,50 @@ describe("Claude artifact delivery", () => {
       }
     },
   );
+
+  it("denies parent-process code and unreviewed native effects at Strict Full access while retaining confined commands", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "full-access",
+          strict: true,
+          nativeSetup: {
+            subagents: true,
+            webTools: true,
+            skills: true,
+            hooks: true,
+            toolServers: true,
+            projectCode: true,
+          },
+        }),
+      );
+      const open = f.opens[0];
+      if (open === undefined) throw new Error("Expected a Strict query");
+      expect(open.withheldTools).toBeUndefined();
+      expect(open.tools).toEqual(
+        expect.arrayContaining(["Bash", "Edit", "Read", "Agent", "Skill", "TaskOutput"]),
+      );
+      for (const toolName of ["REPL", "Workflow", "EnterWorktree", "FutureNativeExecutor"]) {
+        expect(open.tools).not.toContain(toolName);
+        await expect(
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName,
+            input: { code: "process.exit()" },
+            toolUseId: `strict-${toolName}`,
+            signal: new AbortController().signal,
+          }),
+        ).resolves.toMatchObject({ behavior: "deny" });
+      }
+    } finally {
+      await acquired.close();
+    }
+  });
 
   it("offers Claude's own subagents, web tools, and skills only to a session that carries the person's setup, keeping every channel guard", async () => {
     const ownSetup = {

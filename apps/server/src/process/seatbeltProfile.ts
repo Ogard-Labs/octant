@@ -1183,7 +1183,7 @@ export function makeProcessConfinementLive(
         const authority = sandboxAuthorityDirectory();
         return withReceipt(
           selectedPolicy !== undefined && authority !== undefined
-            ? pinLinuxLaunch(launch, authority)
+            ? pinLinuxLaunch(launch, authority, selectedPolicy)
             : launch,
         );
       }

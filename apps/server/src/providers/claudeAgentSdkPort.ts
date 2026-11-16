@@ -1,3 +1,4 @@
+import { claudeSandboxToolchainReads } from "./claudeSandboxToolchain";
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import {
   forkSession as forkClaudeSession,
@@ -1210,6 +1211,7 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
         ...roots,
         ...(read ? (configured?.readOnlyRoots ?? []) : []),
         ...(configured?.readWriteRoots ?? []),
+        ...(read && input.strict === true ? claudeSandboxToolchainReads() : []),
       ];
       return (
         paths.length === expected.length && paths.every((path, index) => path === expected[index])

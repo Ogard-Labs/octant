@@ -1,3 +1,4 @@
+import { claudeSandboxToolchainReads } from "./providers/claudeSandboxToolchain";
 import { linuxPinnedLaunchAvailable } from "./process/linuxPinnedLaunch";
 import {
   resolveStrictPolicy,
@@ -277,7 +278,8 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
             "Read-only folders on the same filesystem as a writable root are unsupported until access-time alias mediation is available; the launch refuses rather than allowing writes through hard links.",
           ]
         : []),
-      "Claude Strict withholds native startup hooks, MCP servers and Project startup code outside its command sandbox. Native web tools are withheld when tool networking is filtered; brokered Octant tools keep their own policy checks.",
+      "Claude Strict withholds native startup hooks, MCP servers, Project startup code, REPL, Workflow scripts and worktree creation outside its command sandbox. Native web tools are withheld when tool networking is filtered; brokered Octant tools keep their own policy checks.",
+      `Claude Strict command toolchain reads: ${claudeSandboxToolchainReads(platform).join(", ")}. No home/account folder is added by that toolchain grant; writes remain confined to allowed folders.`,
       "Protected project paths require a proven backend and are unavailable on this host.",
       "Exact credential and host-service grants are not supported; protected-file rules remain enforced.",
     ];

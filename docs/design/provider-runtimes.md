@@ -780,9 +780,22 @@ owned lifetime scope. Native startup hooks, MCP servers and Project startup
 code run outside the command sandbox and are withheld under Strict. The
 runtime can still read enabled skills with hooks disabled and strict MCP
 configuration. Native web tools are withheld when tool networking is filtered;
-Octant's brokered tools retain their own checks. These are withheld features,
+Octant's brokered tools retain their own checks. In-process REPL/Workflow scripts, native worktree startup and unreviewed native
+execution tools are also withheld; Strict uses an explicit supported tool list.
+These are withheld features,
 not claims of OS confinement for the parent CLI. The effective-policy panel
 reports this boundary. Ordinary Strict-off native features remain available.
+
+Strict's native read rules re-allow public system toolchains, loader and
+resolver files beneath the root read deny; the effective-policy details list
+the exact paths. This grants no home/account folder and no system write.
+On Linux the private lifetime root materializes top-level directory aliases
+so merged-`/usr` symlinks do not break Claude's native read-deny mounts. Each
+selected folder is mounted from its admitted object using the trusted pinned
+launcher. This wrapper owns lifetime and folder bindings; the native command
+sandbox enforces command effects, and an approved escape still leaves it.
+A real bundled runtime test requires an allowed Project write to succeed and
+the same outside write to fail, with both writes succeeding in its control.
 
 Each native command escape under Strict, including Full access and Auto,
 requires a new **human** answer. Its approval discloses personal-file and

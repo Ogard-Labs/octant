@@ -1,3 +1,4 @@
+import { claudeSandboxToolchainReads } from "./claudeSandboxToolchain";
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import type { ManagedToolAnswer } from "./managedMcpTools";
 import { readClaudeInstructionFiles } from "./claudeInstructionFiles";
@@ -767,6 +768,7 @@ export function claudeSandboxSettings(
         ...extraFolders,
         ...(selectedPolicy?.policy.filesystem.readOnlyRoots ?? []),
         ...(selectedPolicy?.policy.filesystem.readWriteRoots ?? []),
+        ...(strict ? claudeSandboxToolchainReads() : []),
       ],
       allowWrite: [
         projectRoot,
@@ -3500,7 +3502,28 @@ function makeConnection(
         );
         const baseExecutionOptions: ClaudeExecutionOptions = {
           ...policyExecutionOptions,
-          tools: [...policyExecutionOptions.tools, ...claudeNativeTools(nativeSetup)],
+          // An explicit list under Strict excludes in-process JavaScript,
+          // worktree startup code and future unreviewed native effects outside
+          // the command sandbox. Managed tools are appended by the SDK port.
+          ...(input.strict === true ? { fullToolSet: false } : {}),
+          tools: [
+            ...new Set([
+              ...policyExecutionOptions.tools,
+              ...claudeNativeTools(nativeSetup),
+              ...(input.strict === true && input.executionPolicy !== "plan"
+                ? [
+                    "NotebookEdit",
+                    ...CLAUDE_SHELL_TOOLS,
+                    ...CLAUDE_TASK_TOOLS,
+                    "ToolSearch",
+                    ...(input.levelChanges === true ? [CLAUDE_ENTER_PLAN_TOOL] : []),
+                    ...(input.singleUse !== true && input.wakeups !== undefined
+                      ? [...CLAUDE_WAKEUP_TOOLS]
+                      : []),
+                  ]
+                : []),
+            ]),
+          ],
         };
         // Read at each launch: one launch per turn means the next turn after
         // the person turns the setting or the thread's choice off launches

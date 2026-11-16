@@ -1,3 +1,4 @@
+import { pinLinuxLaunch } from "./linuxPinnedLaunch";
 import { Effect, Schema } from "effect";
 import { makeOpenCodeProcessLive } from "../providers/openCodeProcess";
 import { startLinuxControlRelay } from "./linuxControlRelay";
@@ -16,6 +17,7 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -274,6 +276,43 @@ server.serve_forever()
         configureSandboxRestrictionsAuthority(undefined);
         await new Promise<void>((resolve) => egress.close(() => resolve()));
       }
+    },
+  );
+
+  it.skipIf(process.platform !== "linux")(
+    "keeps the admitted folder identity when replacement occurs before the native launcher is prepared",
+    () => {
+      const f = fixture();
+      const authority = join(f.base, "authority");
+      mkdirSync(authority, { mode: 0o700 });
+      const identity = statSync(f.project, { bigint: true });
+      const selected = decodeSandboxPolicySelection({
+        ...f.sandboxPolicy,
+        context: {
+          ...f.sandboxPolicy.context,
+          rootIdentities: [{ path: f.project, identity: `${identity.dev}:${identity.ino}` }],
+        },
+      });
+      const raw = f.launch("printf allowed > marker", selected);
+      const prepare = () => pinLinuxLaunch(raw, authority, selected);
+      const control = prepare();
+      const positive = spawnSync(control.command, [...control.args], {
+        encoding: "utf8",
+        timeout: 10000,
+      });
+      expect(positive.status, positive.stderr).toBe(0);
+      expect(readFileSync(join(f.project, "marker"), "utf8")).toBe("allowed");
+      const victim = join(f.base, "victim");
+      mkdirSync(victim);
+      writeFileSync(join(victim, "marker"), "unchanged");
+      renameSync(f.project, join(f.base, "original-project"));
+      symlinkSync(victim, f.project);
+      const replacement = prepare();
+      expect(
+        spawnSync(replacement.command, [...replacement.args], { encoding: "utf8", timeout: 10000 })
+          .status,
+      ).toBe(125);
+      expect(readFileSync(join(victim, "marker"), "utf8")).toBe("unchanged");
     },
   );
 
