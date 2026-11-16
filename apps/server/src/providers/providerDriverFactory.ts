@@ -224,6 +224,13 @@ export function makeProviderDriver(
           codexHome,
           ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
         }),
+        openEnvironment: codexAccountProcessEnvironment({
+          binaryPath: instance.configuration.binaryPath,
+          hostEnvironment,
+          codexHome,
+          ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
+          strict: false,
+        }),
         ...(options.credentialResolver === undefined
           ? {}
           : { credentialResolver: options.credentialResolver }),
