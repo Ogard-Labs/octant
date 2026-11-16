@@ -117,6 +117,11 @@ export interface PermissionModePickerProps {
   readonly disabled?: boolean;
   readonly profileName?: string;
   /**
+   * The modes this picker offers, in picker order. A coordinator proposal
+   * caps them at the level it requested; absent lists every mode.
+   */
+  readonly modes?: ReadonlyArray<PermissionMode>;
+  /**
    * The thread's opt-in sandbox at Full access. With a handler, the picker
    * offers "Keep the sandbox" under Full access; without one it offers none.
    */
@@ -177,7 +182,10 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
   // warning ink (danger without the sandbox): it is the state a person must
   // not misread as asking first.
   const showsWord = shownMode === "full-access";
-  const options = PERMISSION_MODE_OPTIONS;
+  const options =
+    props.modes === undefined
+      ? PERMISSION_MODE_OPTIONS
+      : PERMISSION_MODE_OPTIONS.filter((option) => props.modes?.includes(option.id) === true);
   return (
     <>
       <OctantMenuRoot>
