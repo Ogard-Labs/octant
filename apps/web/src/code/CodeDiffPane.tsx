@@ -1,4 +1,5 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
+import { checkoutUnreadableReason } from "./checkoutUnreadableReason";
 import { WorkspaceViewStateContext } from "../shell/workspaceViewState";
 import { CodeProviderFileReview } from "./CodeProviderFileReview";
 import type { CodeReviewLineSelection } from "./CodeLocalReview";
@@ -193,7 +194,7 @@ function ChangesUnreadable(props: {
       {...(props.onRetry === undefined
         ? {}
         : { action: { label: "Try again", onClick: props.onRetry } })}
-      message={props.message}
+      message={checkoutUnreadableReason(props.message)}
       role="alert"
       state="warning"
       title="Changes can't be read"

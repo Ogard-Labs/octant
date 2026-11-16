@@ -5,6 +5,7 @@ import {
   type CodeRelativePath,
   type CodeThreadId,
 } from "@octant/contracts";
+import { checkoutUnreadableReason } from "./checkoutUnreadableReason";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import { useEffect } from "react";
 import { FolderTree } from "../ui/icons";
@@ -95,7 +96,9 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
     return (
       <OctantEmpty
         action={{ label: "Try again", onClick: () => void controller.refresh() }}
-        message={controller.errorMessage ?? "Repository files are unavailable."}
+        message={checkoutUnreadableReason(
+          controller.errorMessage ?? "Repository files are unavailable.",
+        )}
         role="alert"
         state="warning"
         title="This checkout can't be read"

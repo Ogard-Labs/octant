@@ -1330,7 +1330,11 @@ is costly to render mounts only while open.
   message, a split column or an empty header row: Files whose checkout cannot
   be read is that one state with no tree, no viewer column and no tab row, and
   Review whose checkout cannot be read is one state with no findings notice
-  under it. A notice is for a pane that still has its content (part of a
+  under it. The reason is in the person's words and the same wherever one
+  cause shows: a thread whose folder the host can no longer open (moved,
+  renamed, deleted, or no longer granted to the window) says so in Files,
+  Review and the Terminal alike, where the host's own sentence spoke of its
+  "authority" in two wordings. A notice is for a pane that still has its content (part of a
   listing failed, a diff is truncated) and keeps the row layout above. A
   loading line is not a state: one quiet line at the pane's top inset, where
   the content it stands in for begins.

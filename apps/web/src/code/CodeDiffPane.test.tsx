@@ -1,4 +1,5 @@
 import { createWorkspaceViewStore, WorkspaceViewStateContext } from "../shell/workspaceViewState";
+import { checkoutUnreadableReason } from "./checkoutUnreadableReason";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeOperationResult } from "@octant/contracts/code-operations";
 import {
@@ -171,6 +172,27 @@ describe("CodeDiffPane", () => {
     expect(screen.getAllByRole("alert")).toHaveLength(1);
     await user.click(within(state).getByRole("button", { name: "Try again" }));
     expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("says a folder that cannot be opened in the person's words, not the host's about its authority", () => {
+    render(
+      <CodeDiffPane
+        client={client()}
+        diff={{ state: "unavailable", message: "Code checkout authority is unavailable." }}
+        loadRuntime={runtime().loadRuntime}
+        onRefresh={vi.fn()}
+      />,
+    );
+    const state = screen.getByRole("alert");
+    // Files gets "Code file authority is unavailable." for the same folder:
+    // both panes give the one reason.
+    expect(state).toHaveTextContent(
+      checkoutUnreadableReason("Code file authority is unavailable."),
+    );
+    expect(state).toHaveTextContent(
+      "The thread's folder can't be opened. It may have been moved, renamed or deleted, or this window no longer has access to it.",
+    );
+    expect(state).not.toHaveTextContent("authority");
   });
 
   it("stacks every changed file with its numbered lines by default", async () => {

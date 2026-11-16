@@ -1,4 +1,5 @@
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
+import { checkoutUnreadableReason } from "./checkoutUnreadableReason";
 import type { ProjectMemoryProposalClient } from "../projects/ProjectMemoryProposalPrompt";
 import { CodeLocalReview } from "./CodeLocalReview";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
@@ -1587,9 +1588,10 @@ function TerminalWorkspaceSurface(
       {...(props.threadPolicy === "plan"
         ? {}
         : { action: { label: "Start terminal", onClick: () => void start() } })}
-      eyebrow="Code terminal"
+      // A pane's state: one line and one reason. The eyebrow "Code terminal"
+      // named the pane a third time, under its own bar.
       message={
-        failure ??
+        (failure === undefined ? undefined : checkoutUnreadableReason(failure)) ??
         (props.threadPolicy === "plan"
           ? "Plan mode is read-only and cannot start repository processes."
           : "No terminal process is attached. Start one explicitly; Octant never restarts it silently.")
