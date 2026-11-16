@@ -48,7 +48,7 @@ static bool overlay_mounted(void)
     (unsigned long)filesystem.f_type == (unsigned long)OVERLAYFS_SUPER_MAGIC;
 }
 
-static int mount_fixture(void)
+static int mount_fixture(bool actor)
 {
   alarm(3);
   char tree[256], lower_ssh[256], upper_ssh[256], options[1024];
@@ -61,6 +61,13 @@ static int mount_fixture(void)
   int lower = open(LOWER_KEY, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
   if (lower < 0 || write(lower, original, sizeof(original) - 1) != (ssize_t)sizeof(original) - 1 ||
       fsync(lower) || close(lower)) return 3;
+  if (actor) {
+    int public = open(LOWER "/public", O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+    if (public < 0 || write(public, original, sizeof(original) - 1) != (ssize_t)sizeof(original) - 1 ||
+        fsync(public) || close(public)) return 3;
+    int companion = open(LOWER_KEY ".pub", O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+    if (companion < 0 || close(companion)) return 3;
+  }
   if (snprintf(options, sizeof(options),
       "lowerdir=%s,upperdir=%s,workdir=%s,index=off,metacopy=off", LOWER, UPPER, WORK) >=
       (int)sizeof(options)) return 4;
@@ -76,7 +83,19 @@ static int mount_fixture(void)
   printf("{\"status\":\"overlayfs-fixture-setup\",\"mounted\":%s,\"overlayFs\":%s,\"lowerVisible\":%s,\"initialCompanionAbsent\":%s}\n",
     mounted ? "true" : "false", visible ? "true" : "false",
     visible ? "true" : "false", absent ? "true" : "false");
-  return visible && absent ? 0 : 5;
+  return visible && (actor ? !absent : absent) ? 0 : 5;
+}
+
+static int inspect_actor_unmount(void)
+{
+  alarm(3);
+  struct stat lower_identity = {0}, upper_identity = {0};
+  bool unchanged = overlay_mounted() && exact_file(LOWER_KEY, &lower_identity);
+  bool no_copy = lstat(UPPER_KEY, &upper_identity) < 0 && errno == ENOENT;
+  bool unmounted = overlay_mounted() && umount2(OVERLAY, 0) == 0 && !overlay_mounted();
+  printf("{\"status\":\"overlayfs-actor-owner\",\"lowerUnchanged\":%s,\"noUpperCopy\":%s,\"unmounted\":%s}\n",
+    unchanged ? "true" : "false", no_copy ? "true" : "false", unmounted ? "true" : "false");
+  return unchanged && no_copy && unmounted ? 0 : 9;
 }
 
 static int check_copyup(void)
@@ -120,7 +139,9 @@ static int unmount_fixture(void)
 int main(int count, char **arguments)
 {
   if (count != 2) return 1;
-  if (!strcmp(arguments[1], "mount")) return mount_fixture();
+  if (!strcmp(arguments[1], "mount")) return mount_fixture(false);
+  if (!strcmp(arguments[1], "mount-actor")) return mount_fixture(true);
+  if (!strcmp(arguments[1], "inspect-actor-unmount")) return inspect_actor_unmount();
   if (!strcmp(arguments[1], "check-copyup")) return check_copyup();
   if (!strcmp(arguments[1], "inspect-unmount")) return inspect_unmount();
   if (!strcmp(arguments[1], "unmount")) return unmount_fixture();

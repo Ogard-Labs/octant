@@ -16,6 +16,7 @@ import { setTimeout as pause } from "node:timers/promises";
 import { runLinuxMediationBroker } from "../../apps/server/src/process/linuxMediationBroker";
 import { buildBubblewrapLaunch } from "../../apps/server/src/process/linuxConfinement";
 import { secretGuardMediationPolicy } from "../../apps/server/src/process/secretGuard";
+import { measureOverlayActor } from "./kernel_overlay_actor";
 import {
   linuxMediationObjectKey,
   readLinuxMediationPolicy,
@@ -78,6 +79,8 @@ if (process.argv[2] === "--metadata-control") {
 }
 
 assert(!Object.keys(process.env).some((name) => name.startsWith("BUN_JSC_")));
+
+if (process.argv[2] === "--overlay-actor") await measureOverlayActor();
 
 const runtime =
   process.argv[2] === "--runtime-bun"

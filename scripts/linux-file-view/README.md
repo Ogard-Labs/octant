@@ -40,6 +40,19 @@ private to the relay until answer/cleanup. The relay checks device/inode and
 and repeats the mount/identity query around classification. Guest strings are
 never translated into host paths.
 
+### OverlayFS actor credentials
+
+The fixed `--overlay-actor` case classifies the physical lower directory's
+private key before enrollment. The enrolled command must fail to read both
+that object directly and through an OverlayFS mount, without changing its
+read-buffer sentinel, while reading an ordinary file through the same mount.
+Linux 6.18's backing-file read uses the mounter's subjective credentials;
+the process's restriction must survive that temporary override. The owner
+independently verifies unchanged lower bytes, no upper copy, normal command
+exit, unmount and cleanup. This is a direct synthetic backing-file case,
+not production launch or complete stacked-filesystem coverage. All existing
+copy-up, capsule, runtime and lifetime cases remain mandatory.
+
 ### OverlayFS copy-up ordering
 
 The pinned Linux 6.18 source has a pre-admission copy-up path: OverlayFS may

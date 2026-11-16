@@ -163,12 +163,14 @@ def main():
     fileattr_workload = root / "fileattr-workload"
     overlayfs_workload = root / "overlayfs-workload"
     overlayfs_fixture = root / "overlayfs-fixture"
+    overlayfs_actor = root / "overlayfs-actor-workload"
     for source, target in ((native / "broker.c", relay),
                            (repository / "scripts/linux-file-view/kernel_policy_workload.c", workload),
                            (repository / "scripts/linux-file-view/kernel_core_probe.c", core_probe),
                            (repository / "scripts/linux-file-view/kernel_fileattr_workload.c", fileattr_workload),
                            (repository / "scripts/linux-file-view/overlayfs_workload.c", overlayfs_workload),
-                           (repository / "scripts/linux-file-view/overlayfs_fixture.c", overlayfs_fixture)):
+                           (repository / "scripts/linux-file-view/overlayfs_fixture.c", overlayfs_fixture),
+                           (repository / "scripts/linux-file-view/overlayfs_actor_workload.c", overlayfs_actor)):
         run("gcc", "-static", "-std=c11", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(target), timeout=30)
     core_check = root / "core-notes-check"
     run("gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-DOCTANT_CORE_NOTES_TEST=1",
@@ -202,6 +204,7 @@ def main():
                    "fileattr-workload": fileattr_workload,
                    "overlayfs-workload": overlayfs_workload,
                    "overlayfs-fixture": overlayfs_fixture,
+                   "overlayfs-actor-workload": overlayfs_actor,
                    "core-probe": core_probe,
                    "policy-broker": policy, "session-cases": session_cases, "usr/bin/bwrap": Path("/usr/bin/bwrap"),
                    "kernel-runtime.mjs": repository / "scripts/linux-file-view/kernel_runtime.mjs",
@@ -264,13 +267,19 @@ def main():
     runtime_joins = []
     outside = []
     fileattr_cases, fileattr_owners, fileattr_filesystems, fileattr_brokers = [], [], [], []
-    overlay_reproductions = []
+    overlay_reproductions, overlay_actors, overlay_actor_workloads, overlay_actor_owners = [], [], [], []
     probe_addresses, probe_exits, core_notes, core_targets, core_retirements, processes = [], [], [], [], [], []
     for line in log.splitlines():
         if line.startswith("{"):
             value = json.loads(line)
             if value.get("status") == "measured-original-policy-broker":
                 cases.append(value)
+            elif value.get("status") == "overlayfs-actor-workload":
+                overlay_actor_workloads.append(value)
+            elif value.get("status") == "overlayfs-actor-owner":
+                overlay_actor_owners.append(value)
+            elif value.get("status") == "measured-overlayfs-actor":
+                overlay_actors.append(value)
             elif value.get("status") == "measured-overlayfs-copy-up":
                 overlay_reproductions.append(value)
             elif value.get("status") == "measured-kernel-runtime":
@@ -331,7 +340,7 @@ def main():
             len(session_joins) != 1 or any(session_joins[0].get(key) != value for key, value in {"controllerJoined": True, "controllerCode": 0, "orphansJoined": 1, "remaining": False}.items())):
         raise SystemExit("The actual owned session needs all lifecycle/stdio/private-root controls and exact orphan joins.")
     expected_modes = ["--metadata-control", "direct", *(["--bubblewrap"] * 12),
-                      "--runtime-bun", "--runtime-node", "--fileattr", "--overlay-copyup"]
+                      "--runtime-bun", "--runtime-node", "--fileattr", "--overlay-copyup", "--overlay-actor"]
     if (len(processes) != len(expected_modes) or sorted(entry.get("mode", "") for entry in processes) != sorted(expected_modes) or
             len(core_targets) != len(expected_modes) + 1 or len(core_retirements) != len(expected_modes) + 2 or
             {entry.get("pid") for entry in core_retirements} != {pid, *(entry.get("pid") for entry in processes), session_joins[0].get("controllerPid")} or
@@ -352,6 +361,17 @@ def main():
             fileattr_brokers[0].get("ownedCommandJoined") is not True or
             fileattr_brokers[0].get("cleaned") is not True):
         raise SystemExit("The ext4 attributes need private read/mutation refusals, unchanged output/owner state and public positive controls.")
+    if (len(overlay_actors) != 1 or len(overlay_actor_workloads) != 1 or len(overlay_actor_owners) != 1 or
+            overlay_actors[0].get("ended") != {"status": "exited", "code": 0} or
+            overlay_actors[0].get("actualBubblewrapBuilder") is not False or
+            overlay_actors[0].get("productionReady") is not False or
+            any(overlay_actors[0].get(field) is not True for field in
+                ("inspected", "unmounted", "cleaned", "controllerJitDefaults")) or
+            any(overlay_actor_workloads[0].get(field) is not True for field in
+                ("directPrivateRefused", "overlayPrivateRefused", "ordinaryOverlayRead")) or
+            any(overlay_actor_owners[0].get(field) is not True for field in
+                ("lowerUnchanged", "noUpperCopy", "unmounted"))):
+        raise SystemExit("Backing-file credential overrides need private refusals, unchanged output/owner state and an ordinary OverlayFS read.")
     if (len(overlay_reproductions) != 1 or
             overlay_reproductions[0].get("actualBubblewrapBuilder") is not False or
             overlay_reproductions[0].get("productionReady") is not False or

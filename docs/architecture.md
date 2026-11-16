@@ -18724,10 +18724,12 @@ cards; general Azure CLI credentials remain unavailable by design.
   actor; a window on this host or a device the host's own person paired changes the list (maintainer decision, 2026-11-12). The journal holds changes, not the list, so a group a later Octant
   adds is protected on every host. Changes reach every launch prepared after
   them.
-- **Linux access-time mediation is not yet shipped.** Parked (maintainer
-  request, 2026-11-12): the candidate is unselected with zero production
-  coverage, and no further work is scheduled until
-  [the Full access rule](#security-and-authority) is built. Existing Bubblewrap
+- **Linux access-time mediation is not yet shipped.** The maintainer approved
+  continued development for explicitly opted-in hosts running a compatible
+  custom kernel (2026-11-16). This supersedes the earlier development pause;
+  it authorizes no automatic kernel installation, bootloader change or reboot.
+  The candidate remains unselected with zero production coverage until the
+  complete implementation and native proofs below pass. Existing Bubblewrap
   file covers are prepared at launch; they do not enforce the complete rule
   for absent files or later companion/alias changes. The replacement must use
   the original structured rules and exact own-account exceptions, preserve live
