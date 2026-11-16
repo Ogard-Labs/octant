@@ -13,9 +13,10 @@ import type {
   Session,
 } from "@opencode-ai/sdk/v2/types";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Effect, Exit, Fiber, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -35,11 +36,13 @@ import { NO_OPENCODE_OWN_SETUP, type OpenCodeOwnSetup } from "./openCodeOwnSetup
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import {
   betaPermissionsForRelease,
+  makeOpenCodeProcessLive,
   type OpenCodeProcessPort,
   type OpenCodeProcessStartInput,
 } from "./openCodeProcess";
 import { SECRET_QUESTION_REFUSAL } from "./secretQuestion";
 
+const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeOpenCodeCli.ts", import.meta.url));
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000101");
 const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000102");
 const otherSessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000104");
@@ -176,6 +179,38 @@ describe("OpenCode driver", () => {
     expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
     expect(fixture.calls.some((call) => call.startsWith("mcp.disconnect:"))).toBe(true);
   });
+
+  it("becomes ready on a Windows host whose new threads run unconfined, and stays unready otherwise", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-opencode-windows-probe-")));
+    try {
+      const binaryPath = join(root, "opencode-fixture");
+      writeFileSync(binaryPath, `#!/bin/sh\nexec '${fakeCliPath}' "$@"\n`);
+      chmodSync(binaryPath, 0o755);
+      // The production process port, told it runs on Windows; the fixture's
+      // client answers the readiness routes.
+      const windowsProcess = (catalogUnconfined: boolean): OpenCodeProcessPort => {
+        const live = makeOpenCodeProcessLive({
+          platform: "win32",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 10_000,
+          windowsCatalogUnconfined: () => catalogUnconfined,
+        });
+        return { start: (input) => live.start({ ...input, binaryPath }) };
+      };
+      const ready = driverFixture({ process: windowsProcess(true) });
+      const probe = await Effect.runPromise(Effect.scoped(ready.driver.probe({ instanceId })));
+      expect(probe.readiness).toBe("ready");
+      expect(probe.models.length).toBeGreaterThan(0);
+
+      const refused = driverFixture({ process: windowsProcess(false) });
+      const unready = await Effect.runPromise(
+        Effect.either(Effect.scoped(refused.driver.probe({ instanceId }))),
+      );
+      expect(JSON.stringify(unready)).toContain("Windows does not have yet");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   it("keeps app tools unsupported when the provider rejects the MCP declaration", async () => {
     const fixture = driverFixture({ mcpSupported: false });

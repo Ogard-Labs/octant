@@ -2,7 +2,7 @@ import type { PermissionMode } from "@octant/contracts/providers";
 import {
   AUTO_UNSUPPORTED_REASON,
   fullAccessSandboxSupported,
-  hostSandboxRefusal,
+  hostProviderTurnRefusal,
   threadAccessOf,
 } from "@octant/domain/guardrail-policy";
 import type { ProviderInstanceId } from "@octant/contracts/providers";
@@ -148,7 +148,11 @@ export interface PermissionModePickerProps {
  */
 export const STRICT_DETAIL =
   "Adds Octant's own limits on top of the provider's: a fixed environment, provider telemetry off, secret files closed to every tool, and asks again after outside content. Some workflows that work in the provider's own app stop working.";
-const STRICT_WINDOWS_DETAIL = "Strict needs Octant's sandbox, which does not run on Windows yet.";
+const STRICT_WINDOWS_DETAIL = "Strict needs a sandbox Windows doesn't have yet.";
+
+/** What a level below Full access runs with on Windows, said wherever it is offered. */
+export const WINDOWS_PROVIDER_APPROVALS_DETAIL =
+  "On Windows the provider's own approvals decide; Octant's sandbox does not run here.";
 
 const SANDBOX_DETAIL = "No prompts, but writes stay in the folder and secret files stay closed.";
 const SANDBOX_UNSUPPORTED_DETAIL =
@@ -166,16 +170,27 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
     props.autoReview?.status === "none" ? props.autoReview.reason : AUTO_UNSUPPORTED_REASON;
   const autoFallsBack = props.value === "auto" && !autoSupported;
   const warning = useFullAccessWarning(props.warningScope ?? "machine");
-  // A host without Octant's sandbox (Windows today) runs only Full access with
-  // the sandbox off. The host refuses the rest; the picker shows them
-  // unavailable with that reason rather than offering a choice it refuses.
+  // A host without Octant's sandbox (Windows today) runs the levels below Full
+  // access with the provider's own approvals and claims no sandbox there; it
+  // refuses only what needs Octant's sandbox (Strict below Full access, and
+  // Keep the sandbox). The picker shows those unavailable with the host's
+  // reason rather than offering a choice it refuses.
   const hostPlatform = useHostPlatform();
   const hostRefusalOf = (mode: PermissionMode) =>
-    hostSandboxRefusal({ platform: hostPlatform, access: threadAccessOf(mode) });
-  const sandboxHostRefusal = hostSandboxRefusal({
+    hostProviderTurnRefusal({
+      platform: hostPlatform,
+      access: threadAccessOf(mode),
+      strict: props.strict === true,
+    });
+  const sandboxHostRefusal = hostProviderTurnRefusal({
     platform: hostPlatform,
     access: { executionPolicy: "full-access", fullAccessSandbox: true },
+    strict: false,
   });
+  const withoutOctantSandbox = (mode: PermissionMode, detail: string | undefined) =>
+    hostPlatform === "win32" && mode !== "full-access"
+      ? `${detail === undefined ? "" : `${detail} `}${WINDOWS_PROVIDER_APPROVALS_DETAIL}`
+      : detail;
   const sandboxed = props.value === "full-access" && props.fullAccessSandbox === true;
   const strictUnavailable = hostPlatform === "win32" && props.strict !== true;
   const triggerLabel = autoFallsBack
@@ -191,7 +206,7 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
     ? unsupportedReason
     : sandboxed
       ? SANDBOX_DETAIL
-      : detailOf(props.value);
+      : withoutOctantSandbox(props.value, detailOf(props.value));
   const sandboxSupported = props.fullAccessSandboxSupported !== false;
   const shownMode: PermissionMode = autoFallsBack ? "ask-first" : props.value;
   const ModeIcon = PERMISSION_MODE_ICON[shownMode];
@@ -251,7 +266,7 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                     hostRefusal ??
                     (option.id === "auto" && !autoSupported
                       ? unsupportedReason
-                      : detailOf(option.id));
+                      : withoutOctantSandbox(option.id, detailOf(option.id)));
                   return (
                     <OctantMenuRadioItem
                       aria-describedby={`${idPrefix}-${option.id}-note`}

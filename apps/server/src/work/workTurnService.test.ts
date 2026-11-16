@@ -129,7 +129,10 @@ import type { TurnEndSummary } from "../metrics/turnEnd";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { frameExternalContentForModel } from "../context/externalContentFraming";
-import { WINDOWS_SANDBOX_MISSING_REASON } from "@octant/domain/guardrail-policy";
+import {
+  WINDOWS_KEPT_SANDBOX_REFUSAL,
+  WINDOWS_STRICT_REFUSAL,
+} from "@octant/domain/guardrail-policy";
 
 const attachmentRoots: string[] = [];
 
@@ -153,15 +156,15 @@ const ids = {
 
 describe("WorkTurnService", () => {
   it.each(["ask-first", "auto-accept-edits", "auto"] as const)(
-    "refuses a Windows Work turn at %s, naming the missing sandbox, before acquiring a provider or appending the journal",
+    "refuses a Strict Windows Work turn at %s, naming Strict, before acquiring a provider or appending the journal",
     async (threadAccess) => {
-      const fixture = serviceFixture({ threadAccess });
+      const fixture = serviceFixture({ threadAccess, resolveStrict: () => true });
       vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
       try {
         await expect(
           fixture.service.startFirstTurn(ids.window, startCommand()),
         ).rejects.toMatchObject({
-          failure: { category: "unavailable", message: WINDOWS_SANDBOX_MISSING_REASON },
+          failure: { category: "unavailable", message: WINDOWS_STRICT_REFUSAL },
         });
         expect(fixture.acquireInputs).toHaveLength(0);
         expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
@@ -171,14 +174,49 @@ describe("WorkTurnService", () => {
     },
   );
 
-  it("refuses a Windows turn on a Full access thread when its caller's ceiling lowers the turn below Full access", async () => {
+  it.each(["ask-first", "auto-accept-edits", "auto"] as const)(
+    "starts a Windows Work turn at %s outside Strict and reaches its provider",
+    async (threadAccess) => {
+      const fixture = serviceFixture({ threadAccess, resolveStrict: () => false });
+      vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+      try {
+        await expect(
+          fixture.service.startFirstTurn(ids.window, startCommand()),
+        ).resolves.toMatchObject({ kind: "accepted" });
+        await vi.waitFor(() => expect(fixture.acquireInputs).toHaveLength(1));
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it("refuses a Windows turn on a Full access thread that keeps the sandbox, naming the kept sandbox", async () => {
+    const fixture = serviceFixture({
+      threadAccess: "full-access",
+      fullAccessSandbox: true,
+      resolveStrict: () => false,
+    });
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      await expect(
+        fixture.service.startFirstTurn(ids.window, startCommand()),
+      ).rejects.toMatchObject({
+        failure: { category: "unavailable", message: WINDOWS_KEPT_SANDBOX_REFUSAL },
+      });
+      expect(fixture.acquireInputs).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("refuses a Strict Windows turn on a Full access thread when its caller's ceiling lowers the turn below Full access", async () => {
     const fixture = serviceFixture({ threadAccess: "full-access" });
     vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
     try {
       await expect(
         fixture.service.startFirstTurn(ids.window, startCommand(), { accessCeiling: "ask-first" }),
       ).rejects.toMatchObject({
-        failure: { category: "unavailable", message: WINDOWS_SANDBOX_MISSING_REASON },
+        failure: { category: "unavailable", message: WINDOWS_STRICT_REFUSAL },
       });
       expect(fixture.acquireInputs).toHaveLength(0);
     } finally {
@@ -6378,6 +6416,7 @@ function serviceFixture(
     readonly readProjectMemory?: WorkTurnServiceDependencies["persistence"]["readProjectMemory"];
     readonly threadAccess?: WorkAccess;
     readonly fullAccessSandbox?: boolean;
+    readonly resolveStrict?: WorkTurnServiceDependencies["resolveStrict"];
     readonly documentDelivery?: "canvas" | "native-artifacts";
     readonly onTurnRequested?: WorkTurnServiceDependencies["onTurnRequested"];
     readonly onTurnCancelled?: WorkTurnServiceDependencies["onTurnCancelled"];
@@ -6588,6 +6627,7 @@ function serviceFixture(
     ...(options.resolveSelectedExtensions === undefined
       ? {}
       : { resolveSelectedExtensions: options.resolveSelectedExtensions }),
+    ...(options.resolveStrict === undefined ? {} : { resolveStrict: options.resolveStrict }),
     ...(options.resolveFileMentionContext === undefined
       ? {}
       : { resolveFileMentionContext: options.resolveFileMentionContext }),

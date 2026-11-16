@@ -132,6 +132,7 @@ function fakeRuntimeProcess(onKill: "exits" | "outlives") {
 function makeHarness(
   output: readonly unknown[] = [safeRuntimeInitialization],
   runtimeProcess?: ReturnType<typeof fakeRuntimeProcess>,
+  platform?: NodeJS.Platform,
 ) {
   const query = new FakeQuery(output);
   let invocation: ClaudeAgentSdkQueryInvocation | undefined;
@@ -161,7 +162,11 @@ function makeHarness(
       return runtimeProcess;
     };
   });
-  const port = makeClaudeAgentSdkPort({ sdk, spawnClaudeCodeProcess });
+  const port = makeClaudeAgentSdkPort({
+    sdk,
+    spawnClaudeCodeProcess,
+    ...(platform === undefined ? {} : { platform }),
+  });
   return {
     get invocation() {
       return invocation;
@@ -492,6 +497,23 @@ describe("Claude Agent SDK port", () => {
       expect(harness.query.close).toHaveBeenCalledOnce();
     },
   );
+
+  test("starts a Windows session below Full access on Claude's permission modes with no command sandbox, and refuses one asking for it", async () => {
+    const { sandbox: _sandbox, ...withoutSandbox } = openInput;
+    const harness = makeHarness([safeRuntimeInitialization], undefined, "win32");
+    await expect(
+      Effect.runPromise(Effect.scoped(harness.port.openQuery(withoutSandbox))),
+    ).resolves.toBeDefined();
+    expect(harness.invocation?.options).not.toHaveProperty("sandbox");
+    expect(harness.invocation?.options).toMatchObject({ permissionMode: "default" });
+
+    const refused = makeHarness([safeRuntimeInitialization], undefined, "win32");
+    expect(await failureOf(Effect.scoped(refused.port.openQuery(openInput)))).toEqual({
+      category: "invalid-configuration",
+      message: "Claude sandbox configuration is invalid.",
+    });
+    expect(refused.invocation).toBeUndefined();
+  });
 
   test("sends the sandbox's network to the session's egress proxy port and nothing else", async () => {
     const harness = makeHarness();

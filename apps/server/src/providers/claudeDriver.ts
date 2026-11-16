@@ -90,7 +90,11 @@ import {
   type ClaudePendingQuestion,
 } from "./claudeEventMapper";
 import { CLAUDE_TASK_TOOLS, ClaudeTaskList, readClaudeStoredTaskList } from "./claudeTaskList";
-import { planReadOnlyToolServers, providerOwnMemoryLaunches } from "@octant/domain";
+import {
+  planReadOnlyToolServers,
+  providerOwnMemoryLaunches,
+  windowsProviderLaunch,
+} from "@octant/domain";
 import {
   canonicalClaudeAccountDirectory,
   claudeArtifactLaunchEnvironment,
@@ -1302,6 +1306,8 @@ type ClaudeEnvironmentFactory = (
 
 export interface ClaudeDriverOptions {
   readonly instanceId: ProviderInstanceId;
+  /** The host's platform; defaults to the running one. */
+  readonly platform?: NodeJS.Platform;
   /**
    * The person's git identity for commits made inside the command sandbox,
    * which cannot read their global gitconfig; read at each sandboxed launch.
@@ -3550,6 +3556,19 @@ function makeConnection(
       signal: AbortSignal,
       resumeSessionId?: string,
     ): Promise<SessionState> => {
+      // Windows has no Octant sandbox, so each launch there is decided from
+      // its own mode, level and Strict value before anything runs: below Full
+      // access Claude's own permission modes hold it outside Strict, and
+      // Strict and a kept sandbox are refused by name.
+      if ((options.platform ?? process.platform) === "win32") {
+        const windows = windowsProviderLaunch({
+          mode: mode ?? "code",
+          executionPolicy: input.executionPolicy,
+          fullAccessSandbox: input.fullAccessSandbox,
+          strict: input.strict,
+        });
+        if (windows.status === "refused") throw failure("incompatible", windows.reason);
+      }
       // An account nobody has checked yet (a fresh start, or a runtime exit that
       // cleared the reading) shows "Not checked". The turn runs that check
       // itself instead of failing on the missing reading.
@@ -3778,7 +3797,11 @@ function makeConnection(
             strict,
             readOnly: mode === "chat" || input.executionPolicy === "plan",
           });
-        const sandboxNetwork = octantSandbox
+        // Claude Code has no command sandbox on Windows; an admitted turn
+        // there runs on Claude's own permission modes alone.
+        const configuresSandbox =
+          octantSandbox && (options.platform ?? process.platform) !== "win32";
+        const sandboxNetwork = configuresSandbox
           ? await runSetupEffect(
               acquireProviderRuntimeNetwork(options.runtimeNetwork, {
                 runtime: "claude-sandbox",
@@ -3798,7 +3821,7 @@ function makeConnection(
         if (sandboxNetwork !== undefined && sandboxNetwork.endpoint.kind !== "loopback") {
           throw failure("incompatible", "Claude's sandbox needs its egress proxy on loopback.");
         }
-        const sandbox = octantSandbox
+        const sandbox = configuresSandbox
           ? claudeSandboxSettings(
               input.executionPolicy,
               projectRoot,

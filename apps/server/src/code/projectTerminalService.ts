@@ -1,3 +1,4 @@
+import { win32 } from "node:path";
 import type { ChildWorktreeSourceService } from "./childWorktreeSourceService";
 import {
   ActorId,
@@ -829,10 +830,21 @@ export class ProjectTerminalService {
         : strict
           ? (workThread?.executionPolicy ?? posture)
           : "full-access";
-    // A Project action is written for a POSIX shell (`cd '…' && { … }`), which
-    // a Windows terminal never opens; refused before it is journaled.
-    if (action !== undefined && process.platform === "win32")
-      return refused("unavailable", "Project actions do not run on Windows yet.");
+    const shell = this.#options.shell?.() ?? defaultTerminalShell();
+    // On Windows an action runs in the shell Settings › Code names, written in
+    // that shell's own words; a shell Octant cannot write it for is refused
+    // before anything is journaled.
+    const actionCommand =
+      action === undefined
+        ? undefined
+        : process.platform === "win32"
+          ? windowsActionCommand(shell, folder, action)
+          : actionShellCommand(folder, action);
+    if (action !== undefined && actionCommand === undefined)
+      return refused(
+        "unavailable",
+        "This action cannot run in the terminal shell Settings › Code names. Choose Windows PowerShell, PowerShell 7 or Command Prompt.",
+      );
     if (action !== undefined) {
       try {
         this.#append(command.terminalId, 0, PROJECT_TERMINAL_EVENT_NAMES.started, {
@@ -860,7 +872,7 @@ export class ProjectTerminalService {
             ? {}
             : { admit: () => workThread.current() }
           : {
-              command: actionShellCommand(folder, action),
+              command: actionCommand ?? "",
               admit: () => {
                 const current = this.#authority(windowId, command.projectId);
                 return (
@@ -876,7 +888,7 @@ export class ProjectTerminalService {
                 );
               },
             }),
-        shell: this.#options.shell?.() ?? defaultTerminalShell(),
+        shell,
         cwd: folder,
         // Every folder of the Project is bound like the main one, so the
         // shell can move between them; the pick only chooses where it starts.
@@ -1392,6 +1404,28 @@ function refused(
   message: string,
 ): Extract<ProjectTerminalResult, { kind: "project-terminal-refused" }> {
   return { kind: "project-terminal-refused", reason, message };
+}
+
+/**
+ * A Project action in a Windows shell's own words: it changes to the action's
+ * folder and stops there if that fails, then runs the action as written. A
+ * shell other than the three Settings offers gets none.
+ */
+export function windowsActionCommand(
+  shell: string,
+  folder: string,
+  action: ProjectAction,
+): string | undefined {
+  const directory = action.directory === "." ? folder : win32.join(folder, action.directory);
+  switch (win32.basename(shell).toLowerCase()) {
+    case "powershell.exe":
+    case "pwsh.exe":
+      return `Set-Location -LiteralPath '${directory.replaceAll("'", "''")}' -ErrorAction Stop\n${action.command}`;
+    case "cmd.exe":
+      return `cd /d "${directory}" && ${action.command}`;
+    default:
+      return undefined;
+  }
 }
 
 function actionShellCommand(folder: string, action: ProjectAction): string {
