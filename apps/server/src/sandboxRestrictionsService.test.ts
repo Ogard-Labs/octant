@@ -32,6 +32,7 @@ afterEach(() => {
   directories.splice(0).forEach((path) => rmSync(path, { recursive: true, force: true }));
 });
 function fixture(strict = true) {
+  let legacy = false;
   let strictEnabled = strict;
   const base = mkdtempSync(join(tmpdir(), "octant-restrictions-"));
   directories.push(base);
@@ -80,10 +81,10 @@ function fixture(strict = true) {
       project: () => project,
       thread: () => ({ projectId, mode: "work" }),
       platform: process.platform,
-      strictPreferences: () => ({
-        executionPolicy: "approval-gated",
-        thread: { strict: strictEnabled },
-      }),
+      strictPreferences: () =>
+        legacy
+          ? { executionPolicy: "full-access", thread: { fullAccessSandbox: true } }
+          : { executionPolicy: "approval-gated", thread: { strict: strictEnabled } },
     });
   const service = create();
   const policy = decodeSandboxPolicy({
@@ -109,6 +110,9 @@ function fixture(strict = true) {
     settings,
     save,
     start,
+    setLegacy: (value: boolean) => {
+      legacy = value;
+    },
     setStrict: (value: boolean) => {
       strictEnabled = value;
     },
@@ -147,6 +151,26 @@ describe.skipIf(process.platform !== "linux")("trusted sandbox restrictions", ()
     expect(f.service.snapshot(f.settings).policy).toBeDefined();
     await resumed.turn.end();
   });
+  it("does not silently activate newly saved Strict configuration through a retained Full-access-only sandbox", async () => {
+    const f = fixture(false);
+    f.setLegacy(true);
+    f.save({ kind: "set-policy", expectedVersion: 0, scope: f.settings, policy: f.policy });
+    const previous = f.start();
+    if (previous.status !== "admitted") throw new Error(previous.message);
+    expect(previous.turn).toMatchObject({ strict: true, legacy: true });
+    expect(previous.turn.selection).toBeUndefined();
+    expect(f.service.snapshot({ kind: "session", threadId }).activePolicy).toBeUndefined();
+    expect(f.service.snapshot({ kind: "session", threadId }).pending).toBe(false);
+    await previous.turn.end();
+    f.setLegacy(false);
+    f.setStrict(true);
+    const current = f.start();
+    if (current.status !== "admitted") throw new Error(current.message);
+    expect(current.turn.legacy).toBe(false);
+    expect(current.turn.selection?.policy.network).toBe(f.policy.network);
+    await current.turn.end();
+  });
+
   it("admits default Strict through the same immutable backend policy without requiring a custom save", async () => {
     const f = fixture();
     const first = f.start();

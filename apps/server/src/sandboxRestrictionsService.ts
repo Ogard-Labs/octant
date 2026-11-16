@@ -218,6 +218,11 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
   #effective(scope: SandboxRestrictionsScope): StoredPolicy | undefined {
     return this.#records(scope).find((record) => record?.policy !== undefined);
   }
+  #activeRecord(scope: SandboxRestrictionsScope, legacy: boolean): StoredPolicy | undefined {
+    return this.#records(scope).find(
+      (record) => record?.policy !== undefined && (!legacy || record.requiresStrict !== true),
+    );
+  }
   #strictPolicy(scope: SandboxRestrictionsScope) {
     const legacy = this.#records(scope).find(
       (record) => record?.policy !== undefined && record.requiresStrict !== true,
@@ -291,8 +296,13 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
       );
     }
     const held = threadId === undefined ? undefined : this.#turns.get(threadId);
+    const requestedPolicy = this.#activeRecord(scope, strictPolicy.legacy)?.policy;
     const actualPolicy =
-      held === undefined ? (strictPolicy.enabled ? policy : undefined) : held.selection?.policy;
+      held === undefined
+        ? strictPolicy.enabled
+          ? requestedPolicy
+          : undefined
+        : held.selection?.policy;
     const actualStrict = held?.strict ?? strictPolicy.enabled;
     const actualLegacy = held?.legacy ?? strictPolicy.legacy;
     const actualSummary = !actualStrict
@@ -339,7 +349,7 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
           this.#turns.get(threadId)?.legacy !== strictPolicy.legacy ||
           ((strictPolicy.enabled || this.#turns.get(threadId)?.strict === true) &&
             JSON.stringify(
-              policy ??
+              (strictPolicy.enabled ? requestedPolicy : undefined) ??
                 (strictPolicy.enabled && !strictPolicy.legacy ? defaultStrictPolicy : undefined),
             ) !== JSON.stringify(this.#turns.get(threadId)?.selection?.policy))),
       summary: actualSummary,
@@ -527,11 +537,14 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
           ? parentTurn.legacy === true && (!strictResolution.enabled || strictResolution.legacy)
           : strictResolution.legacy);
       const record =
-        this.#effective({ kind: "session", threadId: request.threadId }) ??
-        this.#effective({
-          kind: "project",
-          projectId: Schema.decodeUnknownSync(ProjectId)(request.projectId),
-        });
+        this.#activeRecord({ kind: "session", threadId: request.threadId }, legacyStrict) ??
+        this.#activeRecord(
+          {
+            kind: "project",
+            projectId: Schema.decodeUnknownSync(ProjectId)(request.projectId),
+          },
+          legacyStrict,
+        );
       const parentRecord =
         request.parentThreadId === undefined
           ? undefined

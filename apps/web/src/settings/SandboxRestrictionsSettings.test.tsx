@@ -80,7 +80,9 @@ describe("sandbox restrictions settings", () => {
       expect.any(AbortSignal),
     );
     expect(
-      screen.getByText("Grant write access to /shared/library. Applies next turn."),
+      screen.getByText(
+        "Grant write access to /shared/library. Saved for future runs; this does not enable Strict.",
+      ),
     ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Allow for this session" }));
     expect(client.change).toHaveBeenCalledWith(

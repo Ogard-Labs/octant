@@ -516,7 +516,8 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                     <p className="oct-meta">{denial.remedy}</p>
                     {denial.grantable ? (
                       <p className="oct-meta">
-                        Grant {denial.operation} access to {denial.resource}. Applies next turn.
+                        Grant {denial.operation} access to {denial.resource}. Saved for future runs;
+                        this does not enable Strict.
                       </p>
                     ) : null}
                     <div className="settings-view__actions">
