@@ -11,6 +11,7 @@ const thread = {
   lifecycle: "active",
   providerInstanceId: providerId,
   modelId: "test-model",
+  modelOptionValues: { reasoning: "high" },
   researchEnabled: false,
   researchRouting: "automatic",
   personalityInstructions: "Be brief.",
@@ -111,6 +112,17 @@ for (const width of [70, 80, 100, 160]) {
     if (width >= 100 && !frame.includes("Threads")) throw new Error("Missing sidebar");
     if (width >= 140 && !frame.includes("Context and usage")) throw new Error("Missing info panel");
     const running = screen.run();
+    if (width === 160) {
+      if (!frame.includes("high")) throw new Error("Configured reasoning effort missing");
+      test.mockInput.pressKey("b", { ctrl: true });
+      test.mockInput.pressKey("g", { ctrl: true });
+      await test.renderOnce();
+      const hidden = test.captureCharFrame();
+      if (hidden.includes("Threads") || hidden.includes("Context and usage"))
+        throw new Error("Wide panels did not hide");
+      test.mockInput.pressKey("b", { ctrl: true });
+      test.mockInput.pressKey("g", { ctrl: true });
+    }
     if (width === 70) {
       test.mockInput.pressKey("b", { ctrl: true });
       await test.waitForFrame((frame) => frame.includes("Threads"));
@@ -159,7 +171,7 @@ for (const width of [70, 80, 100, 160]) {
 // Measure a growing 2,000-line reply with the actual native renderer.
 let reply = Array.from(
   { length: 2000 },
-  (_, index) => `Line ${index}: terminal streaming acceptance`,
+  (_, index) => `Line ${index}: **terminal** streaming acceptance`,
 ).join("\n");
 const turnId = "61000000-0000-4000-8000-000000000001";
 const promptRef = {

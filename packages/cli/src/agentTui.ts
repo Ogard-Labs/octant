@@ -1,3 +1,9 @@
+import {
+  readCodeRequests,
+  answerCodeRequest,
+  codeRequestId,
+  type AgentCodeRequest,
+} from "./agentCodeRequests";
 import type {
   NativeHarnessApproval,
   NativeHarnessSessionView,
@@ -188,6 +194,7 @@ class AgentScreen {
   #hostTicks:
     | { readonly approvalId: string; readonly ticked: ReadonlySet<number>; readonly page: number }
     | undefined;
+  #codeRequest: AgentCodeRequest | undefined;
   #destroyed = false;
   #refreshSequence = 0;
   #lastAskId: string | undefined;
@@ -195,9 +202,7 @@ class AgentScreen {
   #note = "";
   #drawn = "";
   #streamingStructure = "";
-  #streamingBody:
-    | (import("@opentui/core").TextRenderable & { appendContent(text: string): void })
-    | undefined;
+  #updateStreaming: ((text: string) => void) | undefined;
   #streamingText = "";
   #ticks = 0;
   #lastCtrlC = 0;
@@ -230,8 +235,8 @@ class AgentScreen {
   #readingDiff = false;
   #mcpLines = ["MCP: unreported"];
   #lastMcpRead = 0;
-  #showSidebar = false;
-  #showInfo = false;
+  #showSidebar: boolean | undefined;
+  #showInfo: boolean | undefined;
   #markdownCache = new Map<string, import("@opentui/core").StyledText>();
   #suggestions:
     | { readonly kind: "file" | "thread"; readonly items: ReadonlyArray<string> }
@@ -409,10 +414,10 @@ class AgentScreen {
             this.#draw();
           } else void this.#interrupt();
         } else if (key.ctrl && key.name === "b") {
-          this.#showSidebar = !this.#showSidebar;
+          this.#showSidebar = !(this.#showSidebar ?? agentTuiLayout(this.#renderer.width).sidebar);
           this.#draw();
         } else if (key.ctrl && key.name === "g") {
-          this.#showInfo = !this.#showInfo;
+          this.#showInfo = !(this.#showInfo ?? agentTuiLayout(this.#renderer.width).info);
           this.#draw();
         } else if (key.ctrl && key.name === "j") {
           this.#composer.setText("/next-waiting");
@@ -496,10 +501,13 @@ class AgentScreen {
     const refreshSequence = ++this.#refreshSequence;
     const readingThreadId = this.#threadId;
     const readingMode = this.#mode;
-    const [thread, session, sites] = await Promise.all([
+    const [thread, session, sites, codeRequests] = await Promise.all([
       this.#port.read(),
       readAgentSession(this.#input.session, this.#threadId),
       listAgentSiteApprovals(this.#input.session, this.#port.mode, this.#threadId).catch(() => []),
+      readingMode === "code"
+        ? readCodeRequests(this.#input.session, readingThreadId)
+        : Promise.resolve([]),
     ]);
     let navigationFailed = false;
     const navigation = await listAgentNavigation(this.#input.session, readingMode).catch(() => {
@@ -543,6 +551,7 @@ class AgentScreen {
     this.#thread = thread;
     this.#session = session === "unavailable" ? undefined : session;
     this.#siteApproval = sites[0];
+    this.#codeRequest = codeRequests[0];
     const running = isAgentSnapshotRunning(thread);
     if (this.#wasRunning && !running && this.#input.quiet !== true) {
       const outcome = thread?.turns.at(-1)?.outcome ?? "ended";
@@ -694,7 +703,7 @@ class AgentScreen {
     this.#port = agentThreadPort(this.#input.session, mode, threadId);
     this.#follow(mode);
     this.#drawn = "";
-    this.#streamingBody = undefined;
+    this.#updateStreaming = undefined;
     this.#streamingStructure = "";
     this.#lastAskId = undefined;
     this.#staleAnswer = false;
@@ -800,8 +809,8 @@ class AgentScreen {
     const p = this.#palette;
     const session = this.#session;
     const layout = agentTuiLayout(this.#renderer.width);
-    this.#sidebar.visible = layout.sidebar || this.#showSidebar;
-    this.#info.visible = layout.info || this.#showInfo;
+    this.#sidebar.visible = this.#showSidebar ?? layout.sidebar;
+    this.#info.visible = this.#showInfo ?? layout.info;
     const projectThreads = this.#threads.filter(
       (thread) => thread.projectId === this.#thread?.projectId,
     );
@@ -837,7 +846,7 @@ class AgentScreen {
     const contextLabel =
       percentUsed === undefined ? "Context: unreported" : `Context: ${percentUsed}%`;
     const costLabel = cost === undefined ? "Cost: unreported" : `Cost: $${cost.toFixed(4)}`;
-    this.#composerBox.title = ` ${this.#mode} · ${this.#thread?.modelId ?? "model"} · ${this.#thread?.modelOptionValues?.effort ?? this.#thread?.modelOptionValues?.reasoning_effort ?? "default effort"} · ${this.#thread?.access ?? "access unreported"} `;
+    this.#composerBox.title = ` ${this.#mode} · ${this.#thread?.modelId ?? "model"} · ${this.#thread?.modelOptionValues?.effort ?? this.#thread?.modelOptionValues?.reasoning_effort ?? this.#thread?.modelOptionValues?.reasoning ?? "default effort"} · ${this.#thread?.access ?? "access unreported"} `;
     this.#info.content = [
       this.#thread?.title ?? "Thread",
       "",
@@ -899,14 +908,18 @@ class AgentScreen {
     if (
       pending !== undefined ||
       session?.approvals?.some((entry) => entry.status === "pending") ||
-      this.#siteApproval !== undefined
+      this.#siteApproval !== undefined ||
+      this.#codeRequest !== undefined
     ) {
       this.#listing = undefined;
       this.#suggestions = undefined;
       this.#showHelp = false;
     }
     const nextAskId =
-      pending?.id ?? session?.approvals?.find((entry) => entry.status === "pending")?.id;
+      (this.#codeRequest === undefined ? undefined : codeRequestId(this.#codeRequest)) ??
+      pending?.id ??
+      session?.approvals?.find((entry) => entry.status === "pending")?.id ??
+      this.#siteApproval?.id;
     if (
       this.#lastAskId !== undefined &&
       nextAskId !== this.#lastAskId &&
@@ -918,7 +931,8 @@ class AgentScreen {
     if (
       pending !== undefined ||
       session?.approvals?.some((entry) => entry.status === "pending") ||
-      this.#siteApproval !== undefined
+      this.#siteApproval !== undefined ||
+      this.#codeRequest !== undefined
     )
       this.#diff = undefined;
     const digest = JSON.stringify(
@@ -939,7 +953,8 @@ class AgentScreen {
       this.#diff === undefined &&
       lastEntry?.kind === "lead" &&
       lastEntry.outcome === "streaming" &&
-      !/[`*_#>|]|^\s*[-+]\s/m.test(lastEntry.text);
+      !lastEntry.text.includes("|") &&
+      !lastEntry.text.includes("<think>");
     const structure = plainLive
       ? JSON.stringify([
           entries.slice(0, -1),
@@ -952,17 +967,17 @@ class AgentScreen {
     if (
       plainLive &&
       structure === this.#streamingStructure &&
-      this.#streamingBody !== undefined &&
+      this.#updateStreaming !== undefined &&
       lastEntry.text.startsWith(this.#streamingText)
     ) {
       const delta = lastEntry.text.slice(this.#streamingText.length);
-      if (delta.length > 0) this.#streamingBody.appendContent(delta);
+      if (delta.length > 0) this.#updateStreaming(lastEntry.text);
       this.#streamingText = lastEntry.text;
       this.#drawn = digest;
     } else if (digest !== this.#drawn || (live && this.#diff === undefined)) {
       this.#drawn = digest;
       this.#streamingStructure = structure;
-      this.#streamingBody = undefined;
+      this.#updateStreaming = undefined;
       for (const child of this.#transcript.getChildren()) {
         if (child !== this.#panel) child.destroyRecursively();
       }
@@ -1027,7 +1042,19 @@ class AgentScreen {
 
     const approval = session?.approvals?.find((entry) => entry.status === "pending");
     const site = this.#siteApproval;
-    if (this.#listing === "files") {
+    if (this.#codeRequest !== undefined) {
+      const request = this.#codeRequest;
+      this.#panel.title =
+        request.kind === "approval" ? " Provider approval " : " Provider question ";
+      this.#panelText.content =
+        request.text +
+        "\n" +
+        (request.kind === "approval"
+          ? "y allow once · n deny — then Enter"
+          : request.options.map((option, index) => `${index + 1}. ${option.label}`).join("\n") +
+            "\nType an answer, then Enter.");
+      this.#panel.visible = true;
+    } else if (this.#listing === "files") {
       this.#panel.title = " Current checkout files ";
       const paths =
         this.#checkoutChanges?.kind === "ready"
@@ -1411,22 +1438,45 @@ class AgentScreen {
       );
     }
     if (visible.length === 0) return box;
-    class StreamingText extends TextRenderable {
-      appendContent(text: string): void {
-        this.textBuffer.append(text);
-        this.updateTextInfo();
-        this.requestRender();
-      }
+    if (streaming && reasoning.length === 0 && !visible.includes("|")) {
+      const blocks: {
+        source: string;
+        fence: boolean;
+        node: import("@opentui/core").TextRenderable;
+      }[] = [];
+      const update = (source: string) => {
+        const lines = source.split("\n");
+        let fence = false;
+        for (let start = 0, index = 0; start < lines.length; start += 32, index++) {
+          const part = lines.slice(start, start + 32);
+          const text = part.join("\n");
+          const previous = blocks[index];
+          if (previous === undefined) {
+            const node = new TextRenderable(this.#renderer, {
+              content: this.#markdown(text, fence),
+              fg: p.text,
+              wrapMode: "word",
+            });
+            box.add(node);
+            blocks.push({ source: text, fence, node });
+          } else if (previous.source !== text || previous.fence !== fence) {
+            previous.node.content = this.#markdown(text, fence);
+            previous.source = text;
+            previous.fence = fence;
+          }
+          for (const line of part) if (line.startsWith("```")) fence = !fence;
+        }
+      };
+      update(visible);
+      this.#updateStreaming = update;
+      this.#streamingText = visible;
+      return box;
     }
-    const bodyText = new StreamingText(this.#renderer, {
+    const bodyText = new TextRenderable(this.#renderer, {
       content: markdown && /[`*_#>|]|^\s*[-+]\s/m.test(visible) ? this.#markdown(visible) : visible,
       fg: p.text,
       wrapMode: "word",
     });
-    if (streaming && reasoning.length === 0) {
-      this.#streamingBody = bodyText;
-      this.#streamingText = visible;
-    }
     box.add(bodyText);
     return box;
   }
@@ -1436,13 +1486,13 @@ class AgentScreen {
    * bold, inline code, bullets, and fenced code. Deterministic and cheap, so
    * a streaming reply restyles on every poll without a parser in the way.
    */
-  #markdown(text: string): import("@opentui/core").StyledText {
-    const cached = this.#markdownCache.get(text);
+  #markdown(text: string, startsInFence = false): import("@opentui/core").StyledText {
+    const cached = this.#markdownCache.get(`${startsInFence}:${text}`);
     if (cached !== undefined) return cached;
     const { StyledText, fg, bold, dim } = this.#tui;
     const p = this.#palette;
     const chunks: import("@opentui/core").TextChunk[] = [];
-    let inFence = false;
+    let inFence = startsInFence;
     const lines = terminalMarkdownTables(text).split("\n");
     lines.forEach((line, index) => {
       const eol = index < lines.length - 1 ? "\n" : "";
@@ -1489,7 +1539,7 @@ class AgentScreen {
     });
     const styled = new StyledText(compactTextChunks(chunks));
     if (this.#markdownCache.size >= 128) this.#markdownCache.clear();
-    this.#markdownCache.set(text, styled);
+    this.#markdownCache.set(`${startsInFence}:${text}`, styled);
     return styled;
   }
 
@@ -1540,12 +1590,12 @@ class AgentScreen {
       return;
     }
     if (text === "/info") {
-      this.#showInfo = !this.#showInfo;
+      this.#showInfo = !(this.#showInfo ?? agentTuiLayout(this.#renderer.width).info);
       this.#draw();
       return;
     }
     if (text === "/sidebar") {
-      this.#showSidebar = !this.#showSidebar;
+      this.#showSidebar = !(this.#showSidebar ?? agentTuiLayout(this.#renderer.width).sidebar);
       this.#draw();
       return;
     }
@@ -1561,7 +1611,8 @@ class AgentScreen {
       else if (
         this.#session?.approvals?.some((entry) => entry.status === "pending") ||
         this.#session?.questions.some((entry) => entry.status === "pending") ||
-        this.#siteApproval !== undefined
+        this.#siteApproval !== undefined ||
+        this.#codeRequest !== undefined
       )
         this.#note = "Answer the pending request before opening checkout review.";
       else {
@@ -1773,6 +1824,11 @@ class AgentScreen {
     }
     if (text.startsWith("/steer ")) {
       await this.#steer(text.slice("/steer".length).trim());
+      return;
+    }
+    if (this.#codeRequest !== undefined) {
+      this.#note = (await answerCodeRequest(this.#input.session, this.#codeRequest, text)) ?? "";
+      await this.refresh();
       return;
     }
     const approval = this.#session?.approvals?.find((entry) => entry.status === "pending");
