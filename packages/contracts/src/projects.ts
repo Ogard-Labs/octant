@@ -192,6 +192,12 @@ const ProjectFields = {
   brandKit: Schema.optional(CanvasDesignBrand),
   agentMemoryWrites: Schema.optional(ProjectAgentMemoryWrites),
   imageGenerationChoice: Schema.optional(ProjectImageGenerationChoice),
+  /**
+   * Set when the person dropped the kept choice with Ask again, so the next
+   * image call shows the card even at Full access; cleared when a choice is
+   * kept again.
+   */
+  imageGenerationAskAgain: Schema.optional(Schema.Literal(true)),
   lifecycle: ProjectLifecycle,
   pinned: Schema.Boolean,
   rank: ProjectRank,

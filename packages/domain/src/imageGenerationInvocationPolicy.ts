@@ -197,6 +197,8 @@ export function imageGenerationWithoutAsking(input: {
   readonly profiles: ReadonlyArray<ImageGenerationProfileView>;
   readonly kept: ProjectImageGenerationChoice | undefined;
   readonly fullAccess: boolean;
+  /** The person chose Ask again, so the card comes back at Full access too. */
+  readonly askAgain?: boolean | undefined;
   /** The image profile Settings names for Full access; absent means the first ready one. */
   readonly defaultProfileInstanceId?: string | undefined;
 }):
@@ -215,7 +217,7 @@ export function imageGenerationWithoutAsking(input: {
   // Settings when it is ready, else the first ready one, on its default model
   // (maintainer decision, 2026-11-16). Strict plugs in here: under Strict,
   // several ready profiles keep today's card.
-  if (input.fullAccess) {
+  if (input.fullAccess && input.askAgain !== true) {
     const named =
       input.defaultProfileInstanceId === undefined
         ? undefined
