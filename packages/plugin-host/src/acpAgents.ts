@@ -165,7 +165,11 @@ export const ACP_REGISTRY_AGENTS: ReadonlyArray<AcpRegistryAgent> = [
   {
     registryId: "kiro",
     name: "Kiro CLI",
-    distribution: { kind: "binary", command: "kirocli/bin/kiro-cli", args: ["acp", "--agent-engine=v3"] },
+    distribution: {
+      kind: "binary",
+      command: "kirocli/bin/kiro-cli",
+      args: ["acp", "--agent-engine=v3"],
+    },
     unreviewedBecause: "Its modes, sign-in folder and Project entries need a signed-in probe.",
   },
   {

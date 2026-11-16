@@ -3862,12 +3862,20 @@ export function betaAgentPermissionRules(
     rules = [
       { action: "*", resource: "*", effect: "ask" },
       { action: "edit", resource: "*", effect: "allow" },
-      ...OPENCODE_SUBAGENT_ALLOWS.map((action) => ({ action, resource: "*", effect: "allow" as const })),
+      ...OPENCODE_SUBAGENT_ALLOWS.map((action) => ({
+        action,
+        resource: "*",
+        effect: "allow" as const,
+      })),
     ];
   } else if (policy === "approval-gated") {
     rules = [
       { action: "*", resource: "*", effect: "ask" },
-      ...OPENCODE_SUBAGENT_ALLOWS.map((action) => ({ action, resource: "*", effect: "allow" as const })),
+      ...OPENCODE_SUBAGENT_ALLOWS.map((action) => ({
+        action,
+        resource: "*",
+        effect: "allow" as const,
+      })),
     ];
   } else {
     rules = [

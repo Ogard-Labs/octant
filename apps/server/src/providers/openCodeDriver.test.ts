@@ -3440,19 +3440,17 @@ describe("OpenCode driver", () => {
       Effect.scoped(
         fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
           Effect.flatMap((connection) =>
-            connection
-              .start({ sessionId, modelId, executionPolicy: "approval-gated" })
-              .pipe(
-                Effect.flatMap(() => connection.stop(sessionId)),
-                Effect.flatMap(() =>
-                  connection.start({
-                    sessionId: otherSessionId,
-                    modelId,
-                    executionPolicy: "approval-gated",
-                    strict: false,
-                  }),
-                ),
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
+              Effect.flatMap(() => connection.stop(sessionId)),
+              Effect.flatMap(() =>
+                connection.start({
+                  sessionId: otherSessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                  strict: false,
+                }),
               ),
+            ),
           ),
         ),
       ),
@@ -4087,7 +4085,10 @@ function driverFixture(
       ...(options.readOwnSetup === undefined ? {} : { readOwnSetup: options.readOwnSetup }),
       ...(options.protectedPaths === undefined
         ? {}
-        : { protectedPaths: () => options.protectedPaths ?? { belowFullAccess: [], atFullAccess: [] } }),
+        : {
+            protectedPaths: () =>
+              options.protectedPaths ?? { belowFullAccess: [], atFullAccess: [] },
+          }),
       permissionPersistence: () =>
         typeof options.permissionPersistence === "function"
           ? options.permissionPersistence()

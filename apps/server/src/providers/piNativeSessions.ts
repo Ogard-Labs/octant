@@ -99,7 +99,9 @@ function headerOf(line: string | undefined): PiSessionHeader | undefined {
 /** A regular file's first line and size, never following a link. */
 function readHeader(
   path: string,
-): { readonly header: PiSessionHeader; readonly size: number; readonly mtimeMs: number } | undefined {
+):
+  | { readonly header: PiSessionHeader; readonly size: number; readonly mtimeMs: number }
+  | undefined {
   let descriptor: number;
   try {
     descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -168,7 +170,12 @@ function personSessionFile(
   projectRoot: string,
   nativeSessionId: string,
 ):
-  | { readonly path: string; readonly name: string; readonly header: PiSessionHeader; readonly size: number }
+  | {
+      readonly path: string;
+      readonly name: string;
+      readonly header: PiSessionHeader;
+      readonly size: number;
+    }
   | undefined {
   const folder = join(personDirectory, piSessionFolderName(projectRoot));
   const matches = sessionFiles(folder).filter((path) => path.endsWith(`_${nativeSessionId}.jsonl`));
@@ -255,9 +262,16 @@ export function makePiNativeSessions(options: {
           oneAtATime(`${String(options.instanceId)}\u0000${input.nativeSessionId}`, async () => {
             if (wrongInstance(input.instanceId))
               throw refuse("invalid-configuration", "Provider instance does not match driver.");
-            if (!SESSION_ID.test(input.nativeSessionId) || !SESSION_ID.test(String(input.sessionId)))
+            if (
+              !SESSION_ID.test(input.nativeSessionId) ||
+              !SESSION_ID.test(String(input.sessionId))
+            )
               throw refuse("stale-resume", "That Pi session is not one of this folder's.");
-            const source = personSessionFile(personDirectory, input.projectRoot, input.nativeSessionId);
+            const source = personSessionFile(
+              personDirectory,
+              input.projectRoot,
+              input.nativeSessionId,
+            );
             if (source === undefined)
               throw refuse("stale-resume", "That Pi session is not one of this folder's.");
             if (adoptedSources(options.octantSessionDirectory).has(source.path))
@@ -265,7 +279,11 @@ export function makePiNativeSessions(options: {
             if (source.size > MAX_ADOPTED_SESSION_BYTES)
               throw refuse("unsupported", "That Pi session is too large to take up.");
             const [, ...entries] = readFileSync(source.path, "utf8").split("\n");
-            const header = { ...source.header, id: String(input.sessionId), parentSession: source.path };
+            const header = {
+              ...source.header,
+              id: String(input.sessionId),
+              parentSession: source.path,
+            };
             const prefix = source.name.slice(0, -`_${input.nativeSessionId}.jsonl`.length);
             const target = join(
               options.octantSessionDirectory,
@@ -312,21 +330,24 @@ export function makePiNativeSessions(options: {
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
         : Effect.tryPromise({
             try: () =>
-              oneAtATime(`${String(options.instanceId)}\u0000${input.nativeSessionId}`, async () => {
-                for (const path of sessionFiles(options.octantSessionDirectory)) {
-                  if (!path.endsWith(`_${String(input.sessionId)}.jsonl`)) continue;
-                  const header = readHeader(path)?.header;
-                  if (
-                    header === undefined ||
-                    header.id !== String(input.sessionId) ||
-                    header.parentSession === undefined ||
-                    !header.parentSession.endsWith(`_${input.nativeSessionId}.jsonl`) ||
-                    !lstatSync(path).isFile()
-                  )
-                    continue;
-                  rmSync(path);
-                }
-              }),
+              oneAtATime(
+                `${String(options.instanceId)}\u0000${input.nativeSessionId}`,
+                async () => {
+                  for (const path of sessionFiles(options.octantSessionDirectory)) {
+                    if (!path.endsWith(`_${String(input.sessionId)}.jsonl`)) continue;
+                    const header = readHeader(path)?.header;
+                    if (
+                      header === undefined ||
+                      header.id !== String(input.sessionId) ||
+                      header.parentSession === undefined ||
+                      !header.parentSession.endsWith(`_${input.nativeSessionId}.jsonl`) ||
+                      !lstatSync(path).isFile()
+                    )
+                      continue;
+                    rmSync(path);
+                  }
+                },
+              ),
             catch: () => failure("unavailable", "The Pi session could not be released."),
           }),
   };

@@ -497,7 +497,9 @@ export function acpNativeSandboxApplies(input: {
     !versionAtLeast([Number(match[1]), Number(match[2]), Number(match[3])], sandbox.minimumVersion)
   )
     return false;
-  return sandbox.unavailable?.({ platform: input.platform, environment: input.environment }) !== true;
+  return (
+    sandbox.unavailable?.({ platform: input.platform, environment: input.environment }) !== true
+  );
 }
 
 export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): AcpConfinementPort {

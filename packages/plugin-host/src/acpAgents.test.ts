@@ -48,9 +48,9 @@ describe("adding any ACP agent", () => {
     expect(
       decideAcpAgentLaunch({ steps, executionPolicy: "approval-gated", strict: false }),
     ).toEqual({ status: "starts", sandbox: "own", remembers: true });
-    expect(decideAcpAgentLaunch({ steps, executionPolicy: "approval-gated", strict: true })).toEqual(
-      { status: "starts", sandbox: "octant", remembers: true },
-    );
+    expect(
+      decideAcpAgentLaunch({ steps, executionPolicy: "approval-gated", strict: true }),
+    ).toEqual({ status: "starts", sandbox: "octant", remembers: true });
     // A launch that never resolved Strict keeps Octant's sandbox.
     expect(decideAcpAgentLaunch({ steps, executionPolicy: "auto-accept-edits" })).toMatchObject({
       sandbox: "octant",

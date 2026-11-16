@@ -14256,7 +14256,10 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   - **Claude Code's full tool preset.** Outside Plan and Chat, Octant offers
     Claude Code's full built-in tool preset with no Octant deny list.
   - **OpenCode's `task` subagents** are always allowed outside Plan, instead
-    of following the level; Plan still denies them.
+    of following the level; Plan still denies them. Built: `task` and 2.x
+    `subagent` start unasked at every level outside Plan, a child session's
+    requests still reach the person through the parent's approval path, and a
+    person's own OpenCode rule denying `task` still wins.
 
   Rationale: each provider then behaves as its own documentation says, and
   Octant's server still answers every ask the provider raises and journals
@@ -14296,9 +14299,12 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     at Full access. Strict refuses them for every tool. Built for Claude
     Code's own file tools (its gate refuses only another provider's sign-in
     outside Strict) and for the confinement of Pi and the ACP agents
-    (`protectedFiles: "provider-sign-ins"`), read at each launch. Not built
-    yet for Codex and OpenCode, whose processes are shared per posture and do
-    not yet key on Strict. Until
+    (`protectedFiles: "provider-sign-ins"`), read at each launch, and for
+    OpenCode, whose shared process is keyed on Strict: outside Strict its wall
+    and its permission rules refuse only other providers' sign-ins, and a
+    process started under one Strict value refuses a session asking for the
+    other. Not built yet for Codex, whose process is shared per posture and
+    does not yet key on Strict. Until
     [Providers run in their own sandbox](#security-and-authority) is built, a
     wrapped runtime's wall still keeps files outside the Project's folders
     unreadable, so outside Strict the narrowing reaches the protected files
@@ -14479,7 +14485,10 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     the one a version pin was reviewed against is offered as "unverified"
     instead of losing the pinned features (Kimi Code's command inventory,
     OpenCode's Octant tools, an ACP probe's claims); below Full access the
-    pin holds ([Provider runtimes](design/provider-runtimes.md)).
+    pin holds ([Provider runtimes](design/provider-runtimes.md)). Built for
+    Kimi Code's command inventory; OpenCode's Octant tools were already
+    offered at Full access on any release that accepts them (`mixed`). Not
+    built yet for an ACP probe's exact-release claims.
   - **Linux parity.** Octant's tools reach OpenCode and ACP agents on Linux
     as on macOS (built: the launch reaches the tool bridge on the shared host
     network, or through the egress forwarder's loopback relay for the
@@ -15128,9 +15137,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     its Project and Settings as they are now; a launch that does not carry
     the resolved value is Strict. A device the host's own person paired
     turns it on or off as a local window does; a hub-introduced device and
-    an agent grant may turn it on, never off. Not built yet: the provider's
-    own sandbox outside Strict, so today every provider still runs in the
-    sandbox the table below shows whether Strict is on or off.
+    an agent grant may turn it on, never off. Built outside Strict for
+    Gemini CLI and Qwen Code (below); not built yet for Codex and Claude
+    Code, which still run in the sandbox the table below shows whether
+    Strict is on or off.
   - **Octant's sandbox stays the default** for providers with no sandbox of
     their own: OpenCode, Mistral Vibe and Pi.
   - **Per provider.** Codex runs its native workspace-write sandbox and its
@@ -15153,7 +15163,18 @@ approval-gated` command that undoes it. The terminal shows no one-time
     native sandboxes. Copilot CLI and Cursor follow once their ACP releases
     are checked for a sandbox Octant can configure, and Grok Build once it is
     known why its launch sets `GROK_SANDBOX=off`; until then each keeps
-    Octant's profile.
+    Octant's profile. Built: Gemini CLI and Qwen Code run in their own
+    sandboxes outside Strict, below Full access, in Work or Code outside
+    Plan, in a Project the person trusted for the agent, and with Network
+    limits not routing the runtime through Octant's proxy; any other launch
+    keeps Octant's profile (`acpNativeSandboxApplies`, detail in
+    [Provider runtimes: Gemini CLI and Qwen Code](design/provider-runtimes.md#gemini-cli-and-qwen-code)).
+    The trusted-Project condition keeps an untrusted Project's own skill and
+    configuration files held back by Octant's profile, as they are today,
+    since the agents load them by themselves once their wall is gone. Checked
+    and kept on Octant's profile, with the reasons in
+    [Provider runtimes](design/provider-runtimes.md#own-sandboxes-checked-and-not-switched):
+    Copilot CLI, Cursor and Grok Build.
   - **Unchanged.** Server-side approval authority and journaling; Plan's
     read-only enforcement and no shell in Chat; the paired-device and
     routine rules; never handing one provider another's credentials;

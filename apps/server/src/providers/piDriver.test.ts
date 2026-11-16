@@ -76,7 +76,12 @@ class FakeClient implements PiClientPort {
         type: "response" as const,
         command: type,
         success: true,
-        data: { summary: "s", firstKeptEntryId: "e", tokensBefore: 150000, estimatedTokensAfter: 32000 },
+        data: {
+          summary: "s",
+          firstKeptEntryId: "e",
+          tokensBefore: 150000,
+          estimatedTokensAfter: 32000,
+        },
       };
     }
     if (type === "steer") {
@@ -357,7 +362,10 @@ describe("Pi provider driver", () => {
     ]);
     expect(
       await Effect.runPromise(
-        compact({ sessionId: decodeProviderSessionId("80000000-0000-4000-8000-000000000799"), compactionId: "c-3" }),
+        compact({
+          sessionId: decodeProviderSessionId("80000000-0000-4000-8000-000000000799"),
+          compactionId: "c-3",
+        }),
       ),
     ).toEqual({ kind: "refused", reason: "no-session" });
     await Effect.runPromise(connection.stop(sessionId));
