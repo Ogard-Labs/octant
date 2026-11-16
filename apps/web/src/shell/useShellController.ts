@@ -330,9 +330,10 @@ export function useShellController(options: ShellControllerOptions) {
       );
   }, [authoritative, contentStorageKey, contentTabs]);
 
-  // Threads opened with a single click from the sidebar; the next open in
-  // their pane takes their tab. A double click keeps one (see workspace.md,
-  // Opening into tabs). Read at commit time, so a ref rather than state.
+  // Threads opened with a single click from the sidebar. A pane keeps one
+  // conversation however it was opened (see workspace.md, One conversation to
+  // a pane); the preview only decides whether its reference is written to
+  // storage. Read at commit time, so a ref rather than state.
   const previewThreads = useRef<ThreadPreview>({});
   // Stable, so the sidebar rows reading them through context do not re-render
   // with every shell render.
@@ -340,7 +341,7 @@ export function useShellController(options: ShellControllerOptions) {
   const openThreadAsPreview = useCallback((threadId: string) => {
     previewThreads.current = { ...previewThreads.current, pending: threadId };
   }, []);
-  /** A double click on the thread's row or tab keeps its tab. */
+  /** A double click on the thread's row or tab stops it being the preview. */
   const keepThreadTab = useCallback((threadId: string) => {
     const { current, pending } = previewThreads.current;
     previewThreads.current = {
@@ -405,10 +406,8 @@ export function useShellController(options: ShellControllerOptions) {
             ? undefined
             : readWorkspaceContent(contentStorageKey, next.workspace);
           contentOwner.current = contentStorageKey;
-          // Read the preview before settling it: the updater runs later.
-          const preview = currentPreviewSet(previewThreads.current);
           setContentTabs((tabs) =>
-            rememberWorkspaceContent(restored ?? tabs, previousWorkspace, next.workspace, preview),
+            rememberWorkspaceContent(restored ?? tabs, previousWorkspace, next.workspace),
           );
           previewThreads.current = settleThreadPreview(previewThreads.current, next.workspace);
           committedShell.current = next;
@@ -555,10 +554,7 @@ export function useShellController(options: ShellControllerOptions) {
         workspaceVersion: result.version,
       };
       committedShell.current = next;
-      const preview = currentPreviewSet(previewThreads.current);
-      setContentTabs((tabs) =>
-        rememberWorkspaceContent(tabs, previous.workspace, next.workspace, preview),
-      );
+      setContentTabs((tabs) => rememberWorkspaceContent(tabs, previous.workspace, next.workspace));
       previewThreads.current = settleThreadPreview(previewThreads.current, next.workspace);
       setAuthoritative(next);
       setStatus("ready");

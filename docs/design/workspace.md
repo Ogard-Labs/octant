@@ -703,7 +703,7 @@ need a stable answer identity before this control can apply to them.
 
 The central workspace is one persistent recursive
 split tree. A leaf holds exactly one surface — a thread, a draft, a Project
-overview, a utility surface, or a mode welcome. A pane retains navigation references for conversations, files, previews, and canvases; selecting a
+overview, a utility surface, or a mode welcome. A pane retains navigation references for its one conversation and for the files, previews, and canvases opened in it; selecting a
 tab reopens that surface through the authoritative command path. Image creation
 and revision occupy pane-owned tabs whose drafts remain mounted while switching
 back to the conversation. Opening the same content selects its existing entry; closing active content
@@ -764,13 +764,19 @@ geometry and close-control presentation are shared with dock tools under
 
 These tabs add no persisted layout or authority.
 
-**Opening into tabs.** A single click on a sidebar thread opens it in the
-active pane in place: it takes over the pane's open tab unless that tab was
-kept, so browsing threads does not grow the tab row. A double click keeps the
-thread as a tab of its own, and so does a later double click on its tab; a
-kept tab stays when another thread opens in the pane, which then opens beside
-it as a new tab. A tab opened from anywhere else (a link, a search result, a
-drop) is kept.
+**One conversation to a pane.** A thread opened in a pane, from the sidebar,
+a link, a search result or a drop, takes the place of the thread the pane
+showed: the title row never holds a second thread. Threads live in the
+sidebar's list, and Back and Forward walk the ones a window has shown. Until
+2026-11-16 every thread a pane had shown stayed as a tab (a single click
+replaced a previewed one, a double click kept it), so the title row grew a
+second list of threads beside the sidebar's and read as a browser's tab strip
+(maintainer request). Tabs remain for what is opened over a conversation: a
+file, a preview, a canvas, image creation. They keep their place when another
+thread opens, and a row restored from storage that still holds several
+threads keeps the one the pane shows. A file, preview or canvas opened over a
+thread always opens beside it, so the row keeps the way back to the
+conversation.
 
 A thread row drags out of the sidebar the same way from either arrangement,
 Status or the Project tree. Chat and Work threads share that list but not a
@@ -781,9 +787,9 @@ following it to that mode, where the host would refuse to place it.
 **Moving tabs and showing them side by side.** A tab drags the way a pane's
 title row does, through the same drop rules: dropped on another pane's edge it
 splits that pane and opens there, dropped on a pane's centre it opens in that
-pane, and any tab of a pane that holds more than one may split its own pane,
-so a tab dragged to its pane's right edge lands beside the thread the pane
-shows. The pane's open tab does so too: the pane first shows the neighbour a
+pane, and any tab of a pane that holds more than one (its conversation and the
+files, previews or canvases over it) may split its own pane, so a file's tab
+dragged to its pane's right edge lands beside the thread the pane shows. The pane's open tab does so too: the pane first shows the neighbour a
 close would show, then the tab is placed. (Carried with its pane, the open tab
 had no drop target anywhere in the pane it was in, and dropped on another pane
 it took the whole pane, its other tabs with it.) A pane's only tab moves its
@@ -2469,11 +2475,11 @@ Workspace content and dock tool tabs share a compact recipe for height,
 spacing, selected fill and edge, and close controls: panel tabs are 28px with a
 raised selected fill and a 16px close (see DESIGN.md, Panel tabs), and a Files
 tab with unsaved edits shows a dot and asks Save, Don't save or Cancel before it
-closes. A pane's conversation tabs
-then become a row of equal soft tabs with the control corner, 28px tall at a shared 196px (never
+closes. A pane's own tabs (its conversation and the files, previews and canvases opened over it)
+are a row of equal soft tabs with the control corner, 28px tall at a shared 196px (never
 narrower than 112px), 8px apart: every tab carries a faint wash of the ink, the
 hovered one a little more, and the open one the brightest wash with a hairline
-edge, so the row reads as a set of open conversations rather than a line of
+edge, so the row reads as a set of open things rather than a line of
 links with one highlighted. A pane tab's own button spans the whole tab with
 the × laid over its end, so the shared keyboard focus edge outlines the whole
 tab: drawn on the label alone it boxed the title and left the × outside. A tab whose

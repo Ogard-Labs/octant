@@ -90,7 +90,7 @@ export interface SplitWorkspaceProps {
   readonly contentTabs?: WorkspaceContentTabs;
   readonly onActivateContentTab?: (paneId: PaneId, tabId: WorkspaceTab["id"]) => void;
   readonly onCloseContentTab?: (paneId: PaneId, tabId: WorkspaceTab["id"]) => void;
-  /** A double click on a thread's tab keeps it when another thread opens. */
+  /** A double click on a thread's tab stops it being the single-click preview. */
   readonly onKeepContentTab?: (threadId: string) => void;
   /** Lays two to four tabs out in the pane, in tab order. */
   readonly onArrangeSideBySide?: (paneId: PaneId, surfaces: ReadonlyArray<WorkspaceTab>) => void;
