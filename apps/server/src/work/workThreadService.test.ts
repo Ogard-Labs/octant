@@ -701,6 +701,27 @@ describe("WorkThreadService", () => {
     expect(inUnit).toEqual(["work.thread-updated@1", "guardrail.level-lowered@1"]);
   });
 
+  it.each([true, false])(
+    "keeps the older Full-access boundary when explicitly migrating Work to Strict %s",
+    async (strict) => {
+      const f = serviceFixture({
+        threads: [thread({ access: "full-access", fullAccessSandbox: true })],
+      });
+      const result = await f.service.execute(ids.window, {
+        kind: "change-work-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        access: "full-access",
+        strict,
+      });
+      if (!("kind" in result) || result.kind !== "thread-updated")
+        throw new Error("No updated thread");
+      expect(result.thread.strict).toBe(strict);
+      const { strict: _newPreference, ...olderReader } = result.thread;
+      expect(olderReader.fullAccessSandbox === true).toBe(strict);
+    },
+  );
+
   it("clears a Work thread's Strict override and legacy flag when the person chooses inheritance", async () => {
     const f = serviceFixture({
       threads: [thread({ access: "full-access", strict: false, fullAccessSandbox: true })],

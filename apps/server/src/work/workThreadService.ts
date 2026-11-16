@@ -681,7 +681,10 @@ export class WorkThreadService {
           ...((command.defaultStrict ?? current.defaultStrict) === undefined
             ? {}
             : { defaultStrict: command.defaultStrict ?? current.defaultStrict }),
-          ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
+          ...((command.defaultStrict ??
+            current.defaultStrict ??
+            command.defaultFullAccessSandbox ??
+            current.defaultFullAccessSandbox) === true
             ? { defaultFullAccessSandbox: true }
             : {}),
           // Absent reads as on, so only a stored off needs a value.
@@ -850,12 +853,12 @@ export class WorkThreadService {
             this.#currentSettings().defaultAccess,
           // The opt-in sandbox only rides along when the resolved access is
           // Full access: the request's choice, else the Project's, else Settings'.
-          ...(command.strict === undefined &&
-          ((project.defaultPermissionMode === undefined
+          ...(((project.defaultPermissionMode === undefined
             ? undefined
             : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
             this.#currentSettings().defaultAccess) === "full-access" &&
-          (command.fullAccessSandbox ??
+          (command.strict ??
+            command.fullAccessSandbox ??
             defaultFullAccessSandboxFor({ project, settings: this.#currentSettings() }))
             ? { fullAccessSandbox: true }
             : {}),
@@ -1284,9 +1287,9 @@ export class WorkThreadService {
           ...unsandboxed
         } = current;
         const sandboxed =
-          command.strict === undefined &&
+          command.strict !== "inherit" &&
           command.access === "full-access" &&
-          (command.fullAccessSandbox ?? currentSandbox) === true;
+          (command.strict ?? currentStrict ?? command.fullAccessSandbox ?? currentSandbox) === true;
         const updated = decodeWorkThread({
           ...unsandboxed,
           access: command.access,
@@ -1704,9 +1707,9 @@ export class WorkThreadService {
       workingDirectory: ".",
       ...(command.strict === undefined ? {} : { strict: command.strict }),
       access: this.#currentSettings().defaultAccess,
-      ...(command.strict === undefined &&
-      this.#currentSettings().defaultAccess === "full-access" &&
-      (command.fullAccessSandbox ??
+      ...(this.#currentSettings().defaultAccess === "full-access" &&
+      (command.strict ??
+        command.fullAccessSandbox ??
         defaultFullAccessSandboxFor({ settings: this.#currentSettings() }))
         ? { fullAccessSandbox: true }
         : {}),

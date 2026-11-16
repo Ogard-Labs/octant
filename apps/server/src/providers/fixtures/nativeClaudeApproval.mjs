@@ -113,14 +113,17 @@ const timer = setTimeout(() => {
   for (const child of children) if (child.exitCode === null) child.kill("SIGKILL");
 }, 25000);
 try {
-  const config = join(root, "config");
+  // Match production: provider account state is separate from writable work.
+  const config = join(authority, "config");
+  const home = join(authority, "home");
   mkdirSync(config);
+  mkdirSync(home);
   const unavailable = process.argv[4] === "missing-sandbox";
   const emptyPath = unavailable || process.argv[4] === "no-hook-empty-path";
   const environment = {
     PATH: emptyPath ? root : process.env.PATH,
     SHELL: "/bin/bash",
-    HOME: root,
+    HOME: home,
     CLAUDE_CONFIG_DIR: config,
     ANTHROPIC_API_KEY: "offline-protocol-fixture",
     ANTHROPIC_BASE_URL: `http://127.0.0.1:${address.port}`,

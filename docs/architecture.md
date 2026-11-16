@@ -13955,7 +13955,10 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     Previous `fullAccessSandbox` choices retain their Full-access-only meaning
     until explicitly replaced by Strict or Off. Previous custom-policy records
     retain their opt-in protection. New explicit preferences take precedence;
-    replay and rollback do not silently drop a saved boundary. The picker marks
+    replay and rollback do not silently drop a saved boundary. Full-access
+    Strict choices retain the legacy compatibility bit; Settings and Project
+    defaults dual-write it so an older reader retains that Full-access wall.
+    Explicit Off clears the compatibility choice. The picker marks
     retained protection **Legacy sandbox**, rather than claiming the full Strict
     bundle. Settings and Project controls show the previous choice alongside
     On/Off; Project also offers inheritance. Access level changes do not change

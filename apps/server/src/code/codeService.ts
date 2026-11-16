@@ -2050,7 +2050,10 @@ export class CodeService {
           ...((command.defaultStrict ?? current.defaultStrict) === undefined
             ? {}
             : { defaultStrict: command.defaultStrict ?? current.defaultStrict }),
-          ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
+          ...((command.defaultStrict ??
+            current.defaultStrict ??
+            command.defaultFullAccessSandbox ??
+            current.defaultFullAccessSandbox) === true
             ? { defaultFullAccessSandbox: true }
             : {}),
           ...((command.androidEmulatorSnapshotBoot ?? current.androidEmulatorSnapshotBoot) === true
@@ -4804,7 +4807,8 @@ export class CodeService {
     return decodeCodeThread({
       ...rest,
       permissionPersistence: "project-default",
-      ...(fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+      // Keep the Full-access-only compatibility bit for older journal readers.
+      ...((rest.strict ?? fullAccessSandbox) === true ? { fullAccessSandbox: true } : {}),
     });
   }
 
