@@ -1,4 +1,4 @@
-import { providerCommandOf, providerCommandRefusal, providerRunsAsItself } from "@octant/domain";
+import { providerCommandOf, providerRunsAsItself } from "@octant/domain";
 import { readBoundedResponseBody } from "../extensions/boundedResponseBody";
 import { advertisedSlashCommands } from "./providerSlashCommands";
 import { OpenCodeChildSessions } from "./openCodeChildSessions";
@@ -2805,9 +2805,9 @@ function makeConnection(
             if (rejected !== undefined) return Effect.fail(rejected);
             // A prompt that opens with one of OpenCode's listed commands runs
             // through its command route, as OpenCode's own client sends it;
-            // as plain text the model would only read the slash. The host
-            // refused it in Chat and Plan before this; the driver holds the
-            // same line for any caller that did not.
+            // as plain text the model would only read the slash. It runs in
+            // every mode; the session's own permissions, set for the level,
+            // decide what it may do.
             const runCommand = runtimeClient.command;
             const listCommands = runtimeClient.commands;
             // The observation holds the list of whichever Project's session
@@ -2830,18 +2830,12 @@ function makeConnection(
               Effect.flatMap((listed) => {
                 const command =
                   runCommand === undefined ? undefined : providerCommandOf(input.prompt, listed);
+                // A command another Project lists, or one OpenCode no longer
+                // lists here, is refused rather than sent to the model as text.
                 const commandRefusal =
-                  providerCommandRefusal({
-                    prompt: input.prompt,
-                    commands: command === undefined ? undefined : listed,
-                    mode,
-                    executionPolicy: state.executionPolicy,
-                  }) ??
-                  // A command another Project lists, or one OpenCode no longer
-                  // lists here, is refused rather than sent to the model as text.
-                  (command === undefined && runCommand !== undefined
+                  command === undefined && runCommand !== undefined
                     ? commandNotListedHere(input.prompt, observed?.commands)
-                    : undefined);
+                    : undefined;
                 if (commandRefusal !== undefined) {
                   return Effect.fail(fail("unauthorized", commandRefusal));
                 }
