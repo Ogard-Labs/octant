@@ -10540,7 +10540,8 @@ the model at another size.
   new thread alone at Full access and journals `fullAccessRunFlag` on it,
   saving nothing on the Project; the host accepts the flag only from a window
   on this host, so no agent grant, device or routine sets it, and the MCP
-  server never sends it; under
+  server never sends it, and refuses it, naming Strict, where the thread
+  would be Strict; under
   [Octant adds no restrictions of its own unless Strict is on](#security-and-authority); built), so
   a thread starts at Full access only where the person already set it (the
   same tools served to an agent grant accept it when the person chose Full
@@ -14338,9 +14339,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
 
   **Octant adds no restrictions of its own unless Strict is on**
   (maintainer decision, 2026-11-16; partly built: the Strict setting and
-  every item marked built below; not built yet: Strict refusing the local
-  CLI's Full access flag, Strict keeping a coordinator's Plan gate at Full
-  access, and the opt-in extras). A person who moves
+  every item marked built below; not built yet: the opt-in extras). A
+  person who moves
   from a provider's own CLI to Octant keeps every workflow that worked
   there, and Octant restricts a provider no more than any other agent
   workspace does. Outside Strict, the provider's own sandbox, permission
@@ -14497,8 +14497,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     access on the Project. A tool call another agent makes through
     `octant agent mcp` still cannot choose it, outside an agent grant the
     person set to Full access. Built as `octant agent --full-access`
-    ([Native harness: scripted callers](#native-harness)). Not built yet:
-    Strict refusing the flag.
+    ([Native harness: scripted callers](#native-harness)). Strict refuses
+    the flag with a sentence naming Strict (built: a new Code thread and a
+    Work thread's level change read Strict as the thread would resolve it,
+    its own choice, else its Project's default, else Settings, before
+    anything is journaled).
   - **Home folder as an extra folder.** A Project's extra folder may be the
     home folder, behind a warning naming what it opens; the credential
     folders inside it (`.ssh`, `.aws`, `.gnupg`, `Library/Keychains` and the
@@ -14553,8 +14556,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     and Git actions follow the level instead of Plan's read-only gate
     ([Coordinator threads](design/coordinator-threads.md)). The one place
     that decides a coordinator turn's posture, `coordinatorTurnPosture` in
-    `@octant/domain`, is where Strict will keep Plan's gate at every level
-    (not built yet).
+    `@octant/domain`, keeps Plan's gate at every level under the thread's
+    Strict, read as each turn starts (built).
   - **Pull requests.** A pull-request watch's end after ten started wakes or
     three days, and Auto-fix's three attempts per failure.
   - **Agent messages and children.** A turn's three thread messages, and a
