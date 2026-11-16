@@ -180,6 +180,50 @@ button.environment-card__toggle:active {
   background: var(--octant-control-pressed);
 }
 
+/* The title row is the fold button and, when the section has one, a "…" menu
+   beside it. The button takes the room, so the menu holds the row's right
+   edge on the column the rows' chevrons use. */
+.environment-card__head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.environment-card__head > .environment-card__toggle {
+  flex: 1 1 auto;
+  width: auto;
+}
+
+.environment-card__title-action {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding-inline-end: var(--oct-space-1);
+}
+
+/* A small icon menu at the end of a row or a title row. It is visible at rest
+   so touch and keyboard reach it; its fills follow the rows' own. */
+.environment-menu-trigger {
+  display: inline-flex;
+  width: var(--oct-space-6);
+  height: var(--oct-space-6);
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  background: transparent;
+  color: var(--oct-muted);
+}
+
+.environment-menu-trigger:hover {
+  background: var(--octant-control-hover);
+}
+
+.environment-menu-trigger:active {
+  background: var(--octant-control-pressed);
+}
+
 .environment-card__title {
   flex: 0 1 auto;
   min-width: 0;
@@ -445,6 +489,18 @@ button.environment-link:hover .environment-row__trailing {
 
 .environment-row__action {
   margin-inline-start: auto;
+}
+
+/* A group with nothing to open is a row of the list, not a button: the same
+   trailing slot a chevron takes keeps its value on the rows' right edge. */
+.environment-group__header--static {
+  margin: 0;
+}
+
+.environment-group__header--static::after {
+  width: var(--oct-icon-sm);
+  flex: none;
+  content: "";
 }
 
 .environment-group {

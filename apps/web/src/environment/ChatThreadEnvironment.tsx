@@ -163,27 +163,43 @@ function ChatEnvironmentCounts(props: {
   );
   const view = windowed ? (whole.kind === "counted" ? whole.view : undefined) : props.view;
   const unread = windowed && whole.kind === "failed" ? "Unavailable" : "Counting";
-  const count = (value: (counted: ChatThreadView) => number, singular: string) =>
-    view === undefined ? unread : countLabel(value(view), singular);
+  // A count of none is left out, decided here where the count is made, so a
+  // Project named "0 Ventures" is never mistaken for one. "Counting" and
+  // "Unavailable" are answers about the reading and stay.
+  const count = (
+    value: (counted: ChatThreadView) => number,
+    singular: string,
+  ): string | undefined => {
+    if (view === undefined) return unread;
+    const counted = value(view);
+    return counted === 0 ? undefined : countLabel(counted, singular);
+  };
+  const facts: ReadonlyArray<readonly [label: string, value: string | undefined]> = [
+    ["Project", props.project?.name ?? "Unfiled Chat"],
+    ["Memory", props.project === undefined ? "Unavailable for unfiled Chat" : "Project-scoped"],
+    [
+      "Attachments",
+      count(
+        (counted) =>
+          counted.attachments.filter((attachment) => attachment.status !== "purged").length,
+        "attachment",
+      ),
+    ],
+    ["Sources", count((counted) => counted.citations.length, "source")],
+    ["Recap", count((counted) => counted.turns.length, "turn")],
+  ];
+  const shown = facts.flatMap(([label, value]) =>
+    value === undefined || value.trim() === "" ? [] : [[label, value] as const],
+  );
   return (
     <div className="environment-chat-group">
-      <dl>
-        <ChatFact label="Project" value={props.project?.name ?? "Unfiled Chat"} />
-        <ChatFact
-          label="Memory"
-          value={props.project === undefined ? "Unavailable for unfiled Chat" : "Project-scoped"}
-        />
-        <ChatFact
-          label="Attachments"
-          value={count(
-            (counted) =>
-              counted.attachments.filter((attachment) => attachment.status !== "purged").length,
-            "attachment",
-          )}
-        />
-        <ChatFact label="Sources" value={count((counted) => counted.citations.length, "source")} />
-        <ChatFact label="Recap" value={count((counted) => counted.turns.length, "turn")} />
-      </dl>
+      {shown.length === 0 ? null : (
+        <dl>
+          {shown.map(([label, value]) => (
+            <ChatFact key={label} label={label} value={value} />
+          ))}
+        </dl>
+      )}
       {windowed && whole.kind === "failed" ? (
         <p className="environment-chat-group__status" role="status">
           The thread&apos;s totals could not be read.{" "}

@@ -3,6 +3,7 @@ import { EnvironmentGroup } from "../environment/EnvironmentGroup";
 import { compactTokenCount } from "../context/contextInspectorModel";
 import {
   decodeAggregateVersion,
+  type SpendCeilingRemaining,
   type SpendCeilingSnapshot,
   type SpendCeilingThreadType,
   type UsageQueryFilter,
@@ -15,10 +16,13 @@ import {
   notMeasuredProvidersNote,
   spendCeilingLimits,
   spendCeilingRemainingPhrases,
+  spendCeilingShortReading,
 } from "./spendCeilingLimits";
 import { useEffect, useMemo, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantPopover } from "../ui/base/OctantPopover";
+import { ChevronRight } from "../ui/icons";
 import { useUsageDashboardController } from "./useUsageDashboardController";
 import "./usageWorkspace.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -66,15 +70,18 @@ export function ThreadUsagePanel(props: ThreadUsagePanelProps) {
     <EnvironmentGroup
       icon={Gauge}
       title="Usage"
-      // A request with no reported usage is not zero usage, so a total that
+      // The row's own value says the state, so the body has no sentence for
+      // it. A request with no reported usage is not zero usage, so a total that
       // leaves some out is not shown folded, where the caveat is hidden.
-      {...(summary === undefined ||
-      summary.totals.totalRequests === 0 ||
-      summary.requestsWithUnavailableUsage > 0
+      {...(summary === undefined
         ? {}
-        : {
-            summary: `${compactTokens(summary.totals.totalInputTokens + summary.totals.totalOutputTokens)} tokens`,
-          })}
+        : summary.totals.totalRequests === 0
+          ? { summary: "No usage yet" }
+          : summary.requestsWithUnavailableUsage > 0
+            ? {}
+            : {
+                summary: `${compactTokens(summary.totals.totalInputTokens + summary.totals.totalOutputTokens)} tokens`,
+              })}
     >
       <section aria-label="Thread usage" className="thread-usage">
         {controller.status === "loading" ? (
@@ -91,11 +98,7 @@ export function ThreadUsagePanel(props: ThreadUsagePanelProps) {
           </OctantAlert>
         ) : null}
 
-        {summary === undefined ? null : summary.totals.totalRequests === 0 ? (
-          <p className="thread-usage__status" role="note">
-            No usage has been recorded for this thread yet.
-          </p>
-        ) : (
+        {summary === undefined || summary.totals.totalRequests === 0 ? null : (
           // Label and figure on one line each, the same list the checkout facts
           // use. As four boxed tiles the numbers read as a dashboard inside the
           // rail, and a count of zero unreported requests took a tile to say so.
@@ -122,6 +125,7 @@ export function ThreadUsagePanel(props: ThreadUsagePanelProps) {
         )}
         {props.spendCeilingClient === undefined ? null : (
           <SpendCeilingControls
+            key={`${props.subjectType}:${props.subjectId}`}
             client={props.spendCeilingClient}
             subjectId={props.subjectId}
             subjectType={props.subjectType}
@@ -264,106 +268,142 @@ function SpendCeilingControls(props: {
     }
   }
 
+  const reading = spendCeilingShortReading(
+    [snapshot?.threadRemaining, snapshot?.projectRemaining].filter(
+      (remaining) => remaining !== undefined,
+    ),
+  );
+  const value =
+    remaining === undefined ? "None" : remaining.length === 0 ? "Cannot be measured" : reading;
+  const [open, setOpen] = useState(false);
+  const messageAlert =
+    message === undefined ? null : (
+      <OctantAlert className="thread-usage__status" tone="warning">
+        {message}
+      </OctantAlert>
+    );
+
   return (
     <div className="thread-usage__ceiling">
-      <div className="thread-usage__ceiling-head">
-        <h4 className="thread-usage__subtitle">Spend ceiling</h4>
-        {remaining === undefined ? (
-          <p className="thread-usage__ceiling-value" role="note">
-            None
-          </p>
-        ) : remaining.length === 0 ? (
-          // A ceiling is set but none of its dimensions can be measured; the
-          // refusal below says why, and "None" would claim there is no ceiling.
-          <p className="thread-usage__ceiling-value" role="status">
-            Cannot be measured
-          </p>
-        ) : (
-          <p className="thread-usage__ceiling-value" role="status">
-            {remaining.join(" · ")}
-          </p>
-        )}
-      </div>
-      {notMeasured === undefined ? null : (
-        <p className="thread-usage__ceiling-note" role="note">
-          {notMeasured}
-        </p>
-      )}
+      {/* One row: the label and what is set. The four fields, the buttons and
+          the notes open from it, so a thread with no ceiling spends one line
+          on it instead of a form. */}
+      <OctantPopover
+        align="end"
+        className="thread-usage__popover"
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) {
+            setBudget("");
+            setTurns("");
+            setHours("");
+            setDollars("");
+          }
+        }}
+        open={open}
+        title="Spend ceiling"
+        trigger={
+          <>
+            <span className="thread-usage__ceiling-label">Spend ceiling</span>
+            <span className="thread-usage__ceiling-value">{value}</span>
+            <ChevronRight aria-hidden="true" className="thread-usage__ceiling-chevron" size={14} />
+          </>
+        }
+        triggerClassName="thread-usage__ceiling-row"
+        triggerLabel={`Spend ceiling, ${value}`}
+      >
+        <div className="thread-usage__ceiling-sheet">
+          {remaining === undefined || remaining.length === 0 ? null : (
+            <p className="thread-usage__ceiling-note" role="status">
+              {remaining.join(" · ")}
+            </p>
+          )}
+          {notMeasured === undefined ? null : (
+            <p className="thread-usage__ceiling-note" role="note">
+              {notMeasured}
+            </p>
+          )}
+          {scope === undefined ? null : (
+            // One line: the number and what to do with it. The field had sat alone
+            // and unlabelled across the rail with its button wrapped under it.
+            <form
+              className="thread-usage__ceiling-form"
+              noValidate
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submit(threadCeilingSet ? "raise" : "set");
+              }}
+            >
+              <OctantInput
+                aria-label="Token spend ceiling"
+                inputMode="numeric"
+                onChange={(event) => setBudget(event.target.value)}
+                placeholder={threadCeilingSet ? "New tokens" : "Tokens"}
+                value={budget}
+              />
+              <OctantInput
+                aria-label="Turn ceiling"
+                inputMode="numeric"
+                onChange={(event) => setTurns(event.target.value)}
+                placeholder="Turns"
+                value={turns}
+              />
+              <OctantInput
+                aria-label="Agent run time ceiling in hours"
+                inputMode="decimal"
+                onChange={(event) => setHours(event.target.value)}
+                placeholder="Hours"
+                value={hours}
+              />
+              <OctantInput
+                aria-label="Money ceiling in US dollars"
+                inputMode="decimal"
+                onChange={(event) => setDollars(event.target.value)}
+                placeholder="$"
+                value={dollars}
+              />
+              <OctantButton
+                aria-label={threadCeilingSet ? "Raise spend ceiling" : "Set spend ceiling"}
+                size="sm"
+                type="submit"
+                variant="outline"
+              >
+                {threadCeilingSet ? "Raise" : "Set"}
+              </OctantButton>
+              {threadCeilingSet ? (
+                <OctantButton
+                  aria-label="Clear ceiling"
+                  onClick={() => void submit("clear")}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Clear
+                </OctantButton>
+              ) : null}
+            </form>
+          )}
+          {/* The alert itself stays in the group behind this sheet. A refused
+              Set would otherwise go unseen until the sheet closed, so the sheet
+              repeats the words as a plain line; the alert has already spoken. */}
+          {message === undefined ? null : (
+            <p className="thread-usage__ceiling-note thread-usage__ceiling-problem">{message}</p>
+          )}
+          {hasMoneyCeiling([snapshot?.thread, snapshot?.project]) ? (
+            <p className="thread-usage__ceiling-note" role="note">
+              {MONEY_CEILING_NOTE}
+            </p>
+          ) : null}
+        </div>
+      </OctantPopover>
       {refusal === undefined ? null : (
         <OctantAlert className="thread-usage__status" tone="warning">
           {refusal.message}
         </OctantAlert>
       )}
-      {scope === undefined ? null : (
-        // One line: the number and what to do with it. The field had sat alone
-        // and unlabelled across the rail with its button wrapped under it.
-        <form
-          className="thread-usage__ceiling-form"
-          noValidate
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submit(threadCeilingSet ? "raise" : "set");
-          }}
-        >
-          <OctantInput
-            aria-label="Token spend ceiling"
-            inputMode="numeric"
-            onChange={(event) => setBudget(event.target.value)}
-            placeholder={threadCeilingSet ? "New ceiling in tokens" : "Tokens, e.g. 200000"}
-            value={budget}
-          />
-          <OctantInput
-            aria-label="Turn ceiling"
-            inputMode="numeric"
-            onChange={(event) => setTurns(event.target.value)}
-            placeholder="Turns"
-            value={turns}
-          />
-          <OctantInput
-            aria-label="Agent run time ceiling in hours"
-            inputMode="decimal"
-            onChange={(event) => setHours(event.target.value)}
-            placeholder="Hours"
-            value={hours}
-          />
-          <OctantInput
-            aria-label="Money ceiling in US dollars"
-            inputMode="decimal"
-            onChange={(event) => setDollars(event.target.value)}
-            placeholder="$"
-            value={dollars}
-          />
-          <OctantButton
-            aria-label={threadCeilingSet ? "Raise spend ceiling" : "Set spend ceiling"}
-            size="sm"
-            type="submit"
-            variant="outline"
-          >
-            {threadCeilingSet ? "Raise" : "Set"}
-          </OctantButton>
-          {threadCeilingSet ? (
-            <OctantButton
-              aria-label="Clear ceiling"
-              onClick={() => void submit("clear")}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              Clear
-            </OctantButton>
-          ) : null}
-        </form>
-      )}
-      {hasMoneyCeiling([snapshot?.thread, snapshot?.project]) ? (
-        <p className="thread-usage__ceiling-note" role="note">
-          {MONEY_CEILING_NOTE}
-        </p>
-      ) : null}
-      {message === undefined ? null : (
-        <OctantAlert className="thread-usage__status" tone="warning">
-          {message}
-        </OctantAlert>
-      )}
+      {/* Always here, open or closed: moving it into the popover moved the
+          dashboard link under the pointer when the popover opened. */}
+      {messageAlert}
     </div>
   );
 }

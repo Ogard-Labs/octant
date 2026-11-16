@@ -18,7 +18,9 @@ export function ThreadActivityEnvironment() {
   // A live computer-use session is what the Running section counts; with no
   // preview host there can be none.
   useReportRunning(preview?.available === true ? 1 : 0);
-  if (preview === null) return null;
+  // No session, nothing to say: the Running section's summary reads "Nothing
+  // running" and a row of "None" added a line to every thread without one.
+  if (preview === null || !preview.available) return null;
   const action = preview.hidden ? "Show" : "Hide";
   // One row in the rail's rhythm: what it is on the left, what it is doing on
   // the right. It had been a section label over a full-width button that sat
@@ -27,21 +29,17 @@ export function ThreadActivityEnvironment() {
     <section aria-label="Computer use" className="environment-row environment-activity">
       <EnvironmentTile icon={PictureInPicture2} />
       <h3 className="environment-row__title">Computer use</h3>
-      {preview.available ? (
-        <OctantButton
-          aria-expanded={!preview.hidden}
-          aria-label={`${action} Picture in Picture`}
-          className="environment-row__action"
-          onClick={() => preview.setHidden(!preview.hidden)}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          {action} preview
-        </OctantButton>
-      ) : (
-        <span className="environment-row__detail">None</span>
-      )}
+      <OctantButton
+        aria-expanded={!preview.hidden}
+        aria-label={`${action} Picture in Picture`}
+        className="environment-row__action"
+        onClick={() => preview.setHidden(!preview.hidden)}
+        size="sm"
+        type="button"
+        variant="ghost"
+      >
+        {action} preview
+      </OctantButton>
     </section>
   );
 }

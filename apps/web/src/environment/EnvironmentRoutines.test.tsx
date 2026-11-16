@@ -111,6 +111,11 @@ function renderRoutines(
   );
 }
 
+async function choose(item: "New routine" | "Follow up later"): Promise<void> {
+  await userEvent.click(screen.getByRole("button", { name: "Add a routine" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: item }));
+}
+
 function listedNames(): ReadonlyArray<string> {
   const list = screen.getByRole("list", { name: "Routines in this Project" });
   return within(list)
@@ -127,14 +132,19 @@ describe("EnvironmentRoutines", () => {
     vi.useRealTimers();
   });
 
-  it("offers only the two create actions when the Project has no routines", async () => {
+  it("offers the two ways to add one behind a single plus button when the Project has no routines", async () => {
     const fake = client([]);
     renderRoutines(fake);
     await waitFor(() => expect(fake.list).toHaveBeenCalled());
     await userEvent.click(screen.getByRole("button", { name: "Routines" }));
 
-    expect(screen.getByRole("button", { name: "Follow up later" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "New routine" })).toBeInTheDocument();
+    // One "+" holds both ways to add one; neither stands on the row.
+    expect(screen.queryByRole("button", { name: "Follow up later" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "New routine" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Add a routine" }));
+    expect(await screen.findByRole("menuitem", { name: "Follow up later" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "New routine" })).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
 
@@ -250,7 +260,7 @@ describe("EnvironmentRoutines", () => {
       await waitFor(() => expect(fake.list).toHaveBeenCalled());
       await userEvent.click(screen.getByRole("button", { name: "Routines" }));
 
-      await userEvent.click(screen.getByRole("button", { name: "New routine" }));
+      await choose("New routine");
       const form = screen.getByRole("form", { name: "New routine" });
       await userEvent.type(within(form).getByLabelText("Name"), "Morning check");
       await userEvent.type(
@@ -286,7 +296,7 @@ describe("EnvironmentRoutines", () => {
     renderRoutines(fake);
     await waitFor(() => expect(fake.list).toHaveBeenCalled());
     await userEvent.click(screen.getByRole("button", { name: "Routines" }));
-    await userEvent.click(screen.getByRole("button", { name: "New routine" }));
+    await choose("New routine");
 
     await userEvent.click(screen.getByRole("button", { name: "Create routine" }));
 
@@ -300,7 +310,7 @@ describe("EnvironmentRoutines", () => {
     await waitFor(() => expect(fake.list).toHaveBeenCalled());
     await userEvent.click(screen.getByRole("button", { name: "Routines" }));
 
-    await userEvent.click(screen.getByRole("button", { name: "Follow up later" }));
+    await choose("Follow up later");
     expect(screen.getByRole("button", { name: "Tomorrow at 9:00" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -326,7 +336,7 @@ describe("EnvironmentRoutines", () => {
     renderRoutines(fake);
     await waitFor(() => expect(fake.list).toHaveBeenCalled());
     await userEvent.click(screen.getByRole("button", { name: "Routines" }));
-    await userEvent.click(screen.getByRole("button", { name: "Follow up later" }));
+    await choose("Follow up later");
     await userEvent.click(screen.getByRole("button", { name: "In 1 hour" }));
     await userEvent.click(screen.getByRole("button", { name: "Schedule follow-up" }));
     expect(fake.followUp).toHaveBeenCalledWith(

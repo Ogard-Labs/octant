@@ -31,8 +31,7 @@ function environmentClient(
 }
 
 describe("EnvironmentSubagents", () => {
-  it("says None rather than vanishing when the thread has delegated nothing", async () => {
-    const user = userEvent.setup();
+  it("says None as a plain row that is not a button when the thread has delegated nothing", async () => {
     render(
       <EnvironmentSubagents
         client={environmentClient({
@@ -44,8 +43,9 @@ describe("EnvironmentSubagents", () => {
     );
 
     expect(await screen.findByText("None")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: /^Subagents/ }));
-    expect(screen.getByText(/They appear when the agent hands off part of its work/)).toBeVisible();
+    expect(screen.getByText("Subagents")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Subagents/ })).toBeNull();
+    expect(screen.queryByText(/They appear when the agent hands off part of its work/)).toBeNull();
   });
 
   it("does not claim there are none before the first read has answered", async () => {

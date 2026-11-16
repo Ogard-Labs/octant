@@ -475,7 +475,7 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   with what it limits and its default
   ([Coordinator threads: Bounds](coordinator-threads.md#bounds)). The settings
   sat above the composer as a select and three number fields until 2026-11-15;
-  most people keep the defaults, and the box for the work came after them. A Code thread's row menu has **Make coordinator**, a submenu
+  most people keep the defaults, and the box for the work came after them. A thread's row menu keeps its everyday actions on top (Pin in pane, Pin, Rename; Mark as read or unread, Mark done, Put away, Snooze; the pull-request destinations) and files the rest under **More**, with Archive last and alone (maintainer request, 2026-11-16). A Code thread's row menu has **Make coordinator**, a submenu
   with the same worker-level choice, or **Stop
   coordinating** on a coordinator (never on a worker); on a coordinator
   **Coordinator limits…**, which opens the same dialog with the three bounds
@@ -655,7 +655,10 @@ the shelf's `data-shelf` value stays `completed`, separate from its label.
 The **Review page** lists the threads the sidebar's To review count counts, by
 the same predicate (`isWaitingForReview`: unread, not working, not on a shelf),
 so the tile's number and the page's rows never disagree. A Code thread's
-checkout diff remembers Unified or Side by side in this window; Settings ›
+checkout diff remembers Unified or Side by side in this window, set from the Review bar's
+**More review actions** menu together with Ignore whitespace (maintainer request,
+2026-11-16; the menu's button wears a dot while either is off its default, and
+the menu offers Reset); Settings ›
 Code supplies the default only while that thread has no stored choice. Rows run oldest
 first, by the host's reported finish time where it has one. The detail panel
 reads the thread's last reply, the Code board's check facts, an Octant-run
@@ -1075,10 +1078,22 @@ Projects list shows each Work or Code Project's thread count at the trailing
 edge in place of "Available"; only a state that needs the person (Archived,
 Relink required, Unverified) is a word. Issues open on the current Project's
 GitHub repository when the Project has one and the host has used it. The
-Agents toolbar is one row: the All, Active and History chips, one mode menu,
-and the List and Graph switch. The Automations notice about notification
-delivery sits under the creation cards, and the suggested templates are a
-three-column grid of equal-height cards.
+Agents toolbar is one row: search, one Filter menu (Status and Mode as two
+labelled groups), the List and Graph switch, and a "…" menu that holds Save as
+Canvas. A run's Open thread shows while the pointer or focus is on its row and
+always on touch, keeping its space; pressing the row still opens the run's
+detail (maintainer request, 2026-11-16). The Artifacts toolbar is search, one
+Filter menu (Kind, Project, Mode and Tag as radio groups), the gallery and list
+switch, and the tabs. Automations has one "New automation" button in the page
+header; it opens a menu of Describe with Octant and Create manually, each with
+its sentence as the item's description, and the two-card creation section is
+gone. The toolbar is search, the List and Calendar switch, and one Filter menu
+(Status, Group, Sort, Mode and Show completed). Every Filter button reads
+"Filter" with the number of non-default choices, says it in its accessible name
+("Filter, 2 active"), and its menu ends with Reset filters while anything is on.
+The Automations notice about notification delivery sits under the list, and the
+suggested templates are a three-column grid of equal-height cards, kept in the
+empty state beside the same single button.
 
 ### Inbox page
 
@@ -1087,9 +1102,11 @@ under rules.
 
 - **Title line.** "Inbox" in the page title role (`--oct-text-2xl` at the strong weight, shared by every destination), and on
   its baseline, in the secondary ink, one sentence of state in the person's locale:
-  today's date and what waits ("Nothing is waiting on you.", "1 thread is
-  waiting on you.", "3 threads are waiting on you."), with the urgent count when
-  there is one. There is no greeting by time of day and no separate count line.
+  today's date and what waits ("1 thread is waiting on you.", "3 threads are
+  waiting on you."), with the urgent count when there is one. An empty page has
+  no such sentence: its Needs you card already says nothing is there (maintainer
+  request, 2026-11-16). There is no greeting by time of day and no separate
+  count line.
   Refresh is a quiet icon button with a tooltip at the trailing edge.
 - **Columns.** The content keeps a measure of 980px, left-aligned under the
   title's inset, and opens to 1240px in a window 1200px wide or more; a wide
@@ -1453,7 +1470,7 @@ memory used and total, network in and out, disk throughput, disk space, GPU
 utilisation, and **Energy**. The readings are plain rows on the dock's own
 surface with a hairline between them, never boxes on a fill of their own, and a
 history line appears once it has two samples to join. Each reading is drawn
-only when that host reports it; a host with no battery says "No battery", and a figure the host cannot read
+only when that host reports it; a host with no battery draws no Energy row (maintainer request, 2026-11-16), and a figure the host cannot read
 is left out rather than drawn as zero. The tool keeps the last five minutes of
 samples in the window (nothing is stored), reads about every five seconds only
 while it is mounted and the window is visible, never overlaps reads, abandons one
@@ -2678,12 +2695,15 @@ The jump happens once; a turn the thread no longer holds (an edit or rewind
 removed it) leaves the thread at its newest turns
 ([Host reads and commands](host-reads-and-commands.md)). The list's three
 arrangements, Status (the default), the Project tree, and the Activity feed,
-are a visible Status/Projects/Activity switch on the row the Project view
-picker uses, not an icon in the header. The phone's Work and Code tabs offer the
+are the first group of the list's filter menu on the row the Project view
+picker uses ("Show threads as", a radio group; the button's count is for filters
+only), not a three-button switch and not an icon in the header. A list with no
+Project views to filter keeps the choice behind one glyph on that row
+(maintainer request, 2026-11-16). The phone's Work and Code tabs offer the
 same three as a segmented control above their thread list
 ([Mobile maturity](mobile-maturity.md#exists-today)). That row stands in the same place in
-all three, with the Project tree's own Projects heading under it, so pressing
-the switch moves nothing but the list. Status headings carry their count in
+all three, with the Project tree's own Projects heading under it, so choosing
+an arrangement moves nothing but the list. Status headings carry their count in
 meta ink after the label ("Needs input 2"), the same face as the feed's folded
 Earlier count. A row whose pull request's checks pass adds a 12px check in the
 success ink after the PR number.
@@ -2798,7 +2818,7 @@ branch with its checkout kind (Worktree, Main folder or Shared folder), then
 the checkout's state. The computer was a section of its own, a label over one
 row and a hairline, 68px for one fact. An unavailable checkout is one muted warning row whose
 short text has the full reason as tooltip and description. "Changes" follows,
-with Commit or push and Create pull request as plain action rows. A section is a
+with Commit or push and Create pull request as plain action rows only where they could do something (see "What the strip shows at rest"). A section is a
 muted 12px sentence-case label over rows; a row is a 16px muted icon, a 14px
 medium label in body ink and an optional right-aligned detail in muted ink as plain
 text (no chip, no border), 28px tall, filled across its width by the pointer
@@ -3179,9 +3199,9 @@ Review; No uncommitted changes when clean), a detached HEAD or separate
 worktree when true, and Commit or push and Create pull request sit under it as
 two equal buttons. The rows follow in two cards, Running (Local servers, open by
 default only when this checkout is serving something; Subagents; Computer use) and Delivery (Pull requests,
-Sources, Delivers, Working folder, and Usage, closed by default; totals, the
-spend ceiling form for tokens, turns, hours, and US dollars, whose fields wrap
-two by two in a narrow rail, and Open Usage dashboard inside). A card with no
+Sources, Delivers, Working folder, and Usage, closed by default; totals, one
+Spend ceiling row whose popover holds the form for tokens, turns, hours, and US
+dollars, and Open Usage dashboard inside). A card with no
 rows to show is omitted with its caption. Every row has one grammar: a 26px
 glyph tile, the name, the row's state as a small neutral chip, and a trailing
 chevron where the row opens (a row's own action, such as All pull requests,
@@ -3241,6 +3261,29 @@ its text, because the strip is 300px wide. Under the rows stand "N to review"
 and "N finished", each on a line of its own. A row opens that subagent in the
 Agents tool and the lines open the tool; the strip has no Stop, and reading and
 steering a subagent belong in Agents (maintainer request, 2026-11-16).
+
+**What the strip shows at rest.** A thread with nothing running, no pull
+request and no changes shows only what is true and what can be started
+(maintainer request, 2026-11-16). Local servers is a row only while a server
+runs on this computer, and Computer use only while a session exists; Running's
+folded summary says "Nothing running" otherwise. Subagents stays as "None", and
+with nothing to open it is a plain row with no chevron and no button, as is any
+group whose opened body would only repeat its value. Pull requests is absent
+when the Project is not on GitHub (Delivery's summary says "Not on GitHub");
+when it is, "All pull requests" is the last row of its opened body and the
+count is not said again. Usage's own value is the total, or "No usage yet".
+Its Spend ceiling is one row (label, and "None" or a short reading such as
+"2M tokens · $5") that opens a popover under it holding the four fields, Set,
+Raise and Clear, the money note and every refusal message, with the same
+handlers; Escape or a press outside closes it and leaves the ceiling as it was.
+Commit or push shows for a checkout with changes or a named branch, and Create
+pull request for a named branch, because the section reads the working tree and
+the branch only, not how far the branch is ahead. Neither shows for an
+unreadable checkout. New task in this Project and Worktrees are the items of a
+"…" menu (More for changes) at the right end of the Changes title row, shown
+while the section is open. Routines keeps its row; Follow up later and New
+routine are the two items of one "+" menu (Add a routine) at its right end.
+Chat's fact list leaves out a fact whose value is none.
 
 On the phone, a thread's header button (Views and panes) is the one way to
 reach anything beside the conversation. Its sheet lists the full-screen views

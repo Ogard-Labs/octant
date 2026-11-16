@@ -60,7 +60,8 @@ export function EnvironmentSubagents(props: {
     [controller.entries, providers],
   );
   // A row that vanished when nothing had been delegated could not be told
-  // apart from a missing feature, so an empty thread says None.
+  // apart from a missing feature, so an empty thread says None. With nothing
+  // to list it is not a button either: its body only repeated the value.
   const summary = controller.status !== "ready" ? "Reading" : subagentSummary(controller.entries);
   const working = controller.entries.filter((entry) =>
     isActiveAgentHierarchyStatus(entry.lifecycleStatus),
@@ -90,6 +91,7 @@ export function EnvironmentSubagents(props: {
 
   return (
     <EnvironmentGroup
+      expandable={controller.status !== "ready" || controller.entries.length > 0}
       icon={Bot}
       onOpenChange={setChosen}
       open={open}
@@ -101,10 +103,6 @@ export function EnvironmentSubagents(props: {
       {controller.status !== "ready" ? (
         <p className="environment-subagents__empty" role="status">
           Reading subagents…
-        </p>
-      ) : controller.entries.length === 0 ? (
-        <p className="environment-subagents__empty">
-          None yet. They appear when the agent hands off part of its work.
         </p>
       ) : (
         <div className="environment-subagents__list">

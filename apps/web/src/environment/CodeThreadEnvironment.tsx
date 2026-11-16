@@ -28,7 +28,9 @@ import {
   GitCommitHorizontal,
   GitFork,
   GitPullRequest,
+  MoreHorizontal,
   Paperclip,
+  Plus,
   Server,
   Target,
 } from "../ui/icons";
@@ -56,7 +58,7 @@ import { EnvironmentGoal } from "./EnvironmentGoal";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
 import { EnvironmentRoutines } from "./EnvironmentRoutines";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantMenu } from "../ui/base/OctantMenu";
 import {
   CODE_DELIVERY_OUTCOME_OPTIONS,
   CodeDeliveryOutcomeSelector,
@@ -187,6 +189,48 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
       : { label: "New task in this Project", onClick: () => onNewThreadInProject(project.id) };
   const observed = controller.observation;
   const readyObservation = observed?.status === "ready" ? observed : undefined;
+  // The section holds the working tree's state and the branch, not how far the
+  // branch is ahead of its remote or whether a pull request exists, so it
+  // cannot rule out a push on a named branch. It hides the rows only where
+  // they could do nothing: an unreadable checkout (the status row says why)
+  // and a detached HEAD with a clean tree.
+  const offersCommitOrPush =
+    props.onOpenGit !== undefined &&
+    readyObservation !== undefined &&
+    (readyObservation.changes === "dirty" || readyObservation.branch.kind === "named");
+  const offersPullRequest =
+    props.onCreatePullRequest !== undefined &&
+    readyObservation !== undefined &&
+    readyObservation.branch.kind === "named";
+  // A checkout that cannot be read already shows "New task in this Project" as
+  // its way out, so the menu offers it for every other state.
+  const changesMenu: ReadonlyArray<{
+    readonly value: string;
+    readonly label: string;
+    readonly icon: ReactNode;
+    readonly run: () => void;
+  }> = [
+    ...(project === undefined || onNewThreadInProject === undefined || checkoutUnusable
+      ? []
+      : [
+          {
+            value: "new-task",
+            label: "New task in this Project",
+            icon: <Plus aria-hidden="true" size={16} />,
+            run: () => onNewThreadInProject(project.id),
+          },
+        ]),
+    ...(props.onOpenWorktrees === undefined
+      ? []
+      : [
+          {
+            value: "worktrees",
+            label: "Worktrees",
+            icon: <GitFork aria-hidden="true" size={16} />,
+            run: props.onOpenWorktrees,
+          },
+        ]),
+  ];
   const localServersAvailable = localServersSection?.available === true;
   const localServers = useLocalServersController({
     enabled: localServersAvailable,
@@ -201,6 +245,15 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
     localServers.snapshot === undefined
       ? undefined
       : countGroupedLocalServerListenersByScope(localServers.snapshot);
+  // A server elsewhere on the computer keeps the row, so it stays reachable;
+  // before the first read there is nothing to say yet. A failed read keeps it
+  // too, open, because the error and its way to try again live in the row.
+  const serversFailed = localServersAvailable && localServers.status === "error";
+  const serversShown =
+    serversFailed ||
+    (localServersAvailable &&
+      runningServerCounts !== undefined &&
+      runningServerCounts.currentCheckout + runningServerCounts.other > 0);
   // Open by default only when this checkout is serving something; a list of
   // servers elsewhere on the computer is a count until asked for.
   const [serversOpen, setServersOpen] = useState<boolean>();
@@ -255,6 +308,23 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
             className="environment-checkout"
             foldId="changes"
             summary={changesSummary(controller.status, controller.observation)}
+            {...(changesMenu.length === 0
+              ? {}
+              : {
+                  titleAction: (
+                    <OctantMenu
+                      items={changesMenu.map(({ value, label, icon }) => ({ value, label, icon }))}
+                      onValueChange={(value) =>
+                        changesMenu.find((entry) => entry.value === value)?.run()
+                      }
+                      selectionMode="action"
+                      trigger={<MoreHorizontal aria-hidden="true" size={16} />}
+                      triggerClassName="environment-menu-trigger"
+                      triggerLabel="More for changes"
+                      value=""
+                    />
+                  ),
+                })}
           >
             <EnvironmentGitGroup
               {...(freshThreadAction === undefined ? {} : { action: freshThreadAction })}
@@ -268,23 +338,20 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
               failureRef={failure}
               status={controller.status}
             />
-            {props.onOpenGit === undefined ? null : (
+            {offersCommitOrPush ? (
               <EnvironmentRow
                 icon={GitCommitHorizontal}
                 label="Commit or push"
                 onClick={props.onOpenGit}
               />
-            )}
-            {props.onCreatePullRequest === undefined ? null : (
+            ) : null}
+            {offersPullRequest ? (
               <EnvironmentRow
                 icon={GitPullRequest}
                 label="Create pull request"
                 onClick={props.onCreatePullRequest}
               />
-            )}
-            {props.onOpenWorktrees === undefined ? null : (
-              <EnvironmentRow icon={GitFork} label="Worktrees" onClick={props.onOpenWorktrees} />
-            )}
+            ) : null}
           </EnvironmentCard>
         }
         mode="code"
@@ -328,34 +395,6 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                     : runningServerCounts.currentCheckout
               }
             />
-            <EnvironmentGroup
-              icon={Server}
-              onOpenChange={setServersOpen}
-              open={serversOpen ?? (runningServerCounts?.currentCheckout ?? 0) > 0}
-              {...(localServers.snapshot === undefined
-                ? {}
-                : {
-                    summary: serverSummary(runningServerCounts),
-                  })}
-              title="Local servers"
-            >
-              <LocalServersGroup
-                controller={localServers}
-                {...(props.onOpenLocalServer === undefined
-                  ? {}
-                  : { onOpenTarget: props.onOpenLocalServer })}
-                {...(props.onCopyLocalServerUrl === undefined
-                  ? {}
-                  : { onCopyUrl: props.onCopyLocalServerUrl })}
-                {...(localServersAvailable
-                  ? {}
-                  : {
-                      unavailableReason:
-                        localServersSection?.unavailableReason ??
-                        "Open a repository Project to view local servers.",
-                    })}
-              />
-            </EnvironmentGroup>
             {props.agentRunClient === undefined ? null : (
               <EnvironmentSubagents
                 client={props.agentRunClient}
@@ -375,6 +414,35 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
               />
             )}
             <ThreadActivityEnvironment />
+            {/* Last in its section: a server that starts while the strip is open
+                adds a row at the end, never above one the pointer may be on. It
+                is absent when nothing runs on this computer, which the
+                section's summary says. */}
+            {serversShown ? (
+              <EnvironmentGroup
+                icon={Server}
+                onOpenChange={setServersOpen}
+                open={
+                  serversOpen ?? (serversFailed || (runningServerCounts?.currentCheckout ?? 0) > 0)
+                }
+                {...(localServers.snapshot === undefined
+                  ? {}
+                  : {
+                      summary: serverSummary(runningServerCounts),
+                    })}
+                title="Local servers"
+              >
+                <LocalServersGroup
+                  controller={localServers}
+                  {...(props.onOpenLocalServer === undefined
+                    ? {}
+                    : { onOpenTarget: props.onOpenLocalServer })}
+                  {...(props.onCopyLocalServerUrl === undefined
+                    ? {}
+                    : { onCopyUrl: props.onCopyLocalServerUrl })}
+                />
+              </EnvironmentGroup>
+            ) : null}
           </EnvironmentCard>
           <EnvironmentCard caption="Delivery" foldId="delivery">
             {pullRequestClient === undefined || props.project === undefined ? null : (
@@ -485,7 +553,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                   <p>
                     {readyObservation.workingFolder.kind === "extra"
                       ? "Shared approved folder; it is outside this task's child worktree. Git, changed-file receipts, Review and PR operations cover the Code checkout only. "
-                      : "Main folder of this Code checkout. "}
+                      : ""}
                     Start a new task to choose another working folder or subfolder.
                   </p>
                 )}

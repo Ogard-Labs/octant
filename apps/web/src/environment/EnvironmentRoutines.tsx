@@ -4,7 +4,7 @@ import type {
   AutomationSummary,
   AutomationThreadRoutineRequest,
 } from "@octant/contracts/automation";
-import { CalendarClock } from "../ui/icons";
+import { CalendarClock, Plus } from "../ui/icons";
 import { useCallback, useState } from "react";
 import { automationLifecycleLabel } from "../automation/automationCenterModel";
 import { followUpWhenLabel, routineScheduleLine } from "../automation/routinePresentation";
@@ -16,6 +16,7 @@ import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantMenu } from "../ui/base/OctantMenu";
 import { EnvironmentGroup } from "./EnvironmentGroup";
 import { FollowUpPicker, scheduledAtOf, type Editing } from "./EnvironmentFollowUpPicker";
 import { EnvironmentRoutineForm } from "./EnvironmentRoutineForm";
@@ -209,6 +210,26 @@ export function EnvironmentRoutines(props: {
       : routines.slice(0, COLLAPSED_ROUTINE_COUNT);
   return (
     <EnvironmentGroup
+      // The two ways to add one share a "+" at the row's end: two ghost
+      // buttons stood in every thread's strip whether or not it had any.
+      action={
+        <OctantMenu
+          items={[
+            { value: "follow-up", label: "Follow up later", disabled: busy },
+            { value: "routine", label: "New routine", disabled: busy },
+          ]}
+          onValueChange={(value) =>
+            value === "follow-up"
+              ? start({ kind: "follow-up", editing: { kind: "new" } })
+              : start({ kind: "new" })
+          }
+          selectionMode="action"
+          trigger={<Plus aria-hidden="true" size={16} />}
+          triggerClassName="environment-menu-trigger"
+          triggerLabel="Add a routine"
+          value=""
+        />
+      }
       icon={CalendarClock}
       onOpenChange={setOpen}
       open={open}
@@ -219,28 +240,6 @@ export function EnvironmentRoutines(props: {
       }
       title="Routines"
     >
-      <div className="environment-routine__actions">
-        <OctantButton
-          className="window-no-drag"
-          disabled={busy}
-          onClick={() => start({ kind: "follow-up", editing: { kind: "new" } })}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          Follow up later
-        </OctantButton>
-        <OctantButton
-          className="window-no-drag"
-          disabled={busy}
-          onClick={() => start({ kind: "new" })}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          New routine
-        </OctantButton>
-      </div>
       {opened?.kind === "follow-up" ? (
         <FollowUpPicker
           busy={busy}

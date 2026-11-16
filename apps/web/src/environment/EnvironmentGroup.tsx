@@ -100,6 +100,13 @@ export function EnvironmentCard(props: {
   readonly summary?: string | undefined;
   /** A small mark drawn after the summary, for a figure that is also a share. */
   readonly summaryMark?: ReactNode;
+  /**
+   * One small control at the right end of the title row (a "…" menu). It sits
+   * beside the fold button, never inside it, so pressing it cannot fold the
+   * section; folded, the row is only its title and summary and the control is
+   * gone.
+   */
+  readonly titleAction?: ReactNode;
   readonly className?: string;
   readonly children: ReactNode;
 }) {
@@ -138,6 +145,7 @@ function FoldableEnvironmentCard(props: {
   readonly foldId: string;
   readonly summary?: string | undefined;
   readonly summaryMark?: ReactNode;
+  readonly titleAction?: ReactNode;
   readonly className?: string;
   readonly children: ReactNode;
 }) {
@@ -171,27 +179,32 @@ function FoldableEnvironmentCard(props: {
         data-folded={folded ? "true" : undefined}
         role="group"
       >
-        <OctantButton
-          aria-controls={rowsId}
-          aria-describedby={showSummary ? summaryId : undefined}
-          aria-expanded={!folded}
-          aria-labelledby={captionId}
-          className="environment-card__caption environment-card__toggle window-no-drag"
-          onClick={toggle}
-          type="button"
-          variant="bare"
-        >
-          <span className="environment-card__title" id={captionId}>
-            {props.caption}
-          </span>
-          <ChevronRight aria-hidden="true" className="environment-card__chevron" size={12} />
-          {showSummary ? (
-            <span className="environment-card__summary" id={summaryId}>
-              {summary}
-              {props.summaryMark}
+        <div className="environment-card__head">
+          <OctantButton
+            aria-controls={rowsId}
+            aria-describedby={showSummary ? summaryId : undefined}
+            aria-expanded={!folded}
+            aria-labelledby={captionId}
+            className="environment-card__caption environment-card__toggle window-no-drag"
+            onClick={toggle}
+            type="button"
+            variant="bare"
+          >
+            <span className="environment-card__title" id={captionId}>
+              {props.caption}
             </span>
-          ) : null}
-        </OctantButton>
+            <ChevronRight aria-hidden="true" className="environment-card__chevron" size={12} />
+            {showSummary ? (
+              <span className="environment-card__summary" id={summaryId}>
+                {summary}
+                {props.summaryMark}
+              </span>
+            ) : null}
+          </OctantButton>
+          {folded || props.titleAction === undefined ? null : (
+            <span className="environment-card__title-action">{props.titleAction}</span>
+          )}
+        </div>
         <div className="environment-card__rows" hidden={folded} id={rowsId}>
           <EnvironmentSectionFoldedContext.Provider value={folded}>
             {props.children}
@@ -214,6 +227,12 @@ export interface EnvironmentGroupProps {
   readonly icon?: IconComponent;
   /** Short trailing summary shown on the header row (e.g. "+102 −0"). */
   readonly summary?: ReactNode;
+  /**
+   * False for a group with nothing to open: it draws its title and value as a
+   * plain row, with no chevron and no button, so a reader is never sent to an
+   * opened body that only repeats the value.
+   */
+  readonly expandable?: boolean;
   readonly defaultOpen?: boolean;
   readonly open?: boolean;
   /** Lets a parent react to open/close, e.g. to pause polling while collapsed. */
@@ -243,6 +262,19 @@ export function EnvironmentGroup(props: EnvironmentGroupProps) {
     setOpen(next);
     onOpenChange?.(next);
   };
+  if (props.expandable === false) {
+    return (
+      <section className="environment-group">
+        <p className="environment-group__header environment-group__header--static">
+          {props.icon === undefined ? null : <EnvironmentTile icon={props.icon} />}
+          <span className="environment-group__title">{props.title}</span>
+          {props.summary === undefined ? null : (
+            <span className="environment-group__summary"> {props.summary}</span>
+          )}
+        </p>
+      </section>
+    );
+  }
   return (
     <section className={`environment-group${open ? " environment-group--open" : ""}`}>
       <div className="environment-group__head">

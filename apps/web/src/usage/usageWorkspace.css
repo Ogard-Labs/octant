@@ -383,8 +383,7 @@
   gap: var(--oct-space-3);
 }
 
-.thread-usage__totals dt,
-.thread-usage__subtitle {
+.thread-usage__totals dt {
   margin: 0;
   color: var(--oct-fg-2);
   font-size: var(--oct-text-sm);
@@ -398,6 +397,8 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The ceiling is one row: label at the left, what is set at the right. The
+   row is a button (a popover opens from it), filled only by the pointer. */
 .thread-usage__ceiling {
   display: grid;
   gap: var(--oct-space-1);
@@ -405,20 +406,66 @@
   border-top: 1px solid var(--oct-hairline);
 }
 
-.thread-usage__ceiling-head {
+/* Doubled onto its container so the popover trigger's utility classes
+   (inline-flex, centred, rounded) cannot win on stylesheet order. */
+.thread-usage__ceiling .thread-usage__ceiling-row {
   display: flex;
+  width: 100%;
   min-height: 28px;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: var(--oct-space-3);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+  text-align: left;
+}
+
+.thread-usage__ceiling .thread-usage__ceiling-row:hover {
+  background: var(--octant-control-hover);
+}
+
+.thread-usage__ceiling .thread-usage__ceiling-row:active {
+  background: var(--octant-control-pressed);
 }
 
 .thread-usage__ceiling-value {
-  margin: 0;
+  min-width: 0;
+  margin: 0 0 0 auto;
+  overflow: hidden;
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
   text-align: end;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The same trailing slot the Environment rows keep for their chevron, shown
+   only on a pointed row so nothing shifts. */
+.thread-usage__ceiling-chevron {
+  flex: none;
+  color: var(--oct-muted);
+  opacity: 0;
+}
+
+.thread-usage__ceiling-row:hover .thread-usage__ceiling-chevron,
+.thread-usage__ceiling-row[data-popup-open] .thread-usage__ceiling-chevron {
+  opacity: 1;
+}
+
+.thread-usage__popover {
+  width: 320px;
+  max-width: calc(100vw - var(--oct-space-6));
+}
+
+.thread-usage__ceiling-sheet {
+  display: grid;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-1);
 }
 
 .thread-usage__ceiling-form {
@@ -439,6 +486,11 @@
   margin: 0;
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
+}
+
+/* A refused Set, repeated inside the open sheet in the warning ink. */
+.thread-usage__ceiling-problem {
+  color: var(--oct-warn-fg);
 }
 
 /* A floor rather than a complete total is a caveat on every number below it,

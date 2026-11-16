@@ -1,4 +1,4 @@
-import { render as renderElement, screen, waitFor } from "@testing-library/react";
+import { render as renderElement, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -130,8 +130,137 @@ describe("ThreadUsagePanel", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByRole("note")).toHaveTextContent("No usage has been recorded"),
+      expect(document.querySelector(".environment-group__summary")).toHaveTextContent(
+        "No usage yet",
+      ),
     );
+    expect(screen.queryByText(/No usage has been recorded/)).not.toBeInTheDocument();
+  });
+
+  it("shows the spend ceiling as one row that opens the form in a popover and closes it on Escape", async () => {
+    const load = vi.fn().mockResolvedValue(dashboard(4));
+    const snapshot = vi.fn().mockResolvedValue({});
+    await renderOpen(
+      <ThreadUsagePanel
+        client={{ load } as UsageDashboardClient}
+        spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        subjectId="73000000-0000-4000-8000-000000000001"
+        subjectType="chat-thread"
+      />,
+    );
+    const row = await screen.findByRole("button", { name: "Spend ceiling, None" });
+    expect(screen.queryByLabelText("Token spend ceiling")).not.toBeInTheDocument();
+    expect(screen.queryByText("Spend ceiling", { selector: "h4" })).not.toBeInTheDocument();
+    await userEvent.click(row);
+    await userEvent.type(await screen.findByLabelText("Token spend ceiling"), "500");
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByLabelText("Token spend ceiling")).toBeNull());
+    expect(row).toHaveFocus();
+    await userEvent.click(row);
+    expect(await screen.findByLabelText("Token spend ceiling")).toHaveValue("");
+  });
+
+  it("reads a ceiling that is set in one short line on the row", async () => {
+    const load = vi.fn().mockResolvedValue(dashboard(4));
+    const snapshot = vi.fn().mockResolvedValue({
+      thread: { version: 2, policy: { tokenBudget: 2_000_000, costBudgetUsdCents: 500 } },
+      threadRemaining: {
+        ceilingTokens: 2_000_000,
+        remainingTokens: 1_500_000,
+        ceilingUsdCents: 500,
+        remainingUsdCents: 400,
+        window: { kind: "lifetime" },
+        version: 2,
+      },
+    });
+    await renderOpen(
+      <ThreadUsagePanel
+        client={{ load } as UsageDashboardClient}
+        spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        subjectId="73000000-0000-4000-8000-000000000001"
+        subjectType="chat-thread"
+      />,
+    );
+    expect(
+      await screen.findByRole("button", { name: "Spend ceiling, 2M tokens · $5" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps a ceiling error in the group, once, whether the popover is open or closed", async () => {
+    const load = vi.fn().mockResolvedValue(dashboard(4));
+    const snapshot = vi.fn().mockRejectedValue(new Error("Ceiling service is down."));
+    await renderOpen(
+      <ThreadUsagePanel
+        client={{ load } as UsageDashboardClient}
+        onOpenUsageDashboard={vi.fn()}
+        spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        subjectId="73000000-0000-4000-8000-000000000001"
+        subjectType="chat-thread"
+      />,
+    );
+    const group = document.querySelector(".thread-usage") as HTMLElement;
+    expect(await within(group).findByRole("alert")).toHaveTextContent("Ceiling service is down.");
+    await openSpendCeiling();
+    await screen.findByLabelText("Token spend ceiling");
+    expect(within(group).getByRole("alert")).toHaveTextContent("Ceiling service is down.");
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    // The open sheet repeats the words as a plain line, so a refusal is seen
+    // where the person is typing.
+    expect(screen.getAllByText("Ceiling service is down.")).toHaveLength(2);
+  });
+
+  it("names the same ceiling on the row and in the popover when the thread and the Project differ", async () => {
+    const load = vi.fn().mockResolvedValue(dashboard(4));
+    const snapshot = vi.fn().mockResolvedValue({
+      thread: { version: 1 },
+      project: { version: 2 },
+      threadRemaining: {
+        ceilingTokens: 1_000_000,
+        remainingTokens: 900_000,
+        window: { kind: "lifetime" },
+        version: 1,
+      },
+      projectRemaining: {
+        ceilingTokens: 2_000_000,
+        remainingTokens: 100_000,
+        window: { kind: "lifetime" },
+        version: 2,
+      },
+    });
+    await renderOpen(
+      <ThreadUsagePanel
+        client={{ load } as UsageDashboardClient}
+        spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        subjectId="73000000-0000-4000-8000-000000000001"
+        subjectType="chat-thread"
+      />,
+    );
+    const row = await screen.findByRole("button", { name: "Spend ceiling, 2M tokens" });
+    await userEvent.click(row);
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "100,000 of 2,000,000 tokens remaining",
+    );
+  });
+
+  it("closes the popover and clears the fields when the thread changes", async () => {
+    const load = vi.fn().mockResolvedValue(dashboard(4));
+    const snapshot = vi.fn().mockResolvedValue({});
+    const element = (subjectId: string) => (
+      <ThreadUsagePanel
+        client={{ load } as UsageDashboardClient}
+        spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        subjectId={subjectId}
+        subjectType="chat-thread"
+      />
+    );
+    const { rerender } = renderElement(element("73000000-0000-4000-8000-000000000001"));
+    await userEvent.click(screen.getByRole("button", { name: /^Usage/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Spend ceiling/ }));
+    await userEvent.type(await screen.findByLabelText("Token spend ceiling"), "123");
+    rerender(element("73000000-0000-4000-8000-000000000002"));
+    await waitFor(() => expect(screen.queryByLabelText("Token spend ceiling")).toBeNull());
+    await userEvent.click(await screen.findByRole("button", { name: /^Spend ceiling/ }));
+    expect(await screen.findByLabelText("Token spend ceiling")).toHaveValue("");
   });
 
   it("names a token ceiling refusal and a recovery on Environment", async () => {
@@ -194,6 +323,7 @@ describe("ThreadUsagePanel", () => {
         subjectType="chat-thread"
       />,
     );
+    await openSpendCeiling();
     await waitFor(() =>
       expect(screen.getByRole("status")).toHaveTextContent("150 of 500 tokens remaining"),
     );
@@ -232,6 +362,7 @@ describe("ThreadUsagePanel", () => {
         subjectType="chat-thread"
       />,
     );
+    await openSpendCeiling();
     await waitFor(() =>
       expect(screen.getByRole("status")).toHaveTextContent("150 of 500 tokens remaining"),
     );
@@ -269,6 +400,7 @@ describe("ThreadUsagePanel", () => {
         subjectType="chat-thread"
       />,
     );
+    await openSpendCeiling();
     await waitFor(() =>
       expect(screen.getByRole("status")).toHaveTextContent("$14.60 of $25 remaining"),
     );
@@ -320,6 +452,7 @@ describe("ThreadUsagePanel", () => {
         subjectType="chat-thread"
       />,
     );
+    await openSpendCeiling();
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("has no price"));
     // The turns it can measure and the money it cannot, side by side.
     expect(screen.getByRole("status")).toHaveTextContent(
@@ -356,6 +489,7 @@ describe("ThreadUsagePanel", () => {
         subjectType="chat-thread"
       />,
     );
+    await openSpendCeiling();
     await waitFor(() =>
       expect(screen.getByRole("status")).toHaveTextContent("1,000 of 1,000 tokens remaining"),
     );
@@ -381,6 +515,11 @@ describe("ThreadUsagePanel", () => {
     expect(screen.queryByText("800")).not.toBeInTheDocument();
   });
 });
+
+/** The spend ceiling is one row of the opened Usage group; its form is in a popover. */
+async function openSpendCeiling(): Promise<void> {
+  await userEvent.click(await screen.findByRole("button", { name: /^Spend ceiling/ }));
+}
 
 /** Usage is a closed Environment row until the reader opens it. */
 async function renderOpen(element: ReactElement): Promise<void> {
