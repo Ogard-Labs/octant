@@ -83,6 +83,8 @@ export interface AcpConfinementInput {
    * Absent, Full access launches unwrapped.
    */
   readonly fullAccessSandbox?: boolean;
+  /** Whether the launch is Strict; absent is Strict. */
+  readonly strict?: boolean;
   /** A non-mutating readiness check may contact the provider without a thread. */
   readonly purpose?: "probe" | "session";
   readonly environment: NodeJS.ProcessEnv;
@@ -592,6 +594,9 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 : { extraBoundRoots: input.extraFolders }),
               temporaryDirectory,
               networkEgress,
+              // Outside Strict the agent's own tools may use the protected
+              // files inside its folders, other providers' sign-ins excepted.
+              ...(input.strict === false ? { protectedFiles: "provider-sign-ins" as const } : {}),
               // On Linux the capsule reaches the tool bridges through the
               // forwarder's loopback relay; Seatbelt opens them above.
               ...(platform === "linux" &&
@@ -1342,6 +1347,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           mode: input.mode,
           executionPolicy: input.executionPolicy,
           ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+          ...(input.strict === false ? { strict: false } : {}),
           ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
           environment,
           ...(input.loopbackPorts === undefined ? {} : { loopbackPorts: input.loopbackPorts }),

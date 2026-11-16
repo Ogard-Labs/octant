@@ -89,6 +89,8 @@ export interface PiConfinementPort {
      * Accept edits has. Absent, Full access launches unwrapped.
      */
     readonly fullAccessSandbox?: boolean;
+    /** Whether the launch is Strict; absent is Strict. */
+    readonly strict?: boolean;
     readonly environment: NodeJS.ProcessEnv;
     readonly tools?: ReadonlyArray<ProviderToolDefinition>;
     readonly toolBridge?: PiManagedToolBridgeConfig;
@@ -880,6 +882,9 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
               writeBoundRoot: !(input.executionPolicy === "plan" || input.mode === "chat"),
               additionalWriteRoots: [piHome],
               allowFileReadStar: true,
+              // Outside Strict Pi's own tools may use the protected files
+              // inside its folders, other providers' sign-ins excepted.
+              ...(input.strict === false ? { protectedFiles: "provider-sign-ins" as const } : {}),
               // Work declares shell "denied"; an in-process provider shell
               // emits no permission request, so the jail itself must refuse
               // to spawn it.

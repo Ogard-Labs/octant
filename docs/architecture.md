@@ -14262,7 +14262,16 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     configuration, `.netrc`) at every level, as on its own, so `aws`,
     `kubectl`, `docker push`, private registries and `gh` work. Octant's own
     file tools keep refusing them below Full access, and provider sign-ins
-    at Full access. Strict refuses them for every tool.
+    at Full access. Strict refuses them for every tool. Built for Claude
+    Code's own file tools (its gate refuses only another provider's sign-in
+    outside Strict) and for the confinement of Pi and the ACP agents
+    (`protectedFiles: "provider-sign-ins"`), read at each launch. Not built
+    yet for Codex and OpenCode, whose processes are shared per posture and do
+    not yet key on Strict. Until
+    [Providers run in their own sandbox](#security-and-authority) is built, a
+    wrapped runtime's wall still keeps files outside the Project's folders
+    unreadable, so outside Strict the narrowing reaches the protected files
+    inside them (a home folder opened as a Project).
   - **Denials.** A denied request goes back to the model, which adjusts, as
     on its own; no count of denials ends a Code turn, in Strict too (built:
     the runtime answers every Deny and the turn keeps running).

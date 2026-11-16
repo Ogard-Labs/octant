@@ -884,10 +884,18 @@ export function claudeFileToolSecretRefusal(
   projectRoot: string,
   searchesRunUnguarded: boolean,
   homeDirectory?: string,
+  /**
+   * Whether the launch is Strict. Outside Strict Claude's own tools may use
+   * the files Octant protects, as Claude Code does on its own; only another
+   * provider's sign-in stays refused, since one provider never receives
+   * another's credentials.
+   */
+  strict = true,
 ): string | undefined {
   const options = {
     ownAccountPaths,
     ...(homeDirectory === undefined ? {} : { homeDirectory }),
+    ...(strict ? {} : { fullAccess: true }),
   };
   if (CLAUDE_SEARCH_TOOLS.has(toolName)) {
     // Under Plan the runtime runs inside Octant's profile, so
@@ -3828,6 +3836,8 @@ function makeConnection(
                 ownClaudeAccountPaths,
                 request.projectRoot,
                 claudeSearchesRunUnguarded(input.executionPolicy),
+                undefined,
+                strict,
               )
             : undefined;
           if (secretRefusal !== undefined) return deny(secretRefusal);
