@@ -259,6 +259,23 @@ static int launchctl(char *const args[]) {
   }
   return WIFEXITED(status) && !WEXITSTATUS(status) ? 0 : -1;
 }
+static int remove_control(const char *label) {
+  static const char prefix[] = "app.octant.sandbox.";
+  if (strncmp(label, prefix, sizeof(prefix)-1)) return -1;
+  const char *name = label + sizeof(prefix)-1;
+  if (strncmp(name, "octant-sandbox-control-", sizeof("octant-sandbox-control-")-1) || !token(name)) return -1;
+  char path[PATH_MAX], canonical[PATH_MAX];
+  snprintf(path, sizeof(path), "/tmp/%s", name);
+  if (!realpath(path, canonical)) return errno == ENOENT ? 0 : -1;
+  int directory = private_directory(canonical);
+  if (directory < 0) return errno == ENOENT ? 0 : -1;
+  int error = 0;
+  if (unlinkat(directory, "control.sock", 0) && errno != ENOENT) error = -1;
+  if (unlinkat(directory, "job.plist", 0) && errno != ENOENT) error = -1;
+  close(directory);
+  if (rmdir(canonical) && errno != ENOENT) error = -1;
+  return error;
+}
 static void xml(FILE *file, const char *s) {
   for (; *s; ++s) {
     switch (*s) {
@@ -314,11 +331,16 @@ static int run(const char *root, const char *epoch, char **args) {
   record.client = getpid(); record.client_unique = unique(getpid());
   if (!record.coalition || record.coalition == coalition(getpid()) || !record.owner_unique || boot_id(record.boot)) goto cleanup;
   snprintf(receipt_name, sizeof(receipt_name), "%d-%" PRIu64 ".scope", getpid(), unique(getpid()));
-  int receipt_fd = openat(directory, receipt_name, O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC, 0600);
+  char pending_name[160];
+  snprintf(pending_name, sizeof(pending_name), "%s.pending", receipt_name);
+  int receipt_fd = openat(directory, pending_name, O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC, 0600);
   if (receipt_fd < 0) goto cleanup;
   int receipt_error = full_write(receipt_fd, &record, sizeof(record)) || fsync(receipt_fd);
   close(receipt_fd);
-  if (receipt_error || fsync(directory)) goto cleanup;
+  if (receipt_error || renameat(directory, pending_name, directory, receipt_name) || fsync(directory)) {
+    unlinkat(directory, pending_name, 0);
+    goto cleanup;
+  }
   receipt_written = 1;
   if (isatty(0) && tcgetsid(0) == getsid(0)) {
     signal(SIGHUP, SIG_IGN);
@@ -342,14 +364,16 @@ static int run(const char *root, const char *epoch, char **args) {
   }
 cleanup:
   if (control_fd >= 0) close(control_fd);
-  if (record.coalition && revoke_scope(record.coalition, 0)) result = 125;
-  else if (receipt_written) { unlinkat(directory, receipt_name, 0); fsync(directory); }
+  int revoked = !record.coalition || !revoke_scope(record.coalition, 0);
+  if (!revoked) result = 125;
   if (registered) {
     char *bootout[] = {"launchctl", "bootout", service, NULL};
     if (launchctl(bootout)) result = 125;
   }
-  close(listener); close(directory);
-  unlink(socket_path); unlink(plist); rmdir(control);
+  close(listener);
+  if (remove_control(label)) { result = 125; revoked = 0; }
+  if (receipt_written && revoked) { unlinkat(directory, receipt_name, 0); fsync(directory); }
+  close(directory);
   return result;
 }
 static int reap(const char *root, const char *epoch, pid_t client) {
@@ -367,19 +391,19 @@ static int reap(const char *root, const char *epoch, pid_t client) {
     int fd = openat(directory, entry->d_name, O_RDONLY|O_NOFOLLOW|O_CLOEXEC);
     struct stat st;
     struct receipt record;
-    if (fd < 0) { result = 125; continue; }
+    if (fd < 0) { if (errno != ENOENT) result = 125; continue; }
     int error = fstat(fd, &st) || st.st_uid != getuid() || (st.st_mode & 077) ||
       st.st_size != sizeof(record) || full_read(fd, &record, sizeof(record));
     close(fd);
     if (error || record.magic != RECEIPT_MAGIC || !memchr(record.epoch, 0, sizeof(record.epoch)) ||
         !memchr(record.boot, 0, sizeof(record.boot)) || !memchr(record.label, 0, sizeof(record.label)) ||
         strncmp(record.label, "app.octant.sandbox.octant-sandbox-control-", sizeof("app.octant.sandbox.octant-sandbox-control-")-1) ||
-        !token(record.label) || !token(record.epoch)) { result = 125; continue; }
+        !token(record.label) || !token(record.epoch)) { fputs("octant-sandbox-scope: invalid ownership receipt\n", stderr); result = 125; continue; }
     if (client > 0 && record.client != client) continue;
     if (!strcmp(epoch, "--stale")) {
       if (record.owner > 1 && unique(record.owner) == record.owner_unique) continue;
     } else if (strcmp(record.epoch, epoch)) continue;
-    if (!strcmp(boot, record.boot) && revoke_scope(record.coalition, 0)) { result = 125; continue; }
+    if (!strcmp(boot, record.boot) && revoke_scope(record.coalition, 0)) { fputs("octant-sandbox-scope: kernel scope revocation failed\n", stderr); result = 125; continue; }
     if (!strcmp(boot, record.boot)) {
       char service[256];
       snprintf(service, sizeof(service), "gui/%u/%s", getuid(), record.label);
@@ -387,7 +411,8 @@ static int reap(const char *root, const char *epoch, pid_t client) {
       /* An already unloaded owned job is also a completed revocation. */
       (void)launchctl(bootout);
     }
-    if (unlinkat(directory, entry->d_name, 0)) result = 125;
+    if (!strcmp(boot, record.boot) && remove_control(record.label)) { result = 125; continue; }
+    if (unlinkat(directory, entry->d_name, 0) && errno != ENOENT) result = 125;
   }
   closedir(entries); fsync(directory); close(directory);
   return result;
