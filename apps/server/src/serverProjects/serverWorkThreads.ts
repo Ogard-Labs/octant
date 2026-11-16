@@ -96,11 +96,13 @@ export function bindServerWorkTurn(
   };
   const tools = options.composition.forServerWork({
     thread: input.thread,
-    filesystem: new ServerFileSystem({
-      connection: options.connection,
-      server: address,
-      root: project.folder,
-    }),
+    filesystem: ({ fullAccess }) =>
+      new ServerFileSystem({
+        connection: options.connection,
+        server: address,
+        root: project.folder,
+        fullAccess,
+      }),
     shell: createServerShell({
       connection: options.connection,
       server: () => {

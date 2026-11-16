@@ -892,10 +892,13 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             command !== undefined &&
             callerAuthority === "remote-device" &&
             !agentGrantSession &&
-            raisesToFullAccess(command)
+            (raisesToFullAccess(command) || loosensStrict(command))
           ) {
             return failureResponse(
-              { category: "unauthorized", message: FULL_ACCESS_LOCAL_ONLY },
+              {
+                category: "unauthorized",
+                message: raisesToFullAccess(command) ? FULL_ACCESS_LOCAL_ONLY : STRICT_LOCAL_ONLY,
+              },
               403,
               origin,
             );
@@ -910,6 +913,20 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           ) {
             return failureResponse(
               { category: "unauthorized", message: AUTOMATIC_MODEL_LOCAL_ONLY },
+              403,
+              origin,
+            );
+          }
+          // The per-run Full access flag is typed by the person on `octant
+          // agent` at this host. Another agent (an agent grant, or any
+          // device) never sets it, whatever level its own grant allows.
+          if (
+            command?.kind === "create-code-thread" &&
+            command.thread.fullAccessRunFlag === true &&
+            (callerKind !== "local-window" || agentGrantSession)
+          ) {
+            return failureResponse(
+              { category: "unauthorized", message: FULL_ACCESS_RUN_FLAG_PERSON_ONLY },
               403,
               origin,
             );
@@ -3353,6 +3370,8 @@ class CodeRouteRejected extends Error {
 const AUTOMATIC_MODEL_LOCAL_ONLY =
   "The model for automatic calls is chosen in the Octant window on this host.";
 const FULL_ACCESS_LOCAL_ONLY = "Full access is chosen in the Octant window on this host.";
+const FULL_ACCESS_RUN_FLAG_PERSON_ONLY =
+  "The per-run Full access flag is set by the person on `octant agent` on this host.";
 
 function raisesToFullAccess(command: CodeCommand): boolean {
   switch (command.kind) {
@@ -3363,6 +3382,28 @@ function raisesToFullAccess(command: CodeCommand): boolean {
       return command.thread.executionPolicy === "full-access";
     case "update-code-settings":
       return command.defaultExecutionPolicy === "full-access";
+    default:
+      return false;
+  }
+}
+
+const STRICT_LOCAL_ONLY =
+  "Strict is turned off in the Octant window on this host or on a device you paired.";
+
+/**
+ * Whether a command could turn Strict off for a thread or as the default:
+ * an explicit off, or a thread returned to defaults that may be off. A
+ * hub-introduced device may turn Strict on, never off, as it may lower a
+ * thread's level but never raise it.
+ */
+function loosensStrict(command: CodeCommand): boolean {
+  switch (command.kind) {
+    case "change-code-thread-access":
+      return command.strict === false || command.strict === null;
+    case "create-code-thread":
+      return command.thread.strict === false;
+    case "update-code-settings":
+      return command.defaultStrict === false;
     default:
       return false;
   }

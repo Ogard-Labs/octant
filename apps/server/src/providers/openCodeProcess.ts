@@ -5,6 +5,7 @@ import {
   constants,
   accessSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -31,12 +32,15 @@ import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
   makeProcessConfinementLive,
   ProcessConfinementError,
+  seatbeltAllowLiteralMetadataRule,
+  seatbeltAllowLiteralReadRule,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import {
   materializeOsNetworkEgress,
   resolveProviderRuntimeEgressPolicy,
 } from "../process/threadEgressPolicy";
+import { secretGuardRefusal } from "../process/secretGuard";
 import { makeBoundedProviderStderr } from "./providerProcessDiagnostic";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import {
@@ -80,6 +84,8 @@ export interface OpenCodeProcessStartInput {
   readonly cwd: string;
   /** The Project's extra folders, granted what `cwd` is granted. */
   readonly extraFolders?: ReadonlyArray<string>;
+  /** Folders read at every level and written at none: the thread's attachments folder. */
+  readonly readOnlyFolders?: ReadonlyArray<string>;
   /** Product mode used to derive the OS process policy before launch. */
   readonly mode?: "chat" | "work" | "code";
   /** Effective thread policy used to derive filesystem/process/network limits. */
@@ -134,6 +140,13 @@ export interface OpenCodeProcessStartInput {
    * session's rules decide them). Absent keeps every tool server off.
    */
   readonly ownToolServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /**
+   * The person let OpenCode run as itself: a 1.x launch also finds their
+   * global `AGENTS.md` where OpenCode looks for it, as it does on its own
+   * (see `openCodeGlobalAgentsInstructionFile`). Absent, 1.x finds none and
+   * falls back to the global `CLAUDE.md`.
+   */
+  readonly runsAsItself?: true;
 }
 
 export interface OpenCodeProcessPort {
@@ -174,14 +187,20 @@ export interface OpenCodeProcessDependencies {
 
 /**
  * Static switches every OpenCode launch sets: no updater, no model fetch, no
- * borrowed Claude Code integration, no default plugins. The version read keeps
- * them too, since a read with no network and only a scratch home is exactly
- * where an update or fetch attempt can stall.
+ * `.claude` skills, no default plugins. The version read keeps them too, since
+ * a read with no network and only a scratch home is exactly where an update or
+ * fetch attempt can stall.
+ *
+ * `OPENCODE_DISABLE_CLAUDE_CODE` and `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT` are
+ * not set, so OpenCode reads `CLAUDE.md` where it finds no `AGENTS.md`, as it
+ * does on its own: instruction text grants no authority. Read from the opencode
+ * 1.18.21 source, the broad switch disables both that prompt and `.claude`
+ * skills, so it goes too and `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` alone keeps
+ * the skills off; 2.x reads only `AGENTS.md` and gates `.claude` skills on
+ * either switch, so the skills switch covers it there as well.
  */
 const OPENCODE_GUARDS = {
   OPENCODE_DISABLE_AUTOUPDATE: "1",
-  OPENCODE_DISABLE_CLAUDE_CODE: "1",
-  OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: "1",
   OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
   OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
   OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
@@ -193,15 +212,14 @@ const OPENCODE_GUARDS = {
 /**
  * The guards for a launch whose person let OpenCode load its own skills: the
  * switches that keep OpenCode from reading `.claude/skills` and
- * `.agents/skills` go, and every other guard (updater, model fetch, the
- * borrowed `CLAUDE.md` prompt, default plugins, project configuration)
- * stays. Read from the installed opencode v2.2.0 binary: its server reads
- * `.claude` skills only when neither `OPENCODE_DISABLE_CLAUDE_CODE` nor
- * `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` is set, so both go.
+ * `.agents/skills` go, and every other guard (updater, model fetch, default
+ * plugins, project configuration) stays. Read from the installed opencode
+ * v2.2.0 binary: its server reads `.claude` skills only when neither
+ * `OPENCODE_DISABLE_CLAUDE_CODE` nor `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` is
+ * set, and no launch sets the first.
  */
 function openCodeGuardsWithOwnSkills(): Readonly<Record<string, string>> {
   const {
-    OPENCODE_DISABLE_CLAUDE_CODE: _compatibilityOff,
     OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: _compatibilitySkillsOff,
     OPENCODE_DISABLE_EXTERNAL_SKILLS: _externalSkillsOff,
     ...kept
@@ -253,28 +271,29 @@ const READINESS_PATTERN = /^(?:opencode )?server listening on (http:\/\/[^\s]+)$
  * route in a work tree. A private temp directory with a `bin/git` symlink to
  * `/usr/bin/false` put first on PATH makes the spawn succeed and git exit
  * non-zero, which OpenCode reads as "not a git project" and serves anyway.
- * The jail allows fork plus exec of exactly this one binary — no real git,
- * no shell, no other exec. The stand-in is macOS only. Linux confinement
- * cannot grant that one exec without also allowing fork, which reopens the
- * Plan jail, so a 2.x Chat or Plan launch on Linux is refused before it
- * starts (`openCodeRefusesTurnHere`).
+ * On macOS the jail allows fork plus exec of exactly this one binary — no
+ * real git, no shell, no other exec. Linux cannot grant one exec alone, so its
+ * Chat and Plan jail admits processes inside a read-only view instead
+ * (maintainer decision, 2026-11-16); the stand-in is still put first there, so
+ * a repository's own Git configuration (`core.fsmonitor`, hooks) never runs
+ * from a Chat or Plan launch on either platform.
  */
 const GIT_STANDIN_TARGET = "/usr/bin/false";
 
 /**
- * Why a 2.x Chat or Plan launch is refused off macOS. Linux confinement can
- * only deny fork outright, and 2.x has to start `git` to serve a work tree,
- * so the jail those modes need cannot serve one there. Work and Code outside
- * Plan already allow a shell, so 2.x runs there (maintainer decision,
- * 2026-11-14).
+ * Why a 2.x Chat or Plan launch is refused on a host that is neither macOS nor
+ * Linux. macOS grants the git stand-in its one exec, and Linux's Chat and Plan
+ * jail admits processes inside a read-only view (maintainer decision,
+ * 2026-11-16); elsewhere the jail those modes need can start no process, and
+ * 2.x has to start `git` to serve a work tree.
  */
-export const OPENCODE_LINUX_CHAT_PLAN_REFUSAL =
-  "OpenCode 2 runs on Linux only in Work and Code outside Plan: Chat and Plan allow no process, and OpenCode 2 cannot serve a Git work tree without starting one. Use Work or Code at Ask first or above, or another provider for Chat and Plan.";
+export const OPENCODE_CHAT_PLAN_REFUSAL =
+  "OpenCode 2 runs on this host only in Work and Code outside Plan: Chat and Plan allow no process here, and OpenCode 2 cannot serve a Git work tree without starting one. Use Work or Code at Ask first or above, or another provider for Chat and Plan.";
 
 /**
  * Whether this launch is one the host's confinement cannot give a 2.x
- * runtime: Chat or Plan (no fork, no exec) wherever the git stand-in is not
- * available. Work and Code outside Plan launch as they always have.
+ * runtime: Chat or Plan on a host whose jail can start no process. Work and
+ * Code outside Plan launch as they always have.
  */
 export function openCodeRefusesTurnHere(input: {
   readonly runtime: OpenCodeRuntime;
@@ -284,10 +303,20 @@ export function openCodeRefusesTurnHere(input: {
 }): boolean {
   return (
     input.runtime === "beta" &&
-    input.platform !== "darwin" &&
+    !openCodeChatPlanJailStartsProcesses(input.platform) &&
     (input.mode === "chat" || input.executionPolicy === "plan")
   );
 }
+
+/**
+ * Whether a 2.x Chat or Plan launch can start the processes it needs here:
+ * macOS through the git stand-in's single exec grant, Linux because its read-only
+ * Chat and Plan jail admits processes.
+ */
+export function openCodeChatPlanJailStartsProcesses(platform: NodeJS.Platform): boolean {
+  return platform === "darwin" || platform === "linux";
+}
+
 /** A 2.x launch whose caller named no posture runs nothing without refusal. */
 const BETA_DENY_ALL: ReadonlyArray<PermissionV2Rule> = [
   { action: "*", resource: "*", effect: "deny" },
@@ -1058,6 +1087,110 @@ function openCodeDiscoveryRules(home: string | undefined): ReadonlyArray<string>
   ];
 }
 
+/**
+ * The person's global `CLAUDE.md` when a confined OpenCode 1.x launch may read
+ * it, or undefined. Read from the opencode 1.18.21 source
+ * (`src/session/instruction.ts`), 1.x reads `os.homedir()/.claude/CLAUDE.md`
+ * where it finds no global `AGENTS.md`, and its global configuration folder is
+ * the launch's private one, so this is the file it reads; it ignores
+ * `CLAUDE_CONFIG_DIR`. 2.x reads only `AGENTS.md`, so nothing is opened there.
+ *
+ * The rest of `~/.claude` (the sign-in in `.credentials.json`, settings,
+ * transcripts) stays denied: the grant names this one file. A protected file
+ * stays denied, and a link, or a file reached through a linked `.claude`, is
+ * refused rather than followed, so the grant cannot name another file.
+ */
+function openCodeGlobalClaudeInstructionFile(
+  runtime: OpenCodeRuntime,
+  home: string | undefined,
+  platform: NodeJS.Platform,
+): string | undefined {
+  if (runtime !== "legacy" || home === undefined || !isAbsolute(home)) return undefined;
+  try {
+    const file = join(realpathSync(home), ".claude", "CLAUDE.md");
+    if (!lstatSync(file).isFile() || realpathSync(file) !== file) return undefined;
+    if (secretGuardRefusal(file, { platform, homeDirectory: home }) !== undefined) {
+      return undefined;
+    }
+    return file;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The person's global OpenCode `AGENTS.md` when an OpenCode 1.x launch may
+ * read it, or undefined. Read from the opencode 1.18.21 source
+ * (`src/session/instruction.ts` and core `global.ts`), 1.x reads the first of
+ * `<global config>/AGENTS.md` and `~/.claude/CLAUDE.md` that exists, where the
+ * global config folder is `$OPENCODE_CONFIG_DIR`, else
+ * `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`. A launch sets
+ * `OPENCODE_CONFIG_DIR` to its private folder, so this is the file the
+ * person's own environment names, and the launch links it in there. 2.x is
+ * left as it is.
+ *
+ * The rest of the folder (the person's `opencode.json`, plugins, agents)
+ * stays out: the grant names this one file. A protected file stays denied,
+ * and a link, or a file reached through a linked folder, is refused rather
+ * than followed, so the grant cannot name another file.
+ */
+function openCodeGlobalAgentsInstructionFile(
+  runtime: OpenCodeRuntime,
+  environment: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): string | undefined {
+  const home = environment.HOME;
+  if (runtime !== "legacy" || home === undefined || !isAbsolute(home)) return undefined;
+  const absolute = (value: string | undefined) =>
+    value !== undefined && isAbsolute(value) ? value : undefined;
+  try {
+    const configDirectory = absolute(environment.OPENCODE_CONFIG_DIR);
+    const configHome = absolute(environment.XDG_CONFIG_HOME);
+    const configured =
+      configDirectory !== undefined
+        ? join(configDirectory, "AGENTS.md")
+        : configHome !== undefined
+          ? join(configHome, "opencode", "AGENTS.md")
+          : join(home, ".config", "opencode", "AGENTS.md");
+    // Only the home folder itself is canonicalized (macOS homes and temporary
+    // folders sit behind /private links). Every folder below it, and a
+    // configured folder outside it, is kept as named, so a linked
+    // OPENCODE_CONFIG_DIR or a link inside XDG_CONFIG_HOME fails the check
+    // below instead of being resolved away first.
+    const homeDirectory = join(home);
+    const file =
+      configured === homeDirectory || configured.startsWith(`${homeDirectory}/`)
+        ? join(realpathSync(homeDirectory), configured.slice(homeDirectory.length))
+        : configured;
+    if (!lstatSync(file).isFile() || realpathSync(file) !== file) return undefined;
+    if (secretGuardRefusal(file, { platform, homeDirectory: home }) !== undefined) {
+      return undefined;
+    }
+    return file;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Links the person's global `AGENTS.md` into the launch's private config
+ * folder, where OpenCode looks for it. Undefined when nothing was linked, so
+ * the wall opens nothing for it.
+ */
+function linkOpenCodeGlobalAgentsInstructions(
+  profile: PrivateOpenCodeProfile,
+  file: string | undefined,
+): string | undefined {
+  const configDirectory = profile.environment.OPENCODE_CONFIG_DIR;
+  if (file === undefined || configDirectory === undefined) return undefined;
+  try {
+    symlinkSync(file, join(configDirectory, "AGENTS.md"));
+    return file;
+  } catch {
+    return undefined;
+  }
+}
+
 interface OpenCodeLaunch {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
@@ -1133,6 +1266,8 @@ function prepareOpenCodeLaunch(
   runtime: OpenCodeRuntime,
   port: number,
   platform: NodeJS.Platform,
+  /** The person's global `AGENTS.md`, linked into the private config folder. */
+  globalAgentsInstructions: string | undefined,
 ): Effect.Effect<OpenCodeLaunch, ProviderFailure> {
   const mode = input.mode ?? "code";
   const executionPolicy = openCodeWallPolicy(input);
@@ -1140,7 +1275,7 @@ function prepareOpenCodeLaunch(
   // protocol selected by the version probe aligned with its CLI contract.
   const args = openCodeServerArgs(runtime, port);
   if (openCodeRefusesTurnHere({ runtime, platform, mode, executionPolicy })) {
-    return Effect.fail(failure("unsupported", OPENCODE_LINUX_CHAT_PLAN_REFUSAL));
+    return Effect.fail(failure("unsupported", OPENCODE_CHAT_PLAN_REFUSAL));
   }
   return Effect.try({
     try: () => {
@@ -1173,7 +1308,13 @@ function prepareOpenCodeLaunch(
         cacheHome,
         stateHome,
         providerDataDirectory,
+        ...(input.readOnlyFolders ?? []),
       ]);
+      const globalClaudeInstructions = openCodeGlobalClaudeInstructionFile(
+        runtime,
+        profile.environment.HOME,
+        platform,
+      );
       const privateHomeAllowPaths = existingAbsolutePaths([
         root,
         binaryPath,
@@ -1185,6 +1326,12 @@ function prepareOpenCodeLaunch(
         cacheHome,
         stateHome,
         providerDataDirectory,
+        ...(input.readOnlyFolders ?? []),
+        // Bubblewrap binds this one file read-only. Seatbelt keeps `~/.claude`
+        // denied as a whole and reopens the file by literal rule below: as an
+        // allowed path here it would deny `.claude` entry by entry instead, so
+        // a sign-in written after launch would be readable.
+        ...(platform === "darwin" ? [] : [globalClaudeInstructions, globalAgentsInstructions]),
       ]);
       const writeRoots = existingAbsolutePaths([
         configDirectory,
@@ -1204,18 +1351,25 @@ function prepareOpenCodeLaunch(
       // Chat and Plan have no shell; an in-process provider shell emits no
       // permission request, so the jail itself must refuse to spawn it. Work
       // launches exactly as Code does at the same level.
-      const jailDeniesProcess = executionPolicy === "plan" || mode === "chat";
+      const chatOrPlan = executionPolicy === "plan" || mode === "chat";
       // OpenCode 2 runs `git rev-parse` at startup to resolve its project.
-      // Under the Chat/Plan jail that spawn fails with EPERM and the
-      // server answers 500 for every route in a work tree. On macOS the
-      // stand-in puts an always-failing `git` first on PATH so the spawn
-      // succeeds and git exits non-zero, which OpenCode reads as "not a git
-      // project". The jail allows fork plus exec of exactly /usr/bin/false
-      // and nothing else. Linux confinement cannot express that one exec
-      // without also allowing fork, which is the hole the Plan jail exists
-      // to close, so a 2.x Chat or Plan launch on Linux was refused above.
-      // OpenCode 1.x and Work and Code modes are unchanged.
-      const betaGitStandin = runtime === "beta" && jailDeniesProcess && platform === "darwin";
+      // Under a jail that starts nothing that spawn fails with EPERM and the
+      // server answers 500 for every route in a work tree, so a 2.x Chat or
+      // Plan launch gets the always-failing `git` stand-in first on PATH,
+      // which OpenCode reads as "not a git project". On macOS the jail allows
+      // fork plus exec of exactly /usr/bin/false and nothing else. Linux
+      // cannot express that one exec, so its Chat and Plan jail admits
+      // processes inside the same read-only view: the checkout and every
+      // other bound folder read-only, a private writable temp and the
+      // runtime's own state folders, the launch's network rule, and
+      // Bubblewrap's no-new-privileges (maintainer decision, 2026-11-16).
+      // Its permission rules still deny the shell and delegation. OpenCode
+      // 1.x needs no process and keeps the jail that starts none.
+      const linuxReadOnlyJailStartsProcesses =
+        runtime === "beta" && chatOrPlan && platform === "linux";
+      const jailDeniesProcess = chatOrPlan && !linuxReadOnlyJailStartsProcesses;
+      const betaGitStandin =
+        runtime === "beta" && chatOrPlan && openCodeChatPlanJailStartsProcesses(platform);
       if (betaGitStandin) {
         const standinBin = prepareGitStandinDirectory(profile);
         const existingPath = profile.environment.PATH;
@@ -1255,10 +1409,17 @@ function prepareOpenCodeLaunch(
         readRoots,
         privateHomeAllowPaths,
         networkEgress,
-        writeBoundRoot: !(executionPolicy === "plan" || mode === "chat"),
+        // A proxied Linux launch reaches the tool bridges through the
+        // forwarder's loopback relay; on the shared host network it reaches
+        // them directly, and Seatbelt opens them below.
+        ...(platform === "linux" && typeof networkEgress === "object" && loopbackPorts.length > 0
+          ? { loopbackRelayPorts: loopbackPorts }
+          : {}),
+        writeBoundRoot: !chatOrPlan,
         allowProcessExec: !jailDeniesProcess,
-        // The stand-in needs fork so OpenCode can spawn the failing git; exec
-        // stays denied except for the single /usr/bin/false literal grant.
+        // On macOS the stand-in needs fork so OpenCode can spawn the failing
+        // git; exec stays denied except for the single /usr/bin/false literal
+        // grant.
         allowProcessFork: !jailDeniesProcess || betaGitStandin,
         allowFileReadStar: true,
         // The agent is a loopback HTTP server: the confinement has to let it
@@ -1281,6 +1442,23 @@ function prepareOpenCodeLaunch(
                 // Its provider listing resolves the other coding tools' home
                 // directories first, and a refusal there fails the listing.
                 ...openCodeDiscoveryRules(profile.environment.HOME),
+                // OpenCode 1.x reads the person's global CLAUDE.md as it does
+                // on its own; the person's protected files still follow these
+                // rules, and nothing else under `.claude` opens.
+                ...(globalClaudeInstructions === undefined
+                  ? []
+                  : [
+                      seatbeltAllowLiteralMetadataRule(dirname(globalClaudeInstructions)),
+                      seatbeltAllowLiteralReadRule(globalClaudeInstructions),
+                    ]),
+                // The person's global AGENTS.md, which the private config
+                // folder links to; nothing else in its folder opens.
+                ...(globalAgentsInstructions === undefined
+                  ? []
+                  : [
+                      seatbeltAllowLiteralMetadataRule(dirname(globalAgentsInstructions)),
+                      seatbeltAllowLiteralReadRule(globalAgentsInstructions),
+                    ]),
                 // The git stand-in's only exec: the always-failing binary the
                 // PATH shim resolves `git` to. No other exec becomes possible.
                 ...(betaGitStandin
@@ -1496,8 +1674,27 @@ function acquireOpenCodeServer(
       const password = randomBytes(32).toString("base64url");
       const username = runtime === "beta" ? "opencode" : "octant";
       const authorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+      const globalAgentsInstructions =
+        input.runsAsItself === true
+          ? linkOpenCodeGlobalAgentsInstructions(
+              profile,
+              openCodeGlobalAgentsInstructionFile(
+                runtime,
+                options.inheritedEnvironment ?? process.env,
+                options.platform,
+              ),
+            )
+          : undefined;
       const prepared = Effect.runSyncExit(
-        prepareOpenCodeLaunch(input, profile, options.confinement, runtime, port, options.platform),
+        prepareOpenCodeLaunch(
+          input,
+          profile,
+          options.confinement,
+          runtime,
+          port,
+          options.platform,
+          globalAgentsInstructions,
+        ),
       );
       if (Exit.isFailure(prepared)) {
         profile.cleanup();

@@ -65,6 +65,30 @@ export const CANVAS_PROTOTYPE_HOST_CHROMIUM_SWITCHES: ReadonlyArray<
 const NO_ROUTE_PROXY = "socks5://127.0.0.1:1";
 const NO_ROUTE_BYPASS = "<-loopback>";
 
+/**
+ * How long the host keeps reading a route back after `setProxy` before it
+ * calls the network open. Chromium applies a new proxy configuration
+ * asynchronously, and a read straight after the change once came back as
+ * something other than the dead proxy on a macOS CI runner, leaving the
+ * prototype unavailable for that launch. Nothing is served before the read
+ * succeeds, so waiting a moment widens nothing; a route that never settles
+ * still fails closed.
+ */
+const ROUTE_READ_ATTEMPTS = 10;
+const ROUTE_READ_INTERVAL_MS = 25;
+
+async function readsDeadRoute(
+  session: Pick<CanvasPrototypeHostSessionPort, "resolveProxy">,
+  probe: string,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < ROUTE_READ_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, ROUTE_READ_INTERVAL_MS));
+    const route = await session.resolveProxy(probe);
+    if (/^SOCKS5 127\.0\.0\.1:1$/.test(route.trim())) return true;
+  }
+  return false;
+}
+
 /** The scheme the page is served under, to this process's one session. */
 export const CANVAS_PROTOTYPE_SCHEME = "octant-prototype";
 /** In memory: not prefixed `persist:`, so nothing a page does outlives the process. */
@@ -644,8 +668,7 @@ export function createCanvasPrototypeHost(options: CanvasPrototypeHostOptions) {
           proxyBypassRules: NO_ROUTE_BYPASS,
         });
         for (const probe of ["https://example.com/", "http://127.0.0.1:9/"]) {
-          const route = await options.session.resolveProxy(probe);
-          if (!/^SOCKS5 127\.0\.0\.1:1$/.test(route.trim())) {
+          if (!(await readsDeadRoute(options.session, probe))) {
             unavailable(
               "Octant could not close the prototype surface's network, so it does not run.",
             );

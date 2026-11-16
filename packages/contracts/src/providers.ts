@@ -2149,6 +2149,11 @@ export const OutsideProviderDriverListing = Schema.Struct({
   installed: Schema.Boolean,
   trusted: Schema.Boolean,
   publisherKey: Schema.optional(ExtensionPublisherKeyFingerprint),
+  /**
+   * Present when this host has no confinement for the driver's process, so it
+   * runs without one (Linux). Absent where the host confines it (macOS).
+   */
+  hostConfinement: Schema.optional(Schema.Literal("unconfined")),
 }).annotations(strict);
 export type OutsideProviderDriverListing = typeof OutsideProviderDriverListing.Type;
 
@@ -2767,6 +2772,18 @@ const ProviderRuntimeEventFields = {
   occurredAt: UtcTimestamp,
 } as const;
 
+/**
+ * Token counts a runtime reported for one of its own subagents. Each count is
+ * present only when the runtime reported it: some runtimes report only a total.
+ */
+export const ProviderChildUsage = Schema.Struct({
+  inputTokens: Schema.optional(Schema.NonNegativeInt),
+  outputTokens: Schema.optional(Schema.NonNegativeInt),
+  totalTokens: Schema.optional(Schema.NonNegativeInt),
+}).annotations(strict);
+export type ProviderChildUsage = typeof ProviderChildUsage.Type;
+export const MAX_PROVIDER_CHILD_FINAL_SUMMARY = 2048;
+
 /** A provider report is observation only; it carries no execution authority. */
 export const ProviderChildActivityEvent = Schema.Struct({
   ...ProviderRuntimeEventFields,
@@ -2777,6 +2794,14 @@ export const ProviderChildActivityEvent = Schema.Struct({
   task: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
   status: Schema.Literal("starting", "running", "waiting", "completed", "failed"),
   summary: Schema.NonEmptyTrimmedString,
+  /**
+   * The subagent's own closing report, as the runtime relayed it. It is
+   * outside content: it is shown to the person and never sent to a model.
+   */
+  finalSummary: Schema.optional(
+    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_PROVIDER_CHILD_FINAL_SUMMARY)),
+  ),
+  usage: Schema.optional(ProviderChildUsage),
 }).annotations(strict);
 export type ProviderChildActivityEvent = typeof ProviderChildActivityEvent.Type;
 
@@ -2798,6 +2823,8 @@ export const ProviderChildObservation = Schema.Struct({
     "unknown",
   ),
   latestSummary: Schema.String.pipe(Schema.maxLength(512)),
+  finalSummary: ProviderChildActivityEvent.fields.finalSummary,
+  usage: ProviderChildActivityEvent.fields.usage,
   firstObservedAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
   historyStatus: Schema.Literal("partial", "truncated", "conflicted"),
@@ -2850,6 +2877,14 @@ export const OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS = 65_536;
 /** A point in a runtime's own session, as the runtime names it. */
 export const ProviderNativeAnchor = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256));
 export type ProviderNativeAnchor = typeof ProviderNativeAnchor.Type;
+
+/** The most of a plan a runtime may put before the person when it asks to leave Plan. */
+export const MAX_PROVIDER_PLAN_CHARACTERS = 32_768;
+export const ProviderLevelChangeRequest = Schema.Struct({
+  kind: Schema.Literal("enter-plan", "exit-plan"),
+  plan: Schema.optional(Schema.String.pipe(Schema.maxLength(MAX_PROVIDER_PLAN_CHARACTERS))),
+}).annotations(strict);
+export type ProviderLevelChangeRequest = typeof ProviderLevelChangeRequest.Type;
 
 export const ProviderRuntimeEvent = Schema.Union(
   Schema.Struct({
@@ -3154,13 +3189,14 @@ export const ProviderRuntimeEvent = Schema.Union(
     requestId: Schema.NonEmptyTrimmedString,
     action: Schema.NonEmptyTrimmedString,
     description: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-  Schema.Struct({
-    ...ProviderRuntimeEventFields,
-    kind: Schema.Literal("approval-request"),
-    requestId: Schema.NonEmptyTrimmedString,
-    action: Schema.NonEmptyTrimmedString,
-    description: Schema.NonEmptyTrimmedString,
+    /**
+     * The runtime asks to change the thread's level rather than to run a
+     * tool: `enter-plan` to plan read-only first, `exit-plan` to leave Plan
+     * and carry out `plan`. Only a session started with `levelChanges` asks
+     * this; the runtime never changes its own mode, and an approval applies
+     * from the thread's next session.
+     */
+    levelChange: Schema.optional(ProviderLevelChangeRequest),
   }).annotations(strict),
   /**
    * The runtime's own reviewer answered one approval itself, so the person was

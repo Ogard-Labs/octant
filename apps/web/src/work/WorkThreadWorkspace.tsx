@@ -1,4 +1,5 @@
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
+import { attachAllowingFiles, attachmentMediaType } from "../composer/attachmentMediaType";
 import {
   ProjectMemoryProposalPrompt,
   type ProjectMemoryProposalClient,
@@ -40,9 +41,13 @@ import {
 } from "@octant/contracts";
 import type { ProjectSummary, ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
-import { WORK_PERMISSION_MODES, workAccessOfMode, workModeOf } from "./workPermissionModes";
+import { workAccessOfMode, workModeOf } from "./workPermissionModes";
 import { ThreadGuardrailLevel } from "../code/GuardrailLevelIndicator";
-import { PermissionModePicker, threadKeepsFullAccessSandbox } from "../code/PermissionModePicker";
+import {
+  PERMISSION_MODE_LABEL,
+  PermissionModePicker,
+  threadKeepsFullAccessSandbox,
+} from "../code/PermissionModePicker";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useProjectTrustNotice } from "../providers/ProjectTrustNotice";
 import { browserApprovalDetail, browserApprovalSummary } from "../browser/browserProfileCopy";
@@ -51,7 +56,9 @@ import {
   prependEarlierTurns,
   refreshNewestTurns,
   startedConversationPickerGroups,
+  workThreadAccessOf,
   type PickerGroup,
+  resolveStrict,
 } from "@octant/domain";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import {
@@ -93,6 +100,10 @@ import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import { ThreadWakeups } from "../wakeups/ThreadWakeups";
 import type { ThreadWakeupClient } from "../wakeups/threadWakeupClient";
+import { CodeLiveTasks } from "../code/CodeLiveTasks";
+import { CodeNativeSession } from "../code/CodeNativeSession";
+import type { ThreadSessionClient } from "../code/codeSessionClient";
+import { createWorkSessionClient } from "./workSessionClient";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
@@ -156,7 +167,7 @@ import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
-import { ChildResultCards } from "../agents/ChildResultCards";
+import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import {
   documentIsVisible,
@@ -238,6 +249,11 @@ type WorkTranscriptRow =
       readonly key: string;
       readonly turn: WorkTurnState;
       readonly tasks: NonNullable<WorkTurnState["tasks"]>;
+    }
+  | {
+      readonly kind: "steered";
+      readonly key: string;
+      readonly steered: NonNullable<WorkTurnState["steeredResults"]>;
     }
   | {
       readonly kind: "side-tasks";
@@ -501,6 +517,8 @@ export interface WorkThreadWorkspaceProps {
   /** Machine-owned navigation snapshot; avoids rescanning every Project before transcript read. */
   readonly initialThread?: WorkThread;
   readonly projects?: ReadonlyArray<ProjectSummary>;
+  /** Work's Strict default in Settings, which a thread and Project that did not choose follow. */
+  readonly workDefaultStrict?: boolean;
   readonly onDisplayReadyChange?: (ready: boolean) => void;
   readonly changeRevision?: number;
   readonly threadClient: WorkThreadClient;
@@ -523,6 +541,8 @@ export interface WorkThreadWorkspaceProps {
   readonly messageQueueClient?: ThreadMessageQueueClient;
   /** The thread's wake-ups; absent builds one from the server address. */
   readonly wakeupClient?: ThreadWakeupClient;
+  /** The thread's live tasks and outside sessions; absent builds one from the server address. */
+  readonly sessionClient?: ThreadSessionClient<WorkThreadId>;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
   readonly memoryProposalClient?: ProjectMemoryProposalClient;
@@ -920,9 +940,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const [accessChanging, setAccessChanging] = useState(false);
   // Work and Code share one set of levels; the composer moves this thread to
   // another one, and its next turn runs at it.
-  const changeAccess = async (access: WorkAccess, fullAccessSandbox?: boolean) => {
+  const changeAccess = async (
+    access: WorkAccess,
+    fullAccessSandbox?: boolean,
+    strict?: boolean,
+  ) => {
     if (thread === undefined || accessChanging) return;
-    if (access === thread.access && fullAccessSandbox === undefined) return;
+    if (access === thread.access && fullAccessSandbox === undefined && strict === undefined) return;
     setAccessChanging(true);
     setErrorMessage(undefined);
     setToolCatalogHandoffRequired(false);
@@ -933,6 +957,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         expectedVersion: thread.version,
         access,
         ...(fullAccessSandbox === undefined ? {} : { fullAccessSandbox }),
+        ...(strict === undefined ? {} : { strict }),
       });
       if (!("kind" in result) || result.kind !== "thread-updated") {
         setErrorMessage("This task’s mode could not be saved.");
@@ -989,6 +1014,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           selected: thread,
           latest: turns.at(-1)?.authority,
         });
+  const { serverUrl, windowCapability, sessionClient: givenSessionClient } = props;
+  const sessionClient = useMemo(
+    () =>
+      givenSessionClient ??
+      (serverUrl === undefined || windowCapability === undefined
+        ? undefined
+        : createWorkSessionClient({ serverUrl, windowCapability })),
+    [givenSessionClient, serverUrl, windowCapability],
+  );
   const messageQueue = useThreadMessageQueue({
     mode: "work",
     hostId: props.hostId,
@@ -1480,6 +1514,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         });
       }
       if (!headPlaced) rows.push(head);
+      if (turn.steeredResults !== undefined && turn.steeredResults.length > 0) {
+        rows.push({
+          kind: "steered",
+          key: `${String(turn.requestId)}-steered`,
+          steered: turn.steeredResults,
+        });
+      }
       // The provider's restated task list lands where the turn it belongs to
       // ends, so the transcript reads as what was said and then what it is
       // working through.
@@ -1981,7 +2022,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             threadId: props.threadId,
             attachmentId,
             displayName: file.name.trim() === "" ? "Pasted image" : file.name,
-            mediaType: decodeWorkAttachmentMediaType(file.type),
+            mediaType: decodeWorkAttachmentMediaType(attachmentMediaType(file)),
             bytes: new Uint8Array(await file.arrayBuffer()),
           });
           attachmentIds.push(attachmentId);
@@ -2227,10 +2268,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     windowCapability: props.windowCapability,
     hostId: props.hostId,
     refused: serverWorkProject !== undefined || creating || completionLocked,
-    onFiles: (files) => {
-      if (imageSupport === false) images.refuse("Choose an image-capable model to attach images.");
-      else images.attach(files);
-    },
+    onFiles: (files) =>
+      void attachAllowingFiles(
+        files,
+        imageSupport,
+        images.attach,
+        images.refuse,
+        "Choose an image-capable model to attach images.",
+      ),
   });
   // A picture marked up in this thread's Browser arrives here as a file and
   // meets the same checks as one dropped on the composer.
@@ -2734,6 +2779,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   />
                 );
               }
+              if (row.kind === "steered") {
+                return (
+                  <SteeredChildResults
+                    providerGroups={props.providerGroups}
+                    steered={row.steered}
+                  />
+                );
+              }
               if (row.kind === "tasks") {
                 return (
                   <ThreadTasksPanel
@@ -2750,6 +2803,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               }
               if (row.kind === "request") {
                 if (props.requestClient !== undefined && row.request.detail.kind === "approval") {
+                  const levelChange = row.request.detail.levelChange;
                   return (
                     <ProviderApprovalPrompt
                       onAnswer={(decision) => {
@@ -2759,6 +2813,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         });
                       }}
                       summary={`${row.request.detail.action}: ${row.request.detail.description}`}
+                      {...(levelChange === undefined
+                        ? {}
+                        : {
+                            levelChange: {
+                              to: workThreadAccessOf(levelChange.to).executionPolicy,
+                              toLabel: PERMISSION_MODE_LABEL[workModeOf(levelChange.to)],
+                              ...(levelChange.plan === undefined ? {} : { plan: levelChange.plan }),
+                            },
+                          })}
                     />
                   );
                 }
@@ -3002,6 +3065,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 windowCapability={props.windowCapability}
                 client={props.wakeupClient}
               />
+              <CodeLiveTasks threadId={props.threadId} client={sessionClient} />
+              <CodeNativeSession
+                threadId={props.threadId}
+                client={sessionClient}
+                threadHasTurns={turns.length > 0}
+              />
               <ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />
             </>
           }
@@ -3217,17 +3286,22 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             attach:
               props.turnClient === undefined && taskActions.length === 0 ? undefined : (
                 <ComposerAttachButton
-                  accept="image/png,image/jpeg,image/webp,image/gif"
                   busy={creating || completionLocked}
                   refusedReason={
                     props.turnClient === undefined
                       ? "Attachments need a connected host."
-                      : imageSupport === false
-                        ? "The selected model does not accept images. Choose an image-capable model."
-                        : undefined
+                      : undefined
                   }
                   onRefused={images.refuse}
-                  onFileSelected={(file) => images.attach([file])}
+                  onFileSelected={(file) =>
+                    attachAllowingFiles(
+                      [file],
+                      imageSupport,
+                      images.attach,
+                      images.refuse,
+                      "The selected model does not accept images. Choose an image-capable model.",
+                    )
+                  }
                   threadActions={taskActions}
                 />
               ),
@@ -3257,11 +3331,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   <PermissionModePicker
                     autoSupported={autoSupported}
                     disabled={accessChanging || creating || completionLocked}
-                    modes={WORK_PERMISSION_MODES}
-                    onChange={(mode) => {
-                      const access = workAccessOfMode(mode);
-                      if (access !== undefined) void changeAccess(access);
-                    }}
+                    onChange={(mode) => void changeAccess(workAccessOfMode(mode))}
                     value={workModeOf(thread.access)}
                     warningScope={{ projectId: String(thread.projectId) }}
                     fullAccessSandbox={thread.fullAccessSandbox === true}
@@ -3272,6 +3342,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     onFullAccessSandboxChange={(sandboxed) =>
                       void changeAccess("full-access", sandboxed)
                     }
+                    strict={
+                      thread.strict ??
+                      resolveStrict({
+                        project: project?.type === "work" ? project : undefined,
+                        settings: { defaultStrict: props.workDefaultStrict },
+                      })
+                    }
+                    onStrictChange={(strict) => void changeAccess(thread.access, undefined, strict)}
                   />
                 )}
               </>

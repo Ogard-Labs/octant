@@ -27,7 +27,7 @@ import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { useFullAccessWarning } from "./FullAccessWarning";
-import { PERMISSION_MODE_OPTIONS } from "./PermissionModePicker";
+import { PERMISSION_MODE_OPTIONS, STRICT_DETAIL } from "./PermissionModePicker";
 import { WORKERS_UNLISTED } from "./coordinatorWorkerListing";
 
 export interface CodeSettingsUpdate {
@@ -37,6 +37,8 @@ export interface CodeSettingsUpdate {
   readonly defaultAutoApprove?: boolean;
   /** Absent keeps the stored choice. */
   readonly defaultFullAccessSandbox?: boolean;
+  /** Absent keeps the stored choice. */
+  readonly defaultStrict?: boolean;
   readonly autoReviewer?: AutoReviewer;
   /** Null returns Octant Shield to each thread's own provider. */
   readonly shieldModel?: ShieldModelChoice | null;
@@ -204,6 +206,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   const [fullAccessSandbox, setFullAccessSandbox] = useState(
     props.settings.defaultFullAccessSandbox === true,
   );
+  const [strict, setStrict] = useState(props.settings.defaultStrict === true);
   const [autoReviewer, setAutoReviewer] = useState<AutoReviewer>(
     props.settings.autoReviewer ?? "provider",
   );
@@ -299,6 +302,11 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         ? props.settings.defaultFullAccessSandbox === true
         : current,
     );
+    setStrict((current) =>
+      current === (previousSettings.defaultStrict === true)
+        ? props.settings.defaultStrict === true
+        : current,
+    );
     setExecutable((current) =>
       current === (previousSettings.externalEditor?.executable ?? "")
         ? (props.settings.externalEditor?.executable ?? "")
@@ -331,6 +339,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       readonly restartContinuation?: boolean;
       readonly autoReviewer?: AutoReviewer;
       readonly fullAccessSandbox?: boolean;
+      readonly strict?: boolean;
       readonly coordinatorStarting?: CoordinatorStartingChoice;
       readonly coordinatorWorkerListing?: CoordinatorWorkerListing;
       readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
@@ -349,6 +358,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     }
     if (change.fullAccessSandbox !== undefined) {
       setFullAccessSandbox(host.defaultFullAccessSandbox === true);
+    }
+    if (change.strict !== undefined) {
+      setStrict(host.defaultStrict === true);
     }
     if (change.autoReviewer !== undefined) {
       setAutoReviewer(host.autoReviewer ?? "provider");
@@ -391,6 +403,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       readonly restartContinuation?: boolean;
       readonly autoReviewer?: AutoReviewer;
       readonly fullAccessSandbox?: boolean;
+      readonly strict?: boolean;
       readonly coordinatorStarting?: CoordinatorStartingChoice;
       readonly coordinatorWorkerListing?: CoordinatorWorkerListing;
       readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
@@ -440,6 +453,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         ...(change.fullAccessSandbox === undefined
           ? {}
           : { defaultFullAccessSandbox: change.fullAccessSandbox }),
+        ...(change.strict === undefined ? {} : { defaultStrict: change.strict }),
         requireGitRepository: draft.requireGitRepository,
         defaultDiffLayout: draft.defaultDiffLayout,
         // The host keeps the stored switch when a change leaves it out, so
@@ -543,6 +557,22 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               onCheckedChange={(checked) => {
                 setFullAccessSandbox(checked);
                 void commit("access", { fullAccessSandbox: checked });
+              }}
+            />
+          </SettingRow>
+          <SettingRow
+            description={`${STRICT_DETAIL} Off, each provider follows its own sandbox, permission modes and settings. A Project or a thread can choose for itself.`}
+            focused={props.focusedSetting === "code-strict"}
+            label="Strict"
+            scope="mode"
+            settingId="code-strict"
+          >
+            <OctantSwitch
+              checked={strict}
+              label="Strict"
+              onCheckedChange={(checked) => {
+                setStrict(checked);
+                void commit("access", { strict: checked });
               }}
             />
           </SettingRow>

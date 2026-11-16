@@ -259,6 +259,49 @@ describe.skipIf(!canRunThrowawaySshd)("the harness's file tools on a server fold
       });
       expect(await files().read({ path: ".codex/auth.json" })).toMatchObject({ kind: "file" });
     });
+
+    it("reads, lists and searches protected files at Full access and still refuses provider sign-ins", async () => {
+      const sent: string[] = [];
+      let fullAccess = true;
+      const tools = new ServerFileSystem({
+        connection: {
+          run: async (...call) => {
+            const answer = await connection.run(...call);
+            if (answer.status === "ran") sent.push(answer.output.toString("latin1"));
+            return answer;
+          },
+        },
+        server: () => ({ alias: sshd.alias, user: sshd.user }),
+        root,
+        fullAccess: () => fullAccess,
+      });
+      expect(await tools.read({ path: ".config/1Password/vault.sqlite" })).toMatchObject({
+        kind: "file",
+        lines: ["SECRETVALUE", ""],
+      });
+      expect(await tools.read({ path: "backup/client.p12" })).toMatchObject({ kind: "file" });
+      for (const signIn of [".codex/auth.json", ".claude/.credentials.json", "innocent.txt"]) {
+        expect(await tools.read({ path: signIn })).toMatchObject({ reason: "protected-file" });
+      }
+      const found = await tools.grep({ pattern: "SECRETVALUE" });
+      const paths = found.kind === "matches" ? found.matches.map((match) => match.path) : [];
+      expect(paths).toContain(".azure/accessTokens.json");
+      expect(paths).not.toContain(".codex/auth.json");
+      const listed = await tools.glob({ pattern: "**/*" });
+      expect(listed.kind === "paths" && listed.paths).toEqual(
+        expect.arrayContaining([".cargo/credentials.toml"]),
+      );
+      expect(JSON.stringify(listed)).not.toContain("auth.json");
+
+      // The level is read on every call: lowered, the same tools refuse again.
+      fullAccess = false;
+      expect(await tools.read({ path: "backup/client.p12" })).toMatchObject({
+        reason: "protected-file",
+      });
+      sent.length = 0;
+      await tools.grep({ pattern: "SECRETVALUE" });
+      expect(sent.join("")).not.toContain("SECRETVALUE");
+    });
   });
 
   it("reaches nothing, and changes nothing anywhere, when the server cannot be reached", async () => {

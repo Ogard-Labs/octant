@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { decodeProviderRuntimeEvent } from "@octant/contracts";
-import { recordProviderChildObservation } from "./childObservations";
+import {
+  boundedChildFinalSummary,
+  recordProviderChildObservation,
+  reportedChildUsage,
+} from "./childObservations";
 
 const activity = (patch: Record<string, unknown> = {}) => {
   const event = decodeProviderRuntimeEvent({
@@ -20,6 +24,33 @@ const activity = (patch: Record<string, unknown> = {}) => {
 };
 
 describe("provider child observations", () => {
+  it("keeps the latest closing report and usage a runtime reported, and none it did not", () => {
+    const running = recordProviderChildObservation(undefined, activity());
+    expect(running.children[0]).not.toHaveProperty("finalSummary");
+    expect(running.children[0]).not.toHaveProperty("usage");
+    const finished = recordProviderChildObservation(
+      running,
+      activity({
+        sequence: 2,
+        status: "completed",
+        finalSummary: "Done.",
+        usage: { totalTokens: 50 },
+      }),
+    );
+    const later = recordProviderChildObservation(
+      finished,
+      activity({ sequence: 3, status: "completed", summary: "Closed" }),
+    );
+    expect(later.children[0]).toMatchObject({ finalSummary: "Done.", usage: { totalTokens: 50 } });
+  });
+  it("bounds a closing report on a character boundary and refuses malformed counts", () => {
+    const bounded = boundedChildFinalSummary("😀".repeat(3000));
+    expect(bounded?.length).toBeLessThanOrEqual(2048);
+    expect(bounded?.endsWith("😀…")).toBe(true);
+    expect(boundedChildFinalSummary("  ")).toBeUndefined();
+    expect(reportedChildUsage({ inputTokens: -1, outputTokens: 1.5 })).toBeUndefined();
+    expect(reportedChildUsage({ inputTokens: 0, totalTokens: "9" })).toEqual({ inputTokens: 0 });
+  });
   it("deduplicates replay without granting controls or guessing a model", () => {
     const first = recordProviderChildObservation(undefined, activity());
     expect(first.children).toHaveLength(1);

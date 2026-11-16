@@ -1,4 +1,5 @@
-import { providerCommandOf, providerCommandRefusal, providerRunsAsItself } from "@octant/domain";
+import { planReadOnlyToolServers, providerCommandOf, providerRunsAsItself } from "@octant/domain";
+import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
 import { readBoundedResponseBody } from "../extensions/boundedResponseBody";
 import { advertisedSlashCommands } from "./providerSlashCommands";
 import { OpenCodeChildSessions } from "./openCodeChildSessions";
@@ -62,6 +63,7 @@ import {
   type OpenCodeManagedToolsBridge,
 } from "./openCodeManagedTools";
 import {
+  openCodeChatPlanJailStartsProcesses,
   openCodeServesCommandRoutes,
   openCodeServesNativeRoutes,
   openCodeServesQuestionForms,
@@ -148,6 +150,19 @@ export interface OpenCodeClientPort {
   ) => Promise<void>;
 }
 
+/**
+ * The host's protected files in force, as absolute paths, at each level: the
+ * full list below Full access, and the narrower list Octant's own file tools
+ * still refuse at Full access. The host picks both lists; the driver only
+ * chooses between them by the session's execution policy.
+ */
+export interface OpenCodeProtectedPaths {
+  readonly belowFullAccess: ReadonlyArray<string>;
+  readonly atFullAccess: ReadonlyArray<string>;
+}
+
+const NO_PROTECTED_PATHS: OpenCodeProtectedPaths = { belowFullAccess: [], atFullAccess: [] };
+
 export interface OpenCodeDriverOptions {
   readonly instanceId: ProviderInstanceId;
   readonly binaryPath: string;
@@ -161,12 +176,18 @@ export interface OpenCodeDriverOptions {
   /** The person's own OpenCode rules and MCP servers; read from their configuration by default. */
   readonly readOwnSetup?: () => OpenCodeOwnSetup;
   /**
-   * The host's protected files and folders in force, as absolute paths, which
-   * every session refuses to read or list. The host resolves them, so the
-   * driver never reads its protected-file configuration itself. Absent
-   * refuses none beyond OpenCode's own `.env` rule.
+   * The person's own MCP servers they marked "Read-only — allowed in Plan" on
+   * this host, read at each Plan session start. Absent starts none in Plan.
    */
-  readonly protectedPaths?: () => ReadonlyArray<string>;
+  readonly planMcpServers?: () => ReadonlyArray<string>;
+  /**
+   * The host's protected files and folders in force, as absolute paths, which
+   * a session refuses to read or list: one list below Full access, one at it.
+   * The host resolves both, so the driver never reads its protected-file
+   * configuration or policy itself. Absent refuses none beyond OpenCode's own
+   * `.env` rule.
+   */
+  readonly protectedPaths?: () => OpenCodeProtectedPaths;
   readonly idleLeaseMs?: number;
   readonly clock?: () => string;
   readonly correlationId?: () => string;
@@ -189,7 +210,7 @@ interface SessionState {
   /** The person's own permission rules this session applies, empty when none. */
   readonly own: OwnPermissions;
   /** The host's protected paths when the session started, refused last in its rules. */
-  readonly protectedPaths: ReadonlyArray<string>;
+  readonly protectedPaths: OpenCodeProtectedPaths;
   readonly approvals: Set<string>;
   /**
    * The delegated session each pending approval or question came from, when it
@@ -247,6 +268,11 @@ export interface OwnPermissions {
   readonly rules: ReadonlyArray<PermissionV2Rule>;
   readonly toolServers: boolean;
   /**
+   * The servers a Plan session starts although `toolServers` is off: the
+   * person's marks. Their tools ask, and in Plan the person may answer them.
+   */
+  readonly planServers?: ReadonlyArray<string>;
+  /**
    * OpenCode's own `webfetch` and `websearch`. Off, both are denied at every
    * level, Full access included, and after the person's own rules, so a
    * session whose setup has web tools off cannot reach them through a rule.
@@ -259,6 +285,8 @@ const NO_OWN_PERMISSIONS: OwnPermissions = { rules: [], toolServers: false, webT
 /** What a session with the setup on carries of the person's configuration. */
 interface ResolvedOwnSetup extends OpenCodeOwnSetup {
   readonly toolServers: boolean;
+  /** The person's servers marked for Plan that this Plan session starts. */
+  readonly planServers: ReadonlyArray<string>;
   readonly webTools: boolean;
   /** The launch loads the trusted Project's own OpenCode configuration. */
   readonly projectConfig: boolean;
@@ -267,7 +295,36 @@ interface ResolvedOwnSetup extends OpenCodeOwnSetup {
 function ownPermissions(setup: ResolvedOwnSetup | undefined): OwnPermissions {
   return setup === undefined
     ? NO_OWN_PERMISSIONS
-    : { rules: setup.rules, toolServers: setup.toolServers, webTools: setup.webTools };
+    : {
+        rules: setup.rules,
+        toolServers: setup.toolServers,
+        planServers: setup.planServers,
+        webTools: setup.webTools,
+      };
+}
+
+/**
+ * Plan's rules for the person's marked servers: after the deny every other
+ * server's namespaced tools get, each marked server's tools (`<server>_*`)
+ * ask, so the person answers each call.
+ */
+function planServerAsks(own: OwnPermissions): ReadonlyArray<PermissionV2Rule> {
+  return own.toolServers
+    ? []
+    : (own.planServers ?? []).map((server) => ({
+        action: `${server}_*`,
+        resource: "*",
+        effect: "ask" as const,
+      }));
+}
+
+/** Whether a pending approval is a call to a server the person marked for Plan. */
+function isPlanServerCall(own: OwnPermissions, tool: string | undefined): boolean {
+  return (
+    tool !== undefined &&
+    !own.toolServers &&
+    (own.planServers ?? []).some((server) => tool.startsWith(`${server}_`))
+  );
 }
 
 const WEB_TOOLS = ["webfetch", "websearch"] as const;
@@ -452,8 +509,9 @@ function openCodeBetaCapabilities(
     fileChanges: native ? "supported" : "unsupported",
     sessionCompaction: { chat: compaction, work: compaction, code: compaction },
     appManagedTools: reported.appManagedTools,
-    // Off macOS the launch refuses Chat and Plan (`openCodeRefusesTurnHere`).
-    ...(platform === "darwin"
+    // On a host whose Chat and Plan jail starts no process the launch refuses
+    // both (`openCodeRefusesTurnHere`).
+    ...(openCodeChatPlanJailStartsProcesses(platform)
       ? {}
       : {
           turnModes: {
@@ -1479,30 +1537,30 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
             // Probe the app-owned transport with an empty, private catalogue.
             // This is a non-generating declaration check: it does not send a
             // model prompt and its bridge is closed before the probe scope
-            // returns. Linux intentionally skips it because bwrap cannot
-            // express the exact loopback-only rule required by the bridge.
-            const bridge =
-              process.platform === "darwin"
-                ? yield* Effect.acquireRelease(
-                    Effect.tryPromise({
-                      try: () =>
-                        createOpenCodeManagedToolsBridge([], async () => ({
-                          resultJson: '{"error":"probe-only"}',
-                          isError: true,
-                        })),
-                      catch: () => fail("unavailable", "OpenCode MCP probe bridge is unavailable."),
-                    }),
-                    (ownedBridge) => Effect.promise(() => ownedBridge.close()),
-                  )
-                : undefined;
-            // On macOS, probe under the Chat/Plan jail, not the Code jail:
-            // the git stand-in (fork plus exec of /usr/bin/false only) is
-            // what makes a 2.x runtime serve a Git work tree in Chat and
-            // Plan. Attesting under Code confinement would pass even without
-            // it. Elsewhere a 2.x Chat or Plan launch is refused, so the probe
+            // returns. It runs wherever the launch can reach the bridge (macOS
+            // and Linux).
+            const bridge = appToolBridgeReachesLaunchOn(process.platform)
+              ? yield* Effect.acquireRelease(
+                  Effect.tryPromise({
+                    try: () =>
+                      createOpenCodeManagedToolsBridge([], async () => ({
+                        resultJson: '{"error":"probe-only"}',
+                        isError: true,
+                      })),
+                    catch: () => fail("unavailable", "OpenCode MCP probe bridge is unavailable."),
+                  }),
+                  (ownedBridge) => Effect.promise(() => ownedBridge.close()),
+                )
+              : undefined;
+            // Probe under the Chat/Plan jail, not the Code jail, wherever
+            // that jail can start the git stand-in (macOS's single exec,
+            // Linux's read-only capsule that admits processes): it is what
+            // makes a 2.x runtime serve a Git work tree in Chat and Plan, and
+            // attesting under Code confinement would pass even without it.
+            // Elsewhere a 2.x Chat or Plan launch is refused, so the probe
             // attests the jail turns do run in there: Work and Code at Ask
             // first, which allows a process.
-            const probesTurnJail = process.platform !== "darwin";
+            const probesTurnJail = !openCodeChatPlanJailStartsProcesses(process.platform);
             const runtime = yield* acquireRuntime(
               options,
               projectRoot,
@@ -1596,24 +1654,24 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               };
             }
             if (
-              process.platform === "linux" &&
+              !appToolBridgeReachesLaunchOn(process.platform) &&
               normalized.models.length > 0 &&
               normalized.capabilities.appManagedTools === "unsupported"
             ) {
               return {
                 ...normalized,
-                message:
-                  "OpenCode app-managed tools require macOS loopback confinement on this host.",
+                message: "OpenCode app-managed tools are not offered on this host.",
               };
             }
             return normalized;
           }),
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) =>
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], attachmentsFolder }) =>
       instanceId !== options.instanceId
         ? Effect.fail(fail("invalid-configuration", "Provider instance does not match driver."))
         : Effect.gen(function* () {
+            const readOnlyFolders = attachmentsFolder === undefined ? [] : [attachmentsFolder];
             if (
-              [projectRoot, ...extraFolders].some(
+              [projectRoot, ...extraFolders, ...readOnlyFolders].some(
                 (root) => !isAbsolute(root) || resolve(root) !== root,
               )
             ) {
@@ -1635,6 +1693,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               resumeToolCatalogs,
               rememberedEditsFor(projectRoot),
               sessionsHoldingStaleContext,
+              readOnlyFolders,
             );
           }),
   };
@@ -1654,7 +1713,7 @@ function acquireRuntime(
     [],
     false,
     NO_OWN_PERMISSIONS,
-    options.protectedPaths?.() ?? [],
+    options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
   );
   return options.runtimeRegistry.acquireRuntime(options.instanceId, {
     idleMs: options.idleLeaseMs ?? 30_000,
@@ -1739,6 +1798,8 @@ function makeConnection(
   resumeToolCatalogs: Map<string, ReadonlyArray<ProviderToolDefinition>>,
   rememberedEdits: Set<string>,
   sessionsHoldingStaleContext: Set<string>,
+  /** The thread's attachments folder, read at every level and written at none. */
+  readOnlyFolders: ReadonlyArray<string> = [],
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
     const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
@@ -1750,13 +1811,30 @@ function makeConnection(
      * Plan), which OpenCode itself loads. Nothing loads unless the setup is
      * on for the session.
      */
-    const ownSetupFor = (setup: ProviderNativeSetup | undefined): ResolvedOwnSetup | undefined => {
+    const ownSetupFor = (
+      setup: ProviderNativeSetup | undefined,
+      executionPolicy: ProviderExecutionPolicy,
+    ): ResolvedOwnSetup | undefined => {
       if (!providerRunsAsItself(setup) || setup === undefined) return undefined;
       const own = (options.readOwnSetup ?? readOpenCodeOwnSetup)();
+      // Plan starts only the servers the person marked, and only those the
+      // person's configuration still names.
+      const planServers = setup.toolServers
+        ? []
+        : planReadOnlyToolServers({
+            executionPolicy,
+            setup,
+            marked: options.planMcpServers?.() ?? [],
+          }).filter((name) => Object.hasOwn(own.mcp, name));
       return {
         rules: own.rules,
-        mcp: setup.toolServers ? own.mcp : {},
+        mcp: setup.toolServers
+          ? own.mcp
+          : Object.fromEntries(
+              Object.entries(own.mcp).filter(([name]) => planServers.includes(name)),
+            ),
         toolServers: setup.toolServers,
+        planServers,
         webTools: setup.webTools,
         projectConfig: setup.projectCode,
       };
@@ -1872,6 +1950,7 @@ function makeConnection(
             mode,
             projectRoot,
             extraFolders,
+            readOnlyFolders,
             questionForms: openCodeServesQuestionForms(runtimeVersion),
             remembersInOpenCode: opencodeRemembersApproval(
               state,
@@ -2091,10 +2170,12 @@ function makeConnection(
                   executionPolicy,
                   ...(fullAccessSandbox ? { fullAccessSandbox: true } : {}),
                   ...(ownSkills ? { ownSkills: true as const } : {}),
-                  ...(ownSetup === undefined || !ownSetup.toolServers
+                  ...(ownSetup === undefined ||
+                  (!ownSetup.toolServers && ownSetup.planServers.length === 0)
                     ? {}
                     : { ownToolServers: ownSetup.mcp }),
                   ...(ownSetup?.projectConfig === true ? { projectConfig: true as const } : {}),
+                  ...(ownSetup === undefined ? {} : { runsAsItself: true as const }),
                   betaPermissions: betaSessionPermissionRules(
                     executionPolicy,
                     mode,
@@ -2102,8 +2183,10 @@ function makeConnection(
                     extraFolders,
                     ownSkills,
                     ownPermissions(ownSetup),
-                    options.protectedPaths?.() ?? [],
+                    options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
+                    readOnlyFolders,
                   ),
+                  ...(readOnlyFolders.length === 0 ? {} : { readOnlyFolders }),
                   ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
                   onProcessStarted: (process) =>
                     options.runtimeRegistry.trackProcess(options.instanceId, process),
@@ -2460,7 +2543,7 @@ function makeConnection(
             return Effect.fail(fail("protocol", "A provider session is already active."));
           }
           sessionSetupInFlight = true;
-          const ownSetup = ownSetupFor(input.nativeSetup);
+          const ownSetup = ownSetupFor(input.nativeSetup, input.executionPolicy);
           const state = newSessionState(
             input.sessionId,
             input.modelId,
@@ -2470,7 +2553,7 @@ function makeConnection(
             input.nativeSetup,
             rememberedEdits,
             ownPermissions(ownSetup),
-            options.protectedPaths?.() ?? [],
+            options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
           );
           return prepareManagedTools(state, input.tools ?? []).pipe(
             Effect.flatMap(() =>
@@ -2525,6 +2608,7 @@ function makeConnection(
                         state.nativeSetup?.skills === true,
                         state.own,
                         state.protectedPaths,
+                        readOnlyFolders,
                       ),
                       model: splitModelId(input.modelId),
                     }),
@@ -2631,7 +2715,7 @@ function makeConnection(
               if (priorState !== undefined && inheritedTools !== undefined) {
                 priorState.managedTools = undefined;
               }
-              const ownSetup = ownSetupFor(input.nativeSetup);
+              const ownSetup = ownSetupFor(input.nativeSetup, input.executionPolicy);
               const state = newSessionState(
                 input.sessionId,
                 "unknown/unknown",
@@ -2641,7 +2725,7 @@ function makeConnection(
                 input.nativeSetup,
                 rememberedEdits,
                 ownPermissions(ownSetup),
-                options.protectedPaths?.() ?? [],
+                options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
               );
               if (inheritedTools !== undefined) {
                 inheritedTools.owner.state = state;
@@ -2790,9 +2874,9 @@ function makeConnection(
             if (rejected !== undefined) return Effect.fail(rejected);
             // A prompt that opens with one of OpenCode's listed commands runs
             // through its command route, as OpenCode's own client sends it;
-            // as plain text the model would only read the slash. The host
-            // refused it in Chat and Plan before this; the driver holds the
-            // same line for any caller that did not.
+            // as plain text the model would only read the slash. It runs in
+            // every mode; the session's own permissions, set for the level,
+            // decide what it may do.
             const runCommand = runtimeClient.command;
             const listCommands = runtimeClient.commands;
             // The observation holds the list of whichever Project's session
@@ -2815,18 +2899,12 @@ function makeConnection(
               Effect.flatMap((listed) => {
                 const command =
                   runCommand === undefined ? undefined : providerCommandOf(input.prompt, listed);
+                // A command another Project lists, or one OpenCode no longer
+                // lists here, is refused rather than sent to the model as text.
                 const commandRefusal =
-                  providerCommandRefusal({
-                    prompt: input.prompt,
-                    commands: command === undefined ? undefined : listed,
-                    mode,
-                    executionPolicy: state.executionPolicy,
-                  }) ??
-                  // A command another Project lists, or one OpenCode no longer
-                  // lists here, is refused rather than sent to the model as text.
-                  (command === undefined && runCommand !== undefined
+                  command === undefined && runCommand !== undefined
                     ? commandNotListedHere(input.prompt, observed?.commands)
-                    : undefined);
+                    : undefined;
                 if (commandRefusal !== undefined) {
                   return Effect.fail(fail("unauthorized", commandRefusal));
                 }
@@ -2891,6 +2969,7 @@ function makeConnection(
                                 state.nativeSetup?.skills === true,
                                 state.own,
                                 state.protectedPaths,
+                                readOnlyFolders,
                               ),
                             }),
                           );
@@ -2974,6 +3053,24 @@ function makeConnection(
             },
           ),
         ),
+      stopChildAgent: ({ sessionId, childAgentId }) =>
+        usableStateFor(sessionId).pipe(
+          Effect.flatMap(([source]) => {
+            const activeClient = client;
+            // OpenCode runs a subagent as its own session, so aborting that
+            // session stops the child and leaves the parent's turn running.
+            if (activeClient === undefined || !childSessions.runsUnder(childAgentId, source)) {
+              return Effect.succeed("not-found" as const);
+            }
+            return request(() => activeClient.abort(childAgentId)).pipe(
+              Effect.as("stopped" as const),
+            );
+          }),
+          Effect.catchIf(
+            (providerFailure) => providerFailure.category === "protocol",
+            () => Effect.succeed("not-found" as const),
+          ),
+        ),
       interrupt: (sessionId) =>
         usableStateFor(sessionId).pipe(
           Effect.flatMap(([source, state]) => {
@@ -3021,7 +3118,8 @@ function makeConnection(
             }
             return state.terminal
               ? Effect.fail(fail("protocol", "Provider session is already terminal."))
-              : state.executionPolicy === "plan"
+              : state.executionPolicy === "plan" &&
+                  !isPlanServerCall(state.own, state.approvalCalls.get(input.requestId)?.tool)
                 ? Effect.fail(fail("unauthorized", "Plan mode cannot approve provider actions."))
                 : !state.approvals.has(input.requestId)
                   ? Effect.fail(fail("protocol", "Provider approval request is not pending."))
@@ -3040,9 +3138,11 @@ function makeConnection(
                       // pending requests it covers. It is answered only where
                       // the person let OpenCode run as itself, and its files
                       // stay admitted for this Project root from then on.
+                      // A Plan answer approves that one call.
                       const always =
                         input.approved &&
                         input.scope !== "once" &&
+                        state.executionPolicy !== "plan" &&
                         opencodeRemembersApproval(
                           state,
                           runtimeKind,
@@ -3167,7 +3267,7 @@ function newSessionState(
   nativeSetup: ProviderNativeSetup | undefined,
   rememberedEdits: Set<string>,
   own: OwnPermissions,
-  protectedPaths: ReadonlyArray<string>,
+  protectedPaths: OpenCodeProtectedPaths,
 ): SessionState {
   return {
     sessionId,
@@ -3303,6 +3403,7 @@ function mapAndOffer(
     readonly mode: "chat" | "work" | "code";
     readonly projectRoot: string;
     readonly extraFolders: ReadonlyArray<string>;
+    readonly readOnlyFolders: ReadonlyArray<string>;
     /** Whether this release's question forms were read (`openCodeServesQuestionForms`). */
     readonly questionForms: boolean;
     /** An approval here is answered `always`, a grant kept in OpenCode's own store. */
@@ -3376,8 +3477,16 @@ function mapAndOffer(
               // OpenCode asked, so its own evaluation of the person's rules,
               // which name resources Octant does not see, ended in `ask`; the
               // level decides what Octant does with it.
-              { rules: [], toolServers: state.own.toolServers, webTools: state.own.webTools },
+              {
+                rules: [],
+                toolServers: state.own.toolServers,
+                ...(state.own.planServers === undefined
+                  ? {}
+                  : { planServers: state.own.planServers }),
+                webTools: state.own.webTools,
+              },
               state.protectedPaths,
+              beta.readOnlyFolders,
             ),
             action,
           );
@@ -3629,15 +3738,21 @@ const OPENCODE_ENV_READ_RULES: ReadonlyArray<PermissionV2Rule> = [
 /**
  * The read refusals that come after everything else, so no allow reopens
  * them: the host's protected files in force, which the host resolves and
- * passes in, refused as the Claude Code gate refuses them. A name pattern in
- * that list arrives as its whole folder and is refused as `folder/*`, since
- * OpenCode's wildcards cannot say a regular expression: stricter, never wider.
+ * passes in, refused as Octant's own file tools refuse them at the same
+ * level. At Full access the secret-path refusals do not apply, as OpenCode
+ * reads any file on its own, and only the provider sign-ins stay refused
+ * (maintainer decision, 2026-11-15). A name pattern in that list arrives as
+ * its whole folder and is refused as `folder/*`, since OpenCode's wildcards
+ * cannot say a regular expression: stricter, never wider.
  */
 export function openCodeProtectedReadRefusals(
-  protectedPaths: ReadonlyArray<string>,
+  policy: ProviderExecutionPolicy,
+  protectedPaths: OpenCodeProtectedPaths,
 ): ReadonlyArray<PermissionV2Rule> {
   const patterns = new Set<string>();
-  for (const path of protectedPaths) {
+  const inForce =
+    policy === "full-access" ? protectedPaths.atFullAccess : protectedPaths.belowFullAccess;
+  for (const path of inForce) {
     patterns.add(path);
     patterns.add(`${path}/*`);
   }
@@ -3653,13 +3768,14 @@ export function permissionRules(
   extraFolders: ReadonlyArray<string> = [],
   ownSkills = false,
   own: OwnPermissions = NO_OWN_PERMISSIONS,
-  protectedPaths: ReadonlyArray<string> = [],
+  protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
+  readOnlyFolders: ReadonlyArray<string> = [],
 ): PermissionRuleset {
   let rules: PermissionRuleset;
   if (policy === "full-access") {
     // Full access reaches folders outside the Project, as OpenCode does on
-    // its own (maintainer decision, 2026-11-14); the protected-file refusals
-    // below still hold.
+    // its own (maintainer decision, 2026-11-14); of the protected-file
+    // refusals below only the provider sign-ins hold there.
     rules = [{ permission: "*", pattern: "*", action: "allow" }];
   } else if (policy === "auto-accept-edits") {
     // Edits inside the bound directory proceed; everything else still asks,
@@ -3710,6 +3826,9 @@ export function permissionRules(
   // session's bash and task follow the posture above exactly as Code's do.
   // The person's tool servers are namespaced tools, which the level decides.
   if (!own.toolServers) rules.push({ permission: "*_*", pattern: "*", action: "deny" });
+  for (const rule of planServerAsks(own)) {
+    rules.push({ permission: rule.action, pattern: rule.resource, action: rule.effect });
+  }
   if (!own.webTools) {
     for (const permission of WEB_TOOLS) rules.push({ permission, pattern: "*", action: "deny" });
   }
@@ -3719,7 +3838,10 @@ export function permissionRules(
   // The person's own skills load once they let OpenCode run as itself; a
   // skill is text, and OpenCode asks for it under the posture's own rule.
   if (!ownSkills) rules.push({ permission: "skill", pattern: "*", action: "deny" });
-  for (const rule of openCodeProtectedReadRefusals(protectedPaths)) {
+  for (const rule of attachmentsFolderRules(readOnlyFolders)) {
+    rules.push({ permission: rule.action, pattern: rule.resource, action: rule.effect });
+  }
+  for (const rule of openCodeProtectedReadRefusals(policy, protectedPaths)) {
     rules.push({ permission: rule.action, pattern: rule.resource, action: rule.effect });
   }
   if (managedToolServerName === undefined) return rules;
@@ -3759,7 +3881,7 @@ export function betaAgentPermissionRules(
   _mode: "chat" | "work" | "code",
   extraFolders: ReadonlyArray<string> = [],
   ownRules: ReadonlyArray<PermissionV2Rule> = [],
-  protectedPaths: ReadonlyArray<string> = [],
+  protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
 ): PermissionV2Ruleset {
   let rules: PermissionV2Ruleset;
   if (policy === "full-access") {
@@ -3796,7 +3918,7 @@ export function betaAgentPermissionRules(
   return [
     ...rules,
     ...outsideFolderAllows(policy, extraFolders),
-    ...openCodeProtectedReadRefusals(protectedPaths),
+    ...openCodeProtectedReadRefusals(policy, protectedPaths),
   ];
 }
 
@@ -3827,6 +3949,21 @@ function outsideFolderAllows(
       effect: "allow" as const,
     })),
   ];
+}
+
+/**
+ * The thread's attachments folder: read at every level, Plan included, and
+ * written at none. These come after every other folder rule, so neither the
+ * level's outside-folder answer nor an edit allow reopens a write there.
+ */
+function attachmentsFolderRules(
+  readOnlyFolders: ReadonlyArray<string>,
+): ReadonlyArray<PermissionV2Rule> {
+  return readOnlyFolders.flatMap((folder) => [
+    { action: "external_directory", resource: folder, effect: "allow" as const },
+    { action: "external_directory", resource: `${folder}/*`, effect: "allow" as const },
+    { action: "edit", resource: `${folder}/*`, effect: "deny" as const },
+  ]);
 }
 
 /**
@@ -3862,7 +3999,8 @@ export function betaSessionPermissionRules(
   extraFolders: ReadonlyArray<string> = [],
   ownSkills = false,
   own: OwnPermissions = NO_OWN_PERMISSIONS,
-  protectedPaths: ReadonlyArray<string> = [],
+  protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
+  readOnlyFolders: ReadonlyArray<string> = [],
 ): PermissionV2Ruleset {
   const rules: PermissionV2Ruleset = [
     ...betaAgentPermissionRules(policy, mode, extraFolders, own.rules, protectedPaths),
@@ -3870,6 +4008,7 @@ export function betaSessionPermissionRules(
       ? []
       : [
           { action: "*_*", resource: "*", effect: "deny" } as const,
+          ...planServerAsks(own),
           ...outsideFolderAllows(policy, extraFolders),
         ]),
     ...(own.webTools
@@ -3882,6 +4021,7 @@ export function betaSessionPermissionRules(
     // OpenCode's own default agent does; without this the posture's
     // catch-all would ask for permission to ask.
     { action: "question", resource: "*", effect: "allow" },
+    ...attachmentsFolderRules(readOnlyFolders),
   ];
   if (managedToolServerName !== undefined) {
     rules.push({ action: `${managedToolServerName}_*`, resource: "*", effect: "allow" });

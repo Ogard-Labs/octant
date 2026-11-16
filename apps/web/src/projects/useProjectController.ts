@@ -22,6 +22,7 @@ import {
   type CodeProjectPullRequestBackgroundRefresh,
   type ProjectAction,
   type ProjectColor,
+  type ProjectCommandResult,
   type ProjectProviderPolicy,
   type WorkProjectStatusFile,
 } from "@octant/contracts/projects";
@@ -41,6 +42,19 @@ const PROJECT_CHANGED_ELSEWHERE = "The Project changed in another window. Review
 export type ProjectChange =
   | { readonly status: "changed" }
   | { readonly status: "refused"; readonly message: string };
+
+/**
+ * Adding an extra folder may also stop at the home folder warning: nothing
+ * was added, and a resend with `confirmHomeFolder` spends `receiptId`.
+ */
+export type ExtraFolderChange =
+  | ProjectChange
+  | {
+      readonly status: "needs-confirmation";
+      readonly canonicalRoot: string;
+      readonly receiptId: string;
+      readonly warning: string;
+    };
 
 export type ProjectControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
 export type ProjectSearchStatus = "idle" | "searching" | "success" | "error";
@@ -209,10 +223,22 @@ export function useProjectController(options: ProjectControllerOptions) {
   async function executeReporting(
     command: Parameters<ProjectClient["executeProject"]>[0],
     successMessage: string,
-  ): Promise<ProjectChange> {
+  ): Promise<ProjectChange>;
+  async function executeReporting(
+    command: Parameters<ProjectClient["executeProject"]>[0],
+    successMessage: string,
+    held: (result: ProjectCommandResult) => ExtraFolderChange | undefined,
+  ): Promise<ExtraFolderChange>;
+  async function executeReporting(
+    command: Parameters<ProjectClient["executeProject"]>[0],
+    successMessage: string,
+    held?: (result: ProjectCommandResult) => ExtraFolderChange | undefined,
+  ): Promise<ExtraFolderChange> {
     setErrorMessage(undefined);
     try {
-      await fallbackClient.executeProject(command);
+      const result = await fallbackClient.executeProject(command);
+      const stopped = held?.(result);
+      if (stopped !== undefined) return stopped;
       await load("retry");
       if (!mounted.current) return { status: "refused", message: PROJECT_UNAVAILABLE };
       announce(successMessage);
@@ -257,7 +283,8 @@ export function useProjectController(options: ProjectControllerOptions) {
    */
   /**
    * Record the mode a Code or Work Project's new threads start in; absent
-   * follows Settings. Work has no Plan, so a Work Project takes the other four.
+   * follows Settings. No Work thread starts in Plan, so a Work Project takes
+   * the other four.
    */
   async function setCodePermissionMode(
     projectId: ProjectId,
@@ -269,9 +296,17 @@ export function useProjectController(options: ProjectControllerOptions) {
      * choice to Settings.
      */
     fullAccessSandbox: boolean | "settings" | "keep" = "keep",
+    /** Strict for this Project's threads that did not choose, read the same way. */
+    strictChoice: boolean | "settings" | "keep" = "keep",
   ): Promise<boolean> {
     const project = projectById.get(projectId);
     if (project?.type !== "work" && project?.type !== "code") return false;
+    const strict =
+      strictChoice === "keep"
+        ? project.defaultStrict
+        : strictChoice === "settings"
+          ? undefined
+          : strictChoice;
     const sandbox =
       fullAccessSandbox === "keep"
         ? project.defaultFullAccessSandbox
@@ -280,11 +315,15 @@ export function useProjectController(options: ProjectControllerOptions) {
           : fullAccessSandbox;
     if (
       project.defaultPermissionMode === permissionMode &&
-      project.defaultFullAccessSandbox === sandbox
+      project.defaultFullAccessSandbox === sandbox &&
+      project.defaultStrict === strict
     ) {
       return true;
     }
-    const sandboxField = sandbox === undefined ? {} : { fullAccessSandbox: sandbox };
+    const sandboxField = {
+      ...(sandbox === undefined ? {} : { fullAccessSandbox: sandbox }),
+      ...(strict === undefined ? {} : { strict }),
+    };
     if (project.type === "work") {
       if (permissionMode === "plan") return false;
       return execute(
@@ -837,7 +876,11 @@ export function useProjectController(options: ProjectControllerOptions) {
    * main folder. The host refuses the home folder, system and credential
    * folders, and any folder that overlaps one the Project already has.
    */
-  async function addExtraFolder(projectId: ProjectId, receiptId: string): Promise<ProjectChange> {
+  async function addExtraFolder(
+    projectId: ProjectId,
+    receiptId: string,
+    confirmHomeFolder = false,
+  ): Promise<ExtraFolderChange> {
     const project = projectById.get(projectId);
     if (project === undefined || project.type === "chat") {
       return { status: "refused", message: "Only a Work or Code Project can have extra folders." };
@@ -848,8 +891,18 @@ export function useProjectController(options: ProjectControllerOptions) {
         projectId,
         expectedVersion: project.version,
         receiptId: decodeBindingReceiptId(receiptId),
+        ...(confirmHomeFolder ? { confirmHomeFolder: true as const } : {}),
       },
       "Folder added to the Project.",
+      (result) =>
+        result.kind === "project-extra-folder-needs-confirmation"
+          ? {
+              status: "needs-confirmation",
+              canonicalRoot: result.canonicalRoot,
+              receiptId: String(result.receiptId),
+              warning: result.warning,
+            }
+          : undefined,
     );
   }
 

@@ -42,6 +42,9 @@ import {
   ProjectPolicyRejected,
   MemoryPolicyRejected,
   addProjectExtraFolder,
+  extraFolderIsHome,
+  extraFolderRefusal,
+  HOME_EXTRA_FOLDER_WARNING,
   removeProjectExtraFolder,
   changeProjectLifecycle,
   changeCodeProjectAccess,
@@ -137,7 +140,7 @@ export type AgentMemoryCommand = Exclude<MemoryCommand, { readonly kind: "transf
 
 export interface ProjectServiceOptions {
   readonly persistence: PersistenceService;
-  readonly bindingReceiptStore: Pick<BindingReceiptStorePort, "consume">;
+  readonly bindingReceiptStore: Pick<BindingReceiptStorePort, "consume" | "issue">;
   readonly projectRootPort: Pick<ProjectRootPort, "validate">;
   readonly uuid: () => string;
   readonly clock: () => string;
@@ -221,7 +224,7 @@ function personNamedBy(eventActor: EventActor | undefined): ProjectActor {
 
 export class ProjectService implements ProjectServiceApi {
   readonly #persistence: PersistenceService;
-  readonly #receipts: Pick<BindingReceiptStorePort, "consume">;
+  readonly #receipts: Pick<BindingReceiptStorePort, "consume" | "issue">;
   readonly #roots: Pick<ProjectRootPort, "validate">;
   readonly #uuid: () => string;
   readonly #clock: () => string;
@@ -869,6 +872,7 @@ export class ProjectService implements ProjectServiceApi {
             command.permissionMode,
             timestamp,
             command.fullAccessSandbox,
+            command.strict,
           );
           kind = "code-project-access-changed";
           eventName = "project.code-permission-mode-changed@1";
@@ -940,11 +944,45 @@ export class ProjectService implements ProjectServiceApi {
             projectType: current.type,
             now: this.#now(),
           });
+          const homeDirectory = this.#homeDirectory();
+          if (
+            extraFolderIsHome(picked.canonicalRoot, homeDirectory) &&
+            command.confirmHomeFolder !== true
+          ) {
+            // Judged as if confirmed first, so a home folder refused for any
+            // other reason is refused now rather than after the warning.
+            const refusal = extraFolderRefusal({
+              mainRoot: current.binding.canonicalRoot,
+              extraFolders: (current.extraFolders ?? []).map((folder) => folder.canonicalRoot),
+              candidate: picked.canonicalRoot,
+              homeDirectory,
+              homeFolderConfirmed: true,
+            });
+            if (refusal !== undefined)
+              throw new ProjectServiceError({ category: "invalid", message: refusal });
+            // The spent receipt is replaced by one for the same folder, this
+            // window and this Project type alone, which only a confirmed
+            // resend may spend before it expires.
+            const fresh = this.#receipts.issue({
+              windowId: authenticatedWindowId,
+              projectType: current.type,
+              canonicalBinding: picked,
+              now: this.#now(),
+            });
+            return decodeProjectCommandResult({
+              kind: "project-extra-folder-needs-confirmation",
+              project: current,
+              canonicalRoot: picked.canonicalRoot,
+              receiptId: fresh.receiptId,
+              warning: HOME_EXTRA_FOLDER_WARNING,
+            });
+          }
           const added = addProjectExtraFolder(current, {
             canonicalRoot: picked.canonicalRoot,
             actor,
             addedAt: timestamp,
-            homeDirectory: this.#homeDirectory(),
+            homeDirectory,
+            ...(command.confirmHomeFolder === true ? { homeFolderConfirmed: true } : {}),
           });
           project = added.project;
           eventFacts = { folder: added.folder };
@@ -989,6 +1027,7 @@ export class ProjectService implements ProjectServiceApi {
             command.permissionMode,
             timestamp,
             command.fullAccessSandbox,
+            command.strict,
           );
           kind = "work-project-permission-mode-changed";
           eventName = "project.work-permission-mode-changed@1";

@@ -14,6 +14,7 @@ import {
   type NativeHarnessClient,
 } from "@octant/client-runtime/native-harness-client";
 import { Cloud, Globe, MessagesSquare, X } from "lucide-react";
+import { ollamaAddressWarning } from "@octant/domain";
 import {
   useEffect,
   useId,
@@ -647,6 +648,11 @@ function ConnectStep(props: ConnectStepProps) {
             : presentation.urlHint}
         </span>
       </div>
+      {props.kind === "ollama" && ollamaAddressWarning(url) !== undefined ? (
+        <OctantAlert className="provider-settings__alert" tone="warning">
+          {ollamaAddressWarning(url)}
+        </OctantAlert>
+      ) : null}
       {azureSuggested ? (
         <OctantAlert
           action={

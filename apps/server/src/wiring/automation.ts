@@ -277,6 +277,8 @@ export function wireAutomation(deps: AutomationDependencies) {
     projection: persistence.automationProjection,
     hostId: String(LOCAL_HOST_ID),
     clock: () => new Date().toISOString(),
+    readChildren: (threadId) =>
+      agentRunOrchestration.parentSummary(decodeAgentRunParentThreadId(threadId)),
   });
   // The one host-local durable scheduler (A3) plus the ordinary-thread
   // dispatcher (A4). Claims stay journaled; the dispatcher revalidates
@@ -870,6 +872,9 @@ export function wireAutomation(deps: AutomationDependencies) {
       createRoutineProposalTools({
         ...turn,
         proposals: routineProposalService,
+        startsActiveAtFullAccess: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+            .agentRoutinesStartActiveAtFullAccess,
         // The running posture and the journaled level are both read and the
         // stricter wins, so a thread lowered mid-turn stops skipping the card.
         readPosture: () =>
@@ -1085,7 +1090,7 @@ export function wireAutomation(deps: AutomationDependencies) {
   // A routine the person asked a thread for is created at once, paused, as
   // that window's principal through the same draft and command path a
   // confirmed card takes, so only the card and the pause differ.
-  routineProposalService.bindRequestedCreate(({ windowId, proposal }) => {
+  routineProposalService.bindRequestedCreate(({ windowId, proposal, active }) => {
     if (!automationHistoryAvailable) {
       return {
         status: "not-created",
@@ -1103,8 +1108,9 @@ export function wireAutomation(deps: AutomationDependencies) {
         origin: { kind: "interactive" },
         definition: built.draft,
         // Paused in its first journaled event, so nothing runs before the
-        // person enables it.
-        initialLifecycle: "paused",
+        // person enables it, unless their Settings let a routine an agent
+        // creates at Full access start enabled.
+        ...(active === true ? {} : { initialLifecycle: "paused" }),
       }),
       { originThreadId: proposal.threadId },
     );

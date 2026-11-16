@@ -1,6 +1,7 @@
 export * from "./questionnaire";
 export * from "./chat";
 export * from "./code";
+export * from "./attachmentMediaType";
 export * from "./codePlanner";
 export * from "./codeFileListing";
 export * from "./codeSearch";
@@ -217,6 +218,9 @@ export * from "./gitHistory";
 
 export * from "./threadMessageQueue";
 export * from "./threadWakeups";
+export * from "./codeSessions";
+export * from "./workSessions";
+export * from "./providerNativeSession";
 export * from "./agentObservation";
 export * from "./hostAnswer";
 export * from "./terminalSessions";

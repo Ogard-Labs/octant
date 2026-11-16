@@ -1,12 +1,14 @@
 import type {
   CorrelationId,
   ProviderFailure,
+  ProviderChildUsage,
   ProviderInstanceId,
   ProviderRuntimeEvent,
   ProviderSessionId,
   UtcTimestamp,
 } from "@octant/contracts";
-import { OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS } from "@octant/contracts";
+import { OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS, decodeProviderModelId } from "@octant/contracts";
+import { boundedChildFinalSummary } from "@octant/provider-sdk/child-observations";
 import { summarizeStepArgument, unwrapShellInvocation } from "@octant/domain/live-turn-policy";
 import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
 import { watchedTextOf } from "@octant/domain/shield-watcher-policy";
@@ -41,6 +43,12 @@ export interface CodexEventContext {
   readonly projectRoot: string;
   readonly threadId: string;
   readonly turnId: string;
+  /**
+   * Set while Codex's own review runs on a thread of its own: the session's
+   * thread, which a completed turn names in its resume cursor in place of the
+   * review's. The review's turn is no anchor in the session's thread.
+   */
+  readonly sessionThreadId?: string;
   sequence: number;
   terminal: boolean;
   usage?: {
@@ -64,6 +72,11 @@ export interface CodexEventContext {
   readonly agentMessages: Map<string, CodexAgentMessageState>;
   readonly taskIds: Map<string, string>;
   readonly toolStates: Map<string, CodexToolState>;
+  /**
+   * The latest thread-total usage Codex reported on each of its own subagent
+   * threads, shared by the driver's connections. Absent, usage stays unknown.
+   */
+  readonly subagentUsage?: ReadonlyMap<string, ProviderChildUsage>;
   readonly makeRequestId: () => string;
   readonly makeTaskId: () => string;
   readonly makeToolCallId: () => string;
@@ -307,6 +320,28 @@ function mapProposedPlan(
   return streamedEvents(context, "text-delta", `${separator}${text}`);
 }
 
+/** The heading a Codex review's findings read under in the thread. */
+export const CODEX_REVIEW_HEADING = "**Codex review**";
+
+/**
+ * The findings Codex's own review reports when it leaves review mode, as the
+ * reply's own paragraph under the review heading: a review result, not edits
+ * or a plan. A review that found nothing still says so.
+ */
+function mapReviewFindings(
+  context: CodexEventContext,
+  item: Extract<ThreadItem, { readonly review: string }>,
+): ReadonlyArray<CodexMappedMessage> {
+  if (context.agentMessages.get(item.id)?.lifecycle === "terminal") {
+    return protocolFailure("Provider completed a review more than once.");
+  }
+  const findings = item.review.trim();
+  const text = `${CODEX_REVIEW_HEADING}\n\n${findings.length === 0 ? "No findings." : findings}\n`;
+  const separator = agentMessageSeparator(context, item.id);
+  context.agentMessages.set(item.id, { lifecycle: "terminal", text });
+  return streamedEvents(context, "text-delta", `${separator}${text}`);
+}
+
 function correlationFailure(): ReadonlyArray<CodexMappedMessage> {
   return protocolFailure("Provider message did not match the active thread and turn.");
 }
@@ -532,6 +567,11 @@ export function mapCodexSubagentCall(
   const threads = [
     ...new Set([...item.receiverThreadIds, ...Object.keys(item.agentsStates ?? {})]),
   ];
+  const requestedModel = item.tool === "spawnAgent" ? (item.model?.trim() ?? "") : "";
+  const modelId =
+    requestedModel.length === 0 || requestedModel.length > 128
+      ? undefined
+      : decodeProviderModelId(requestedModel);
   for (const threadId of threads) {
     const childAgentId = threadId.trim();
     if (childAgentId.length === 0 || childAgentId.length > 255) continue;
@@ -545,12 +585,25 @@ export function mapCodexSubagentCall(
             : undefined
           : CODEX_SUBAGENT_STATUS[reported];
     if (status === undefined) continue;
+    // A finished agent's last answer is shown to the person only; the parent
+    // model already received it from Codex's own wait call.
+    const finalSummary =
+      status === "completed"
+        ? boundedChildFinalSummary(item.agentsStates?.[threadId]?.message ?? undefined)
+        : undefined;
+    const usage =
+      status === "completed" || status === "failed"
+        ? context.subagentUsage?.get(threadId)
+        : undefined;
     results.push(
       event(context, {
         kind: "child-agent-activity",
         childAgentId,
         ...lineage,
         ...(task.length === 0 ? {} : { task }),
+        ...(modelId === undefined ? {} : { modelId }),
+        ...(finalSummary === undefined ? {} : { finalSummary }),
+        ...(usage === undefined ? {} : { usage }),
         status,
         summary:
           status === "running" || status === "starting"
@@ -714,6 +767,12 @@ function mapLifecycle(
     case "plan":
       return message.method === "item/completed"
         ? mapProposedPlan(context, item)
+        : [{ kind: "ignored" }];
+    case "enteredReviewMode":
+      return [{ kind: "ignored" }];
+    case "exitedReviewMode":
+      return message.method === "item/completed"
+        ? mapReviewFindings(context, item)
         : [{ kind: "ignored" }];
     case "userMessage":
     case "reasoning":
@@ -1021,9 +1080,11 @@ function mapTerminal(
   return [
     event(context, {
       kind: "completed",
-      resumeCursor: { driverKind: "codex", value: context.threadId },
+      resumeCursor: { driverKind: "codex", value: context.sessionThreadId ?? context.threadId },
       // `thread/fork` takes it as `lastTurnId` (app-server v2, rust-v0.162.1).
-      ...(turn.id.trim().length === 0 ? {} : { nativeAnchor: turn.id }),
+      ...(turn.id.trim().length === 0 || context.sessionThreadId !== undefined
+        ? {}
+        : { nativeAnchor: turn.id }),
     }),
   ];
 }

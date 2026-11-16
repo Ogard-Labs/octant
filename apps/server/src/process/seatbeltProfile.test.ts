@@ -73,6 +73,28 @@ describe("shared Seatbelt profile builder", () => {
     );
   });
 
+  it("refuses a provider outside Strict only other providers' sign-ins inside its folders, and every protected file under Strict", () => {
+    const base = temporaryRoot();
+    const home = join(base, "home");
+    mkdirSync(home);
+    const profileFor = (protectedFiles?: "provider-sign-ins") =>
+      buildDenyDefaultSeatbeltProfile({
+        boundRoot: home,
+        temporaryDirectory: home,
+        networkEgress: "none",
+        homeDirectory: home,
+        usersDirectory: base,
+        ownAccountAccess: "none",
+        ...(protectedFiles === undefined ? {} : { protectedFiles }),
+      });
+    const awsDenial = `"${escapeSeatbeltPath(join(home, ".aws/credentials"))}"`;
+    const codexDenial = `(subpath "${escapeSeatbeltPath(join(home, ".codex/auth.json"))}")`;
+    expect(profileFor()).toContain(awsDenial);
+    expect(profileFor()).toContain(codexDenial);
+    expect(profileFor("provider-sign-ins")).not.toContain(awsDenial);
+    expect(profileFor("provider-sign-ins")).toContain(codexDenial);
+  });
+
   it.skipIf(process.platform !== "darwin")(
     "starts the system shell without a shell-selection warning",
     () => {
@@ -191,6 +213,27 @@ describe("shared Seatbelt profile builder", () => {
         expect(lines).toContain(seatbeltDenyRule("file-write*", folder));
         expect(lines).not.toContain(seatbeltAllowRule("file-write*", folder));
       }
+    });
+
+    it("keeps credential folders denied after granting the home folder as an extra folder", () => {
+      const { main, temporaryDirectory } = folders();
+      const home = join(temporaryRoot(), "home");
+      mkdirSync(join(home, ".aws"), { recursive: true });
+      const lines = buildDenyDefaultSeatbeltProfile({
+        boundRoot: main,
+        extraBoundRoots: [home],
+        homeDirectory: home,
+        temporaryDirectory,
+        networkEgress: "none",
+        privateHomeAllowPaths: [],
+      }).split("\n");
+      const granted = lines.lastIndexOf(seatbeltAllowRule("file-write*", home));
+      const denied = lines.findLastIndex(
+        (line) =>
+          line.startsWith("(deny file-read* file-write*") && line.includes(join(home, ".aws")),
+      );
+      expect(granted).toBeGreaterThan(-1);
+      expect(denied).toBeGreaterThan(granted);
     });
 
     it("refuses an extra folder that is relative or an ancestor of a denied system path", () => {

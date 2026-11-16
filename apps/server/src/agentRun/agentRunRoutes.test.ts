@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
+import type { ProviderConnection } from "@octant/provider-sdk";
 import {
   AgentRunPolicySettings,
   AgentRunRequested,
@@ -19,6 +20,7 @@ import {
   decodeAgentRunRequestId,
   decodeMultiModelRoutingVendorId,
   decodeWindowId,
+  type AgentObservedChild,
   type AgentRun,
   type AgentRunAuthority,
   type AgentRunCommandResult,
@@ -191,6 +193,8 @@ function createHandler(
     readonly snapshotCanvas?: AgentRunRouteDependencies["snapshotCanvas"];
     readonly resolveCenterContext?: AgentRunRouteDependencies["resolveCenterContext"];
     readonly coordinatorWorkers?: AgentRunRouteDependencies["coordinatorWorkers"];
+    readonly readObservations?: AgentRunRouteDependencies["readObservations"];
+    readonly liveTurnConnection?: AgentRunRouteDependencies["liveTurnConnection"];
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-agentrun-routes-"));
@@ -379,6 +383,12 @@ function createHandler(
         parentThreadTitle: `Thread ${String(parentThreadId).slice(0, 8)}`,
       })),
     ...(options.snapshotCanvas === undefined ? {} : { snapshotCanvas: options.snapshotCanvas }),
+    ...(options.readObservations === undefined
+      ? {}
+      : { readObservations: options.readObservations }),
+    ...(options.liveTurnConnection === undefined
+      ? {}
+      : { liveTurnConnection: options.liveTurnConnection }),
     ...(options.coordinatorWorkers === undefined
       ? {}
       : { coordinatorWorkers: options.coordinatorWorkers }),
@@ -965,6 +975,90 @@ describe("agentRunRoutes", () => {
       status: "unavailable",
       entries: [],
       staleReason: "No retained child conversation is available.",
+    });
+  });
+
+  describe("stopping one provider-native subagent", () => {
+    const child = {
+      providerInstanceId: ids.provider,
+      sessionId: "session-live",
+      childAgentId: "child-1",
+      lifecycleStatus: "running",
+      latestSummary: "Working.",
+      firstObservedAt: now,
+      updatedAt: now,
+      historyStatus: "partial",
+      history: [],
+      kind: "observed",
+      observationId: "observation-1",
+      parentThreadId: ids.thread,
+      mode: "chat",
+      control: "stop",
+    } as unknown as AgentObservedChild;
+    const readObservations = () => ({ observations: [child], observationsTruncated: false });
+    const stopRequest = (token: string, observationId = "observation-1") =>
+      new Request("http://127.0.0.1/api/agent-runs/observed/stop", {
+        method: "POST",
+        headers: { "x-octant-window-capability": token, "content-type": "application/json" },
+        body: JSON.stringify({ parentThreadId: ids.thread, observationId }),
+      });
+    const live = (stopChildAgent?: ProviderConnection["stopChildAgent"]) => ({
+      connection: (stopChildAgent === undefined
+        ? {}
+        : { stopChildAgent }) as unknown as ProviderConnection,
+      sessionId: "session-live" as never,
+      providerInstanceId: ids.provider as never,
+      takesSteeredResults: true,
+    });
+
+    it("asks the running turn's session to stop that one child", async () => {
+      const stopChildAgent = vi.fn(() => Effect.succeed("stopped" as const));
+      const { handler, token } = createHandler({
+        readObservations,
+        liveTurnConnection: () => live(stopChildAgent),
+      });
+      const response = await handler(stopRequest(token));
+      expect(response?.status).toBe(200);
+      expect(await response?.json()).toEqual({ status: "stop-requested" });
+      expect(stopChildAgent).toHaveBeenCalledWith({
+        sessionId: "session-live",
+        childAgentId: "child-1",
+      });
+    });
+
+    it("refuses a window that does not hold the thread before reaching the provider", async () => {
+      const stopChildAgent = vi.fn(() => Effect.succeed("stopped" as const));
+      const { handler, token } = createHandler({
+        readObservations,
+        authorizeParentThread: () => false,
+        liveTurnConnection: () => live(stopChildAgent),
+      });
+      const response = await handler(stopRequest(token));
+      expect(response?.status).toBe(403);
+      expect(await response?.json()).toEqual({ status: "refused", reason: "unauthorized" });
+      expect(stopChildAgent).not.toHaveBeenCalled();
+    });
+
+    it("refuses when no turn is running, the runtime cannot stop one child, or no child matches", async () => {
+      const notLive = createHandler({ readObservations, liveTurnConnection: () => undefined });
+      expect(await (await notLive.handler(stopRequest(notLive.token)))?.json()).toEqual({
+        status: "refused",
+        reason: "not-live",
+      });
+      const unsupported = createHandler({ readObservations, liveTurnConnection: () => live() });
+      expect(await (await unsupported.handler(stopRequest(unsupported.token)))?.json()).toEqual({
+        status: "refused",
+        reason: "unsupported",
+      });
+      const stopChildAgent = vi.fn(() => Effect.succeed("stopped" as const));
+      const unknown = createHandler({
+        readObservations,
+        liveTurnConnection: () => live(stopChildAgent),
+      });
+      const response = await unknown.handler(stopRequest(unknown.token, "observation-2"));
+      expect(response?.status).toBe(409);
+      expect(await response?.json()).toEqual({ status: "refused", reason: "not-found" });
+      expect(stopChildAgent).not.toHaveBeenCalled();
     });
   });
 

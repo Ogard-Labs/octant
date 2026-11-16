@@ -337,6 +337,7 @@ function toHierarchyEntry(entry: AgentRunParentSummaryClientEntry): AgentHierarc
   return {
     runId: String(entry.runId),
     ...(entry.parentRunId === undefined ? {} : { parentRunId: String(entry.parentRunId) }),
+    ...(entry.compareGroup === undefined ? {} : { compareGroup: entry.compareGroup }),
     role: entry.role,
     task: entry.task,
     lifecycleStatus: entry.lifecycleStatus,
@@ -352,6 +353,7 @@ function toHierarchyEntry(entry: AgentRunParentSummaryClientEntry): AgentHierarc
     ...(entry.resultPackets === undefined ? {} : { resultPackets: entry.resultPackets }),
     ...(entry.resultsTruncated === undefined ? {} : { resultsTruncated: entry.resultsTruncated }),
     version: entry.version,
+    ...(entry.createdAt === undefined ? {} : { createdAt: entry.createdAt }),
     updatedAt: entry.updatedAt,
   };
 }

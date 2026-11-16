@@ -133,6 +133,35 @@ describe("WorkRequestDetail", () => {
     ).toThrow();
   });
 
+  it("keeps the paths a plan names whole on a level change, while its request text stays sanitized", () => {
+    const plan = "1. Edit src/app/main.ts\n2. Run the tests in packages/core";
+    expect(
+      decodeWorkRequestDetail({ ...approvalDetail, levelChange: { to: "auto", plan } }),
+    ).toMatchObject({ levelChange: { to: "auto", plan } });
+    expect(() =>
+      decodeWorkRequestDetail({
+        ...approvalDetail,
+        description: "Edit src/app/main.ts",
+        levelChange: { to: "auto", plan },
+      }),
+    ).toThrow();
+  });
+
+  it("refuses a level change to Full access, or a plan handed over on the way into Plan", () => {
+    expect(() =>
+      decodeWorkRequestDetail({ ...approvalDetail, levelChange: { to: "full-access" } }),
+    ).toThrow();
+    expect(() =>
+      decodeWorkRequestDetail({ ...approvalDetail, levelChange: { to: "plan", plan: "Do it." } }),
+    ).toThrow();
+    expect(() =>
+      decodeWorkRequestDetail({
+        ...approvalDetail,
+        levelChange: { to: "ask-first", plan: "Step\u0000one" },
+      }),
+    ).toThrow();
+  });
+
   it("rejects more than 8 user-input options", () => {
     expect(() =>
       decodeWorkRequestDetail({

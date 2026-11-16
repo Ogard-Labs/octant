@@ -6,8 +6,13 @@ import type {
   ProviderRuntimeEvent,
   ProviderSessionId,
   UtcTimestamp,
+  ProviderLevelChangeRequest,
 } from "@octant/contracts";
-import { MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS } from "@octant/contracts";
+import {
+  MAX_PROVIDER_PLAN_CHARACTERS,
+  MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS,
+  decodeProviderModelId,
+} from "@octant/contracts";
 import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
 import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
 import { createHash } from "node:crypto";
@@ -24,6 +29,10 @@ import type {
 } from "./claudeAgentSdkPort";
 import { isClaudeTaskTool, type ClaudeTaskList } from "./claudeTaskList";
 import { outputStopReason } from "./outputStopReason";
+import {
+  boundedChildFinalSummary,
+  reportedChildUsage,
+} from "@octant/provider-sdk/child-observations";
 import { outsideContentTarget } from "./outsideContentRead";
 import { proposedPlanText } from "./proposedPlan";
 
@@ -207,6 +216,12 @@ export interface ClaudeEventContext {
   readonly callUsage: Map<string, ClaudeUsage>;
   readonly requestIds: Map<string, ClaudeRequestCorrelation>;
   readonly taskIds: Map<string, ClaudeTaskState>;
+  /**
+   * The runtime's task id of each subagent, by the Octant child id its
+   * activity is reported under. Stopping one subagent names the runtime's
+   * task, while the person only ever sees the child id.
+   */
+  readonly subagentTaskIds: Map<string, string>;
   /**
    * The task id of each checklist position. Claude restates the whole list on
    * every `TodoWrite`, and the task panel keeps a task's first-seen place, so
@@ -743,6 +758,14 @@ function mapToolUse(
     // The runtime's own subagent: shown as a child run of this thread from
     // its start. Its own tool calls each pass Octant's gate on their own.
     const task = normalized(jsonString(content.input, "description") ?? "", SUMMARY_MAX_CHARACTERS);
+    // The model the call asked for, as Claude names it (an alias such as
+    // "haiku" or a full id). Without one the subagent's definition or the
+    // parent decides, which Claude does not report, so it stays unknown.
+    const requestedModel = jsonString(content.input, "model")?.trim() ?? "";
+    const modelId =
+      requestedModel.length === 0 || requestedModel.length > 128
+        ? undefined
+        : decodeProviderModelId(requestedModel);
     return [
       start,
       ...inputContent(),
@@ -750,6 +773,7 @@ function mapToolUse(
         kind: "child-agent-activity",
         childAgentId: resolved.state.toolCallId,
         ...(task === undefined ? {} : { task }),
+        ...(modelId === undefined ? {} : { modelId }),
         status: "starting",
         summary: "Claude started a subagent.",
       }),
@@ -1316,12 +1340,43 @@ function mapTask(
     return [failure("Claude workflow activity did not match a workflow call.")];
   }
   context.taskIds.set(message.taskId, next);
+  if (message.subtype === "task_started" && message.toolUseId !== undefined) {
+    const parent = context.toolStates.get(message.toolUseId);
+    if (parent?.toolName === CLAUDE_SUBAGENT_TOOL) {
+      context.subagentTaskIds.set(parent.toolCallId, message.taskId);
+    }
+  }
+  const progress = event(context, {
+    kind: "task-progress",
+    taskId: next.taskId,
+    status: normalizedTaskStatus(next.lifecycle),
+    summary: next.summary,
+  });
+  const childAgentId =
+    message.subtype === "task_notification"
+      ? [...context.subagentTaskIds].find(([, taskId]) => taskId === message.taskId)?.[0]
+      : undefined;
+  if (childAgentId === undefined) {
+    return [progress, ...workflowChildActivity(context, message, existing, next)];
+  }
+  // The subagent's closing report and the total tokens Claude counted for it.
+  // Claude reports no input/output split, so only the total is carried. The
+  // report reaches the person only; the parent already holds it as the tool
+  // result Claude itself returned.
+  const finalSummary = boundedChildFinalSummary(message.summary);
+  const usage =
+    message.usage === undefined
+      ? undefined
+      : reportedChildUsage({ totalTokens: message.usage.totalTokens });
   return [
+    progress,
     event(context, {
-      kind: "task-progress",
-      taskId: next.taskId,
-      status: normalizedTaskStatus(next.lifecycle),
-      summary: next.summary,
+      kind: "child-agent-activity",
+      childAgentId,
+      status: next.lifecycle === "completed" ? "completed" : "failed",
+      summary: next.lifecycle === "completed" ? "The subagent finished." : "The subagent failed.",
+      ...(finalSummary === undefined ? {} : { finalSummary }),
+      ...(usage === undefined ? {} : { usage }),
     }),
     ...workflowChildActivity(context, message, existing, next),
   ];
@@ -1956,6 +2011,23 @@ function artifactApprovalDescription(
   return `Publish ${target ?? "a Project file"} to your claude.ai account${replacing}. It leaves this computer.`;
 }
 
+/**
+ * Claude Code's own plan-mode calls, read as the level change they ask for.
+ * `ExitPlanMode` carries the plan the person is asked to approve, bounded;
+ * a plan that is not text is left out rather than refusing the ask.
+ */
+function claudeLevelChangeRequest(
+  request: ClaudeToolRequest,
+): ProviderLevelChangeRequest | undefined {
+  if (request.toolName === "EnterPlanMode") return { kind: "enter-plan" };
+  if (request.toolName !== "ExitPlanMode") return undefined;
+  const plan =
+    typeof request.input.plan === "string"
+      ? Array.from(request.input.plan.trim()).slice(0, MAX_PROVIDER_PLAN_CHARACTERS).join("")
+      : "";
+  return plan.length === 0 ? { kind: "exit-plan" } : { kind: "exit-plan", plan };
+}
+
 export function mapClaudeToolRequest(
   context: ClaudeEventContext,
   request: ClaudeToolRequest,
@@ -1978,6 +2050,30 @@ export function mapClaudeToolRequest(
   if (correlated.kind === "failure") return correlated;
   const normalizedRequestId = correlated.requestId;
   const target = approvalTarget(context, request);
+  const levelChange = claudeLevelChangeRequest(request);
+  if (levelChange !== undefined) {
+    return {
+      kind: "approval",
+      request: {
+        kind: "approval",
+        requestId: normalizedRequestId,
+        providerSessionId: context.claudeSessionId,
+        providerToolUseId: request.toolUseId,
+        inputDigest: digest,
+        toolName,
+        event: mappedEvent(context, {
+          kind: "approval-request",
+          requestId: normalizedRequestId,
+          action: toolName,
+          description:
+            levelChange.kind === "enter-plan"
+              ? "Claude asks to plan first: the thread moves to Plan, read-only, from its next turn."
+              : "Claude finished planning and asks to leave Plan to carry out its plan from the thread's next turn.",
+          levelChange,
+        }),
+      },
+    };
+  }
   const requestEvent = mappedEvent(context, {
     kind: "approval-request",
     requestId: normalizedRequestId,

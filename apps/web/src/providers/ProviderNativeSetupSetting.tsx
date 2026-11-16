@@ -35,8 +35,9 @@ const FEATURE_NAMES: Readonly<Record<ProviderNativeSetupFeature, string>> = {
  * The person's switch for one key provider account running as it does in its
  * own app: its own subagents, web tools, skills, and home configuration. On by
  * default; turning it off keeps them unloaded below Full access, and the web
- * tools at every level and in every mode. Only a
- * window on this host may change it (the server refuses others). The line
+ * tools at every level and in every mode. Only the host's own person may
+ * change it, at a window on this host or on a device they paired (the server
+ * refuses every other device). The line
  * under the switch says which of those this provider's driver can load at
  * all, so a feature Octant cannot see is never implied.
  */
@@ -58,9 +59,10 @@ export function ProviderNativeSetupSetting(props: ProviderNativeSetupSettingProp
           {props.instance.driverKind === "mistral-vibe" ? (
             <>
               {" "}
-              Vibe doesn’t say which tool its subagents ask to run, so their approvals show no tool
-              name, and a subagent running as one of your own Vibe agents may approve its own tools,
-              as in Vibe.
+              Vibe’s subagents, and your own Vibe agents they run as, work in Work and Code outside
+              Plan, at every level there. Vibe doesn’t say which tool its subagents ask to run, so
+              their approvals show no tool name, and a subagent running as one of your own Vibe
+              agents may approve its own tools, as in Vibe.
             </>
           ) : null}
           {unsupported.length === 0 ? null : (
@@ -103,8 +105,11 @@ export interface ProviderOwnMemorySettingProps {
  * The person's switch for one Claude Code or Codex account's own memory, on
  * by default and apart from "Run as itself": that switch and Full access never
  * turn memory on once the person turned it off. The text says what Octant does
- * not control while it is on, and where it stays off. Only a window on this host may change it (the
- * server refuses others).
+ * not control while it is on, and what it may do in Plan and Chat: Claude Code
+ * reads its memory there and cannot change it, and Codex, which writes its
+ * memory in the background, keeps it off there. Only the host's own person may
+ * change it, at a window on this host or on a device they paired (the server
+ * refuses every other device).
  */
 export function ProviderOwnMemorySetting(props: ProviderOwnMemorySettingProps) {
   const name = keyProviderLabel(props.instance.driverKind);
@@ -115,7 +120,10 @@ export function ProviderOwnMemorySetting(props: ProviderOwnMemorySettingProps) {
         <>
           Lets {name} keep and use its own memory in this account’s Work and Code threads, as in{" "}
           {name} itself. On by default. {name} decides what it remembers and carries it across
-          Projects; Octant does not show, journal, or clear it. It stays off in Plan and in Chat.
+          Projects; Octant does not show, journal, or clear it.{" "}
+          {props.instance.driverKind === "claude"
+            ? "In Plan and in Chat it reads its memory and cannot change it."
+            : "It stays off in Plan and in Chat, because it writes its memory in the background."}{" "}
           Octant’s Project memory and its memory of you work with this off. {name}’s telemetry and
           self-update stay off either way.
         </>

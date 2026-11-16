@@ -64,10 +64,11 @@ The command palette's **Approve** and **Deny** commands use
 thread.
 
 A Code answer counts as refused when the host says `operation-failed` or reports
-the turn `failed`, or `interrupted` with a reason. A bare `interrupted` is the
-third denial in one turn: the provider received that Deny and the host then
-stopped the turn, so it counts as answered. The start-screen card, the command
-palette, and the open Code thread all read Code answers this way.
+the turn `failed`, or `interrupted` with a reason. A Deny goes back to the
+model and the turn keeps running, however many denials it has had, so the
+answer reports the turn `running`; a bare `interrupted` still counts as
+answered. The start-screen card, the command palette, and the open Code thread
+all read Code answers this way.
 
 ## Stopping a Code turn
 
@@ -330,10 +331,14 @@ unit, `thread.terminal-session-imported@1` holds the bounded history on the
 `thread.terminal-session-delivered@1` records the first admitted turn that
 carried it, so a restart before that turn still delivers it. New imports include
 the original working directory and an explicit text-handoff continuity receipt.
-A requested native adoption fails before reading or creating anything when
-historical account binding and exclusive session ownership cannot be proved;
-current adapters report `account-binding-unavailable`. Neither a source folder
-nor a currently logged-in account is substituted for that missing evidence.
+A native adoption requested through this import fails before reading or
+creating anything when historical account binding and exclusive session
+ownership cannot be proved; its adapters report `account-binding-unavailable`.
+Neither a source folder nor a currently logged-in account is substituted for
+that missing evidence. Claude Code's own adoption of a session for an empty
+Code thread is a separate path that has that proof
+([Provider runtimes: Sessions started outside
+Octant](provider-runtimes.md#sessions-started-outside-octant)).
 
 ## Linear issues
 

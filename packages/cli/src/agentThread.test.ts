@@ -392,6 +392,26 @@ describe("starting a Code thread from the terminal", () => {
     }
   });
 
+  it("starts this run's thread at Full access with the person's flag, remembering nothing on the Project", async () => {
+    const fake = host("current-session");
+
+    const result = await createAgentThread(fake.session, {
+      mode: "code",
+      title: "Run the terminal",
+      projectName: "Repo",
+      access: "full-access",
+      fullAccessScope: "run",
+    });
+
+    expect(result).toMatchObject({ kind: "created", mode: "code" });
+    expect(result).not.toHaveProperty("projectRemembersFullAccess");
+    expect(fake.projectCommands()).toEqual([]);
+    expect(fake.created()?.thread).toMatchObject({
+      executionPolicy: "full-access",
+      fullAccessRunFlag: true,
+    });
+  });
+
   it("starts a narrower asked-for mode without touching the Project's remembered access", async () => {
     const fake = host("project-default");
 
@@ -479,7 +499,7 @@ describe("starting a Work thread from the terminal with an asked-for access", ()
     expect(change).toMatchObject({ access: "full-access", fullAccessSandbox: true });
   });
 
-  it("refuses --access plan for a Work thread, which has no Plan overlay", async () => {
+  it("moves a new Work thread to Plan through the composer's access command", async () => {
     const fake = workHost();
 
     const result = await createAgentThread(fake.session, {
@@ -489,9 +509,34 @@ describe("starting a Work thread from the terminal with an asked-for access", ()
       access: "plan",
     });
 
-    expect(result).toMatchObject({ kind: "refused" });
-    // Refused before anything is created, so no stray thread is left behind.
-    expect(fake.workCommands()).toEqual([]);
+    expect(result).toMatchObject({ kind: "created", mode: "work" });
+    const change = fake
+      .workCommands()
+      .find((command) => command.kind === "change-work-thread-access");
+    expect(change).toMatchObject({ access: "plan", expectedVersion: 1 });
+  });
+
+  it("keeps the per-run Full access flag on a Work thread created at Full access", async () => {
+    const fake = workHost();
+
+    const result = await createAgentThread(fake.session, {
+      mode: "work",
+      title: "Run the terminal",
+      projectName: "Client",
+      access: "full-access",
+      fullAccessScope: "run",
+    });
+
+    expect(result).toMatchObject({ kind: "created", mode: "work" });
+    const commands = fake.workCommands();
+    expect(commands.find((command) => command.kind === "create-work-thread")).toMatchObject({
+      access: "full-access",
+    });
+    expect(commands.find((command) => command.kind === "change-work-thread-access")).toMatchObject({
+      access: "full-access",
+      fullAccessRunFlag: true,
+      expectedVersion: 1,
+    });
   });
 
   it("refuses --access on a Chat thread", async () => {

@@ -1,4 +1,5 @@
 import { useDroppedFolderMentions } from "../../composer/useDroppedFolderMentions";
+import { attachAllowingFiles } from "../../composer/attachmentMediaType";
 import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
 import type { AutoReview } from "../autoReview";
 import {
@@ -15,7 +16,6 @@ import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
   composerProviderCommands,
-  PLAN_PROVIDER_COMMAND_REFUSAL,
 } from "../../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../../composer/useComposerAtMenu";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
@@ -423,11 +423,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
-    provider: composerProviderCommands(
-      providerGroups,
-      props.selectedProviderInstanceId,
-      executionPolicy === "plan" ? PLAN_PROVIDER_COMMAND_REFUSAL : undefined,
-    ),
+    provider: composerProviderCommands(providerGroups, props.selectedProviderInstanceId),
   });
   // F2: the default delivery branch must never collide with the base branch
   // (e.g. `development`), which normally exists. Derive a unique
@@ -773,10 +769,14 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       workspace === "managed-worktree" ||
       props.fixedPrompt !== undefined ||
       props.creating === true,
-    onFiles: (files) => {
-      if (imageSupport === false) images.refuse("Choose an image-capable model to attach images.");
-      else images.attach(files);
-    },
+    onFiles: (files) =>
+      void attachAllowingFiles(
+        files,
+        imageSupport,
+        images.attach,
+        images.refuse,
+        "Choose an image-capable model to attach images.",
+      ),
   });
   function attachFromTransfer(items: DataTransfer | null): boolean {
     if (items === null) return false;
@@ -1069,15 +1069,17 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               className: "code-composer-adapter__composer-bar",
               attach: (
                 <ComposerAttachButton
-                  accept="image/png,image/jpeg,image/webp,image/gif"
                   busy={props.creating === true}
-                  refusedReason={
-                    imageSupport === false
-                      ? "The selected model does not accept images. Choose an image-capable model."
-                      : undefined
-                  }
                   onRefused={images.refuse}
-                  onFileSelected={(file) => images.attach([file])}
+                  onFileSelected={(file) =>
+                    attachAllowingFiles(
+                      [file],
+                      imageSupport,
+                      images.attach,
+                      images.refuse,
+                      "The selected model does not accept images. Choose an image-capable model.",
+                    )
+                  }
                 />
               ),
               trailing: (

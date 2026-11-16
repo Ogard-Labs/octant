@@ -11,6 +11,7 @@ import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
 import { DescribedImageName, ImageDescribedBy } from "./imageDescription";
 import {
+  AgentResultsSteeredIntoTurn,
   AgentRunId,
   AgentRunResultDeliveryMark,
   AgentRunResultDeliveryRunIds,
@@ -454,6 +455,12 @@ export const ChatTurn = Schema.Struct({
    * idempotent: the server refuses to begin a second turn for the same run.
    */
   delivery: Schema.optional(AgentRunResultDeliveryMark),
+  /**
+   * Finished children's results the host steered into this turn while it
+   * ran, in arrival order. The journaled `agent-run.result-steered` record is
+   * the source; this is its projection onto the turn.
+   */
+  steeredResults: Schema.optional(AgentResultsSteeredIntoTurn),
   createdAt: UtcTimestamp,
 })
   .annotations(strict)

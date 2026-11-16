@@ -210,6 +210,16 @@ export interface ClaudeOpenQueryInput {
   /** The account keeps Claude's own memory for this launch (`providerOwnMemoryLaunches`). */
   readonly ownMemory?: true;
   /**
+   * The thread's attachments folder: a Plan launch's confinement binds it
+   * read-only, as the command sandbox reads it below Full access.
+   */
+  readonly attachmentsFolder?: string;
+  /**
+   * The account's own MCP servers this Plan session starts, the person's
+   * marks (`planReadOnlyToolServers`); absent or empty starts none.
+   */
+  readonly planMcpServers?: ReadonlyArray<string>;
+  /**
    * The auto-compact window for this query alone, from the person's
    * compaction point; absent leaves the runtime its own.
    */
@@ -269,6 +279,9 @@ export interface ClaudeSessionMetadata {
   readonly projectRoot: string;
   readonly lastModified: number;
   readonly createdAt?: number;
+  /** The name the person gave the session, or else the runtime's summary of it. */
+  readonly title?: string;
+  readonly gitBranch?: string;
 }
 
 export type ClaudeJsonValue =
@@ -625,6 +638,15 @@ export interface ClaudeQueryPort {
   readonly requestCompaction: () => Effect.Effect<void, ProviderFailure>;
   readonly interrupt: () => Effect.Effect<void, ProviderFailure>;
   /**
+   * Stops one task the runtime started, such as a subagent, by the runtime's
+   * own task id, and leaves the turn that started it running. The runtime
+   * reports the stop with a task notification; this only asks for it.
+   * `unsupported` when the runtime offers no single-task stop.
+   */
+  readonly stopTask: (
+    taskId: string,
+  ) => Effect.Effect<"requested" | "unsupported", ProviderFailure>;
+  /**
    * Kills this query's runtime process tree outright, without asking it to
    * stop first. Only this query's own process is signalled.
    */
@@ -660,6 +682,14 @@ export interface ClaudeAgentSdkPort {
     readonly upToMessageId: string;
     readonly configDirectory?: string;
   }) => Effect.Effect<string, ProviderFailure>;
+  /**
+   * The account's sessions whose own folder is `projectRoot`, as the runtime
+   * lists them. A port without it offers no session to start a thread from.
+   */
+  readonly listSessions?: (input: {
+    readonly projectRoot: string;
+    readonly configDirectory?: string;
+  }) => Effect.Effect<ReadonlyArray<ClaudeSessionMetadata>, ProviderFailure>;
 }
 
 // Mutable because the SDK's `SDKUserMessage` content is; the port builds a
@@ -771,6 +801,8 @@ export interface ClaudeFlagSettings {
   readonly disableAllHooks?: true;
   readonly autoMemoryEnabled?: false;
   readonly autoCompactWindow?: number;
+  readonly allowedMcpServers?: ReadonlyArray<{ readonly serverName: string }>;
+  readonly disableClaudeAiConnectors?: true;
 }
 
 export interface ClaudeNativeQueryOptions {
@@ -808,9 +840,31 @@ export interface ClaudeNativeQueryOptions {
 export function claudeNativeQueryOptions(
   setup: ProviderNativeSetup | undefined,
   ownMemory = false,
+  planMcpServers: ReadonlyArray<string> = [],
 ): ClaudeNativeQueryOptions {
   if (setup === undefined) {
     return { settingSources: [], skills: [], strictMcpConfig: true, settings: {} };
+  }
+  // A Plan session whose person marked some of the account's servers
+  // "Read-only — allowed in Plan" (`planReadOnlyToolServers`) reads them from
+  // home settings like any other, and a flag allowlist starts those alone:
+  // Claude Code applies `allowedMcpServers` to every scope and an empty list
+  // to none, and the merged list keeps any narrower one the person set. Octant's
+  // own server is named so the allowlist never drops it. The claude.ai
+  // connectors are not the person's marked servers, so they stay off.
+  const planServers = !setup.toolServers && !setup.projectCode ? planMcpServers : [];
+  if (planServers.length > 0) {
+    return {
+      settingSources: ["user"],
+      skills: setup.skills ? "all" : [],
+      strictMcpConfig: false,
+      settings: {
+        allowedMcpServers: [...planServers, "octant"].map((serverName) => ({ serverName })),
+        disableClaudeAiConnectors: true,
+        ...(setup.hooks ? {} : { disableAllHooks: true as const }),
+        ...(ownMemory ? {} : { autoMemoryEnabled: false as const }),
+      },
+    };
   }
   const readsHome = setup.skills || setup.hooks || setup.toolServers || setup.projectCode;
   const settingSources: ClaudeSettingSource[] = [];
@@ -905,6 +959,8 @@ export interface ClaudeAgentSdkQueryLike extends AsyncIterable<unknown> {
     servers: Record<string, McpSdkServerConfigWithInstance>,
   ) => Promise<McpSetServersResult>;
   readonly interrupt: () => Promise<unknown>;
+  /** Older runtimes cannot stop one task without interrupting the turn. */
+  readonly stopTask?: (taskId: string) => Promise<void>;
   readonly setPermissionMode: (mode: ClaudePermissionMode) => Promise<void>;
   readonly initializationResult: () => Promise<unknown>;
   /** The runtime's own account of its window; older runtimes do not answer. */
@@ -1384,6 +1440,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               ? {}
               : { extraFolders: input.additionalDirectories }),
             executionPolicy: input.executionPolicy,
+            ...(input.attachmentsFolder === undefined
+              ? {}
+              : { readOnlyFolders: [input.attachmentsFolder] }),
             runsCommands: input.tools.includes("Bash"),
             ...(input.network === undefined ? {} : { network: input.network }),
           });
@@ -1562,7 +1621,11 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   },
                 };
               };
-            const native = claudeNativeQueryOptions(input.nativeSetup, input.ownMemory === true);
+            const native = claudeNativeQueryOptions(
+              input.nativeSetup,
+              input.ownMemory === true,
+              input.planMcpServers,
+            );
             const flagSettings: ClaudeFlagSettings = {
               ...native.settings,
               // Claude Code upgrades Haiku to Sonnet in Plan unless Sonnet is
@@ -2019,6 +2082,13 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     throw error;
                   }
                 }, "interruption"),
+              stopTask: (taskId) =>
+                request(async () => {
+                  const stop = query?.stopTask;
+                  if (stop === undefined) return "unsupported" as const;
+                  await stop.call(query, taskId);
+                  return "requested" as const;
+                }, "task stop"),
               setPermissionMode: (mode) =>
                 request(() => query!.setPermissionMode(mode), "permission update"),
               supportedModels: () =>
@@ -2049,6 +2119,18 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
       });
       return Effect.acquireRelease(acquire, (query, _exit) => query.close());
     },
+    listSessions: ({ projectRoot, configDirectory }) =>
+      Effect.tryPromise({
+        try: async () =>
+          decodeSessions(
+            await withClaudeAccountDirectory(configDirectory, () =>
+              sdk.listSessions({ dir: projectRoot, includeWorktrees: false }),
+            ),
+            projectRoot,
+            { titles: true },
+          ),
+        catch: (error) => sanitizeFailure(error, "session lookup"),
+      }),
     findSession: ({ sessionId, projectRoot, configDirectory }) =>
       Effect.tryPromise({
         try: async () => {

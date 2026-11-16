@@ -24,11 +24,7 @@ import {
   WorkThreadTranscript,
   decodeHostAnswer,
 } from "@octant/contracts";
-import {
-  fullAccessSandboxSupported,
-  threadAccessOf,
-  workAccessOfPermissionMode,
-} from "@octant/domain";
+import { fullAccessSandboxSupported, threadAccessOf, workThreadAccessOfMode } from "@octant/domain";
 import {
   answerAgentTurnQuestion,
   changeAgentModel,
@@ -641,9 +637,12 @@ export async function createAgentThread(
      * remembers it for the Project, as above. `thread` gives it to this thread
      * alone and sends no Project command: an agent grant holds no Project
      * administration, so the host refuses it both the Project command and a
-     * thread that asks for the Project's remembered level.
+     * thread that asks for the Project's remembered level. `run` is the
+     * person's per-run flag (`octant agent --full-access`): this thread alone
+     * starts at Full access, the host journals that the flag came from the
+     * person, and the Project is left as it was.
      */
-    readonly fullAccessScope?: "project" | "thread" | undefined;
+    readonly fullAccessScope?: "project" | "thread" | "run" | undefined;
     /**
      * Opt-in sandbox at Full access: the thread records `fullAccessSandbox`,
      * so its launch stays confined and its network proxied while prompts stay
@@ -802,23 +801,16 @@ export async function createAgentThread(
   });
   if (projectOpened.kind === "refused") return projectOpened;
   if (mode === "work") {
-    // Checked before anything is created, so a refused request leaves no
-    // thread behind.
+    // A Work thread takes every level a Code thread does, Plan included.
     const workAccess =
-      input.access === undefined ? undefined : workAccessOfPermissionMode(input.access);
-    if (input.access !== undefined && workAccess === undefined) {
-      return {
-        kind: "refused",
-        message: "--access plan is not a Work mode; Work has no Plan overlay.",
-      };
-    }
+      input.access === undefined ? undefined : workThreadAccessOfMode(input.access);
     const threadId = randomUUID();
     const response = await session.send({
       path: "/api/work/threads/commands",
       method: "POST",
       body: {
         kind: "create-work-thread",
-        ...(workAccess === undefined ? {} : { access: workAccess }),
+        ...(workAccess === undefined || workAccess === "plan" ? {} : { access: workAccess }),
         threadId,
         projectId: String(project.id),
         title: input.title,
@@ -838,6 +830,30 @@ export async function createAgentThread(
     const created = decodeHostAnswer(WorkThreadCommandResult)(response.body);
     if (!("kind" in created) || created.kind !== "thread-created") {
       return { kind: "refused", message: "The host did not create the Work thread." };
+    }
+    // The create command sets every other level in its first event. Plan is
+    // entered by a change, which records the level it returns to, and the
+    // per-run Full access flag exists only on the change command.
+    const runFlag = input.fullAccessScope === "run" && workAccess === "full-access";
+    if (workAccess === "plan" || runFlag) {
+      const changed = await session.send({
+        path: "/api/work/threads/commands",
+        method: "POST",
+        body: {
+          kind: "change-work-thread-access",
+          threadId,
+          expectedVersion: 1,
+          access: workAccess,
+          ...(input.sandbox === true ? { fullAccessSandbox: true } : {}),
+          ...(runFlag ? { fullAccessRunFlag: true } : {}),
+        },
+      });
+      if (changed.status !== 200) {
+        return {
+          kind: "refused",
+          message: refusalMessage(changed, "The host did not change the Work thread's access."),
+        };
+      }
     }
     const threadOpened = await openAgentWindow(session, {
       mode,
@@ -877,7 +893,7 @@ export async function createAgentThread(
   // access <name> full-access`; anywhere else it starts approval-gated, and
   // the host refuses a remembered request the Project no longer backs.
   let remembered =
-    input.fullAccessScope !== "thread" &&
+    (input.fullAccessScope === undefined || input.fullAccessScope === "project") &&
     project.type === "code" &&
     project.codeAccessPersistence === "project-default";
   let rememberedNow = false;
@@ -885,7 +901,7 @@ export async function createAgentThread(
   if (
     requested?.executionPolicy === "full-access" &&
     !remembered &&
-    input.fullAccessScope !== "thread"
+    (input.fullAccessScope === undefined || input.fullAccessScope === "project")
   ) {
     // An explicit --access full-access remembers Full access for the Project
     // first, through the same command `octant project access` sends, so the
@@ -933,6 +949,9 @@ export async function createAgentThread(
         executionPolicy:
           requested?.executionPolicy ?? (remembered ? "full-access" : "approval-gated"),
         ...(input.sandbox === true ? { fullAccessSandbox: true } : {}),
+        ...(input.fullAccessScope === "run" && requested?.executionPolicy === "full-access"
+          ? { fullAccessRunFlag: true }
+          : {}),
         ...(requested?.autoApprove === true ? { autoApprove: true } : {}),
         permissionPersistence:
           (requested?.executionPolicy ?? (remembered ? "full-access" : "approval-gated")) ===

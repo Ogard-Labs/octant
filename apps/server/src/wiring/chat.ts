@@ -3,6 +3,7 @@ import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { randomUUID } from "node:crypto";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {
+  LOCAL_HOST_ID,
   type ChatThread,
   type ChatThreadId,
   decodeAgentRunParentThreadId,
@@ -183,7 +184,10 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
     readonly workTurnService: () => WorkTurnService;
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
-  } & Pick<FoundationsWiring, "providerRuntimeRegistry" | "conversationInputTransfer">;
+  } & Pick<
+    FoundationsWiring,
+    "providerRuntimeRegistry" | "conversationInputTransfer" | "resolveThreadStrict"
+  >;
 
 export function wireChat(deps: ChatDependencies) {
   const imageDescriber = deps.imageDescriber;
@@ -414,8 +418,11 @@ export function wireChat(deps: ChatDependencies) {
       return hidden;
     };
     const chatService = new ChatService({
-      stalledTurnLimitMs: () =>
-        stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+      stalledTurnLimitMs: (turn) =>
+        stalledTurnLimitMs(
+          persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          turn,
+        ),
       providerToolCallPauseLimitMs: () =>
         providerToolCallPauseLimitMs(
           persistence.readShellSettings()?.settings ?? defaultShellSettings(),
@@ -448,6 +455,7 @@ export function wireChat(deps: ChatDependencies) {
       awaitsHarnessApproval: threadAwaitsHarnessApproval,
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       outsideContentMarks: runtimeOutsideContentMarks,
+      resolveStrict: deps.resolveThreadStrict,
       attachmentStore: chatAttachmentStore,
       beforeAttachmentPurge: async (threadId) => {
         if (attachmentPurgeGuards.length === 0)
@@ -689,6 +697,14 @@ export function wireChat(deps: ChatDependencies) {
                   parentThreadId: String(thread.id),
                   mode: "chat",
                   ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+                  // A Side Chat is offered no helpers at all (withheld above).
+                  askThroughHost: {
+                    lead: {
+                      hostId: LOCAL_HOST_ID,
+                      providerInstanceId: thread.providerInstanceId,
+                      modelId: thread.modelId,
+                    },
+                  },
                 }),
                 // Outside the taint wrapper, as in Work and Code: an offer's
                 // answer is Octant's own receipt of what the model wrote, and
@@ -861,6 +877,8 @@ export function wireChat(deps: ChatDependencies) {
       },
     });
     threadDialogueService = new ThreadDialogueService({
+      messagesPerTurn: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).threadMessagesPerTurn,
       resolveChatTargets: (windowId, threadIds) =>
         threadMentionService.chatDialogueTargets(windowId, threadIds),
       readChatThread: (threadId) => chatService.read(threadId),

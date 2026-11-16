@@ -1,3 +1,4 @@
+import type { StalledTurnScope } from "../providers/turnBudget";
 import {
   decodeConversationInputReference,
   type ConversationInputPolicy,
@@ -7,11 +8,7 @@ import type { OctantInstructionsBlock } from "../octantInstructions/octantInstru
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
-import {
-  describedImageText,
-  providerCommandRefusal,
-  validateQuestionnaireAnswer,
-} from "@octant/domain";
+import { describedImageText, validateQuestionnaireAnswer } from "@octant/domain";
 import type { TurnImage, TurnImagesDescription } from "../harness/imageDescription";
 import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "./sideChatReturn";
 import {
@@ -716,6 +713,8 @@ export interface ChatServiceOptions {
   readonly recordExternalContentIngestion?: RecordExternalContentIngestion;
   /** Marks a thread whose runtime read outside content with its own tools. */
   readonly outsideContentMarks?: RuntimeOutsideContentMarking;
+  /** Strict for a thread now (`createStrictResolver`); absent reads as Strict. */
+  readonly resolveStrict?: (threadId: string) => boolean;
   readonly dataDirectory: string;
   readonly uuid: () => string;
   readonly clock: () => string;
@@ -741,7 +740,7 @@ export interface ChatServiceOptions {
    * The host's stalled-turn limit in milliseconds, `null` when it is Off,
    * read as each turn starts. Absent uses the default limit.
    */
-  readonly stalledTurnLimitMs?: () => number | null;
+  readonly stalledTurnLimitMs?: (turn: StalledTurnScope) => number | null;
   /**
    * The longest one provider tool call pauses the stalled-turn clock, in
    * milliseconds, `null` when that bound is Off, read as each turn starts.
@@ -1178,6 +1177,7 @@ export class ChatService {
   readonly #persistence: PersistenceService;
   readonly #recordExternalContentIngestion: RecordExternalContentIngestion | undefined;
   readonly #outsideContentMarks: RuntimeOutsideContentMarking | undefined;
+  readonly #resolveStrict: ((threadId: string) => boolean) | undefined;
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #driver: ChatServiceOptions["driver"];
@@ -1245,6 +1245,7 @@ export class ChatService {
     this.#persistence = options.persistence;
     this.#recordExternalContentIngestion = options.recordExternalContentIngestion;
     this.#outsideContentMarks = options.outsideContentMarks;
+    this.#resolveStrict = options.resolveStrict;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#driver = options.driver;
@@ -3004,14 +3005,6 @@ export class ChatService {
     const accepted = await this.#withTurnAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
       this.#admitHarnessTurn(thread);
-      const commandRefusal = providerCommandRefusal({
-        prompt: command.prompt,
-        commands: this.#providerRuntimeRegistry?.observedState(thread.providerInstanceId)?.commands,
-        mode: "chat",
-      });
-      if (commandRefusal !== undefined) {
-        throw new ChatServiceError({ category: "unsupported", message: commandRefusal });
-      }
       if (command.submissionId !== undefined) {
         // Match on submissionId alone. A turn whose only attempt ended
         // failed, cancelled, or interrupted is still the turn this
@@ -6997,6 +6990,7 @@ export class ChatService {
                 }),
               ),
               researchRoute: input.prepared.researchRoute,
+              strict: this.#resolveStrict?.(String(input.thread.id)) ?? true,
               ...(input.prepared.appManagedTools === undefined
                 ? {}
                 : { appManagedTools: input.prepared.appManagedTools }),

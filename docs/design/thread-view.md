@@ -265,11 +265,20 @@ behind a Details disclosure. The card is one component in Chat, Work and
 Code; a delivery the card cannot read is shown as its text under a plain
 "Subagent result" head.
 
-Provider-observed children remain separate from managed runs. Their detail shows
-reported activity, observation timing, available lineage and explicit partial,
-truncated or conflicting history. An unknown model stays unknown. Observations
-have no managed conversation, execution controls, workspace authority or result
-acknowledgement.
+Subagents the provider runtime started itself are rows in the same card,
+counted and previewed by the same rules as managed runs, finished ones
+included, each reading "Started by <provider>" with its model or "Model
+unknown". Their detail shows reported activity, observation timing, available
+lineage and explicit partial, truncated or conflicting history. They have no
+managed conversation, workspace authority or result acknowledgement; their one
+control is Stop, offered only where the running turn can stop that subagent
+alone, and a stop request leaves the reported state until the provider reports
+the subagent finished. Its detail shows the final summary (folded) and token
+usage where the runtime reports them, "Usage not reported" otherwise. Every
+row, managed or not, names its provider.
+
+A result steered into the parent's running turn shows as the same child-result
+card after that turn's reply, headed "Delivered into the running turn".
 
 Managed result previews identify their execution generation and recorded model.
 The result detail leads with the reported summary, files, checks and blockers;
@@ -538,6 +547,50 @@ the rows. The rows refresh on the thread's follow-up notices and on a slow
 visible-page interval. The turn a wake-up starts opens with the host heading
 `Wake-up you scheduled earlier in this thread:` above its prompt. The rules
 are in [Architecture: wake-ups](../architecture.md#modes-chat-work-and-code).
+
+## Live tasks
+
+A Work or Code thread whose last turn completed while background work it
+started (a dev server, a watch) still runs shows one row above the message queue, in
+the composer: an activity icon, each task's command on one line in monospace
+(its full text on hover, wrapping under each other at a narrow width),
+**Running** or the count running, and **Stop**, which stops the session and
+every task in it. With no live task, and while a turn holds the session (the
+turn shows its own task rows), the row takes no space. A failed stop shows a
+sentence under the row. The row refreshes on the thread's follow-up notices
+and on a slow visible-page interval. A turn the runtime starts by itself on
+the idle thread opens with the host's line `The agent started this turn by
+itself after background work it was running reported.` in place of a
+person's message. The rules are in
+[Provider runtimes](provider-runtimes.md#background-commands-and-runtime-started-turns).
+
+## Plan-mode asks
+
+When a Work or Code thread's agent asks to plan first, the pending request
+reads
+**Plan first**: the agent's sentence, then "This turn ends; the next one
+runs in Plan, read-only.", with **Switch to Plan** and **Keep working**.
+When it asks to leave Plan, the request reads **Approve the plan**: the
+plan in a bordered monospace block under the sentence, keyboard-focusable
+and scrolling inside the card past 18rem so the buttons stay in reach, then
+"This turn ends; the next one runs at" the level it returns to, with
+**Approve plan ·** that level and **Keep planning**. The rules are in
+[Provider runtimes](provider-runtimes.md#plan-mode-as-level-changes).
+
+## Sessions started outside Octant
+
+An empty Work or Code thread whose provider keeps sessions of its own for the
+folder its turns run in and its account, begun outside Octant, shows one row above the
+message queue: a history icon, how many sessions there are, and **Continue
+one**, which opens a list of them in place. Each choice shows the session's
+title (its name, or the provider's summary of it) on one line, then its
+branch and when it was last written; **Continue in this thread** starts the
+thread from the chosen one. A refusal shows the host's sentence under the
+row. Once the thread has a message the row is gone. A thread started from a
+session shows, in the same place, its details row: **Continues a session
+started outside Octant**, the session's own id in monospace (cut with an
+ellipsis at a narrow width, whole on hover), and **Copy**. The rules are in
+[Provider runtimes](provider-runtimes.md#sessions-started-outside-octant).
 
 ## Credential requests
 

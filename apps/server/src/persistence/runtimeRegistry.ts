@@ -185,6 +185,7 @@ import {
   AgentRunRequested,
   AgentRunResultAcknowledged,
   AgentRunResultDeliverySettled,
+  AgentResultSteered,
   AgentRunStatusChanged,
   AutomationNotificationDeliveryRecorded,
   AutomationNotificationPreferences,
@@ -433,6 +434,7 @@ import {
   DIAGNOSTICS_FAILURE_INCIDENT_RECORDED_V1,
 } from "./diagnosticsExportProjection";
 import { AgentRunProjection } from "../agentRun/agentRunProjection";
+import { AGENT_RESULT_STEERED } from "../agentRun/agentResultSteeredRecord";
 import {
   AGENT_RUN_REQUESTED,
   AGENT_RUN_RESULT_ACKNOWLEDGED,
@@ -472,6 +474,7 @@ import { registerPersonMemoryEvents } from "../personMemory/personMemoryStore";
 import { registerTodoEvents } from "../todos/todoStore";
 import { registerOctantInstructionsEvents } from "../octantInstructions/octantInstructionsStore";
 import { registerProtectedFilesEvents } from "../protectedFilesService";
+import { registerMcpPlanReadOnlyEvents } from "../providers/mcpPlanReadOnlyService";
 import { registerCanvasExportFolderEvents } from "../canvas/canvasExportFolderEventStore";
 import { registerCanvasNetworkAccessEvents } from "../canvas/canvasNetworkAccessService";
 import { registerCanvasOutsideContentEvents } from "../canvas/canvasOutsideContentMark";
@@ -735,6 +738,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)
     .register(AGENT_RUN_RESULT_DELIVERY_SETTLED, 1, AgentRunResultDeliverySettled)
+    .register(AGENT_RESULT_STEERED, 1, AgentResultSteered)
     .register(AGENT_RUN_SETTINGS_UPDATED, 1, AgentRunPolicySettings)
     .register(AGENT_MESSAGE_EVENT_NAMES.sent, 1, AgentMessageSent)
     .register(AGENT_MESSAGE_EVENT_NAMES.delivered, 1, AgentMessageDelivered)
@@ -882,6 +886,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerCanvasExportEvents(events);
   registerCanvasPublicShareEvents(events);
   registerProtectedFilesEvents(events);
+  registerMcpPlanReadOnlyEvents(events);
   registerPersonMemoryEvents(events);
   registerTodoEvents(events);
   registerOctantInstructionsEvents(events);

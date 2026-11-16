@@ -18,6 +18,7 @@ import {
   type CodeTerminalLiveFrame,
   type WindowId,
 } from "@octant/contracts";
+import { SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL } from "../attachments/attachedFiles";
 import { turnBlocksInPlaceRestore } from "@octant/domain/code-policy";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -2238,6 +2239,7 @@ describe("CodeOperationService", () => {
           : { status: "unknown" as const, attachmentId: requested[0]! },
       release: vi.fn(),
       read: vi.fn(async () => bytes),
+      threadFolder: () => "/octant-data/code-threads/thread",
     };
     let supported = true;
     const { service, turns, events } = providerTurnFixture({
@@ -2300,6 +2302,52 @@ describe("CodeOperationService", () => {
     expect(journalled().at(-1)).toMatchObject({ attachments: [reference] });
   });
 
+  it("names an attached file of any type by its read-only path, for a model that reads no images too", async () => {
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000031",
+      displayName: "report.pdf",
+      mediaType: "application/pdf",
+      byteLength: 3,
+      digest: "e".repeat(64),
+    };
+    const folder = "/octant-data/code-threads/thread";
+    const attachments = {
+      peek: () => ({ status: "ok" as const, attachments: [reference] }),
+      release: vi.fn(),
+      read: vi.fn(async () => new Uint8Array([1, 2, 3])),
+      readablePath: vi.fn(async () => `${folder}/${reference.attachmentId}/report.pdf`),
+      threadFolder: vi.fn(() => folder),
+    };
+    const { service, turns } = providerTurnFixture({
+      attachments: attachments as never,
+      supportsAttachments: () => false,
+    });
+    await expect(
+      service.execute(ids.window, {
+        ...startProviderTurn,
+        operationId: decodeCodeOperationId("70000000-0000-4000-8000-000000000031"),
+        attachmentIds: [reference.attachmentId],
+      } as never),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    const start = turns.start.mock.calls.at(-1)?.[0] as {
+      readonly attachments?: ReadonlyArray<unknown>;
+      readonly attachmentsFolder?: string;
+      readonly context?: ReadonlyArray<{ readonly kind: string; readonly text?: string }>;
+    };
+    // Not sent as a picture: the provider takes images alone.
+    expect(start.attachments).toBeUndefined();
+    // The session is granted the thread's own attachments folder, and the
+    // turn names the file in it.
+    expect(start.attachmentsFolder).toBe(folder);
+    expect(
+      start.context?.some(
+        (block) =>
+          block.text?.includes(`${folder}/${reference.attachmentId}/report.pdf`) === true &&
+          block.text.includes("read-only"),
+      ),
+    ).toBe(true);
+  });
+
   it("describes images for a model that cannot read them before the start, and sends those words", async () => {
     const reference = {
       attachmentId: "40000000-0000-4000-8000-000000000021",
@@ -2312,6 +2360,7 @@ describe("CodeOperationService", () => {
       peek: () => ({ status: "ok" as const, attachments: [reference] }),
       release: vi.fn(),
       read: vi.fn(async () => new Uint8Array([1, 2, 3])),
+      threadFolder: () => "/octant-data/code-threads/thread",
     };
     const stored = new Map<string, string>();
     const evidence = {
@@ -2384,6 +2433,7 @@ describe("CodeOperationService", () => {
       peek: () => ({ status: "ok" as const, attachments: [reference] }),
       release: vi.fn(),
       read: vi.fn(async () => new Uint8Array([1, 2, 3])),
+      threadFolder: () => "/octant-data/code-threads/thread",
     };
     const { service, turns, events } = providerTurnFixture({
       attachments: attachments as never,
@@ -2846,6 +2896,62 @@ describe("CodeOperationService", () => {
       failure: { category: "unavailable" },
     });
     expect(fixture.turns.start).toHaveBeenCalledOnce();
+  });
+
+  it("refuses before journaling a server Project's turn that carries a file its server could not open, and still sends its images", async () => {
+    const file = {
+      attachmentId: "40000000-0000-4000-8000-000000000041",
+      displayName: "report.pdf",
+      mediaType: "application/pdf",
+      byteLength: 3,
+      digest: "f".repeat(64),
+    };
+    const image = {
+      ...file,
+      attachmentId: "40000000-0000-4000-8000-000000000042",
+      displayName: "shot.png",
+      mediaType: "image/png",
+    };
+    let staged = [file];
+    const attachments = {
+      peek: () => ({ status: "ok" as const, attachments: staged }),
+      release: vi.fn(),
+      read: vi.fn(async () => new Uint8Array([1, 2, 3])),
+      readablePath: vi.fn(async () => "/octant-data/code-threads/thread/report.pdf"),
+      threadFolder: () => "/octant-data/code-threads/thread",
+    };
+    const fixture = providerTurnFixture({
+      remoteRoot: true,
+      holdsServerThread: () => true,
+      attachments: attachments as never,
+      supportsAttachments: () => true,
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }),
+    });
+    const journalled = () =>
+      fixture.events.append.mock.calls
+        .map(([entry]) => (entry as { readonly event: { readonly kind: string } }).event)
+        .filter((event) => event.kind === "conversation-turn-started");
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        attachmentIds: [file.attachmentId],
+      } as never),
+    ).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unsupported", message: SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL },
+    });
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+    expect(journalled()).toHaveLength(0);
+    expect(attachments.readablePath).not.toHaveBeenCalled();
+
+    staged = [image];
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        operationId: decodeCodeOperationId("70000000-0000-4000-8000-000000000042"),
+        attachmentIds: [image.attachmentId],
+      } as never),
+    ).resolves.toMatchObject({ kind: "provider-turn-state" });
   });
 
   it("runs a server Project's Git panel with Git on its server, and refuses it when the server has none", async () => {
@@ -3340,7 +3446,7 @@ describe("CodeOperationService", () => {
     );
   });
 
-  it("runs a coordinator's turn under Plan's read-only gate and carries its roster", async () => {
+  it("runs a coordinator's turn at Full access at that level, and carries its roster", async () => {
     const fixture = providerTurnFixture({
       thread: decodeCodeThread({ ...thread(), executionPolicy: "full-access", coordinator: true }),
       isCoordinatorThread: () => true,
@@ -3356,11 +3462,33 @@ describe("CodeOperationService", () => {
 
     expect(fixture.turns.start).toHaveBeenCalledWith(
       expect.objectContaining({
-        thread: expect.objectContaining({ executionPolicy: "plan" }),
+        thread: expect.objectContaining({ executionPolicy: "full-access" }),
         context: expect.arrayContaining([
           { kind: "user-message", text: "Coordinator roster, written by Octant." },
         ]),
       }),
+    );
+  });
+
+  it("runs a coordinator's turn below Full access under Plan's read-only gate", async () => {
+    const fixture = providerTurnFixture({
+      thread: decodeCodeThread({
+        ...thread(),
+        executionPolicy: "auto-accept-edits",
+        coordinator: true,
+      }),
+      isCoordinatorThread: () => true,
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        executionPolicy: "auto-accept-edits",
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+
+    expect(fixture.turns.start).toHaveBeenCalledWith(
+      expect.objectContaining({ thread: expect.objectContaining({ executionPolicy: "plan" }) }),
     );
   });
 

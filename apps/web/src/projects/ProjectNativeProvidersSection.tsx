@@ -21,7 +21,8 @@ export interface ProjectNativeProvidersSectionProps {
  * one checked loads its own setup in this Project's threads and the
  * Project's own settings, hooks, MCP servers, plugins, and tools, at every
  * level but Plan. Unchecked, a provider loads none of the Project's code,
- * even at Full access. Only a window on this host can change it.
+ * even at Full access. Only the host's own person can change it, at a window
+ * on this host or on a device they paired.
  */
 export function ProjectNativeProvidersSection(props: ProjectNativeProvidersSectionProps) {
   const trusted = new Set(props.project.nativeProviders ?? []);

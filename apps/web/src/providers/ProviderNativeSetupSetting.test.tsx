@@ -26,13 +26,28 @@ describe("A provider's own memory", () => {
     const toggle = screen.getByRole("switch", { name: "Use Codex work’s own memory" });
     expect(toggle).toBeChecked();
     expect(toggle).toHaveAccessibleDescription(/On by default/);
-    expect(toggle).toHaveAccessibleDescription(/stays off in Plan and in Chat/);
+    expect(toggle).toHaveAccessibleDescription(
+      /stays off in Plan and in Chat, because it writes its memory in the background/,
+    );
     expect(toggle).toHaveAccessibleDescription(/telemetry and self-update stay off either way/);
     await userEvent.click(toggle);
     expect(onChange).toHaveBeenCalledWith(false);
 
     rerender(view({ ...codex, ownMemory: false }));
     expect(screen.getByRole("switch", { name: "Use Codex work’s own memory" })).not.toBeChecked();
+  });
+
+  it("says Claude Code reads its memory in Plan and Chat without changing it", () => {
+    render(
+      <ProviderOwnMemorySetting
+        disabled={false}
+        instance={{ ...codex, displayName: "Claude work", driverKind: "claude" }}
+        onChange={vi.fn(async () => true)}
+      />,
+    );
+    expect(
+      screen.getByRole("switch", { name: "Use Claude work’s own memory" }),
+    ).toHaveAccessibleDescription(/In Plan and in Chat it reads its memory and cannot change it/);
   });
 });
 
@@ -86,7 +101,7 @@ describe("Run a key provider as itself", () => {
     );
   });
 
-  it("says Mistral Vibe's subagent approvals name no tool, and says it only for Vibe", () => {
+  it("says where Mistral Vibe's subagents run and that their approvals name no tool, only for Vibe", () => {
     const vibe = { ...codex, displayName: "Vibe", driverKind: "mistral-vibe" } as const;
     const { unmount } = render(
       <ProviderNativeSetupSetting
@@ -97,6 +112,9 @@ describe("Run a key provider as itself", () => {
     );
     expect(screen.getByRole("switch", { name: "Run Vibe as itself" })).toHaveAccessibleDescription(
       /Vibe doesn’t say which tool its subagents ask to run/,
+    );
+    expect(screen.getByRole("switch", { name: "Run Vibe as itself" })).toHaveAccessibleDescription(
+      /work in Work and Code outside Plan, at every level there/,
     );
     expect(
       screen.getByRole("switch", { name: "Run Vibe as itself" }),

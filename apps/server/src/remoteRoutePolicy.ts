@@ -2,6 +2,7 @@ import { AGENT_PROOF_HEADER } from "@octant/contracts/agent-access";
 import { CANVAS_DESIGN_PAGE_PATH } from "@octant/contracts/canvas";
 import {
   CODE_OWNER_UNLOCKED_MERGE_PATHS,
+  ATTACHMENT_MEDIA_TYPE_PATTERN,
   CHAT_ATTACHMENT_MEDIA_TYPES,
   CODE_ATTACHMENT_MEDIA_TYPES,
   HUB_WAKE_MAX_SPOKES,
@@ -962,7 +963,7 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 16 * 1_024,
-    maxResponseBytes: 96 * 1_024,
+    maxResponseBytes: 512 * 1_024,
   },
   {
     // A paired device lists and answers the MCP tool prompts its own turns
@@ -980,11 +981,12 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   // JSON bodies within the listener's default budget.
   ...(
     [
-      ["/api/chat/attachments", "POST", "chat", CHAT_ATTACHMENT_MEDIA_TYPES],
-      ["/api/work/attachments", "PUT", "work", WORK_ATTACHMENT_MEDIA_TYPES],
-      ["/api/code/attachments", "PUT", "code", CODE_ATTACHMENT_MEDIA_TYPES],
+      ["/api/chat/attachments", "POST", "chat", CHAT_ATTACHMENT_MEDIA_TYPES, false],
+      // Work and Code take a file of any type (maintainer decision, 2026-11-16).
+      ["/api/work/attachments", "PUT", "work", WORK_ATTACHMENT_MEDIA_TYPES, true],
+      ["/api/code/attachments", "PUT", "code", CODE_ATTACHMENT_MEDIA_TYPES, true],
     ] as const
-  ).map(([path, method, mode, mediaTypes]) => ({
+  ).map(([path, method, mode, mediaTypes, anyType]) => ({
     kind: "exact" as const,
     path,
     methods: [method],
@@ -995,6 +997,7 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
       `x-octant-${mode}-display-name`,
     ],
     allowedContentTypes: mediaTypes,
+    ...(anyType ? { acceptsAnyAttachmentType: true as const } : {}),
     maxBodyBytes: REMOTE_ATTACHMENT_UPLOAD_MAX_BODY_BYTES,
     uploadsAttachment: true as const,
   })),
@@ -1193,6 +1196,51 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 16 * 1_024,
   })),
+  // Agents settings and the local work resource limits, read and changed by a
+  // device the host's own person paired; the route refuses every other device
+  // session and journals the device as the actor.
+  {
+    kind: "exact" as const,
+    path: "/api/agent-run-settings",
+    methods: ["GET", "PUT"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/agent-run-settings/resources",
+    methods: ["GET"] as const,
+  },
+  // Safe networks and the Network limits switch, read and changed by a device
+  // the host's own person paired; the route refuses a change from every other
+  // device session and journals the device as the actor.
+  {
+    kind: "exact" as const,
+    path: "/api/access/safe-networks",
+    methods: ["GET", "POST"] as const,
+    // `?projectId=`; the route reads only that key.
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 64 * 1_024,
+  },
+  // A thread's wake-ups, read and cancelled or run by a device the host's own
+  // person paired; the route refuses every other device session itself.
+  {
+    kind: "exact" as const,
+    path: "/api/thread-wakeups",
+    methods: ["GET"] as const,
+    // `?mode=&threadId=`; the route refuses every other query itself.
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/thread-wakeups/commands",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 4_096,
+  },
   {
     kind: "exact" as const,
     path: "/api/usage/host-health",
@@ -1277,7 +1325,13 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes:
       "allowedContentTypes" in match ? match.allowedContentTypes : REMOTE_CONTENT_TYPES,
     ...("maxBodyBytes" in match ? { maxBodyBytes: match.maxBodyBytes } : {}),
+    ...(match.kind === "exact" && "maxResponseBytes" in match
+      ? { maxResponseBytes: match.maxResponseBytes }
+      : {}),
     ...("uploadsAttachment" in match ? { uploadsAttachment: match.uploadsAttachment } : {}),
+    ...("acceptsAnyAttachmentType" in match
+      ? { acceptsAnyAttachmentType: match.acceptsAnyAttachmentType }
+      : {}),
     // An exact route takes a query only when it says so: one naming a Project
     // there, or one that declares `allowQuery` because its own handler reads
     // and bounds the query (the load read's `?detail=vitals`, search's
@@ -1334,6 +1388,12 @@ export interface RemoteRouteDefinition {
    * still the route's own.
    */
   readonly uploadsAttachment?: true;
+  /**
+   * An attachment upload whose body may be a file of any media type, named as
+   * `type/subtype`; `allowedContentTypes` then lists only the images the mode
+   * sends natively.
+   */
+  readonly acceptsAnyAttachmentType?: true;
 }
 
 export type RemoteRouteResponse = Response | undefined;
@@ -1871,7 +1931,19 @@ function contentTypeAllowed(request: Request, route: RemoteRouteDefinition): boo
   const contentType = request.headers.get("content-type");
   if (contentType === null) return false;
   const mediaType = contentType.split(";", 1)[0]?.trim().toLowerCase();
+  if (route.acceptsAnyAttachmentType === true && mediaType !== undefined) {
+    return routeAcceptsAttachmentType(route, mediaType);
+  }
   return (route.allowedContentTypes ?? REMOTE_CONTENT_TYPES).includes(mediaType as never);
+}
+
+/** Whether an attachment upload route takes a body of this media type. */
+export function routeAcceptsAttachmentType(
+  route: Pick<RemoteRouteDefinition, "acceptsAnyAttachmentType" | "allowedContentTypes">,
+  mediaType: string,
+): boolean {
+  if (route.acceptsAnyAttachmentType === true) return ATTACHMENT_MEDIA_TYPE_PATTERN.test(mediaType);
+  return (route.allowedContentTypes ?? []).includes(mediaType);
 }
 
 function declaredBodyBytes(request: Request): number {

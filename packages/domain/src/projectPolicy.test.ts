@@ -335,6 +335,11 @@ describe("Project creation and lifecycle", () => {
       const dropped = changeProjectImageGenerationChoice(kept, undefined, updatedAt);
       expect(dropped.version).toBe(3);
       expect("imageGenerationChoice" in dropped).toBe(false);
+      // Dropping is the person's Ask again; keeping a choice again clears it.
+      expect(dropped.imageGenerationAskAgain).toBe(true);
+      expect(
+        "imageGenerationAskAgain" in changeProjectImageGenerationChoice(dropped, choice, updatedAt),
+      ).toBe(false);
       expect(() => changeProjectImageGenerationChoice(project, undefined, updatedAt)).toThrow(
         ProjectPolicyRejected,
       );
@@ -979,6 +984,30 @@ describe("Project extra folders", () => {
       binding: { canonicalRoot: "/Users/example/Work/Workspace" } as CanonicalProjectBinding,
     });
     expect(() => add(around, "/Users/example/Work")).toThrow(/main folder/);
+  });
+
+  it("adds the home folder only once the person confirms it, keeping folders above it refused", () => {
+    expect(() => add(work(), "/Users/example")).toThrow(/needs your confirmation/);
+    const confirmed = addProjectExtraFolder(work(), {
+      canonicalRoot: "/Users/example",
+      actor,
+      addedAt: updatedAt,
+      homeDirectory: home,
+      homeFolderConfirmed: true,
+    });
+    expect(projectExtraFolderRoots(confirmed.project)).toEqual(["/Users/example"]);
+    // A confirmation covers the home folder alone, never a folder above it or a credential folder.
+    for (const candidate of ["/Users", "/Users/example/.ssh"]) {
+      expect(() =>
+        addProjectExtraFolder(work(), {
+          canonicalRoot: candidate,
+          actor,
+          addedAt: updatedAt,
+          homeDirectory: home,
+          homeFolderConfirmed: true,
+        }),
+      ).toThrow(ProjectPolicyRejected);
+    }
   });
 
   it("refuses the home folder, anything above it, system folders and secret folders", () => {

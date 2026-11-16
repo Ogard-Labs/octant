@@ -93,6 +93,25 @@ export function resolveProviderNativeSetup(
 }
 
 /**
+ * The provider's own MCP servers a Plan session starts: exactly the ones the
+ * person marked "Read-only — allowed in Plan" on this host, and only where the
+ * session loads the person's setup at all. Plan leaves the account's tool
+ * servers off because a server's tools can write; the person's mark is what
+ * lets one back in, never the server's own `readOnlyHint`, which is the
+ * server's claim. Outside Plan the setup's `toolServers` decides as before, so
+ * the mark adds nothing there. Each marked server's tools still meet the
+ * thread's ask rules.
+ */
+export function planReadOnlyToolServers(input: {
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly setup: ProviderNativeSetup | undefined;
+  readonly marked: ReadonlyArray<string>;
+}): ReadonlyArray<string> {
+  if (input.executionPolicy !== "plan" || input.setup === undefined) return [];
+  return [...new Set(input.marked)];
+}
+
+/**
  * Whether a setup loads anything of the person's own configuration: rules,
  * skills, tool servers, hooks, subagents, or a Project's code. The runtime's
  * web tools alone do not, so a session with only those on is not running as
@@ -106,25 +125,36 @@ export function providerRunsAsItself(setup: ProviderNativeSetup | undefined): bo
 }
 
 /**
+ * How a provider's own memory reaches its memory folder. `session-tools`: the
+ * memory is loaded when a session starts, and only the model's own file tools
+ * write it (Claude Code's `CLAUDE.md` files and auto-memory). `background`:
+ * the runtime writes memories by itself, outside any tool call a gate could
+ * refuse (Codex writes `~/.codex/memories` after a turn).
+ */
+export type ProviderMemoryWrites = "session-tools" | "background";
+
+/**
  * Whether a session launches with the provider's own memory on. The account's
  * own setting decides (on unless the person turned it off,
  * `accountKeepsOwnMemory`), and nothing else turns it on: not "Run as itself",
- * not a trusted Project, not Full access. Plan keeps it off because a Plan launch
- * may write nothing a later session would load, and the runtime's memory
- * folder is exactly that. Chat keeps it off too: its launch is confined the
- * same way, and no Chat launch has been run with a provider's memory on.
+ * not a trusted Project, not Full access. Plan and Chat may write nothing a
+ * later session would load, and the runtime's memory folder is exactly that,
+ * so there the memory is loaded only when it is read-only: a provider whose
+ * memory only its session tools write keeps it in Plan and Chat, where Plan
+ * holds no write tool and its sandbox binds that folder read-only, and Chat's
+ * gate refuses a write into it; a provider that writes memories in the
+ * background keeps it off there (maintainer decision, 2026-11-16).
  */
 export function providerOwnMemoryLaunches(input: {
   /** The account's own switch (`accountKeepsOwnMemory`). */
   readonly accountAllows: boolean;
   readonly mode: "chat" | "work" | "code" | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
+  readonly memoryWrites: ProviderMemoryWrites;
 }): boolean {
-  return (
-    input.accountAllows &&
-    (input.mode === "work" || input.mode === "code") &&
-    input.executionPolicy !== "plan"
-  );
+  if (!input.accountAllows || input.mode === undefined) return false;
+  const readOnlyLaunch = input.mode === "chat" || input.executionPolicy === "plan";
+  return !readOnlyLaunch || input.memoryWrites === "session-tools";
 }
 
 /** Whether any feature of a resolved setup is on. */

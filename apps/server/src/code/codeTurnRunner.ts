@@ -1,4 +1,5 @@
 import type { Questionnaire } from "@octant/contracts";
+import type { StalledTurnScope } from "../providers/turnBudget";
 import { isAbsolute } from "node:path";
 import {
   DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
@@ -157,6 +158,11 @@ export type CodeTurnEventCategory =
 
 export interface CodeTurnEvent {
   readonly category: CodeTurnEventCategory;
+  /** An approval that asks to change the thread's level rather than to run a tool. */
+  readonly levelChange?: {
+    readonly kind: "enter-plan" | "exit-plan";
+    readonly plan?: string;
+  };
   readonly childObservation?: Extract<ProviderRuntimeEvent, { kind: "child-agent-activity" }>;
   readonly providerKind: ProviderRuntimeEvent["kind"];
   readonly instanceId: ProviderInstanceId;
@@ -217,6 +223,8 @@ export interface CodeTurnRunnerInput {
   readonly providerRoot?: string;
   /** The Project's extra folders, granted what the checkout is granted. */
   readonly extraFolders?: ReadonlyArray<string>;
+  /** The thread's attachments folder, which the session reads and never writes. */
+  readonly attachmentsFolder?: string;
   readonly prompt: string;
   readonly resumeCursor?: ProviderResumeCursor;
   readonly onSessionReady?: (handle: ProviderSessionHandle) => Effect.Effect<void, CodeTurnFailure>;
@@ -252,10 +260,19 @@ export interface CodeTurnRunnerInput {
    * permission mode and Octant's own gate answers every prompt.
    */
   readonly harnessAutoReviewEnabled?: boolean;
+  /** Strict for this launch, as the host resolved it; absent is Strict. */
+  readonly strict?: boolean;
   /** What the session may load of the provider's own setup; absent keeps it all off. */
   readonly nativeSetup?: ProviderNativeSetup;
   /** The host's schedule for this thread's wake-ups; absent offers the runtime none. */
   readonly wakeups?: ProviderWakeupSchedule;
+  /**
+   * The runtime started this turn by itself in the thread's kept session
+   * (a background task ended or a watch reported). The turn attaches to what
+   * the runtime is already running instead of sending the prompt, which
+   * only records why the turn exists.
+   */
+  readonly runtimeTurn?: true;
   /**
    * Records that the runtime's own web search, page fetch, or hosted tool put
    * outside content in front of the model. Without it such a call stops the
@@ -327,7 +344,7 @@ export interface CodeTurnRunnerOptions {
    * Read as each turn starts, so a changed setting applies to the next turn
    * and a running turn keeps the limit it started with.
    */
-  readonly stalledTurnLimitMs?: () => number | null;
+  readonly stalledTurnLimitMs?: (turn: StalledTurnScope) => number | null;
   /**
    * The longest one provider tool call pauses the stalled-turn clock, in
    * milliseconds, `null` when that bound is Off. Read as each turn starts,
@@ -343,7 +360,7 @@ export interface CodeTurnRunnerOptions {
 export class CodeTurnRunner {
   readonly #maxEvents: number | undefined;
   readonly #toolStepLimit: (fullAccess: boolean) => number | undefined;
-  readonly #stalledTurnLimitMs: () => number | null;
+  readonly #stalledTurnLimitMs: (turn: StalledTurnScope) => number | null;
   readonly #providerToolCallPauseLimitMs: () => number | null;
   readonly #maxStreamedOutputBytes: number;
 
@@ -471,9 +488,18 @@ export class CodeTurnRunner {
           ...(input.extraFolders === undefined || input.extraFolders.length === 0
             ? {}
             : { extraFolders: input.extraFolders }),
+          ...(input.attachmentsFolder === undefined
+            ? {}
+            : { attachmentsFolder: input.attachmentsFolder }),
           permissionPersistence: input.thread.permissionPersistence,
         })
         .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
+      input.liveTurn?.connect({
+        connection,
+        sessionId: input.sessionId,
+        providerInstanceId: input.thread.providerInstanceId,
+        takesSteeredResults: input.harnessAutoReviewEnabled !== true,
+      });
 
       const cleanup = { stopped: false };
       yield* Effect.addFinalizer(() =>
@@ -494,8 +520,11 @@ export class CodeTurnRunner {
         executionPolicy: input.thread.executionPolicy,
         ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),
         ...(input.thread.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+        ...(input.strict === false ? { strict: false } : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         ...(input.wakeups === undefined ? {} : { wakeups: input.wakeups }),
+        // The host answers the runtime's own asks to plan or to leave Plan.
+        levelChanges: true,
         // The driver still offers its artifact tool only where it would name
         // it for this mode and posture.
         ...(input.thread.documentDelivery === "native-artifacts" ? { nativeArtifacts: true } : {}),
@@ -525,7 +554,13 @@ export class CodeTurnRunner {
         return yield* fail("interrupted", "Code turn was cancelled before provider send.");
       }
 
-      const idle = yield* makeIdleTimeout(stalledTurnLimitMs(), providerToolCallPauseLimitMs());
+      const idle = yield* makeIdleTimeout(
+        stalledTurnLimitMs({
+          fullAccess: input.thread.executionPolicy === "full-access",
+          strict: input.strict !== false,
+        }),
+        providerToolCallPauseLimitMs(),
+      );
       const shareEventLoop = makeEventLoopShare();
       const compactions = new TurnCompactions();
       const collected = yield* subscribeThenSend({
@@ -828,6 +863,15 @@ export class CodeTurnRunner {
             );
           }
           timing = startTurnMetrics(clock());
+          if (input.runtimeTurn === true) {
+            if (connection.attachRuntimeTurn === undefined) {
+              return yield* fail("failed", "This provider cannot open a turn it started itself.");
+            }
+            yield* connection
+              .attachRuntimeTurn(input.sessionId)
+              .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
+            return;
+          }
           yield* connection
             .send({
               sessionId: input.sessionId,
@@ -1081,6 +1125,14 @@ function normalizeProviderEvent(
         ),
         executionPolicy: input.thread.executionPolicy,
         permissionPersistence: input.thread.permissionPersistence,
+        ...(event.levelChange === undefined
+          ? {}
+          : {
+              levelChange: {
+                kind: event.levelChange.kind,
+                ...(event.levelChange.plan === undefined ? {} : { plan: event.levelChange.plan }),
+              },
+            }),
       });
     case "review-verdict":
       return Effect.succeed({

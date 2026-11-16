@@ -487,6 +487,21 @@ describe("ProviderCatalogView outside drivers", () => {
     expect(screen.getByText(/Outside drivers are listed once you have trusted/)).toBeDefined();
   });
 
+  it("says on the row and in its package facts that a driver runs without confinement on a host that has none", () => {
+    render(
+      <ProviderCatalogView
+        {...props({ outsideDrivers: [{ ...listing, hostConfinement: "unconfined" }] })}
+      />,
+    );
+    const row = within(screen.getByRole("list", { name: "Outside drivers" })).getByRole("link", {
+      name: "Loopback chat, not added. Open setup",
+    });
+    expect(row.textContent).toContain("Outside driver · Runs without confinement");
+    openSetup(/^Loopback chat, /);
+    expect(screen.getByText(/has no sandbox for provider drivers/)).toBeDefined();
+    expect(screen.getByText("None on this computer")).toBeDefined();
+  });
+
   it("shows no outside group when the host admits none", () => {
     render(<ProviderCatalogView {...props()} />);
     expect(screen.queryByRole("list", { name: "Outside drivers" })).toBeNull();

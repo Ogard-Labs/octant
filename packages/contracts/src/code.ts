@@ -1,4 +1,5 @@
 import { ConversationInputPolicy } from "./conversationInputs";
+import { AnyAttachmentMediaType, NATIVE_IMAGE_ATTACHMENT_MEDIA_TYPES } from "./attachmentMediaType";
 import { Option, Schema } from "effect";
 import { AgentProfileId } from "./agentProfile";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
@@ -69,18 +70,14 @@ export const CodeAttachmentId = brandedUuid("CodeAttachmentId");
 export type CodeAttachmentId = typeof CodeAttachmentId.Type;
 
 /**
- * Code attachments are images only. Everything a repository holds already
- * reaches a Code turn through the checkout the thread is bound to, so the one
- * thing a path cannot carry is a picture the user is looking at — a screenshot,
- * a mockup, a photographed whiteboard.
+ * Code attachments are files of any type (maintainer decision, 2026-11-16). An
+ * image in {@link CODE_ATTACHMENT_MEDIA_TYPES} goes to a model that reads images
+ * as a picture; any other file stays in the thread's attachments folder, which
+ * the session reads at every level and never writes, and the turn names its
+ * path for the agent to open with its own tools.
  */
-export const CODE_ATTACHMENT_MEDIA_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "image/gif",
-] as const;
-export const CodeAttachmentMediaType = Schema.Literal(...CODE_ATTACHMENT_MEDIA_TYPES);
+export const CODE_ATTACHMENT_MEDIA_TYPES = NATIVE_IMAGE_ATTACHMENT_MEDIA_TYPES;
+export const CodeAttachmentMediaType = AnyAttachmentMediaType;
 export type CodeAttachmentMediaType = typeof CodeAttachmentMediaType.Type;
 export const MAX_CODE_ATTACHMENT_BYTES = 10_485_760;
 export const MAX_CODE_TURN_ATTACHMENTS = 8;
@@ -409,6 +406,13 @@ export const CodeThread = Schema.Struct({
   executionPolicy: ProviderExecutionPolicy,
   permissionPersistence: PermissionPersistence,
   /**
+   * The level the thread returns to when its agent asks to leave Plan and the
+   * person approves. Recorded only when the thread entered Plan at its
+   * agent's request (`EnterPlanMode`) and dropped when it leaves Plan; never
+   * Full access, which only the person chooses. Absent on every other thread.
+   */
+  planReturnPolicy: Schema.optional(ProviderExecutionPolicy),
+  /**
    * The profile this thread runs under, recorded so the thread can say which
    * working mode produced its posture. Optional so a journal written before
    * profiles bound threads replays as "no profile" rather than being rejected.
@@ -469,6 +473,20 @@ export const CodeThread = Schema.Struct({
    * before the flag existed replays as off (Full access stays fully open).
    */
   fullAccessSandbox: Schema.optional(Schema.Boolean),
+  /**
+   * This thread started at Full access because the person passed the per-run
+   * Full access flag to `octant agent` on this host. It is the thread's alone:
+   * the Project's remembered level is untouched. Optional so an older journal
+   * replays without it; the host drops it once the thread leaves Full access.
+   */
+  fullAccessRunFlag: Schema.optional(Schema.Literal(true)),
+  /**
+   * Strict, the thread's own choice. Absent follows its Project, else
+   * Settings, else off (`resolveStrict`); the host reads it at each launch
+   * and call, so a thread that never chose follows those as they are now.
+   * Strict restores the protections Octant adds beside the provider's own.
+   */
+  strict: Schema.optional(Schema.Boolean),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -568,6 +586,11 @@ export const CodeSettings = Schema.Struct({
    * unless the thread says otherwise. Absent is off: Full access stays open.
    */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+  /**
+   * Strict for Code threads whose thread and Project did not choose. Absent
+   * is off: the provider's own settings decide.
+   */
+  defaultStrict: Schema.optional(Schema.Boolean),
   /**
    * Whether an Android emulator Octant boots may load and save a quickboot
    * snapshot. Absent is off: every boot is cold, which is what a store
@@ -844,6 +867,8 @@ export const CodeCommand = Schema.Union(
     /** Absent keeps the stored choice. */
     defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
     /** Absent keeps the stored choice. */
+    defaultStrict: Schema.optional(Schema.Boolean),
+    /** Absent keeps the stored choice. */
     androidEmulatorSnapshotBoot: Schema.optional(Schema.Boolean),
     /** Absent keeps the stored choice. */
     autoReviewer: Schema.optional(AutoReviewer),
@@ -982,6 +1007,12 @@ export const CodeCommand = Schema.Union(
     ...CodeThreadCommandFields,
     executionPolicy: ProviderExecutionPolicy,
     permissionPersistence: PermissionPersistence,
+    /**
+     * Set only with `executionPolicy: "plan"` when the person approved the
+     * agent's own ask to plan: the level the thread returns to when the
+     * person later approves its plan. The host refuses Full access here.
+     */
+    planReturnPolicy: Schema.optional(ProviderExecutionPolicy),
     approvalId: Schema.optional(CodeApprovalId),
     autoApprove: Schema.optional(Schema.Boolean),
     /**
@@ -989,6 +1020,11 @@ export const CodeCommand = Schema.Union(
      * the thread's current choice; the host drops it below Full access.
      */
     fullAccessSandbox: Schema.optional(Schema.Boolean),
+    /**
+     * Strict, chosen with the mode at any level. Absent keeps the thread's
+     * current choice; null returns it to its Project's and Settings' default.
+     */
+    strict: Schema.optional(Schema.NullOr(Schema.Boolean)),
   }).annotations(strict),
   /**
    * The person moves the thread to another account (provider instance) of the

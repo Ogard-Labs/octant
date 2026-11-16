@@ -179,6 +179,20 @@ describe("Work thread routes", () => {
       )?.status,
     ).toBe(403);
     expect(execute).toHaveBeenCalledTimes(3);
+    // The per-run flag is the person's own on `octant agent`: no device and
+    // no agent grant sets it, while a local window may.
+    const runFlag = { ...raiseThread, fullAccessRunFlag: true };
+    expect((await route(from(runFlag, paired)))?.status).toBe(403);
+    expect((await route(from(runFlag, { origin: AGENT_ACCESS_ORIGIN })))?.status).toBe(403);
+    expect(execute).toHaveBeenCalledTimes(3);
+    const local = await route(
+      request("/api/work/threads/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(runFlag),
+      }),
+    );
+    expect(local?.status).toBe(200);
   });
 
   it("refuses a hub-introduced device raising a Work thread or the Work default to Full access, and lets it lower one", async () => {
@@ -244,6 +258,58 @@ describe("Work thread routes", () => {
       }),
     );
     expect(local?.status).toBe(200);
+  });
+
+  it("refuses a hub-introduced device turning Strict off for a Work thread or as Work's default, and lets it turn Strict on", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-updated", thread: thread() }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "73000000-0000-4000-8000-000000000030";
+    const fromDevice = (command: Record<string, unknown>) => {
+      const remote = request("/api/work/threads/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "73000000-0000-4000-8000-000000000031" as never,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    const strict = (value: boolean | null) => ({
+      kind: "change-work-thread-access",
+      threadId,
+      expectedVersion: 1,
+      access: "ask-first",
+      strict: value,
+    });
+
+    for (const loosen of [
+      strict(false),
+      strict(null),
+      {
+        kind: "update-work-settings",
+        expectedVersion: 1,
+        defaultAccess: "ask-first",
+        defaultStrict: false,
+      },
+    ]) {
+      const refused = await route(fromDevice(loosen));
+      expect(refused?.status).toBe(403);
+      expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+    }
+    expect(execute).not.toHaveBeenCalled();
+
+    expect((await route(fromDevice(strict(true))))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledOnce();
   });
 
   it("lets a device the host's own person paired change Continue after restart, move a thread to another account or set its usage-limit hand-off, as that device, and refuses any other device", async () => {

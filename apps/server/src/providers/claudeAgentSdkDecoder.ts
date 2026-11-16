@@ -942,12 +942,16 @@ export function permissionMode(
 // every built-in tool but the withheld ones, also not named in advance, and
 // each call to one passes the gate too.
 export function claudeOffersTool(
-  input: Pick<ClaudeOpenQueryInput, "tools" | "nativeSetup" | "withheldTools">,
+  input: Pick<ClaudeOpenQueryInput, "tools" | "nativeSetup" | "withheldTools" | "planMcpServers">,
   toolName: string,
 ): boolean {
   if (input.tools.includes(toolName)) return true;
   if (toolName.startsWith("mcp__")) {
-    return claudeStartsOwnServers(input.nativeSetup) && !toolName.startsWith("mcp__octant__");
+    if (toolName.startsWith("mcp__octant__")) return false;
+    return (
+      claudeStartsOwnServers(input.nativeSetup) ||
+      (input.planMcpServers ?? []).some((server) => toolName.startsWith(`mcp__${server}__`))
+    );
   }
   return input.withheldTools !== undefined && !input.withheldTools.includes(toolName);
 }
@@ -968,7 +972,11 @@ function claudeOffersMcpServer(input: ClaudeOpenQueryInput, server: unknown): bo
     return input.managedToolServer === true && record.status === "connected";
   // The person's and the trusted Project's own servers; one that failed or
   // waits for sign-in simply offers no tools.
-  return claudeStartsOwnServers(input.nativeSetup) && typeof record.name === "string";
+  if (typeof record.name !== "string") return false;
+  // A Plan session holds only the account's servers the person marked.
+  return (
+    claudeStartsOwnServers(input.nativeSetup) || (input.planMcpServers ?? []).includes(record.name)
+  );
 }
 
 function decodeInitializedMessage(
@@ -1746,9 +1754,16 @@ export function decodeMessage(
   throw protocol("Claude returned an unsupported runtime message.");
 }
 
+/**
+ * The runtime's sessions whose own folder is `expectedRoot`. A session's
+ * title (a name the person gave it, or the runtime's summary of its first
+ * prompt) is kept only with `titles`, for the list a person picks a session
+ * from; a resume lookup never carries it.
+ */
 export function decodeSessions(
   value: unknown,
   expectedRoot: string,
+  options: { readonly titles?: true } = {},
 ): readonly ClaudeSessionMetadata[] {
   if (!Array.isArray(value)) throw protocol();
   return value.flatMap((entry) => {
@@ -1763,12 +1778,23 @@ export function decodeSessions(
       throw protocol();
     }
     if (session.cwd !== expectedRoot) return [];
+    // A title or branch the runtime reports oddly is left out, never a reason
+    // to drop the session.
+    const named = typeof session.customTitle === "string" ? session.customTitle.trim() : "";
+    const summary = typeof session.summary === "string" ? session.summary.trim() : "";
+    const title = options.titles === true ? (named.length > 0 ? named : summary).slice(0, 200) : "";
+    const gitBranch =
+      options.titles === true && typeof session.gitBranch === "string"
+        ? session.gitBranch.slice(0, 256)
+        : undefined;
     return [
       {
         sessionId: session.sessionId,
         projectRoot: session.cwd,
         lastModified: session.lastModified,
         ...(session.createdAt === undefined ? {} : { createdAt: session.createdAt }),
+        ...(title.length === 0 ? {} : { title }),
+        ...(gitBranch === undefined || gitBranch.length === 0 ? {} : { gitBranch }),
       },
     ];
   });

@@ -359,6 +359,21 @@ describe("AgentRunPersistenceService", () => {
     expect(restored?.workspaceReceipt).toEqual(workWorkspaceReceipt);
   });
 
+  it("keeps a run's compare group in its parent summary across replay", () => {
+    const first = createHarness();
+    const accepted = first.service.requestRun({
+      command: { ...requestCommand(), compareGroup: "plans" },
+      parentAuthority,
+      confirmed: true,
+    });
+    expect(accepted.kind).toBe("run-accepted");
+    expect(first.service.parentSummary(ids.thread)[0]?.compareGroup).toBe("plans");
+
+    const replayed = createHarness(first.connection);
+    replayed.service.rebuildFromJournal();
+    expect(replayed.service.parentSummary(ids.thread)[0]?.compareGroup).toBe("plans");
+  });
+
   it("is request-id idempotent on retry and does not create a second run", () => {
     const { service, projection } = createHarness();
     const first = service.requestRun({

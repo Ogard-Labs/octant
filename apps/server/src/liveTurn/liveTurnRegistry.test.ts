@@ -1,6 +1,6 @@
 import type { ProviderRuntimeEvent } from "@octant/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LiveTurnRegistry } from "./liveTurnRegistry";
+import { LiveTurnRegistry, type LiveTurnConnection } from "./liveTurnRegistry";
 
 function event(kind: ProviderRuntimeEvent["kind"], fields: object = {}): ProviderRuntimeEvent {
   return {
@@ -19,6 +19,29 @@ const START = "2026-10-06T12:00:00.000Z";
 describe("a thread's live turn", () => {
   it("has no facts before a turn starts", () => {
     expect(new LiveTurnRegistry().read("t1")).toBeUndefined();
+  });
+
+  it("holds the running turn's connection only until that turn ends", () => {
+    const registry = new LiveTurnRegistry();
+    const first = registry.tracker("t1", "code-navigation");
+    const held = { sessionId: "session-a" } as unknown as LiveTurnConnection;
+    first.connect(held);
+    // A tracker that has not begun owns no turn to attach a connection to.
+    expect(registry.connection("t1")).toBeUndefined();
+    first.begin(START);
+    first.connect(held);
+    expect(registry.connection("t1")).toBe(held);
+    const second = registry.tracker("t1", "code-navigation");
+    second.begin(START);
+    // The turn that replaced it starts without one, and a late end from the
+    // older turn cannot drop the newer one's.
+    expect(registry.connection("t1")).toBeUndefined();
+    const next = { sessionId: "session-b" } as unknown as LiveTurnConnection;
+    second.connect(next);
+    first.end();
+    expect(registry.connection("t1")).toBe(next);
+    second.end();
+    expect(registry.connection("t1")).toBeUndefined();
   });
 
   it("carries the start time from the moment the turn begins", () => {

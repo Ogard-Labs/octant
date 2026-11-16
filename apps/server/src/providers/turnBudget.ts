@@ -157,16 +157,41 @@ export function makeTurnTextParagraphs(): (event: ProviderRuntimeEvent) => Provi
   };
 }
 
+/** What decides which stalled-turn limit a turn runs under. */
+export interface StalledTurnScope {
+  readonly fullAccess: boolean;
+  readonly strict: boolean;
+}
+
 /**
- * The stalled-turn limit the host setting asks for, in milliseconds; `null`
- * when the setting is Off and no turn is cut off for silence.
+ * The stalled-turn limit the host settings ask for one turn, in milliseconds;
+ * `null` when that setting is Off and no turn is cut off for silence. A turn
+ * at Full access outside Strict takes the Full access limit, Off unless the
+ * person set one; every other turn, and every turn under Strict, takes the
+ * stalled-turn limit (Architecture: "Octant adds no restrictions of its own
+ * unless Strict is on").
  */
 export function stalledTurnLimitMs(
-  settings: Pick<ShellSettings, "stalledTurnLimitMinutes">,
+  settings: Pick<ShellSettings, "stalledTurnLimitMinutes" | "fullAccessStalledTurnLimitMinutes">,
+  turn: StalledTurnScope,
 ): number | null {
-  return settings.stalledTurnLimitMinutes === null
+  const minutes =
+    turn.fullAccess && !turn.strict
+      ? settings.fullAccessStalledTurnLimitMinutes
+      : settings.stalledTurnLimitMinutes;
+  return minutes === null ? null : minutes * 60_000;
+}
+
+/**
+ * How long a session left running only background work is kept with no turn
+ * in its thread, in milliseconds; `null` when the setting is Off.
+ */
+export function backgroundSessionIdleLimitMs(
+  settings: Pick<ShellSettings, "backgroundSessionIdleLimitMinutes">,
+): number | null {
+  return settings.backgroundSessionIdleLimitMinutes === null
     ? null
-    : settings.stalledTurnLimitMinutes * 60_000;
+    : settings.backgroundSessionIdleLimitMinutes * 60_000;
 }
 
 /** The limit a runner uses when nothing tells it the host's setting. */

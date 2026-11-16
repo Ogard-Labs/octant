@@ -63,6 +63,7 @@ function context(overrides: Partial<ClaudeEventContext> = {}): ClaudeEventContex
     requestIds: new Map(),
     taskIds: new Map(),
     todoTaskIds: new Map(),
+    subagentTaskIds: new Map(),
     taskList: new ClaudeTaskList(),
     toolStates: new Map(),
     makeRequestId: () => `request-${++request}`,
@@ -826,6 +827,78 @@ describe("mapClaudeMessage", () => {
         },
       },
     ]);
+  });
+
+  it("names the model Claude's own subagent call asked for, and leaves it unknown otherwise", () => {
+    const start = (input: Readonly<Record<string, string>>) =>
+      eventValues(
+        mapped(context(), {
+          kind: "stream-event",
+          sessionId: claudeSessionId,
+          event: {
+            kind: "content-start",
+            index: 0,
+            content: { kind: "tool-use", toolUseId: "sdk-agent", toolName: "Agent", input },
+          },
+        }),
+      ).find((value) => value.kind === "child-agent-activity");
+    expect(start({ description: "Review", model: "haiku" })).toMatchObject({ modelId: "haiku" });
+    expect(start({ description: "Review" })).not.toHaveProperty("modelId");
+  });
+
+  it("carries a subagent's closing report and total tokens when Claude reports its task finished", () => {
+    const finish = (notification: {
+      readonly summary: string;
+      readonly usage?: { totalTokens: number; toolUses: number; durationMs: number };
+    }) => {
+      const ctx = context();
+      mapped(ctx, {
+        kind: "stream-event",
+        sessionId: claudeSessionId,
+        event: {
+          kind: "content-start",
+          index: 0,
+          content: {
+            kind: "tool-use",
+            toolUseId: "sdk-agent",
+            toolName: "Agent",
+            input: { description: "Review" },
+          },
+        },
+      });
+      mapped(ctx, {
+        kind: "task",
+        sessionId: claudeSessionId,
+        subtype: "task_started",
+        taskId: "sdk-task",
+        toolUseId: "sdk-agent",
+        description: "Review",
+      });
+      return eventValues(
+        mapped(ctx, {
+          kind: "task",
+          sessionId: claudeSessionId,
+          subtype: "task_notification",
+          taskId: "sdk-task",
+          status: "completed",
+          ...notification,
+        }),
+      ).find((value) => value.kind === "child-agent-activity");
+    };
+    expect(
+      finish({
+        summary: "Found two issues.",
+        usage: { totalTokens: 420, toolUses: 3, durationMs: 9 },
+      }),
+    ).toMatchObject({
+      status: "completed",
+      finalSummary: "Found two issues.",
+      usage: { totalTokens: 420 },
+    });
+    const withoutUsage = finish({ summary: "   " });
+    expect(withoutUsage).toMatchObject({ status: "completed" });
+    expect(withoutUsage).not.toHaveProperty("usage");
+    expect(withoutUsage).not.toHaveProperty("finalSummary");
   });
 
   it("shows Claude's own subagent as a child run and marks the thread when the subagent reads the web", () => {

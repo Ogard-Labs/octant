@@ -125,6 +125,34 @@ describe("Pi process boundary", () => {
     });
   });
 
+  it("outside Strict gives a Pi process the host's environment less Octant's variables and other providers' keys, with telemetry left to the person", () => {
+    const host = {
+      PATH: "/usr/bin",
+      HOME: "/Users/test",
+      HTTPS_PROXY: "http://proxy.invalid:8080",
+      GH_TOKEN: "gh-token",
+      ANTHROPIC_API_KEY: "anthropic-key",
+      OPENAI_API_KEY: "openai-key",
+      OCTANT_PI_TOOL_BRIDGE_TOKEN: "octant-secret",
+    };
+    const open = sanitizePiEnvironment(host, "/managed", "enabled", "openai", false);
+    expect(open).toMatchObject({
+      PATH: "/usr/bin",
+      HOME: "/managed",
+      PI_CODING_AGENT_DIR: "/managed",
+      HTTPS_PROXY: "http://proxy.invalid:8080",
+      GH_TOKEN: "gh-token",
+      OPENAI_API_KEY: "openai-key",
+      PI_SKIP_VERSION_CHECK: "1",
+    });
+    expect(open).not.toHaveProperty("ANTHROPIC_API_KEY");
+    expect(open).not.toHaveProperty("OCTANT_PI_TOOL_BRIDGE_TOKEN");
+    expect(open).not.toHaveProperty("PI_TELEMETRY");
+    const strict = sanitizePiEnvironment(host, "/managed", "enabled", "openai");
+    expect(strict).toMatchObject({ PI_TELEMETRY: "0" });
+    expect(strict).not.toHaveProperty("GH_TOKEN");
+  });
+
   it("gives a discovery run, or a provider with no host variable, no provider credential", () => {
     const host = {
       PATH: "/usr/bin",

@@ -722,6 +722,46 @@ describe("WorkThreadService", () => {
     expect(inUnit).toEqual(["work.thread-updated@1", "guardrail.level-lowered@1"]);
   });
 
+  it("journals the person's per-run Full access flag on the thread until it leaves Full access, and refuses it at another level or from a routine", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+    const raised = await fixture.service.execute(ids.window, {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "full-access",
+      fullAccessRunFlag: true,
+    });
+    expect(raised).toMatchObject({
+      thread: { access: "full-access", fullAccessRunFlag: true },
+    });
+    const lowered = await fixture.service.execute(ids.window, {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 2,
+      access: "auto",
+    });
+    expect(lowered).toMatchObject({ thread: { access: "auto" } });
+    expect((lowered as { thread: object }).thread).not.toHaveProperty("fullAccessRunFlag");
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-work-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 3,
+        access: "auto",
+        fullAccessRunFlag: true,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    await expect(
+      fixture.service.execute(ROUTINE_HOST_SCOPE_ID, {
+        kind: "change-work-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 3,
+        access: "full-access",
+        fullAccessRunFlag: true,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+  });
+
   it("journals who lowered Work's default or a thread's level, from which level and at which scope", async () => {
     const fixture = serviceFixture({ threads: [thread()] });
     await fixture.service.execute(ids.window, {
@@ -760,6 +800,64 @@ describe("WorkThreadService", () => {
       actor: { kind: "local-user" },
       occurredAt: expect.any(String),
     });
+  });
+
+  it("moves a thread into Plan remembering the level it left, and an approved plan back to it as the person who answered", async () => {
+    const fixture = serviceFixture({ threads: [thread({ access: "auto-accept-edits" })] });
+    const entered = await fixture.service.execute(ids.window, {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "plan",
+    });
+    expect(entered).toMatchObject({
+      kind: "thread-updated",
+      thread: { access: "plan", planReturnAccess: "auto-accept-edits" },
+    });
+
+    const deviceId = "72000000-0000-4000-8000-0000000000d1";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const left = fixture.service.changeLevelAtAgentRequest({
+      threadId: ids.thread,
+      kind: "exit-plan",
+      actor: device,
+    });
+    expect(left).toMatchObject({ status: "changed", thread: { access: "auto-accept-edits" } });
+    expect(left.status === "changed" ? left.thread.planReturnAccess : "kept").toBeUndefined();
+    const updated = fixture.persistence.journal.append.mock.calls
+      .map(([request]) => request.events[0])
+      .filter((event) => event.eventName === "work.thread-updated@1");
+    expect(updated.at(-1)?.actor).toEqual(device);
+    // The answer came after the thread already left Plan: nothing moves again.
+    expect(
+      fixture.service.changeLevelAtAgentRequest({
+        threadId: ids.thread,
+        kind: "exit-plan",
+        actor: device,
+      }),
+    ).toMatchObject({ status: "refused" });
+  });
+
+  it("returns a thread the agent moved to Plan from Full access to Ask first, never to Full access", () => {
+    const fixture = serviceFixture({ threads: [thread({ access: "full-access" })] });
+    const person = { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" } as never;
+    expect(
+      fixture.service.changeLevelAtAgentRequest({
+        threadId: ids.thread,
+        kind: "enter-plan",
+        actor: person,
+      }),
+    ).toMatchObject({
+      status: "changed",
+      thread: { access: "plan", planReturnAccess: "ask-first" },
+    });
+    expect(
+      fixture.service.changeLevelAtAgentRequest({
+        threadId: ids.thread,
+        kind: "exit-plan",
+        actor: person,
+      }),
+    ).toMatchObject({ status: "changed", thread: { access: "ask-first" } });
   });
 
   it("journals a paired device's Full access changes with the device as their actor, and a local window's as the local user", async () => {
@@ -1637,6 +1735,46 @@ describe("WorkThreadService", () => {
     });
     expect(result).toMatchObject({ thread: { access: "auto" } });
     expect("thread" in result ? result.thread.fullAccessSandbox : "missing").toBeUndefined();
+  });
+
+  it("marks a thread as carrying outside content before journaling the session it adopted, and refuses when it cannot", () => {
+    const adopted = {
+      nativeSessionId: "outside-1",
+      providerSessionId: "11111111-1111-4111-8111-111111111111" as never,
+      resumeCursor: { driverKind: "claude", value: "outside-cursor" } as never,
+      providerInstanceId: ids.provider as never,
+      modelId: "model-a" as never,
+      bindingRevisionId: ids.binding as never,
+      workingDirectory: "." as never,
+    };
+    const record = vi.fn<
+      NonNullable<WorkThreadServiceDependencies["recordExternalContentIngestion"]>
+    >(() => ({
+      kind: "recorded",
+      taint: { externalContentIngested: true, ingestedSources: ["adopted-provider-session"] },
+    }));
+    const marked = serviceFixture({ threads: [thread()], recordExternalContentIngestion: record });
+
+    const result = marked.service.recordAdoptedSession(thread(), adopted);
+
+    expect(result).toMatchObject({ status: "recorded", thread: { adoptedSession: adopted } });
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: ids.thread,
+        provenance: { origin: "external-content", sourceLabel: "adopted-provider-session" },
+      }),
+    );
+    expect(record.mock.invocationCallOrder[0]).toBeLessThan(
+      marked.persistence.journal.append.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(marked.projection.read(ids.thread)?.adoptedSession).toEqual(adopted);
+
+    const refused = serviceFixture({
+      threads: [thread()],
+      recordExternalContentIngestion: () => ({ kind: "refused", reason: "malformed" }),
+    });
+    expect(refused.service.recordAdoptedSession(thread(), adopted).status).toBe("refused");
+    expect(refused.persistence.journal.append).not.toHaveBeenCalled();
   });
 
   it("journals a person turning Wake when a message arrives on and off for a Work thread", async () => {

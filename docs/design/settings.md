@@ -52,7 +52,8 @@ for coordinator threads ([Octant instructions](octant-instructions.md#settings))
 and ends on Notifications (what Octant sends while a person is away); Permissions holds the files no agent may touch,
 then the network places and servers agents may reach (Network limits, Safe
 networks, Servers), then what a person has already allowed (remembered
-websites, remembered tool approvals, public links). Profile and Notifications
+websites, remembered tool approvals, public links), with Octant's own limits
+on unattended work after Tool steps (see below). Profile and Notifications
 were pages of one and two controls, and Access was the other half of the
 question Permissions answers, so the rail listed three pages a person rarely
 needed alone; links to those pages open the page that holds them now. Data &
@@ -68,8 +69,10 @@ opens with Model endpoints, every endpoint Octant calls over an API itself
 by model roles ([Model endpoints: Model roles](model-endpoints.md#model-roles)), helper agents, and Navigator's models; with no endpoint yet it offers three ways
 in instead (Sign in with ChatGPT, Sign in with OpenRouter, Add endpoint), each
 sign-in one click with its terms as a consent line under the button. Voice &
-images holds speech, transcription, the image profiles, and custom image
-sources. The Provider catalog lists every bundled driver of both kinds and
+images holds speech, transcription, the image profiles, custom image
+sources, and, once two image profiles are ready, **At Full access** with one
+select, **Image profile at Full access** (First ready profile, then each ready
+profile by name), the profile a thread at Full access uses instead of asking. The Provider catalog lists every bundled driver of both kinds and
 sends each one to the page that configures it. A sign-in
 endpoint's row says who is signed in, its detail page offers sign out and
 sign in again, and its configuration fixes the base URL and asks for no key. The
@@ -84,6 +87,23 @@ open: the built-in background pictures sit behind the current one and a
 Change action, and the pattern dials appear only while the pattern is drawn.
 Rows in Settings are `SettingRow`; rows everywhere else are `surface-row`. Both
 draw the same hairline.
+
+**Octant's own limits** sit on Settings › Permissions after Tool steps, as
+host settings in four sections of number steppers (1 to the stated top) and
+switches, each row naming its default in its description
+([Octant's own limits become settings](../architecture.md#security-and-authority)):
+**Wake-ups and messages** (Wake-ups waiting per thread, 8, up to 64; Message
+wakes per hour, 30; Rounds of replies that wake, 10; Thread messages per turn,
+3, up to 20; and the switch **Run missed wake-ups on return**, off),
+**Coordinators** (Coordinators per Project, 4, up to 32), **Pull requests**
+(Wakes per pull-request watch, 10, up to 100; Days a pull-request watch lasts,
+3, up to 30; Auto-fix tries per failure, 3, up to 20), **Waiting** (Longest
+Browser wait, in minutes, 10, up to 60, whose description says a Claude Code
+thread still ends one tool call at eleven minutes; Longest wait for a helper,
+in seconds, 120, up to 3,600), then **Routines** with the switch **Start
+agent-created routines active at Full access**, off. Each change is the
+ordinary journaled settings replacement a local window or a device the host's
+own person paired makes; the server reads each value where it applies.
 
 Selecting a page replaces its controls as well as its heading. Plugin pages
 resolve the currently selected entry point; a missing entry point shows an
@@ -265,9 +285,9 @@ The levels, top to bottom, are Ask first,
 Accept edits, Auto, and Full access; Full access is the lowest, and there is
 no separate switch below it. The first time a machine or a Project picks Full
 access, a one-time warning asks to confirm, in the warning role: "Agents can
-change any file and run any command without asking, with no sandbox. Protected
-files, such as SSH and cloud keys, are guarded by Octant's own tools and
-redaction only, and a shell command can read them." It
+change any file and run any command without asking, with no sandbox, and can
+read protected files such as SSH and cloud keys. Secret values are redacted
+from what Octant records." It
 offers Cancel (focused) and Use Full access, and is not shown again for that
 scope. **Protected files** opens Settings › Permissions, above Remembered
 websites: one row per built-in group (SSH private keys, cloud credentials,

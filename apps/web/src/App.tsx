@@ -1,4 +1,5 @@
 import type { RevealedThreadTurn } from "./shell/WorkspaceView";
+import { attachmentMediaType } from "./composer/attachmentMediaType";
 import { OctantEmpty } from "./ui/base/OctantEmpty";
 import { AgentThreadAttributionProvider } from "./agentAccess/agentThreadAttribution";
 import { QuestionnaireDraftsProvider } from "./transcript/questionnaireDrafts";
@@ -7061,7 +7062,7 @@ function LaunchedShell(
     const attachmentIds: WorkAttachmentId[] = [];
     for (const file of images) {
       const attachmentId = decodeWorkAttachmentId(globalThis.crypto.randomUUID());
-      const mediaType = decodeWorkAttachmentMediaType(file.type);
+      const mediaType = decodeWorkAttachmentMediaType(attachmentMediaType(file));
       await workTurnClient.putAttachment({
         threadId,
         attachmentId,
@@ -7378,7 +7379,7 @@ function LaunchedShell(
           threadId: created.thread.id,
           attachmentId,
           displayName: pastedImageName(file),
-          mediaType: decodeCodeAttachmentMediaType(file.type),
+          mediaType: decodeCodeAttachmentMediaType(attachmentMediaType(file)),
           bytes: new Uint8Array(await file.arrayBuffer()),
         });
         attachmentIds.push(attachmentId);
@@ -8480,6 +8481,9 @@ function LaunchedShell(
                       chatReadCursorStore={chatReadCursorStore}
                       clients={launchedClients}
                       codeBoardProjects={codeBoardProjects}
+                      {...(workSettings.settings?.defaultStrict === true
+                        ? { workDefaultStrict: true }
+                        : {})}
                       codeController={codeController}
                       codeDefaultPermissionMode={codeDefaultPermissionMode}
                       codeProviderChoices={codeProviderChoices}

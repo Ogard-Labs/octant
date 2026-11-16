@@ -40,13 +40,14 @@ import {
   threadAccessOf,
   type PickerGroup,
 } from "@octant/domain";
-import { ChevronDown, CirclePause, X } from "lucide-react";
+import { ChevronDown, CirclePause, FileText, X } from "lucide-react";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadAccountControl } from "../providers/ThreadAccountControl";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -70,6 +71,9 @@ import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt"
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import { ThreadWakeups } from "../wakeups/ThreadWakeups";
+import { CodeLiveTasks } from "./CodeLiveTasks";
+import { CodeNativeSession } from "./CodeNativeSession";
+import { createCodeSessionClient, type CodeSessionClient } from "./codeSessionClient";
 import type { ThreadWakeupClient } from "../wakeups/threadWakeupClient";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import {
@@ -89,7 +93,7 @@ import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverP
 import { serverCodeThreadProviderGroups } from "./composer/serverCodeComposer";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
-import { ChildResultCards } from "../agents/ChildResultCards";
+import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
 import { isChildResultDelivery } from "../agents/childResultDelivery";
 import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { ScheduledFollowUpMark } from "../automation/ScheduledFollowUpMark";
@@ -113,7 +117,7 @@ import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import type { HostId } from "@octant/contracts/host";
 import type { AutomationClient, CodeClient, ThreadMentionClient } from "@octant/client-runtime";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
-import { useCodeAttachments } from "./useCodeAttachments";
+import { isImageAttachment, useCodeAttachments } from "./useCodeAttachments";
 import {
   threadImageOfferKey,
   useThreadImageOffers,
@@ -190,7 +194,6 @@ import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
   composerProviderCommands,
-  PLAN_PROVIDER_COMMAND_REFUSAL,
 } from "../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
@@ -234,6 +237,8 @@ export interface CodeThreadWorkspaceProps {
    * false or absent Auto is shown disabled with the reason.
    */
   readonly harnessAutoReviewSupported?: boolean;
+  /** Strict as the thread's Project and Settings set it, for a thread that did not choose. */
+  readonly strictDefault?: boolean;
   /** Who answers the thread's prompts at Auto, or why nobody can. */
   readonly autoReview?: AutoReview;
   readonly threadId: CodeThreadId;
@@ -330,6 +335,7 @@ export interface CodeThreadWorkspaceProps {
   readonly messageQueueClient?: ThreadMessageQueueClient;
   /** The thread's wake-ups; absent builds one from the server address. */
   readonly wakeupClient?: ThreadWakeupClient;
+  readonly codeSessionClient?: CodeSessionClient;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
   readonly memoryProposalClient?: ProjectMemoryProposalClient;
@@ -482,11 +488,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       setDraft(next);
       props.controller.setPendingDraft?.(next);
     },
-    provider: composerProviderCommands(
-      props.providerGroups,
-      view?.thread.providerInstanceId,
-      view?.thread.executionPolicy === "plan" ? PLAN_PROVIDER_COMMAND_REFUSAL : undefined,
-    ),
+    provider: composerProviderCommands(props.providerGroups, view?.thread.providerInstanceId),
   });
   const activeThreadKeyRef = useRef(String(props.threadId));
   activeThreadKeyRef.current = String(props.threadId);
@@ -606,6 +608,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     client: props.attachmentClient ?? UNAVAILABLE_ATTACHMENT_CLIENT,
     threadId: props.attachmentClient === undefined ? undefined : props.threadId,
   });
+  const { serverUrl, windowCapability, codeSessionClient } = props;
+  const sessionClient = useMemo(
+    () =>
+      codeSessionClient ??
+      (serverUrl === undefined || windowCapability === undefined
+        ? undefined
+        : createCodeSessionClient({ serverUrl, windowCapability })),
+    [codeSessionClient, serverUrl, windowCapability],
+  );
   const messageQueue = useThreadMessageQueue({
     mode: "code",
     hostId: props.hostId,
@@ -798,11 +809,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     windowCapability: props.windowCapability,
     hostId: props.hostId,
     refused: serverCheckout || props.pairedDevice === true,
-    onFiles: (files) => {
-      if (seesImages.takesImages === false)
-        attachments.refuse(seesImages.refusal ?? "Choose a vision model to attach images.");
-      else void attachments.attach(files);
-    },
+    onFiles: (files) => void attachFiles(files),
   });
   // A picture marked up in this thread's Browser arrives here as a file and
   // meets the same checks as one dropped on the composer.
@@ -1244,20 +1251,28 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       }
     }
   }
-  function attachFromTransfer(items: DataTransfer | null): boolean {
-    if (props.attachmentClient === undefined || items === null) return false;
-    const files = [...items.files];
-    if (files.length === 0) return false;
-    // The host refuses this turn anyway. Saying so at the paste is kinder than
-    // letting the user write the message first and lose it at send.
-    if (seesImages.takesImages === false) {
+  /**
+   * Attach dropped, pasted or chosen files. Any file may be attached; an
+   * image needs a model that reads images, which the host would otherwise
+   * refuse at send, so a picture for one that does not is refused here and
+   * every other file still attaches.
+   */
+  function attachFiles(files: ReadonlyArray<File>): Promise<string | undefined> {
+    if (seesImages.takesImages !== false) return attachments.attach(files);
+    const others = files.filter((file) => !isImageAttachment(file));
+    if (others.length < files.length) {
       attachments.refuse(
         seesImages.refusal ??
           `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`,
       );
-      return true;
     }
-    void attachments.attach(files);
+    return others.length === 0 ? Promise.resolve(undefined) : attachments.attach(others);
+  }
+  function attachFromTransfer(items: DataTransfer | null): boolean {
+    if (props.attachmentClient === undefined || items === null) return false;
+    const files = [...items.files];
+    if (files.length === 0) return false;
+    void attachFiles(files);
     return true;
   }
 
@@ -1557,6 +1572,24 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         executionPolicy: access.executionPolicy,
         permissionPersistence: thread.permissionPersistence,
         autoApprove: access.autoApprove,
+      });
+    } finally {
+      setAccessChanging(false);
+    }
+  }
+
+  async function changeStrict(strict: boolean) {
+    props.controller.setAccessNotice(undefined);
+    setAccessChanging(true);
+    try {
+      await props.controller.execute({
+        kind: "change-code-thread-access",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+        executionPolicy: thread.executionPolicy,
+        permissionPersistence: thread.permissionPersistence,
+        ...(thread.autoApprove === true ? { autoApprove: true } : {}),
+        strict,
       });
     } finally {
       setAccessChanging(false);
@@ -2367,6 +2400,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         ) : null}
                       </TurnActionMenu>
                     </article>
+                    <SteeredChildResults
+                      providerGroups={providerGroups}
+                      steered={message.steeredResults}
+                    />
                     {message.role === "assistant" && message.operationId !== undefined ? (
                       <SideTaskInline
                         last={message === lastReply}
@@ -2466,6 +2503,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     })
                   }
                   summary={request.summary}
+                  {...(request.levelChange === undefined
+                    ? {}
+                    : { levelChange: request.levelChange })}
                 />
               ) : (
                 <ProviderQuestionCard
@@ -2530,6 +2570,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 serverUrl={props.serverUrl}
                 windowCapability={props.windowCapability}
                 client={props.wakeupClient}
+              />
+              <CodeLiveTasks threadId={props.threadId} client={sessionClient} />
+              <CodeNativeSession
+                threadId={props.threadId}
+                client={sessionClient}
+                threadHasTurns={props.controller.conversation.length > 0}
               />
               <ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />
             </>
@@ -2712,17 +2758,25 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               />
               <TrackerReferenceComposerHints draft={draft} />
               {attachments.staged.length === 0 ? null : (
-                <div className="code-thread-workspace__attachments" aria-label="Attached images">
+                <div className="code-thread-workspace__attachments" aria-label="Attached files">
                   {attachments.staged.map(({ previewUrl, reference }) => (
                     <span
                       className="chip code-thread-workspace__attachment"
                       key={reference.attachmentId}
                     >
-                      <img
-                        alt={reference.displayName}
-                        className="code-thread-workspace__attachment-thumb"
-                        src={previewUrl}
-                      />
+                      {previewUrl === "" ? (
+                        <FileText
+                          aria-hidden="true"
+                          className="code-thread-workspace__attachment-thumb"
+                          size={16}
+                        />
+                      ) : (
+                        <img
+                          alt={reference.displayName}
+                          className="code-thread-workspace__attachment-thumb"
+                          src={previewUrl}
+                        />
+                      )}
                       <span className="code-thread-workspace__attachment-name">
                         {reference.displayName}
                       </span>
@@ -2854,18 +2908,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             ariaLabel: "Thread context",
             attach: (
               <ComposerAttachButton
-                accept="image/png,image/jpeg,image/webp,image/gif"
                 busy={attachments.busy}
                 refusedReason={
                   props.attachmentClient === undefined
-                    ? "Image attachments are unavailable on this host."
-                    : seesImages.takesImages === false
-                      ? (seesImages.refusal ??
-                        `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`)
-                      : undefined
+                    ? "Attachments are unavailable on this host."
+                    : undefined
                 }
                 onRefused={attachments.refuse}
-                onFileSelected={(file) => void attachments.attach([file])}
+                onFileSelected={(file) => void attachFiles([file])}
               />
             ),
             leading: (
@@ -2915,6 +2965,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     thread.providerInstanceId,
                   )}
                   onFullAccessSandboxChange={(sandboxed) => void changeFullAccessSandbox(sandboxed)}
+                  strict={thread.strict ?? props.strictDefault === true}
+                  onStrictChange={(strict) => void changeStrict(strict)}
                 />
               </>
             ),

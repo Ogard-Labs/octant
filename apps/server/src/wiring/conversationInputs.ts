@@ -34,6 +34,26 @@ export function supportsConversationInput(
   );
 }
 
+/**
+ * Whether a Work or Code turn sends an attached file that is not an image as
+ * it is, rather than naming its path in the thread's attachments folder.
+ * OpenCode hands a file part to its model, so a PDF goes natively where the
+ * thread's model reads documents; the Claude Code and Codex adapters send
+ * images alone, so every other file of theirs is named by path.
+ */
+export function providerTakesFileNatively(
+  driverKind: string | undefined,
+  observed: ProviderObservedState | undefined,
+  modelId: string,
+  mediaType: string,
+): boolean {
+  return (
+    driverKind === "opencode" &&
+    mediaType === "application/pdf" &&
+    supportsConversationInput(observed, modelId, mediaType)
+  );
+}
+
 /** Reads only a reference previously selected by the authorized conversation reader. */
 export function conversationInputSource(
   persistence: PersistenceService,

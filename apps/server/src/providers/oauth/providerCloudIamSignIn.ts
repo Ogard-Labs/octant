@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { EventActor, ProviderInstance, ProviderInstanceId } from "@octant/contracts";
 import {
   decodeHostOAuthJournalRecord,
@@ -240,8 +241,15 @@ export async function answerCloudIamSettingsCommand(input: {
   readonly principal: PrincipalKind;
   /** Who asked, as the route resolved them; a Sign out is journaled as theirs. */
   readonly actor?: EventActor | undefined;
+  /** The window that asked, as the broker's actor for a connect. */
+  readonly actorId?: string;
+  readonly awsProfile?: string;
+  readonly accessKeys?: { readonly accessKeyId: string; readonly secretAccessKey: string };
 }): Promise<ProviderOAuthView> {
   const { dependencies } = input;
+  if (input.kind === "connect-aws-profile" || input.kind === "connect-access-keys") {
+    return connectPersonCloudSource(input);
+  }
   if (input.kind !== "status" && input.kind !== "sign-out") {
     return { kind: "refused", reason: "terminal-sign-in-only" };
   }
@@ -293,6 +301,112 @@ export async function answerCloudIamSettingsCommand(input: {
     input.actor,
   );
   return signedOut(false);
+}
+
+/**
+ * Connect the person's own AWS profile, or a long-lived key pair they entered,
+ * in place of the portal sign-in. Only a window on this host connects one, as
+ * only the host begins a portal sign-in; the profile is read and the keys are
+ * kept by the broker alone, so the server stores only the pointer and the
+ * journal names only the reference.
+ */
+async function connectPersonCloudSource(input: {
+  readonly dependencies: CloudIamSignInDependencies | undefined;
+  readonly instanceId: ProviderInstanceId;
+  readonly kind: ProviderOAuthCommand["kind"];
+  readonly principal: PrincipalKind;
+  readonly actor?: EventActor | undefined;
+  readonly actorId?: string;
+  readonly awsProfile?: string;
+  readonly accessKeys?: { readonly accessKeyId: string; readonly secretAccessKey: string };
+}): Promise<ProviderOAuthView> {
+  const { dependencies } = input;
+  if (
+    input.principal !== "local-window" ||
+    authorizePrincipalAction({ principalKind: input.principal, action: "provider.oauth.begin" })
+      .kind === "deny"
+  ) {
+    return { kind: "refused", reason: "local-host-required" };
+  }
+  if (dependencies === undefined || dependencies.credentials === undefined)
+    return { kind: "refused", reason: "unavailable" };
+  const target = cloudIamSignInTarget(dependencies.readInstance(input.instanceId));
+  if (target === undefined) return { kind: "refused", reason: "unsupported-driver" };
+  if (dependencies.terms.offer(termsOf(target.descriptor)).oauth.termsRequired) {
+    return {
+      kind: "signed-out",
+      termsRequired: true,
+      termsSummary: AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.termsSummary,
+      accountLabel: target.accountLabel,
+    };
+  }
+  const source =
+    input.kind === "connect-aws-profile" && input.awsProfile !== undefined
+      ? { kind: "aws-profile" as const, profileName: input.awsProfile }
+      : input.kind === "connect-access-keys" && input.accessKeys !== undefined
+        ? { kind: "access-keys" as const, ...input.accessKeys }
+        : undefined;
+  if (source === undefined || input.actorId === undefined)
+    return { kind: "refused", reason: "invalid" };
+  let raw: unknown;
+  try {
+    raw = await dependencies.broker.connect({
+      descriptorId: target.descriptor.descriptorId,
+      source,
+      scope: target.descriptor.scope,
+      actorId: input.actorId,
+      termsAcknowledgedAt: new Date().toISOString(),
+    });
+  } catch {
+    return { kind: "refused", reason: "unavailable" };
+  }
+  if (!isRecord(raw) || raw.kind !== "signed-in" || typeof raw.credentialRef !== "string") {
+    const reason = isRecord(raw) ? raw.reason : undefined;
+    return {
+      kind: "refused",
+      reason:
+        reason === "sso-sign-in-needed" ||
+        reason === "profile-missing" ||
+        reason === "process-failed" ||
+        reason === "unsupported" ||
+        reason === "not-authorized"
+          ? `aws-${reason}`
+          : "invalid",
+    };
+  }
+  const credentialRef = raw.credentialRef;
+  const pointer = {
+    kind: "cloud-iam" as const,
+    credentialRef,
+    source: target.descriptor.source,
+    scope: target.descriptor.scope,
+  };
+  // Resolving a profile can run a credential process or an SSO request; the
+  // endpoint may be edited or removed meanwhile, so the grant is stored only
+  // if the endpoint still wants it, as a browser sign-in's settle does.
+  const current = cloudIamSignInTarget(dependencies.readInstance(input.instanceId));
+  if (current === undefined || !sameCloudIamGrant(pointer, current.descriptor)) {
+    await dependencies.broker.revoke(credentialRef).catch(() => undefined);
+    return { kind: "refused", reason: "invalid" };
+  }
+  try {
+    await forgetReplacedGrant(dependencies, input.instanceId, credentialRef);
+    await dependencies.credentials.set(input.instanceId, encodeCloudIamCredential(pointer));
+  } catch {
+    await dependencies.broker.revoke(credentialRef).catch(() => undefined);
+    return { kind: "refused", reason: "unavailable" };
+  }
+  append(
+    dependencies,
+    {
+      name: "host-oauth.sign-in-completed",
+      descriptorId: target.descriptor.descriptorId,
+      attemptId: randomUUID(),
+      credentialRef,
+    },
+    input.actor,
+  );
+  return { kind: "signed-in", accountLabel: target.accountLabel };
 }
 
 /**

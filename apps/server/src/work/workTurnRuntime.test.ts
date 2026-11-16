@@ -19,7 +19,9 @@ import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/dr
 import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { RecordExternalContentIngestion } from "../context/inheritedExternalContentMark";
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
-import { WorkTurnRuntime } from "./workTurnRuntime";
+import { OutlivingSessions } from "../providers/outlivingSessions";
+import { heldTurnContext } from "../providers/heldTurnContext";
+import { WorkTurnRuntime, workSessionKey } from "./workTurnRuntime";
 
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
@@ -2004,8 +2006,9 @@ describe("WorkTurnRuntime", () => {
     });
   });
 
-  it("starts the provider auto-accepting edits only for a thread whose access allows it", async () => {
-    const started: Array<{ readonly executionPolicy?: string }> = [];
+  it("starts the provider at the thread's level, Plan's read-only profile included, and lets the agent ask to change it", async () => {
+    const started: Array<{ readonly executionPolicy?: string; readonly levelChanges?: boolean }> =
+      [];
     const events: ProviderRuntimeEvent[] = [
       {
         instanceId: ids.provider,
@@ -2022,7 +2025,10 @@ describe("WorkTurnRuntime", () => {
       acquire: () =>
         Effect.succeed({
           subscribe: Effect.succeed(Stream.fromIterable(events)),
-          start: (input: { readonly executionPolicy?: string }) => {
+          start: (input: {
+            readonly executionPolicy?: string;
+            readonly levelChanges?: boolean;
+          }) => {
             started.push(input);
             return Effect.void;
           },
@@ -2035,7 +2041,7 @@ describe("WorkTurnRuntime", () => {
           answerTool: () => Effect.void,
         } as never),
     };
-    const turn = (access?: "ask-first" | "auto-accept-edits") =>
+    const turn = (access?: "ask-first" | "auto-accept-edits" | "plan") =>
       new WorkTurnRuntime().run({
         command: decodeStartWorkThreadTurnCommand({
           kind: "start-work-thread-turn",
@@ -2063,11 +2069,14 @@ describe("WorkTurnRuntime", () => {
     await turn();
     await turn("ask-first");
     await turn("auto-accept-edits");
+    await turn("plan");
     expect(started.map((input) => input.executionPolicy)).toEqual([
       "approval-gated",
       "approval-gated",
       "auto-accept-edits",
+      "plan",
     ]);
+    expect(started.every((input) => input.levelChanges === true)).toBe(true);
   });
 
   it("hands the provider the prior Work transcript as follow-up context", async () => {
@@ -2174,6 +2183,154 @@ describe("WorkTurnRuntime", () => {
     });
     expect(outcome).toEqual({ kind: "cancelled" });
     expect(acquire).not.toHaveBeenCalled();
+  });
+
+  describe("a session the host keeps past its turn", () => {
+    const command = decodeStartWorkThreadTurnCommand({
+      kind: "start-work-thread-turn",
+      requestId: ids.request,
+      threadId: ids.thread,
+      turnId: ids.turn,
+      prompt: "Start the preview server",
+      authority: {
+        hostId: "local",
+        projectId: ids.project,
+        bindingRevisionId: ids.binding,
+        workingDirectory: ".",
+        confinementPosture: "project-root-confined",
+        providerInstanceId: ids.provider,
+        modelId: "model",
+      },
+    });
+    const completed = (sequence: number): ProviderRuntimeEvent =>
+      decodeProviderRuntimeEvent({
+        kind: "completed",
+        instanceId: ids.provider,
+        sequence,
+        correlationId: ids.project,
+        occurredAt: "2026-11-15T12:00:00.000Z",
+        sessionId: ids.session,
+      });
+    // A runtime whose session still runs a background task after its turn.
+    const runtimeWithTask = () => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const work = {
+        tasks: [{ taskId: "task-1", description: "npm run dev" }],
+        turnRunning: false,
+        runtimeTurnWaiting: false,
+        ended: false,
+      };
+      const calls = {
+        acquire: vi.fn(),
+        start: vi.fn(),
+        send: vi.fn(),
+        attach: vi.fn(),
+        stop: vi.fn(),
+        outlivesTurn: [] as Array<boolean | undefined>,
+      };
+      const connection: ProviderConnection = {
+        subscribe: Effect.succeed(Stream.fromQueue(queue)),
+        start: (input) =>
+          Effect.sync(() => {
+            calls.start(input);
+            calls.outlivesTurn.push(input.outlivesTurn);
+            return { sessionId: input.sessionId };
+          }),
+        resume: () => Effect.die("unused"),
+        send: () =>
+          Effect.sync(() => calls.send()).pipe(Effect.zipRight(Queue.offer(queue, completed(1)))),
+        attachRuntimeTurn: () =>
+          Effect.sync(() => calls.attach()).pipe(Effect.zipRight(Queue.offer(queue, completed(2)))),
+        backgroundWork: () => ({ current: () => work, watch: () => () => undefined }),
+        interrupt: () => Effect.void,
+        stop: () => Effect.sync(() => calls.stop()),
+        answerApproval: () => Effect.void,
+        answerUserInput: () => Effect.void,
+        answerTool: () => Effect.void,
+      };
+      const driver: ProviderDriver = {
+        kind: "claude",
+        probe: () => Effect.die("unused"),
+        acquire: (input) =>
+          Effect.sync(() => {
+            calls.acquire(input);
+            return connection;
+          }),
+      };
+      return { calls, driver };
+    };
+
+    it("keeps the thread's session and its background task running after the turn completes", async () => {
+      const keeper = new OutlivingSessions({
+        idleLimitMs: () => null,
+        startRuntimeTurn: async () => ({ status: "busy" }),
+      });
+      const { calls, driver } = runtimeWithTask();
+      const runtime = new WorkTurnRuntime({ timeoutMs: 5000, outlivingSessions: keeper });
+      try {
+        const first = await runtime.run({
+          command,
+          providerSessionId: ids.session as never,
+          projectRoot: "/tmp/work-project",
+          driver,
+          signal: new AbortController().signal,
+        });
+        expect(first).toMatchObject({ kind: "completed" });
+        expect(calls.outlivesTurn).toEqual([true]);
+        expect(calls.stop).not.toHaveBeenCalled();
+        expect(keeper.liveTasks(workSessionKey(ids.thread))?.tasks).toEqual([
+          { taskId: "task-1", description: "npm run dev" },
+        ]);
+
+        const second = await runtime.run({
+          command,
+          providerSessionId: ids.session as never,
+          projectRoot: "/tmp/work-project",
+          driver,
+          signal: new AbortController().signal,
+        });
+        expect(second).toMatchObject({ kind: "completed" });
+        // The next turn takes up the same session rather than starting one.
+        expect(calls.acquire).toHaveBeenCalledOnce();
+        expect(calls.start).toHaveBeenCalledOnce();
+      } finally {
+        await keeper.close();
+      }
+      expect(calls.stop).toHaveBeenCalledOnce();
+    });
+
+    it("opens a turn the runtime started by itself by attaching to it, never sending the recorded prompt", async () => {
+      const keeper = new OutlivingSessions({
+        idleLimitMs: () => null,
+        startRuntimeTurn: async () => ({ status: "busy" }),
+      });
+      const { calls, driver } = runtimeWithTask();
+      const runtime = new WorkTurnRuntime({ timeoutMs: 5000, outlivingSessions: keeper });
+      const promptSent = vi.fn();
+      const forTurn = vi.spyOn(heldTurnContext, "forTurn");
+      try {
+        const outcome = await runtime.run({
+          command,
+          providerSessionId: ids.session as never,
+          projectRoot: "/tmp/work-project",
+          driver,
+          runtimeTurn: true,
+          onPromptSent: promptSent,
+          signal: new AbortController().signal,
+        });
+        expect(outcome).toMatchObject({ kind: "completed" });
+        expect(calls.attach).toHaveBeenCalledOnce();
+        expect(calls.send).not.toHaveBeenCalled();
+        // The runtime's own turn spends tokens like any other.
+        expect(promptSent).toHaveBeenCalledOnce();
+        // It sends no context, so the held-context record is neither read
+        // for it nor told it carried anything.
+        expect(forTurn).not.toHaveBeenCalled();
+      } finally {
+        forTurn.mockRestore();
+        await keeper.close();
+      }
+    });
   });
 
   describe("how a turn ran", () => {
@@ -2291,6 +2448,7 @@ describe("WorkTurnRuntime", () => {
       const tracker = {
         begin: (startedAt: string) => calls.push(`begin ${startedAt}`),
         observe: (observed: { readonly kind: string }) => calls.push(observed.kind),
+        connect: () => calls.push("connect"),
         end: () => calls.push("end"),
       };
 
@@ -2308,7 +2466,14 @@ describe("WorkTurnRuntime", () => {
         liveTurn: tracker,
       });
 
-      expect(calls).toEqual([`begin ${at(0)}`, "tool-start", "text-delta", "completed", "end"]);
+      expect(calls).toEqual([
+        `begin ${at(0)}`,
+        "connect",
+        "tool-start",
+        "text-delta",
+        "completed",
+        "end",
+      ]);
     });
 
     it("hands each command a runtime starts to the forge-change record, with the thread's level", async () => {
@@ -2353,6 +2518,7 @@ describe("WorkTurnRuntime", () => {
         liveTurn: {
           begin: () => calls.push("begin"),
           observe: () => calls.push("observe"),
+          connect: () => undefined,
           end: () => calls.push("end"),
         },
       });

@@ -15,6 +15,7 @@ import {
   permissionModeOfWorkAccess,
   threadAccessOf,
   workAccessOfPermissionMode,
+  workThreadAccessOfMode,
 } from "@octant/domain";
 import type { MobileRemoteTransport } from "./mobileInboxClient";
 
@@ -45,7 +46,7 @@ export const MOBILE_THREAD_LEVEL_LABELS: Readonly<Record<PermissionMode, string>
 
 /** Said before the first Full access pick, in the words the desktop warning uses. */
 export const MOBILE_FULL_ACCESS_WARNING =
-  "Agents can change any file and run any command without asking, with no sandbox. Protected files, such as SSH and cloud keys, are guarded by Octant's own tools and redaction only, and a shell command can read them.";
+  "Agents can change any file and run any command without asking, with no sandbox, and can read protected files such as SSH and cloud keys. Secret values are redacted from what Octant records.";
 
 const CODE_LEVELS: ReadonlyArray<PermissionMode> = [
   "auto",
@@ -54,11 +55,18 @@ const CODE_LEVELS: ReadonlyArray<PermissionMode> = [
   "plan",
   "full-access",
 ];
-// Work shares Code's levels and has no Plan overlay.
-const WORK_LEVELS = CODE_LEVELS.filter((level) => level !== "plan");
+// Work shares Code's levels, Plan included; Plan is a Work thread's own level
+// and never where a Work Project or the Work default starts new threads.
+const WORK_DEFAULT_LEVELS = CODE_LEVELS.filter((level) => level !== "plan");
 
-export function mobileThreadLevelChoices(mode: "code" | "work"): ReadonlyArray<PermissionMode> {
-  return mode === "work" ? WORK_LEVELS : CODE_LEVELS;
+/** The levels a thread can be moved to: every level, in Work as in Code. */
+export function mobileThreadLevelChoices(): ReadonlyArray<PermissionMode> {
+  return CODE_LEVELS;
+}
+
+/** The levels a Project or the host default can start new threads at. */
+export function mobileDefaultLevelChoices(mode: "code" | "work"): ReadonlyArray<PermissionMode> {
+  return mode === "work" ? WORK_DEFAULT_LEVELS : CODE_LEVELS;
 }
 
 export function mobileThreadLevel(subject: MobileThreadLevelSubject): PermissionMode {
@@ -89,8 +97,7 @@ export async function changeMobileThreadLevel(input: {
   let path: string;
   let command: Record<string, unknown>;
   if (subject.mode === "work") {
-    const access = workAccessOfPermissionMode(input.level);
-    if (access === undefined) return REFUSED;
+    const access = workThreadAccessOfMode(input.level);
     path = "/api/work/threads/commands";
     command = {
       kind: "change-work-thread-access",
@@ -180,6 +187,9 @@ export async function changeMobileProjectLevel(input: {
       ...(project.defaultFullAccessSandbox === undefined
         ? {}
         : { fullAccessSandbox: project.defaultFullAccessSandbox }),
+      // The command returns an unmentioned Strict choice to Settings, so a
+      // level change keeps the Project's own.
+      ...(project.defaultStrict === undefined ? {} : { strict: project.defaultStrict }),
     },
     ["code-project-access-changed", "work-project-permission-mode-changed"],
     PROJECT_REFUSED,

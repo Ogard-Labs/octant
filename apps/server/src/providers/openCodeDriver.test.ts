@@ -163,26 +163,17 @@ describe("OpenCode driver", () => {
   it("proves MCP declaration support through a confined loopback probe lease", async () => {
     const fixture = driverFixture();
     const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
-    if (process.platform === "darwin") {
-      expect(probe.capabilities.appManagedTools).toBe("supported");
-      expect(fixture.processInputs[0]).toMatchObject({
-        mode: "chat",
-        executionPolicy: "plan",
-        loopbackPorts: [expect.any(Number)],
-      });
-      expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
-      expect(fixture.calls.some((call) => call.startsWith("mcp.disconnect:"))).toBe(true);
-    } else {
-      expect(probe.capabilities.appManagedTools).toBe("unsupported");
-      // Off macOS turns run only in Work and Code outside Plan, so the probe
-      // attests that jail.
-      expect(fixture.processInputs[0]).toMatchObject({
-        mode: "code",
-        executionPolicy: "approval-gated",
-      });
-      expect(fixture.processInputs[0]?.loopbackPorts).toBeUndefined();
-      expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(false);
-    }
+    // macOS and Linux reach the bridge, and both probe the Chat and Plan
+    // jail, which starts the git stand-in; elsewhere turns run only in Work
+    // and Code outside Plan, so the probe attests that jail.
+    expect(probe.capabilities.appManagedTools).toBe("supported");
+    expect(fixture.processInputs[0]).toMatchObject(
+      process.platform === "darwin" || process.platform === "linux"
+        ? { mode: "chat", executionPolicy: "plan", loopbackPorts: [expect.any(Number)] }
+        : { mode: "code", executionPolicy: "approval-gated", loopbackPorts: [expect.any(Number)] },
+    );
+    expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
+    expect(fixture.calls.some((call) => call.startsWith("mcp.disconnect:"))).toBe(true);
   });
 
   it("keeps app tools unsupported when the provider rejects the MCP declaration", async () => {
@@ -1690,9 +1681,10 @@ describe("OpenCode driver", () => {
       userQuestions: "supported",
       fileChanges: "unsupported",
     });
-    // Off macOS the launch refuses Chat and Plan, and the report says so.
+    // Where the Chat and Plan jail starts no process the launch refuses both,
+    // and the report says so.
     expect(probe.capabilities.turnModes).toEqual(
-      process.platform === "darwin"
+      process.platform === "darwin" || process.platform === "linux"
         ? undefined
         : {
             chat: "unsupported",
@@ -1906,7 +1898,7 @@ describe("OpenCode driver", () => {
     expect(String(resumed)).toContain("did not run its command");
   });
 
-  it("refuses a listed OpenCode command in Plan before it reaches the runtime", async () => {
+  it("runs a listed OpenCode command in Plan through its command route, under the session's Plan rules", async () => {
     const fixture = betaDriver({ commands: [{ name: "review" }] });
     const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
     fixture.registry.setObservedState(probe);
@@ -1929,8 +1921,8 @@ describe("OpenCode driver", () => {
           ),
       ),
     );
-    expect(String(result)).toContain("Plan runs none");
-    expect(fixture.calls.some((call) => call.startsWith("session.command:"))).toBe(false);
+    expect(Exit.isSuccess(result)).toBe(true);
+    expect(fixture.calls).toContain("session.command:review::");
     expect(fixture.calls).not.toContain("session.promptAsync");
   });
 
@@ -3150,7 +3142,10 @@ describe("OpenCode driver", () => {
     const projectFile = "/work/project/src/index.ts";
     const key = join(homedir(), ".ssh", "id_ed25519");
     const credentials = join(homedir(), ".aws", "credentials");
-    const protectedPaths = [join(homedir(), ".ssh"), credentials];
+    const protectedPaths = {
+      belowFullAccess: [join(homedir(), ".ssh"), credentials],
+      atFullAccess: [],
+    };
     for (const policy of ["approval-gated", "plan"] as const) {
       const legacy = permissionRules(
         policy,
@@ -3193,7 +3188,7 @@ describe("OpenCode driver", () => {
       webTools: true,
     } as const;
     const key = join(homedir(), ".ssh", "id_ed25519");
-    const protectedPaths = [join(homedir(), ".ssh")];
+    const protectedPaths = { belowFullAccess: [join(homedir(), ".ssh")], atFullAccess: [] };
     for (const policy of ["approval-gated", "plan"] as const) {
       const legacy = permissionRules(policy, "code", undefined, [], false, own, protectedPaths).map(
         (rule) => ({ action: rule.permission, resource: rule.pattern, effect: rule.action }),
@@ -3223,6 +3218,27 @@ describe("OpenCode driver", () => {
     const beta = betaAgentPermissionRules("plan", "code", [], own.rules);
     expect(evaluateV2Permission(beta, "webfetch")).toBe("deny");
     expect(evaluateV2Permission(beta, "edit")).toBe("deny");
+  });
+
+  it("asks in Plan for the tools of a server the person marked and keeps every other server's tools denied", () => {
+    const own = {
+      rules: [],
+      toolServers: false,
+      planServers: ["docs-search"],
+      webTools: true,
+    } as const;
+    const legacy = permissionRules("plan", "code", undefined, [], false, own);
+    expect(evaluatePermission(legacy, "docs-search_query")).toBe("ask");
+    expect(evaluatePermission(legacy, "writer_save")).toBe("deny");
+    const beta = betaSessionPermissionRules("plan", "code", undefined, [], false, own);
+    expect(evaluateV2Permission(beta, "docs-search_query")).toBe("ask");
+    expect(evaluateV2Permission(beta, "writer_save")).toBe("deny");
+    // With nothing marked, every server stays withheld as before.
+    const unmarked = betaSessionPermissionRules("plan", "code", undefined, [], false, {
+      ...own,
+      planServers: [],
+    });
+    expect(evaluateV2Permission(unmarked, "docs-search_query")).toBe("deny");
   });
 
   it("lets a session reach a Project's extra folder, asks for every other outside folder, and denies them in Plan", () => {
@@ -3315,10 +3331,14 @@ describe("OpenCode driver", () => {
     ).toBe("allow");
   });
 
-  it("asks for a folder outside the Project at Guarded, reaches it at Full access, refuses it in Plan, and still refuses a protected file there", () => {
+  it("asks for a folder outside the Project at Guarded, reaches it at Full access, refuses it in Plan, and still refuses a protected file there below Full access", () => {
     const outside = "/elsewhere/notes/a.ts";
     const key = join(homedir(), ".ssh", "id_ed25519");
-    const protectedPaths = [join(homedir(), ".ssh")];
+    const signIn = join(homedir(), ".codex", "auth.json");
+    const protectedPaths = {
+      belowFullAccess: [join(homedir(), ".ssh"), signIn],
+      atFullAccess: [signIn],
+    };
     const rulesFor = (policy: "full-access" | "approval-gated" | "plan") => [
       permissionRules(
         policy,
@@ -3337,7 +3357,7 @@ describe("OpenCode driver", () => {
     ];
     for (const rules of rulesFor("full-access")) {
       expect(lastMatch(rules, "external_directory", outside)).toBe("allow");
-      expect(lastMatch(rules, "read", key)).toBe("deny");
+      expect(lastMatch(rules, "read", signIn)).toBe("deny");
     }
     for (const rules of rulesFor("approval-gated")) {
       expect(lastMatch(rules, "external_directory", outside)).toBe("ask");
@@ -3348,6 +3368,51 @@ describe("OpenCode driver", () => {
     }
     for (const rules of rulesFor("plan")) {
       expect(lastMatch(rules, "external_directory", outside)).toBe("deny");
+    }
+  });
+
+  it("refuses only provider sign-ins at Full access and every protected file below it, the person's own deny still over the env exception", () => {
+    const cloud = join(homedir(), ".aws", "credentials");
+    const added = "/opt/vault/token";
+    const codexSignIn = join(homedir(), ".codex", "auth.json");
+    const claudeSignIn = join(homedir(), ".claude", ".credentials.json");
+    // The host resolves both lists; the driver only chooses one by level.
+    const protectedPaths = {
+      belowFullAccess: [cloud, added, codexSignIn, claudeSignIn],
+      atFullAccess: [codexSignIn, claudeSignIn],
+    };
+    const own = {
+      rules: [{ action: "read", resource: "*.env.example", effect: "deny" }],
+      toolServers: false,
+      webTools: true,
+    } as const;
+    const rulesFor = (policy: "full-access" | "approval-gated" | "auto-accept-edits" | "plan") => [
+      permissionRules(policy, "code", undefined, [], false, own, protectedPaths).map((rule) => ({
+        action: rule.permission,
+        resource: rule.pattern,
+        effect: rule.action,
+      })),
+      betaAgentPermissionRules(policy, "code", [], own.rules, protectedPaths),
+    ];
+    for (const rules of rulesFor("full-access")) {
+      expect(lastMatch(rules, "read", cloud)).toBe("allow");
+      expect(lastMatch(rules, "list", added)).toBe("allow");
+      expect(lastMatch(rules, "read", codexSignIn)).toBe("deny");
+      expect(lastMatch(rules, "read", claudeSignIn)).toBe("deny");
+      expect(lastMatch(rules, "read", "/work/project/.env.example")).toBe("deny");
+      // Provider sign-ins stay the last rules, so no allow reopens them.
+      expect(rules.at(-1)).toEqual({
+        action: "list",
+        resource: `${claudeSignIn}/*`,
+        effect: "deny",
+      });
+    }
+    for (const policy of ["approval-gated", "auto-accept-edits", "plan"] as const) {
+      for (const rules of rulesFor(policy)) {
+        expect(lastMatch(rules, "read", cloud), policy).toBe("deny");
+        expect(lastMatch(rules, "list", added), policy).toBe("deny");
+        expect(lastMatch(rules, "read", codexSignIn), policy).toBe("deny");
+      }
     }
   });
 
@@ -3520,6 +3585,8 @@ describe("OpenCode driver", () => {
     };
     const own = await launch(true);
     expect(own?.ownSkills).toBe(true);
+    // Running as itself, 1.x also finds the person's global AGENTS.md.
+    expect(own?.runsAsItself).toBe(true);
     expect(evaluateV2Permission([...(own?.betaPermissions ?? [])], "skill")).toBe("ask");
     // The person's tool servers follow the level, and shell still asks.
     expect(evaluateV2Permission([...(own?.betaPermissions ?? [])], "other-server_tool")).toBe(
@@ -3529,6 +3596,7 @@ describe("OpenCode driver", () => {
 
     const locked = await launch(false);
     expect(locked).not.toHaveProperty("ownSkills");
+    expect(locked).not.toHaveProperty("runsAsItself");
     expect(evaluateV2Permission([...(locked?.betaPermissions ?? [])], "skill")).toBe("deny");
   });
 

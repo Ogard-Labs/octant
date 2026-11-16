@@ -14,8 +14,11 @@ import {
   ProviderInstanceId,
   ProviderModelId,
   ProviderModelOptionValues,
+  ProviderResumeCursor,
+  ProviderSessionId,
   ThreadProviderHandoff,
 } from "./providers";
+import { ProviderNativeSessionId } from "./providerNativeSession";
 import { UsageResumeThreadState } from "./usageResume";
 import { ThreadUsageLimitHandoff } from "./usageLimitHandoff";
 import { BrowserProfileChoice } from "./projectBrowser";
@@ -52,21 +55,66 @@ export const WorkThreadCompletionEvidence = Schema.Struct({
 export type WorkThreadCompletionEvidence = typeof WorkThreadCompletionEvidence.Type;
 
 /**
+ * The levels Work's defaults (Settings › Work, and a Work Project's start
+ * mode) offer: every Work level except Plan, which a thread enters on its own.
+ */
+export const WorkDefaultAccess = Schema.Literal(
+  "ask-first",
+  "auto-accept-edits",
+  "auto",
+  "full-access",
+);
+export type WorkDefaultAccess = typeof WorkDefaultAccess.Type;
+
+/**
  * The guardrail level a Work thread runs at, in the words a Code thread's
  * mode picker uses: Work and Code share one capability set (shell, Git, file
  * writes, local tools) and differ only in what they show. `ask-first` asks
  * the person for every command and edit, `auto-accept-edits` lets edits
  * inside the Project folder land without a prompt while commands still ask,
  * `auto` lets the provider's own reviewer answer (a provider without one asks
- * first), and `full-access` runs with no sandbox and no prompts. Work has no
- * Plan overlay. The first two are what Work threads recorded before the
- * levels were shared, so older journals replay unchanged.
+ * first), `full-access` runs with no sandbox and no prompts, and `plan` is
+ * Code's read-only Plan: the agent looks and proposes and changes nothing.
+ * Plan is a thread's level only, never a default. The first two are what Work
+ * threads recorded before the levels were shared, so older journals replay
+ * unchanged.
  */
-export const WorkAccess = Schema.Literal("ask-first", "auto-accept-edits", "auto", "full-access");
+export const WorkAccess = Schema.Literal(
+  "ask-first",
+  "auto-accept-edits",
+  "auto",
+  "full-access",
+  "plan",
+);
 export type WorkAccess = typeof WorkAccess.Type;
 
+/**
+ * The level a Work thread in Plan returns to when the person approves its
+ * plan: a guarded level, never Full access, which only the person chooses.
+ */
+export const WorkPlanReturnAccess = Schema.Literal("ask-first", "auto-accept-edits", "auto");
+export type WorkPlanReturnAccess = typeof WorkPlanReturnAccess.Type;
+
 /** The access a Work thread starts with when nothing else is set. */
-export const DEFAULT_WORK_ACCESS: WorkAccess = "ask-first";
+export const DEFAULT_WORK_ACCESS: WorkDefaultAccess = "ask-first";
+
+/**
+ * The provider session begun outside Octant that an empty Work thread was
+ * started from, with what its first turn must still match to resume it: the
+ * provider, model, Project binding and folder the host adopted it under. The
+ * cursor is the host's own resume record, as a turn's is.
+ */
+export const WorkThreadAdoptedSession = Schema.Struct({
+  nativeSessionId: ProviderNativeSessionId,
+  providerSessionId: ProviderSessionId,
+  resumeCursor: ProviderResumeCursor,
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  bindingRevisionId: BindingRevisionId,
+  workingDirectory: ThreadWorkingDirectory,
+  workingFolderId: Schema.optional(ProjectWorkingFolderId),
+}).annotations(strict);
+export type WorkThreadAdoptedSession = typeof WorkThreadAdoptedSession.Type;
 
 export const WorkThread = Schema.Struct({
   id: WorkThreadId,
@@ -89,11 +137,25 @@ export const WorkThread = Schema.Struct({
    */
   access: Schema.optionalWith(WorkAccess, { default: () => DEFAULT_WORK_ACCESS }),
   /**
+   * The level the thread returns to when the person approves its plan,
+   * recorded while the thread is in Plan and dropped when it leaves; never
+   * Full access. Same meaning as `CodeThread.planReturnPolicy`.
+   */
+  planReturnAccess: Schema.optional(WorkPlanReturnAccess),
+  /**
    * Opt-in sandbox at Full access, same meaning as `CodeThread.fullAccessSandbox`:
    * confinement and proxied egress stay on, prompts stay off. Optional so an
    * older journal replays as off.
    */
   fullAccessSandbox: Schema.optional(Schema.Boolean),
+  /** Strict, the thread's own choice; same meaning as `CodeThread.strict`. */
+  strict: Schema.optional(Schema.Boolean),
+  /**
+   * This thread runs at Full access because the person passed the per-run
+   * Full access flag to `octant agent` on this host; same meaning as
+   * `CodeThread.fullAccessRunFlag`. Dropped once the thread leaves Full access.
+   */
+  fullAccessRunFlag: Schema.optional(Schema.Literal(true)),
   /**
    * The thread's pending usage-resume opt-in, when a person asked the host to
    * resume a usage-limited turn at the provider's declared reset. Journaled on
@@ -128,6 +190,12 @@ export const WorkThread = Schema.Struct({
    * is idle, under the wake bounds. Absent, the message waits for its next turn.
    */
   messageWake: Schema.optional(Schema.Literal(true)),
+  /**
+   * Set when the person started this thread from a provider session begun
+   * outside Octant: its first turn resumes that session. Journaled only on a
+   * thread with no turn yet; absent on every other thread.
+   */
+  adoptedSession: Schema.optional(WorkThreadAdoptedSession),
   /** Completed and snoozed rest, shared with Chat and Code; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
   version: AggregateVersion,
@@ -166,6 +234,8 @@ export const CreateWorkThreadCommand = Schema.Struct({
    * clamps it off at every other level.
    */
   fullAccessSandbox: Schema.optional(Schema.Boolean),
+  /** Strict for this thread; absent follows its Project and Settings. */
+  strict: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type CreateWorkThreadCommand = typeof CreateWorkThreadCommand.Type;
 
@@ -344,10 +414,26 @@ export const ChangeWorkThreadAccessCommand = Schema.Struct({
   ...WorkThreadCommandFields,
   access: WorkAccess,
   /**
+   * Set only with `access: "plan"`: the level the thread returns to when the
+   * person approves its plan. Absent, the host records the level the thread
+   * leaves, or Ask first when it leaves Full access.
+   */
+  planReturnAccess: Schema.optional(WorkPlanReturnAccess),
+  /**
    * The opt-in sandbox at Full access, chosen with the level. Absent keeps
    * the thread's current choice; the host drops it at any other level.
    */
   fullAccessSandbox: Schema.optional(Schema.Boolean),
+  /**
+   * The person passed `octant agent`'s per-run Full access flag; only with
+   * `access: "full-access"`, and only from a window on this host.
+   */
+  fullAccessRunFlag: Schema.optional(Schema.Literal(true)),
+  /**
+   * Strict, chosen with the level at any level. Absent keeps the thread's
+   * current choice; null returns it to its Project's and Settings' default.
+   */
+  strict: Schema.optional(Schema.NullOr(Schema.Boolean)),
 }).annotations(strict);
 export type ChangeWorkThreadAccessCommand = typeof ChangeWorkThreadAccessCommand.Type;
 
@@ -383,9 +469,11 @@ export type CancelWorkUsageResumeCommand = typeof CancelWorkUsageResumeCommand.T
 export const WorkSettings = Schema.Struct({
   defaultProviderInstanceId: Schema.optional(ProviderInstanceId),
   defaultModelId: Schema.optional(ProviderModelId),
-  defaultAccess: WorkAccess,
+  defaultAccess: WorkDefaultAccess,
   /** New Work threads at Full access keep the sandbox. Absent is off. */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+  /** Strict for Work threads whose thread and Project did not choose. Absent is off. */
+  defaultStrict: Schema.optional(Schema.Boolean),
   /**
    * Settings › Work › Continue after restart: whether the host continues, by
    * itself, a Work turn a restart cut off. Absent is on, which is also what a
@@ -410,9 +498,11 @@ export const UpdateWorkSettingsCommand = Schema.Struct({
   expectedVersion: AggregateVersion,
   defaultProviderInstanceId: Schema.optional(ProviderInstanceId),
   defaultModelId: Schema.optional(ProviderModelId),
-  defaultAccess: WorkAccess,
+  defaultAccess: WorkDefaultAccess,
   /** Absent keeps the stored choice. */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+  /** Absent keeps the stored choice. */
+  defaultStrict: Schema.optional(Schema.Boolean),
   /** Absent keeps the stored choice. */
   restartContinuation: Schema.optional(Schema.Boolean),
 })

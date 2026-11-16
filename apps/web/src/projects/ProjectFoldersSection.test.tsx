@@ -75,6 +75,30 @@ describe("Project folders", () => {
     expect(within(rows[1]!).getByText("/Users/ada/Dev/Research")).toHaveClass("sr-only");
   });
 
+  it("shows the host's home folder warning and adds the folder only when the person confirms it", async () => {
+    const fresh = `${"F".repeat(42)}A`;
+    const onAdd = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: "needs-confirmation",
+        canonicalRoot: "/Users/ada",
+        receiptId: fresh,
+        warning: "Adding your home folder lets threads change every file in it.",
+      })
+      .mockResolvedValueOnce({ status: "changed" });
+    const { bridge } = hostBridge(CHOSEN);
+    render(<ProjectFoldersSection hostBridge={bridge} onAdd={onAdd} project={project()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Add folder…" }));
+    expect(await screen.findByText(/change every file in it/)).toBeVisible();
+    expect(onAdd).toHaveBeenCalledTimes(1);
+    expect(onAdd).toHaveBeenLastCalledWith(RECEIPT);
+
+    await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(onAdd).toHaveBeenLastCalledWith(fresh, true));
+    expect(await screen.findByText("Folder added.")).toBeVisible();
+  });
+
   it("names the main folder a repository for a Code Project", () => {
     render(
       <ProjectFoldersSection onAdd={vi.fn()} onRemove={vi.fn()} project={project([], "code")} />,

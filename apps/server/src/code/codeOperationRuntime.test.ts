@@ -51,6 +51,8 @@ import {
   decodeCodeOperationId,
   decodeCodeOperationCommand,
   decodeCodeThread,
+  type CodeApprovalId,
+  type ProviderExecutionPolicy,
   decodeCodeTerminalId,
   decodeCodeThreadId,
   decodeCodeRuntimeWorkId,
@@ -59,6 +61,8 @@ import {
   decodeProviderInstanceId,
   decodeProviderModelId,
   decodeProviderSessionId,
+  decodeCodeNativeSessionId,
+  type ProviderSessionId,
   decodeBrowserAutomationSnapshot,
   decodeToolActionAuthority,
   decodeSiblingThreadsToolResult,
@@ -164,10 +168,12 @@ import {
 import {
   beginUnconfirmedStepSettlement,
   type CodeActiveTurns,
+  codeSessionTerms,
   createCodeOperationRuntime,
   threadWithActiveTurnPosture,
 } from "./codeOperationRuntime";
 import { CODE_RUNTIME_WORK_UPDATED, pullRequestCommentDigest } from "./codeRuntimeWorkRecorder";
+import { heldTurnContext } from "../providers/heldTurnContext";
 import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
@@ -2117,6 +2123,49 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("stops the thread's kept session and its background tasks before a compaction resumes the same session", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const order: Array<string> = [];
+    const stopThread = vi.fn(async () => {
+      order.push("stopped");
+      return true;
+    });
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      outlivingSessions: {
+        acquire: (_key, _acquiredFor, open) => open as never,
+        stopThread,
+      },
+    });
+    const sessions = fixture.runtime.compactionSessions;
+    if (sessions === undefined) throw new Error("The runtime offers compaction sessions");
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(33),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() =>
+        expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false),
+      );
+      const opened = await sessions.open(String(threadId), windowId);
+      order.push("opened");
+      expect(opened).toBeDefined();
+      // Two processes never write the same native history: the kept one is
+      // stopped before the compaction's own resumes it.
+      expect(stopThread).toHaveBeenCalledWith(`code:${String(threadId)}`);
+      expect(order).toEqual(["stopped", "opened"]);
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("opens, for a compaction, the session the thread's next turn would resume and no more", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -3292,6 +3341,78 @@ describe("CodeOperationRuntime", () => {
         (block) => block.kind === "instructions" && block.text.includes("extra folders"),
       );
       expect(named?.text).toContain("- /Users/example/Notes");
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("holds a kept session to the folders the turn took, so a folder removed while it starts is never retained", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const revision = "90000000-0000-4000-8000-000000000071";
+    const project = (extraFolders: ReadonlyArray<string>) =>
+      ({
+        id: thread().projectId,
+        type: "code",
+        name: "App",
+        lifecycle: "active",
+        pinned: false,
+        rank: "0/1",
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+        binding: { canonicalRoot: "/Users/example/App" },
+        bindingHistory: [
+          {
+            revisionId: revision,
+            revision: 1,
+            currentBinding: { canonicalRoot: "/Users/example/App" },
+            actor,
+            changedAt: now,
+          },
+        ],
+        extraFolders: extraFolders.map((canonicalRoot) => ({
+          canonicalRoot,
+          addedBy: actor,
+          addedAt: now,
+        })),
+      }) as never;
+    let folders: ReadonlyArray<string> = ["/Users/example/Notes"];
+    const taken = project(["/Users/example/Notes"]);
+    const kept: Array<string | undefined> = [];
+    const fixture = runtimeFixture({
+      provider: providerDriver(provider),
+      readProjectExtraFolders: () => folders,
+      readProject: () => project(folders),
+      // Runs after the turn took its folders and before its session is
+      // acquired: the person removes the extra folder meanwhile.
+      designSystemContext: async () => {
+        folders = [];
+        return undefined;
+      },
+      outlivingSessions: {
+        acquire: (_key, _acquiredFor, open, terms) => {
+          kept.push(terms);
+          // The test keeps nothing; the turn opens its connection as usual.
+          return open as never;
+        },
+        stopThread: async () => false,
+      },
+    });
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(76),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+      // The session holds the removed folder, so its terms name it: the
+      // Project's terms now differ and the session is not kept past its turn.
+      expect(kept).toEqual([codeSessionTerms(thread(), taken)]);
+      expect(kept[0]).not.toEqual(codeSessionTerms(thread(), project([])));
     } finally {
       fixture.close();
     }
@@ -5002,7 +5123,7 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
-  it("stops a provider turn on its third denied tool request and reports that denial as delivered", async () => {
+  it("hands every denied tool request back to the model and keeps the turn running, a third denial included", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
     const fixture = runtimeFixture({
@@ -5051,7 +5172,7 @@ describe("CodeOperationRuntime", () => {
       expect(approvals).toHaveLength(3);
     });
 
-    for (const [index, approval] of approvals.slice(0, 2).entries()) {
+    for (const [index, approval] of approvals.entries()) {
       await expect(
         fixture.runtime.execute(windowId, {
           kind: "answer-provider-approval",
@@ -5063,22 +5184,6 @@ describe("CodeOperationRuntime", () => {
         }),
       ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
     }
-    expect(connection.interrupt).not.toHaveBeenCalled();
-
-    await expect(
-      fixture.runtime.execute(windowId, {
-        kind: "answer-provider-approval",
-        operationId: operationId(133),
-        threadId,
-        checkoutId,
-        approvalId: approvals[2]!.event.approvalId,
-        decision: "denied",
-      }),
-    ).resolves.toEqual({
-      kind: "provider-turn-state",
-      operationId: operationId(133),
-      state: "interrupted",
-    });
 
     expect(connection.answerApproval).toHaveBeenCalledTimes(3);
     expect(connection.answerApproval).toHaveBeenLastCalledWith({
@@ -5086,25 +5191,7 @@ describe("CodeOperationRuntime", () => {
       requestId: "denied-3",
       approved: false,
     });
-    expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
-
-    await vi.waitFor(async () => {
-      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 40);
-      const terminal = frames.filter(
-        (frame) => frame.event.kind === "operation-state" && frame.event.state === "interrupted",
-      );
-      expect(terminal).toHaveLength(1);
-      expect(terminal[0]).toMatchObject({
-        event: {
-          state: "interrupted",
-          failure: {
-            category: "failed",
-            message:
-              "Stopped after 3 denied tool requests in one turn. Send a new message to continue.",
-          },
-        },
-      });
-    });
+    expect(connection.interrupt).not.toHaveBeenCalled();
     fixture.close();
   });
 
@@ -5174,101 +5261,6 @@ describe("CodeOperationRuntime", () => {
     fixture.runtime.withdrawThreadAsks?.(String(threadId));
     expect(withdrawn).toHaveBeenCalledOnce();
     expect(await fixture.runtime.pendingRequests?.(windowId)).toEqual([]);
-    fixture.close();
-  });
-
-  it("stops a provider turn whose browser tool requests were denied for the third time", async () => {
-    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-    const provider = providerConnection(queue);
-    const authority = decodeToolActionAuthority({
-      hostId: "90000000-0000-4000-8000-000000000001",
-      mode: "code",
-      projectId: thread().projectId,
-      rootId: "90000000-0000-4000-8000-000000000009",
-      worktreeId: checkoutId,
-      providerInstanceId: thread().providerInstanceId,
-      extension: { kind: "core" },
-    });
-    const ready = decodeBrowserAutomationSnapshot({
-      status: "ready",
-      threadId,
-      evidence: [],
-    });
-    const fixture = runtimeFixture({
-      provider: providerDriver(provider),
-      browserAutomation: {
-        resolveAuthority: () => authority,
-        inspectThread: () => ready,
-        create: vi.fn(async () => ready),
-        act: vi.fn(async () => ready),
-        releaseThread: vi.fn(async () => ready),
-      },
-    });
-    const operation = operationId(140);
-    await fixture.runtime.execute(windowId, {
-      kind: "start-provider-turn",
-      operationId: operation,
-      threadId,
-      checkoutId,
-      sessionId,
-      prompt: fixture.prompt,
-    });
-    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
-
-    for (const index of [0, 1, 2]) {
-      await Effect.runPromise(
-        Queue.offer(
-          queue,
-          providerEvent({
-            kind: "tool-request",
-            requestId: `browser-${index}`,
-            toolName: "octant_browser",
-            inputJson: '{"operation":"navigate","url":"https://example.com"}',
-          }),
-        ),
-      );
-      let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
-      await vi.waitFor(async () => {
-        const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 40);
-        approval = frames
-          .map((frame) => frame.event)
-          .filter((event) => event.kind === "approval-requested")[index];
-        expect(approval).toBeDefined();
-      });
-      if (approval === undefined) throw new Error("Expected browser approval");
-      const answer = await fixture.runtime.execute(windowId, {
-        kind: "answer-provider-approval",
-        operationId: operationId(141 + index),
-        threadId,
-        checkoutId,
-        approvalId: approval.approvalId,
-        decision: "denied",
-      });
-      if (index < 2) {
-        expect(answer).toMatchObject({ kind: "provider-turn-state", state: "running" });
-        expect(provider.interrupt).not.toHaveBeenCalled();
-      } else {
-        expect(answer).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
-      }
-    }
-
-    await vi.waitFor(async () => {
-      const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 40);
-      const terminal = frames.filter(
-        (frame) => frame.event.kind === "operation-state" && frame.event.state === "interrupted",
-      );
-      expect(terminal).toHaveLength(1);
-      expect(terminal[0]).toMatchObject({
-        event: {
-          state: "interrupted",
-          failure: {
-            category: "failed",
-            message:
-              "Stopped after 3 denied tool requests in one turn. Send a new message to continue.",
-          },
-        },
-      });
-    });
     fixture.close();
   });
 
@@ -5744,6 +5736,745 @@ describe("CodeOperationRuntime", () => {
           trigger: "background-task",
         });
       });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("opens a turn the runtime started by itself on the kept session instead of sending its prompt, and replays it as the runtime's", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = {
+      ...providerConnection(queue),
+      attachRuntimeTurn: vi.fn(() => Effect.void),
+    };
+    const startOperation = operationId(1383);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      isRuntimeStartedTurn: (operation) => operation === String(startOperation),
+    });
+    try {
+      // The person's turn that left the session running its background work.
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1382),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() =>
+        expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false),
+      );
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.attachRuntimeTurn).toHaveBeenCalledWith(sessionId));
+      expect(connection.send).toHaveBeenCalledOnce();
+      await Effect.runPromise(
+        Queue.offerAll(queue, [
+          providerEvent({ kind: "runtime-turn-started", trigger: "background-task" }),
+          providerEvent({ kind: "completed" }),
+        ]),
+      );
+      await vi.waitFor(async () =>
+        expect(terminalStates(await operationEvents(fixture.runtime, startOperation))).toEqual([
+          "completed",
+        ]),
+      );
+      const kinds = (await operationEvents(fixture.runtime, startOperation)).map(
+        (event) => event.kind,
+      );
+      expect(kinds.indexOf("runtime-turn-started")).toBeGreaterThan(
+        kinds.indexOf("conversation-turn-started"),
+      );
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("never counts the standing context of a runtime-started turn as held, since it sends nothing", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = {
+      ...providerConnection(queue),
+      attachRuntimeTurn: vi.fn(() => Effect.void),
+    };
+    const runtimeOperation = operationId(1387);
+    const forTurn = vi.spyOn(heldTurnContext, "forTurn");
+    const fixture = runtimeFixture({
+      provider: {
+        conversationOwnership: "provider",
+        acquire: () => Effect.succeed(connection),
+      } as unknown as ProviderDriver,
+      isRuntimeStartedTurn: (operation) => operation === String(runtimeOperation),
+    });
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1386),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() =>
+        expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false),
+      );
+      const sentTurns = forTurn.mock.calls.length;
+      expect(sentTurns).toBeGreaterThan(0);
+
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: runtimeOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.attachRuntimeTurn).toHaveBeenCalledOnce());
+      // The held-context record is neither read for nor marked by this turn,
+      // so the runtime's report that it keeps its prompts holds nothing new.
+      expect(forTurn).toHaveBeenCalledTimes(sentTurns);
+    } finally {
+      forTurn.mockRestore();
+      fixture.close();
+    }
+  });
+
+  it("counts no context copy for a runtime-started turn, only what its session already carried", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = {
+      ...providerConnection(queue),
+      attachRuntimeTurn: vi.fn(() => Effect.void),
+    };
+    const runtimeOperation = operationId(1390);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      isRuntimeStartedTurn: (operation) => operation === String(runtimeOperation),
+    });
+    fixture.setThread(
+      decodeCodeThread({
+        ...thread(),
+        profileId: "60000000-0000-4000-8000-000000000001",
+        profileContext: {
+          displayName: "Reviewer",
+          instructions: "Review as a skeptic. ".repeat(40).trim(),
+          approvedSkillIds: [],
+        },
+      }),
+    );
+    const usage = providerEvent({
+      kind: "usage",
+      inputTokens: 10,
+      outputTokens: 2,
+      contextTokens: 9_000,
+      promptRetention: "kept",
+    });
+    const sentParts = async (operation: ReturnType<typeof operationId>) => {
+      let parts: ReadonlyArray<{ readonly kind: string; readonly tokens: number }> = [];
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 20);
+        const report = frames.find((frame) => frame.event.kind === "usage");
+        if (report?.event.kind !== "usage") throw new Error("no report yet");
+        parts = (report.event.contextBreakdown?.parts ?? []).filter(
+          (part) => part.kind !== "octant-tools",
+        );
+      });
+      return parts;
+    };
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1389),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(Queue.offerAll(queue, [usage, providerEvent({ kind: "completed" })]));
+      const first = await sentParts(operationId(1389));
+      expect(first.length).toBeGreaterThan(0);
+      await vi.waitFor(() =>
+        expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false),
+      );
+
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: runtimeOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.attachRuntimeTurn).toHaveBeenCalledOnce());
+      await Effect.runPromise(Queue.offerAll(queue, [usage, providerEvent({ kind: "completed" })]));
+      // The session carries the first turn's copy; this turn added none.
+      expect(await sentParts(runtimeOperation)).toEqual(first);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("refuses a runtime-started turn on a thread with no session of its own, journaling no handoff", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = {
+      ...providerConnection(queue),
+      attachRuntimeTurn: vi.fn(() => Effect.void),
+    };
+    const runtimeOperation = operationId(1388);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      isRuntimeStartedTurn: (operation) => operation === String(runtimeOperation),
+    });
+    try {
+      const result = await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: runtimeOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      expect(result).toMatchObject({
+        kind: "provider-turn-state",
+        state: "failed",
+        failure: { message: "The runtime's own turn has no session of this thread to open in." },
+      });
+      expect(connection.attachRuntimeTurn).not.toHaveBeenCalled();
+      expect(connection.start).not.toHaveBeenCalled();
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("stops the session a finished turn left running background work when the person stops the idle thread", async () => {
+    const stopThread = vi.fn(async () => true);
+    const fixture = runtimeFixture({
+      outlivingSessions: { acquire: vi.fn(), stopThread },
+    });
+    try {
+      const result = await fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(1384),
+        threadId,
+        checkoutId,
+      });
+      expect(stopThread).toHaveBeenCalledWith(`code:${String(threadId)}`);
+      expect(result).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("starts an empty thread from a session begun outside Octant, journals the adoption, and resumes it on the next turn", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const outside = decodeCodeNativeSessionId("outside-session-1");
+    const adopt = vi.fn((input: { readonly sessionId: ProviderSessionId }) =>
+      Effect.succeed<ProviderResumeCursor>({ driverKind: "codex", value: `resumed-${outside}` }),
+    );
+    const provider: ProviderDriver = {
+      ...providerDriver(connection),
+      nativeSessions: {
+        list: () => Effect.succeed([{ nativeSessionId: outside, lastModified: 5, title: "Login" }]),
+        adopt,
+      },
+    };
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: [] },
+    }));
+    const fixture = runtimeFixture({ provider, recordExternalContentIngestion });
+    try {
+      const sessions = fixture.runtime.nativeSessions!;
+      expect(await sessions.list(windowId, threadId)).toEqual({
+        threadId,
+        sessions: [{ nativeSessionId: outside, lastModified: 5, title: "Login" }],
+      });
+      expect(await sessions.adopt(windowId, threadId, outside)).toEqual({
+        kind: "code-native-session-adopted",
+        threadId,
+        nativeSessionId: outside,
+      });
+      expect(recordExternalContentIngestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadId: String(threadId),
+          provenance: { origin: "external-content", sourceLabel: "adopted-provider-session" },
+        }),
+      );
+      // The thread names the session it continues and offers no other.
+      expect(await sessions.list(windowId, threadId)).toMatchObject({
+        adopted: { nativeSessionId: outside },
+        sessions: [],
+      });
+      const adoptedSessionId = adopt.mock.calls[0]![0].sessionId;
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1385),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() =>
+        expect(connection.resume).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sessionId: adoptedSessionId,
+            resumeCursor: { driverKind: "codex", value: `resumed-${outside}` },
+          }),
+        ),
+      );
+      expect(connection.start).not.toHaveBeenCalled();
+      expect(await sessions.adopt(windowId, threadId, outside)).toMatchObject({
+        kind: "code-native-session-refused",
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("refuses an adoption whose thread was rebound to another checkout while it ran, and gives the claim back", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const outside = decodeCodeNativeSessionId("outside-session-1");
+    let finish: (() => void) | undefined;
+    const adopt = vi.fn((_input: { readonly sessionId: ProviderSessionId }) =>
+      Effect.async<ProviderResumeCursor>((resume) => {
+        finish = () => resume(Effect.succeed({ driverKind: "codex", value: `resumed-${outside}` }));
+      }),
+    );
+    const release = vi.fn((_input: { readonly sessionId: ProviderSessionId }) => Effect.void);
+    const provider: ProviderDriver = {
+      ...providerDriver(providerConnection(queue)),
+      nativeSessions: { list: () => Effect.succeed([]), adopt, release },
+    };
+    const fixture = runtimeFixture({
+      provider,
+      recordExternalContentIngestion: vi.fn(() => ({
+        kind: "recorded" as const,
+        taint: { externalContentIngested: true, ingestedSources: [] },
+      })),
+    });
+    try {
+      const adoption = fixture.runtime.nativeSessions!.adopt(windowId, threadId, outside);
+      await vi.waitFor(() => expect(adopt).toHaveBeenCalledOnce());
+      // The Project was relinked meanwhile and the thread rebound to a new checkout.
+      fixture.setThread({
+        ...thread(),
+        checkoutId: decodeCodeCheckoutId("90000000-0000-4000-8000-000000000072"),
+      });
+      finish?.();
+      expect(await adoption).toEqual({
+        kind: "code-native-session-refused",
+        message: "This thread changed while it took up the session. Try again.",
+      });
+      expect(release).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: adopt.mock.calls[0]?.[0].sessionId }),
+      );
+      // Nothing was journaled, so the thread can still be adopted again.
+      expect(await fixture.runtime.nativeSessions!.list(windowId, threadId)).not.toHaveProperty(
+        "adopted",
+      );
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("gives the session's claim back when the adoption cannot be recorded, so it can be adopted again", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const outside = decodeCodeNativeSessionId("outside-session-1");
+    const adopt = vi.fn((_input: { readonly sessionId: ProviderSessionId }) =>
+      Effect.succeed<ProviderResumeCursor>({ driverKind: "codex", value: `resumed-${outside}` }),
+    );
+    const release = vi.fn((_input: { readonly sessionId: ProviderSessionId }) => Effect.void);
+    const provider: ProviderDriver = {
+      ...providerDriver(providerConnection(queue)),
+      nativeSessions: { list: () => Effect.succeed([]), adopt, release },
+    };
+    // The thread cannot be marked as carrying outside content, so nothing is journaled.
+    const fixture = runtimeFixture({
+      provider,
+      recordExternalContentIngestion: vi.fn(() => ({
+        kind: "refused" as const,
+        reason: "malformed" as const,
+      })),
+    });
+    try {
+      expect(await fixture.runtime.nativeSessions!.adopt(windowId, threadId, outside)).toEqual({
+        kind: "code-native-session-refused",
+        message: "The thread could not be marked as carrying outside content.",
+      });
+      expect(release).toHaveBeenCalledWith({
+        instanceId: expect.anything(),
+        nativeSessionId: outside,
+        sessionId: adopt.mock.calls[0]?.[0].sessionId,
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("refuses to start a thread from a session for a window that cannot open its Project", async () => {
+    const adopt = vi.fn(() =>
+      Effect.succeed<ProviderResumeCursor>({ driverKind: "codex", value: "x" }),
+    );
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider: ProviderDriver = {
+      ...providerDriver(providerConnection(queue)),
+      nativeSessions: { list: () => Effect.succeed([]), adopt },
+    };
+    const fixture = runtimeFixture({ provider, projectAccess: false });
+    try {
+      expect(
+        await fixture.runtime.nativeSessions!.adopt(
+          windowId,
+          threadId,
+          decodeCodeNativeSessionId("outside-session-1"),
+        ),
+      ).toEqual({
+        kind: "code-native-session-refused",
+        message: "This thread is not open to this window.",
+      });
+      expect(adopt).not.toHaveBeenCalled();
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("refuses a message sent while the thread is still taking up an outside session, then resumes the adopted session", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const outside = decodeCodeNativeSessionId("outside-session-2");
+    let finishAdoption: (cursor: ProviderResumeCursor) => void = () => undefined;
+    const adopt = vi.fn((_input: { readonly sessionId: ProviderSessionId }) =>
+      Effect.promise(
+        () =>
+          new Promise<ProviderResumeCursor>((resolve) => {
+            finishAdoption = resolve;
+          }),
+      ),
+    );
+    const provider: ProviderDriver = {
+      ...providerDriver(connection),
+      nativeSessions: { list: () => Effect.succeed([]), adopt },
+    };
+    const fixture = runtimeFixture({
+      provider,
+      recordExternalContentIngestion: () => ({
+        kind: "recorded" as const,
+        taint: { externalContentIngested: true, ingestedSources: [] },
+      }),
+    });
+    try {
+      const adoption = fixture.runtime.nativeSessions!.adopt(windowId, threadId, outside);
+      await vi.waitFor(() => expect(adopt).toHaveBeenCalledOnce());
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(1976),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).rejects.toMatchObject({
+        failure: {
+          category: "waiting",
+          message:
+            "This thread is taking up a session started elsewhere. Send again when it finishes.",
+        },
+      });
+      expect(connection.start).not.toHaveBeenCalled();
+      finishAdoption({ driverKind: "codex", value: `resumed-${outside}` });
+      expect(await adoption).toEqual({
+        kind: "code-native-session-adopted",
+        threadId,
+        nativeSessionId: outside,
+      });
+      const adoptedSessionId = adopt.mock.calls[0]![0].sessionId;
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1977),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() =>
+        expect(connection.resume).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sessionId: adoptedSessionId,
+            resumeCursor: { driverKind: "codex", value: `resumed-${outside}` },
+          }),
+        ),
+      );
+      expect(connection.start).not.toHaveBeenCalled();
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("refuses to take up an outside session once a turn has been admitted on the thread", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const adopt = vi.fn(() =>
+      Effect.succeed<ProviderResumeCursor>({ driverKind: "codex", value: "x" }),
+    );
+    const provider: ProviderDriver = {
+      ...providerDriver(connection),
+      nativeSessions: { list: () => Effect.succeed([]), adopt },
+    };
+    const fixture = runtimeFixture({ provider });
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1978),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      expect(
+        await fixture.runtime.nativeSessions!.adopt(
+          windowId,
+          threadId,
+          decodeCodeNativeSessionId("outside-session-3"),
+        ),
+      ).toEqual({
+        kind: "code-native-session-refused",
+        message: "Only a thread with no messages yet can continue a session started elsewhere.",
+      });
+      expect(adopt).not.toHaveBeenCalled();
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("moves the thread to Plan only from its next session when the person approves the agent's ask to plan", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const starts: Array<ProviderSessionStart> = [];
+    const connection = providerConnection(queue, starts);
+    let setThread: (next: CodeThread) => void = () => undefined;
+    const changeThreadLevel = vi.fn(
+      async (input: {
+        readonly executionPolicy: ProviderExecutionPolicy;
+        readonly planReturnPolicy?: ProviderExecutionPolicy;
+      }) => {
+        setThread(
+          decodeCodeThread({
+            ...thread(),
+            executionPolicy: input.executionPolicy,
+            ...(input.planReturnPolicy === undefined
+              ? {}
+              : { planReturnPolicy: input.planReturnPolicy }),
+          }),
+        );
+        return true;
+      },
+    );
+    const fixture = runtimeFixture({ provider: providerDriver(connection), changeThreadLevel });
+    setThread = (next) => fixture.setThread(next);
+    const firstTurn = operationId(1386);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: firstTurn,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId: "plan-ask",
+            action: "EnterPlanMode",
+            description: "Claude asks to plan first.",
+            levelChange: { kind: "enter-plan" },
+          }),
+        ),
+      );
+      let asked: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
+      await vi.waitFor(async () => {
+        asked = (await operationEvents(fixture.runtime, firstTurn)).find(
+          (event): event is Extract<OperationFrame["event"], { kind: "approval-requested" }> =>
+            event.kind === "approval-requested",
+        );
+        expect(asked).toMatchObject({ action: "level-change", levelChange: { to: "plan" } });
+      });
+      const answered = await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(1387),
+        threadId,
+        checkoutId,
+        approvalId: asked!.approvalId,
+        decision: "approved",
+      });
+      expect(answered).toMatchObject({ state: "interrupted" });
+      expect(changeThreadLevel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          windowId,
+          threadId,
+          executionPolicy: "plan",
+          planReturnPolicy: thread().executionPolicy,
+        }),
+      );
+      expect(connection.answerApproval).toHaveBeenCalledWith(
+        expect.objectContaining({ requestId: "plan-ask", approved: true, scope: "once" }),
+      );
+      expect(connection.interrupt).toHaveBeenCalled();
+      // The session that asked kept the level it launched with to the end.
+      expect(starts.map((start) => start.executionPolicy)).toEqual([thread().executionPolicy]);
+      await Effect.runPromise(
+        Queue.offer(queue, providerEvent({ kind: "interrupted", message: "Stopped." })),
+      );
+      await vi.waitFor(async () =>
+        expect(terminalStates(await operationEvents(fixture.runtime, firstTurn))).toEqual([
+          "interrupted",
+        ]),
+      );
+
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1388),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      // The next turn's session launches in Plan, read-only.
+      await vi.waitFor(() =>
+        expect(
+          vi
+            .mocked(connection.resume)
+            .mock.calls.map(([input]) => input.executionPolicy)
+            .at(-1),
+        ).toBe("plan"),
+      );
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("returns the plan to the level the person lowered the thread to while the ask to plan was open", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const changeThreadLevel = vi.fn(async () => true);
+    const fixture = runtimeFixture({ provider: providerDriver(connection), changeThreadLevel });
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "auto-accept-edits" }));
+    const turn = operationId(1391);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: turn,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId: "plan-ask",
+            action: "EnterPlanMode",
+            description: "Claude asks to plan first.",
+            levelChange: { kind: "enter-plan" },
+          }),
+        ),
+      );
+      let approvalId: CodeApprovalId | undefined;
+      await vi.waitFor(async () => {
+        const asked = (await operationEvents(fixture.runtime, turn)).find(
+          (event) => event.kind === "approval-requested",
+        );
+        expect(asked?.kind).toBe("approval-requested");
+        if (asked?.kind === "approval-requested") approvalId = asked.approvalId;
+      });
+      // The person lowers the level before answering.
+      fixture.setThread(
+        decodeCodeThread({ ...thread(), executionPolicy: "approval-gated", version: 2 }),
+      );
+      await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(1392),
+        threadId,
+        checkoutId,
+        approvalId: approvalId!,
+        decision: "approved",
+      });
+      expect(changeThreadLevel).toHaveBeenCalledWith(
+        expect.objectContaining({ executionPolicy: "plan", planReturnPolicy: "approval-gated" }),
+      );
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("keeps the thread's level and the turn running when the person declines the agent's ask to plan", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const changeThreadLevel = vi.fn(async () => true);
+    const fixture = runtimeFixture({ provider: providerDriver(connection), changeThreadLevel });
+    const turn = operationId(1389);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: turn,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId: "plan-ask",
+            action: "EnterPlanMode",
+            description: "Claude asks to plan first.",
+            levelChange: { kind: "enter-plan" },
+          }),
+        ),
+      );
+      let approvalId: CodeApprovalId | undefined;
+      await vi.waitFor(async () => {
+        const asked = (await operationEvents(fixture.runtime, turn)).find(
+          (event) => event.kind === "approval-requested",
+        );
+        expect(asked?.kind).toBe("approval-requested");
+        if (asked?.kind === "approval-requested") approvalId = asked.approvalId;
+      });
+      const answered = await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(1390),
+        threadId,
+        checkoutId,
+        approvalId: approvalId!,
+        decision: "denied",
+      });
+      expect(answered).toMatchObject({ state: "running" });
+      expect(changeThreadLevel).not.toHaveBeenCalled();
+      expect(connection.interrupt).not.toHaveBeenCalled();
+      expect(connection.answerApproval).toHaveBeenCalledWith(
+        expect.objectContaining({ requestId: "plan-ask", approved: false }),
+      );
     } finally {
       fixture.close();
     }
@@ -9086,13 +9817,9 @@ describe("provider switch handoff", () => {
     }
   });
 
-  it("refuses a provider's own slash command in Plan before it reaches the runtime, listed or not", async () => {
+  it("sends a provider's own slash command in Plan to the runtime, whose Plan rules decide what it does", async () => {
     const drivers = twoHarnesses();
-    const fixture = runtimeFixture({
-      resolveProviderDriver: drivers.resolveProviderDriver,
-      // The list another Project's session last wrote, without this command.
-      providerCommands: () => [{ name: "review" }],
-    });
+    const fixture = runtimeFixture({ resolveProviderDriver: drivers.resolveProviderDriver });
     fixture.setThread(
       decodeCodeThread({ ...onProvider(providerInstance, "model-a"), executionPolicy: "plan" }),
     );
@@ -9107,8 +9834,13 @@ describe("provider switch handoff", () => {
         sessionId,
         prompt,
       });
-      expect(JSON.stringify(started)).toContain("Plan runs none: Plan stays read-only");
-      expect(drivers.connection(providerInstance).send).not.toHaveBeenCalled();
+      expect(started).not.toMatchObject({ kind: "operation-failed" });
+      await vi.waitFor(() =>
+        expect(drivers.connection(providerInstance).send).toHaveBeenCalledTimes(1),
+      );
+      expect(vi.mocked(drivers.connection(providerInstance).send).mock.calls[0]?.[0]).toMatchObject(
+        { prompt: "/deploy src" },
+      );
     } finally {
       await fixture.runtime.close();
       fixture.close();
@@ -10513,6 +11245,61 @@ describe("provider switch handoff", () => {
         },
       );
 
+      it("keeps a merged fork pending through a turn the runtime started, which sends nothing, and carries it on the person's next turn", async () => {
+        const drivers = twoHarnesses();
+        const attachRuntimeTurn = vi.fn(() => Effect.void);
+        Object.assign(drivers.provider, { attachRuntimeTurn });
+        const runtimeTurn = String(operationId(86));
+        const fixture = runtimeFixture({
+          resolveProviderDriver: drivers.resolveProviderDriver,
+          isRuntimeStartedTurn: (operation) => operation === runtimeTurn,
+        });
+        try {
+          await forkWithReply(
+            fixture,
+            drivers,
+            { instance: providerInstance, model: "model-a" },
+            { instance: harnessInstance, model: "harness-model" },
+          );
+          expect(
+            await fixture.runtime.mergeForkContext!(
+              windowId,
+              forkThreadId,
+              String(operationId(90)),
+            ),
+          ).toMatchObject({ status: "merged" });
+
+          // The runtime's own turn attaches to the kept session and sends nothing.
+          await sendOnSource(fixture, 86);
+          await vi.waitFor(() => expect(attachRuntimeTurn).toHaveBeenCalledOnce());
+          await drivers.offer(
+            providerInstance,
+            eventOn(providerInstance, { kind: "completed", sessionId: sourceSession }),
+          );
+          await vi.waitFor(() =>
+            expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false),
+          );
+          expect(
+            (await sourceFrames(fixture, 86)).some(
+              (frame) => frame.event.kind === "fork-context-delivered",
+            ),
+          ).toBe(false);
+
+          // The person's next turn carries the merge.
+          await sendOnSource(fixture, 87);
+          await vi.waitFor(async () =>
+            expect(
+              (await sourceFrames(fixture, 87)).some(
+                (frame) => frame.event.kind === "fork-context-delivered",
+              ),
+            ).toBe(true),
+          );
+        } finally {
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      });
+
       it("merges a fork once, carries it once, and keeps it across a restart", async () => {
         const drivers = twoHarnesses();
         const fixture = runtimeFixture({ resolveProviderDriver: drivers.resolveProviderDriver });
@@ -10846,6 +11633,9 @@ function runtimeFixture(options: {
   throwRuntimeWorkReporter?: boolean;
   onProviderTurnRequested?: (threadId: CodeThreadId) => void;
   probeProvider?: Parameters<typeof createCodeOperationRuntime>[0]["probeProvider"];
+  isRuntimeStartedTurn?: Parameters<typeof createCodeOperationRuntime>[0]["isRuntimeStartedTurn"];
+  changeThreadLevel?: Parameters<typeof createCodeOperationRuntime>[0]["changeThreadLevel"];
+  outlivingSessions?: Parameters<typeof createCodeOperationRuntime>[0]["outlivingSessions"];
   readonly resolveProviderDriver?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["resolveProviderDriver"];
@@ -10853,6 +11643,7 @@ function runtimeFixture(options: {
   readProjectExtraFolders?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["readProjectExtraFolders"];
+  readProject?: Parameters<typeof createCodeOperationRuntime>[0]["readProject"];
   compactionRunning?: (threadId: CodeThreadId) => boolean;
   sessionCompactions?: Parameters<typeof createCodeOperationRuntime>[0]["sessionCompactions"];
   spendCeiling?: Parameters<typeof createCodeOperationRuntime>[0]["spendCeiling"];
@@ -10896,7 +11687,6 @@ function runtimeFixture(options: {
     typeof createCodeOperationRuntime
   >[0]["recordExternalContentIngestion"];
   forkProviderSession?: Parameters<typeof createCodeOperationRuntime>[0]["forkProviderSession"];
-  providerCommands?: Parameters<typeof createCodeOperationRuntime>[0]["providerCommands"];
   supportsSessionRollback?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["supportsSessionRollback"];
@@ -11087,6 +11877,15 @@ function runtimeFixture(options: {
       readEvidence: (reference) => evidenceValues.get(reference.contentId),
     });
   const runtime = createCodeOperationRuntime({
+    ...(options.isRuntimeStartedTurn === undefined
+      ? {}
+      : { isRuntimeStartedTurn: options.isRuntimeStartedTurn }),
+    ...(options.changeThreadLevel === undefined
+      ? {}
+      : { changeThreadLevel: options.changeThreadLevel }),
+    ...(options.outlivingSessions === undefined
+      ? {}
+      : { outlivingSessions: options.outlivingSessions }),
     ...(options.verifyModelToolsOnFirstUse === undefined
       ? {}
       : { verifyModelToolsOnFirstUse: options.verifyModelToolsOnFirstUse }),
@@ -11240,9 +12039,6 @@ function runtimeFixture(options: {
     ...(options.forkProviderSession === undefined
       ? {}
       : { forkProviderSession: options.forkProviderSession }),
-    ...(options.providerCommands === undefined
-      ? {}
-      : { providerCommands: options.providerCommands }),
     ...(options.supportsSessionRollback === undefined
       ? {}
       : { supportsSessionRollback: options.supportsSessionRollback }),
@@ -11307,6 +12103,7 @@ function runtimeFixture(options: {
     ...(options.readProjectExtraFolders === undefined
       ? {}
       : { readProjectExtraFolders: options.readProjectExtraFolders }),
+    ...(options.readProject === undefined ? {} : { readProject: options.readProject }),
     ...(options.isProviderModelAllowed === undefined
       ? {}
       : { isProviderModelAllowed: options.isProviderModelAllowed }),
@@ -16319,53 +17116,6 @@ describe("streamed reply text in a Code turn", () => {
       expect(JSON.stringify(turn.frames().at(-1))).toContain("storage is full");
     } finally {
       await Effect.runPromise(Deferred.succeed(gate, undefined));
-      await turn.finish();
-    }
-  });
-
-  it("still stops the turn on the third denial and records the loss when the flush fails", async () => {
-    let full = false;
-    let rows = 9000;
-    const turn = await streamingTurn(316, {
-      approvalValidator: false,
-      evidencePut: (content) => {
-        if (full) throw new CodeEvidenceCapacityExceeded();
-        return storedEvidence(++rows, content);
-      },
-    });
-    try {
-      for (const requestId of ["d-1", "d-2", "d-3"])
-        await turn.offer({
-          kind: "approval-request",
-          requestId,
-          action: "write",
-          description: `Modify src/${requestId}.ts`,
-        });
-      const approvals = turn
-        .frames()
-        .flatMap((frame) =>
-          frame.event.kind === "approval-requested" ? [frame.event.approvalId] : [],
-        );
-      expect(approvals).toHaveLength(3);
-      const answer = (index: number) =>
-        turn.fixture.runtime.execute(windowId, {
-          kind: "answer-provider-approval",
-          operationId: operationId(380 + index),
-          threadId,
-          checkoutId,
-          approvalId: approvals[index] ?? "",
-          decision: "denied",
-        });
-      await answer(0);
-      await answer(1);
-      await turn.offer({ kind: "text-delta", text: "lost" });
-      full = true;
-      expect(await answer(2)).toMatchObject({ state: "interrupted" });
-      full = false;
-      await turn.offer();
-      expect(turn.terminalStates()).toEqual(["interrupted"]);
-      expect(JSON.stringify(turn.frames().at(-1))).toContain("storage is full");
-    } finally {
       await turn.finish();
     }
   });

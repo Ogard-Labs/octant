@@ -41,15 +41,26 @@ apps gives nobody a reason to use it.
    (maintainer decision, 2026-10-31). Full access means what it means in the
    providers' own apps: no sandbox and no prompts. Outside content is only
    recorded there, and every hard line holds.
-4. **Key providers run as themselves.** Claude Code, Codex, Mistral Vibe, and
-   OpenCode keep their native tools, subagents, skills, hooks, and sandboxes
-   inside Octant. Octant adds; it does not amputate
+4. **Key providers run as themselves; Octant supplements them.** Claude Code,
+   Codex, Mistral Vibe, OpenCode, and every other ACP agent keep their native
+   tools, subagents, skills, hooks, and sandboxes inside Octant. Octant
+   supplements a provider and never replaces it: any workflow that works in
+   the provider's own app (Claude Code first) works in Octant, and Octant adds
+   its journal, views, approvals, and guardrails on top (maintainer decision,
+   2026-11-14). Where Octant cannot yet carry a provider's workflow, that is a
+   recorded gap to close, not a rule; a specification states it as "not built
+   yet" with its reason, never as a refusal Octant chose
    ([Key providers run as themselves](#providers)).
 5. **Honesty never softens.** Octant always says what a provider or tool can
    and cannot do, and records what happened.
 6. **Never stricter than the native app.** Anything a person can allow in a
    key provider's own app, they can allow in Octant, with the same or fewer
-   steps. Rationale (compared 2026-10-31): Claude Code offers a bypass mode,
+   steps, and a workflow the provider's own app carries is a workflow Octant
+   carries (principle 4). Octant holds back what a native app would allow
+   only for the hard lines below, the first-run rule that a new thread never
+   starts at Full access (principle 3), the protected provider-account
+   credentials ([Security and authority](#security-and-authority)), and Chat, a mode of Octant's
+   own with no folder and no shell. Rationale (compared 2026-10-31): Claude Code offers a bypass mode,
    an automatic mode whose classifier reviews each call, its sandbox off by
    default, and merge-when-ready in its desktop app; Codex offers no
    approvals with full access, an automatic approval reviewer, and its own
@@ -238,7 +249,11 @@ The design rests on a small set of invariants that every package obeys:
   read-only. Below Full access, Octant's
   own tool launches are OS-confined; one provider runtime is not yet
   (Claude outside Plan) and relies on the runtime's own sandbox, per the confinement matrix in
-  [Security and authority](#security-and-authority). Every driver starts a
+  [Security and authority](#security-and-authority). A provider with a
+  sandbox of its own is to run in it below Full access, with Octant's sandbox
+  as the opt-in Strict setting and the fallback (the Strict setting is
+  built; the provider's own sandbox outside Strict is designed, not built;
+  [Providers run in their own sandbox](#security-and-authority)). Every driver starts a
   Work session with its shell and Git at the thread's level, as in Code, and
   Work threads reach Full access
   ([Modes](#modes-chat-work-and-code) lists what each driver does).
@@ -802,8 +817,11 @@ adjustment; Pause holds new managed commands and helper agents. Running processe
 are not suspended or killed. Existing per-operation Stop controls remain available.
 
 The host journals the policy with its managed-agent settings aggregate and checks
-its version on writes. Only an authenticated local window can change it or read
-`/api/agent-run-settings/resources`. Old journals without a policy use Automatic.
+its version on writes. Only the host's own person changes it or reads
+`/api/agent-run-settings/resources`: at an authenticated local window, or on a
+device that person paired, whose change is journaled with the device as the
+actor (maintainer decision, 2026-11-16; built). A device the hub's roster
+introduced is refused. Old journals without a policy use Automatic.
 The panel shows hardware, last sampled load, effective ceilings and waiting/running
 command counts, with an explicit Refresh; it does not poll while closed.
 
@@ -829,8 +847,10 @@ hard CPU/memory quotas, thermal measurements or predictions of a tool's peak RAM
 
 Repository tests, local worktree preparation, scaffolds and the Octant Harness's
 shell ports share one host budget. They reserve worker slots atomically before
-launch, bound each wait by the operation deadline and at most 30 minutes, retain
-cancellation, and recheck ordinary authority after waiting. The queue has at most
+launch, bound each wait by the operation deadline alone, retain cancellation
+(the queue's earlier 30-minute refusal went under
+[Octant adds no restrictions of its own unless Strict is on](#security-and-authority); built),
+and recheck ordinary authority after waiting. The queue has at most
 128 entries. Worker slots are divided across the allowed command concurrency,
 so separate Projects do not each get a full worker pool. A confirmed exit releases
 the reservation; uncertain cleanup retains it until host restart/reconciliation.
@@ -1697,14 +1717,24 @@ starts a Code session at the same level, and a Work turn journals `shell` and
 
 - **Claude Code:** the Work session starts with its shell tool, at the
   thread's level as in Code (Guarded asks per command, Reviewed uses its
-  automatic mode, Full access runs unattended).
+  automatic mode, Full access runs unattended). Its session outlives the
+  turn while background work runs, with live tasks and runtime-started
+  turns as in Code, and an empty Work thread can continue a Claude Code
+  session begun outside Octant in the folder its turns run in
+  ([Provider runtimes](design/provider-runtimes.md#background-commands-and-runtime-started-turns)).
+  Claude's own plan-then-approve works as in Code: `EnterPlanMode` and,
+  from Plan, `ExitPlanMode` reach the person as level changes, and a Work
+  Plan session starts with Code Plan's read-only tool list and profile
+  ([Provider runtimes](design/provider-runtimes.md#plan-mode-as-level-changes)).
 - **Codex:** Work threads start and resume with the shell features on and the
   approval policy and sandbox the level maps to in Code; `command` and
   `permissions` requests inside the root reach the person at Guarded. A Work
   thread reads the folder's `AGENTS.md` as Code does (maintainer decision,
   2026-11-14).
 - **OpenCode:** the session rules no longer deny `bash` and `task` in Work;
-  the posture's rules apply as in Code.
+  the posture's rules apply as in Code (`task` is to be allowed outside Plan
+  at every level; designed, not built,
+  [Security and authority](#security-and-authority)).
 - **Pi:** the Work session starts with its shell tool.
 - **ACP agents, Mistral Vibe included:** an `execute` request reaches the
   person at Guarded as in Code, and a Work launch gets the exec and fork a
@@ -1802,8 +1832,8 @@ The setting is **Use <provider>'s own memory** in Settings › Providers, beside
 Run as itself (built for Claude Code and Codex). It is `ownMemory` on the
 provider account: absent is on, `false` is the person's off, and a `true`
 an older record carries reads as on. It is changed only by `set-provider-own-memory` from a local
-window or a paired device (maintainer decision, 2026-11-12; not built yet:
-today a paired device is refused) and journaled as
+window or a device the host's own person paired (maintainer decision,
+2026-11-12) and journaled as
 `provider.instance-own-memory-changed@1`. Run as itself, a trusted Project,
 and Full access never turn it back on once the person turned it off. Before
 this default, turning the setting off left no stored value, so on upgrade
@@ -1815,13 +1845,18 @@ and keeps every other guard, and a Codex process is leased without the
 `features.memories=false` override, so Codex's own configuration decides and
 Octant never forces the feature on; that lease is a process of its own, like
 the one that runs Codex's subagents. It applies to Work and Code sessions
-outside Plan. A Plan launch keeps memory off at every setting: Plan may write
+outside Plan, and to Claude Code in Plan and Chat. Plan and Chat may write
 nothing a later session would load, and the runtime's memory folder is exactly
-that ([Plan launch writes](design/decisions.md#plan-launch-writes-and-sign-in)).
+that ([Plan launch writes](design/decisions.md#plan-launch-writes-and-sign-in)),
+so there a provider's memory loads only read-only: Claude Code's, which only
+its file tools write, loads with its writes refused, and Codex's, which Codex
+writes in the background, stays off at every setting
+([Plan and Chat tool parity](#security-and-authority); maintainer decision,
+2026-11-16).
 OpenCode and Mistral Vibe keep no memory of their own behind a switch Octant
-sets, so their accounts carry no setting. Not built yet: Chat, where a
-provider's memory stays off at every setting, because no confined Chat launch
-has been run with it on. Live check owed: no real Claude Code or Codex turn
+sets, so their accounts carry no setting. Chat keeps a provider's memory off
+at every setting, as Plan does (maintainer decision, 2026-11-14), because no
+confined Chat launch has been run with it on. Live check owed: no real Claude Code or Codex turn
 has yet run with the setting on.
 
 ### Project memory
@@ -1850,9 +1885,10 @@ authoritative.
   write Project memory without asking" (off by default) does the same
   (maintainer request, 2026-11-12; built). The setting is on every mode's
   Project, in Project Overview; a person sets it from a local window or a
-  paired device (maintainer decision, 2026-11-12; not built yet: today a
-  paired device is refused), and each change is journaled as
-  `project.agent-memory-writes-changed@1`. A Chat thread has no Full access,
+  device the host's own person paired (maintainer decision, 2026-11-12;
+  built; a device the hub's roster introduced is refused), and each change is
+  journaled as `project.agent-memory-writes-changed@1` with the device as the
+  actor when one set it. A Chat thread has no Full access,
   so in Chat only the setting skips the card. The tool call is the thread's
   record of such a write: its result reports `written` with the entry's
   text. The write goes through the same memory command path and checks as a
@@ -2693,8 +2729,15 @@ A child AgentRun starts only when the thread's agent delegates through
 `octant_agents`, the one child-run tool, offered to an Octant Harness lead and
 to a provider runtime's agent alike. Its operations are `capabilities`,
 `delegate`, `status`, `wait`, `cancel`, and `follow-up`; `wait` with a zero
-timeout reads a finished reply without blocking. Either parent harness can
-target either child harness; provider-owned hidden subagents remain disabled.
+timeout reads a finished reply without blocking, and `wait` over several
+`runIds` answers when the first settles (`any`) or every one has (`all`, the
+default), collecting each reply once as its child settles. `delegate` may give
+siblings one `compareGroup` label (at most 64 characters, journaled on the run)
+so the Agents dock shows them side by side; the host groups and never ranks. Either parent harness can
+target either child harness. A provider's own native subagents are not
+`octant_agents` children: they run where
+[Key providers run as themselves](design/provider-runtimes.md#key-providers)
+says, each shown as a child run of its thread.
 Every child appears in the Agents surface, where the person can watch, stop,
 or resume it, and `cancel` is the agent's way to stop one it started.
 
@@ -2852,7 +2895,13 @@ that the running child received it.
 
 Delegation resolves explicit provider/model selections against the parent's
 current eligible catalog, including Project policy and supported reasoning
-values. A provider that can answer counts even when its catalog is
+values. Every child carries Octant's tools, so a target's model must carry them
+on every runtime (provider-wide support, Verify tools, or `mixed` for a child
+at Full access) before it is advertised or admitted (`modelCanTakeDelegatedWork`).
+Rationale: an ACP agent without negotiated tools, or OpenCode below Full
+access, was advertised and then refused at start with `tools-unsupported`.
+`capabilities` also lists every enabled provider it leaves out, with the first
+reason that excludes it (`not-ready`, `tools-unsupported`, `project-policy`). A provider that can answer counts even when its catalog is
 degraded (a Foundry deployment its models route does not list); a direct
 endpoint model is a target only once its tools are verified. With no explicit target, both harnesses use the same role-to-slot
 mapping and host/Project model slots (Settings names them model roles: Planner, Scout, Quick edit, Builder, Hard problems, Reviewer, Sees images and Small jobs, with Advisor kept as it was). An unconfigured route can inherit the
@@ -2865,10 +2914,49 @@ per thread and their yes is journaled for the thread
 (`thread.standing-answer-recorded@1`, erased with the thread), so later
 helpers start unasked and a waiting helper is kept; Plan stays refused
 (maintainer decision, 2026-11-13). The level is the one the turn runs at.
-Built for a Code thread, which asks in the thread's tool approval. Not built
-yet: a Work or Chat thread below Full access is still refused, because their
-turns have no way to ask a person from a host tool, and the reviewer at Auto
-does not answer in the person's place. A helper on another hub member follows
+Built: a Code thread asks in the thread's tool approval; a Chat or Work thread
+asks through the host's single-use approval card on the thread (class
+`agents.delegate`), which every thread's composer shows, ended with the tool
+call that asked; a Work routine run, which nobody can answer, still refuses.
+The reviewer at Auto does not answer in the person's place.
+
+A finished child's result reaches its parent as a queued delivery turn, or,
+while the parent's turn is running on a runtime that steers (Codex, the Octant
+Harness) and the result fits the runtime's note limit, as a note steered into
+that turn (`steer` with `source: "agent-result"`). The parent is marked as
+having read outside content before either, and its approval gates read the
+mark live, so later tools in the same turn act marked; a Code turn reviewed by
+the provider's own reviewer is never steered, because that reviewer was chosen
+while the thread was unmarked. A steered result settles as delivered with
+detail "Steered into the parent's running turn." and is journaled as
+`agent.result-steered@1` on its own aggregate (the thread, the running turn's
+key, the delivery mark and the framed text), so it never moves the turn's or
+the thread's version. Chat, Work and Code turn reads attach it as
+`steeredResults`, once per run generation, and the transcript shows the
+ordinary child-result card after the turn's reply, labelled "Delivered into the
+running turn"; it shows on the next read, not as a stream frame. The thread
+purge erases it with the thread, as every aggregate whose payload names the
+thread. A crash between the steer and the record leaves the result delivered
+without a card.
+
+A subagent the provider runtime started itself is observed, never managed. Its
+one control is Stop, offered (`control: "stop"`) only while the thread's
+running turn holds a connection that stops one child alone
+(`ProviderConnection.stopChildAgent`: Claude through the SDK's task stop,
+OpenCode by aborting a child session that runs under the turn's own session)
+on that child's provider instance and session. `POST
+/api/agent-runs/observed/stop` checks the window as the summary read does and
+finds the child only among the observations that window may read; Codex
+(an interrupt on a subagent thread is unverified) and ACP (no protocol call)
+report it unsupported.
+
+A provider-started subagent carries what its runtime reports and nothing it
+does not: its model (Claude from the subagent call, Codex from the spawn call,
+OpenCode from the child's first reply; ACP names only an agent profile), a
+final summary of at most 2,048 characters when it completes, and token usage
+(input and output for Codex and OpenCode, a total for Claude, none for ACP).
+The summary is shown to the person only and never added to the parent's
+context, so it changes no outside-content mark. A helper on another hub member follows
 the same rule, and the same answer covers it (maintainer decision, 2026-11-13;
 [Hub and spokes: delegation](design/hub-and-spokes.md#spoke-to-spoke-discovery-and-delegation)).
 
@@ -3085,8 +3173,8 @@ hold for every action in it:
   setting **Agents may push to the default branch** (`agentDefaultBranchPush`
   on the Project, `change-code-project-agent-default-branch-push`, journaled
   as `project.code-agent-default-branch-push-changed@1`), off by default and
-  set from a local window or a paired device (maintainer decision, 2026-11-12;
-  not built yet: today a paired device is answered 403). Its
+  set from a local window or a device the host's own person paired, journaled
+  with that device as the actor (maintainer decision, 2026-11-12; built). Its
   switch is hidden in the app until an agent push path to the default branch
   exists; the server field, command and rule stay (maintainer decision,
   2026-11-12). With
@@ -3110,14 +3198,17 @@ hold for every action in it:
   does not ask. Below Full access the Project switch "Agents may comment on
   pull requests" stands in for the per-post ask on a thread that has read no
   outside content; a thread that has read outside content still asks before
-  posting, switch on or off (maintainer decision, 2026-11-12); with the switch off the agent
+  posting, switch on or off (maintainer decision, 2026-11-12; outside Strict
+  the mark stops adding this ask under
+  [Octant adds no restrictions of its own unless Strict is on](#security-and-authority),
+  built); with the switch off the agent
   drafts the post by asking, and the approval shows the whole text
   (maintainer request, 2026-11-12). The level is the one the turn runs at, and
   a host that cannot tell whether the thread is marked asks. Built: the switch is `agentPullRequestComments`
   on the Project (`change-code-project-agent-pull-request-comments`, journaled
   as `project.code-agent-pull-request-comments-changed@1`), off by default and
-  set from a local window or a paired device (maintainer decision, 2026-11-12;
-  not built yet: today a paired device is answered 403). With
+  set from a local window or a device the host's own person paired, journaled
+  with that device as the actor (maintainer decision, 2026-11-12; built). With
   it in force the tool sends the post as `authorization: standing` naming
   `project`; the host does not take that word, it reads the switch again at
   the post, with the thread's outside-content mark, and refuses with
@@ -3199,14 +3290,18 @@ Which path reaches the forge depends on the thread's
   writes are an ordinary ask, as they are in the runtime on its own
   (maintainer decision, 2026-11-14): at Guarded and Accept edits the person
   approves the pending command, and at Reviewed Shield decides it, its forge
-  hard lines included, or hands it to the person. Octant's structured
+  hard lines included under Strict (outside Strict a provider runtime's own
+  merge or force-push follows its own permission mode, so Shield judges it
+  without them; built), or hands it to the person. Octant's structured
   pull-request tools, with their repository, branch, revision, consent,
   required-check and live-authority checks, stay an option the agent may
   use, not a requirement. The Octant Harness, whose shell is Octant's own,
   still refuses a recognizable push or pull-request write before its shell
   runs it and sends the agent to those tools. Claude Code runs its commands
-  in its own sandbox below Full access, which cannot read `~/.ssh`,
-  `~/.gitconfig` or `~/.config/gh`; a push or `gh` call the sandbox stopped
+  in its own sandbox below Full access, which today cannot read `~/.ssh`,
+  `~/.gitconfig` or `~/.config/gh` (once
+  [Providers run in their own sandbox](#security-and-authority) is built,
+  that sandbox follows the person's own Claude Code settings instead); a push or `gh` call the sandbox stopped
   is retried outside it (`dangerouslyDisableSandbox`), and Octant always
   asks about that retry itself, whatever the person's own permission rules
   allow, naming it as a command outside the sandbox, so once approved git
@@ -3477,7 +3572,8 @@ CI or reviewers should be woken, not left polling; maintainer request,
   refused, no turn is sent.
 - **Auto-fix limits.** A failure is a check name, a review thread id, or the
   base conflict. Each started wake spends one attempt on every failure it
-  carried; at most three attempts per failure, after which Auto-fix stops
+  carried; at most three attempts per failure, or the number in Settings ›
+  Permissions ([Octant's own limits become settings](#security-and-authority); built), after which Auto-fix stops
   (`attempt-limit`) and opens the thread's follow-up marker. The same failures
   on the same head never start a second turn; a wake that started none (the
   thread refused it, or the outside-content mark was refused) is tried again
@@ -3526,7 +3622,8 @@ CI or reviewers should be woken, not left polling; maintainer request,
   the thread is archived, completed, or gone, when the Project no longer
   connects the repository (`authority-lost`), when the agent calls `unwatch`,
   after ten started wakes (`wake-limit`), or three days after it began
-  (`expired`), checked even while nothing vouches for it; the last two open the
+  (`expired`), both settings in Settings › Permissions with those defaults
+  ([Octant's own limits become settings](#security-and-authority); built), checked even while nothing vouches for it; the last two open the
   thread's follow-up marker. Three days covers a review round across a weekend
   without leaving a forgotten watch running. Asking again turns nothing new
   on; after a stop it starts a fresh budget. Known gap: the vouching window is
@@ -3637,7 +3734,9 @@ Octant-operated hosted service stays out of scope
 ([Current Release Boundary](#current-release-boundary)).
 
 **Coordinator threads start and direct worker threads.** A person may make a
-Code thread a coordinator: a long-lived thread whose own actions are read-only,
+Code thread a coordinator: a long-lived thread whose own actions are read-only
+below Full access and follow the level at Full access
+([Octant's own limits become settings](#security-and-authority); built),
 which starts worker threads without asking (or proposes them, when the person
 restricts that globally or per Project), messages them, receives their state,
 and brings their requests to the person. Its wake, round and start bounds
@@ -3897,11 +3996,19 @@ the thread it came from.
   Events arriving while a run is active, and CI from the routine's reserved
   `automation/` branches, are held for review. This conservative attribution
   and the finite allowance bound feedback without claiming to identify every
-  outside writer. The activity check retains at most 64 owned runs, including
-  cancelled runs whose ordinary turn or children remain active. Missing or
-  overflowing evidence is unknown and blocks automatic admission and re-arm;
-  finish and review tasks and children, then archive and explicitly configure a
-  new routine when its history is full. Code completion is observed from the
+  outside writer. The activity check retains 64 owned runs by default,
+  including cancelled runs whose ordinary turn or children remain active; the
+  person may raise the window up to 1,024 runs or clear it on the routine's
+  detail ([Octant's own limits become settings](#security-and-authority);
+  built). Each change is journaled on the routine
+  (`automation-file-source-window-changed@1`) with the whole resulting
+  checkpoint, so replay rebuilds the same window and the same overflow, and
+  is made from a window on this host or a device its person paired. Missing
+  or overflowing evidence is unknown and blocks automatic admission and
+  re-arm; when the history is full, finish and review tasks and children,
+  then clear it. A clear is refused while any run it holds, or the routine's
+  current run, is active, and returns the input to arming, so it needs one
+  quiet check before an arrival counts again; a held batch stays held. Code completion is observed from the
   exact recorded operation, session, prompt, checkout and provider, never from
   the thread's latest unrelated turn. Pause, restart, quiet time and ordinary Save reset no budget.
   Explicit Review/Re-arm requires current source and Project authority from a
@@ -4037,7 +4144,9 @@ the thread it came from.
   **At Full access.** A turn running at Full access creates a routine the
   agent suggested on its own at once, with no card
   (maintainer decision, 2026-11-12): it takes the same path a routine the
-  person asked for takes, so it is created paused in its first journaled
+  person asked for takes, so it is created paused (at Full access the setting
+  **Start agent-created routines active at Full access**, off by default,
+  starts it enabled instead; [Octant's own limits become settings](#security-and-authority); built) in its first journaled
   event, with approval-gated authority of its own, and shown in the thread by
   the receipt below, and it runs only after the person enables it. Below Full
   access the card's confirmation stays. The level read is the one the turn
@@ -4283,19 +4392,19 @@ runtime's message, which holds whenever the turn carries no other context
 or Claude's prompt hook carries it. OpenCode 2 runs a listed command through
 its own command route rather than as text, with the turn's context admitted
 first as input that starts no run (detail in
-[Provider runtimes](design/provider-runtimes.md)). The host refuses, before the turn
-reaches any driver, a turn whose prompt opens with a command-shaped `/name`
-in Plan, which stays read-only, and in Chat, which keeps no folder and no
-shell, whenever the provider lists commands at all, whether or not the list
-the host holds names it: that list is the one a session last wrote for the
-provider, which may be another Project's. The refusal is the existing turn
-refusal, so a remote client meets it too; those composers still list the
-commands and say why they cannot run. An ACP agent with a reviewed command
-inventory (Kimi Code) keeps its probe check, refuses every leading slash in
-Plan and Chat, and elsewhere runs only a reviewed command its session
-listed. Codex lists none: its app-server
-(rust-v0.162.1) lists skills, which are invoked by `$name`, and no prompts,
-and its slash commands are its terminal client's own. OpenCode 1.x lists
+[Provider runtimes](design/provider-runtimes.md)). Every mode and level
+forwards them, Chat and Plan included, and every composer lists them, a Chat
+thread's too (maintainer decision, 2026-11-16, under
+[Octant adds no restrictions of its own unless Strict is on](#security-and-authority);
+built): the host refuses no turn for opening with `/name`, because the runtime
+was launched under the level's tool rules, which decide what the command may
+then do, so a command in Plan still cannot write and one in Chat still has no
+folder or shell. An ACP agent with a reviewed command inventory (Kimi Code)
+keeps its probe check and, in every mode, runs only a reviewed command its
+session listed. Codex lists only `/review`, which starts Codex's own review
+run ([Provider runtimes: Codex](design/provider-runtimes.md#codex)): its
+app-server (rust-v0.162.1) lists skills, which are invoked by `$name`, and no
+prompts, and its other slash commands are its terminal client's own. OpenCode 1.x lists
 none: its command route answers only once the whole run has ended. Side Chat is a Chat-mode sidecar about
 exactly one source thread: ordinary Chat with no inherited Work or Code
 authority and no agent path that messages, approves, steers, or appends to the
@@ -4427,10 +4536,13 @@ turn is running or waiting on the person holds it until that turn ends. A
 wake-up the host could not fire on time, because the host was down or asleep
 at its due time or its timer ran more than two minutes late, is journaled as
 **missed** and never fired later on its own: the thread shows it as missed
-with **Run now** and Cancel, and only the person's Run now starts its turn.
-Bounds: at most 8 waiting wake-ups a thread, a first fire at least a minute
-away (a delayed one held to one minute to one hour, the runtime's own
-range), a recurring one at most every 5 minutes across its life, refused
+with **Run now** and Cancel, and only the person's Run now starts its turn,
+unless the person turned on **Run missed wake-ups on return** in Settings ›
+Permissions, which runs it once when the host is back.
+Bounds: at most 8 waiting wake-ups a thread, or the number in Settings ›
+Permissions, a first fire at least a minute away (a delayed one held to one
+minute to one hour, the runtime's own range), a recurring one as often as
+every minute, as cron does ([Octant's own limits become settings](#security-and-authority); built), refused
 when its first fire is past it, and ending on its own after 7 days, before
 any turn a busy thread held back past that time, and a thread archived or
 deleted ends every wake-up it had. A purge takes the thread's wake-ups with
@@ -4439,9 +4551,13 @@ journals nothing new for them, so no event naming the purged thread is left
 behind.
 The agent may list and delete only its own thread's. Work and Code outside
 Plan take them; Chat runs Claude in Plan, so a Chat thread is never offered
-the tools, and Plan and single-use sessions are not either. Only a local
-window that can open the thread lists, cancels, or runs one (not built yet
-for a paired device). Rationale: this is the usage-resume timer's shape (an
+the tools, and Plan and single-use sessions are not either. Only the
+person lists, cancels, or runs one: at a local window that can open the
+thread, or on a device the host's own person paired, which reaches a Work
+Project's thread and an active Code Project's thread as its own send would
+(`/api/thread-wakeups`, forwarded for that device; built), journaled with the
+device as the actor. A device the hub's roster introduced and an agent grant
+are refused. Rationale: this is the usage-resume timer's shape (an
 in-process host timer over journaled records, rescanned at start) rather
 than a routine, because a routine creates threads, captures its own
 authority, and is enabled by the person, while a wake-up belongs to one
@@ -4571,7 +4687,9 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
     wakes nothing, so two agents answering each other stop waking each other
     after ten rounds and continue only when a person runs a turn. Both numbers
     are settings, per coordinator for a coordinator and its workers
-    (maintainer request, 2026-11-12); any other thread takes the defaults.
+    (maintainer request, 2026-11-12); any other thread takes the bounds in
+    Settings › Permissions, 30 and 10 unless the person changed them
+    ([Octant's own limits become settings](#security-and-authority); built).
     The host
     records wake turns and each thread's latest host turn with its hop in its
     own store, so a restart keeps the hourly count and the hop count
@@ -4691,7 +4809,7 @@ it creates a worker thread, under the rules in
   window a `#thread` mention resolves (12 messages within 8,000 characters,
   truncation stated), and no tool payloads beyond that window, files, or diff.
   `wait` returns when the target leaves `working`, or after the caller's
-  timeout, 30 seconds by default and at most 120 like a child run's `wait`,
+  timeout, 30 seconds by default and at most 120,
   with the state only; `working` in its answer means the time ran out.
 - **References.** A reference is `<thread id>@<project id>`, the one form every
   operation names a thread by, `send` included: the thread part is the id
@@ -4801,8 +4919,18 @@ thread's [guardrail level](#security-and-authority). New tasks may choose an app
   An extra working folder is shared, including for a child worktree. Code Git,
   PRs, changed-file receipts and Review still describe that thread's primary
   checkout only; the UI states that limit.
-- **What can be a folder.** The domain policy refuses the home folder and
-  any folder above it, a system folder (`/`, `/System`, `/Library`, `/usr`,
+- **What can be a folder.** The home folder is an extra folder only once the
+  person confirms its warning (under
+  [Octant adds no restrictions of its own unless Strict is on](#security-and-authority);
+  built): the add command answers a home folder with
+  `project-extra-folder-needs-confirmation`, the warning, and a fresh
+  single-use receipt for the same folder, window and Project type in place of
+  the spent one, and only a resend with `confirmHomeFolder` spends it. The
+  confirmed home folder may hold the main folder and the other extra folders;
+  its credential folders stay denied for every confined launch, because the
+  secret guard's denials follow every folder grant. Relinking the main folder
+  inside it is refused until it is removed. The domain policy refuses any
+  folder above home, a system folder (`/`, `/System`, `/Library`, `/usr`,
   `/etc`, `/private`, `/Volumes` itself and their peers) or a folder inside
   a system-owned tree, a credential folder in home (`.ssh`, `.aws`,
   `.azure`, `.gnupg`, `.kube`, `.docker`, `.password-store`,
@@ -6651,24 +6779,37 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   person marked trusted for that provider's own Project code in Octant; where
   the provider keeps its own folder-trust list, that list applies as well.
 
-  | Provider     | Today                                                                                                                                                                                              | Rule                                                                                                                                                                                                                 | Built                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-  | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | Claude Code  | With the setup off: own subagents off; `WebSearch` and `WebFetch` never offered and a session reporting them refused; Project skills off; no setting sources, so home config and skills never read | All on when the person allows: native subagents, web search and fetch, Project and home skills, home settings and a trusted Project's hooks, MCP servers, and plugins; automatic mode as Reviewed's default reviewer | Reviewed with its own reviewer, in Work and Code; subagents (shown as child runs), web search and fetch, home skills, home settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers, and plugins. The account's own MCP servers, claude.ai connectors, and installed plugins start in every Project at every level but Plan; a Project's `.mcp.json` waits for that Project's trust (maintainer decision, 2026-11-14; [detail](design/provider-runtimes.md#key-providers)). `EnterWorktree`, `ExitWorktree`, and `REPL` are offered outside Plan and take the shell's approval rules. In Work and Code outside Plan, Claude Code's whole built-in tool set less a short withheld list, with any tool Octant has no rule of its own for asking below Full access (the account's claude.ai service tools included) and session-internal tools such as `ToolSearch` and the task tools running unasked, and no cap on tool calls in a turn ([detail](design/provider-runtimes.md#full-built-in-tool-set)); background commands and `Monitor` command watches, with the turns the runtime starts for them held inside the person's turn ([detail](design/provider-runtimes.md#background-commands-and-runtime-started-turns)); `Workflow` with subagents on, its agents shown as child runs under the call and its run held inside the person's turn ([detail](design/provider-runtimes.md#workflows)); `ScheduleWakeup`, `CronCreate`, `CronList`, and `CronDelete`, answered from the thread's Octant-owned wake-ups ([detail](design/provider-runtimes.md#wake-ups-the-model-schedules)) |
-  | Codex        | Own subagents off; Project skills disabled by path; in Chat every person-added tool server switched off by name                                                                                    | Own subagents, Project skills, and the person's tool servers on, Chat included; its own approval review as Reviewed's default reviewer                                                                               | Reviewed with its own reviewer, in Work and Code; with the setup on, Project skills on, the person's tool servers on in Chat, and its own subagents at every level, each shown as a child run with its approvals and app-tool calls answered through the parent's approval path                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-  | Mistral Vibe | Project and home skills off; Project context off; runs through the ACP bridge only                                                                                                                 | Its own skills, a trusted Project's tools and MCP servers, and its auto-approve mode as Reviewed's default reviewer; first-class with the same promise                                                               | Reviewed with its auto-approve mode, in Work and Code; with the setup on, its skills (registry skills included where the person's configuration opts in), Project context, the account's MCP servers, connectors, and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins, and agents; its own subagents in Work and Code outside Plan, shown as child runs; a subagent's request names no tool (3.0.3 source, read 2026-11-14), so its approval says "A Mistral Vibe subagent asks to run a tool. Vibe doesn't say which." with Allow and Deny under the thread's level; a subagent runs as one of the person's own custom or installed agents at every level there, and may approve its own tools as in Vibe itself; Octant cannot see those calls, so each child run names the agent and says so, and a run as any agent but Vibe's read-only `explore` marks the thread as having read outside content (maintainer decisions, 2026-11-14); its `accept-edits` mode at Accept edits in Work and Code; its questions on 3.0.3 through the shared questionnaire (maintainer decision, 2026-11-14). Stays on the ACP bridge by choice ([why](design/provider-runtimes.md#mistral-vibe-surface))                                                                                                                                                                                                                                                                                                                                                                                           |
-  | OpenCode     | With the setup off: Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`. Shell and delegation follow the level in Work as in Code either way | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on; Reviewed through Octant Shield                                                                                 | With the setup on: its skills on, and a remembered 2.x approval answered `always` and saying the grant lives in OpenCode's own store. its delegation followed as child runs, the MCP servers and permission rules in the person's own OpenCode configuration, and a tool the person's rules allow running without a card; Reviewed through Octant Shield at Auto. At every level, Plan included, it reads, finds, searches and lists inside the Project and its extra folders without asking, as Octant's Claude Code file gate allows, with `.env` files and Octant's protected files refused; any other outside folder asks below Full access and is refused in Plan (maintainer decision, 2026-11-14). At Full access it reaches outside folders, and in a trusted Project outside Plan it loads the Project's own `opencode.json(c)` and `.opencode` agents, commands, plugins, and tools as on its own, `OPENCODE_DISABLE_PROJECT_CONFIG` unset, accepting that their rules can override Octant's in that Project ([why](design/provider-runtimes.md#key-providers); maintainer decision, 2026-11-14). In Plan on both runtimes, its other read-only tools (task list, code search, language server, web fetch and search) run without asking, web reads still marking the thread; edits, shell, delegation and outside folders stay denied (maintainer decision, 2026-11-14)                                                                                                                                                                                                                              |
+  | Provider     | With the setup off                                                                                                                                                                            | Rule                                                                                                                                                                                                     | Built                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+  | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Claude Code  | Own subagents off; `WebSearch` and `WebFetch` kept only in Work and Code outside Plan, asking below Full access; Project skills off; no setting sources, so home config and skills never read | All on by default: native subagents, web search and fetch, Project and home skills, home settings and a trusted Project's hooks, MCP servers, and plugins; automatic mode as Reviewed's default reviewer | Reviewed with its own reviewer, in Work and Code; subagents (shown as child runs), web search and fetch, home skills, home settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers, and plugins. The account's own MCP servers, claude.ai connectors, and installed plugins start in every Project at every level but Plan, where only the servers the person marked "Read-only — allowed in Plan" start ([Plan and Chat tool parity](#security-and-authority)); a Project's `.mcp.json` waits for that Project's trust (maintainer decision, 2026-11-14; [detail](design/provider-runtimes.md#key-providers)). `EnterWorktree`, `ExitWorktree`, and `REPL` are offered outside Plan and take the shell's approval rules. In Work and Code outside Plan, Claude Code's whole built-in tool set less a short withheld list, with any tool Octant has no rule of its own for asking below Full access (the account's claude.ai service tools included) and session-internal tools such as `ToolSearch` and the task tools running unasked, and no cap on tool calls in a turn ([detail](design/provider-runtimes.md#full-built-in-tool-set)); background commands and `Monitor` command watches, which in Code keep running as live tasks after the person's turn completes, each turn the runtime then starts opened as a runtime-started turn, and in Work are held inside the person's turn ([detail](design/provider-runtimes.md#background-commands-and-runtime-started-turns)); `Workflow` with subagents on, its agents shown as child runs under the call and its run held inside the person's turn ([detail](design/provider-runtimes.md#workflows)); `ScheduleWakeup`, `CronCreate`, `CronList`, and `CronDelete`, answered from the thread's Octant-owned wake-ups ([detail](design/provider-runtimes.md#wake-ups-the-model-schedules)); Claude Code's own `EnterPlanMode` and `ExitPlanMode` in Code as level changes the person approves, applied from the next session ([detail](design/provider-runtimes.md#plan-mode-as-level-changes)); an empty Code thread started from a session of the same account and folder begun outside Octant, adopted only by the person, journaled, and marked as carrying outside content ([detail](design/provider-runtimes.md#sessions-started-outside-octant)) |
+  | Codex        | Own subagents off (the app-server leased with its subagent switches false); Project skills disabled by path; in Chat every person-added tool server switched off by name                      | Own subagents, Project skills, and the person's tool servers on, Chat included; its own approval review as Reviewed's default reviewer                                                                   | Reviewed with its own reviewer, in Work and Code; with the setup on, Project skills on, the person's tool servers on in Chat, and its own subagents at every level, each shown as a child run with its approvals and app-tool calls answered through the parent's approval path; with the account's setup off, its own subagents stay off (the app-server leased with its subagent switches false) unless the thread chose On, the Project trusts Codex, or a Work or Code thread runs at Full access                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+  | Mistral Vibe | Project and home skills off; Project context off. It runs through the ACP bridge either way                                                                                                   | Its own skills, a trusted Project's tools and MCP servers, and its auto-approve mode as Reviewed's default reviewer; first-class with the same promise                                                   | Reviewed with its auto-approve mode, in Work and Code; with the setup on, its skills (registry skills included where the person's configuration opts in), Project context, the account's MCP servers, connectors, and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins, and agents; its own subagents in Work and Code outside Plan, shown as child runs; a subagent's request names no tool (3.0.3 source, read 2026-11-14), so its approval says "A Mistral Vibe subagent asks to run a tool. Vibe doesn't say which." with Allow and Deny under the thread's level; a subagent runs as one of the person's own custom or installed agents at every level there, and may approve its own tools as in Vibe itself; Octant cannot see those calls, so each child run names the agent and says so, and a run as any agent but Vibe's read-only `explore` marks the thread as having read outside content (maintainer decisions, 2026-11-14); its `accept-edits` mode at Accept edits in Work and Code; its questions on 3.0.3 through the shared questionnaire (maintainer decision, 2026-11-14). Stays on the ACP bridge by choice ([why](design/provider-runtimes.md#mistral-vibe-surface))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+  | OpenCode     | Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`. Shell and delegation follow the level in Work as in Code either way                | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on; Reviewed through Octant Shield                                                                     | With the setup on: its skills on, and a remembered 2.x approval answered `always` and saying the grant lives in OpenCode's own store. its delegation followed as child runs, the MCP servers and permission rules in the person's own OpenCode configuration, and a tool the person's rules allow running without a card; Reviewed through Octant Shield at Auto. At every level, Plan included, it reads, finds, searches and lists inside the Project and its extra folders without asking, as Octant's Claude Code file gate allows, with `.env` files and Octant's protected files refused (at Full access only the provider sign-ins, as Octant's own file tools; maintainer decision, 2026-11-15); any other outside folder asks below Full access and is refused in Plan (maintainer decision, 2026-11-14). At Full access it reaches outside folders, and in a trusted Project outside Plan it loads the Project's own `opencode.json(c)` and `.opencode` agents, commands, plugins, and tools as on its own, `OPENCODE_DISABLE_PROJECT_CONFIG` unset, accepting that their rules can override Octant's in that Project ([why](design/provider-runtimes.md#key-providers); maintainer decision, 2026-11-14). In Plan on both runtimes, its other read-only tools (task list, code search, language server, web fetch and search) run without asking, web reads still marking the thread; edits, shell, delegation and outside folders stay denied (maintainer decision, 2026-11-14)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
   A turn has an origin. A person's send starts one; a runtime may also
   start one by itself when background work it ran finishes or reports.
-  Octant never lets the runtime's turn start on its own: the person's turn
-  that started the work is held open until the work ends, and each turn the
-  runtime starts inside it is folded in, marked by the runtime event
-  `runtime-turn-started` and, in Code, the journaled operation frame of the
-  same name, so the journal records that it was the runtime's and replay
-  rebuilds it. It passes the same gate at the same level, the person's stop
-  ends it with the session and every background task in it, and a cap and
-  the stalled-turn limit bound it (maintainer decision, 2026-11-14; built for
-  Claude Code's background commands and `Monitor` watches, [detail](design/provider-runtimes.md#background-commands-and-runtime-started-turns)).
+  Octant never lets the runtime's turn run unseen. In Work and Code the
+  person's turn completes when the model's reply is done, and the host keeps
+  the session while its background tasks run, shown as live tasks in the
+  thread; when the runtime starts a turn by itself on the idle thread, the
+  host opens a runtime-started turn for it through the thread's ordinary
+  admission, at the thread's level, and that turn reattaches to the kept
+  session. The kept session is stopped when its last task ends with no turn
+  running, when the person stops the thread or changes its level, model,
+  checkout, folder or lifecycle, after the host's background work limit,
+  when the runtime's turn cannot be opened, and at shutdown; none of the
+  runtime's tool calls is answered before the host has opened its turn.
+  Elsewhere (a child run, a single-use session) the person's turn that
+  started the work is held open until the work ends, and each turn the
+  runtime starts inside it is folded in, bounded by a cap and the
+  stalled-turn limit. Either way the turn is marked by the runtime event
+  `runtime-turn-started`; Code also journals the operation frame of the same
+  name, and Work journals the opened turn as the system's with the host's
+  fixed prompt, so the journal records that it was the runtime's and replay
+  rebuilds it; it passes the same gate at the same level, and the person's
+  stop ends it with the session and every background task in it (maintainer
+  decisions, 2026-11-14; built for Claude Code's background commands and
+  `Monitor` watches, in Work as in Code, [detail](design/provider-runtimes.md#background-commands-and-runtime-started-turns)).
   A wake-up the runtime asks for at a later time (`ScheduleWakeup`,
   `CronCreate`) is the host's, never the runtime's: the driver records it
   with the host and the runtime's scheduler holds nothing, so nothing fires
@@ -6683,8 +6824,8 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   otherwise holds back, Kimi Code reads its home skills, servers, plugins,
   and hooks with the setup, Kilo its own skills, each agent's own subagents
   run in Work and Code outside Plan with an honest approval card for a
-  request naming no call Octant saw, and Kimi Code's own slash commands run
-  outside Plan; each reports only those features
+  request naming no call Octant saw, and Kimi Code's own reviewed slash
+  commands run in every mode; each reports only those features
   ([detail](design/provider-runtimes.md#acp-agents-run-as-themselves)).
   Every other provider keeps the deny rules for Project code and skills under
   [Extensions and skills](#extensions-and-skills) until it is promoted the
@@ -6740,7 +6881,11 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
     and `.opencode/opencode.json` (maintainer decision, 2026-11-14). Codex
     lists none, because Octant's trust loads none of its Project
     configuration (Codex's own folder trust decides it), and any other
-    provider answers none.
+    provider answers none. Decided (maintainer decision, 2026-11-16; designed,
+    not built): in a Project trusted for Codex, outside Plan and Strict, Codex
+    loads its own Project configuration as it does on its own, and Codex then
+    lists its entries here
+    ([Provider runtimes: Codex](design/provider-runtimes.md#codex)).
     Untrusted Project code shows one quiet notice card above the thread's
     composer ([Thread view](design/thread-view.md#project-trust-prompt)):
     **Trust for <provider>** sends the same `change-project-native-providers`
@@ -7257,6 +7402,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   discovery descriptor, the bundled plugin and its identity, picker and
   Settings labels, and the Settings create and configuration forms. A new
   agent adds its row, its runtime profile, its logo, and conformance evidence.
+  Decided (maintainer decision, 2026-11-16; designed, not built): a person may
+  also add an agent from the public ACP registry or their own local command
+  through the plugin model, so a reviewed row is no longer the only way an ACP
+  agent runs ([Provider runtimes: Any ACP agent](design/provider-runtimes.md#any-acp-agent)).
   The row never widens the vocabulary to `string`: an unlisted kind fails to
   decode, a configuration must name the same agent as its instance or command
   and a posture its row lists, and every capability is still the one the
@@ -7388,10 +7537,20 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   stays Azure AI Foundry's opt-in.
   Amazon Bedrock speaks `cloud-iam`: the person signs in at the organization's
   single sign-on portal with a device code from the host-local
-  `octant provider sign-in` command, or opts in to "Use my AWS profile",
-  which reads the person's existing cloud profile (maintainer request,
-  2026-11-12; not built yet: today only the device-code sign-in exists), and the broker keeps that session and the
-  temporary credentials it mints for the instance's one account and role. The
+  `octant provider sign-in` command, or, at a window on this host, opts in to
+  "Use my AWS profile" or long-lived access keys (maintainer request,
+  2026-11-12, and decision, 2026-11-16; built), and the broker keeps that
+  session and the temporary credentials it mints for the instance's one
+  account and role. A profile is read in place by the broker on every
+  renewal, the way the AWS CLI reads it (`AWS_CONFIG_FILE` and
+  `AWS_SHARED_CREDENTIALS_FILE` honoured): shared-file keys, the single
+  sign-on token `aws sso login` cached under `~/.aws/sso/cache`, then
+  `credential_process` run through the platform shell; a profile that only
+  assumes a role is refused as unsupported (not built yet). A key pair goes
+  to the broker's `/v1/cloud-iam/connect` route once and is kept there; the
+  card warns that long-lived keys work until revoked. Either grant is cloud
+  material the raw resolve refuses, and the server stores only the pointer
+  and journals only the reference. The
   server describes each Converse request to the broker's
   `/v1/cloud-iam/sign` route by its fields (method, host, path, query, the
   content type and accept headers, and the body's hash); the broker checks
@@ -9194,9 +9353,10 @@ fork point gone, nothing readable left, history beyond the bounded scan, or a
 handoff that could not be saved). The conversation page carries the summary
 as the turn's `handoff`, and the transcript says what carried over and that
 the source's later replies (and, for text, its session, hidden reasoning and
-tool activity) did not. Other runtimes that can fork a session natively
-(Claude, Codex) still use the text handoff until a driver seam reports a
-fork-at-point capability.
+tool activity) did not. Codex can fork
+a session natively but still uses the text handoff, a gap to close: its
+`thread/fork` copy stays loaded in the app-server that made it, and another
+app-server's resume refuses it.
 
 **A fork that later switches providers (Code).** A forked thread's
 provider-switch handoff also carries the conversation the fork inherited,
@@ -9487,9 +9647,14 @@ overview say so wherever a money budget is in force.
 
 Direct-endpoint providers (`openai-compatible`, `anthropic-compatible`,
 `azure-foundry`, and `ollama`) run under the native harness in
-`apps/server/src/harness`. Ollama stays a literal-loopback HTTP origin: its
-transport speaks Ollama's native `/api/chat` and refuses any other base URL,
-so a cloud, LAN, or tunnelled Ollama is not a harness endpoint. Ollama cuts a
+`apps/server/src/harness`. An Ollama address is an origin: HTTPS anywhere, as
+a hosted Ollama is reached, or plain HTTP on loopback or a private network
+(an RFC 1918, link-local, unique-local or overlay-network address, or an mDNS
+`.local` name), which Add endpoint marks with a warning that prompts travel
+unencrypted; a public address over plain HTTP is refused, and nothing
+resolves DNS to decide
+([Provider reach Octant no longer narrows](#security-and-authority); built).
+Its transport speaks Ollama's native `/api/chat`. Ollama cuts a
 prompt longer than the window it loaded without an error, which can drop the
 harness's instructions and tool definitions, so every Ollama request names its
 window as `options.num_ctx` and the transport measures the request against
@@ -10383,7 +10548,13 @@ the model at another size.
   person, so the server keeps three rules of its own: it never answers an
   approval or any other request listed for the person (only a harness
   question or a Chat turn's question, through the routes line mode uses);
-  it refuses `full-access`, which would save Full access on the Project, so
+  it refuses `full-access`, which would save Full access on the Project (the
+  person's own per-run flag, `octant agent --full-access`, starts that run's
+  new thread alone at Full access and journals `fullAccessRunFlag` on it,
+  saving nothing on the Project; the host accepts the flag only from a window
+  on this host, so no agent grant, device or routine sets it, and the MCP
+  server never sends it; under
+  [Octant adds no restrictions of its own unless Strict is on](#security-and-authority); built), so
   a thread starts at Full access only where the person already set it (the
   same tools served to an agent grant accept it when the person chose Full
   access for that grant, and give it to the thread alone, never the Project;
@@ -10445,9 +10616,11 @@ the model at another size.
      stored as approval-gated, auto-accept-edits, or Full access has its
      write, edit, command, or check refused as `plan-mode-denied`, including
      a call from tools composed before the narrowing. A turn's posture only
-     narrows the thread's, never widens it. Work and Chat have no Plan
-     posture (a Work turn is ask-first or auto-accept-edits; Chat is
-     approval-gated), so no narrowed turn reaches them. A child agent
+     narrows the thread's, never widens it. Chat has no Plan posture (it is
+     approval-gated), so no narrowed turn reaches it; a Work thread in Plan
+     runs every turn at Plan, and its harness calls are judged by the level
+     the running turn holds, so its writes and commands are refused the same
+     way. A child agent
      is admitted, and a scheduled resume is granted, under the same narrower
      posture: the parent's live grant is its thread (with the window's session
      grant) clamped to the posture its running turn holds, so a turn narrowed to
@@ -11218,8 +11391,10 @@ places and, at Auto, Octant Shield may allow an unlisted host for one call
 ([harness tool egress rules](#harness-tool-egress-rules)). For commands, on
 is the wider setting. The switch is journaled whole as
 `safe-networks.limits-set@1` (on its own fixed aggregate id under
-`safe-networks`), changes from a local window or a paired device (maintainer
-decision, 2026-11-12; not built yet: today only from a local window), and replays at startup.
+`safe-networks`), changes from a local window or a device the host's own
+person paired, which the event's actor names (maintainer decision,
+2026-11-12; built; a device the hub's roster introduced is refused), and
+replays at startup.
 `ProviderRuntimeNetwork.start` reads it at each launch: off, it answers
 `open` for every runtime (open network as before, and Claude's sandbox without
 the proxy port); on, it does what follows. A Full access launch answers
@@ -11573,7 +11748,11 @@ that is not yet effective for the thread is refused and never reaches the model.
   app, whose app bundle is then the runtime's install) and takes a stricter
   profile from the shared confinement builder (no network, no exec but its
   runtime, no fork, a read-only package, one temporary folder, of the system
-  only what a runtime reads to start, and a fixed environment), and on any host but macOS its component is `host-prohibited`
+  only what a runtime reads to start, and a fixed environment). Linux has no
+  extension-process confinement, so a driver the person installed, trusted
+  and enabled runs there without one, with the same fixed environment, and
+  its provider row says so (maintainer decision, 2026-11-16); on any other
+  host its component is `host-prohibited`
   ([Outside provider drivers](design/outside-provider-drivers.md#driver-process-rules)).
 
 - Skills are discovered only from valid `.agents/skills/` and `.claude/skills/`
@@ -11732,9 +11911,16 @@ that is not yet effective for the thread is refused and never reaches the model.
   for OpenCode: the launch drops `OPENCODE_DISABLE_CLAUDE_CODE`,
   `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS`, and `OPENCODE_DISABLE_EXTERNAL_SKILLS`
   (opencode v2.2.0 reads `.claude` skills only with the first two unset) and
-  asks for `skill` under the posture instead of denying it; the borrowed
-  `CLAUDE.md` prompt and project configuration stay off, and below Full
-  access the confined launch reaches only the Project's skills. Built for
+  asks for `skill` under the posture instead of denying it; project
+  configuration loads only in a Project trusted for OpenCode, outside Plan
+  ([Key providers run as themselves](#providers)), and below Full access the
+  confined launch reaches only the Project's skills. No launch sets
+  `OPENCODE_DISABLE_CLAUDE_CODE` or `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT`, so
+  OpenCode reads `CLAUDE.md` where it finds no `AGENTS.md`, as it does on its
+  own, and running as itself OpenCode 1.x also finds the person's global
+  `AGENTS.md`, linked into its private config folder: instruction files are
+  text with no authority (built;
+  [detail](design/provider-runtimes.md#key-providers)). Built for
   Mistral Vibe: the launch leaves `VIBE_SKILL_PATHS` and
   `VIBE_DISABLED_SKILLS` unset, and any of the person's setup also unsets
   `VIBE_INCLUDE_PROJECT_CONTEXT`, since the Project's context is text. A skill the provider loads that way is the
@@ -11754,9 +11940,11 @@ that is not yet effective for the thread is refused and never reaches the model.
   (`AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`,
   `.clinerules`, `.goosehints`, and the like) stay readable: they are text
   the runtime adds to its own context, not code, and they get no authority
-  from Octant. Two runtimes do not read them: fx, whose root `AGENTS.md` deny
-  predates this rule, and Grok Build, which loads no Project instructions in
-  the untrusted folder Octant gives it.
+  from Octant. Two runtimes read them only with more of the person's setup:
+  fx reads its root `AGENTS.md` whenever it runs as itself (the default) and
+  not with the setup turned off, and Grok Build loads Project instructions
+  only in a Project the person trusted for it, since its untrusted folder
+  loads none ([Key providers run as themselves](#providers)).
 
   | Runtime            | Project code it loads by itself                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | How                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
   | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -12016,11 +12204,14 @@ that is not yet effective for the thread is refused and never reaches the model.
     host-owned turn (a routine, a goal loop, a usage-limit resume, a child-run
     delivery) can create one. A host-owned turn in the Project may use one,
     but the prompt it raises covers that one call and records nothing, even
-    when a person answers it: nobody chose to send that turn. Only an answer
-    to a prompt raised by the own turn of the local window, or of a device the
-    host's own person paired, is kept; any other device's turn may use a
-    grant, and its prompt covers one call and records nothing, whether the
-    device or a local window answers.
+    when a person answers it: nobody chose to send that turn. An answer is
+    kept from the local window whose own turn raised the prompt, and from a
+    device the host's own person paired, which is that person: it lists and
+    answers any prompt whose thread still stands in the recorded Project,
+    whichever window's turn raised it, and its answer is journaled as the
+    device (maintainer decision, 2026-11-16; built). A hub-introduced device's
+    turn may use a grant, and its prompt covers one call and records nothing,
+    whoever answers; that device answers only its own turn's prompts, once.
   - A package update signed by the same key keeps the package's trust and its
     remembered tool approvals; a new or missing signing key asks again
     (maintainer decision, 2026-11-12). Built for a package whose signature the
@@ -12113,6 +12304,8 @@ that is not yet effective for the thread is refused and never reaches the model.
     server after the mark, then runs for the rest of that thread, because its
     arguments can carry out what the thread has read and one answer says the
     person accepts that for this server (maintainer decision, 2026-11-12).
+    That ask is Strict's: outside Strict the mark adds no question and the
+    remembered grants decide as before it (built).
     A Project's or the account's grant does not spare that question, and
     every MCP result marks its thread, so a network server asks once more
     after that thread's first tool result. The answer covers no other
@@ -13274,6 +13467,15 @@ before the bundled pin moves. The driver
 never uses a standalone CuaDriver installation. Plan refuses computer-use
 control.
 
+A window lists, inspects, answers and stops the Computer use sessions its own
+turns started (`/api/computer-use/*`). A device the host's own person paired
+is that person, so it lists and stops every session on the host, whichever
+window's turn started it, naming the session by its exact thread and
+authority; the stop is recorded as the person's from a device they paired
+(maintainer decision, 2026-11-16; built). Its approval answers stay with the
+sessions its own turns started. A device the hub's roster introduced, an
+agent grant and a caller with no session are refused.
+
 **Composer window capture.** In the macOS desktop app, the composer's attach
 menu offers **Capture window…** beside **Choose file…**: the person picks one open
 window and a PNG of it attaches through the ordinary image path, so the same
@@ -13427,8 +13629,8 @@ their inspection and quarantined install from a local folder, and the host
 proxy that runs one over the harness endpoint wire protocol (closed failures,
 a capability ceiling, and a brokered request with this instance's key to its
 configured origin only), the confined process per instance that carries that
-protocol on macOS, and admission (trust at a digest, a provider added off from
-a local window (or, not built yet, a paired device), host-run Verify tools, and the process stopped whenever the
+protocol on macOS (on Linux without confinement, labelled), and admission (trust at a digest, a provider added off from
+a local window or a device the host's own person paired, host-run Verify tools, and the process stopped whenever the
 driver stops being effective) are built, as is moving an instance to a newly
 trusted digest of its driver with its records cleared, and a crash-limit hold
 journaled at the digest that crashed, which a restart does not lift. Publisher
@@ -13625,12 +13827,12 @@ mechanisms are:
   exception to the wider one. Full access shows a one-time warning the first
   time a machine or a Project picks it.
 
-  | Level                                    | Who approves tool calls                                                                                                | Prompt-injection gate                                       | Sandbox                                                                                                               | Git and pull requests                                                                                      | Default for                                                               |
-  | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-  | Guarded (Ask first)                      | The person, for anything with effects                                                                                  | On: fresh confirmation after reading outside content        | Octant's OS confinement plus the provider's                                                                           | Opens and updates pull requests after asking; merges only when the person asked                            | Ask first in the first-run picker; the fallback where no reviewer can run |
-  | Guarded with edits waived (Accept edits) | The person, except file edits inside the folder                                                                        | On                                                          | Octant's plus the provider's                                                                                          | As Guarded                                                                                                 | Accept edits in the first-run picker                                      |
-  | Reviewed (Auto)                          | A reviewer the person chooses: the provider's own or [Octant Shield](#octant-shield); the person for what it escalates | On                                                          | Octant's plus the provider's                                                                                          | As Guarded, with the reviewer standing in for the person's click                                           | Auto in the first-run picker, pre-selected                                |
-  | Full access                              | Nobody: no prompts, every approval answered allow                                                                      | Off: outside content is recorded and marked, never a prompt | None: no Octant sandbox and no provider sandbox; protected files are guarded by Octant's own tools and redaction only | Opens, updates, merges, and force-pushes the pull requests and branches the person asked for in the thread | Full access in the first-run picker, never pre-selected                   |
+  | Level                                    | Who approves tool calls                                                                                                | Prompt-injection gate                                       | Sandbox                                                                                                                                         | Git and pull requests                                                                                      | Default for                                                               |
+  | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+  | Guarded (Ask first)                      | The person, for anything with effects                                                                                  | On: fresh confirmation after reading outside content        | Octant's OS confinement plus the provider's                                                                                                     | Opens and updates pull requests after asking; merges only when the person asked                            | Ask first in the first-run picker; the fallback where no reviewer can run |
+  | Guarded with edits waived (Accept edits) | The person, except file edits inside the folder                                                                        | On                                                          | Octant's plus the provider's                                                                                                                    | As Guarded                                                                                                 | Accept edits in the first-run picker                                      |
+  | Reviewed (Auto)                          | A reviewer the person chooses: the provider's own or [Octant Shield](#octant-shield); the person for what it escalates | On                                                          | Octant's plus the provider's                                                                                                                    | As Guarded, with the reviewer standing in for the person's click                                           | Auto in the first-run picker, pre-selected                                |
+  | Full access                              | Nobody: no prompts, every approval answered allow                                                                      | Off: outside content is recorded and marked, never a prompt | None: no Octant sandbox and no provider sandbox; protected files are guarded by redaction, and Octant's own tools refuse only provider sign-ins | Opens, updates, merges, and force-pushes the pull requests and branches the person asked for in the thread | Full access in the first-run picker, never pre-selected                   |
   - **Full access means no sandbox and no prompts,** as in the providers'
     own apps (maintainer decision, 2026-10-31). Per runtime: Claude Code
     runs `permissionMode: "bypassPermissions"`; Codex runs
@@ -13652,9 +13854,12 @@ mechanisms are:
     1. Every hard line: no telemetry, secrets never journaled, signed
        updates, authority checked on the host, the journal, Plan read-only,
        spend ceilings, and an agent never marking a thread Done.
-    2. Merge, plain force-push, and push to the default branch, which follow
-       the pull-request merge rules and the Project's "Agents may merge"
-       switch.
+    2. Merge, plain force-push, and push to the default branch through
+       Octant's own pull-request tool or Octant Harness, which follow the
+       pull-request merge rules and the Project's "Agents may merge"
+       switch. A provider's own commands are not on the list outside
+       Strict ([Octant adds no restrictions of its own unless Strict is on](#security-and-authority);
+       built for Octant Shield's forge hard lines).
     3. Computer use: the first action in each application asks, once per
        thread, because it drives the person's real desktop.
     4. The Browser on a signed-in profile: a site approval per origin and
@@ -13830,12 +14035,24 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     decision, 2026-10-31: "softer guard — full access is full access").
     No runtime or command runs under an OS wall at this level, and a shell
     command can read a protected file. The [secret guard](#secret-guard) is
-    soft there: Octant's own file tools (the Octant Harness's and the ACP
-    client's host-side file operations) still refuse a protected path with
-    the same plain message. Claude Code's own file tools are Claude's, not
-    Octant's: at Full access its gate allows any path, outside the Project's
-    folders and protected files included, as Claude Code does on its own
-    (maintainer decision, 2026-11-14). Below Full access it keeps every
+    soft there. Claude Code's own file tools are Claude's, not Octant's: at
+    Full access its gate allows any path, outside the Project's folders and
+    protected files included, as Claude Code does on its own (maintainer
+    decision, 2026-11-14). Octant's own file tools (the Octant Harness's and
+    the ACP client's host-side file operations) follow the same rule
+    (maintainer decision, 2026-11-15): at Full access they read and write a
+    protected path, and refuse only the protected provider-account
+    credentials, the Provider sign-ins group (each provider's stored sign-in
+    and Octant's managed account homes), with the same plain message, as the
+    account's sign-in stays out of the instruction files Octant reads for
+    Claude at every level. Below Full access they refuse every protected path.
+    OpenCode's own file tools are held to the same narrowing: at Full access
+    its read and list refusals, on 1.x and 2.x, name only the Provider
+    sign-ins group ([detail](design/provider-runtimes.md#key-providers)).
+    A server Project's file tools follow it too: the list they match on the
+    server in a shell script, and again on this host, names only that group
+    at Full access ([detail](design/server-projects.md#threads)). Below Full
+    access it keeps every
     secret-path refusal, and a path outside the Project's folders asks
     through the gate (Reviewed's reviewer decides it) rather than being
     refused; Plan refuses it (maintainer decision, 2026-11-14;
@@ -13852,13 +14069,13 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     and export. It never prompts and never blocks
     ([Octant Shield's Watcher](#octant-shield) does this tagging).
   - **The one-time warning** reads: agents can change any file and run any
-    command without asking, with no sandbox. Protected files, such as SSH and
-    cloud keys, are guarded by Octant's own tools and redaction only, and a
-    shell command can read them.
+    command without asking, with no sandbox, and can read protected files such
+    as SSH and cloud keys. Secret values are redacted from what Octant records.
   - **Every level keeps the hard lines** in
     [Overview and principles](#overview-and-principles): no telemetry and the
     provider telemetry guards, the journal of every tool call and level
-    change, the secret guard's refusal in Octant's own file tools and its redaction in tool
+    change, the secret guard's refusal of provider sign-ins in Octant's own
+    file tools and its redaction in tool
     output, transcripts, logs, the journal, and exports, spend
     ceilings, remote clients never exceeding the host, an agent never
     marking a thread Done, credentials reaching providers only through the
@@ -13880,11 +14097,12 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     default for every new thread, Work and
     Code; Settings › Work and Settings › Code change it, a Project, Work or Code, may override
     it, and any thread can switch mode at any time from the composer in one
-    click (maintainer decision, 2026-10-31). Work has no Plan, so a Plan
-    answer leaves new Work threads at Ask first. A new Work thread takes its
-    Project's mode, else Work's default; a Project override can be Auto, Ask
-    first, Accept edits, or Full access, and a device the host's own person
-    did not pair cannot pick Full access for it.
+    click (maintainer decision, 2026-10-31). No Work thread starts in Plan,
+    so a Plan answer leaves new Work threads at Ask first. A new Work thread
+    takes its Project's mode, else Work's default; a Project override can be
+    Auto, Ask first, Accept edits, or Full access, and a device the host's
+    own person did not pair cannot pick Full access for it. A Work thread
+    moves to Plan from its own mode picker, as a Code thread does.
   - **Computer keeps its first-action ask** at every level, Full access
     included: it asks at the first action in each application, once per
     thread. The Browser asks at Full access only on a signed-in profile; a
@@ -14077,13 +14295,490 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   top to bottom, are Guarded (Ask first, Accept edits), Reviewed
   (Auto), and Full access; Plan is a read-only overlay:
 
-  | Mode         | Stored posture                   | Level              | Claude Code                                             | Codex                                                              |
-  | ------------ | -------------------------------- | ------------------ | ------------------------------------------------------- | ------------------------------------------------------------------ |
-  | Auto         | `approval-gated` + `autoApprove` | Reviewed           | `permissionMode: "auto"`, its sandbox                   | `untrusted` + external sandbox, `approvalsReviewer: "auto_review"` |
-  | Ask first    | `approval-gated`                 | Guarded            | `default`, its sandbox; Octant's gate decides each call | `untrusted` + external sandbox, reviewer `user`                    |
-  | Accept edits | `auto-accept-edits`              | Guarded            | `default`, its sandbox; in-root edits waived            | `untrusted` + external sandbox, in-root patch edits accepted       |
-  | Plan         | `plan`                           | Guarded, read-only | `plan`                                                  | `read-only` + `never`                                              |
-  | Full access  | `full-access`                    | Full access        | `bypassPermissions`, no sandbox                         | `danger-full-access` + `never`                                     |
+  | Mode         | Stored posture                   | Level              | Claude Code                                             | Codex                                                               |
+  | ------------ | -------------------------------- | ------------------ | ------------------------------------------------------- | ------------------------------------------------------------------- |
+  | Auto         | `approval-gated` + `autoApprove` | Reviewed           | `permissionMode: "auto"`, its sandbox                   | `on-request` + external sandbox, `approvalsReviewer: "auto_review"` |
+  | Ask first    | `approval-gated`                 | Guarded            | `default`, its sandbox; Octant's gate decides each call | `untrusted` + external sandbox, reviewer `user`                     |
+  | Accept edits | `auto-accept-edits`              | Guarded            | `default`, its sandbox; in-root edits waived            | `untrusted` + external sandbox, in-root patch edits accepted        |
+  | Plan         | `plan`                           | Guarded, read-only | `plan`                                                  | `read-only` + `never`                                               |
+  | Full access  | `full-access`                    | Full access        | `bypassPermissions`, no sandbox                         | `danger-full-access` + `never`                                      |
+
+  The Codex column is Strict's. Outside Strict, Codex's Auto, Ask first and
+  Accept edits in Work and Code run its own `workspace-write` sandbox in place
+  of the external one, with the same approval policies (built;
+  [Providers run in their own sandbox](#security-and-authority)). The Claude
+  Code column is today's; its sandbox changes per that rule (designed, not
+  built). Today Claude Code's Accept edits runs Claude's `default` mode
+  and Octant waives in-root edits itself, and Octant's gate judges each call
+  before Claude's own rules see the ones it would ask about
+  ([Provider runtimes: Full built-in tool set](design/provider-runtimes.md#full-built-in-tool-set)).
+
+  **The provider's own permission system decides, as on its own**
+  (maintainer decision, 2026-11-15; designed, not built):
+  - **Claude Code's own permission modes.** Octant maps its levels onto
+    Claude Code's native modes: Ask first to `default`, Accept edits to
+    `acceptEdits`, Auto to `auto`, Full access to `bypassPermissions`, and
+    Plan to `plan`. Claude Code's own permission engine and the person's
+    Claude Code rules decide each tool call, and Octant no longer
+    second-guesses a call Claude's rules allow. When Claude Code asks, the
+    ask reaches the person as an Octant approval, decided and journaled on
+    the server as today. Plan stays read-only and Chat has no shell.
+  - **Claude Code's full tool preset.** Outside Plan and Chat, Octant offers
+    Claude Code's full built-in tool preset with no Octant deny list.
+  - **OpenCode's `task` subagents** are always allowed outside Plan, instead
+    of following the level; Plan still denies them.
+
+  Rationale: each provider then behaves as its own documentation says, and
+  Octant's server still answers every ask the provider raises and journals
+  it, so no approval leaves the server's authority.
+
+  **Octant adds no restrictions of its own unless Strict is on**
+  (maintainer decision, 2026-11-16; partly built: slash commands, the
+  Strict setting, Project trust from Claude Code and Codex, the default
+  level, image generation, the resource queue, Work's Browser page scripts,
+  the local CLI's Full access flag, the home folder as an extra folder and
+  the items marked built below). A person who moves
+  from a provider's own CLI to Octant keeps every workflow that worked
+  there, and Octant restricts a provider no more than any other agent
+  workspace does. Outside Strict, the provider's own sandbox, permission
+  modes, settings and tools decide; Octant shows the provider's asks,
+  answers them on the server and journals them. At Full access Octant adds
+  nothing. Strict, set per thread, per Project or in Settings as above,
+  restores each of these protections:
+  - **Environment.** A provider receives the host's environment (proxies,
+    custom certificate authorities, `ANTHROPIC_BASE_URL`, Bedrock and Vertex
+    routing, `GH_TOKEN` and the rest), less Octant's own secrets and other
+    providers' keys. Strict keeps each runtime's fixed list. Built for
+    Claude Code, Pi and the ACP agents, read at each launch; OpenCode already
+    received the host's environment. Built for Codex: each account has a
+    Strict and an open launch environment, and a lease takes the one its
+    session's Strict value names (the lease is keyed on Strict, so the two
+    never share a process); an extra account still loses the host's Codex
+    keys either way.
+  - **Outside content.** Reading outside content still marks the thread
+    and shows it, but no longer withdraws the provider's own web search or
+    turns off Claude's `auto` or Codex's `auto_review` reviewer. Strict
+    keeps today's withdrawal. Built: Code's Auto keeps the provider's
+    reviewer (`harnessAutoReviewEffective`), and an Octant Harness turn
+    keeps its provider's own search for the whole turn
+    (`decideHarnessProviderSearch`).
+  - **Protected files.** A provider's own tools may read and write the
+    files Octant protects (`~/.aws`, kube, docker, npm and `gh`
+    configuration, `.netrc`) at every level, as on its own, so `aws`,
+    `kubectl`, `docker push`, private registries and `gh` work. Octant's own
+    file tools keep refusing them below Full access, and provider sign-ins
+    at Full access. Strict refuses them for every tool. Built for Claude
+    Code's own file tools (its gate refuses only another provider's sign-in
+    outside Strict) and for the confinement of Pi and the ACP agents
+    (`protectedFiles: "provider-sign-ins"`), read at each launch. Built for
+    Codex: outside Strict a Work or Code thread below Full access runs in
+    Codex's own sandbox, which reads them as Codex on its own does, and a
+    Plan or Chat lease keeps Octant's profile with only other providers'
+    sign-ins refused. Not built yet for OpenCode, whose processes are shared
+    per posture and do not yet key on Strict. Until
+    [Providers run in their own sandbox](#security-and-authority) is built for
+    a runtime, its wall still keeps files outside the Project's folders
+    unreadable, so outside Strict the narrowing reaches the protected files
+    inside them (a home folder opened as a Project).
+  - **Denials.** A denied request goes back to the model, which adjusts, as
+    on its own; no count of denials ends a Code turn, in Strict too (built:
+    the runtime answers every Deny and the turn keeps running).
+  - **Git and pull requests.** A provider's own `git push`, `gh` writes,
+    merge, force-push and push to the default branch follow its own
+    permission mode, and at Full access run unasked; the journal still
+    records each one with the hard line it crossed. Octant's own
+    pull-request tool and Octant Harness keep the merge rules and the
+    Project's "Agents may merge" switch. Strict asks for the provider's
+    commands too, as today. Built: Octant Shield's forge hard lines judge a
+    provider runtime's call only under Strict, and at Full access a
+    provider's command runs unasked and is journaled
+    (`shield-forge-changes.observed@1`) with the hard line it crossed.
+  - **Provider channels.** Telemetry, error reports, `/bug`, `/feedback`
+    and marketplace installs follow the person's own provider settings.
+    Self-update stays off, because Octant installs and updates provider
+    CLIs itself. Strict turns every channel off, as today. Octant itself
+    still sends nothing. Built for Claude Code, Pi, Mistral Vibe, Grok Build
+    and Kimi Code; Codex and OpenCode set no channel guard of Octant's.
+  - **Codex sign-ins.** Codex may use Amazon Bedrock through an AWS profile
+    or exported credentials. Strict refuses them, as today (built: only a
+    Strict session's lease refuses such a sign-in, with a sentence naming
+    Strict, and the account's probe stays ready for every other thread).
+  - **Slash commands.** A provider's own slash commands run in every mode
+    and level, Chat and Plan included; the level's tool rules decide what a
+    command may then do, so Plan stays read-only. Built: the host and the
+    drivers refuse no `/name` for the mode, and every composer lists the
+    provider's commands without a refusal row.
+  - **Claude artifacts and Claude Design.** With the account's switch on,
+    Claude's `Artifact` tool works as in Claude Code: every action (`publish`,
+    `quickstart`, `read`, `list`, updates and publishing from a type), so
+    `/design` and `/slides` work. The thread's Canvas or artifacts choice
+    decides only where Octant's own delivery instructions point, never
+    whether the tool is offered. A publish naming a local file follows the
+    thread's file rules (a file outside the Project asks below Full access).
+    Chat and Plan offer the read-only actions; publishing needs Work or
+    Code. Each thread publishes as its own Claude account; see
+    [Provider runtimes: Claude artifacts](design/provider-runtimes.md#claude-code).
+  - **Project trust.** A Project the person already trusted in the
+    provider's own CLI (Claude Code's accepted folder trust, Codex's trusted
+    projects) counts as trusted in Octant without a second click. Octant's
+    one card stays only where the provider has no trust record, standing in
+    for the prompt the provider's CLI would show. Strict requires Octant's
+    own trust for every Project. Built: the host reads Claude Code's
+    `projects["<folder>"].hasTrustDialogAccepted` in `.claude.json` (the
+    Project's folder or one above it) and Codex's `trust_level = "trusted"`
+    for the Project's folder in `config.toml`, under `CLAUDE_CONFIG_DIR` and
+    `CODEX_HOME` when set, when a session starts and when the trust prompt
+    asks; `projectTrustsProvider` is where Strict will plug in.
+  - **Default level.** A new thread still starts asking, as the providers'
+    CLIs do, and a person may choose Full access as their default level in
+    Settings (built: Settings › Code's Default mode and Settings › Work's
+    default access, behind the one-time warning).
+  - **Plan in Work.** Work threads get the Plan level, so the provider's
+    own plan mode, `EnterPlanMode` and `ExitPlanMode` work there as in Code.
+    Built: Plan is a Work thread's level (`access: "plan"`, never a Settings
+    or Project default), journaled through `change-work-thread-access` like
+    any level change and offered by the web and phone mode pickers, the
+    owner posture card and `octant agent --access plan`. In Plan, Work is
+    read-only on the host as Code's Plan is: the provider launches with
+    Code Plan's read-only profile and tool set (Claude's Plan tool list,
+    Codex's Plan collaboration mode), Octant Harness writes and commands are
+    refused, and every Work tool family refuses what changes something
+    (Browser effects past reading the open page, every Computer action,
+    Project memory writes, image generation and saves, sibling messages)
+    while helpers it starts run in Plan, and the artifact mirror and replica
+    sync refuse its Canvases. It may still propose a side task or a routine
+    and write its own Canvas. The agent's ask to plan first or to leave Plan
+    is a level-change request (a structured `levelChange` on the Work
+    approval, carrying the plan whole with paths and secrets redacted) that
+    Octant Shield and a provider's reviewer never answer; approving it moves
+    the thread as the person who answered and ends the turn, and an approved
+    plan returns the thread to the guarded level it left (its
+    `planReturnAccess`), never to Full access.
+  - **Project terminal.** The person's own Project terminal runs unconfined
+    by default, as the person's shell does outside Octant, and a Work
+    Project's terminal no longer runs at the approval-gated posture. Octant's
+    sandbox applies to it only under Strict, where it runs under a Code
+    thread terminal's confinement as before (built;
+    [Project terminals](#security-and-authority)).
+  - **After outside content.** Below Full access a thread that has read
+    outside content is still marked, but the mark no longer makes a network
+    MCP server ask again, every Computer action ask again, delegation ask
+    once, or a pull-request comment or review reply ask whatever the Project's
+    "Agents may comment on pull requests" switch says; the remembered grants,
+    the switch and the level decide as they did before the mark. Strict keeps
+    each of those asks, as today. Built for all four, each read at the call
+    from the effective Strict value.
+  - **Image generation.** At Full access, with several image profiles ready
+    and no kept choice, the card is skipped and the image is made on a default
+    profile (the one the person names in Settings, else the first ready one)
+    on its default model. "Ask again" in Project Overview still brings the
+    card back. Strict keeps today's card. Built: Settings › Voice & images ›
+    At Full access names the profile.
+  - **Resource queue.** A launch waiting on the host's
+    [local work resource limits](#local-work-resource-limits) keeps waiting,
+    cancellable and shown as waiting, instead of being refused after 30
+    minutes; the operation's own deadline and the queue's 128 entries stay
+    (built).
+  - **Browser page scripts in Work.** Below Full access a Work thread gets
+    Code's one-use, exact-source script permission under the same rules
+    ([Browser for agents: Bounded page scripts](design/browser-agent-tool.md#bounded-page-scripts));
+    built: both tools ask through one shared function
+    (`browserPageScriptPermission.ts`), and Work's `oneUsePermission` is
+    where Strict will keep Work refused.
+  - **Local CLI at Full access.** `octant agent` takes an explicit per-run
+    Full access flag the person sets on the command line: that run's thread
+    starts at Full access alone, journaled with the flag, never saving Full
+    access on the Project. A tool call another agent makes through
+    `octant agent mcp` still cannot choose it, outside an agent grant the
+    person set to Full access. Built as `octant agent --full-access`
+    ([Native harness: scripted callers](#native-harness)); Strict will refuse
+    the flag.
+  - **Home folder as an extra folder.** A Project's extra folder may be the
+    home folder, behind a warning naming what it opens; the credential
+    folders inside it (`.ssh`, `.aws`, `.gnupg`, `Library/Keychains` and the
+    rest) stay protected, a folder above home and the system folders stay
+    refused ([Projects with several folders](#projects-with-several-folders));
+    built: the host answers the home folder with its warning and a fresh
+    single-use receipt, and a confirmed resend adds it. Strict will refuse
+    the home folder; `homeFolderConfirmed` in the domain policy is where.
+  - **Stalled-turn limit.** At Full access the stalled-turn limit defaults
+    to Off; below Full access it stays 30 minutes, and the person may set
+    either. Strict keeps 30 minutes at every level (built: Settings ›
+    Providers & Models › Stalled-turn limit at Full access,
+    `fullAccessStalledTurnLimitMinutes`, Off by default; a Full access turn
+    under Strict, and every turn below Full access, takes the stalled-turn
+    limit).
+  - **Opt-in extras.** A per-person list of provider tools to block, and in
+    Strict a notice saying what Strict withheld.
+
+  Kept as product rules, since no provider feature depends on them: Plan is
+  read-only, Chat has no folder or shell (it is an extra mode, not a limit
+  on Work or Code), folders outside the Project ask below Full access as in
+  the providers, a question asking for a secret is refused and secrets are
+  never recorded, an account with Run as itself off keeps its own web tools
+  off, and one provider never receives another's credentials.
+
+  Rationale: people choose Octant for what it adds beside the provider, not
+  to lose what the provider already does. Protection stays available to
+  anyone who turns Strict on, and the server keeps answering and
+  journaling every ask either way.
+
+  **Octant's own limits become settings** (maintainer decision, 2026-11-16;
+  built: each limit below but the routine window is a host setting in
+  Settings › Permissions, journaled with the host's other settings, changed
+  at a local window or a device the host's own person paired, and read by the
+  server where it applies; the routine window is set per routine and
+  journaled with it). Under the
+  [unattended-work rule](#security-and-authority) a fixed constant needs a
+  reason beside it; these have none that protects a hard line, so each
+  becomes a setting with today's value as its default, and each owner keeps
+  today's text with a pointer here:
+  - **Agent wake-ups.** A recurring wake-up may fire as often as every
+    minute, as cron does, instead of every 5 minutes; the cap of 8 waiting a
+    thread and what happens to a missed run (today journaled as missed and
+    run only by the person's **Run now**; the setting may run it once on
+    return) become settings ([Scheduled wake-ups](#person-memory)).
+  - **Message wakes.** The wake bounds a thread outside a coordinator takes
+    (one wake turn at a time, 30 an hour, a hop count of ten) become settings
+    for every thread, as they already are per coordinator.
+  - **Coordinators.** How many coordinators a Code Project may hold becomes a
+    setting, default 4, and at Full access a coordinator's own file, shell
+    and Git actions follow the level instead of Plan's read-only gate
+    ([Coordinator threads](design/coordinator-threads.md)). The one place
+    that decides a coordinator turn's posture, `coordinatorTurnPosture` in
+    `@octant/domain`, is where Strict will keep Plan's gate at every level.
+  - **Pull requests.** A pull-request watch's end after ten started wakes or
+    three days, and Auto-fix's three attempts per failure.
+  - **Agent messages and children.** A turn's three thread messages, and a
+    child run's `wait` limit (120 seconds by default, up to an hour).
+  - **Browser.** A wait's 10 minutes (up to an hour; the host refuses a wait
+    past the setting, and a Claude Code thread still ends one tool call at
+    eleven minutes).
+  - **Routines.** A file routine's 64-run activity window can be cleared or
+    raised, and a setting, off by default, **Start agent-created routines
+    active at Full access** lets a routine an agent creates at Full access
+    start enabled instead of paused. The window is raised (up to 1,024 runs)
+    or cleared on the routine's detail and journaled with the routine, so
+    replay rebuilds the same overflow.
+
+  Rationale: a limit the person cannot change stops the workflow it was
+  meant to bound; the journal, spend ceilings and the person's Stop still
+  bound what an agent does.
+
+  **Paired devices act as the person** (maintainer decision, 2026-11-16;
+  partly built). "An authenticated paired device is the person" (the
+  [Full access rule](#security-and-authority)) is to be built for each place
+  that still refuses a device the host's own person paired, stopping computer
+  use first. Built: stopping computer use, which such a device does for every
+  session on the host
+  ([Computer use plugin](#extensions-and-skills)); the Project switches for
+  agents writing Project memory, pushing to the default branch and commenting
+  on pull requests; a thread's wake-ups
+  ([wake-ups](#modes-chat-work-and-code)); Safe networks and Network limits;
+  local work resource limits; growing an MCP grant by answering any prompt
+  whose thread still stands in its Project; and Full access and extension
+  install, built earlier. Each is journaled with the device as the actor. Not
+  built yet: a Project terminal and Project browser, the Browser's Take over
+  and Hand back, `sign-in`, profile pages and saved flows, finishing a
+  connector sign-in, creating an agent grant, approving a coordinator proposal
+  from the paired clients, Canvas HTML import, provider cloud sessions and
+  server Projects. Each owning section keeps its own "not built yet" line
+  until it is built. A device the host knows only through the hub's roster is
+  unchanged.
+
+  **Provider reach Octant no longer narrows** (maintainer decision,
+  2026-11-16; partly built: Ollama off loopback and Bedrock's AWS profile and
+  access keys are built, the rest is designed, not built):
+  - **Ollama off loopback.** An Ollama address on the local network or a
+    hosted Ollama is allowed, and plain HTTP to a private-network address is
+    allowed with a warning; a public address still needs HTTPS
+    ([Native harness](#native-harness)).
+  - **Bedrock request signing.** The designed "Use my AWS profile" is built,
+    and long-lived access keys are allowed with a warning (built; a profile
+    that only assumes a role is not read yet)
+    ([Providers and model endpoints: Amazon Bedrock](design/model-endpoints.md#organization-sign-in-amazon-bedrock)).
+  - **Unreviewed releases.** At Full access a provider release newer than
+    the one a version pin was reviewed against is offered as "unverified"
+    instead of losing the pinned features (Kimi Code's command inventory,
+    OpenCode's Octant tools, an ACP probe's claims); below Full access the
+    pin holds ([Provider runtimes](design/provider-runtimes.md)).
+  - **Linux parity.** Octant's tools reach OpenCode and ACP agents on Linux
+    as on macOS (built: the launch reaches the tool bridge on the shared host
+    network, or through the egress forwarder's loopback relay for the
+    bridge's port alone when Network limits proxy it;
+    [Provider runtimes](design/provider-runtimes.md)), and an outside
+    provider driver is admitted on Linux under the same trust steps as on
+    macOS (built: it runs without confinement and its provider row says so;
+    Strict, once built, keeps it `host-prohibited` there;
+    [Outside provider drivers](design/outside-provider-drivers.md)).
+
+  **Plan and Chat tool parity** (maintainer decision, 2026-11-16; partly
+  built). Plan and Chat keep their rules (Plan writes nothing, Chat has no
+  folder), and inside those rules a provider keeps what it offers on its own:
+  - **Read-only MCP servers in Plan** (designed, not built). A server's own
+    `readOnlyHint` is the server's claim and is never trusted. The person may
+    mark one MCP server "Read-only — allowed in Plan", per server and per
+    host, from the Settings surfaces that manage MCP servers today; the mark
+    is journaled, and a tool's `readOnlyHint` may pre-suggest the mark in the
+    dialog but never sets it. In Plan the tools of a marked server are offered
+    and run under the thread's ask rules; an unmarked server stays withheld,
+    as every server is in Plan today. It is to be wired for every provider
+    whose MCP servers Octant controls: Claude Code, Codex and OpenCode at
+    least. Until built, Plan starts no MCP server but Octant's own.
+  - **Provider memory, read-only** (built for Claude Code and Codex). Claude
+    Code loads its memory in Plan and Chat with the account's memory setting
+    on: the account's `CLAUDE.md` (in Chat the only instruction file, since
+    Chat has no Project) and its auto-memory under
+    `projects/<folder>/memory/`. Plan holds no write tool and its sandbox
+    binds the account folder read-only; Claude Code's own permission check
+    allows a Markdown write into its memory folder without asking, so in Chat
+    and Plan Octant's gate refuses every file write into the account's
+    `CLAUDE.md` or a memory folder, links resolved, before any level's allow,
+    with a sentence saying memory is read-only there. A shell command in Chat
+    stays held by Claude's own command sandbox. Codex keeps its memory off in
+    Plan and Chat at every setting, because Codex writes memories by itself
+    after a turn into `~/.codex/memories`, outside any tool call Octant's gate
+    could refuse. OpenCode, Mistral Vibe and the other providers keep no
+    memory behind a switch Octant sets, so nothing changes for them.
+  - **Linux Plan and Chat confinement admits processes** (built for OpenCode
+    2; Claude Code's Plan shell on Linux designed, not built). A Linux Chat or
+    Plan launch that needs to start processes runs in the same Bubblewrap
+    capsule with the process-denying seccomp filter left off: every bound
+    folder read-only, a private writable temp and the runtime's own state
+    folders the only writable roots, the launch's existing network rule, all
+    capabilities dropped, and Bubblewrap's no-new-privileges. Every other
+    rule of the capsule stays, and a capsule that cannot be built is refused
+    as today; a launch that needs no process (OpenCode 1.x, Pi, ACP agents)
+    keeps the filter. OpenCode 2 therefore runs Chat and Plan on Linux,
+    with its permission rules still denying its shell and delegation and the
+    always-failing `git` stand-in first on its `PATH`, as on macOS, so a
+    repository's own Git configuration never runs there. Claude Code's Bash
+    in Plan stays macOS only until Linux can hold it to macOS's rules: on
+    macOS the profile keeps the command from the runtime's network, its
+    account state (every session's transcript and, on Linux, the sign-in
+    file `.credentials.json`) and writes into its transcript, judged by the
+    program asking. One Bubblewrap capsule cannot tell the shell from the
+    runtime, so on Linux a Plan command could read the account's sign-in and
+    send it anywhere the runtime may reach. Building it needs a nested capsule
+    for the shell alone, or the maintainer's acceptance of that reach.
+  - **Files of any kind as attachments** (designed, not built). A person may
+    attach any file in every mode. Octant keeps it in an Octant-owned
+    attachments folder per thread under the host's data directory, never
+    inside the Project, journaled like an image attachment and under the same
+    size and count limits, and grants the session read access to that one
+    folder at every level, Plan and Chat included, read-only. A provider that
+    takes the file natively (a PDF where its API takes one, OpenCode's PDF
+    capability) gets it natively; any other gets the file's path in the
+    message and reads it with its own tools. The composer accepts any file
+    by choosing or dropping it and shows it as an attachment chip. Until
+    built, attachments are images only.
+
+  Rationale: Plan's and Chat's limits are what the person relies on, not
+  the absence of a tool; each of these keeps the limit at the boundary that
+  enforces it (the sandbox, the gate, or the person's own mark) instead of
+  withholding the tool.
+
+  **Plan and Chat tool parity** (maintainer decision, 2026-11-16; partly
+  built). Plan and Chat keep their rules (Plan writes nothing, Chat has no
+  folder), and inside those rules a provider keeps what it offers on its own:
+  - **Read-only MCP servers in Plan** (built for Claude Code, Codex and
+    OpenCode). A server's own `readOnlyHint` is the server's claim and is
+    never trusted. The person may mark one of a provider's own MCP servers
+    "Read-only — allowed in Plan", per server and per host, from Settings ›
+    MCP servers (the Claude Code and Codex tooling page lists each account's
+    servers with the switch, and any of the three providers' servers can be
+    marked by name), at a window on this computer or on a device the person
+    paired; any other caller is refused (`/api/mcp-plan-read-only`). Each
+    mark and unmark is journaled with who made it
+    (`mcp-plan-read-only.server-set@1`). A Plan session starts the marked
+    servers and no other, and only where the account loads its own setup at
+    all (`planReadOnlyToolServers`): Claude Code reads them from its home
+    settings under a flag `allowedMcpServers` list that also names Octant's
+    own server and keeps claude.ai connectors off, and its gate puts each
+    marked call to the person and refuses any other server's; Codex switches
+    every unmarked server in its effective config off by name; OpenCode
+    starts only the marked servers and asks about their tools, and in Plan
+    the person may answer exactly those calls, once each. A hosted (HTTP)
+    server works in Plan; one that runs on this computer may not start where
+    Plan's sandbox starts no program (OpenCode on macOS), which the Settings
+    page says. Not built: a tool's `readOnlyHint` pre-suggesting the mark,
+    since Octant does not connect to a provider's own servers to read it.
+  - **Provider memory, read-only** (built for Claude Code and Codex). Claude
+    Code loads its memory in Plan and Chat with the account's memory setting
+    on: the account's `CLAUDE.md` (in Chat the only instruction file, since
+    Chat has no Project) and its auto-memory under
+    `projects/<folder>/memory/`. Plan holds no write tool and its sandbox
+    binds the account folder read-only; Claude Code's own permission check
+    allows a Markdown write into its memory folder without asking, so in Chat
+    and Plan Octant's gate refuses every file write into the account's
+    `CLAUDE.md` or a memory folder, links resolved, before any level's allow,
+    with a sentence saying memory is read-only there. A shell command in Chat
+    stays held by Claude's own command sandbox. Codex keeps its memory off in
+    Plan and Chat at every setting, because Codex writes memories by itself
+    after a turn into `~/.codex/memories`, outside any tool call Octant's gate
+    could refuse. OpenCode, Mistral Vibe and the other providers keep no
+    memory behind a switch Octant sets, so nothing changes for them.
+  - **Linux Plan and Chat confinement admits processes** (built). A Linux Chat or
+    Plan launch that needs to start processes runs in the same Bubblewrap
+    capsule with the process-denying seccomp filter left off: every bound
+    folder read-only, a private writable temp and the runtime's own state
+    folders the only writable roots, the launch's existing network rule, all
+    capabilities dropped, and Bubblewrap's no-new-privileges. Every other
+    rule of the capsule stays, and a capsule that cannot be built is refused
+    as today; a launch that needs no process (OpenCode 1.x, Pi, ACP agents)
+    keeps the filter. OpenCode 2 therefore runs Chat and Plan on Linux,
+    with its permission rules still denying its shell and delegation and the
+    always-failing `git` stand-in first on its `PATH`, as on macOS, so a
+    repository's own Git configuration never runs there. Claude Code's Bash
+    in Plan runs on Linux under macOS's rules. On macOS the profile keeps the
+    command from the runtime's network, its account state and writes into its
+    transcript, judged by the program asking; one Bubblewrap capsule cannot
+    tell the shell from the runtime, so on Linux the runtime's capsule (which
+    then starts processes, `startsNestedCapsules`) runs each command through
+    `CLAUDE_CODE_SHELL_PREFIX` in a capsule nested inside it: the system and
+    Project folders and the thread's attachments folder read-only, no network
+    namespace but loopback, no home folder and so no account folder or
+    sign-in file (`.credentials.json`), an environment cleared of everything
+    but a fixed list (no API key, no proxy), the launch's private temp the
+    only writable folder, all capabilities dropped and no new privileges.
+    The prefix program sits in a folder of its own that the runtime's capsule
+    binds read-only. A host that cannot nest a capsule (Octant run as root,
+    nested user namespaces off) offers Plan no Bash tool, and a capsule that
+    fails to build fails its command; nothing runs in the runtime's capsule
+    instead.
+  - **Files of any kind as attachments** (built for Work and Code; Chat
+    designed, not built). A person may attach any file in every mode. Octant
+    keeps it in an Octant-owned attachments folder per thread under the
+    host's data directory (`code-threads/<thread>`, `work-threads/<thread>`),
+    never inside the Project, journaled like an image attachment and under
+    the same size and count limits, and grants the session read access to
+    that one folder at every level, Plan included, read-only: Claude Code's
+    command sandbox, its Plan confinement and the Linux Plan shell capsule
+    bind it read-only and its gate reads it unasked and refuses every file
+    write into it; Codex's and OpenCode's launch confinement bind it
+    read-only and OpenCode's rules allow reading it and deny edits there. At
+    Full access nothing is sandboxed, so only the gate's refusal of file
+    tools holds there. An image goes to a model that reads images as before;
+    a provider that takes the file natively gets it natively (a PDF to
+    OpenCode where its model reads documents); any other file is named in
+    the message by a path in that folder, a second name for the verified
+    file under its own name, and the agent reads it with its own tools. The
+    Work and Code composers and a paired phone accept any file by choosing or
+    dropping it and show it as an attachment chip; a paired device's upload
+    of any `type/subtype` is admitted on those routes. The folder is made
+    before the runtime launches, so a runtime started for a turn with no
+    file, which a later turn may reuse, already binds it. A thread in a
+    server Project works with the server's own file tools and this host's
+    folder is not there, and no transfer to the server exists, so a turn
+    carrying a file it would name by path is refused before it is accepted,
+    with a sentence saying to attach images or copy the file to the server;
+    images and natively taken files still go. Not built: Chat keeps its
+    image, text and PDF types.
+
+  Rationale: Plan's and Chat's limits are what the person relies on, not
+  the absence of a tool; each of these keeps the limit at the boundary that
+  enforces it (the sandbox, the gate, or the person's own mark) instead of
+  withholding the tool.
 
   Option names were read from the installed Agent SDK (0.3.211
   `PermissionMode`) and the Codex app-server schema (codex-cli 0.164.0
@@ -14102,8 +14797,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   and the Octant harness launch outside Octant's OS sandbox with the network
   open, and Octant answers every approval allow; an ACP agent also launches
   unconfined with no sandbox denials, because Full access means what it means
-  in the provider's own app; Octant's own file tools still refuse protected
-  paths. No call asks at Full access in Code, irreversible actions and
+  in the provider's own app; Octant's own file tools read protected paths
+  there and still refuse provider sign-ins. No call asks at Full access in Code, irreversible actions and
   publish-to-target included (`resolveToolCall`): the agent pushes, merges or
   publishes because the person asked in the thread, and the journal records
   the call. Outside content is recorded only: the thread keeps its taint for
@@ -14149,7 +14844,7 @@ access` agree); a thread's own change is journaled as
   `full-access` is remembered for the Code Project through the same
   `change-code-project-access` command `octant project access` sends, so it
   works the same on a host with no desktop window; a Work thread takes the
-  level through `change-work-thread-access` (no Plan overlay). Because the
+  level through `change-work-thread-access`, Plan included. Because the
   flag saves Full access on the Project rather than only on the new thread,
   the terminal says so and prints the `octant project access <name>
 approval-gated` command that undoes it. The terminal shows no one-time
@@ -14158,8 +14853,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `octant settings access <mode> [--work]` sets the global default new
   threads start at, Code unless `--work`, through `update-code-settings` /
   `update-work-settings`. A Work thread
-  takes the same levels without Plan: Settings › Work sets the one a new
-  thread starts at and its composer changes it
+  takes the same levels, Plan included, though Plan is never a default:
+  Settings › Work sets the one a new thread starts at and its composer
+  changes it
   ([Modes](#modes-chat-work-and-code)).
   One provider-owned exception is accepted: on OpenCode 2.x, approval-gated
   honours permission grants the person saved in OpenCode itself for the same
@@ -14577,7 +15273,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   that cannot cover a denied file is refused.
   Plan and Chat also load a seccomp filter that denies process-creating
   fork/clone (while allowing `clone` with `CLONE_THREAD` for pthreads) and
-  `execveat` after start, because Bubblewrap cannot block the first `execve`.
+  `execveat` after start, because Bubblewrap cannot block the first `execve`,
+  except a launch whose Chat and Plan capsule admits processes, which keeps
+  the read-only binds and leaves the filter off
+  ([Plan and Chat tool parity](#security-and-authority)).
   A launch that needs that filter fails closed as `incompatible` on a CPU
   other than x64 or arm64 or without an executable `/bin/sh`.
   Sensitive system roots remain denied even where runtime compatibility
@@ -14608,22 +15307,108 @@ approval-gated` command that undoes it. The terminal shows no one-time
   journal compatibility.
   A provider runtime launch is wrapped when the process carries exactly one
   thread's authority. The state below, which `providerProcessConfinement.test.ts`
-  pins against this table, is the accepted one: Claude keeps its own sandbox
+  pins against this table, is the accepted one today: Claude keeps its own sandbox
   outside Plan, and closing that gap is not an open goal. Octant says so rather than promising a boundary it
-  does not draw; a runtime that can be wrapped without losing what it needs is
-  taken as its own change. Full access gets no wrapper at all: every
+  does not draw. Full access gets no wrapper at all: every
   runtime and every command it runs launches as the program itself, with no
   profile, no Bubblewrap bind, and no credential-file or extension denials
   (maintainer decision, 2026-10-31: "softer guard — full access is full
   access"). Programs that apply a sandbox of their own, such as `swift package`
-  and headless Chromium, therefore run without extra flags.
+  and headless Chromium, therefore run without extra flags. The table and the
+  per-runtime notes after it describe the build as it ships; below Full access
+  they change per provider as the next rule says.
 
-  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                  | Plan's read-only enforced by                                                                                                                                                                                                               |
-  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `proxied` on macOS; `allow` on Linux         | Octant sandbox: no root write, no exec or fork                                                                                                                                                                                             |
-  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; commands `proxied` on macOS | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder; on macOS exec only zsh and listed read-only tools, which get no network and write only the launch temporary directory |
-  | Codex app-server (`codexProcess.ts`)                                      | Wrapped                         | Wrapped                                             | `proxied` on macOS; `allow` on Linux         | Octant sandbox: root read-only; writes only the account home (not its configuration) and a private temporary directory; Codex's own sandbox set to external                                                                                |
-  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Account-read wrapper            | Account-read wrapper                                | No network                                   | No turn runs; only its isolated account and private temporary state are available                                                                                                                                                          |
+  **Providers run in their own sandbox** (maintainer decision, 2026-11-15;
+  designed, not built). Octant's sandbox becomes the opt-in and the fallback:
+  - **The provider's own sandbox by default.** Below Full access, every
+    provider that has a sandbox of its own runs in it, as it does on its own.
+    Octant configures that sandbox, Claude Code excepted (below), rather
+    than wrapping it in Octant's Seatbelt or Bubblewrap profile: its writable roots are the Project's
+    folders, its network follows Network limits
+    ([provider runtime network](#provider-runtime-network)), and Octant's
+    protected paths ([secret guard](#secret-guard)) become its deny rules
+    wherever the provider supports them.
+  - **Native escalation is an Octant approval.** When the provider asks to
+    run one command outside its sandbox, the ask reaches the person as an
+    Octant approval at Guarded and Accept edits and Reviewed's reviewer at
+    Reviewed. Approved runs that one command; denied or unanswered stays
+    refused, and nothing is remembered for a later command.
+  - **Strict: Octant's sandbox as an opt-in.** Strict is set in the same
+    places as the [opt-in sandbox at Full access](#security-and-authority):
+    per thread, as a Project's default, and as the default in Settings, a
+    thread's request taking its Project's choice, else Settings', else off.
+    It runs the provider inside Octant's profile instead of its own sandbox
+    (for Codex, the profile the table below shows). Strict keeps provider
+    sign-ins, `~/.ssh` and cloud keys unreadable. A provider inside
+    Octant's profile has no native escalation, so a command that needs to
+    leave fails; Claude Code keeps its own request to leave its sandbox,
+    asked every time (below). The setting is built: a thread's choice
+    (`CodeThread.strict`, `WorkThread.strict`, changed with the mode), a
+    Project's default (`defaultStrict`, changed with the Project's default
+    mode) and the Code and Work defaults in Settings (`defaultStrict`; a
+    Chat thread, which has neither, is Strict when either Settings default
+    is), each shown with the trade-off it makes. The host reads it at each
+    launch and each call through one resolver (`createStrictResolver`),
+    never stamping it on the thread, so a thread that never chose follows
+    its Project and Settings as they are now; a launch that does not carry
+    the resolved value is Strict. A device the host's own person paired
+    turns it on or off as a local window does; a hub-introduced device and
+    an agent grant may turn it on, never off. Built for Codex: the provider's
+    own sandbox outside Strict (per runtime, below). Not built yet for the
+    other providers, which still run in the sandbox the table below shows
+    whether Strict is on or off.
+  - **Octant's sandbox stays the default** for providers with no sandbox of
+    their own: OpenCode, Mistral Vibe and Pi.
+  - **Per provider.** Codex runs its native workspace-write sandbox and its
+    own escalation; macOS refuses a Seatbelt profile inside another, so the
+    native sandbox replaces Octant's profile rather than running in it.
+    Claude Code is the exception to Octant configuring the native sandbox:
+    Octant leaves Claude's sandbox alone. It runs exactly as the person's own
+    Claude Code settings configure it, as in Claude Code on its own, and
+    Octant passes it no sandbox settings at all: no writable roots, no
+    network, no read or deny rules, and no change to when sandboxed commands
+    run unasked. Claude's own request to run a command outside its sandbox
+    becomes the Octant approval above. Plan keeps its read-only confinement.
+    Under Strict, Octant cannot wrap Claude's sandbox in its own profile,
+    since macOS refuses nested Seatbelt, so Strict for Claude Code is
+    today's configuration of Claude's own sandbox: reads and writes held to
+    the Project's folders, network per Network limits, and
+    `autoAllowBashIfSandboxed: false`, and Claude's own request to run one
+    command outside it still asks every time, as today (maintainer decision,
+    2026-11-16). Gemini CLI and Qwen Code use their
+    native sandboxes. Copilot CLI and Cursor follow once their ACP releases
+    are checked for a sandbox Octant can configure, and Grok Build once it is
+    known why its launch sets `GROK_SANDBOX=off`; until then each keeps
+    Octant's profile.
+  - **Unchanged.** Server-side approval authority and journaling; Plan's
+    read-only enforcement and no shell in Chat; the paired-device and
+    routine rules; never handing one provider another's credentials;
+    marking and showing outside content; and Full access, which keeps no
+    sandbox unless the thread keeps one. The rest of what Octant adds
+    moves into Strict under
+    [Octant adds no restrictions of its own unless Strict is on](#security-and-authority).
+  - **Not built, and not part of this rule:** a host-side command executor
+    that runs a provider's commands for it, and restarting a session at wider
+    authority.
+
+  Rationale: a provider's own sandbox carries its native escalation, so a
+  command that needs to leave asks the person instead of failing at Octant's
+  wall (Codex cannot raise that ask under an external sandbox, as the Codex
+  notes below record), and the provider then behaves as its own
+  documentation says; Claude Code is left wholly to the person's own Claude
+  Code settings for the same reason. Octant's profile cannot hold a native sandbox inside
+  it on macOS, which refuses nested Seatbelt, so keeping the wall means
+  giving the native sandbox up. The accepted trade-off: below Full access a
+  provider's native sandbox may allow reads outside the Project, other
+  credentials included, as the provider on its own does; a person who wants
+  those reads closed turns Strict on.
+
+  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                                                     | OS egress below Full access                  | Plan's read-only enforced by                                                                                                                                                                                                               |
+  | ------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                                                               | `proxied` on macOS; `allow` on Linux         | Octant sandbox: no root write, no exec or fork                                                                                                                                                                                             |
+  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only                                   | `allow` on Plan; commands `proxied` on macOS | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder; on macOS exec only zsh and listed read-only tools, which get no network and write only the launch temporary directory |
+  | Codex app-server (`codexProcess.ts`)                                      | Wrapped                         | Wrapped under Strict; outside Strict unwrapped in Codex's own workspace-write sandbox | `proxied` on macOS; `allow` on Linux         | Octant sandbox: root read-only; writes only the account home (not its configuration) and a private temporary directory; Codex's own sandbox set to external                                                                                |
+  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Account-read wrapper            | Account-read wrapper                                                                  | No network                                   | No turn runs; only its isolated account and private temporary state are available                                                                                                                                                          |
 
   Wherever a row names the root or the checkout, a Project's extra folders
   get the same rule ([Projects with several folders](#projects-with-several-folders)).
@@ -14654,8 +15439,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   - **Claude Agent SDK:** unwrapped as in Code's approval-gated posture; the
     runtime's own sandbox holds commands to the Project root, and its
     permission prompts carry each command to the person at Guarded.
-  - **Codex app-server:** wrapped at Guarded and Reviewed as in Code, with
-    the lease keyed by root, mode, and posture (below); the shell runs inside
+  - **Codex app-server:** outside Strict, unwrapped at Guarded and Reviewed in
+    Codex's own workspace-write sandbox (below); under Strict, and in Plan and
+    Chat at every Strict value, wrapped as in Code, with the lease keyed by
+    root, mode, posture and Strict (below); a wrapped shell runs inside
     Octant's profile, so `~/.ssh` is reachable only through the person's SSH
     agent or a server registered with Octant Shield. At Full access unwrapped.
   - **Octant Harness:** gives the Work thread the shell port a Code harness
@@ -14674,10 +15461,31 @@ approval-gated` command that undoes it. The terminal shows no one-time
   resident and starts under the profile in 130 to 260 ms. macOS refuses a
   Seatbelt profile inside another (`sandbox_apply: Operation not permitted`),
   so Codex's own sandbox cannot run inside Octant's. Each turn tells Codex the
-  sandbox is external (`externalSandbox`, network `restricted`), and both
-  prompting postures run `untrusted`, because under an external sandbox
-  `on-request` runs every command without asking. Approving a command no
-  longer lifts any sandbox: it runs inside Octant's profile. Under that
+  sandbox is external (`externalSandbox`, network `restricted`). Under an
+  external sandbox `on-request` runs every command Codex does not flag as
+  dangerous without asking, so Auto runs `on-request` with Codex's reviewer,
+  as Codex's own Auto does, and its commands run unasked inside Octant's
+  wall; Ask first and Accept edits run `untrusted` and keep asking. Codex
+  cannot ask to leave Octant's wall under an external sandbox, so a command
+  that needs to fails there (not built yet: carrying that ask; see
+  [Provider runtimes: Codex](design/provider-runtimes.md#codex)). Under
+  [Providers run in their own sandbox](#security-and-authority) (built for
+  Codex) a Work or Code thread outside Strict leaves Octant's profile below
+  Full access for Codex's native workspace-write sandbox, whose escalation
+  carries that ask: the process runs unwrapped, each turn sends
+  `sandboxPolicy: { type: "workspaceWrite" }` with the Project's folders as
+  `writableRoots` and `networkAccess` true unless the launch took the egress
+  proxy (Network limits on), which the runtime's own traffic keeps, and an
+  approved command is answered `accept`, never `acceptForSession`, so it runs
+  that one command and nothing is remembered. The thread starts
+  `workspace-write`, with the approval policies above. That lease is keyed on
+  Strict as well as root, mode and posture, so it never serves a Strict
+  session. Plan and Chat stay in Octant's read-only profile at every Strict
+  value, and Strict keeps Octant's profile as described here. The
+  workspace-write policy a turn sends takes no deny rules, so Octant's
+  protected paths are not Codex deny rules (not built yet: a named Codex
+  permissions profile could carry them). Inside Octant's profile approving a
+  command no longer lifts any sandbox: it runs inside Octant's profile. Under that
   profile a Codex command cannot read `HOME` outside the root and the account
   home, and cannot write the account home's configuration, `.env`, rules,
   skills, hooks, plugins, prompts, or instructions. The runtime's own reach is
@@ -14693,7 +15501,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   (`allowUnsandboxedCommands` with `dangerouslyDisableSandbox` on `Bash`),
   only after it asks at Guarded and Accept edits or passes the reviewer at
   Reviewed, and never in Plan (maintainer decision, 2026-11-14;
-  [detail](design/provider-runtimes.md#full-built-in-tool-set)).
+  [detail](design/provider-runtimes.md#full-built-in-tool-set)). Today Octant
+  sets that sandbox's folders and network and keeps sandboxed commands
+  asking; under [Providers run in their own sandbox](#security-and-authority)
+  (designed, not built) it passes Claude's sandbox no settings at all, and
+  keeps today's configuration only under Strict.
   At Full access a Codex command reaches the whole disk,
   and the launch environment is the same in every posture. Octant
   therefore gives the Codex runtime no reusable cloud credential the person
@@ -14724,7 +15536,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   without the shared builder unless it is named here. The ACP/OpenCode/Pi row has one
   carve-out from "no exec or fork". On macOS, an OpenCode 2 Chat, Plan or Work
   launch may fork and may exec exactly `/usr/bin/false`, which is its Git
-  stand-in (described below). Oh My Pi's probe is a held gap, not
+  stand-in (described below). On Linux, where one exec cannot be granted
+  alone, an OpenCode 2 Chat or Plan launch may start processes inside its
+  read-only capsule, with the same stand-in first on its `PATH`
+  ([Plan and Chat tool parity](#security-and-authority)). Oh My Pi's probe is a held gap, not
   an exception. Octant-owned tools those threads reach stay confined either
   way. A runtime's own built-in tools run under the sandbox its row names:
   Codex's shell under Octant's, Claude's Bash on the postures that write under
@@ -14748,14 +15563,18 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `DISABLE_FEEDBACK_COMMAND`; the second is not in the public reference, but
   both installed binaries carry it beside the first), the session-quality
   survey (`CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`), auto-memory, the SDK's
-  built-in agents, and marketplace auto-install. The provider's own memory
+  built-in agents (lifted whenever the person's own subagents are on, the
+  default, since they are Claude Code's own general-purpose and Explore
+  subagents), and marketplace auto-install. The provider's own memory
   alone has a setting per key provider account, on by default, that the
   person turns off (maintainer decision, 2026-11-14; built for Work and Code
   launches outside Plan, [Modes](#modes-chat-work-and-code)): such a launch goes
   without `CLAUDE_CODE_DISABLE_AUTO_MEMORY` alone, which the bundled runtime
   (Agent SDK 0.3.211) reads on no other path; its memory then lives under the
   account's configuration directory, in `projects/<session folder>/memory/`.
-  A Plan launch, a Chat launch, and the version read keep the guard.
+  The version read keeps the guard. A Plan or Chat launch goes without it on
+  the same setting, its memory read-only
+  ([Plan and Chat tool parity](#security-and-authority)).
   Telemetry and self-update stay off. The runtime's release-note,
   PR-badge, and availability checks are therefore its own traffic to
   Anthropic under the person's account; they carry no Project content.
@@ -14765,8 +15584,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   person chose Claude artifacts, below: its launches go without
   `DISABLE_TELEMETRY` and so send the runtime's usage telemetry. A channel with no switch of its own is closed by the
   launch shape instead: `/share`, like any slash command, runs only when the
-  person sends it from a Work or Code composer outside Plan, as in the
-  runtime's own terminal (the model cannot invoke one, and Octant itself
+  person sends it from a composer, as in the runtime's own terminal, under
+  the level's tool rules (the model cannot invoke one, and Octant itself
   sends none but `/compact`); a plugin's background `command`
   runs only where the person's own setup loads it: with that setup off the
   query is opened with no setting sources, plugins, skills, agents, or MCP
@@ -14791,7 +15610,23 @@ approval-gated` command that undoes it. The terminal shows no one-time
   the umbrella on every launch, and one that exports a truthy
   `DISABLE_TELEMETRY` or `DO_NOT_TRACK` keeps `DO_NOT_TRACK=1` on every
   launch; only those disabling values cross (the runtime then withholds
-  `Artifact` as well).
+  `Artifact` as well). Everything in this paragraph is the launch under
+  Strict. Outside Strict (built, under
+  [Octant adds no restrictions of its own unless Strict is on](#security-and-authority))
+  a Claude launch gets the host's environment less Octant's own variables
+  (`OCTANT_*`) and every other model provider's credential
+  (`providerHostEnvironment`); the account's own sign-in still decides
+  which account a turn runs as, so no host Anthropic key or token crosses,
+  Octant's account directory is applied, and an API-key account gets its
+  broker key. It sets only the self-update, auto-memory and built-in-agents
+  switches (`OPEN_CLAUDE_LAUNCH_GUARDS`); telemetry, error reports, `/bug`,
+  `/feedback`, the survey and marketplace auto-install follow the person's
+  own Claude Code settings, and the Claude artifacts switch below lifts
+  nothing, because nothing of Octant's sits on telemetry there. Pi's
+  telemetry and the ACP agents' channel guards (Mistral Vibe, Grok Build,
+  Kimi Code; `channelGuards`) follow the person's own settings the same way,
+  and those launches get the host's environment on the same terms. OpenCode
+  already launches with the host's environment and sets no channel guard.
   **Claude artifacts (a person-authorized external publish and an opt-in
   telemetry exception).** The one place a Claude launch sends Project content
   to Anthropic other than as inference, and the one place it sends the
@@ -14941,10 +15776,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Linux keeps the login in
   a file inside the account directory, which the launch already holds, and
   Seatbelt rules do not apply there.
-  A Code Plan turn on macOS may run read-only commands through the Bash
-  tool (`claudePlanRunsCommands`, `planCommandRules`). Only a launch that
-  offers the Bash tool gets the grants below; a Chat or Work Plan launch
-  and the readiness probes keep no fork and no exec but their own. The
+  A Work or Code Plan turn on macOS may run read-only commands through the
+  Bash tool (`claudePlanRunsCommands`, `planCommandRules`). Only a launch
+  that offers the Bash tool gets the grants below; a Chat launch and the
+  readiness probes keep no fork and no exec but their own. The
   launch may fork,
   and may exec exactly these programs, by literal and resolved path:
   `/bin/zsh` (pinned as the tool's shell through `CLAUDE_CODE_SHELL`;
@@ -14994,9 +15829,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   else the launch may read, checkout secrets and files outside the home
   folder included, into the model's context (which goes only to the
   provider), and write the launch's temporary
-  directory, which is removed when the runtime exits. On Linux the Plan
-  launch keeps its fork-denying seccomp filter, and Plan offers no Bash
-  tool there. Before a confined launch starts, the
+  directory, which is removed when the runtime exits. On Linux each Plan
+  command runs in a Bubblewrap capsule nested inside the runtime's, which
+  holds it from the runtime's network, account state and sign-in as the
+  macOS rules do; a host that cannot nest a capsule offers Plan no Bash
+  tool ([Plan and Chat tool parity](#security-and-authority)). Before a confined launch starts, the
   `claude auth status` check that readiness uses runs inside that launch's
   sandbox: a sign-in the sandbox cannot read refuses the turn with the step
   that fixes it, instead of failing after the turn has started. Octant
@@ -15040,15 +15877,17 @@ approval-gated` command that undoes it. The terminal shows no one-time
   attests at a directory with a `.git` marker under the Chat/Plan
   confinement and fails closed — listing-only, no turns — if a future
   OpenCode treats the failing git as fatal. Linux confinement cannot express
-  that one exec without also allowing fork, which is the hole the Plan jail
-  exists to close. On Linux a 2.x runtime therefore runs turns where a shell
-  is already allowed, Work and Code at Ask first, Auto, Accept edits and Full
-  access, whose launches allow fork and exec as they do on macOS; a Chat or
-  Plan launch is refused before it starts, naming that reason (maintainer
-  decision, 2026-11-14). The Linux probe attests the Code jail at Ask first,
-  and the capability report says so per mode (`turnModes`: Chat and Plan
-  unsupported, `host-confinement`). App-managed tools stay macOS only and
-  pinned to the measured releases.
+  that one exec without also allowing fork, so a Linux 2.x Chat or Plan launch
+  runs in the read-only capsule that admits processes, with the same stand-in
+  first on its `PATH`, and the Linux probe attests that capsule (maintainer
+  decision, 2026-11-16, replacing the 2026-11-14 refusal;
+  [Plan and Chat tool parity](#security-and-authority)). On a host that is
+  neither, a 2.x runtime runs turns only where a shell is already allowed,
+  Work and Code outside Plan; a Chat or Plan launch is refused before it
+  starts, naming that reason, and the capability report says so per mode
+  (`turnModes`: Chat and Plan unsupported, `host-confinement`). App-managed
+  tools are offered on macOS and Linux and stay pinned to the measured
+  releases.
   Discovery re-allowances — a runtime asking whether a path exists and what it
   resolves to, not to read it — follow one rule. Each names an exact literal
   node, never a subpath, so entries inside it stay denied; a subpath grant is
@@ -15239,7 +16078,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     only from the 2.x release whose events and routes were read (2.2.0); an
     older 2.x release reports no file changes, and it and every 1.x release
     report compaction `unavailable` (not built yet for 1.x, whose server was
-    not read for either). It offers Octant's tools only on macOS
+    not read for either). It offers Octant's tools only on macOS and Linux
     in the verified isolated configuration, which is the release and platform
     boundary, not a gap. A 2.x runtime whose confined jail cannot serve a Git
     work tree is listing-only: models show, no turn is offered. Rationale: a
@@ -15260,8 +16099,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     ([Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface)).
     A spend ceiling leaves other ACP turns out and says so. They report no file changes or diffs, ask no user
     questions on Mistral Vibe and fx, resume only when the agent offers load or
-    resume, and offer Octant's tools only on macOS when the agent serves HTTP
-    MCP. fx is also refused in Chat and Plan.
+    resume, and offer Octant's tools only on macOS and Linux when the agent
+    serves HTTP MCP (Linux under
+    [Provider reach Octant no longer narrows](#security-and-authority);
+    built). fx is also refused in Chat and Plan.
   - **Ollama** carries the Octant Harness agent loop over the local service on
     literal loopback, like the harness endpoints: no provider approvals,
     questions, or file changes, Octant's tools per verified model (a model
@@ -15296,7 +16137,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     and `features.unified_exec` on and its own approval policy for the level;
     Reviewed uses its own approval review or Octant Shield.
   - **OpenCode** stops denying `bash` and `task` in Work; the person's own
-    OpenCode permission rules apply over the level. It has no reviewer of
+    OpenCode permission rules apply over the level. (`task` is to be allowed
+    outside Plan at every level, per
+    [the provider's own permission system decides](#security-and-authority);
+    designed, not built.) It has no reviewer of
     its own, so Reviewed uses [Octant Shield](#octant-shield).
   - **Pi** starts with its shell tool; Reviewed uses Octant Shield there too.
   - **ACP agents**, Mistral Vibe included, get their `execute` requests sent
@@ -15471,7 +16315,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   device is refused outright: a remote Code terminal is gated as an agent,
   and a Project terminal has no thread to hold that approval. The shell runs under the posture a new thread
   in the Project starts with, approval-gated or Full access where a Code
-  Project remembers it (a Work Project's terminal is approval-gated); Plan never applies, because nothing plans in it. The owning
+  Project remembers it (a Work Project's terminal is approval-gated); Plan never applies, because nothing plans in it. Built: outside Strict the terminal runs unconfined, a Work Project's included, read at each start from the task's Strict value for a terminal opened for a Work task, else the Project's (its own default, else its mode's Settings default); a terminal on a Plan checkout stays read-only ([Octant adds no restrictions of its own unless Strict is on](#security-and-authority)). The owning
   window, Project, and binding revision are checked before every command, and
   another window cannot attach. Its lifecycle is journaled on its own
   `project-terminal` aggregate (`code.project-terminal-started@1`,
@@ -15777,18 +16621,27 @@ approval-gated` command that undoes it. The terminal shows no one-time
   connected client, so the child asks exactly where the parent would and
   the request reaches Octant. A request sent while no connection of the
   owner's is listening waits until Codex closes that agent; it is never
-  approved. Built for
+  approved. With the account's setup off, the resolved setup has subagents
+  off unless the thread chose On, the Work or Code Project trusts Codex, or
+  a Work or Code thread runs at Full access, and a thread's Off turns them
+  off everywhere; there the app-server is leased with those switches set
+  false, so Codex's own subagents never start. Built for
   OpenCode: each session its `task` tool delegates to is shown as a child run,
   and a permission or question request from it reaches the person through the
   parent's own approval path and is answered in the child's session; its web
-  reads mark the thread. Built for Mistral Vibe at Full access in Work and
-  Code only, with the person's setup on: below that `VIBE_ENABLE_SUBAGENTS`
-  stays `false`, and a call whose `_meta.child_session_id` names a child is
-  shown as a child run. Rationale, read from the 3.0.3 source: Vibe offers
-  subagents by default and forwards a child's permission request to the
+  reads mark the thread. Built for Mistral Vibe in Work and Code outside
+  Plan, at every level there, with the person's setup on: the launch unsets
+  `VIBE_ENABLE_SUBAGENTS`, and with it `VIBE_AGENT_PATHS`,
+  `VIBE_INSTALLED_AGENTS`, and `VIBE_ENABLED_AGENTS`, so a subagent may run
+  as one of the person's own custom or installed agents; Plan and Chat keep
+  `VIBE_ENABLE_SUBAGENTS` `false` and the agent allowlist. A call whose
+  `_meta.child_session_id` names a child is shown as a child run. Read from
+  the 3.0.3 source: Vibe forwards a child's permission request to the
   parent's `session/request_permission` naming only the child's own history
-  entry, which the parent's updates never announced, so Octant could
-  neither show what it asks nor apply a tool kind's rule.
+  entry, which the parent's updates never announced, so the approval says
+  Vibe names no tool and the thread's level decides it, and a custom agent
+  may approve its own tools as in Vibe itself (maintainer decisions,
+  2026-11-14; [detail](design/provider-runtimes.md#key-providers)).
 - **Canvas design images.** A design frame never loads anything itself. The
   server resolves the images a design declares on every read, through the
   authorized Canvas read and under the version's mode, Project, and thread: a
@@ -17788,12 +18641,15 @@ cards; general Azure CLI credentials remain unavailable by design.
     every redirect instead of giving a command a credential lease.
 - **A refused read names its rule and channel.** Octant's own file tools
   (the Octant Harness's read, write, edit, and grep; the ACP client's file
-  read and write) answer a protected path at every level, Full access
-  included, and Claude Code's file tools, through Octant's tool gate, at
-  every level below Full access (at Full access Claude reads and writes any
-  file, as it does on its own; maintainer decision, 2026-11-14), with the
-  group, the path, and the channel to use instead (`protectedFileRefusal`). The Octant Harness's
-  search across a folder skips protected files without opening them.
+  read and write) and Claude Code's file tools, through Octant's tool gate,
+  answer a protected path at every level below Full access, with the group,
+  the path, and the channel to use instead (`protectedFileRefusal`). At Full
+  access Claude reads and writes any file, as it does on its own (maintainer
+  decision, 2026-11-14), and Octant's own file tools read and write any
+  protected path except a provider sign-in, which they refuse the same way
+  at every level (`secretGuardRefusal` with `fullAccess`; maintainer
+  decision, 2026-11-15). The Octant Harness's search across a folder skips
+  the files it would refuse without opening them.
   Claude Code's Grep, Glob, and LS take no exclusion and, at the postures
   where the runtime runs outside Octant's profile below Full access
   (approval-gated and auto-accept-edits), run in its unwrapped process, so a search rooted at or
@@ -17878,8 +18734,9 @@ cards; general Azure CLI credentials remain unavailable by design.
   for an SSH remote. Not measured: a push over SSH or HTTPS to a real server,
   a real publish, and a container pull.
 - **Known gaps.** At Full access a shell command, or any program the agent
-  starts, can read a protected file: only Octant's own file tools and
-  redaction stand in the way, by decision. On Linux a protected file absent
+  starts, can read a protected file, and so can Octant's own file tools,
+  which refuse only provider sign-ins there: redaction stands in the way, by
+  decision. On Linux a protected file absent
   when a confined runtime starts is not covered, because Bubblewrap would
   have to create a placeholder in the person's home folder first; a file
   created mid-session is covered from the next launch. Below Full access
@@ -17989,8 +18846,11 @@ link-local address is refused. Each list is journaled whole, journal first, as
 fixed id, or the Project's), and `safe-networks.project-override-cleared@1`
 returns a Project to the default, and `safe-networks.limits-set@1` records the
 Network limits switch; startup replays them. Only the person changes them, at a
-local window or, not built yet, a paired device (`GET`/`POST
-/api/access/safe-networks`). A harness
+local window or on a device the host's own person paired (`GET`/`POST
+/api/access/safe-networks`, forwarded for that device; built): the payload's
+`principal` reads `local-window` or `person-paired-device` and the event's
+actor names the device. A device the hub's roster introduced is refused
+(`needs-local-window`). A harness
 command's proxy falls back to the places of its thread's Project after the
 thread's and Project's rules refuse, and a private answer passes for it only
 through a place, as for a runtime. Taint suspends places for a command as it
@@ -18374,7 +19234,7 @@ permissions), with credential-shaped text redacted and cut to 8 KB; a write's
 contents, a tool's output, and the runtime's own reason stay out. Codex's
 request to widen its own sandbox is a privilege change, which Shield hands to
 the person. An allow or deny goes straight back to the runtime for that one
-call and does not count toward the three refusals that end a turn; an ask is
+call; an ask is
 the ordinary approval. Every automatic answer, and every answer on a child
 run's behalf, carries the seam's one-call scope (`ProviderApprovalAnswer.scope:
 "once"`): no driver remembers it for the session or the Project or asks the
@@ -18523,7 +19383,9 @@ Work and Code run on Windows at Full access with the sandbox off (step 3 of
 the [Windows sequence](#current-release-boundary) below; maintainer request,
 2026-11-15); every guarded level, and Full access with the sandbox kept, stays
 refused there until the Windows confinement launcher has run a real provider
-on a person's Windows machine. Finding and removing worktrees on this computer is
+on a person's Windows machine (decided otherwise
+under [Windows below Full access](#current-release-boundary) below; designed,
+not built). Finding and removing worktrees on this computer is
 authorized on Windows hosts too (maintainer request, 2026-11-11): it runs
 host-side Git and file operations a person confirms, starts no agent, and so
 does not lift that confinement gate. Everything on the work board is in scope for the first
@@ -18538,6 +19400,20 @@ Public store distribution, the Windows sequence below, and the full
 LSP / extension host / debugger companion are release-scope choices the
 maintainers schedule, not safety rules; none of them protects an invariant by
 itself.
+
+**Windows below Full access** (maintainer decision, 2026-11-16; designed, not
+built; this widens the release boundary above). On Windows the levels below
+Full access are allowed using each provider's own approvals and, where it has
+one, its own sandbox, with no Octant sandbox claimed: the mode picker and the
+thread say that Octant's sandbox does not run there, and Strict, which needs
+it, stays unavailable on Windows until the confinement launcher has run a
+real provider. The Claude, OpenCode, Pi and ACP agent families are to be
+built on Windows, and Project actions are allowed there, run in the terminal
+shell Settings › Code names. Plan stays read-only through the provider's own
+plan mode, and an Octant tool keeps its own refusals. Rationale: a person on
+Windows gets the same provider behaviour the provider's own CLI gives there;
+claiming a sandbox Octant cannot enforce would be the dishonest part, so the
+picker names what is missing instead of refusing the level.
 
 Also in scope, each design-first (build it only once its owning specification
 documents its authority, privacy, and release boundaries):
@@ -18583,7 +19459,7 @@ documents its authority, privacy, and release boundaries):
 - The [guardrail levels](#security-and-authority) and the
   [key providers' native features](#providers). Built in Code: Ask first,
   Accept edits, Auto (with the key CLI providers' own reviewers), Plan and Full
-  access. Built in Work: Auto, Ask first, Accept edits and Full access.
+  access. Built in Work: Auto, Ask first, Accept edits, Plan and Full access.
   [Octant Shield](#octant-shield) is in scope; its Judge is built for every
   runtime that routes approvals through Octant, and its Watcher for the
   results Octant hands a model.
@@ -18652,7 +19528,9 @@ This unsigned QA archive is not an installer, a usable Windows release, or an
 enabled signed-update channel, and no workflow publishes it to a release;
 native host admission and credentials remain separate prerequisites. The
 release form is the signed per-user installer of step 5 below. Windows Work and
-Code below Full access stay unavailable: the confinement port refuses Windows
+Code below Full access stay unavailable today (decided: allowed with the
+provider's own approvals and no Octant sandbox claimed, under
+[Windows below Full access](#current-release-boundary); designed, not built): the confinement port refuses Windows
 unless its caller opts into the dormant launcher, which no production caller
 does, so the guarded levels fail closed there. Full access uses no confinement,
 so Work and Code run there on Windows (step 3 below). Simulator, the Apple workbench, and vibrancy stay
@@ -18677,8 +19555,10 @@ deliverable and keeps every gate above:
    2026-11-15: build it now, without waiting for the launcher):
    - **The level gate.** A Work turn, a Code turn and every Code operation on
      a thread (terminal, tests, and the rest) on a Windows host run only at
-     Full access with the sandbox off. Anything else is refused on the server
-     before it is journaled or starts a process, with the reason that Windows
+     Full access with the sandbox off (decided: the guarded levels are to run
+     there too, under [Windows below Full access](#current-release-boundary); designed, not built).
+     Anything else is refused on the server before it is journaled or starts a
+     process, with the reason that Windows
      has no Octant process sandbox yet (`hostSandboxRefusal` in the domain's
      `guardrailPolicy.ts`). The gate reads the level the work runs at: a Work
      turn's level clamped to its caller's ceiling, a Code turn's composer
@@ -18699,7 +19579,8 @@ deliverable and keeps every gate above:
      inherited environment names a Windows shell needs (`SYSTEMROOT`,
      `USERPROFILE`, `PSMODULEPATH` and their kin) added to the terminal's
      allowlist. A Project action is written for a POSIX shell and is refused
-     on Windows. Close confirms the stop by the shell's pid, because ConPTY
+     on Windows (decided: allowed, under
+     [Windows below Full access](#current-release-boundary)). Close confirms the stop by the shell's pid, because ConPTY
      reports a shell's exit about 25 seconds after the process ends
      (measured on `windows-2025`).
    - **Ownership receipts.** An owned process's identity on Windows is its
@@ -18774,10 +19655,12 @@ deliverable and keeps every gate above:
      are unavailable on Windows: the Claude, OpenCode, Pi and ACP agent
      families, whose version read, catalog and launch preparation have not
      been given the Windows form Codex has (their confined reads refuse there,
-     so each reports itself unavailable); the
+     so each reports itself unavailable; decided: to be built, under
+     [Windows below Full access](#current-release-boundary); designed, not built); the
      [agent debug tool](design/language-services.md#agent-debug-tool-rules);
      a Project's [own toolchain copy](design/language-services.md#user-added-servers);
-     and Project actions. A provider that starts no local process before its
+     and Project actions (decided: allowed, under [Windows below Full access](#current-release-boundary)).
+     A provider that starts no local process before its
      turn (an Octant Harness model over an endpoint) runs Full access turns
      there with Octant's own file tools and the harness shell.
    - **Evidence.** The level gate, the picker, the settings and the launch

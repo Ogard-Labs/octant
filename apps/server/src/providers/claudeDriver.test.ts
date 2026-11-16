@@ -6,6 +6,7 @@ import {
   type PermissionPersistence,
   type ProviderContextBlock,
   type ProviderFailure,
+  type ProviderExecutionPolicy,
   type ProviderModelId,
   type ProviderNativeSetup,
   type ProviderRuntimeEvent,
@@ -16,6 +17,7 @@ import {
   renderProviderTurnPrompt,
 } from "@octant/provider-sdk/chat-conformance";
 import type {
+  ProviderBackgroundWork,
   ProviderWakeup,
   ProviderWakeupRequest,
   ProviderWakeupSchedule,
@@ -35,7 +37,11 @@ import type {
   ClaudeSessionMetadata,
 } from "./claudeAgentSdkPort";
 import {
+  CLAUDE_ATTACHMENTS_READ_ONLY,
+  CLAUDE_MEMORY_WRITE_REFUSAL,
+  claudeMemoryWriteRefusal,
   CLAUDE_PLAN_CAPTURED_MESSAGE,
+  CLAUDE_PLAN_MCP_SERVER_REFUSAL,
   claudeExecutionOptions,
   claudeSandboxSettings,
   claudeFileToolSecretRefusal,
@@ -50,7 +56,11 @@ import {
   type ClaudeEnvironmentScope,
   type ClaudeEnvironmentScopeOptions,
 } from "./claudeEnvironment";
-import { claudeLoginKeychainPath, type ClaudeProcessPort } from "./claudeProcess";
+import {
+  claudeLoginKeychainPath,
+  claudePlanRunsCommands,
+  type ClaudeProcessPort,
+} from "./claudeProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import { draftGitText } from "../code/codeGitDraftService";
 import { makeContextSummaryGenerator } from "../context/contextSummaryGenerator";
@@ -154,6 +164,7 @@ class FakeQuery implements ClaudeQueryPort {
   readonly compactionRequests = vi.fn(() => Effect.void);
   readonly requestCompaction = () => this.compactionRequests();
   readonly interrupt = vi.fn(() => Effect.void);
+  readonly stopTask = vi.fn((_taskId: string) => Effect.succeed("requested" as const));
   readonly forceKill = vi.fn(() => Effect.void);
   readonly setPermissionMode = vi.fn(() => Effect.void);
   readonly supportedModels = vi.fn(() => Effect.succeed(this.initialization.models));
@@ -228,6 +239,7 @@ function harness(
     readonly runtimeVersion?: string;
     readonly artifactDelivery?: () => boolean;
     readonly ownMemory?: () => boolean;
+    readonly planMcpServers?: () => ReadonlyArray<string>;
     readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
     readonly authorityNow?: () => number;
     readonly maxTrackedToolUses?: number;
@@ -282,6 +294,9 @@ function harness(
         sessions.set(copied, { sessionId: copied, projectRoot: root, lastModified: 11 });
         return copied;
       }),
+    ),
+    listSessions: vi.fn(({ projectRoot: root }) =>
+      Effect.succeed([...sessions.values()].filter((session) => session.projectRoot === root)),
     ),
   };
   const process: ClaudeProcessPort = {
@@ -379,6 +394,7 @@ function harness(
         ? {}
         : { artifactDelivery: options.artifactDelivery }),
       ...(options.ownMemory === undefined ? {} : { ownMemory: options.ownMemory }),
+      ...(options.planMcpServers === undefined ? {} : { planMcpServers: options.planMcpServers }),
       ...(options.gitIdentity === undefined ? {} : { gitIdentity: options.gitIdentity }),
       ...(options.runtimeNetwork === undefined ? {} : { runtimeNetwork: options.runtimeNetwork }),
       ...(options.authorityNow === undefined ? {} : { authorityNow: options.authorityNow }),
@@ -458,6 +474,15 @@ describe("Claude file tools and the secret guard", () => {
     expect(refusal("FutureFileTool", { path: `${home}/.aws/credentials` })).toContain(
       "Cloud command-line credentials",
     );
+  });
+
+  it("outside Strict lets Claude's own file tools use the files Octant protects, another provider's sign-in excepted", () => {
+    const open = (tool: string, input: Record<string, unknown>) =>
+      claudeFileToolSecretRefusal(tool, input, [], `${home}/project`, true, home, false);
+    expect(open("Read", { file_path: `${home}/.aws/credentials` })).toBeUndefined();
+    expect(open("Write", { file_path: `${home}/.npmrc` })).toBeUndefined();
+    expect(open("Read", { file_path: `${home}/.codex/auth.json` })).toBeDefined();
+    expect(refusal("Read", { file_path: `${home}/.aws/credentials` })).toBeDefined();
   });
 
   it("lets the runtime read its own account state and ordinary files", () => {
@@ -776,8 +801,11 @@ describe("Claude execution policy", () => {
       ],
       fullToolSet: false,
     });
-    // A Code Plan turn runs read-only commands only where its Seatbelt profile
-    // can name the programs; Chat has no shell, and Work never runs in Plan.
+    // A Work or Code Plan turn runs read-only commands only where its sandbox
+    // can hold the shell; Chat has no shell.
+    expect(claudeExecutionOptions("plan", false, "work", "darwin")).toEqual(
+      claudeExecutionOptions("plan", false, "code", "darwin"),
+    );
     expect(claudeExecutionOptions("plan", false, "code", "darwin").tools).toEqual([
       "Read",
       "Glob",
@@ -790,10 +818,16 @@ describe("Claude execution policy", () => {
       "TaskGet",
       "Bash",
     ]);
+    // Linux holds each command in a nested capsule where the host can build one.
+    for (const mode of ["code", "work"] as const) {
+      expect(claudeExecutionOptions("plan", false, mode, "linux").tools.includes("Bash")).toBe(
+        claudePlanRunsCommands("linux"),
+      );
+    }
     for (const [mode, platform] of [
-      ["code", "linux"],
+      ["code", "win32"],
+      ["work", "win32"],
       ["chat", "darwin"],
-      ["work", "darwin"],
     ] as const) {
       expect(claudeExecutionOptions("plan", false, mode, platform).tools).toEqual([
         "Read",
@@ -1304,6 +1338,89 @@ describe("Claude execution policy", () => {
     }
   });
 
+  it("refuses a Chat write into Claude's memory instead of asking the person", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const open = f.opens[0]!;
+      const signal = new AbortController().signal;
+      const call = (toolName: string, input: object, toolUseId: string) =>
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName,
+          input,
+          toolUseId,
+          signal,
+        });
+      const memory = "/provider-native/projects/-chat/memory";
+      for (const [toolName, input, toolUseId] of [
+        ["Write", { file_path: `${memory}/MEMORY.md`, content: "remember" }, "memory-write"],
+        [
+          "Edit",
+          { file_path: `${memory}/user.md`, old_string: "a", new_string: "b" },
+          "memory-edit",
+        ],
+        ["Write", { file_path: "/provider-native/CLAUDE.md", content: "x" }, "account-memory"],
+        // A path that climbs back into the folder is the folder.
+        ["Write", { file_path: `${memory}/../memory/./MEMORY.md`, content: "x" }, "climbing-write"],
+      ] as const) {
+        await expect(call(toolName, input, toolUseId)).resolves.toEqual({
+          behavior: "deny",
+          message: CLAUDE_MEMORY_WRITE_REFUSAL,
+        });
+      }
+      // Reading the memory stays allowed: it is loaded, read-only.
+      await expect(
+        call("Read", { file_path: `${memory}/MEMORY.md` }, "memory-read"),
+      ).resolves.not.toMatchObject({ behavior: "deny" });
+    } finally {
+      await acquired.close();
+    }
+  });
+
+  it("refuses a Chat write into Claude's memory when the instructions file or a memory folder is itself a link", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "octant-claude-memory-")));
+    try {
+      const configurationDirectory = join(root, "account");
+      const elsewhere = join(root, "elsewhere");
+      await mkdir(join(configurationDirectory, "projects", "-chat"), { recursive: true });
+      await mkdir(join(elsewhere, "memory"), { recursive: true });
+      await writeFile(join(configurationDirectory, "instructions.md"), "x");
+      await symlink(
+        join(configurationDirectory, "instructions.md"),
+        join(configurationDirectory, "CLAUDE.md"),
+      );
+      await symlink(
+        join(elsewhere, "memory"),
+        join(configurationDirectory, "projects", "-chat", "memory"),
+      );
+      const refusal = (target: string) =>
+        claudeMemoryWriteRefusal({
+          mode: "chat",
+          executionPolicy: "approval-gated",
+          toolName: "Write",
+          target,
+          workingDirectory: root,
+          configurationDirectory,
+        });
+      expect(refusal(join(configurationDirectory, "CLAUDE.md"))).toBe(CLAUDE_MEMORY_WRITE_REFUSAL);
+      expect(refusal(join(configurationDirectory, "instructions.md"))).toBe(
+        CLAUDE_MEMORY_WRITE_REFUSAL,
+      );
+      expect(
+        refusal(join(configurationDirectory, "projects", "-chat", "memory", "MEMORY.md")),
+      ).toBe(CLAUDE_MEMORY_WRITE_REFUSAL);
+      expect(refusal(join(elsewhere, "memory", "MEMORY.md"))).toBe(CLAUDE_MEMORY_WRITE_REFUSAL);
+      expect(refusal(join(elsewhere, "notes.md"))).toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("leaves a call Octant would ask about to the person's own permission rules while every Octant refusal still refuses", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);
@@ -1687,6 +1804,70 @@ describe("Claude execution policy", () => {
 
     await acquired.close();
     wallClock.mockRestore();
+  });
+
+  it("stops one running subagent by its runtime task and leaves the turn running", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    const children: ProviderRuntimeEvent[] = [];
+    const subscription = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          if (event.kind === "child-agent-activity") children.push(event);
+        }),
+      ),
+    );
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "Delegate", attachments: [], tools: [] }),
+      );
+      const query = f.queries[0]!;
+      await query.emit({
+        kind: "stream-event",
+        sessionId: "sdk-session-1",
+        event: {
+          kind: "content-start",
+          index: 0,
+          content: {
+            kind: "tool-use",
+            toolUseId: "sdk-agent-use",
+            toolName: "Agent",
+            input: { description: "Read the notes" },
+          },
+        },
+      });
+      await vi.waitFor(() => expect(children.length).toBeGreaterThan(0));
+      const child = children[0];
+      if (child?.kind !== "child-agent-activity") throw new Error("Expected a subagent");
+      const stopChild = acquired.connection.stopChildAgent;
+      if (stopChild === undefined) throw new Error("Expected a single-child stop");
+      // Not started as a runtime task yet: nothing to stop.
+      await expect(
+        Effect.runPromise(stopChild({ sessionId, childAgentId: child.childAgentId })),
+      ).resolves.toBe("not-found");
+      await query.emit({
+        kind: "task",
+        sessionId: "sdk-session-1",
+        subtype: "task_started",
+        taskId: "sdk-runtime-task",
+        toolUseId: "sdk-agent-use",
+        description: "Read the notes",
+      });
+      await expect(
+        Effect.runPromise(stopChild({ sessionId, childAgentId: child.childAgentId })),
+      ).resolves.toBe("stopped");
+      expect(query.stopTask).toHaveBeenCalledWith("sdk-runtime-task");
+      expect(query.interrupt).not.toHaveBeenCalled();
+      await expect(
+        Effect.runPromise(stopChild({ sessionId, childAgentId: "another-child" })),
+      ).resolves.toBe("not-found");
+    } finally {
+      await Effect.runPromise(Fiber.interrupt(subscription));
+      await acquired.close();
+    }
   });
 
   it("tombstones an unmatched pre-tool grant when its turn completes", async () => {
@@ -4419,7 +4600,7 @@ describe("Claude artifact delivery", () => {
     expectEveryGuard(other.environment);
   });
 
-  it("lifts only the auto-memory guard for a Work or Code launch outside Plan on an account whose person turned its memory on", async () => {
+  it("lifts only the auto-memory guard on an account whose person turned its memory on, in Plan and Chat too", async () => {
     const memoryGuard = "CLAUDE_CODE_DISABLE_AUTO_MEMORY";
     const everyOtherGuard = Object.fromEntries(
       Object.entries(REQUIRED_GUARDS).filter(([name]) => name !== memoryGuard),
@@ -4431,18 +4612,19 @@ describe("Claude artifact delivery", () => {
       undefined,
       () => on,
     );
+    // Plan and Chat load the memory read-only: Plan holds no write tool and
+    // its sandbox binds the account folder read-only, and Chat's gate refuses
+    // a write into the memory folder.
     for (const [mode, policy] of [
       ["work", "approval-gated"],
       ["code", "full-access"],
+      ["code", "plan"],
+      ["chat", "approval-gated"],
     ] as const) {
       const launched = await launch(f, mode, policy, false);
       expect(launched.environment, `${mode} ${policy}`).not.toHaveProperty(memoryGuard);
       expect(launched.environment).toMatchObject(everyOtherGuard);
     }
-    // Plan may write nothing a later session would load, and Chat is confined
-    // the same way, so both keep the guard with the setting on.
-    expectEveryGuard((await launch(f, "code", "plan", false)).environment);
-    expectEveryGuard((await launch(f, "chat", "approval-gated", false)).environment);
     // The next launch after the person turns it off is guarded again, and
     // Full access alone never lifts it.
     on = false;
@@ -4679,6 +4861,100 @@ describe("Claude artifact delivery", () => {
         await acquired.close();
       }
     }
+  });
+
+  it("asks in Plan about a call to an account MCP server the person marked and refuses one they did not", async () => {
+    const f = harness("subscription", "current-session", {
+      planMcpServers: () => ["docs-search"],
+    });
+    const acquired = await acquire(f.driver, "code");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "plan",
+          nativeSetup: {
+            subagents: true,
+            webTools: true,
+            skills: true,
+            toolServers: false,
+            hooks: false,
+            projectCode: false,
+          },
+        }),
+      );
+      const open = f.opens.at(-1)!;
+      expect(open.planMcpServers).toEqual(["docs-search"]);
+      const signal = new AbortController().signal;
+      const answer = (toolName: string, toolUseId: string) =>
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName,
+          input: { query: "x" },
+          toolUseId,
+          signal,
+        });
+      await expect(answer("mcp__docs-search__query", "mcp-marked")).resolves.toEqual({
+        behavior: "ask",
+      });
+      await expect(answer("mcp__linear__search", "mcp-unmarked")).resolves.toEqual({
+        behavior: "deny",
+        message: CLAUDE_PLAN_MCP_SERVER_REFUSAL,
+      });
+    } finally {
+      await acquired.close();
+    }
+  });
+
+  it("reads the thread's attached files unasked in Plan and refuses every write into them", async () => {
+    const attachmentsFolder = "/tmp/octant-data/code-threads/thread-1";
+    const file = `${attachmentsFolder}/40000000-0000-4000-8000-000000000031/report.pdf`;
+    for (const executionPolicy of ["plan", "approval-gated"] as const) {
+      const f = harness("subscription", "current-session");
+      const scope = await Effect.runPromise(Scope.make());
+      const connection = await Effect.runPromise(
+        f.driver
+          .acquire({ instanceId, projectRoot, mode: "code", attachmentsFolder })
+          .pipe(Effect.provideService(Scope.Scope, scope)),
+      );
+      try {
+        await Effect.runPromise(connection.start({ sessionId, modelId, executionPolicy }));
+        const open = f.opens.at(-1)!;
+        expect(open.attachmentsFolder).toBe(attachmentsFolder);
+        const signal = new AbortController().signal;
+        const call = (toolName: string, input: Record<string, unknown>, toolUseId: string) =>
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName,
+            input,
+            toolUseId,
+            signal,
+          });
+        await expect(call("Read", { file_path: file }, `read-${executionPolicy}`)).resolves.toEqual(
+          { behavior: "allow" },
+        );
+        // Plan holds no write tool; Guarded holds one and still may not
+        // change an attached file.
+        await expect(
+          call("Write", { file_path: file, content: "changed" }, `write-${executionPolicy}`),
+        ).resolves.toMatchObject(
+          executionPolicy === "plan"
+            ? { behavior: "deny" }
+            : { behavior: "deny", message: CLAUDE_ATTACHMENTS_READ_ONLY },
+        );
+      } finally {
+        await Effect.runPromise(Scope.close(scope, Exit.void));
+      }
+    }
+    // Below Full access the command sandbox reads the folder and never writes it.
+    const sandbox = claudeSandboxSettings("approval-gated", projectRoot, [], undefined, false, [
+      attachmentsFolder,
+    ]);
+    expect(sandbox?.filesystem.allowRead).toContain(attachmentsFolder);
+    expect(sandbox?.filesystem.allowWrite).not.toContain(attachmentsFolder);
   });
 
   it("refuses an Artifact call in Plan without raising an approval, because publishing leaves the computer", async () => {
@@ -6672,6 +6948,268 @@ describe("Claude session copies for a fork or rewind", () => {
   });
 });
 
+describe("Claude's own plan mode as level changes", () => {
+  async function askedLevelChange(
+    executionPolicy: "full-access" | "plan",
+    toolName: "EnterPlanMode" | "ExitPlanMode",
+    input: Readonly<Record<string, unknown>>,
+  ) {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy, levelChanges: true }),
+    );
+    const seen: ProviderRuntimeEvent[] = [];
+    const scope = Effect.runSync(Scope.make());
+    const events = await Effect.runPromise(Scope.extend(acquired.connection.subscribe, scope));
+    Effect.runFork(Stream.runForEach(events, (event) => Effect.sync(() => seen.push(event))));
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    const preTool = await open.preToolUse({
+      sessionId: "sdk-session-1",
+      projectRoot,
+      toolName,
+      input,
+      toolUseId: "level-1",
+      signal,
+    });
+    const decision = open.canUseTool({ toolName, input, toolUseId: "level-1", signal });
+    await vi.waitFor(() =>
+      expect(seen.some((event) => event.kind === "approval-request")).toBe(true),
+    );
+    return { f, acquired, open, preTool, decision, seen, scope };
+  }
+
+  it("puts Claude's ask to plan to the person even at Full access and never lets it switch its own mode", async () => {
+    const { acquired, open, preTool, decision, seen, scope } = await askedLevelChange(
+      "full-access",
+      "EnterPlanMode",
+      {},
+    );
+    expect(open.withheldTools).not.toContain("EnterPlanMode");
+    expect(open.withheldTools).toContain("ExitPlanMode");
+    expect(preTool).toEqual({ behavior: "ask" });
+    const request = seen.find((event) => event.kind === "approval-request");
+    expect(request).toMatchObject({ levelChange: { kind: "enter-plan" } });
+    await Effect.runPromise(
+      acquired.connection.answerApproval({
+        sessionId,
+        requestId: request?.kind === "approval-request" ? request.requestId : "",
+        approved: true,
+      }),
+    );
+    await expect(decision).resolves.toEqual({
+      behavior: "deny",
+      message: expect.stringContaining("next turn runs in Plan"),
+    });
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    await acquired.close();
+  });
+
+  it("offers a Plan session only the read-only tools and the ask to leave Plan, which carries the plan", async () => {
+    const plan = "1. Read the login test.\n2. Fix the race.";
+    const { acquired, open, decision, seen, scope } = await askedLevelChange(
+      "plan",
+      "ExitPlanMode",
+      { plan },
+    );
+    expect(open.tools).toEqual(expect.arrayContaining(["Read", "Glob", "Grep", "ExitPlanMode"]));
+    for (const writer of ["Edit", "Write", "NotebookEdit", "EnterPlanMode"]) {
+      expect(open.tools).not.toContain(writer);
+    }
+    const request = seen.find((event) => event.kind === "approval-request");
+    expect(request).toMatchObject({ levelChange: { kind: "exit-plan", plan } });
+    await Effect.runPromise(
+      acquired.connection.answerApproval({
+        sessionId,
+        requestId: request?.kind === "approval-request" ? request.requestId : "",
+        approved: false,
+      }),
+    );
+    await expect(decision).resolves.toMatchObject({
+      behavior: "deny",
+      message: expect.stringContaining("kept this thread in Plan"),
+    });
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    await acquired.close();
+  });
+
+  it("withholds both plan-mode tools from a session whose host does not answer level changes", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "work");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    expect(f.opens[0]?.withheldTools).toEqual(
+      expect.arrayContaining(["EnterPlanMode", "ExitPlanMode"]),
+    );
+    await acquired.close();
+  });
+});
+
+describe("Claude sessions started outside Octant", () => {
+  const outside = "outside-session-1";
+
+  it("lists this folder's sessions an Octant thread does not hold, newest first", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    f.sessions.set(outside, {
+      sessionId: outside,
+      projectRoot,
+      lastModified: 50,
+      title: "Fix the login test",
+    });
+    f.sessions.set("older-outside", { sessionId: "older-outside", projectRoot, lastModified: 20 });
+    f.sessions.set("elsewhere", {
+      sessionId: "elsewhere",
+      projectRoot: "/tmp/other",
+      lastModified: 90,
+    });
+
+    const listed = await Effect.runPromise(
+      f.driver.nativeSessions!.list({ instanceId, projectRoot }),
+    );
+    // The session Octant started (sdk-session-1) is left out.
+    expect(listed).toEqual([
+      { nativeSessionId: outside, lastModified: 50, title: "Fix the login test" },
+      { nativeSessionId: "older-outside", lastModified: 20 },
+    ]);
+    await acquired.close();
+  });
+
+  it("takes up a session begun outside Octant so the thread's next turn resumes it", async () => {
+    const f = harness();
+    f.sessions.set(outside, { sessionId: outside, projectRoot, lastModified: 50 });
+    const cursor = await Effect.runPromise(
+      f.driver.nativeSessions!.adopt({
+        instanceId,
+        projectRoot,
+        mode: "code",
+        sessionId,
+        nativeSessionId: outside,
+        modelId,
+      }),
+    );
+    expect(cursor).toMatchObject({
+      driverKind: "claude",
+      value: outside,
+      binding: { sessionId, projectRoot, mode: "code" },
+    });
+    expect(f.resumeIdentities.get(outside)).toMatchObject({
+      octantSessionId: sessionId,
+      sdkSessionId: outside,
+      projectRoot,
+      authentication: "subscription",
+    });
+
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId,
+        resumeCursor: cursor,
+        executionPolicy: "approval-gated",
+      }),
+    );
+    expect(f.opens.at(-1)?.resumeSessionId).toBe(outside);
+    await acquired.close();
+  });
+
+  it("refuses a session another Octant thread holds, or one from another folder", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    const adopt = (nativeSessionId: string) =>
+      Effect.runPromise(
+        Effect.flip(
+          f.driver.nativeSessions!.adopt({
+            instanceId,
+            projectRoot,
+            mode: "code",
+            sessionId: decodeProviderSessionId("80000000-0000-4000-8000-000000000799"),
+            nativeSessionId,
+            modelId,
+          }),
+        ),
+      );
+    await expect(adopt("sdk-session-1")).resolves.toMatchObject({
+      message: "That Claude session already belongs to an Octant thread.",
+    });
+    f.sessions.set("elsewhere", {
+      sessionId: "elsewhere",
+      projectRoot: "/tmp/other",
+      lastModified: 1,
+    });
+    await expect(adopt("elsewhere")).resolves.toMatchObject({ category: "stale-resume" });
+    expect(f.resumeIdentities.get("sdk-session-1")?.octantSessionId).toBe(sessionId);
+    await acquired.close();
+  });
+
+  it("lets only one of two threads adopting the same session at once take it up", async () => {
+    const f = harness();
+    f.sessions.set(outside, { sessionId: outside, projectRoot, lastModified: 50 });
+    const adopt = (threadSession: string) =>
+      Effect.runPromiseExit(
+        f.driver.nativeSessions!.adopt({
+          instanceId,
+          projectRoot,
+          mode: "code",
+          sessionId: decodeProviderSessionId(threadSession),
+          nativeSessionId: outside,
+          modelId,
+        }),
+      );
+    const [first, second] = await Promise.all([
+      adopt("80000000-0000-4000-8000-000000000801"),
+      adopt("80000000-0000-4000-8000-000000000802"),
+    ]);
+    expect([first, second].filter(Exit.isSuccess)).toHaveLength(1);
+    expect(f.resumeIdentityPort.put).toHaveBeenCalledTimes(1);
+    expect(String(f.resumeIdentities.get(outside)?.octantSessionId)).toBe(
+      "80000000-0000-4000-8000-000000000801",
+    );
+  });
+
+  it("offers a session again once an adoption the host could not record is released, and never releases another thread's", async () => {
+    const f = harness();
+    f.sessions.set(outside, { sessionId: outside, projectRoot, lastModified: 50 });
+    await Effect.runPromise(
+      f.driver.nativeSessions!.adopt({
+        instanceId,
+        projectRoot,
+        mode: "code",
+        sessionId,
+        nativeSessionId: outside,
+        modelId,
+      }),
+    );
+    // Another Octant session's release leaves this claim where it is.
+    await Effect.runPromise(
+      f.driver.nativeSessions!.release!({
+        instanceId,
+        nativeSessionId: outside,
+        sessionId: decodeProviderSessionId("80000000-0000-4000-8000-000000000803"),
+      }),
+    );
+    expect(f.resumeIdentities.get(outside)?.octantSessionId).toBe(sessionId);
+
+    await Effect.runPromise(
+      f.driver.nativeSessions!.release!({ instanceId, nativeSessionId: outside, sessionId }),
+    );
+    expect(f.resumeIdentities.get(outside)).toBeUndefined();
+    const listed = await Effect.runPromise(
+      f.driver.nativeSessions!.list({ instanceId, projectRoot }),
+    );
+    expect(listed.map((session) => session.nativeSessionId)).toEqual([outside]);
+  });
+});
+
 describe("Claude exact resume", () => {
   it("cancels and joins a resume held before SDK initialization", async () => {
     const f = harness();
@@ -8095,6 +8633,259 @@ describe("Claude background work", () => {
     await collected;
     expect(seen.map((event) => event.kind)).toEqual(["usage", "completed"]);
     await acquired.close();
+  });
+
+  describe("in a session the host keeps past its turn", () => {
+    async function startKeptTurn(
+      executionPolicy: ProviderExecutionPolicy = "approval-gated",
+      mode: "work" | "code" = "code",
+    ) {
+      const f = harness();
+      const acquired = await acquire(f.driver, mode);
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy,
+          outlivesTurn: true,
+        }),
+      );
+      const seen: ProviderRuntimeEvent[] = [];
+      // Subscribes before it returns, as a turn runner does before it sends.
+      const follow = async () => {
+        const scope = Effect.runSync(Scope.make());
+        const events = await Effect.runPromise(Scope.extend(acquired.connection.subscribe, scope));
+        const done = Effect.runPromise(
+          Stream.runForEach(
+            events.pipe(
+              Stream.filter((event) => event.sessionId === sessionId),
+              Stream.takeUntil((event) =>
+                ["completed", "failed", "interrupted", "waiting"].includes(event.kind),
+              ),
+            ),
+            (event) => Effect.sync(() => seen.push(event)),
+          ).pipe(Effect.ensuring(Scope.close(scope, Exit.void))),
+        );
+        return { done };
+      };
+      const collected = (await follow()).done;
+      await Effect.runPromise(
+        acquired.connection.send({
+          sessionId,
+          prompt: "start the dev server",
+          attachments: [],
+          tools: [],
+        }),
+      );
+      const query = f.queries[0]!;
+      await query.emit(state("running"));
+      const watched = acquired.connection.backgroundWork?.(sessionId);
+      const reported: ProviderBackgroundWork[] = [];
+      watched?.watch((work) => reported.push(work));
+      return { acquired, query, seen, collected, follow, watched, reported, open: f.opens[0]! };
+    }
+
+    it.each(["code", "work"] as const)(
+      "keeps a background task's lifecycle through the person's next turn in a %s thread, so its progress and end still map",
+      async (mode) => {
+        const { acquired, query, seen, collected, follow } = await startKeptTurn(
+          "approval-gated",
+          mode,
+        );
+        await query.emit(backgroundStarted);
+        await query.emit(completed(sdk));
+        await query.emit(state("idle"));
+        await collected;
+        const started = seen.find((event) => event.kind === "task-progress");
+
+        // The person sends while the dev server from the last turn still runs.
+        const next = (await follow()).done;
+        const before = seen.length;
+        await Effect.runPromise(
+          acquired.connection.send({
+            sessionId,
+            prompt: "check the logs",
+            attachments: [],
+            tools: [],
+          }),
+        );
+        await query.emit(state("running"));
+        await query.emit({
+          kind: "task",
+          sessionId: sdk,
+          subtype: "task_progress",
+          taskId: "bash-1",
+          description: "npm test",
+          usage: { totalTokens: 0, toolUses: 0, durationMs: 5_000 },
+        });
+        await query.emit(backgroundEnded);
+        await query.emit(completed(sdk));
+        await query.emit(state("idle"));
+        await next;
+
+        const turn = seen.slice(before);
+        expect(turn.filter((event) => event.kind === "failed")).toEqual([]);
+        expect(turn.at(-1)).toMatchObject({ kind: "completed" });
+        // Both reports name the row the task's start opened.
+        const rows = turn.flatMap((event) =>
+          event.kind === "task-progress" ? [event.taskId] : [],
+        );
+        expect(rows.length).toBeGreaterThanOrEqual(2);
+        expect(new Set(rows)).toEqual(
+          new Set([started?.kind === "task-progress" ? started.taskId : "missing"]),
+        );
+        await acquired.close();
+      },
+    );
+
+    it("answers none of a runtime-started turn's tool calls until the host attaches a turn to it", async () => {
+      const { acquired, query, collected, follow, open } = await startKeptTurn("full-access");
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+
+      await query.emit(backgroundEnded);
+      await query.emit(state("running"));
+      let answered = false;
+      const decision = open
+        .preToolUse({
+          sessionId: sdk,
+          projectRoot,
+          toolName: "Bash",
+          input: { command: "rm -rf build" },
+          toolUseId: "runtime-bash",
+          signal: new AbortController().signal,
+        })
+        .then((value) => {
+          answered = true;
+          return value;
+        });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      // Full access would allow it unasked, but the host has not admitted the turn.
+      expect(answered).toBe(false);
+
+      const runtimeTurn = (await follow()).done;
+      await Effect.runPromise(acquired.connection.attachRuntimeTurn!(sessionId));
+      await expect(decision).resolves.toMatchObject({ behavior: "allow" });
+      await query.emit(completed(sdk));
+      await runtimeTurn;
+      await acquired.close();
+    });
+
+    it("refuses a held runtime-turn tool call when the session is stopped before the host attaches", async () => {
+      const { acquired, query, collected, open } = await startKeptTurn("full-access");
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+      await query.emit(backgroundEnded);
+      await query.emit(state("running"));
+      const decision = open.preToolUse({
+        sessionId: sdk,
+        projectRoot,
+        toolName: "Bash",
+        input: { command: "npm start" },
+        toolUseId: "runtime-start",
+        signal: new AbortController().signal,
+      });
+      await Effect.runPromise(acquired.connection.stop(sessionId));
+      await expect(decision).resolves.toMatchObject({ behavior: "deny" });
+      await acquired.close();
+    });
+
+    it("keeps a runtime-started turn that finishes before the host attaches, and reads it whole on attach", async () => {
+      const { acquired, query, seen, collected, follow, watched } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+      seen.length = 0;
+
+      await query.emit(backgroundEnded);
+      await query.emit(state("running"));
+      await query.emit(text("The server stopped."));
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      // Still waiting for the host, so the keeper opens a turn rather than stop it.
+      expect(watched?.current()).toMatchObject({ runtimeTurnWaiting: true, ended: false });
+
+      const runtimeTurn = (await follow()).done;
+      await Effect.runPromise(acquired.connection.attachRuntimeTurn!(sessionId));
+      await runtimeTurn;
+      const kinds = seen.map((event) => event.kind);
+      expect(kinds[0]).toBe("runtime-turn-started");
+      expect(kinds).toContain("text-delta");
+      expect(kinds.at(-1)).toBe("completed");
+      expect(watched?.current()).toMatchObject({ runtimeTurnWaiting: false });
+      expect(query.close).not.toHaveBeenCalled();
+      await acquired.close();
+    });
+
+    it("completes the person's turn when the reply is done while its background command keeps running", async () => {
+      const { acquired, query, seen, collected, watched } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await collected;
+      expect(seen.at(-1)).toMatchObject({ kind: "completed" });
+      expect(watched?.current()).toMatchObject({
+        tasks: [{ taskId: "bash-1", description: "npm test" }],
+        runtimeTurnWaiting: false,
+        ended: false,
+      });
+      expect(query.close).not.toHaveBeenCalled();
+      await acquired.close();
+    });
+
+    it("holds a turn the runtime starts by itself until the host attaches one, then reads it from its start", async () => {
+      const { acquired, query, seen, collected, follow, watched, reported } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+      seen.length = 0;
+
+      await query.emit(backgroundEnded);
+      await query.emit(state("running"));
+      await query.emit(text("The server stopped."));
+      expect(watched?.current()).toMatchObject({ tasks: [], runtimeTurnWaiting: true });
+      expect(reported.some((work) => work.runtimeTurnWaiting)).toBe(true);
+      // The person cannot send into a turn the runtime is running unseen.
+      await expect(
+        Effect.runPromise(
+          Effect.flip(
+            acquired.connection.send({ sessionId, prompt: "next", attachments: [], tools: [] }),
+          ),
+        ),
+      ).resolves.toMatchObject({ category: "unavailable" });
+
+      const runtimeTurn = (await follow()).done;
+      await Effect.runPromise(acquired.connection.attachRuntimeTurn!(sessionId));
+      await query.emit(completed(sdk));
+      await runtimeTurn;
+      const kinds = seen.map((event) => event.kind);
+      expect(kinds[0]).toBe("runtime-turn-started");
+      expect(kinds).toContain("text-delta");
+      expect(kinds.at(-1)).toBe("completed");
+      const sequences = seen.map((event) => event.sequence);
+      expect(sequences).toEqual([...sequences].sort((a, b) => a - b));
+      await expect(
+        Effect.runPromise(Effect.flip(acquired.connection.attachRuntimeTurn!(sessionId))),
+      ).resolves.toMatchObject({ category: "protocol" });
+      await acquired.close();
+    });
+
+    it("stops the background command with the session when the person stops the thread", async () => {
+      const { acquired, query, collected, watched, reported } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await collected;
+      await Effect.runPromise(acquired.connection.stop(sessionId));
+      expect(query.close).toHaveBeenCalled();
+      expect(reported.at(-1)).toMatchObject({ ended: true });
+      expect(watched?.current().ended).toBe(true);
+      await acquired.close();
+    });
   });
 });
 

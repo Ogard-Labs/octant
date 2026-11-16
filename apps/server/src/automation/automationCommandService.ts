@@ -1,5 +1,6 @@
 import {
   decodeAutomationCommand,
+  automationFileActivityWindowLimit,
   decodeAutomationDefinition,
   deriveAutomationOccurrenceKey,
   type AutomationCommand,
@@ -7,6 +8,7 @@ import {
   type AutomationCommandResult,
   type AutomationClientPrincipal,
   type AutomationDefinition,
+  type AutomationFileSourceCheckpoint,
   type AutomationId,
   type AutomationRunId,
   type AutomationThreadId,
@@ -16,10 +18,12 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import type { AutomationEventSourcePreparation } from "./automationEventSources";
+import type { AutomationFileActivityPorts } from "./automationFileSourceActivity";
 import { isDeepStrictEqual } from "node:util";
 import {
   AutomationPolicyRejected,
   buildAutomationWeeklyResolution,
+  isAgentRunActiveStatus,
   isAutomationMutationAllowed,
   isAutomationRunLifecycleActive,
   resolveNextAutomationOccurrence,
@@ -46,11 +50,19 @@ export interface AutomationCommandServiceOptions {
     | "appendRunCreated"
     | "appendRunCancellation"
     | "appendOccurrenceLedger"
+    | "appendFileSourceWindowChanged"
   >;
   readonly projection: AutomationProjection;
   /** The identifier of the host that owns every definition this server holds. */
   readonly hostId: string;
   readonly clock: () => string;
+  /**
+   * A finished run's delegated children can still be writing into a file
+   * routine's input, and the activity scanner finds them only through the
+   * runs the window retains. Without this port a clear refuses any retained
+   * run that has a thread, since its children cannot be checked.
+   */
+  readonly readChildren?: AutomationFileActivityPorts["readChildren"];
 }
 
 /** Facts about a create that only the host can vouch for. */
@@ -79,12 +91,14 @@ export class AutomationCommandService {
   readonly #projection: AutomationProjection;
   readonly #hostId: string;
   readonly #clock: () => string;
+  readonly #readChildren: AutomationCommandServiceOptions["readChildren"];
 
   constructor(options: AutomationCommandServiceOptions) {
     this.#store = options.store;
     this.#projection = options.projection;
     this.#hostId = options.hostId;
     this.#clock = options.clock;
+    this.#readChildren = options.readChildren;
   }
 
   /**
@@ -130,6 +144,8 @@ export class AutomationCommandService {
       switch (command.kind) {
         case "rearm-file-automation":
           return this.#rearmFileSource(command, source?.kind === "rearm" ? source : undefined);
+        case "change-file-automation-activity-window":
+          return this.#changeFileActivityWindow(command);
         case "create-automation":
           return this.#create(
             command,
@@ -255,6 +271,87 @@ export class AutomationCommandService {
       events: [rearmed, { kind: "occurrence-claimed", occurrence, runId: run.id, at: now }],
     });
     return { kind: "automation-run-accepted", run: this.#projection.getRun(run.id) ?? run };
+  }
+
+  /**
+   * The person's raise or clear of a file routine's activity window, journaled
+   * on the routine so replay rebuilds the same window. A clear forgets runs
+   * that may still be writing into the input, so it is refused while any of
+   * them, or the routine's current run, is active, and the source then needs
+   * one fresh quiet observation before an arrival counts again.
+   */
+  #changeFileActivityWindow(
+    command: Extract<
+      AutomationCommand,
+      { readonly kind: "change-file-automation-activity-window" }
+    >,
+  ): AutomationCommandResult {
+    const definition = this.#projection.getDefinition(command.automationId);
+    const gate = this.#gateDefinitionMutation(definition, command);
+    if (gate !== undefined) return gate;
+    const current = definition as AutomationDefinition;
+    const previous = this.#projection.getFileSource(current.id);
+    if (current.trigger.kind !== "file-arrival" || previous === undefined)
+      return failure("unsupported", "Only a file routine has an activity window.", {
+        automationId: current.id,
+      });
+    const now = this.#now();
+    const base = { ...previous, observationRevision: previous.observationRevision + 1 };
+    let checkpoint: AutomationFileSourceCheckpoint;
+    if (command.change.kind === "raise") {
+      if (command.change.activityWindowLimit < automationFileActivityWindowLimit(previous))
+        return failure(
+          "invalid",
+          "An activity window can be raised, not lowered; clear it instead.",
+          { automationId: current.id },
+        );
+      checkpoint = { ...base, activityWindowLimit: command.change.activityWindowLimit };
+    } else {
+      const stillRunning =
+        this.#projection.activeRun(current.id) !== undefined ||
+        previous.activityWindow.some((runId) => {
+          const run = this.#projection.getRun(runId as AutomationRunId);
+          if (run === undefined || isAutomationRunLifecycleActive(run.lifecycle)) return true;
+          if (run.threadId === undefined) return false;
+          const children = this.#readChildren?.(String(run.threadId));
+          return (
+            children === undefined ||
+            children.some((child) => isAgentRunActiveStatus(child.lifecycleStatus))
+          );
+        });
+      if (stillRunning)
+        return failure(
+          "active-occurrence",
+          "Finish or cancel this routine's runs before clearing its activity history.",
+          { automationId: current.id },
+        );
+      const { reason: _reason, ...unreasoned } = base;
+      checkpoint =
+        previous.phase === "held"
+          ? { ...base, activityWindow: [] }
+          : {
+              ...unreasoned,
+              activityWindow: [],
+              // Arming, as after a pause: the next quiet scan resumes watching,
+              // and a change seen meanwhile is held for review.
+              phase: "arming",
+              reason: "activity-unknown",
+              observedAt: now,
+            };
+    }
+    this.#store.appendFileSourceWindowChanged({
+      ...personActor(command.principal),
+      automationId: current.id,
+      definitionRevision: current.definitionRevision,
+      change: command.change.kind === "raise" ? "raised" : "cleared",
+      checkpoint,
+      expectedVersion: current.version,
+      at: now,
+    });
+    return {
+      kind: "automation-updated",
+      automation: this.#projection.getDefinition(current.id) ?? current,
+    };
   }
 
   #create(

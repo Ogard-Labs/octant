@@ -192,6 +192,12 @@ const ProjectFields = {
   brandKit: Schema.optional(CanvasDesignBrand),
   agentMemoryWrites: Schema.optional(ProjectAgentMemoryWrites),
   imageGenerationChoice: Schema.optional(ProjectImageGenerationChoice),
+  /**
+   * Set when the person dropped the kept choice with Ask again, so the next
+   * image call shows the card even at Full access; cleared when a choice is
+   * kept again.
+   */
+  imageGenerationAskAgain: Schema.optional(Schema.Literal(true)),
   lifecycle: ProjectLifecycle,
   pinned: Schema.Boolean,
   rank: ProjectRank,
@@ -427,7 +433,7 @@ export type WorkProjectDeveloperTools = typeof WorkProjectDeveloperTools.Type;
 
 /**
  * The modes a Work Project can start new threads in. Work shares Code's
- * levels and has no Plan overlay.
+ * levels; Plan is a thread's own level and never where a thread starts.
  */
 export const WorkProjectPermissionMode = Schema.Literal(
   "auto",
@@ -450,6 +456,8 @@ export const WorkProject = Schema.Struct({
   defaultPermissionMode: Schema.optional(WorkProjectPermissionMode),
   /** New threads here at Full access keep the sandbox; absent follows Settings. */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+  /** Strict for threads here that did not choose; absent follows Settings. */
+  defaultStrict: Schema.optional(Schema.Boolean),
   /** Named commands for the Project terminal. Absent means none were defined. */
   actions: Schema.optional(ProjectActions),
 }).annotations(strict);
@@ -481,6 +489,8 @@ export const CodeProject = Schema.Struct({
   defaultPermissionMode: Schema.optional(PermissionMode),
   /** New threads here at Full access keep the sandbox; absent follows Settings. */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+  /** Strict for threads here that did not choose; absent follows Settings. */
+  defaultStrict: Schema.optional(Schema.Boolean),
   /**
    * Who answers this Project's prompts at Auto, overriding Settings. Absent
    * follows Settings.
@@ -518,6 +528,8 @@ const WorkProjectSummary = Schema.Struct({
   defaultPermissionMode: Schema.optional(WorkProjectPermissionMode),
   /** New threads here at Full access keep the sandbox; absent follows Settings. */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+  /** Strict for threads here that did not choose; absent follows Settings. */
+  defaultStrict: Schema.optional(Schema.Boolean),
   actions: Schema.optional(ProjectActions),
   designSystem: Schema.optional(DesignSystemChoice),
 }).annotations(strict);
@@ -539,6 +551,8 @@ const CodeProjectSummary = Schema.Struct({
   defaultPermissionMode: Schema.optional(PermissionMode),
   /** New threads here at Full access keep the sandbox; absent follows Settings. */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+  /** Strict for threads here that did not choose; absent follows Settings. */
+  defaultStrict: Schema.optional(Schema.Boolean),
   autoReviewer: Schema.optional(AutoReviewer),
   desktopRecipe: Schema.optional(DesktopRecipe),
   actions: Schema.optional(ProjectActions),
@@ -758,6 +772,12 @@ export const ProjectCommand = Schema.Union(
     kind: Schema.Literal("add-project-extra-folder"),
     ...ProjectCommandFields,
     receiptId: BindingReceiptId,
+    /**
+     * The person confirmed the home folder warning. A home folder sent
+     * without it is not added: the host answers with the warning and a fresh
+     * receipt for the same folder, which a confirmed resend spends.
+     */
+    confirmHomeFolder: Schema.optional(Schema.Literal(true)),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("remove-project-extra-folder"),
@@ -776,6 +796,8 @@ export const ProjectCommand = Schema.Union(
     permissionMode: Schema.optional(PermissionMode),
     /** The sandbox at Full access for new threads; absent returns it to Settings. */
     fullAccessSandbox: Schema.optional(Schema.Boolean),
+    /** Strict for threads here that did not choose; absent returns it to Settings. */
+    strict: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-project-auto-reviewer"),
@@ -848,6 +870,8 @@ export const ProjectCommand = Schema.Union(
     permissionMode: Schema.optional(WorkProjectPermissionMode),
     /** The sandbox at Full access for new threads; absent returns it to Settings. */
     fullAccessSandbox: Schema.optional(Schema.Boolean),
+    /** Strict for threads here that did not choose; absent returns it to Settings. */
+    strict: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-work-project-actions"),
@@ -924,6 +948,18 @@ export const ProjectCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("project-extra-folder-added"),
     project: BoundProject,
+  }).annotations(strict),
+  /**
+   * Nothing was added: the picked folder is the home folder, and the person
+   * must confirm the warning first. `receiptId` names the same folder for this
+   * window, once, until it expires.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("project-extra-folder-needs-confirmation"),
+    project: BoundProject,
+    canonicalRoot: ProjectFolderPath,
+    receiptId: BindingReceiptId,
+    warning: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_000)),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("project-extra-folder-removed"),

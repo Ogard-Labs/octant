@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import type { OutsideProviderDriverReference, ProviderInstanceId } from "@octant/contracts";
-import { isOutsideDriverHostConfined } from "@octant/plugin-host/activation";
+import { outsideDriverHostLaunch } from "@octant/plugin-host/activation";
 import type {
   ExtensionProcessHandle,
   ExtensionRuntimeStartInput,
@@ -30,7 +30,7 @@ import type { OutsideDriverChannel } from "./outsideHarnessEndpointProxy";
 
 /** Why no process was started. Each is Octant's; nothing a driver wrote. */
 export type OutsideDriverProcessRefusal =
-  /** This platform has no confinement for a driver process (Linux, Windows). */
+  /** This platform runs no driver process (Windows). */
   | "host-prohibited"
   /** The server runs on neither Bun nor Electron's Node, the runtimes a driver runs on. */
   | "runtime-unavailable"
@@ -152,9 +152,10 @@ export class OutsideDriverProcesses {
   }
 
   async start(input: OutsideDriverProcessStartInput): Promise<OutsideDriverProcessStart> {
-    // Decided before any folder or process exists: a host without confinement
-    // never starts a driver, rather than starting it unconfined.
-    if (!isOutsideDriverHostConfined(this.#platform)) return refused("host-prohibited");
+    // Decided before any folder or process exists. Linux has no confinement
+    // for a driver and runs it without one, as its provider row says; a host
+    // that runs none (Windows) never starts one.
+    if (outsideDriverHostLaunch(this.#platform) === "prohibited") return refused("host-prohibited");
     const runtime = this.#runtime;
     if (runtime === undefined || !isAbsolute(runtime.path)) return refused("runtime-unavailable");
     const instanceKey = String(input.instanceId);

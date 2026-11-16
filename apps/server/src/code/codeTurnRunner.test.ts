@@ -450,6 +450,7 @@ describe("CodeTurnRunner", () => {
         sessionId,
         modelId: decodeProviderModelId("model-a"),
         executionPolicy: "approval-gated",
+        levelChanges: true,
         tools: [],
       });
       expect(events).toContainEqual(
@@ -2411,6 +2412,7 @@ describe("CodeTurnRunner", () => {
               liveTurn: {
                 begin: (startedAt) => seen.push(`begin ${startedAt}`),
                 observe: (observed) => seen.push(JSON.stringify(observed)),
+                connect: () => undefined,
                 end: () => seen.push("end"),
               },
             }),

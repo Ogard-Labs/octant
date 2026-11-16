@@ -1,3 +1,4 @@
+import { ATTACHMENT_MEDIA_TYPE_PATTERN, UNKNOWN_ATTACHMENT_MEDIA_TYPE } from "@octant/contracts";
 export type ReadBytesResult =
   | { readonly status: "ok"; readonly bytes: Uint8Array }
   | { readonly status: "unreadable" };
@@ -31,11 +32,16 @@ export function acceptedMediaType(input: {
   readonly accepted: ReadonlyArray<string>;
 }): string | undefined {
   const reported = input.reported?.split(";", 1)[0]?.trim().toLowerCase();
+  // A Work or Code thread takes a file of any type (`*/*`); one the picker
+  // cannot name is sent as a byte stream and named to the agent by path.
+  const anyFile = input.accepted.includes("*/*");
   if (reported !== undefined && reported !== "") {
+    if (anyFile) return ATTACHMENT_MEDIA_TYPE_PATTERN.test(reported) ? reported : undefined;
     return input.accepted.includes(reported) ? reported : undefined;
   }
   const lower = input.name.toLowerCase();
   const implied = EXTENSION_MEDIA_TYPES.find(([extension]) => lower.endsWith(extension))?.[1];
+  if (anyFile) return implied ?? UNKNOWN_ATTACHMENT_MEDIA_TYPE;
   return implied !== undefined && input.accepted.includes(implied) ? implied : undefined;
 }
 

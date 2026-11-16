@@ -384,6 +384,52 @@ describe("remote route policy", () => {
     expect(classifyProductAction(new Request(`${origin}/api/octant-instructions`))).toBeUndefined();
   });
 
+  it("forwards Safe networks for a device the host's person paired, and names no catalogued action for any other device", async () => {
+    const fixture = handler();
+    const read = await fixture.route(request("/api/access/safe-networks?projectId=p"));
+    await read.arrayBuffer();
+    const post = await fixture.route(
+      request("/api/access/safe-networks", {
+        method: "POST",
+        headers: { origin, "sec-fetch-site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    await post.arrayBuffer();
+    expect(read.status).toBe(200);
+    expect(post.status).toBe(200);
+    expect(fixture.authenticatedProduct).toHaveBeenCalledTimes(2);
+    expect(
+      classifyProductAction(new Request(`${origin}/api/access/safe-networks`, { method: "POST" })),
+    ).toBeUndefined();
+  });
+
+  it("forwards a thread's wake-ups for a device the host's person paired, and names no catalogued action for any other device", async () => {
+    const fixture = handler();
+    const read = await fixture.route(
+      request("/api/thread-wakeups?mode=code&threadId=93000000-0000-4000-8000-000000000001"),
+    );
+    await read.arrayBuffer();
+    const post = await fixture.route(
+      request("/api/thread-wakeups/commands", {
+        method: "POST",
+        headers: { origin, "sec-fetch-site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    await post.arrayBuffer();
+
+    expect(read.status).toBe(200);
+    expect(post.status).toBe(200);
+    expect(fixture.authenticatedProduct).toHaveBeenCalledTimes(2);
+    expect(
+      classifyProductAction(
+        new Request(`${origin}/api/thread-wakeups/commands`, { method: "POST" }),
+      ),
+    ).toBeUndefined();
+    expect(classifyProductAction(new Request(`${origin}/api/thread-wakeups`))).toBeUndefined();
+  });
+
   it("forwards a thread's notes and recap for a device the host's person paired, and names no catalogued action for any other device", async () => {
     const fixture = handler();
     const post = await fixture.route(
@@ -1103,6 +1149,34 @@ describe("remote route policy", () => {
     expect(status(inspect("/api/replica-sync/status?x=1"))).not.toBe("allow");
   });
 
+  it("applies an exact product route's response budget and keeps the listener default when none is declared", async () => {
+    const fixture = handler({
+      policy: policy({ maxResponseBytes: 8_192 }),
+      authenticatedProduct: async () => new Response("x".repeat(6_000)),
+    });
+    const headers = { origin, "sec-fetch-site": "same-origin" };
+
+    const capped = await fixture.route(request("/api/host/resources", { headers }));
+    expect((await capped.arrayBuffer()).byteLength).toBe(4_096);
+    const defaulted = await fixture.route(request("/api/replica-sync/status", { headers }));
+    expect((await defaulted.arrayBuffer()).byteLength).toBe(6_000);
+
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    for (const [path, method, maxResponseBytes] of [
+      ["/api/github/authentication", "GET", 4_096],
+      ["/api/github/authentication/commands", "POST", 4_096],
+      ["/api/integrations/linear/authentication", "GET", 4_096],
+      ["/api/integrations/linear/authentication/commands", "POST", 4_096],
+      ["/api/integrations/linear/operations", "POST", 512 * 1_024],
+    ] as const) {
+      expect(
+        routePolicy.inspect(
+          request(path, { method, headers: { ...headers, "content-type": "application/json" } }),
+        ),
+      ).toMatchObject({ kind: "allow", maxResponseBytes });
+    }
+  });
+
   it("admits a paired device's reply detail read and nothing that could change it", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
     const inspect = (path: string, method: "GET" | "POST") =>
@@ -1300,7 +1374,7 @@ describe("remote route policy", () => {
     expect(grants.status).toBe(415);
   });
 
-  it("gives each mode's attachment upload its own body budget and only the media that mode takes", async () => {
+  it("gives each mode's attachment upload its own body budget and only the media that mode takes, any file in Work and Code", async () => {
     const { route, authenticatedProduct } = handler();
     const upload = async (path: string, method: string, contentType: string, body: BodyInit) => {
       const response = await route(
@@ -1324,14 +1398,17 @@ describe("remote route policy", () => {
     expect((await upload("/api/code/attachments", "PUT", "image/webp", photo)).status).toBe(200);
     expect(authenticatedProduct).toHaveBeenCalledTimes(4);
 
-    // Work and Code take images only, and no other product route takes an image.
+    // Work and Code take a file of any type, named as `type/subtype`; a body
+    // with no such type is refused, and no other product route takes a file.
     expect((await upload("/api/work/attachments", "PUT", "application/pdf", photo)).status).toBe(
-      415,
+      200,
     );
-    expect((await upload("/api/code/attachments", "PUT", "text/plain", photo)).status).toBe(415);
+    expect((await upload("/api/code/attachments", "PUT", "text/plain", photo)).status).toBe(200);
+    expect(authenticatedProduct).toHaveBeenCalledTimes(6);
+    expect((await upload("/api/code/attachments", "PUT", "not a type", photo)).status).toBe(415);
     expect((await upload("/api/chat/commands", "POST", "image/jpeg", "{}")).status).toBe(415);
     expect((await upload("/api/work/turns", "PUT", "image/jpeg", "{}")).status).toBe(405);
-    expect(authenticatedProduct).toHaveBeenCalledTimes(4);
+    expect(authenticatedProduct).toHaveBeenCalledTimes(6);
 
     const tooLarge = await route(
       request("/api/chat/attachments", {

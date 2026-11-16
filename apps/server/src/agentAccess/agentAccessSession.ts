@@ -386,6 +386,9 @@ export function guardAgentRequest(input: {
       // agent's only when the person chose Full access for this grant.
       if (body["fullAccessSandbox"] !== undefined && scope.highestLevel !== "full-access")
         return refused("Full access stays with the person.");
+      // Strict narrows a thread, so an agent may turn it on; turning it off
+      // widens what the provider may do, which stays with the person.
+      if (loosensStrict(body["strict"])) return refused(STRICT_STAYS_WITH_PERSON);
       return {
         kind: "allowed",
         recordsThread: {
@@ -396,9 +399,12 @@ export function guardAgentRequest(input: {
       };
     }
     if (kind === "change-work-thread-access") {
+      if (body["fullAccessRunFlag"] !== undefined)
+        return refused("The per-run Full access flag stays with the person.");
       if (!workAccessAllowed(grant.scope.highestLevel, body["access"])) {
         return refused(`This agent's grant allows at most ${grant.scope.highestLevel}.`);
       }
+      if (loosensStrict(body["strict"])) return refused(STRICT_STAYS_WITH_PERSON);
       return thread(body["threadId"]);
     }
     return refused("This agent may not do that.");
@@ -416,12 +422,15 @@ export function guardAgentRequest(input: {
     }
     if (kind === "create-code-thread") {
       const created = (body["thread"] ?? {}) as Readonly<Record<string, unknown>>;
+      if (created["fullAccessRunFlag"] !== undefined)
+        return refused("The per-run Full access flag stays with the person.");
       if (!scope.modes.includes("code")) return refused("This agent's grant has no Code.");
       if (!projectAllowed(grant, created["projectId"])) {
         return refused("That Project is not in this agent's grant.");
       }
       if (!modelAllowed(grant, created["modelId"]))
         return refused("That model is not in this agent's grant.");
+      if (loosensStrict(created["strict"])) return refused(STRICT_STAYS_WITH_PERSON);
       // Remembering a level on the Project is administration, which no grant
       // holds, whatever its level.
       if (
@@ -450,6 +459,16 @@ export function guardAgentRequest(input: {
     return refused("This agent may not do that.");
   }
   return refused("This agent may not do that.");
+}
+
+const STRICT_STAYS_WITH_PERSON = "Turning Strict off stays with the person.";
+
+/**
+ * Whether a thread's Strict choice in a request could turn Strict off: an
+ * explicit off, or null, which returns the thread to defaults that may be off.
+ */
+function loosensStrict(value: unknown): boolean {
+  return value === false || value === null;
 }
 
 const CANCEL_KINDS: ReadonlyArray<string> = [

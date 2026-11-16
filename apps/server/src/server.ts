@@ -249,6 +249,8 @@ export function startOctantServer(
       workTurnProjection,
       workTurnsCutOffByRestart,
       threadWakeups,
+      resolveThreadStrict,
+      resolveProjectStrict,
     } = wireFoundations({ latencyStats, options, persistence });
     const {
       agentRunParentAuthority,
@@ -295,6 +297,7 @@ export function startOctantServer(
       browserAuthority,
       options,
       persistence,
+      workThreadProjection,
     });
     const {
       agentRunInteractions,
@@ -346,6 +349,7 @@ export function startOctantServer(
       threadFollowUpSuggestions,
       turnMetrics,
     } = wireAgentRuns({
+      resolveThreadStrict,
       readResourceMemory,
       agentRunParentAuthority,
       agentRunPersistence,
@@ -357,6 +361,7 @@ export function startOctantServer(
       // Deferred: Work's running turns are wired later in this scope.
       runningWorkTurnAccess: (threadId) => runningWorkTurnAccess(threadId),
       isProjectPolicyTargetAllowed,
+      liveTurns,
       nativeHarnessSessions,
       nativeHarnessApprovals,
       agentRunInteractions,
@@ -445,6 +450,7 @@ export function startOctantServer(
       stopDesktopLeases,
       webAssets,
     } = wireComputerUse({
+      resolveThreadStrict,
       // Deferred: Work's running turns are wired later in this scope.
       runningWorkTurnAccess: (threadId) => runningWorkTurnAccess(threadId),
       onWindowRevoked,
@@ -521,6 +527,7 @@ export function startOctantServer(
       runningWorkTurnSandbox,
       runningWorkTurns,
       workRequestRuntime,
+      workLevelChangeHolder,
       workRequestService,
       workShieldHolder,
     } = wireWorkRequestState({
@@ -576,6 +583,7 @@ export function startOctantServer(
       skillDiscoveryService,
       providerAvailabilityMarks,
     } = yield* wireProviders({
+      resolveThreadStrict,
       hostResourceBudget,
       serverRegistry,
       providerRuntimeNetwork,
@@ -635,6 +643,7 @@ export function startOctantServer(
       observeTurnEnded,
       threadWork,
     } = wireHarness({
+      resolveThreadStrict,
       providerAvailabilityMarks,
       isProjectPolicyTargetAllowed,
       toolEffectLedger,
@@ -865,6 +874,7 @@ export function startOctantServer(
       androidToolchainRoutes,
       appleToolchainRoutes,
       baseRouteCodeService,
+      codeSessionRoutes,
       codeCompletedThreadSource,
       codeOperationRuntime,
       codeService,
@@ -878,6 +888,9 @@ export function startOctantServer(
       terminalProcessPort,
     } = yield* wireCodeRuntime({
       imageDescriber,
+      resolveThreadStrict,
+      isPairedDeviceScope,
+      windowAuthorityStore,
       threadWakeups,
       hostResourceBudget,
       providerAvailabilityMarks,
@@ -1012,6 +1025,8 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      resolveThreadStrict,
+      resolveProjectStrict,
       onWindowRevoked,
       desktopLeases,
       installDesktopPreviewRequest,
@@ -1062,6 +1077,7 @@ export function startOctantServer(
       workspacePresetRoutes,
     } = yield* wireChat({
       imageDescriber,
+      resolveThreadStrict,
       verifyModelToolsOnFirstUse,
       threadMoveHolds,
       conversationInputTransfer,
@@ -1130,6 +1146,7 @@ export function startOctantServer(
       threadMessageQueue,
       threadMessageQueueRoutes,
       threadWakeupRoutes,
+      workSessionRoutes,
       workThreadWakeupPort,
       observeWorkThreadRuntime,
       onWorkTurnCancelled,
@@ -1139,6 +1156,8 @@ export function startOctantServer(
       workflowService,
     } = yield* wireWork({
       imageDescriber,
+      resolveThreadStrict,
+      machineChangeFeed,
       threadWakeups,
       codeProjectAccess,
       isPairedDeviceScope,
@@ -1156,6 +1175,7 @@ export function startOctantServer(
       workTurnProjection,
       threadAwaitsHarnessApproval,
       threadAwaitsHarnessQuestion,
+      workLevelChangeHolder,
       workRequestRuntime,
       workRequestService,
       onWindowRevoked,
@@ -1253,6 +1273,7 @@ export function startOctantServer(
       goalLoopService,
       liftRestartRecovery,
       toolEffectLedger,
+      liveTurns,
       persistence,
       routeCodeService,
       threadMessageQueue,
@@ -1806,6 +1827,7 @@ export function startOctantServer(
       agentRunRouteDependencies,
       agentRunSettingsRoutes,
       androidToolchainRoutes,
+      codeSessionRoutes,
       appleToolchainRoutes,
       artifactLibraryRoutes,
       artifactMirrorRoutes,
@@ -1889,6 +1911,7 @@ export function startOctantServer(
       threadNotesRoutes,
       threadMessageQueueRoutes,
       threadWakeupRoutes,
+      workSessionRoutes,
       usageDashboardRoutes,
       usageRoutes,
       validationEvidenceRoutes,
@@ -1926,6 +1949,7 @@ export function startOctantServer(
       remoteHost,
       threadRetention,
     } = wireRemote({
+      resolveThreadStrict,
       restartRecovery,
       agentGrantRouteSlot,
       pairedDeviceRouteSlot,

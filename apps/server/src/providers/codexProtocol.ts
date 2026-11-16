@@ -177,6 +177,18 @@ const TurnStartResult = Schema.Struct({ turn: TurnReference });
 export type CodexTurnResult = typeof TurnStartResult.Type;
 export const decodeTurnStartResult = decode(TurnStartResult);
 
+/**
+ * `review/start` answers the review's turn and the thread it runs on, which is
+ * the one it was given for an inline review (`ReviewStartResponse` in codex-rs
+ * `app-server-protocol` `v2/review.rs`, rust-v0.169.0).
+ */
+const ReviewStartResult = Schema.Struct({
+  turn: TurnReference,
+  reviewThreadId: Schema.NonEmptyString,
+});
+export type CodexReviewStartResult = typeof ReviewStartResult.Type;
+export const decodeReviewStartResult = decode(ReviewStartResult);
+
 const TurnSteerResult = Schema.Struct({ turnId: Schema.NonEmptyString });
 export type CodexTurnSteerResult = typeof TurnSteerResult.Type;
 export const decodeTurnSteerResult = decode(TurnSteerResult);
@@ -184,6 +196,12 @@ export const decodeTurnSteerResult = decode(TurnSteerResult);
 const TurnInterruptResult = Schema.Struct({});
 export type CodexTurnInterruptResult = typeof TurnInterruptResult.Type;
 export const decodeTurnInterruptResult = (value: unknown): CodexTurnInterruptResult => {
+  decode(Schema.Record({ key: Schema.String, value: Schema.Unknown }))(value);
+  return {};
+};
+
+/** `thread/inject_items` answers `{}` once the items are in the thread's history. */
+export const decodeThreadInjectItemsResult = (value: unknown): Record<string, never> => {
   decode(Schema.Record({ key: Schema.String, value: Schema.Unknown }))(value);
   return {};
 };
@@ -244,6 +262,8 @@ const MODELED_ITEM_TYPES: ReadonlySet<string> = new Set([
   "contextCompaction",
   "agentMessage",
   "plan",
+  "enteredReviewMode",
+  "exitedReviewMode",
   "reasoning",
   "commandExecution",
   "fileChange",
@@ -254,7 +274,7 @@ const MODELED_ITEM_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Codex adds item kinds over time (image views, review markers, ...). Anything
+ * Codex adds item kinds over time (image views, ...). Anything
  * Octant does not model decodes to this opaque item so one new kind cannot take
  * down the whole connection; the mapper ignores it. Modeled kinds keep their
  * strict shapes because the filter excludes their names.
@@ -292,6 +312,13 @@ const ThreadItem = Schema.Union(
     type: Schema.Literal("plan"),
     id: Schema.String,
     text: Schema.String,
+  }),
+  // A review run's markers: `review` is the hint shown on entering, and on
+  // leaving the review's findings as Codex renders them (`review_output_text`).
+  Schema.Struct({
+    type: Schema.Literal("enteredReviewMode", "exitedReviewMode"),
+    id: Schema.String,
+    review: Schema.String,
   }),
   Schema.Struct({
     type: Schema.Literal("reasoning"),
@@ -356,10 +383,19 @@ const ThreadItem = Schema.Union(
     status: Schema.Literal("inProgress", "completed", "failed", "interrupted"),
     receiverThreadIds: Schema.Array(Schema.String).pipe(Schema.maxItems(32)),
     prompt: Schema.optional(Schema.NullOr(Schema.String)),
+    /** The model a `spawnAgent` call asked for, when it named one. */
+    model: Schema.optional(Schema.NullOr(Schema.String)),
     agentsStates: Schema.optional(
       Schema.Record({
         key: Schema.String,
-        value: Schema.Struct({ status: Schema.String }),
+        /**
+         * `message` is the agent's last answer once it completed, or its
+         * error once it errored (codex-cli 0.164.0 `CollabAgentState`).
+         */
+        value: Schema.Struct({
+          status: Schema.String,
+          message: Schema.optional(Schema.NullOr(Schema.String)),
+        }),
       }),
     ),
   }),

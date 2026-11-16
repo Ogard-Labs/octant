@@ -14,6 +14,7 @@ import {
   isImageProfileDriverKind,
 } from "@octant/domain";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import type { McpPlanServerProvider } from "@octant/contracts/mcp-plan-read-only";
 import { lastClaudeHostEnvironmentSnapshot } from "./claudeAccountDirectory";
 import {
   claudeAccountNeedsOwnConfigDirectory,
@@ -39,7 +40,7 @@ import type { AcpProcessPort } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind } from "./acpProfiles";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { makeDevinPlanUsageFacts } from "./devinPlanUsage";
-import { makeOpenCodeDriver } from "./openCodeDriver";
+import { makeOpenCodeDriver, type OpenCodeProtectedPaths } from "./openCodeDriver";
 import { makeOpenCodeGoUsageFacts } from "./openCodeGoUsage";
 import type { OpenCodeProcessPort } from "./openCodeProcess";
 import { makeOllamaDriver } from "./ollamaDriver";
@@ -78,8 +79,8 @@ export interface ProviderDriverFactoryOptions {
   /** The host's process authority clock, which Claude's pre-tool grants expire on. */
   readonly claudeAuthorityNow?: () => number;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
-  /** The host's protected files and folders in force, as absolute paths. */
-  readonly protectedPaths?: () => ReadonlyArray<string>;
+  /** The host's protected files and folders in force, as absolute paths at each level. */
+  readonly protectedPaths?: () => OpenCodeProtectedPaths;
   readonly permissionPersistence: () => PermissionPersistence;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   /**
@@ -91,6 +92,8 @@ export interface ProviderDriverFactoryOptions {
   readonly runtimeTurnsPerTurn?: () => number;
   /** The person's current own-memory switch for a Claude Code or Codex account. */
   readonly providerOwnMemory?: (instanceId: ProviderInstanceId) => boolean;
+  /** The provider's own MCP servers the person let into Plan, read at each launch. */
+  readonly planMcpServers?: (provider: McpPlanServerProvider) => ReadonlyArray<string>;
   /** Host Claude env from the snapshot gate. Omit to use the last gated copy. */
   readonly claudeHostEnvironment?: NodeJS.ProcessEnv;
   readonly codexInstances?: ReadonlyArray<ProviderInstance>;
@@ -148,6 +151,7 @@ export function makeProviderDriver(
         }
       : driver;
   }
+  const readPlanMcpServers = options.planMcpServers;
   switch (instance.driverKind) {
     case "opencode":
       // Route selection follows the version the process attests, not the
@@ -155,6 +159,9 @@ export function makeProviderDriver(
       // share the name `opencode`.
       return {
         ...makeOpenCodeDriver({
+          ...(readPlanMcpServers === undefined
+            ? {}
+            : { planMcpServers: () => readPlanMcpServers("opencode") }),
           instanceId: instance.id,
           binaryPath: instance.configuration.binaryPath,
           process: options.openCodeProcess,
@@ -200,6 +207,9 @@ export function makeProviderDriver(
       const codexHome = effectiveCodexAccountHome(instance, hostEnvironment, homedir());
       const readCodexOwnMemory = options.providerOwnMemory;
       return makeCodexDriver({
+        ...(readPlanMcpServers === undefined
+          ? {}
+          : { planMcpServers: () => readPlanMcpServers("codex") }),
         ...(readCodexOwnMemory === undefined
           ? {}
           : { ownMemory: () => readCodexOwnMemory(instance.id) }),
@@ -213,6 +223,13 @@ export function makeProviderDriver(
           hostEnvironment,
           codexHome,
           ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
+        }),
+        openEnvironment: codexAccountProcessEnvironment({
+          binaryPath: instance.configuration.binaryPath,
+          hostEnvironment,
+          codexHome,
+          ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
+          strict: false,
         }),
         ...(options.credentialResolver === undefined
           ? {}
@@ -270,6 +287,9 @@ export function makeProviderDriver(
       const readArtifactDelivery = options.claudeArtifactDelivery;
       const readClaudeOwnMemory = options.providerOwnMemory;
       return makeClaudeDriver({
+        ...(readPlanMcpServers === undefined
+          ? {}
+          : { planMcpServers: () => readPlanMcpServers("claude") }),
         ...(options.runtimeTurnsPerTurn === undefined
           ? {}
           : { runtimeTurnsPerTurn: options.runtimeTurnsPerTurn }),

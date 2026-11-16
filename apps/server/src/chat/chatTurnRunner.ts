@@ -1,4 +1,5 @@
 import { NativeHarnessAskUserArguments, type Questionnaire } from "@octant/contracts";
+import type { StalledTurnScope } from "../providers/turnBudget";
 import { validateQuestionnaireAnswer } from "@octant/domain";
 import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
 import { boundedToolResultJson } from "../providers/toolResultJson";
@@ -225,7 +226,7 @@ export interface ChatTurnRunnerOptions {
    * Read as each turn starts, so a changed setting applies to the next turn
    * and a running turn keeps the limit it started with.
    */
-  readonly stalledTurnLimitMs?: () => number | null;
+  readonly stalledTurnLimitMs?: (turn: StalledTurnScope) => number | null;
   /**
    * The longest one provider tool call pauses the stalled-turn clock, in
    * milliseconds, `null` when that bound is Off. Read as each turn starts,
@@ -277,6 +278,8 @@ export interface ChatTurnRunnerInput {
   readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
   /** What the session may load of the provider's own setup; absent keeps it all off. */
   readonly nativeSetup?: ProviderNativeSetup;
+  /** Strict for this launch, as the host resolved it; absent is Strict. */
+  readonly strict?: boolean;
   readonly researchRoute: ResearchRouteDecision;
   readonly appManagedTools?: AppManagedToolSet;
   /**
@@ -361,7 +364,7 @@ export class ChatTurnRunner {
   readonly #capacityScheduler: ProviderCapacityScheduler;
   readonly #contextHarness: ContextHarnessService;
   readonly #maxEvents: number | undefined;
-  readonly #stalledTurnLimitMs: () => number | null;
+  readonly #stalledTurnLimitMs: (turn: StalledTurnScope) => number | null;
   readonly #providerToolCallPauseLimitMs: () => number | null;
   readonly #appManagedToolDeadlineMs: number;
   readonly #maxStreamedOutputBytes: number;
@@ -739,6 +742,12 @@ export class ChatTurnRunner {
           ),
           Effect.catchAll(persistProviderFailure),
         );
+      input.liveTurn?.connect({
+        connection,
+        sessionId: input.attempt.providerSessionId,
+        providerInstanceId: input.providerInstanceId,
+        takesSteeredResults: true,
+      });
       const cleanup = { released: false };
       const killSession = connection.forceStop;
       if (killSession !== undefined) {
@@ -986,6 +995,7 @@ export class ChatTurnRunner {
               tools: [...(input.appManagedTools?.definitions ?? [])],
               ...modelOptionValues,
               ...nativeSetup,
+              ...(input.strict === false ? { strict: false } : {}),
             })
           : connection.start({
               sessionId: input.attempt.providerSessionId,
@@ -994,6 +1004,7 @@ export class ChatTurnRunner {
               tools: [...(input.appManagedTools?.definitions ?? [])],
               ...modelOptionValues,
               ...nativeSetup,
+              ...(input.strict === false ? { strict: false } : {}),
             })
       ).pipe(Effect.catchAll(persistProviderFailure));
 
@@ -1051,7 +1062,11 @@ export class ChatTurnRunner {
               }),
             );
 
-      const idle = yield* makeIdleTimeout(stalledTurnLimitMs(), providerToolCallPauseLimitMs());
+      // Chat never runs at Full access.
+      const idle = yield* makeIdleTimeout(
+        stalledTurnLimitMs({ fullAccess: false, strict: input.strict !== false }),
+        providerToolCallPauseLimitMs(),
+      );
       const shareEventLoop = makeEventLoopShare();
       const timeoutWatcher = yield* Effect.forkScoped(
         idle.expired.pipe(

@@ -240,6 +240,8 @@ export function decidePullRequestAutoFix(input: {
   readonly observation: PullRequestAutoFixObservation;
   readonly turnActive: boolean;
   readonly personTyping: boolean;
+  /** Attempts per failure from Settings; absent is the default three. */
+  readonly maxAttempts?: number;
 }): PullRequestAutoFixDecision {
   const { fold, observation } = input;
   if (fold.status !== "on") return { kind: "idle" };
@@ -257,7 +259,7 @@ export function decidePullRequestAutoFix(input: {
   const spent = Math.max(
     ...observation.failures.map((failure) => fold.attempts.get(failureIdentity(failure)) ?? 0),
   );
-  if (spent >= CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS) {
+  if (spent >= (input.maxAttempts ?? CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS)) {
     return { kind: "stop", reason: "attempt-limit" };
   }
   if (input.turnActive) return { kind: "paused", reason: "turn-active" };
@@ -362,12 +364,16 @@ export function pullRequestWatchBaseline(
   return baseline;
 }
 
-/** Whether a watch has outlived its lifetime; checked even while it cannot observe. */
-export function pullRequestWatchExpired(fold: PullRequestWatchFold, now: string): boolean {
-  return (
-    fold.status === "on" &&
-    Date.parse(now) - Date.parse(fold.enabledAt) >= CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_MS
-  );
+/**
+ * Whether a watch has outlived its lifetime (from Settings; absent is three
+ * days); checked even while it cannot observe.
+ */
+export function pullRequestWatchExpired(
+  fold: PullRequestWatchFold,
+  now: string,
+  lifetimeMs: number = CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_MS,
+): boolean {
+  return fold.status === "on" && Date.parse(now) - Date.parse(fold.enabledAt) >= lifetimeMs;
 }
 
 /**
@@ -389,13 +395,19 @@ export function decidePullRequestWatch(input: {
   readonly now: string;
   readonly turnActive: boolean;
   readonly personTyping: boolean;
+  /** Started wakes before the watch ends, from Settings; absent is ten. */
+  readonly maxWakes?: number;
+  /** The watch's lifetime, from Settings; absent is three days. */
+  readonly lifetimeMs?: number;
 }): PullRequestWatchDecision {
   const { fold, observation } = input;
   if (fold.status !== "on") return { kind: "idle" };
   if (observation.state === "merged") return { kind: "stop", reason: "merged" };
   if (observation.state === "closed") return { kind: "stop", reason: "closed" };
-  if (pullRequestWatchExpired(fold, input.now)) return { kind: "stop", reason: "expired" };
-  if (fold.wakes >= CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES) {
+  if (pullRequestWatchExpired(fold, input.now, input.lifetimeMs)) {
+    return { kind: "stop", reason: "expired" };
+  }
+  if (fold.wakes >= (input.maxWakes ?? CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES)) {
     return { kind: "stop", reason: "wake-limit" };
   }
   const since = Date.parse(fold.enabledAt);

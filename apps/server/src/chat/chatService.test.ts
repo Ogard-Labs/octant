@@ -1466,7 +1466,7 @@ describe("ChatService", () => {
     expect(await toolsSent(verified)).toContain("octant_canvas");
   });
 
-  it("refuses a provider's slash command in Chat before it reaches the runtime, listed or not", async () => {
+  it("sends a provider's own slash command in Chat to the runtime, even one no list names", async () => {
     const window = decodeWindowId("84000000-0000-4000-8000-000000000016");
     const probe = probeFixture();
     const providerRuntimeRegistry = new ProviderRuntimeRegistry();
@@ -1478,35 +1478,19 @@ describe("ChatService", () => {
       title: "Commands",
     });
     if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-    for (const prompt of ["/review src", "/deploy now"]) {
-      await expect(
-        service.execute(
-          {
-            kind: "send-chat-turn",
-            threadId: created.thread.id,
-            expectedVersion: created.thread.version,
-            prompt,
-          },
-          { windowId: window },
-        ),
-      ).rejects.toMatchObject({
-        failure: {
-          category: "unsupported",
-          message: expect.stringContaining("Chat runs none: it keeps no folder and no shell"),
-        },
-      });
-    }
-    // A path is ordinary text and is sent.
+    // Unlisted here: the list may be another Project's, and the runtime judges it.
     await service.execute(
       {
         kind: "send-chat-turn",
         threadId: created.thread.id,
         expectedVersion: created.thread.version,
-        prompt: "/usr/bin is on PATH",
+        prompt: "/deploy now",
       },
       { windowId: window },
     );
-    expect(fakeDriver.sentTurns.map((turn) => turn.prompt)).toEqual(["/usr/bin is on PATH"]);
+    await vi.waitFor(() =>
+      expect(fakeDriver.sentTurns.map((turn) => turn.prompt)).toEqual(["/deploy now"]),
+    );
   });
 
   it("restores a model's Verify tools record from the catalogue after a restart, never from an invalidated one", async () => {

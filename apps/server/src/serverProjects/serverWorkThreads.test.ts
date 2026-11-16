@@ -145,6 +145,7 @@ describe.skipIf(!canRunThrowawaySshd)("a server Work Project's turn", () => {
       },
       isHarnessProvider: () => options.harness ?? true,
       approvals: approvals as never,
+      readWorkExecutionPolicy: () => options.level(),
       hostId: authority.hostId,
       readThreadTaint: () => false,
       recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
@@ -216,6 +217,20 @@ describe.skipIf(!canRunThrowawaySshd)("a server Work Project's turn", () => {
     const full = turn({ level: () => "full-access" });
     await full.call("bash", { command: "true" });
     expect(full.asked).toEqual([]);
+  });
+
+  it("reads a protected file on the server at Full access, and refuses it below", async () => {
+    mkdirSync(join(folder, ".aws"), { recursive: true });
+    writeFileSync(join(folder, ".aws", "credentials"), "[default]\n");
+    let level: ProviderExecutionPolicy = "full-access";
+    const { call } = turn({ level: () => level });
+    expect(await call("read", { path: ".aws/credentials" })).toMatchObject({
+      result: { lines: ["[default]", ""] },
+    });
+    level = "approval-gated";
+    expect(JSON.stringify(await call("read", { path: ".aws/credentials" }))).toContain(
+      "protected-file",
+    );
   });
 
   it("runs nothing anywhere when the connection cannot be made", async () => {
