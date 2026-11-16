@@ -320,6 +320,9 @@
   );
   --oct-menu-row-inset: var(--oct-space-2);
   --oct-menu-inset: var(--oct-space-1);
+  /* The widest a menu grows. A row's second line wraps inside it; without a
+     limit one long sentence stretched a menu across the window. */
+  --oct-menu-max-w: 360px;
   --oct-disabled-opacity: 0.75;
   /* The toolbar's ink in a desktop window that is not in front. */
   --oct-window-inactive-opacity: 0.55;

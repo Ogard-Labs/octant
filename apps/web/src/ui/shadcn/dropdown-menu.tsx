@@ -104,7 +104,7 @@ export function DropdownMenuPopup({
         else if (ref !== null && ref !== undefined) ref.current = node;
       }}
       className={cn(
-        "z-[var(--oct-z-popup)] min-w-[12rem] max-w-(--available-width) rounded-(--oct-radius-lg) bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-pop)] outline-none",
+        "z-[var(--oct-z-popup)] min-w-[12rem] max-w-[min(var(--available-width),var(--oct-menu-max-w))] rounded-(--oct-radius-lg) bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-pop)] outline-none",
         className,
       )}
       data-slot="dropdown-menu-content"
