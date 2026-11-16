@@ -1,3 +1,7 @@
+import {
+  StrictPreferenceControl,
+  strictPreferenceValue,
+} from "../settings/StrictPreferenceControl";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { PermissionMode } from "@octant/contracts/providers";
 import type { ProjectSummary } from "@octant/contracts/projects";
@@ -18,12 +22,6 @@ const CODE_OPTIONS = optionsFor(PERMISSION_MODE_OPTIONS);
 // Work shares Code's levels and has no Plan overlay.
 const WORK_OPTIONS = optionsFor(PERMISSION_MODE_OPTIONS.filter((option) => option.id !== "plan"));
 
-const SANDBOX_OPTIONS = [
-  { id: FOLLOW_SETTINGS, label: "Same as Settings" },
-  { id: "on", label: "Keep the sandbox" },
-  { id: "off", label: "No sandbox" },
-];
-
 export interface ProjectPermissionModeSectionProps {
   readonly project: BoundProjectSummary;
   /**
@@ -33,7 +31,7 @@ export interface ProjectPermissionModeSectionProps {
    */
   readonly onChange: (
     mode: PermissionMode | undefined,
-    fullAccessSandbox?: boolean | "settings",
+    strict?: boolean | "inherit",
   ) => Promise<boolean>;
   readonly disabled?: boolean;
   readonly onOpenSandboxRestrictions?: () => void;
@@ -70,32 +68,18 @@ export function ProjectPermissionModeSection(props: ProjectPermissionModeSection
         options={props.project.type === "work" ? WORK_OPTIONS : CODE_OPTIONS}
         value={value}
       />
-      <span className="text-xs text-muted-foreground">Sandbox at Full access</span>
-      <OctantSelectField
-        aria-label="Sandbox at Full access for this Project"
-        className="window-no-drag"
+      <span className="text-xs text-muted-foreground">Strict</span>
+      <StrictPreferenceControl
+        label="Strict for this Project"
+        value={strictPreferenceValue(props.project, true)}
+        inherit
         disabled={props.disabled === true || pending}
-        onValueChange={(next) => {
-          if (next !== FOLLOW_SETTINGS && next !== "on" && next !== "off") return;
-          const sandbox = next === FOLLOW_SETTINGS ? undefined : next === "on";
-          if (sandbox === props.project.defaultFullAccessSandbox) return;
+        onChange={(strict) => {
           setPending(true);
-          // Send the mode the Project is in, not only its stored field: a
-          // Project that remembered Full access before modes existed has no
-          // mode of its own, and sending none reads as "follow Settings",
-          // which drops that remembered Full access.
           void props
-            .onChange(value === FOLLOW_SETTINGS ? undefined : value, sandbox ?? "settings")
+            .onChange(value === FOLLOW_SETTINGS ? undefined : value, strict)
             .finally(() => setPending(false));
         }}
-        options={SANDBOX_OPTIONS}
-        value={
-          props.project.defaultFullAccessSandbox === undefined
-            ? FOLLOW_SETTINGS
-            : props.project.defaultFullAccessSandbox
-              ? "on"
-              : "off"
-        }
       />
       {props.onOpenSandboxRestrictions === undefined ? null : (
         <OctantButton
@@ -103,7 +87,7 @@ export function ProjectPermissionModeSection(props: ProjectPermissionModeSection
           disabled={props.disabled}
           onClick={props.onOpenSandboxRestrictions}
         >
-          Sandbox restrictions…
+          Configure protections…
         </OctantButton>
       )}
       {warning.dialog}

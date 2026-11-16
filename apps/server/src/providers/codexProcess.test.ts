@@ -850,7 +850,7 @@ describe("Codex launch confinement", () => {
     expect(prepared.status === "prepared" ? prepared.launch.command : undefined).toBe("/bin/sh");
   });
 
-  it("launches Windows Full access unwrapped in the thread's folder and refuses a guarded Windows launch before any confinement is prepared", () => {
+  it("launches ordinary Windows levels natively and refuses a kept sandbox before any confinement is prepared", () => {
     const prepare = vi.fn(() => {
       throw Error("No confinement may be prepared.");
     });
@@ -876,7 +876,6 @@ describe("Codex launch confinement", () => {
       },
     });
     for (const authority of [
-      { executionPolicy: "approval-gated" },
       { executionPolicy: "full-access", fullAccessSandbox: true },
     ] as const) {
       const guarded = prepareCodexLaunch({
@@ -892,10 +891,27 @@ describe("Codex launch confinement", () => {
         failure: { message: WINDOWS_SANDBOX_MISSING_REASON },
       });
     }
+    for (const executionPolicy of ["approval-gated", "auto-accept-edits", "plan"] as const) {
+      expect(
+        prepareCodexLaunch({
+          binaryPath: "C:\\fixture\\codex.exe",
+          args: ["app-server"],
+          authority: {
+            kind: "thread",
+            root: "C:\\fixture\\project",
+            mode: "code",
+            executionPolicy,
+          },
+          environment: {},
+          confinement: { prepare },
+          platform: "win32",
+        }),
+      ).toMatchObject({ status: "prepared", launch: { cwd: "C:\\fixture\\project" } });
+    }
     expect(prepare).not.toHaveBeenCalled();
   });
 
-  it("reads the Windows catalog unconfined only for a host that starts threads at open Full access", () => {
+  it("reads Windows metadata natively without making an enrollment decision", () => {
     const prepare = vi.fn(() => {
       throw Error("No confinement may be prepared.");
     });
@@ -907,10 +923,8 @@ describe("Codex launch confinement", () => {
       confinement: { prepare },
       platform: "win32",
     });
-    expect(refused).toMatchObject({
-      status: "refused",
-      failure: { message: WINDOWS_SANDBOX_MISSING_REASON },
-    });
+    expect(refused).toMatchObject({ status: "prepared" });
+    if (refused.status === "prepared") refused.launch.release();
     const read = prepareCodexLaunch({
       binaryPath: "C:\\fixture\\codex.exe",
       args: ["app-server"],

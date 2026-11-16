@@ -812,6 +812,27 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
+          if (
+            command !== undefined &&
+            callerAuthority !== "local-window" &&
+            ((command.kind === "change-code-thread-access" &&
+              (command.strict !== undefined || command.fullAccessSandbox !== undefined)) ||
+              (command.kind === "create-code-thread" &&
+                (command.thread.strict !== undefined ||
+                  command.thread.fullAccessSandbox !== undefined)) ||
+              (command.kind === "update-code-settings" &&
+                (command.defaultStrict !== undefined ||
+                  command.defaultFullAccessSandbox !== undefined)))
+          )
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message:
+                  "Only you, from a window or a device you paired, can change Strict protections.",
+              },
+              403,
+              origin,
+            );
           // The coordinator role, its bounds and workers' level, the wake
           // switches, and how coordinators start workers are the person's
           // choices, at a window on this host or on a device they paired; any

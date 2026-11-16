@@ -6,7 +6,7 @@
   "scripts": {
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "build": "tsdown && bun ../../scripts/build-keychain-helper.ts && bun ../../scripts/build-code-file-helper.ts && bun ../../scripts/build-device-helper.ts",
+    "build": "tsdown && bun ../../scripts/build-keychain-helper.ts && bun ../../scripts/build-code-file-helper.ts && bun ../../scripts/build-sandbox-scope.ts && bun ../../scripts/build-device-helper.ts",
     "start": "electron dist/entry.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"

@@ -701,6 +701,24 @@ describe("WorkThreadService", () => {
     expect(inUnit).toEqual(["work.thread-updated@1", "guardrail.level-lowered@1"]);
   });
 
+  it("clears a Work thread's Strict override and legacy flag when the person chooses inheritance", async () => {
+    const f = serviceFixture({
+      threads: [thread({ access: "full-access", strict: false, fullAccessSandbox: true })],
+    });
+    const result = await f.service.execute(ids.window, {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "full-access",
+      strict: "inherit",
+    });
+    if (!("kind" in result) || result.kind !== "thread-updated")
+      throw new Error("No updated thread");
+    expect(result.thread).not.toHaveProperty("strict");
+    expect(result.thread).not.toHaveProperty("fullAccessSandbox");
+    expect(result.thread.access).toBe("full-access");
+  });
+
   it("journals who lowered Work's default or a thread's level, from which level and at which scope", async () => {
     const fixture = serviceFixture({ threads: [thread()] });
     await fixture.service.execute(ids.window, {

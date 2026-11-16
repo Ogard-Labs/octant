@@ -782,7 +782,11 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
           input.version,
         );
         const wall = piWallPolicy(input);
-        if (wall === "full-access") {
+        if (
+          (wall === "full-access" || platform === "win32") &&
+          input.sandboxPolicy === undefined &&
+          input.fullAccessSandbox !== true
+        ) {
           return { command: input.binaryPath, args, cwd: root, environment };
         }
         const temporaryDirectoryPath = yield* temporaryDirectory(

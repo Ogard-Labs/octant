@@ -158,6 +158,7 @@ export type CodeTurnEventCategory =
 
 export interface CodeTurnEvent {
   readonly category: CodeTurnEventCategory;
+  readonly requiresUser?: boolean;
   /** An approval that asks to change the thread's level rather than to run a tool. */
   readonly levelChange?: {
     readonly kind: "enter-plan" | "exit-plan";
@@ -528,8 +529,12 @@ export class CodeTurnRunner {
           ? {}
           : { modelOptionValues: input.thread.modelOptionValues }),
         executionPolicy: input.thread.executionPolicy,
+        ...(sandboxTurn.strict !== undefined && sandboxTurn.legacy !== true
+          ? { strict: sandboxTurn.strict }
+          : {}),
         ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),
-        ...(input.thread.fullAccessSandbox === true || sandboxPolicy !== undefined
+        ...((sandboxTurn.strict ?? input.thread.fullAccessSandbox) === true ||
+        sandboxPolicy !== undefined
           ? { fullAccessSandbox: true }
           : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
@@ -1132,6 +1137,7 @@ function normalizeProviderEvent(
       return Effect.succeed({
         ...base,
         category: "approval",
+        ...(event.requiresUser === undefined ? {} : { requiresUser: event.requiresUser }),
         requestId: text(event.requestId),
         // A description that already names the tool is not prefixed with it
         // again; "Edit: Claude requests permission to use Edit." said the same

@@ -501,7 +501,7 @@ export interface WorkspaceViewProps {
   readonly onProjectPermissionModeChange?: (
     projectId: ProjectId,
     permissionMode: import("@octant/contracts/providers").PermissionMode | undefined,
-    fullAccessSandbox?: boolean | "settings" | "keep",
+    strict?: boolean | "inherit" | "keep",
   ) => Promise<boolean>;
   readonly onProjectAutoReviewerChange?: (
     projectId: ProjectId,

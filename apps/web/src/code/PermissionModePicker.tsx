@@ -124,11 +124,12 @@ export interface PermissionModePickerProps {
    */
   readonly modes?: ReadonlyArray<PermissionMode>;
   /**
-   * The thread's opt-in sandbox at Full access. With a handler, the picker
-   * offers "Keep the sandbox" under Full access; without one it offers none.
+   * The shared Strict preference, independent of autonomy. A previous sandbox
+   * choice stays visibly marked as legacy until the person replaces it.
    */
-  readonly fullAccessSandbox?: boolean;
-  readonly onFullAccessSandboxChange?: (sandboxed: boolean) => void;
+  readonly strict?: boolean;
+  readonly legacyStrict?: boolean;
+  readonly onStrictChange?: (sandboxed: boolean | "inherit") => void;
   /**
    * Whether this thread's runtime can keep the sandbox at Full access. When it
    * cannot, the choice stays listed but disabled, with the reason.
@@ -136,7 +137,8 @@ export interface PermissionModePickerProps {
   readonly fullAccessSandboxSupported?: boolean;
 }
 
-const SANDBOX_DETAIL = "No prompts, but writes stay in the folder and secret files stay closed.";
+const SANDBOX_DETAIL =
+  "Strict protects personal files and credentials, and keeps writes in allowed folders. Some actions still require approval.";
 const SANDBOX_UNSUPPORTED_DETAIL =
   "This provider can't keep the sandbox at Full access yet. Use Claude, Codex or an Octant Harness model.";
 
@@ -148,17 +150,35 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
   const idPrefix = useId();
   const taskAccess = useContext(TaskAccessContext);
   const [policySelected, setPolicySelected] = useState(false);
+  const [inheritedStrict, setInheritedStrict] = useState<{
+    readonly threadId: string;
+    readonly value: boolean;
+    readonly legacy: boolean;
+  }>();
   const sandboxClient = taskAccess?.sandboxRestrictionsClient;
   const sandboxThreadId = taskAccess?.subject.aggregateId;
   useEffect(() => {
     setPolicySelected(false);
+
     if (sandboxClient === undefined || sandboxThreadId === undefined) return;
     const controller = new AbortController();
     const refresh = () => {
       void sandboxClient
         .settings({ kind: "session", threadId: sandboxThreadId }, controller.signal)
         .then((snapshot) => {
-          if (!controller.signal.aborted) setPolicySelected(snapshot.policy !== undefined);
+          if (!controller.signal.aborted) {
+            setPolicySelected(snapshot.strict === true && snapshot.policy !== undefined);
+            if (snapshot.strict !== undefined)
+              setInheritedStrict({
+                threadId: sandboxThreadId,
+                legacy: snapshot.running
+                  ? snapshot.activeLegacyStrict === true
+                  : snapshot.legacyStrict === true,
+                value: snapshot.running
+                  ? (snapshot.activeStrict ?? snapshot.strict)
+                  : snapshot.strict,
+              });
+          }
         })
         .catch(() => undefined);
     };
@@ -168,7 +188,7 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
       controller.abort();
       clearInterval(timer);
     };
-  }, [sandboxClient, sandboxThreadId]);
+  }, [sandboxClient, sandboxThreadId, props.strict]);
   const autoSupported =
     props.autoReview === undefined ? props.autoSupported : props.autoReview.status === "reviewer";
   const unsupportedReason =
@@ -185,15 +205,19 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
     platform: hostPlatform,
     access: { executionPolicy: "full-access", fullAccessSandbox: true },
   });
-  const sandboxed =
-    props.value === "full-access" && (props.fullAccessSandbox === true || policySelected);
-  const triggerLabel = autoFallsBack
-    ? "Ask first"
-    : sandboxed
-      ? "Full access · Sandboxed"
-      : policySelected && props.value === "auto"
-        ? "Auto · Sandboxed"
-        : PERMISSION_MODE_LABEL[props.value];
+  const effectiveStrict =
+    inheritedStrict !== undefined && inheritedStrict.threadId === sandboxThreadId
+      ? inheritedStrict.value
+      : (props.strict ?? false);
+  const legacyStrict =
+    inheritedStrict !== undefined && inheritedStrict.threadId === sandboxThreadId
+      ? inheritedStrict.legacy
+      : props.legacyStrict === true;
+  const sandboxed = props.value === "full-access" && (effectiveStrict || policySelected);
+  const modeLabel = autoFallsBack ? "Ask first" : PERMISSION_MODE_LABEL[props.value];
+  const triggerLabel = effectiveStrict
+    ? `${modeLabel} · ${legacyStrict ? "Legacy sandbox" : "Strict"}`
+    : modeLabel;
   const detailOf = (id: PermissionMode) =>
     id === "auto"
       ? autoDetail(props.autoReview)
@@ -286,26 +310,25 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                   );
                 })}
               </OctantMenuRadioGroup>
-              {props.value === "full-access" && props.onFullAccessSandboxChange !== undefined ? (
+              {props.onStrictChange !== undefined ? (
                 <OctantMenuGroup>
                   <OctantMenuCheckboxItem
                     aria-describedby={`${idPrefix}-sandbox-note`}
-                    checked={props.fullAccessSandbox === true}
+                    checked={effectiveStrict}
                     // Turning the sandbox on is refused where the runtime can't
                     // keep it; turning an inherited one off is always allowed,
                     // because that is what a refused turn asks the person to do.
                     disabled={
                       props.disabled === true ||
-                      ((!sandboxSupported || sandboxHostRefusal !== undefined) &&
-                        props.fullAccessSandbox !== true)
+                      ((!sandboxSupported || sandboxHostRefusal !== undefined) && !effectiveStrict)
                     }
                     onCheckedChange={(checked) => {
                       if (props.disabled === true) return;
-                      props.onFullAccessSandboxChange?.(checked === true);
+                      props.onStrictChange?.(checked === true);
                     }}
                   >
                     <span className="flex min-w-0 flex-col">
-                      <span>Keep the sandbox</span>
+                      <span>{legacyStrict ? "Legacy sandbox" : "Strict"}</span>
                       <span className="oct-menu-detail" id={`${idPrefix}-sandbox-note`}>
                         {sandboxHostRefusal ??
                           (sandboxSupported ? SANDBOX_DETAIL : SANDBOX_UNSUPPORTED_DETAIL)}
@@ -314,9 +337,22 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                   </OctantMenuCheckboxItem>
                 </OctantMenuGroup>
               ) : null}
+              {props.onStrictChange !== undefined ? (
+                <OctantMenuItem
+                  disabled={props.disabled === true}
+                  onClick={() => props.onStrictChange?.("inherit")}
+                >
+                  Use Project’s Strict preference
+                </OctantMenuItem>
+              ) : null}
+              {legacyStrict && props.onStrictChange !== undefined ? (
+                <OctantMenuItem onClick={() => props.onStrictChange?.(true)}>
+                  Use Strict protections instead of the legacy sandbox
+                </OctantMenuItem>
+              ) : null}
               {taskAccess?.onOpenSandboxRestrictions === undefined ? null : (
                 <OctantMenuItem onClick={taskAccess.onOpenSandboxRestrictions}>
-                  Sandbox restrictions…
+                  Configure protections…
                 </OctantMenuItem>
               )}
               {props.profileName === undefined ? null : (

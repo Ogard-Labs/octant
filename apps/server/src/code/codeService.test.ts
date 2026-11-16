@@ -2295,6 +2295,27 @@ describe("CodeService commands", () => {
       expect("thread" in back ? back.thread : undefined).not.toHaveProperty("planReturnPolicy");
     });
 
+    it("clears an explicit Strict and legacy choice when the person returns a Code thread to inheritance", async () => {
+      const f = serviceFixture({
+        threads: [
+          thread({ executionPolicy: "full-access", strict: true, fullAccessSandbox: true }),
+        ],
+        approve: false,
+      });
+      const result = await f.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "full-access",
+        permissionPersistence: "current-session",
+        strict: "inherit",
+      });
+      if (!("thread" in result)) throw new Error("No updated thread");
+      expect(result.thread).not.toHaveProperty("strict");
+      expect(result.thread).not.toHaveProperty("fullAccessSandbox");
+      expect(result.thread).toMatchObject({ executionPolicy: "full-access" });
+    });
+
     it("keeps a Code thread's sandbox at Full access, takes a new choice with the mode, and drops it below Full access", async () => {
       const raised = serviceFixture({
         threads: [thread({ executionPolicy: "full-access" })],

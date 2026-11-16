@@ -39,6 +39,14 @@ static int pin(const char *path, const char *device, const char *inode, int flag
 }
 
 int main(int argc, char **argv) {
+  if (argc == 2 && !strcmp(argv[1], "--check")) {
+    struct open_how how = { .flags = O_PATH | O_CLOEXEC,
+                           .resolve = RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS };
+    int root = (int)syscall(SYS_openat2, AT_FDCWD, "/", &how, sizeof(how));
+    if (root < 0) refuse();
+    close(root);
+    return syscall(SYS_close_range, 3u, ~0u, 0u) ? 125 : 0;
+  }
   if (argc >= 4 && !strcmp(argv[1], "--exec-close") && !strcmp(argv[2], "--")) {
     if (syscall(SYS_close_range, 3u, ~0u, 0u)) refuse();
     execvp(argv[3], &argv[3]);

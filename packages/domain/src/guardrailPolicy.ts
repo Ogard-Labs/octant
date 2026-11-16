@@ -19,6 +19,7 @@ import { isNativeHarnessDriverKind } from "./providerPolicy";
  */
 export interface ThreadAccess {
   readonly executionPolicy: ProviderExecutionPolicy;
+  readonly strict?: boolean | undefined;
   readonly autoApprove?: boolean | undefined;
   /**
    * Opt-in sandbox at Full access: when the posture is `full-access` and this
@@ -167,7 +168,7 @@ export function refusesFullAccessSandbox(input: {
  * rather than run with less confinement than its level promises.
  */
 export const WINDOWS_SANDBOX_MISSING_REASON =
-  "This level needs Octant's process sandbox, which Windows does not have yet. On this computer only Full access runs; switch the thread to Full access with the sandbox off, or run it on a Mac or Linux host.";
+  "Strict and kept-sandbox launches require Octant confinement, which is unavailable on Windows. Turn Strict off to use the provider's native permissions, or use a supported Mac or Linux host.";
 
 /**
  * Whether a turn at `access` needs Octant's process sandbox: every level
@@ -187,7 +188,9 @@ export function hostSandboxRefusal(input: {
   readonly platform: string | undefined;
   readonly access: ThreadAccess;
 }): string | undefined {
-  return input.platform === "win32" && levelNeedsSandbox(input.access)
+  return input.platform === "win32" &&
+    input.access.strict !== false &&
+    (input.access.strict === true || input.access.fullAccessSandbox === true)
     ? WINDOWS_SANDBOX_MISSING_REASON
     : undefined;
 }
@@ -575,12 +578,24 @@ export function guardrailLowered(from: PermissionMode, to: PermissionMode): bool
  * else off (Full access stays open, as it always was).
  */
 export function defaultFullAccessSandboxFor(input: {
-  readonly project?: { readonly defaultFullAccessSandbox?: boolean | undefined } | undefined;
-  readonly settings?: { readonly defaultFullAccessSandbox?: boolean | undefined } | undefined;
+  readonly project?:
+    | {
+        readonly defaultStrict?: boolean | undefined;
+        readonly defaultFullAccessSandbox?: boolean | undefined;
+      }
+    | undefined;
+  readonly settings?:
+    | {
+        readonly defaultStrict?: boolean | undefined;
+        readonly defaultFullAccessSandbox?: boolean | undefined;
+      }
+    | undefined;
 }): boolean {
-  return (
-    input.project?.defaultFullAccessSandbox ?? input.settings?.defaultFullAccessSandbox ?? false
-  );
+  if (input.project?.defaultStrict !== undefined) return false;
+  if (input.project?.defaultFullAccessSandbox !== undefined)
+    return input.project.defaultFullAccessSandbox;
+  if (input.settings?.defaultStrict !== undefined) return false;
+  return input.settings?.defaultFullAccessSandbox ?? false;
 }
 
 /**

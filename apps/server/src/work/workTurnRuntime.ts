@@ -281,6 +281,8 @@ export function workSessionTerms(
     [...projectExtraFolderRoots(project)].sort(),
     thread.access,
     thread.fullAccessSandbox === true,
+    thread.strict ?? null,
+    project.defaultStrict ?? null,
     String(thread.providerInstanceId),
     String(thread.modelId),
     thread.modelOptionValues ?? null,
@@ -539,6 +541,8 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
               input.projectRoot,
               input.extraFolders ?? [],
               sandboxPolicy?.context.sessionId ?? null,
+              sandboxTurn.strict ?? false,
+              sandboxTurn.legacy ?? false,
               String(input.providerSessionId),
             ]),
             acquire,
@@ -565,6 +569,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         }),
       );
       const options = {
+        ...(sandboxTurn.strict !== undefined && sandboxTurn.legacy !== true
+          ? { strict: sandboxTurn.strict }
+          : {}),
         sessionId: input.providerSessionId,
         ...(input.modelOptionValues === undefined
           ? {}
@@ -574,7 +581,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         // still checks the root before it allows an edit, and one without a
         // reviewer of its own keeps asking at Auto.
         ...workThreadAccessOf(input.access ?? DEFAULT_WORK_ACCESS),
-        ...(input.fullAccessSandbox === true || sandboxPolicy !== undefined
+        ...((sandboxTurn.strict ?? input.fullAccessSandbox) === true || sandboxPolicy !== undefined
           ? { fullAccessSandbox: true }
           : {}),
         tools: input.appManagedTools?.definitions ?? [],

@@ -204,22 +204,29 @@ describe("guardrail levels", () => {
 });
 
 describe("levels on a host without Octant's sandbox", () => {
-  it("runs only Full access with the sandbox off on Windows and names the missing sandbox for every other level", () => {
-    expect(
-      hostSandboxRefusal({ platform: "win32", access: { executionPolicy: "full-access" } }),
-    ).toBeUndefined();
-    for (const access of [
-      { executionPolicy: "approval-gated" },
-      { executionPolicy: "approval-gated", autoApprove: true },
-      { executionPolicy: "auto-accept-edits" },
-      { executionPolicy: "plan" },
-      { executionPolicy: "full-access", fullAccessSandbox: true },
+  it("allows Windows native approvals at every level and refuses only requested Strict confinement", () => {
+    for (const executionPolicy of [
+      "approval-gated",
+      "auto-accept-edits",
+      "full-access",
+      "plan",
     ] as const) {
-      expect(hostSandboxRefusal({ platform: "win32", access })).toBe(
-        WINDOWS_SANDBOX_MISSING_REASON,
-      );
+      expect(
+        hostSandboxRefusal({ platform: "win32", access: { executionPolicy } }),
+      ).toBeUndefined();
+      expect(
+        hostSandboxRefusal({ platform: "win32", access: { executionPolicy, strict: false } }),
+      ).toBeUndefined();
+      expect(
+        hostSandboxRefusal({ platform: "win32", access: { executionPolicy, strict: true } }),
+      ).toBe(WINDOWS_SANDBOX_MISSING_REASON);
     }
-    expect(WINDOWS_SANDBOX_MISSING_REASON).toMatch(/sandbox.*Windows/);
+    expect(
+      hostSandboxRefusal({
+        platform: "win32",
+        access: { executionPolicy: "full-access", fullAccessSandbox: true },
+      }),
+    ).toBe(WINDOWS_SANDBOX_MISSING_REASON);
   });
 
   it("counts a host as starting threads at open Full access only when a Code or Work default is Full access without the sandbox", () => {

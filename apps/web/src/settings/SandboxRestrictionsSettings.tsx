@@ -35,7 +35,7 @@ const initialPolicy = (): SandboxPolicy =>
     filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
     network: "existing-policy",
     credentials: "existing-policy",
-    hostServices: "blocked",
+    hostServices: "existing-policy",
   });
 
 type SandboxChange = {
@@ -103,7 +103,23 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
           setSnapshot((previous) =>
             previous === undefined
               ? value
-              : { ...previous, denials: value.denials, running: value.running },
+              : {
+                  ...previous,
+                  denials: value.denials,
+                  running: value.running,
+                  strict: value.strict,
+                  strictSource: value.strictSource,
+                  legacyStrict: value.legacyStrict,
+                  activeStrict: value.activeStrict,
+                  activeLegacyStrict: value.activeLegacyStrict,
+                  activePolicy: value.activePolicy,
+                  pending: value.pending,
+                  summary: value.summary,
+                  runtimeDetails: value.runtimeDetails,
+                  capabilities: value.capabilities,
+                  limitations: value.limitations,
+                  enrollmentEnabled: value.enrollmentEnabled,
+                },
           );
         })
         .catch(() => undefined);
@@ -172,8 +188,8 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
   ];
   return (
     <SettingsSection
-      title="Sandbox restrictions"
-      description="Full autonomy within the limits you choose; changes apply next turn."
+      title="Configure protections"
+      description="Configure supported protections for Strict. Saving a policy keeps your Strict choice unchanged."
       id="settings-sandbox-restrictions"
     >
       {props.client === undefined ? (
@@ -221,8 +237,9 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                 </SettingsState>
               ) : null}
               <p className="oct-meta">
-                A saved policy keeps the sandbox on. Without an additional policy, the existing Keep
-                the sandbox choice applies.
+                {snapshot.legacyStrict === true ? "Legacy sandbox is" : "Strict is"}{" "}
+                {snapshot.strict === true ? "on" : "off"} · {snapshot.strictSource ?? "default"}.
+                Saved protections apply when Strict is on; required approvals remain.
               </p>
               <SettingRow
                 settingId="sandbox-policy-summary"
@@ -237,14 +254,24 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                 description={snapshot.summary}
               >
                 <span className="oct-meta">
-                  {snapshot.source === "legacy"
-                    ? "Existing sandbox"
-                    : `${snapshot.source}${snapshot.inherited ? " · inherited" : ""}`}
+                  {snapshot.running
+                    ? snapshot.activeStrict === true
+                      ? snapshot.activeLegacyStrict
+                        ? "Legacy sandbox active"
+                        : "Strict active"
+                      : "Strict off for this turn"
+                    : snapshot.strict === true
+                      ? snapshot.legacyStrict
+                        ? "Legacy sandbox on"
+                        : "Strict on"
+                      : "Strict off"}
+                  {snapshot.pending === true ? " · changes pending" : ""}
                 </span>
               </SettingRow>
               {snapshot.running ? (
                 <p className="oct-meta">
-                  A turn is running. Its admitted policy stays in effect; changes apply next turn.
+                  A turn is running. Its admitted policy stays in effect. Stop the turn and start a
+                  new run to apply changes; changing settings cannot alter its running processes.
                 </p>
               ) : null}
               <SettingRow
@@ -331,7 +358,9 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                 label="Blocked actions"
                 description="Writes outside allowed folders and host administration stay confined."
               >
-                <span className="oct-meta">Enforced by the sandbox</span>
+                <span className="oct-meta">
+                  {snapshot.strict === true ? "Strict boundary" : "Saved for Strict"}
+                </span>
               </SettingRow>
               <SettingRow
                 settingId="sandbox-policy-network"
@@ -352,7 +381,15 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                   options={[
                     { id: "existing-policy", label: "Follow Safe networks settings" },
                     { id: "deny", label: "Block network access" },
-                    { id: "unrestricted", label: "Unrestricted network" },
+                    ...(draft.network === "unrestricted"
+                      ? [
+                          {
+                            id: "unrestricted",
+                            label:
+                              "Unrestricted (previous choice; cannot bypass Strict Network limits)",
+                          },
+                        ]
+                      : []),
                   ]}
                   onValueChange={(network) => {
                     if (
@@ -374,13 +411,21 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                       : "host"
                 }
                 label="Host services"
-                description="Ambient Docker sockets, SSH agents and local administration services are blocked."
+                description="Configure whether Strict blocks ambient local services. Provider and host-owned control bridges remain separate."
               >
-                <span className="oct-meta">
-                  {snapshot.capabilities.blockedHostServices
-                    ? "Blocked"
-                    : "Unsupported on this host"}
-                </span>
+                <OctantSelectField
+                  aria-label="Strict host services"
+                  value={draft.hostServices}
+                  disabled={busy || !snapshot.capabilities.blockedHostServices}
+                  options={[
+                    { id: "existing-policy", label: "Standard Strict rules" },
+                    { id: "blocked", label: "Block ambient host services" },
+                  ]}
+                  onValueChange={(hostServices) => {
+                    if (hostServices === "existing-policy" || hostServices === "blocked")
+                      updateDraft({ ...draft, hostServices });
+                  }}
+                />
               </SettingRow>
               <SettingRow
                 settingId="sandbox-policy-credentials"
@@ -394,7 +439,9 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                 label="Personal files and credentials"
                 description="Existing protected-file rules remain active; provider sign-in uses its existing scoped channel."
               >
-                <span className="oct-meta">Protected files enforced</span>
+                <span className="oct-meta">
+                  {snapshot.strict === true ? "Standard Strict rules" : "Saved for Strict"}
+                </span>
               </SettingRow>
               <details>
                 <summary>Advanced protections and limitations</summary>

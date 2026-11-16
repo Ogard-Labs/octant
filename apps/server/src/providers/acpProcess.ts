@@ -510,7 +510,11 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         // refuse protected paths, and secrets are redacted from what it records.
         // A thread that keeps the sandbox takes the Accept edits wall instead.
         const wall = acpWallPolicy(input);
-        if (wall === "full-access") {
+        if (
+          (wall === "full-access" || platform === "win32") &&
+          input.sandboxPolicy === undefined &&
+          input.fullAccessSandbox !== true
+        ) {
           return {
             command: input.binaryPath,
             args,

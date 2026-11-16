@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -22,10 +23,7 @@ const installed =
     : undefined;
 const trustedImage = installed === undefined ? undefined : readFileSync(installed);
 
-export function pinLinuxLaunch(
-  launch: ConfinedProcessLaunch,
-  authority: string,
-): ConfinedProcessLaunch {
+function prepareLinuxSandboxRuntime(authority: string): string {
   if (trustedImage === undefined)
     throw new Error(
       "The installed Linux Strict launch helper is unavailable. Rebuild the host runtime before enabling Strict.",
@@ -47,6 +45,28 @@ export function pinLinuxLaunch(
     createHash("sha256").update(readFileSync(helper)).digest("hex") !== hash
   )
     throw new Error("The private Linux Strict launch helper changed.");
+  return helper;
+}
+
+export function linuxPinnedLaunchAvailable(authority: string | undefined): boolean {
+  if (process.platform !== "linux" || authority === undefined) return false;
+  try {
+    return (
+      spawnSync(prepareLinuxSandboxRuntime(authority), ["--check"], {
+        timeout: 1000,
+        stdio: "ignore",
+      }).status === 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function pinLinuxLaunch(
+  launch: ConfinedProcessLaunch,
+  authority: string,
+): ConfinedProcessLaunch {
+  const helper = prepareLinuxSandboxRuntime(authority);
   let executable = launch.command;
   let args = [...launch.args];
   // Earlier process-denial launches used a shell solely to open this filter.
@@ -59,6 +79,27 @@ export function pinLinuxLaunch(
   }
   const binary = realpathSync(executable);
   const binaryIdentity = statSync(binary, { bigint: true });
+  if (
+    !binaryIdentity.isFile() ||
+    binaryIdentity.nlink !== 1n ||
+    (binaryIdentity.mode & 0o022n) !== 0n
+  )
+    throw new Error(
+      "Strict requires a privately owned or system-installed Bubblewrap executable without writable aliases.",
+    );
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--") break;
+    if (args[i] !== "--bind" && args[i] !== "--dev-bind") continue;
+    const source = args[i + 1];
+    if (source !== undefined) {
+      const root = realpathSync(source);
+      if (binary === root || binary.startsWith(`${root}/`))
+        throw new Error(
+          "Strict cannot grant write access to its own Bubblewrap executable. Choose a narrower folder.",
+        );
+    }
+    i += 2;
+  }
   const payload = args.indexOf("--");
   if (payload < 0) throw new Error("A prepared Linux launch has no command boundary.");
   args.splice(payload + 1, 0, "/octant-strict-launch", "--exec-close", "--");

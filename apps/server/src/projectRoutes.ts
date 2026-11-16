@@ -296,6 +296,22 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           origin,
         );
       }
+      if (
+        boundPrincipalIsRestricted(request) &&
+        (command.kind === "change-code-project-permission-mode" ||
+          command.kind === "change-work-project-permission-mode") &&
+        (command.strict !== undefined || command.fullAccessSandbox !== undefined)
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message:
+              "Only you, from a window or a device you paired, can change Strict protections.",
+          },
+          403,
+          origin,
+        );
+      }
       // Remembering or dropping a Code access grant is host work — a persisted
       // "project-default" is what lets thread creation skip native
       // confirmation, so the decision cannot arrive from a paired device.

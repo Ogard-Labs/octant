@@ -361,7 +361,11 @@ export function compileSandboxLaunchPolicy(
         ...(launch.additionalWriteRoots ?? []),
         ...readWrite.map((root) => root.path),
       ],
-      policyBlockHostServices: selection.policy.hostServices === "blocked",
+      policyBlockHostServices:
+        selection.policy.hostServices === "blocked" ||
+        selection.policy.network === "deny" ||
+        (selection.policy.network === "existing-policy" &&
+          (sandboxNetworkSnapshot(selection)?.limitsOn ?? sandboxNetworkLimitsOn())),
       policyReadOnlyRoots: readOnly.map((root) => root.path),
       policyFolderRoots: [...readOnly, ...readWrite].map((root) => root.path),
       networkEgress,

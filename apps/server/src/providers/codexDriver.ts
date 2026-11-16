@@ -380,10 +380,14 @@ export interface CodexTurnStartInput {
   /** Restated per turn, because a turn without it falls back to the thread's. */
   readonly environments?: readonly [];
   readonly approvalPolicy: "never" | "on-request" | "untrusted";
-  readonly sandboxPolicy:
+  readonly sandboxPolicy?:
     | { readonly type: "dangerFullAccess" }
-    | { readonly type: "workspaceWrite" }
-    | { readonly type: "readOnly" }
+    | {
+        readonly type: "workspaceWrite";
+        readonly writableRoots?: ReadonlyArray<string>;
+        readonly networkAccess?: boolean;
+      }
+    | { readonly type: "readOnly"; readonly networkAccess?: boolean }
     | { readonly type: "externalSandbox"; readonly networkAccess: "restricted" | "enabled" };
   readonly approvalsReviewer: "auto_review" | "user";
   /**
@@ -512,6 +516,7 @@ interface SessionState {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly autoApprove: boolean | undefined;
   readonly fullAccessSandbox: boolean | undefined;
+  readonly strict: boolean | undefined;
   readonly threadId: string;
   readonly correlationId: CorrelationId;
   readonly turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">;
@@ -808,6 +813,7 @@ export function codexExecutionSettings(
   policy: ProviderExecutionPolicy,
   autoApprove?: boolean,
   fullAccessSandbox?: boolean,
+  nativeSandbox = process.platform === "win32",
 ): Pick<CodexThreadStartInput, "approvalPolicy" | "sandbox" | "approvalsReviewer"> {
   if (policy === "full-access") {
     // The opt-in sandbox at Full access runs the process inside Octant's
@@ -820,6 +826,18 @@ export function codexExecutionSettings(
       approvalPolicy: "never",
       sandbox: fullAccessSandbox === true ? "read-only" : "danger-full-access",
       approvalsReviewer: "user",
+    };
+  }
+  if (nativeSandbox && fullAccessSandbox !== true) {
+    return {
+      approvalPolicy:
+        policy === "plan"
+          ? "never"
+          : policy === "auto-accept-edits" || autoApprove === true
+            ? "on-request"
+            : "untrusted",
+      sandbox: policy === "plan" ? "read-only" : "workspace-write",
+      approvalsReviewer: autoApprove === true ? "auto_review" : "user",
     };
   }
   if (policy === "approval-gated" && autoApprove === true) {
@@ -902,8 +920,15 @@ export function codexTurnExecutionSettings(
   autoApprove?: boolean,
   fullAccessSandbox?: boolean,
   networkOpen?: boolean,
+  nativeSandbox = process.platform === "win32",
+  writableRoots: ReadonlyArray<string> = [],
 ): Pick<CodexTurnStartInput, "approvalPolicy" | "sandboxPolicy" | "approvalsReviewer"> {
-  const { sandbox, ...rest } = codexExecutionSettings(policy, autoApprove, fullAccessSandbox);
+  const { sandbox, ...rest } = codexExecutionSettings(
+    policy,
+    autoApprove,
+    fullAccessSandbox,
+    nativeSandbox,
+  );
   // Below Full access the process already runs in Octant's profile, which is
   // the boundary; Codex's own Seatbelt cannot start inside it. Auto's
   // `on-request` is what makes Codex run commands unasked inside it, and Ask
@@ -913,6 +938,18 @@ export function codexTurnExecutionSettings(
   // network claim follows the launch: `enabled` when the process launched
   // without Octant's egress proxy (Network limits off, the default), so
   // Codex tells the model what it really has; `restricted` behind the proxy.
+  if (nativeSandbox && fullAccessSandbox !== true && policy !== "full-access")
+    return {
+      ...rest,
+      sandboxPolicy:
+        policy === "plan"
+          ? { type: "readOnly", networkAccess: networkOpen === true }
+          : {
+              type: "workspaceWrite",
+              writableRoots: [...writableRoots],
+              networkAccess: networkOpen === true,
+            },
+    };
   const sandboxPolicy =
     sandbox === "danger-full-access"
       ? ({ type: "dangerFullAccess" } as const)
@@ -1229,6 +1266,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
         executionPolicy: ProviderExecutionPolicy,
         ownSubagents = false,
         fullAccessSandbox = false,
+        strict?: boolean,
       ) =>
         JSON.stringify([
           projectRoot,
@@ -1238,12 +1276,14 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             keepsOwnMemory(executionPolicy) ? "+own-memory" : ""
           }`,
           ...(fullAccessSandbox ? ["+sandbox"] : []),
+          { strict: strict ?? "legacy" },
           ...(sandboxPolicy === undefined ? [] : [sandboxPolicy]),
         ]);
       const leaseFor = (
         executionPolicy: ProviderExecutionPolicy,
         ownSubagents: boolean,
         fullAccessSandbox = false,
+        strict?: boolean,
       ) =>
         Effect.gen(function* () {
           const runtime = yield* acquireRuntime(
@@ -1259,8 +1299,9 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
               ...(ownSubagents ? { ownSubagents: true as const } : {}),
               ...(keepsOwnMemory(executionPolicy) ? { ownMemory: true as const } : {}),
               ...(fullAccessSandbox ? { fullAccessSandbox: true as const } : {}),
+              ...(strict === undefined ? {} : { strict }),
             },
-            leaseKey(executionPolicy, ownSubagents, fullAccessSandbox),
+            leaseKey(executionPolicy, ownSubagents, fullAccessSandbox, strict),
           );
           // Turn starts probe first, but not every caller does (compaction,
           // summaries, agent runs), so the session itself refuses too.
@@ -1290,10 +1331,12 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
         executionPolicy: ProviderExecutionPolicy,
         ownSubagents: boolean,
         fullAccessSandbox = false,
+        strict?: boolean,
       ) =>
         Effect.promise(() =>
           options.runtimeRegistry.closeIdleLeasesWhere(options.instanceId, (lease) => {
-            if (lease === leaseKey(executionPolicy, ownSubagents, fullAccessSandbox)) return false;
+            if (lease === leaseKey(executionPolicy, ownSubagents, fullAccessSandbox, strict))
+              return false;
             const parsed = codexThreadLease(lease);
             return parsed?.root === projectRoot && parsed.mode === threadMode;
           }),
@@ -1342,7 +1385,13 @@ function codexThreadLease(
   } catch {
     return undefined;
   }
-  if (!Array.isArray(parsed) || (parsed.length !== 4 && parsed.length !== 5)) return undefined;
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length < 4 ||
+    parsed.length > 7 ||
+    typeof parsed[3] !== "string"
+  )
+    return undefined;
   const [root, , mode] = parsed;
   return typeof root === "string" && typeof mode === "string" ? { root, mode } : undefined;
 }
@@ -1636,11 +1685,13 @@ function makeConnection(
     executionPolicy: ProviderExecutionPolicy,
     ownSubagents: boolean,
     fullAccessSandbox?: boolean,
+    strict?: boolean,
   ) => Effect.Effect<CodexLeasedRuntime, ProviderFailure, Scope.Scope>,
   closeIdleOtherLeases: (
     executionPolicy: ProviderExecutionPolicy,
     ownSubagents: boolean,
     fullAccessSandbox?: boolean,
+    strict?: boolean,
   ) => Effect.Effect<void>,
   projectRoot: string,
   extraFolders: ReadonlyArray<string>,
@@ -1654,6 +1705,7 @@ function makeConnection(
     let leasedPolicy: ProviderExecutionPolicy | undefined;
     let leasedOwnSubagents = false;
     let leasedFullAccessSandbox = false;
+    let leasedStrict: boolean | undefined;
     let leasedNetworkOpen = false;
     let closed = false;
     const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
@@ -2152,12 +2204,14 @@ function makeConnection(
       executionPolicy: ProviderExecutionPolicy,
       ownSubagents: boolean,
       fullAccessSandbox = false,
+      strict?: boolean,
     ): Effect.Effect<void, ProviderFailure> =>
       Effect.suspend(() => {
         const sameAuthority = () =>
           leasedPolicy === executionPolicy &&
           leasedOwnSubagents === ownSubagents &&
-          leasedFullAccessSandbox === fullAccessSandbox;
+          leasedFullAccessSandbox === fullAccessSandbox &&
+          leasedStrict === strict;
         if (leasedPolicy !== undefined) {
           return sameAuthority()
             ? Effect.void
@@ -2169,7 +2223,7 @@ function makeConnection(
               );
         }
         return Scope.extend(
-          leaseFor(executionPolicy, ownSubagents, fullAccessSandbox),
+          leaseFor(executionPolicy, ownSubagents, fullAccessSandbox, strict),
           connectionScope,
         ).pipe(
           Effect.flatMap((runtime) => {
@@ -2187,6 +2241,7 @@ function makeConnection(
               leasedPolicy = executionPolicy;
               leasedOwnSubagents = ownSubagents;
               leasedFullAccessSandbox = fullAccessSandbox;
+              leasedStrict = strict;
               leasedNetworkOpen = runtime.networkOpen;
               const lost = () => {
                 if (!closed) runtimeLost();
@@ -2229,6 +2284,7 @@ function makeConnection(
         readonly executionPolicy: ProviderExecutionPolicy;
         readonly autoApprove?: boolean;
         readonly fullAccessSandbox?: boolean;
+        readonly strict?: boolean;
       },
       thread: CodexThreadResult,
       modelId: string,
@@ -2256,6 +2312,7 @@ function makeConnection(
         executionPolicy: input.executionPolicy,
         autoApprove: input.autoApprove,
         fullAccessSandbox: input.fullAccessSandbox,
+        strict: input.strict,
         threadId: thread.thread.id,
         ...(turnOverrides === undefined ? {} : { turnOverrides }),
         ...(collaborationMode === undefined ? {} : { collaborationMode }),
@@ -2286,12 +2343,14 @@ function makeConnection(
               input.executionPolicy,
               codexRunsOwnSubagents(input),
               input.fullAccessSandbox === true,
+              input.strict,
             );
             ensureSubscribed();
             const settings = codexExecutionSettings(
               input.executionPolicy,
               input.autoApprove,
               input.fullAccessSandbox,
+              input.strict === false || (process.platform === "win32" && input.strict !== true),
             );
             const requestedOptions = input.modelOptionValues;
             let optionSettings: Pick<CodexThreadStartInput, "serviceTier" | "config"> = {};
@@ -2404,6 +2463,7 @@ function makeConnection(
               input.executionPolicy,
               codexRunsOwnSubagents(input),
               input.fullAccessSandbox === true,
+              input.strict,
             );
             ensureSubscribed();
             const modeConfig = yield* modeThreadConfig(input.nativeSetup);
@@ -2437,6 +2497,7 @@ function makeConnection(
                             input.executionPolicy,
                             codexRunsOwnSubagents(input),
                             input.fullAccessSandbox === true,
+                            input.strict,
                           )
                         : Effect.void
                       ).pipe(
@@ -2533,6 +2594,9 @@ function makeConnection(
                         state.autoApprove,
                         state.fullAccessSandbox,
                         leasedNetworkOpen,
+                        state.strict === false ||
+                          (process.platform === "win32" && state.strict !== true),
+                        extraFolders,
                       ),
                       ...state.turnOverrides,
                       ...(state.collaborationMode === undefined

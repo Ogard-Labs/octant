@@ -145,7 +145,8 @@
     "./turn-metrics-display": "./src/turnMetricsDisplay.ts",
     "./local-usage-pricing": "./src/localUsagePricing.ts",
     "./command-credential-policy": "./src/commandCredentialPolicy.ts",
-    "./thread-wakeup-policy": "./src/threadWakeupPolicy.ts"
+    "./thread-wakeup-policy": "./src/threadWakeupPolicy.ts",
+    "./strict-policy": "./src/strictPolicy.ts"
   },
   "scripts": {
     "fmt": "oxfmt",

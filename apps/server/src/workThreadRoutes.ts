@@ -217,6 +217,26 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
         );
       }
       const command = decodeWorkThreadCommand(value);
+      if (
+        boundPrincipalIsRestricted(request) &&
+        ((command.kind === "change-work-thread-access" &&
+          (command.strict !== undefined || command.fullAccessSandbox !== undefined)) ||
+          (command.kind === "create-work-thread" &&
+            (command.strict !== undefined || command.fullAccessSandbox !== undefined)) ||
+          (command.kind === "update-work-settings" &&
+            (command.defaultStrict !== undefined ||
+              command.defaultFullAccessSandbox !== undefined)))
+      )
+        return failureResponse(
+          {
+            category: "unauthorized",
+            message:
+              "Only you, from a window or a device you paired, can change Strict protections.",
+          },
+          403,
+          origin,
+        );
+
       if (command.kind === "change-work-thread-browser-profile") {
         return failureResponse(
           {

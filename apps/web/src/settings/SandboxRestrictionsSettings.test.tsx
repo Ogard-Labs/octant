@@ -88,6 +88,31 @@ describe("sandbox restrictions settings", () => {
     );
     expect(await screen.findByText("Settings changed. Reload before saving.")).toBeVisible();
   });
+  it("refreshes active and pending Strict without replacing a local draft or its optimistic version", async () => {
+    const client = fixture();
+    const user = userEvent.setup();
+    render(<SandboxRestrictionsSettings client={client} />);
+    await user.type(
+      await screen.findByRole("textbox", { name: "Allowed folder path" }),
+      "/shared/unsaved",
+    );
+    await user.click(screen.getByRole("button", { name: /^Add$/ }));
+    client.settings.mockImplementation(async (scope) => ({
+      ...snapshot(scope),
+      version: 3,
+      strict: false,
+      activeStrict: true,
+      pending: true,
+      summary: "The admitted Strict policy remains active.",
+    }));
+    expect(
+      await screen.findByText(/Strict active.*changes pending/, {}, { timeout: 5000 }),
+    ).toBeVisible();
+    expect(screen.getByText("/shared/unsaved")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Save sandbox restrictions" }));
+    expect(client.change).toHaveBeenCalledWith(expect.objectContaining({ expectedVersion: 2 }));
+  });
+
   it("retains the folder draft when a stale save is refused", async () => {
     const client = fixture();
     const user = userEvent.setup();

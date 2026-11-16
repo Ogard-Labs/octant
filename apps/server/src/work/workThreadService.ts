@@ -678,6 +678,9 @@ export class WorkThreadService {
           defaultAccess: command.defaultAccess,
           // Absent keeps the stored choice, so a save from a client that does
           // not show the switch never turns it off.
+          ...((command.defaultStrict ?? current.defaultStrict) === undefined
+            ? {}
+            : { defaultStrict: command.defaultStrict ?? current.defaultStrict }),
           ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
             ? { defaultFullAccessSandbox: true }
             : {}),
@@ -832,6 +835,7 @@ export class WorkThreadService {
           ...(command.modelOptionValues === undefined
             ? {}
             : { modelOptionValues: command.modelOptionValues }),
+          ...(command.strict === undefined ? {} : { strict: command.strict }),
           bindingRevisionId: command.bindingRevisionId,
           workingDirectory,
           ...(command.workingFolderId === undefined
@@ -846,7 +850,8 @@ export class WorkThreadService {
             this.#currentSettings().defaultAccess,
           // The opt-in sandbox only rides along when the resolved access is
           // Full access: the request's choice, else the Project's, else Settings'.
-          ...(((project.defaultPermissionMode === undefined
+          ...(command.strict === undefined &&
+          ((project.defaultPermissionMode === undefined
             ? undefined
             : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
             this.#currentSettings().defaultAccess) === "full-access" &&
@@ -1273,13 +1278,21 @@ export class WorkThreadService {
         // The sandbox choice only means something at Full access: kept from the
         // command, else from the thread, and dropped at any other level so a
         // later raise to Full access never inherits a stale choice.
-        const { fullAccessSandbox: currentSandbox, ...unsandboxed } = current;
+        const {
+          fullAccessSandbox: currentSandbox,
+          strict: currentStrict,
+          ...unsandboxed
+        } = current;
         const sandboxed =
+          command.strict === undefined &&
           command.access === "full-access" &&
           (command.fullAccessSandbox ?? currentSandbox) === true;
         const updated = decodeWorkThread({
           ...unsandboxed,
           access: command.access,
+          ...(command.strict === "inherit" || (command.strict ?? currentStrict) === undefined
+            ? {}
+            : { strict: command.strict ?? currentStrict }),
           ...(sandboxed ? { fullAccessSandbox: true } : {}),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
@@ -1689,8 +1702,10 @@ export class WorkThreadService {
         : { modelOptionValues: command.modelOptionValues }),
       bindingRevisionId,
       workingDirectory: ".",
+      ...(command.strict === undefined ? {} : { strict: command.strict }),
       access: this.#currentSettings().defaultAccess,
-      ...(this.#currentSettings().defaultAccess === "full-access" &&
+      ...(command.strict === undefined &&
+      this.#currentSettings().defaultAccess === "full-access" &&
       (command.fullAccessSandbox ??
         defaultFullAccessSandboxFor({ settings: this.#currentSettings() }))
         ? { fullAccessSandbox: true }

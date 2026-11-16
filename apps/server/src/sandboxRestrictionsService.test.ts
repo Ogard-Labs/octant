@@ -31,7 +31,8 @@ afterEach(() => {
   connections.splice(0).forEach((db) => db.close());
   directories.splice(0).forEach((path) => rmSync(path, { recursive: true, force: true }));
 });
-function fixture() {
+function fixture(strict = true) {
+  let strictEnabled = strict;
   const base = mkdtempSync(join(tmpdir(), "octant-restrictions-"));
   directories.push(base);
   const root = join(base, "project");
@@ -79,6 +80,10 @@ function fixture() {
       project: () => project,
       thread: () => ({ projectId, mode: "work" }),
       platform: process.platform,
+      strictPreferences: () => ({
+        executionPolicy: "approval-gated",
+        thread: { strict: strictEnabled },
+      }),
     });
   const service = create();
   const policy = decodeSandboxPolicy({
@@ -93,9 +98,76 @@ function fixture() {
   const save = (value: unknown) => service.change(decodeSandboxRestrictionsCommand(value));
   const start = () =>
     service.beginTurn({ threadId, projectId, mode: "work", root, provider: "codex" });
-  return { base, root, shared, project, service, create, policy, settings, save, start };
+  return {
+    base,
+    root,
+    shared,
+    project,
+    service,
+    create,
+    policy,
+    settings,
+    save,
+    start,
+    setStrict: (value: boolean) => {
+      strictEnabled = value;
+    },
+  };
 }
 describe.skipIf(process.platform !== "linux")("trusted sandbox restrictions", () => {
+  it("keeps a saved policy inactive outside Strict and shows a change pending until the active turn ends", async () => {
+    const f = fixture(false);
+    const saved = f.save({
+      kind: "set-policy",
+      expectedVersion: 0,
+      scope: f.settings,
+      policy: f.policy,
+    });
+    expect(saved).toMatchObject({ strict: false, policy: { network: f.policy.network } });
+    const open = f.start();
+    if (open.status !== "admitted") throw new Error(open.message);
+    expect(open.turn.strict).toBe(false);
+    expect(open.turn.selection).toBeUndefined();
+    await open.turn.end();
+    f.setStrict(true);
+    const protectedTurn = f.start();
+    if (protectedTurn.status !== "admitted") throw new Error(protectedTurn.message);
+    expect(protectedTurn.turn.selection).toBeDefined();
+    f.setStrict(false);
+    expect(f.service.snapshot({ kind: "session", threadId })).toMatchObject({
+      strict: false,
+      activeStrict: true,
+      pending: true,
+    });
+    expect(f.service.active(threadId)).toBe(protectedTurn.turn.selection);
+    await protectedTurn.turn.end();
+    const resumed = f.start();
+    if (resumed.status !== "admitted") throw new Error(resumed.message);
+    expect(resumed.turn.selection).toBeUndefined();
+    expect(f.service.snapshot(f.settings).policy).toBeDefined();
+    await resumed.turn.end();
+  });
+  it("admits default Strict through the same immutable backend policy without requiring a custom save", async () => {
+    const f = fixture();
+    const first = f.start();
+    if (first.status !== "admitted") throw new Error(first.message);
+    expect(first.turn).toMatchObject({
+      strict: true,
+      legacy: false,
+      selection: { policy: { revision: 0, network: "existing-policy" } },
+    });
+    expect(f.service.snapshot({ kind: "session", threadId })).toMatchObject({
+      activeStrict: true,
+      pending: false,
+    });
+    await first.turn.end();
+    f.setStrict(false);
+    const next = f.start();
+    if (next.status !== "admitted") throw new Error(next.message);
+    expect(next.turn.selection).toBeUndefined();
+    await next.turn.end();
+  });
+
   it("replays trusted policies without migrating or changing legacy defaults", () => {
     const f = fixture();
     expect(f.service.snapshot(f.settings).source).toBe("legacy");

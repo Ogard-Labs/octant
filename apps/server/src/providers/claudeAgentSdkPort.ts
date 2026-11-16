@@ -119,17 +119,35 @@ export interface ClaudeSandboxSettings {
   readonly network?: ClaudeSandboxNetwork;
 }
 
-export type ClaudeSandboxNetwork =
+export type ClaudeSandboxNetwork = (
   | { readonly httpProxyPort: number }
-  | { readonly allowedDomains: readonly ["*"] };
+  | { readonly allowedDomains: readonly ["*"] }
+) & {
+  readonly allowAllUnixSockets?: false;
+  readonly allowUnixSockets?: readonly [];
+  readonly allowLocalBinding?: false;
+  readonly allowMachLookup?: readonly [];
+};
 
 /** The SDK's own copy of a sandbox network setting, so a caller's value is never shared. */
-function sdkSandboxNetwork(
-  network: ClaudeSandboxNetwork,
-): { httpProxyPort: number } | { allowedDomains: string[] } {
-  return "httpProxyPort" in network
-    ? { httpProxyPort: network.httpProxyPort }
-    : { allowedDomains: [...network.allowedDomains] };
+function sdkSandboxNetwork(network: ClaudeSandboxNetwork) {
+  return {
+    ...(network.allowAllUnixSockets === undefined
+      ? {}
+      : { allowAllUnixSockets: network.allowAllUnixSockets }),
+    ...(network.allowLocalBinding === undefined
+      ? {}
+      : { allowLocalBinding: network.allowLocalBinding }),
+    ...("httpProxyPort" in network
+      ? { httpProxyPort: network.httpProxyPort }
+      : { allowedDomains: [...network.allowedDomains] }),
+    ...(network.allowUnixSockets === undefined
+      ? {}
+      : { allowUnixSockets: [...network.allowUnixSockets] }),
+    ...(network.allowMachLookup === undefined
+      ? {}
+      : { allowMachLookup: [...network.allowMachLookup] }),
+  };
 }
 
 /**
@@ -168,6 +186,7 @@ export interface ClaudeOpenQueryInput {
   readonly effort?: ClaudeEffortLevel;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly fullAccessSandbox?: boolean;
+  readonly strict?: boolean;
   readonly sandboxPolicy?: SandboxPolicySelection;
   /**
    * Whether the harness may answer approval prompts via its native `auto`
@@ -1087,11 +1106,39 @@ function isExactPathTuple(value: unknown, expected: string): boolean {
  * at Guarded and Reviewed. Plan's read-only rule and a Full access thread
  * that kept its sandbox are held by the sandbox itself, not only the hook.
  */
-export function claudeSandboxLetsCommandsOut(policy: ProviderExecutionPolicy): boolean {
-  return policy === "approval-gated" || policy === "auto-accept-edits";
+export function claudeSandboxLetsCommandsOut(
+  policy: ProviderExecutionPolicy,
+  strict = false,
+): boolean {
+  return (
+    policy === "approval-gated" ||
+    policy === "auto-accept-edits" ||
+    (policy === "full-access" && strict)
+  );
 }
 
-function isValidSandboxNetwork(network: unknown): boolean {
+function isValidSandboxNetwork(network: unknown, blocked = false): boolean {
+  if (blocked) {
+    if (typeof network !== "object" || network === null || Array.isArray(network)) return false;
+    const value = network as Record<string, unknown>;
+    if (
+      value.allowAllUnixSockets !== false ||
+      value.allowLocalBinding !== false ||
+      !Array.isArray(value.allowUnixSockets) ||
+      value.allowUnixSockets.length !== 0 ||
+      !Array.isArray(value.allowMachLookup) ||
+      value.allowMachLookup.length !== 0
+    )
+      return false;
+    const {
+      allowAllUnixSockets: _all,
+      allowLocalBinding: _bind,
+      allowUnixSockets: _unix,
+      allowMachLookup: _mach,
+      ...base
+    } = value;
+    return isValidSandboxNetwork(base);
+  }
   if (hasExactKeys(network, SANDBOX_OPEN_NETWORK_KEYS)) {
     return isExactPathTuple(network.allowedDomains, "*");
   }
@@ -1107,9 +1154,25 @@ function isValidSandboxNetwork(network: unknown): boolean {
 function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
   try {
     if (
+      input.strict === false &&
+      input.sandboxPolicy === undefined &&
+      input.fullAccessSandbox !== true
+    )
+      return input.sandbox === undefined;
+    if (
+      process.platform === "win32" &&
+      input.strict !== true &&
+      input.fullAccessSandbox !== true &&
+      input.sandboxPolicy === undefined
+    )
+      return input.sandbox === undefined;
+    if (
       input.executionPolicy !== "approval-gated" &&
       input.executionPolicy !== "auto-accept-edits" &&
-      !(input.executionPolicy === "full-access" && input.fullAccessSandbox === true)
+      !(
+        input.executionPolicy === "full-access" &&
+        (input.fullAccessSandbox === true || input.strict === true)
+      )
     ) {
       return input.sandbox === undefined;
     }
@@ -1119,23 +1182,43 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
     if (!hasExactKeys(rest, SANDBOX_KEYS)) return false;
     // A network setting is only ever the proxy port or every host: anything
     // that would let the sandbox pick its own sockets or bindings is refused.
-    if (network !== undefined && !isValidSandboxNetwork(network)) return false;
+    if (
+      network !== undefined &&
+      !isValidSandboxNetwork(
+        network,
+        input.strict === true &&
+          (input.sandboxPolicy?.policy.hostServices === "blocked" ||
+            input.sandboxPolicy?.policy.network === "deny" ||
+            (input.sandbox?.network !== undefined && "httpProxyPort" in input.sandbox.network)),
+      )
+    )
+      return false;
     if (
       sandbox.enabled !== true ||
       sandbox.failIfUnavailable !== true ||
       sandbox.autoAllowBashIfSandboxed !== false ||
-      sandbox.allowUnsandboxedCommands !== claudeSandboxLetsCommandsOut(input.executionPolicy) ||
+      sandbox.allowUnsandboxedCommands !==
+        claudeSandboxLetsCommandsOut(input.executionPolicy, input.strict === true) ||
       !hasExactKeys(sandbox.filesystem, SANDBOX_FILESYSTEM_KEYS)
     ) {
       return false;
     }
     const roots = [input.projectRoot, ...(input.additionalDirectories ?? [])];
-    const matchesRoots = (paths: ReadonlyArray<string>) =>
-      paths.length === roots.length && paths.every((path, index) => path === roots[index]);
+    const configured = input.strict === true ? input.sandboxPolicy?.policy.filesystem : undefined;
+    const matchesRoots = (paths: ReadonlyArray<string>, read: boolean) => {
+      const expected = [
+        ...roots,
+        ...(read ? (configured?.readOnlyRoots ?? []) : []),
+        ...(configured?.readWriteRoots ?? []),
+      ];
+      return (
+        paths.length === expected.length && paths.every((path, index) => path === expected[index])
+      );
+    };
     return (
       isExactPathTuple(sandbox.filesystem.denyRead, "/") &&
-      matchesRoots(sandbox.filesystem.allowRead) &&
-      matchesRoots(sandbox.filesystem.allowWrite)
+      matchesRoots(sandbox.filesystem.allowRead, true) &&
+      matchesRoots(sandbox.filesystem.allowWrite, false)
     );
   } catch {
     return false;
@@ -1405,6 +1488,8 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
             },
           );
           const bindSpawn = options.spawnClaudeCodeProcess({
+            runtimeExecutable: input.binaryPath,
+            ...(input.strict === undefined ? {} : { strict: input.strict }),
             projectRoot: input.projectRoot,
             ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
             ...(input.additionalDirectories === undefined
@@ -1592,6 +1677,16 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
             const native = claudeNativeQueryOptions(input.nativeSetup, input.ownMemory === true);
             const flagSettings: ClaudeFlagSettings = {
               ...native.settings,
+              // Reading native sandbox settings must not turn disabled
+              // account hooks or memory back on through the same home file.
+              ...(input.strict === false && input.tools.includes("Bash")
+                ? {
+                    ...(input.nativeSetup?.hooks === true
+                      ? {}
+                      : { disableAllHooks: true as const }),
+                    ...(input.ownMemory === true ? {} : { autoMemoryEnabled: false as const }),
+                  }
+                : {}),
               // Claude Code upgrades Haiku to Sonnet in Plan unless Sonnet is
               // excluded. Keep the explicit selection local to this query.
               ...(input.executionPolicy === "plan" &&
@@ -1636,7 +1731,12 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               ...(input.executionPolicy === "full-access"
                 ? { allowDangerouslySkipPermissions: true }
                 : {}),
-              settingSources: native.settingSources,
+              settingSources:
+                input.strict === false &&
+                input.executionPolicy !== "plan" &&
+                input.tools.includes("Bash")
+                  ? Array.from(new Set([...native.settingSources, "user" as const]))
+                  : native.settingSources,
               skills: native.skills,
               mcpServers: {},
               strictMcpConfig: native.strictMcpConfig,
@@ -1647,7 +1747,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               agents: {},
               plugins: [],
               includePartialMessages: true,
-              ...(input.sandboxPolicy !== undefined
+              ...(input.sandboxPolicy !== undefined && input.strict !== true
                 ? { sandbox: { enabled: false as const } }
                 : input.sandbox === undefined
                   ? {}

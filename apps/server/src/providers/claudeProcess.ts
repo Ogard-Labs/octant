@@ -1,4 +1,13 @@
-import { trackSandboxChild } from "../process/sandboxRuntimePolicy";
+import {
+  trackSandboxChild,
+  sandboxAuthorityDirectory,
+  sandboxSelectionIsCurrent,
+} from "../process/sandboxRuntimePolicy";
+import {
+  macosSandboxScopeLaunchArguments,
+  prepareMacosSandboxScope,
+} from "../process/macosSandboxScope";
+import { DEFAULT_BWRAP_PATH, requireLinuxConfinement } from "../process/linuxConfinement";
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { spawn, type ChildProcess } from "node:child_process";
 import { stopWindowsProcessTree } from "../process/windowsProcessTree";
@@ -6,6 +15,9 @@ import { EventEmitter } from "node:events";
 import {
   accessSync,
   constants,
+  openSync,
+  closeSync,
+  readSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -61,6 +73,8 @@ export type SpawnClaudeCodeProcess = NonNullable<ClaudeAgentSdkOptions["spawnCla
  * the query, which is the only place that knows them.
  */
 export interface ClaudeRuntimeConfinement {
+  readonly runtimeExecutable?: string;
+  readonly strict?: boolean;
   readonly sandboxPolicy?: SandboxPolicySelection;
   readonly projectRoot: string;
   /** The Project's extra folders, which Plan reads as it reads the root. */
@@ -994,8 +1008,118 @@ function confineClaudeLaunch(
   confinement: ClaudeRuntimeConfinement,
   options: ResolvedClaudeProcessOptions,
 ): { readonly spawnOptions: SpawnOptions; readonly release: () => void } {
+  if (confinement.strict === true && confinement.executionPolicy !== "plan") {
+    const selection = confinement.sandboxPolicy;
+    const authority = sandboxAuthorityDirectory();
+    if (selection === undefined || authority === undefined || !sandboxSelectionIsCurrent(selection))
+      throw new ProcessConfinementError(
+        "invalid-configuration",
+        "Claude Strict requires a current server-owned policy and process scope.",
+      );
+    const runtime = realpathSync(spawnOptions.command);
+    const writableRoots = [
+      selection.context.root,
+      ...(selection.context.extraRoots ?? []),
+      ...selection.policy.filesystem.readWriteRoots,
+    ];
+    if (writableRoots.some((root) => runtime === root || runtime.startsWith(`${root}${sep}`)))
+      throw new ProcessConfinementError(
+        "invalid-configuration",
+        "Claude Strict cannot launch a runtime stored in an allowed writable folder. Install the standalone Claude CLI outside the Project and its writable grants.",
+      );
+    if (
+      confinement.runtimeExecutable === undefined ||
+      realpathSync(confinement.runtimeExecutable) !== runtime
+    )
+      throw new ProcessConfinementError(
+        "incompatible",
+        "Claude Strict requires its declared standalone native CLI, without an interpreter or external launcher.",
+      );
+    const descriptor = openSync(runtime, "r");
+    const header = Buffer.alloc(4);
+    try {
+      if (readSync(descriptor, header, 0, 4, 0) !== 4) throw new Error("Missing runtime header");
+    } finally {
+      closeSync(descriptor);
+    }
+    const magic = header.toString("hex");
+    if (
+      ![
+        "7f454c46",
+        "feedface",
+        "feedfacf",
+        "cefaedfe",
+        "cffaedfe",
+        "cafebabe",
+        "bebafeca",
+        "cafebabf",
+        "bfbafeca",
+      ].includes(magic)
+    )
+      throw new ProcessConfinementError(
+        "incompatible",
+        "Claude Strict requires a standalone native Claude CLI. Interpreted launchers cannot prove their startup code stays outside the Project's writable grants.",
+      );
+    // Claude owns the command sandbox. The CLI only receives a kernel lifetime
+    // scope: an outer filesystem wall would defeat its approved native escape,
+    // and Seatbelt cannot nest another Seatbelt sandbox on macOS.
+    const environment = { ...spawnOptions.env, ...confinement.network?.environment };
+    if (process.platform === "darwin") {
+      const scope = prepareMacosSandboxScope(authority, selection);
+      return {
+        spawnOptions: {
+          ...spawnOptions,
+          command: scope.executable,
+          args: [
+            ...macosSandboxScopeLaunchArguments(
+              scope,
+              selection,
+              spawnOptions.command,
+              spawnOptions.args,
+              true,
+            ),
+          ],
+          env: environment,
+        },
+        release: () => undefined,
+      };
+    }
+    if (process.platform === "linux") {
+      requireLinuxConfinement(DEFAULT_BWRAP_PATH);
+      return {
+        spawnOptions: {
+          ...spawnOptions,
+          command: DEFAULT_BWRAP_PATH,
+          args: [
+            "--unshare-user",
+            "--unshare-pid",
+            "--die-with-parent",
+            "--cap-drop",
+            "ALL",
+            "--dev-bind",
+            "/",
+            "/",
+            "--proc",
+            "/proc",
+            "--chdir",
+            confinement.projectRoot,
+            "--",
+            spawnOptions.command,
+            ...spawnOptions.args,
+          ],
+          env: environment,
+        },
+        release: () => undefined,
+      };
+    }
+    throw new ProcessConfinementError(
+      "incompatible",
+      "Claude Strict process ownership is unsupported on this platform.",
+    );
+  }
   if (
-    !CONFINED_CLAUDE_EXECUTION_POLICIES.has(confinement.executionPolicy) &&
+    (!CONFINED_CLAUDE_EXECUTION_POLICIES.has(confinement.executionPolicy) ||
+      process.platform === "win32") &&
     confinement.sandboxPolicy === undefined
   ) {
     // Outside Plan the process is not wrapped: Claude's own sandbox holds
@@ -1360,7 +1484,11 @@ function spawnOwnedClaudeProcess(
 export function makeClaudeProcessLive(options: ClaudeProcessOptions = {}): ClaudeProcessPort {
   const resolved: ResolvedClaudeProcessOptions = {
     inheritedEnvironment: { ...(options.inheritedEnvironment ?? process.env) },
-    confinement: options.confinement ?? makeProcessConfinementLive(),
+    confinement:
+      options.confinement ??
+      (process.platform === "win32"
+        ? { prepare: ({ executable, args }) => ({ command: executable, args }) }
+        : makeProcessConfinementLive()),
     onDiagnostic: options.onDiagnostic,
     probeOutputBytes: options.probeOutputBytes ?? DEFAULT_PROBE_OUTPUT_BYTES,
     probeTimeoutMs: options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS,

@@ -1,7 +1,12 @@
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { decodeProviderInstanceId, type ProviderFailure } from "@octant/contracts";
+import {
+  decodeProviderInstanceId,
+  decodeProviderSessionId,
+  decodeProviderModelId,
+  type ProviderFailure,
+} from "@octant/contracts";
 import { Effect, Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeCodexDriver } from "./codexDriver";
@@ -73,13 +78,102 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
       expect(running(started.right.pid)).toBe(false);
     }, 60_000);
 
-    it("refuses a guarded or sandboxed launch, naming the missing sandbox, before Codex runs", async () => {
+    it.each(["approval-gated", "auto-accept-edits", "plan"] as const)(
+      "starts a native Windows %s runtime and confirms its process stops",
+      async (executionPolicy) => {
+        const root = mkdtempSync(join(tmpdir(), "octant-codex-windows-native-"));
+        directories.push(root);
+        const started = await startAndStop(fakeCodex ?? "", {
+          kind: "thread",
+          root,
+          mode: "code",
+          executionPolicy,
+        });
+        if (Either.isLeft(started)) throw new Error(started.left.message);
+        expect(started.right.version).toBe("0.144.4");
+        expect(running(started.right.pid)).toBe(false);
+      },
+      60_000,
+    );
+
+    it.each(["approval-gated", "auto-accept-edits", "plan"] as const)(
+      "carries %s native permissions through the production Windows driver without claiming an external sandbox",
+      async (executionPolicy) => {
+        const root = mkdtempSync(join(tmpdir(), "octant-codex-native-policy-"));
+        directories.push(root);
+        const registry = new ProviderRuntimeRegistry({ shutdownTimeoutMs: 10000 });
+        const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000071");
+        const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000072");
+        const nativeProcess = makeCodexProcessLive({ platform: "win32", startupTimeoutMs: 20000 });
+        const driver = makeCodexDriver({
+          instanceId,
+          binaryPath: fakeCodex ?? "",
+          runtimeRegistry: registry,
+          process: {
+            start: (input) =>
+              nativeProcess.start({
+                ...input,
+                environment: {
+                  PATH: process.env.PATH,
+                  SYSTEMROOT: process.env.SYSTEMROOT,
+                  TEMP: root,
+                  TMP: root,
+                  USERPROFILE: root,
+                  FAKE_CODEX_ROOT: root,
+                },
+              }),
+          },
+          idleLeaseMs: 0,
+        });
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* driver.acquire({
+                instanceId,
+                projectRoot: root,
+                mode: "code",
+              });
+              yield* connection.start({
+                sessionId,
+                modelId: decodeProviderModelId("gpt-5.4"),
+                executionPolicy,
+              });
+              yield* connection.send({
+                sessionId,
+                prompt: "Inspect this project",
+                attachments: [],
+                tools: [],
+              });
+              yield* connection.stop(sessionId);
+            }),
+          ),
+        );
+        const records = readFileSync(join(root, "records.jsonl"), "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line) as { method?: string; params?: Record<string, unknown> });
+        const started = records.find((record) => record.method === "thread/start");
+        expect(started?.params).toMatchObject({
+          sandbox: executionPolicy === "plan" ? "read-only" : "workspace-write",
+          approvalPolicy:
+            executionPolicy === "plan"
+              ? "never"
+              : executionPolicy === "auto-accept-edits"
+                ? "on-request"
+                : "untrusted",
+        });
+        const turn = records.find((record) => record.method === "turn/start");
+        expect(turn?.params).toMatchObject({
+          sandboxPolicy: { type: executionPolicy === "plan" ? "readOnly" : "workspaceWrite" },
+        });
+      },
+      60000,
+    );
+
+    it("refuses a kept sandbox, naming the missing confinement, before Codex runs", async () => {
       const root = mkdtempSync(join(tmpdir(), "octant-codex-windows-"));
       directories.push(root);
-      for (const level of [
-        { executionPolicy: "approval-gated" },
-        { executionPolicy: "full-access", fullAccessSandbox: true },
-      ] as const) {
+      for (const level of [{ executionPolicy: "full-access", fullAccessSandbox: true }] as const) {
         const refused = await startAndStop(fakeCodex ?? "", {
           kind: "thread",
           root,
@@ -113,9 +207,10 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
       });
     }, 60_000);
 
-    it("reads the catalog only for a host that starts threads at open Full access", async () => {
+    it("reads native metadata independently of the default access level", async () => {
       const refused = await startAndStop(fakeCodex ?? "", { kind: "catalog" }, false);
-      expect(Either.isLeft(refused)).toBe(true);
+      if (Either.isLeft(refused)) throw new Error(refused.left.message);
+      expect(refused.right.version).toBe("0.144.4");
       const read = await startAndStop(fakeCodex ?? "", { kind: "catalog" }, true);
       if (Either.isLeft(read)) throw new Error(read.left.message);
       expect(read.right.version).toBe("0.144.4");

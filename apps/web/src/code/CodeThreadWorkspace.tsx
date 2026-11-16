@@ -1577,7 +1577,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   }
 
-  async function changeFullAccessSandbox(sandboxed: boolean) {
+  async function changeStrict(strict: boolean | "inherit") {
     props.controller.setAccessNotice(undefined);
     setAccessChanging(true);
     try {
@@ -1585,9 +1585,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         kind: "change-code-thread-access",
         threadId: thread.id,
         expectedVersion: thread.version,
-        executionPolicy: "full-access",
+        executionPolicy: thread.executionPolicy,
         permissionPersistence: thread.permissionPersistence,
-        fullAccessSandbox: sandboxed,
+        strict,
       });
     } finally {
       setAccessChanging(false);
@@ -2936,12 +2936,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   {...(profileName === undefined ? {} : { profileName })}
                   warningScope={{ projectId: String(thread.projectId) }}
                   value={permissionModeOf(thread)}
-                  fullAccessSandbox={thread.fullAccessSandbox === true}
+                  strict={
+                    thread.strict ??
+                    (thread.fullAccessSandbox === true && thread.executionPolicy === "full-access")
+                  }
+                  legacyStrict={thread.strict === undefined && thread.fullAccessSandbox === true}
                   fullAccessSandboxSupported={threadKeepsFullAccessSandbox(
                     providerGroups,
                     thread.providerInstanceId,
                   )}
-                  onFullAccessSandboxChange={(sandboxed) => void changeFullAccessSandbox(sandboxed)}
+                  onStrictChange={(strict) => void changeStrict(strict)}
                 />
               </>
             ),

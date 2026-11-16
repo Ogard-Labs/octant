@@ -1476,7 +1476,7 @@ export function createCodeOperationRuntime(
   const operationAccess = (
     windowId: WindowId,
     command: CodeOperationCommand,
-  ): Pick<CodeThread, "executionPolicy" | "fullAccessSandbox"> => {
+  ): Pick<CodeThread, "executionPolicy" | "fullAccessSandbox" | "strict"> => {
     const stored =
       "threadId" in command ? options.persistence.readCodeThread(command.threadId) : undefined;
     if (stored === undefined) return { executionPolicy: "plan" };
@@ -2058,11 +2058,8 @@ export function createCodeOperationRuntime(
       let ownsReservation = false;
       try {
         const command = decodeCodeOperationCommand(rawCommand);
-        // A thread's terminals, tests and other operations run on a host
-        // without Octant's sandbox only at the level that uses none, read from
-        // the posture a live turn narrows it to. An operation that names no
-        // thread has no level to read, so it refuses there. A provider turn is
-        // judged again at its own clamped level when it starts.
+        // Native Windows operations retain provider/tool approval rules;
+        // Strict and retained confinement need a supported host boundary.
         const sandboxRefusal = hostSandboxRefusal({
           platform: process.platform,
           access: operationAccess(windowId, command),
@@ -4748,7 +4745,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return;
     }
     // A level change is the person's alone: no reviewer answers it.
-    if (event.levelChange !== undefined) {
+    if (event.levelChange !== undefined || event.requiresUser === true) {
       this.#persistNormalized(active, event);
       return;
     }

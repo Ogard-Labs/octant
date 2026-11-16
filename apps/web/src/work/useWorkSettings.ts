@@ -14,6 +14,7 @@ export interface WorkSettingsChange {
   readonly defaultAccess?: WorkAccess;
   /** Absent keeps the stored choice. */
   readonly defaultFullAccessSandbox?: boolean;
+  readonly defaultStrict?: boolean;
   /** Absent keeps the stored choice. */
   readonly restartContinuation?: boolean;
 }
@@ -119,6 +120,7 @@ export function useWorkSettings(
                 defaultModelId: model.modelId,
               }),
           defaultAccess: change.defaultAccess ?? saved.defaultAccess,
+          ...(change.defaultStrict === undefined ? {} : { defaultStrict: change.defaultStrict }),
           ...(change.defaultFullAccessSandbox === undefined
             ? {}
             : { defaultFullAccessSandbox: change.defaultFullAccessSandbox }),

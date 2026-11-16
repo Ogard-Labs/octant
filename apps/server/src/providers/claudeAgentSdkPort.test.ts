@@ -420,6 +420,7 @@ describe("Claude Agent SDK port", () => {
               projectRoot: openInput.projectRoot,
               executionPolicy: openInput.executionPolicy,
               runsCommands: false,
+              runtimeExecutable: openInput.binaryPath,
             },
           ]);
           expect(harness.invocation?.options).not.toHaveProperty("continue");
@@ -547,6 +548,22 @@ describe("Claude Agent SDK port", () => {
     ).resolves.toBeDefined();
     expect(harness.invocation?.options).toMatchObject({
       sandbox: { network: { allowedDomains: ["*"] } },
+    });
+  });
+
+  test("leaves Claude's own sandbox configuration to its account settings outside Strict", async () => {
+    const harness = makeHarness();
+    const { sandbox: _sandbox, ...native } = openInput;
+    await Effect.runPromise(
+      Effect.scoped(
+        harness.port.openQuery({ ...native, strict: false, tools: [...native.tools, "Bash"] }),
+      ),
+    );
+    expect(harness.invocation?.options).not.toHaveProperty("sandbox");
+    expect(harness.invocation?.options.settingSources).toContain("user");
+    expect(harness.invocation?.options.settings).toMatchObject({
+      disableAllHooks: true,
+      autoMemoryEnabled: false,
     });
   });
 
@@ -745,7 +762,12 @@ describe("Claude Agent SDK port", () => {
       expect(harness.invocation?.options).not.toHaveProperty("sandbox");
       expect(harness.invocation?.options).not.toHaveProperty("allowDangerouslySkipPermissions");
       expect(harness.spawnConfinements).toEqual([
-        { projectRoot: "/repo", executionPolicy: "plan", runsCommands: false },
+        {
+          projectRoot: "/repo",
+          executionPolicy: "plan",
+          runsCommands: false,
+          runtimeExecutable: openInput.binaryPath,
+        },
       ]);
     },
   );

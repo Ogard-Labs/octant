@@ -1,3 +1,7 @@
+import {
+  StrictPreferenceControl,
+  strictPreferenceValue,
+} from "../settings/StrictPreferenceControl";
 import type { ProviderRegistrySnapshot, WorkAccess } from "@octant/contracts";
 import { buildModelPickerGroups } from "@octant/domain";
 import { useMemo } from "react";
@@ -127,19 +131,19 @@ export function WorkSettingsView(props: {
           {warning.dialog}
         </SettingRow>
         <SettingRow
-          description="New Work threads at Full access run without prompts but keep writes in the Project folder and secret files closed. Works with Codex and Octant Harness models; a task can turn it off from its mode picker."
+          description="Strict keeps provider sign-ins, SSH keys and cloud credentials protected. It applies at every access level and preserves required approvals. Changes apply to the next turn."
           focused={props.focusedSetting === "work-full-access-sandbox"}
-          label="Keep the sandbox at Full access"
+          label="Strict"
           scope="host"
           settingId="work-full-access-sandbox"
         >
-          <OctantSwitch
-            checked={settings.defaultFullAccessSandbox === true}
+          <StrictPreferenceControl
+            value={strictPreferenceValue(settings)}
             disabled={props.controller.busy}
-            label="Keep the sandbox at Full access"
-            onCheckedChange={(checked) =>
-              void props.controller.update({ defaultFullAccessSandbox: checked })
-            }
+            onChange={(value) => {
+              if (typeof value === "boolean")
+                void props.controller.update({ defaultStrict: value });
+            }}
           />
         </SettingRow>
         <SettingRow

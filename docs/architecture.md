@@ -13848,7 +13848,10 @@ mechanisms are:
     agent in the person's name
     ([Context and usage accounting](#context-and-usage-accounting), _Approvals_). Not built yet: the limits the owning
     sections name are still constants.
-  - **Opt-in sandbox at Full access.** A Code or Work thread may set
+  - **Legacy opt-in sandbox at Full access.** The retained compatibility
+    choice described here predates the shared Strict preference below. New
+    controls use Strict; existing `fullAccessSandbox` records keep this meaning
+    until the person explicitly replaces them. A Code or Work thread may set
     `fullAccessSandbox`. Prompts stay off exactly as at Full access, and the
     thread keeps the confinement the guarded levels have:
     - **Which runtimes.** Codex, whose app-server stays inside Octant's
@@ -13917,11 +13920,11 @@ mechanisms are:
       (`defaultFullAccessSandbox`, set with the Project's mode through the
       `change-*-project-permission-mode` commands), else Settings'
       (`defaultFullAccessSandbox` on Code and Work settings), else off
-      (`defaultFullAccessSandboxFor`). In the app: "Keep the sandbox" under
-      Full access in a thread's mode picker (disabled, with the reason, on a
-      runtime that cannot keep it), "Keep the sandbox at Full access" in
-      Settings › Code › Access and Settings › Work, and "Sandbox at Full
-      access" beside a Project's default mode. In the terminal: `octant
+      (`defaultFullAccessSandboxFor`). The app now shows this retained value
+      as **Legacy sandbox** or **Full access only (previous choice)** in the
+      shared Strict control. Explicit Strict preferences take precedence and
+      new threads do not rematerialize the old default after Strict is chosen.
+      In the terminal: `octant
 settings sandbox on|off [--work]`. Only a window on this host or a device
       its person paired can turn
       it off for a Full access thread, because that change names Full access,
@@ -13930,82 +13933,127 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
       Project root succeed, and writes outside it and reads of `HOME` files are
       denied. A live Codex turn under the external-sandbox mapping is a
       maintainer check.
-  - **Configurable sandbox policy (opt-in maintainer preview).**
-    Autonomy and the selected boundary are separate. Full access keeps its
-    no-prompt behavior for permitted work; Auto retains its existing approvals.
-    No existing setting or journal is migrated into an additional policy.
-    Repository files, model approvals and agent calls cannot grant exceptions.
+  - **Configurable protections within Strict (opt-in maintainer preview).**
+    Protection is independent of autonomy. The shared **Strict** preference
+    resolves thread → Project → Settings → off. Configure protections edits the
+    supported policy within Strict; saving never enables Strict. With Strict
+    off, saved configuration stays inactive and adds no approval asks. The
+    provider-native behavior and the migration of other Octant limits remain
+    governed by **Octant adds no restrictions of its own unless Strict is on**.
+    Plan remains read-only and Chat has no folder or command escape.
 
-    The host journals complete versioned Settings and Project policies outside
-    runtime-writable roots. Session exceptions remain in memory and expire on
-    thread archival or host restart. Resolution is session, Project, Settings
-    for the mode, then legacy behavior. Grants bind to native machine identity,
-    canonical Project root/inode, extra roots, binding revision and Git config,
-    including linked worktrees. Replaced folders and changed bindings need a
-    new trusted save. Grants cannot expose the host's private policy store.
+    Strict restores the standard bundle at every access level. A turn with no
+    custom configuration receives the standard policy rather than bypassing
+    backend admission. Full access · Strict still permits routine work without
+    redundant prompts, but mandatory asks remain. In particular, Claude's
+    native command escape asks the person for each command, including at Full
+    access. Its question discloses that the command leaves the command sandbox
+    and can access personal files and host services. A reviewer cannot answer
+    it and no remembered answer authorizes another escape. Denied or unanswered
+    requests remain refused. No host executor, unsandboxed retry or wider-session
+    restart implements that exception.
 
-    Each turn admits an immutable policy and network-rule snapshot before
-    provider acquisition. Changes apply next turn. Helpers intersect grants
-    with their parent, cannot move outside its writable roots and stop with it.
-    Fresh session identity binds provider leases and language/debug caches;
-    differently scoped or unrestricted processes cannot be reused. Compiler
-    receipts include revision, backend/OS, provider and canonical root identity.
-    Cleanup immediately revokes tool authority, closes scoped proxies and
-    terminates owned processes. Uncertain cleanup is recorded and blocks new
-    admission until the owned runtime stops rather than asserting expiry.
+    Previous `fullAccessSandbox` choices retain their Full-access-only meaning
+    until explicitly replaced by Strict or Off. Previous custom-policy records
+    retain their opt-in protection. New explicit preferences take precedence;
+    replay and rollback do not silently drop a saved boundary. The picker marks
+    retained protection **Legacy sandbox**, rather than claiming the full Strict
+    bundle. Settings and Project controls show the previous choice alongside
+    On/Off; Project also offers inheritance. Access level changes do not change
+    the independent Strict preference. Recorded Network limits are never reset,
+    and new Strict configuration cannot bypass them with unrestricted network.
 
-    Settings › Permissions › Sandbox restrictions, the access picker and the
-    Project default-mode section open the same scoped panel. It shows source,
-    effective protection, full folder paths, read/write scope, network choices
-    and limitations. One grouped inline composer card explains a denial and
-    the exact folder or host/port impact before **Allow for this session**,
-    **Remember for this Project**, or **Keep blocked**. Remembering one exception
-    never copies unrelated session overrides into the Project. The host-person
-    settings route enforces strict commands and optimistic versions; agent and
-    hub-introduced sessions cannot grant. A bounded private audit omits raw
-    paths, commands, file contents and credentials.
+    The host journals typed versioned Settings and Project policies outside
+    agent-writable roots; session grants remain in memory. Canonical machine,
+    Project, checkout, extra-folder and inode identities bind saved grants.
+    Every turn receives an immutable policy/network snapshot and a new session
+    identity before acquisition. Every launch and host-brokered call revalidates
+    its authority. Helpers intersect their parent's grants and cannot move to a
+    broader workspace. Process, provider and language/debug reuse keys include
+    the policy and scope. Changed settings are requested values, not changes to
+    a running OS wall. The panel and picker report the running policy separately;
+    stop the turn and begin a new run to apply pending changes. Tightening and
+    relaxation both use that safe boundary.
 
-    Direct file tools enforce the grants with handle-bound reads and writes,
-    including a write check for edits and aliases. The shared launch compiler
-    covers shells, package lifecycle scripts, Git, tests, terminals and native
-    provider descendants. Unsupported host tools (MCP/extension processes,
-    external apps, computer use, hooks and Apple tools without a policy-carrying
-    route) refuse before effects. Remote connectors remain separate authorities.
+    Cleanup revokes host-broker authority, closes scoped proxies, terminates
+    owned descendants and verifies cleanup. Uncertainty retains receipts and
+    blocks new admission. Temporary grants expire at scope end/restart, not just
+    when an ordinary child exits. Brokers never retry without confinement.
+    Kernel-owned scopes cover detached descendants, not only a process group.
 
-    Network choices reuse Safe networks, block general network with a separate
-    provider/control channel, or explicitly allow public internet. Narrow
-    exceptions name an exact destination and port. The existing proxy enforces
-    DNS resolution, redirects, private destinations, IPv4/IPv6, tokens and
-    expiry. Host HTTP tools check the same snapshot at every hop and use pinned
-    DNS transports. Blocked host services deny ambient Unix sockets and private
-    endpoints; exact runtime control bridges are separate host-owned channels.
-    Unrestricted internet still uses a proxy when needed to block host services.
-    Broker loss never opens direct networking. Protected-file rules remain;
-    provider sign-in uses its existing scoped channel, not a folder exemption.
+    Settings › Permissions › **Configure protections**, thread pickers and
+    Project defaults open the same panel. It shows actual Strict/legacy state,
+    provenance, active versus pending policy, full folder paths and supported
+    read/write grants. Expanded details separate toolchain reads, private scratch,
+    cache and account exceptions. An inline grouped denial describes its exact
+    resource, operation and session/Project impact before a trusted grant. Stable
+    codes and rule IDs return to the model; repeated denials do not end a turn.
+    Only a local person or an authenticated device paired by that person may
+    mutate protection. Agents, model output, repository manifests and hub-only
+    devices cannot grant it. Journals preserve the actor; bounded audit records
+    omit commands, raw paths, contents and secrets.
 
-    | Backend/route                                      | Enrollment and enforced boundary                                                                                                                                                                  |
-    | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-    | Linux Bubblewrap                                   | Opt-in preview: PID/network namespaces, capability isolation, writable roots, separate-filesystem read-only grants, enforced proxy, Unix-socket/io_uring restrictions and descendant revocation.  |
-    | Codex, Pi, ACP, Claude and Octant Harness on Linux | Carry selection through existing provider/shell and direct-tool paths; unsupported routes refuse. Real-provider/packaged claims require their native matrix evidence.                             |
-    | OpenCode on Linux                                  | Authenticated host control uses a pinned Unix-socket relay to one fixed port in its private network namespace; the workload starts only after its ownership receipt and socket identity are held. |
-    | macOS                                              | Compiler/native file probes exist; new enrollment refuses until detached-descendant revocation is proven. Existing Keep the sandbox is unchanged.                                                 |
-    | Windows                                            | New enrollment/launches refuse; no new Windows confinement.                                                                                                                                       |
+    Direct file tools use handle-bound operations. Launch planners cover shell,
+    package scripts, builds/tests, Git, terminals and supported provider tools.
+    A route without the required enforcement refuses before effects; this does
+    not claim that remote connector or provider-cloud effects are locally
+    confined. Withheld tools and approval rules are disclosed separately from
+    OS enforcement. Protected-path denials take precedence over folder grants.
 
-    Linux refuses read-only roots on the same filesystem as any writable root:
-    a read-only mount cannot protect a writable hard-link alias. Overlapping
-    grants also refuse. Host-service filters are content-addressed, checked before
-    reuse and stored beside the host authority outside user-grantable folders.
-    Protected Project paths and expanded credential/service
-    grants remain unavailable until their backend has access-time alias and
-    late-created-path proof. A watcher or enumeration is not that protection.
+    Network policy reuses recorded Safe networks, or blocks tool networking with
+    an explicit separately brokered provider/control channel. Narrow exceptions
+    identify the destination and port. DNS pinning, redirects, IPv4/IPv6,
+    private/local endpoints, authentication and scope expiry remain enforced by
+    the proxy. Blocking host services also denies ambient Unix sockets and
+    io_uring routes on Linux. Private fixed-purpose runtime control relays are
+    separate authorities, not general proxies. Proxy loss never opens a direct
+    route. Authentication exceptions retain their existing account scope.
 
-    Enrollment requires `OCTANT_SANDBOX_RESTRICTIONS_PREVIEW=1` on a supported
-    host. Disabling preview prevents new enrollment but keeps saved restrictions
-    enforced, or refuses their launch if the backend is unavailable. Rollback
-    never converts a selected boundary into unrestricted execution. Native
-    probes cover canaries, read-only mounts, real offline install/edit/test/Git,
-    brokered versus direct networking, Unix sockets and detached-child cleanup.
-    Release claims must retain the exact OS/provider evidence and limitations.
+    | Backend/route                     | Supported boundary and required proof                                                                                                                                                                                                                                                                                                                                                                             |
+    | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+    | Linux Bubblewrap                  | PID/network namespaces, capability isolation, configured writable roots, separate-filesystem read-only mounts, enforced proxy and descendant revocation. A static launch helper pins mount sources by object identity using `openat2`, then closes inherited mount descriptors before loading workload code; changed paths refuse. Requires the installed helper and a kernel supporting `openat2`/`close_range`. |
+    | macOS Seatbelt                    | Installed native scope helper and an active GUI session required for enrollment. Unique launchd resource coalitions own detached descendants; durable per-boot receipts support normal exit, client/host failure and restart recovery. Scoped process and PTY launches retain stdio, cwd and terminal semantics.                                                                                                  |
+    | Claude Strict                     | Configured provider-native command sandbox and Octant file-tool gate. The trusted CLI has a lifetime scope, without an incompatible outer filesystem sandbox; approved one-command native escape is the disclosed exception. Plan retains its outer read-only wall.                                                                                                                                               |
+    | Codex, Pi, ACP and Octant Harness | Carry selection through their supported provider/shell and direct-tool routes. Required unsupported protections refuse by name. Live account acceptance is recorded separately from native launch evidence.                                                                                                                                                                                                       |
+    | OpenCode Linux                    | An authenticated fixed-port control relay uses a pinned private Unix socket; ownership admission precedes workload release. Revocation closes the relay and the owned namespace.                                                                                                                                                                                                                                  |
+    | Windows                           | Custom Strict confinement remains unavailable. Ordinary Strict-off provider execution and native approvals follow their owning Windows/provider-native implementation; a successful unrestricted probe never admits Strict.                                                                                                                                                                                       |
+
+    | Provider / level                                      | Explicit Strict off                                            | Strict on, supported macOS/Linux backend                                                               | Windows                                                   |
+    | ----------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------- |
+    | Codex, Ask first / Accept edits / Auto                | Native workspace-write and its approval policy/reviewer        | External Octant profile, policy-bound lease                                                            | Native guarded launches allowed; Strict refused           |
+    | Codex, Plan                                           | Native read-only, restated on every turn/resume                | Read-only Octant profile                                                                               | Native Plan allowed; Strict refused                       |
+    | Claude, Ask first / Accept edits / Auto / Full access | Person's native sandbox settings; no custom policy activation  | Configured native command sandbox, file-tool gate and owned CLI lifetime; every escape asks the person | Ordinary native launch allowed; Strict refused            |
+    | Claude, Plan                                          | Read-only Plan boundary, provider-native on Windows            | Outer read-only wall; no escape                                                                        | Native Plan allowed; Strict refused                       |
+    | OpenCode / Pi / ACP                                   | Documented existing fallback on macOS/Linux; native on Windows | Supported outer wall and inherited descendant scope; named route refusals                              | Ordinary guarded/native approvals allowed; Strict refused |
+    | Full access, other providers                          | No added custom enforcement or asks                            | Supported Strict boundary and its required asks                                                        | Native Full access allowed; Strict refused                |
+    | Chat                                                  | No filesystem or shell                                         | No filesystem or shell                                                                                 | Same tool boundary                                        |
+
+    Claude Strict withholds native startup hooks, MCP servers and Project startup
+    code outside its command sandbox. Native web tools are withheld when tool
+    networking is filtered. A standalone native CLI outside writable roots is
+    required; interpreted launchers cannot claim the protected startup path.
+    The panel distinguishes these withheld features from enforced command
+    confinement. This integration does not claim completion of the separate
+    migration of every application limit or provider feature into Strict.
+
+    Read-only folders on the same filesystem as writable roots remain unavailable
+    until access-time alias mediation exists: a read-only mount or named-path
+    rule does not protect a writable hard-link alias. Overlapping grants refuse.
+    Selected protected paths and expanded narrow credential/service grants are
+    explicitly unsupported capabilities, not delivered effects or silently
+    ignored configuration. Linux late-created-name protection retains its
+    production access-time mediation dependency; enumeration and watchers are
+    not proof. These capability gaps must remain visible without blocking
+    unrelated native provider features.
+
+    `OCTANT_SANDBOX_RESTRICTIONS_PREVIEW=1` permits new custom enrollment on
+    supported hosts. Disabling preview stops new enrollment, not enforcement of
+    saved restrictions. If a selected boundary becomes unavailable, its launch
+    refuses with the missing prerequisite. Native tests exercise denied and
+    successful effects, object replacement, loader injection, descriptors,
+    networking, control bridges and descendant cleanup. Real-provider accounts
+    and signed-package acceptance remain explicit maintainer checks; native
+    fixture success alone does not establish those results.
 
   - **Full access is full access for secret files too** (maintainer
     decision, 2026-10-31: "softer guard — full access is full access").
@@ -19028,13 +19076,12 @@ update source. Octant Nightly builds no disk image.
 
 Cross-platform desktop (macOS, Linux, Windows) remains authorized: the Linux
 desktop shell, then the Linux AppImage with its signed feed, then Windows.
-Work and Code run on Windows at Full access with the sandbox off (step 3 of
-the [Windows sequence](#current-release-boundary) below; maintainer request,
-2026-11-15); every guarded level, and Full access with the sandbox kept, stays
-refused there until the Windows confinement launcher has run a real provider
-on a person's Windows machine (decided otherwise
-under [Windows below Full access](#current-release-boundary) below; designed,
-not built). Finding and removing worktrees on this computer is
+Work and Code provider sessions run on Windows at supported guarded levels
+using native approvals, with no Octant sandbox claimed. Strict and retained
+sandbox choices remain unavailable there; a native probe cannot admit them.
+The [Windows sequence](#current-release-boundary) below distinguishes this
+provider-launch integration from remaining shell, action and packaging work.
+Finding and removing worktrees on this computer is
 authorized on Windows hosts too (maintainer request, 2026-11-11): it runs
 host-side Git and file operations a person confirms, starts no agent, and so
 does not lift that confinement gate. Everything on the work board is in scope for the first
@@ -19050,8 +19097,8 @@ LSP / extension host / debugger companion are release-scope choices the
 maintainers schedule, not safety rules; none of them protects an invariant by
 itself.
 
-**Windows below Full access** (maintainer decision, 2026-11-16; designed, not
-built; this widens the release boundary above). On Windows the levels below
+**Windows below Full access** (maintainer decision, 2026-11-16; provider
+launches and native approvals integrated; shell/action parity remains separate). On Windows the levels below
 Full access are allowed using each provider's own approvals and, where it has
 one, its own sandbox, with no Octant sandbox claimed: the mode picker and the
 thread say that Octant's sandbox does not run there, and Strict, which needs
@@ -19176,13 +19223,12 @@ uses only owned synthetic entries and verifies their removal.
 This unsigned QA archive is not an installer, a usable Windows release, or an
 enabled signed-update channel, and no workflow publishes it to a release;
 native host admission and credentials remain separate prerequisites. The
-release form is the signed per-user installer of step 5 below. Windows Work and
-Code below Full access stay unavailable today (decided: allowed with the
-provider's own approvals and no Octant sandbox claimed, under
-[Windows below Full access](#current-release-boundary); designed, not built): the confinement port refuses Windows
-unless its caller opts into the dormant launcher, which no production caller
-does, so the guarded levels fail closed there. Full access uses no confinement,
-so Work and Code run there on Windows (step 3 below). Simulator, the Apple workbench, and vibrancy stay
+release form is the signed per-user installer of step 5 below. Ordinary
+Strict-off Work and Code provider sessions use native approvals on Windows;
+Strict and retained confinement remain unavailable. The dormant confinement
+launcher is not production admission and no ordinary native launch claims its
+protection. Remaining shell and Project action limitations below are separate.
+Simulator, the Apple workbench, and vibrancy stay
 macOS-only.
 
 **Windows sequence** (maintainer decision, 2026-11-14). Each step is its own
@@ -19202,22 +19248,14 @@ deliverable and keeps every gate above:
    Windows runner, so every confined Windows launch stays refused.
 3. Work and Code at Full access on Windows. Partly built (maintainer request,
    2026-11-15: build it now, without waiting for the launcher):
-   - **The level gate.** A Work turn, a Code turn and every Code operation on
-     a thread (terminal, tests, and the rest) on a Windows host run only at
-     Full access with the sandbox off (decided: the guarded levels are to run
-     there too, under [Windows below Full access](#current-release-boundary); designed, not built).
-     Anything else is refused on the server before it is journaled or starts a
-     process, with the reason that Windows
-     has no Octant process sandbox yet (`hostSandboxRefusal` in the domain's
-     `guardrailPolicy.ts`). The gate reads the level the work runs at: a Work
-     turn's level clamped to its caller's ceiling, a Code turn's composer
-     level, recorded start or coordinator Plan clamped to the thread, and a
-     live turn's narrower posture, never only the thread's stored level. A
-     Code command that only journals (creating, renaming, moving a thread) and
-     host-side Git a person confirms are not process launches and run at any
-     level. The mode picker reads the host's reported platform and shows each
-     guarded level, and Keep the sandbox, unavailable with that reason; the
-     one-time Full access warning shows as on every platform.
+   - **The level gate.** Ordinary provider launches below Full access use
+     native approvals. Strict or retained sandbox requests refuse before
+     process effects because Windows has no admitted Octant process sandbox.
+     The gate reads the effective level and strict preference, including a
+     narrower live turn or caller ceiling. The picker keeps native levels
+     available and disables Strict with the named reason. The Full access
+     warning remains on every platform. Host-side Git confirmed by a person
+     and journal-only commands are not confinement launches.
    - **Terminals.** A Code or Project terminal on Windows opens the shell
      Settings › Code › Terminal shell names (`windowsTerminalShell`): Windows
      PowerShell by default (`System32\WindowsPowerShell\v1.0\powershell.exe`),
@@ -19268,12 +19306,8 @@ deliverable and keeps every gate above:
      cached result admits another launch; every other level keeps the
      confined read and launch, which refuse there, and the server gate above
      refuses those turns first. Codex's model catalog is read by a lease of
-     its own with no thread; on Windows it runs unconfined only while the host
-     starts new threads at open Full access (Settings › Code's default mode or
-     Settings › Work's default access is Full access with the sandbox off,
-     each chosen through the one-time warning; `hostStartsThreadsAtOpenFullAccess`
-     in the domain), and is refused otherwise, so Codex reports itself
-     unavailable on a Windows host whose defaults are guarded. Codex's
+     its own with no thread, using an independent native lease regardless of
+     guarded thread defaults. A metadata probe cannot authorize Strict. Codex's
      environment keeps a Windows host's `Path`, `SystemRoot` and profile
      names whatever their case. A Codex installed only as an npm `.cmd` shim
      does not start (Windows starts a `.cmd` only through a shell, which
@@ -19300,15 +19334,12 @@ deliverable and keeps every gate above:
      which shell runs its commands (Windows PowerShell 5.1, PowerShell 7 or a
      Command Prompt batch script), read from the same setting. The levels below Full access refuse on Windows
      before a command is planned.
-   - **Not yet on Windows.** These run at Full access on macOS and Linux and
-     are unavailable on Windows: the Claude, OpenCode, Pi and ACP agent
-     families, whose version read, catalog and launch preparation have not
-     been given the Windows form Codex has (their confined reads refuse there,
-     so each reports itself unavailable; decided: to be built, under
-     [Windows below Full access](#current-release-boundary); designed, not built); the
+   - **Provider launches and remaining Windows features.** Claude, OpenCode,
+     Pi and ACP now prepare native version reads and ordinary launches on
+     Windows. Selected Strict confinement still refuses. This does not enable the
      [agent debug tool](design/language-services.md#agent-debug-tool-rules);
      a Project's [own toolchain copy](design/language-services.md#user-added-servers);
-     and Project actions (decided: allowed, under [Windows below Full access](#current-release-boundary)).
+     or Project actions (decided: allowed, under [Windows below Full access](#current-release-boundary)).
      A provider that starts no local process before its
      turn (an Octant Harness model over an endpoint) runs Full access turns
      there with Octant's own file tools and the harness shell.

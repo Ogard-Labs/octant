@@ -111,6 +111,8 @@ export interface ProviderSessionStart {
    * keep it. Absent means Full access runs open, as it always did.
    */
   readonly fullAccessSandbox?: boolean;
+  /** Restores the Strict approval bundle as well as the process boundary. */
+  readonly strict?: boolean;
   /**
    * User-chosen values for options the model declares (`ProviderModel.options`),
    * keyed by option id. Drivers apply the ids they understand and ignore the
@@ -271,6 +273,8 @@ export interface ProviderSessionResume {
   readonly autoApprove?: boolean;
   /** Same meaning as in {@link ProviderSessionStart.fullAccessSandbox}. */
   readonly fullAccessSandbox?: boolean;
+  /** Restores the Strict approval bundle as well as the process boundary. */
+  readonly strict?: boolean;
   /**
    * The thread's current model. A driver that reports `modelSwitch` as
    * supported runs the resumed session on it; any other driver keeps the model

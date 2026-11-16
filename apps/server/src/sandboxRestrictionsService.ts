@@ -1,3 +1,15 @@
+import { linuxPinnedLaunchAvailable } from "./process/linuxPinnedLaunch";
+import {
+  resolveStrictPolicy,
+  type StrictPreferences,
+  type StrictDefaults,
+} from "@octant/domain/strict-policy";
+import type { ProviderExecutionPolicy } from "@octant/contracts";
+import {
+  macosSandboxScopeAvailable,
+  macosSandboxScopeIdentity,
+  revokeMacosSandboxScope,
+} from "./process/macosSandboxScope";
 import type { SandboxPolicyLaunchDetails } from "@octant/contracts/sandbox-policy";
 import { admitSandboxPolicy, intersectSandboxPolicies } from "@octant/domain/sandbox-policy";
 import { refusesFullAccessSandbox } from "@octant/domain/guardrail-policy";
@@ -29,11 +41,20 @@ import { replayAggregateTypesInOrder } from "./persistence/journalHydration";
 import { ConcurrencyConflict } from "./persistence/journalErrors";
 import {
   sandboxPolicySummary,
+  sandboxNetworkLimitsOn,
   type SandboxTurnRequest,
   type SandboxTurnAdmission,
   type SandboxRestrictionsAuthority,
 } from "./process/sandboxRuntimePolicy";
 
+const defaultStrictPolicy: SandboxPolicy = decodeSandboxPolicy({
+  schemaVersion: 1,
+  revision: 0,
+  filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
+  network: "existing-policy",
+  credentials: "existing-policy",
+  hostServices: "existing-policy",
+});
 const aggregateId = "00000000-0000-4000-8000-0000000000e6";
 const decodeChanged = Schema.decodeUnknownSync(SandboxPolicyChanged);
 type StoredPolicy = typeof SandboxPolicyChanged.Type;
@@ -61,6 +82,12 @@ export interface SandboxRestrictionsDependencies {
   readonly thread: (
     id: string,
   ) => { readonly projectId: string; readonly mode: "code" | "work" } | undefined;
+  readonly strictPreferences?: (scope: SandboxRestrictionsScope) => {
+    readonly executionPolicy: ProviderExecutionPolicy;
+    readonly thread?: StrictPreferences;
+    readonly project?: StrictDefaults;
+    readonly settings?: StrictDefaults;
+  };
   readonly enrollmentEnabled?: boolean;
   readonly platform?: NodeJS.Platform;
   readonly dataDirectory?: string;
@@ -74,6 +101,8 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
     string,
     {
       readonly selection?: SandboxPolicySelection;
+      readonly strict?: boolean;
+      readonly legacy?: boolean;
       readonly launches: SandboxPolicyLaunchDetails[];
       readonly nonce: string;
       readonly parentThreadId?: string;
@@ -188,6 +217,17 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
   #effective(scope: SandboxRestrictionsScope): StoredPolicy | undefined {
     return this.#records(scope).find((record) => record?.policy !== undefined);
   }
+  #strictPolicy(scope: SandboxRestrictionsScope) {
+    const legacy = this.#records(scope).find(
+      (record) => record?.policy !== undefined && record.requiresStrict !== true,
+    );
+    return resolveStrictPolicy({
+      ...(this.#dependencies.strictPreferences?.(scope) ?? { executionPolicy: "approval-gated" }),
+      ...(legacy === undefined
+        ? {}
+        : { legacyPolicyScope: legacy.scope.kind === "session" ? "thread" : legacy.scope.kind }),
+    });
+  }
   #validate(record: StoredPolicy): void {
     if (record.binding !== this.#binding(record.scope))
       throw new Error(
@@ -203,8 +243,12 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
   }
   snapshot(scope: SandboxRestrictionsScope) {
     const effective = this.#effective(scope);
+    const strictPolicy = this.#strictPolicy(scope);
     const platform = this.#dependencies.platform ?? process.platform;
     const policy = effective?.policy;
+    const backendReady =
+      (platform === "linux" && linuxPinnedLaunchAvailable(this.#dependencies.dataDirectory)) ||
+      (platform === "darwin" && macosSandboxScopeAvailable());
     const threadId = scope.kind === "session" ? scope.threadId : undefined;
     const projectId =
       scope.kind === "project"
@@ -213,9 +257,14 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
           ? undefined
           : this.#dependencies.thread(threadId)?.projectId;
     const limitations = [
-      ...(platform === "darwin"
+      ...(platform === "linux" && !backendReady
         ? [
-            "New policy enrollment is unavailable until detached-descendant revocation is proven for this backend. Existing Keep the sandbox behavior remains available.",
+            "Strict requires the installed native Linux launch helper, private runtime storage and a kernel supporting openat2 and close_range.",
+          ]
+        : []),
+      ...(platform === "darwin" && !backendReady
+        ? [
+            "Strict enrollment requires the installed native scope helper and an active macOS GUI session. Existing legacy sandbox choices remain available.",
           ]
         : []),
       ...(this.#dependencies.enrollmentEnabled === false
@@ -223,11 +272,12 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
             "New policy enrollment is in maintainer preview. Existing saved restrictions remain enforced.",
           ]
         : []),
-      ...(platform === "linux"
+      ...(platform === "linux" || platform === "darwin"
         ? [
             "Read-only folders on the same filesystem as a writable root are unsupported until access-time alias mediation is available; the launch refuses rather than allowing writes through hard links.",
           ]
         : []),
+      "Claude Strict withholds native startup hooks, MCP servers and Project startup code outside its command sandbox. Native web tools are withheld when tool networking is filtered; brokered Octant tools keep their own policy checks.",
       "Protected project paths require a proven backend and are unavailable on this host.",
       "Exact credential and host-service grants are not supported; protected-file rules remain enforced.",
     ];
@@ -238,6 +288,18 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
         error instanceof Error ? error.message : "The saved grant is unavailable.",
       );
     }
+    const held = threadId === undefined ? undefined : this.#turns.get(threadId);
+    const actualPolicy =
+      held === undefined ? (strictPolicy.enabled ? policy : undefined) : held.selection?.policy;
+    const actualStrict = held?.strict ?? strictPolicy.enabled;
+    const actualLegacy = held?.legacy ?? strictPolicy.legacy;
+    const actualSummary = !actualStrict
+      ? "Strict is off. Saved protection settings are inactive."
+      : actualLegacy
+        ? "The previous sandbox choice remains active until you explicitly choose Strict."
+        : actualPolicy === undefined
+          ? "Strict restores the standard protection rules."
+          : `Strict protections apply; some actions still require approval. Writes: Project + ${actualPolicy.filesystem.readWriteRoots.length} allowed folders. Read only: ${actualPolicy.filesystem.readOnlyRoots.length} folders. Network: ${actualPolicy.network === "existing-policy" ? "recorded Safe networks settings" : actualPolicy.network}.`;
     return decodeSandboxRestrictionsSnapshot({
       kind: "sandbox-restrictions",
       runtimeDetails: [...this.#turns.entries()]
@@ -249,24 +311,42 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
         .flatMap(([, turn]) => turn.launches)
         .slice(-16),
       enrollmentEnabled:
-        platform === "linux" &&
-        (this.#dependencies.enrollmentEnabled !== false || policy !== undefined),
+        backendReady && (this.#dependencies.enrollmentEnabled !== false || policy !== undefined),
       version: this.#version,
       scope,
       source: effective?.scope.kind ?? "legacy",
       ...(policy === undefined ? {} : { policy }),
       inherited: effective !== undefined && keyOf(scope) !== keyOf(effective.scope),
       running: threadId !== undefined && this.#turns.has(threadId),
-      summary:
-        policy === undefined
-          ? "Following the existing sandbox choice. No additional restrictions selected."
-          : `Writes: Project + ${policy.filesystem.readWriteRoots.length} allowed folders. Read only: ${policy.filesystem.readOnlyRoots.length} folders. Network: ${policy.network === "existing-policy" ? "existing Safe networks settings" : policy.network}. Applies next turn.`,
+      strict: strictPolicy.enabled,
+      legacyStrict: strictPolicy.legacy,
+      strictSource: strictPolicy.source,
+      ...(threadId === undefined || !this.#turns.has(threadId)
+        ? {}
+        : {
+            activeStrict: this.#turns.get(threadId)?.strict ?? false,
+            activeLegacyStrict: this.#turns.get(threadId)?.legacy ?? false,
+          }),
+      ...(threadId === undefined || this.#turns.get(threadId)?.selection === undefined
+        ? {}
+        : { activePolicy: this.#turns.get(threadId)?.selection?.policy }),
+      pending:
+        threadId !== undefined &&
+        this.#turns.has(threadId) &&
+        (this.#turns.get(threadId)?.strict !== strictPolicy.enabled ||
+          this.#turns.get(threadId)?.legacy !== strictPolicy.legacy ||
+          ((strictPolicy.enabled || this.#turns.get(threadId)?.strict === true) &&
+            JSON.stringify(
+              policy ??
+                (strictPolicy.enabled && !strictPolicy.legacy ? defaultStrictPolicy : undefined),
+            ) !== JSON.stringify(this.#turns.get(threadId)?.selection?.policy))),
+      summary: actualSummary,
       limitations,
       capabilities: {
-        folders: platform === "linux",
+        folders: backendReady,
         protectedPaths: false,
         isolatedCredentials: false,
-        blockedHostServices: platform === "linux",
+        blockedHostServices: backendReady,
       },
       denials: [...this.#denials.values()].filter(
         (denial) =>
@@ -363,7 +443,9 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
           : [...policy.filesystem.readOnlyRoots, ...policy.filesystem.readWriteRoots].map((path) =>
               this.#identity(path),
             );
+      const previous = this.#effective(scope);
       record = {
+        requiresStrict: previous?.requiresStrict ?? previous?.policy === undefined,
         scope,
         binding: this.#binding(scope),
         ...(policy === undefined
@@ -430,7 +512,18 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
           "The previous sandbox runtime is still stopping. Wait for cleanup before retrying.",
       };
     let selection: SandboxPolicySelection | undefined;
+    let strictEnabled = false;
+    let legacyStrict = false;
     try {
+      const strictResolution = this.#strictPolicy({ kind: "session", threadId: request.threadId });
+      const parentTurn =
+        request.parentThreadId === undefined ? undefined : this.#turns.get(request.parentThreadId);
+      strictEnabled = strictResolution.enabled || parentTurn?.strict === true;
+      legacyStrict =
+        strictEnabled &&
+        (parentTurn?.strict === true
+          ? parentTurn.legacy === true && (!strictResolution.enabled || strictResolution.legacy)
+          : strictResolution.legacy);
       const record =
         this.#effective({ kind: "session", threadId: request.threadId }) ??
         this.#effective({
@@ -444,14 +537,18 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
       const parentPolicy =
         request.parentThreadId === undefined
           ? undefined
-          : (this.active(request.parentThreadId)?.policy ?? parentRecord?.policy);
+          : this.active(request.parentThreadId)?.policy;
       const selectedPolicy =
         parentPolicy === undefined
-          ? record?.policy
+          ? (record?.policy ?? (strictEnabled && !legacyStrict ? defaultStrictPolicy : undefined))
           : record?.policy === undefined
             ? parentPolicy
             : intersectSandboxPolicies(parentPolicy, record.policy);
-      if (selectedPolicy !== undefined) {
+      if (strictEnabled && selectedPolicy !== undefined) {
+        if (!legacyStrict && selectedPolicy.network === "unrestricted" && sandboxNetworkLimitsOn())
+          throw new Error(
+            "Strict cannot bypass your recorded Network limits. Choose Follow Safe networks settings or Block network access.",
+          );
         if (record !== undefined) this.#validate(record);
         if (
           parentRecord !== undefined &&
@@ -460,11 +557,18 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
         )
           this.#validate(parentRecord);
         const platform = this.#dependencies.platform ?? process.platform;
-        if (platform === "darwin")
+        if (platform === "linux" && !linuxPinnedLaunchAvailable(this.#dependencies.dataDirectory))
           throw new Error(
-            "This backend has no proven detached-descendant revocation for the selected policy. New policy launches are refused; existing Keep the sandbox behavior remains available.",
+            "Linux Strict requires the installed native launch helper, private runtime storage and a kernel supporting openat2 and close_range. Rebuild the host runtime before enabling Strict.",
           );
-        if (platform !== "linux")
+        if (
+          platform === "darwin" &&
+          (!macosSandboxScopeAvailable() || this.#dependencies.dataDirectory === undefined)
+        )
+          throw new Error(
+            "macOS Strict requires the installed native scope helper, private host storage and an active GUI session.",
+          );
+        if (platform !== "linux" && platform !== "darwin")
           throw new Error("This platform cannot enforce the selected sandbox restrictions.");
         const admission = admitSandboxPolicy(selectedPolicy, {
           allowedFolders: true,
@@ -509,7 +613,7 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
               "The helper's workspace exceeds its parent's sandbox grants. Choose a workspace within the parent's writable roots.",
             );
         }
-        if (platform === "linux") {
+        if (platform === "linux" || platform === "darwin") {
           const writableDevices = [root.path, ...selectedPolicy.filesystem.readWriteRoots].map(
             (path) => statSync(path).dev,
           );
@@ -519,7 +623,7 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
             )
           )
             throw new Error(
-              "Linux cannot enforce this read-only folder against writable hard-link aliases on the same filesystem. Use a separate filesystem, a supported backend, or explicitly choose read and write access.",
+              "This backend cannot enforce this read-only folder against writable hard-link aliases on the same filesystem. Use a separate filesystem, a supported backend, or explicitly choose read and write access.",
             );
         }
         const project = this.#dependencies.project(request.projectId);
@@ -534,7 +638,7 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
             if (
               canonical === privateRoot ||
               privateRoot.startsWith(`${canonical}/`) ||
-              ["sandbox-filters", "sandbox-control", "sandbox-scopes"].some(
+              ["sandbox-filters", "sandbox-control", "sandbox-scopes", "sandbox-runtime"].some(
                 (name) =>
                   canonical === join(privateRoot, name) ||
                   canonical.startsWith(`${join(privateRoot, name)}/`) ||
@@ -627,6 +731,8 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
     this.#turns.set(request.threadId, {
       nonce,
       launches: [],
+      strict: strictEnabled,
+      legacy: legacyStrict,
       ...(request.parentThreadId === undefined ? {} : { parentThreadId: request.parentThreadId }),
       ending: false,
       cleanups: new Map(),
@@ -637,6 +743,8 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
     return {
       status: "admitted",
       turn: {
+        strict: strictEnabled,
+        legacy: legacyStrict,
         ...(selection === undefined ? {} : { selection }),
         summary: selection === undefined ? "" : sandboxPolicySummary(selection),
         current: () =>
@@ -646,7 +754,13 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
           const held = this.#turns.get(request.threadId);
           if (held?.nonce !== nonce) return;
           held.ending = true;
-          if (held.cleanups.size === 0) {
+          if (
+            held.cleanups.size === 0 &&
+            !(
+              (this.#dependencies.platform ?? process.platform) === "darwin" &&
+              held.selection !== undefined
+            )
+          ) {
             this.#turns.delete(request.threadId);
             return;
           }
@@ -676,7 +790,27 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
     },
   ): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const stopped = Promise.allSettled([...turn.cleanups.values()].map((cleanup) => cleanup()));
+    const stopped = Promise.allSettled(
+      [...turn.cleanups.values()].map((cleanup) => cleanup()),
+    ).then(async (entries) => {
+      if (
+        !entries.every((entry) => entry.status === "fulfilled") ||
+        (this.#dependencies.platform ?? process.platform) !== "darwin" ||
+        turn.selection === undefined
+      )
+        return entries;
+      const selected = turn.selection;
+      const final = await Promise.allSettled([
+        (async () => {
+          const directory = this.#dependencies.dataDirectory;
+          const scope =
+            directory === undefined ? undefined : macosSandboxScopeIdentity(directory, selected);
+          if (scope === undefined) throw new Error("Native scope revocation is unavailable.");
+          await revokeMacosSandboxScope(scope);
+        })(),
+      ]);
+      return [...entries, ...final];
+    });
     const result = await Promise.race([
       stopped,
       new Promise<undefined>((resolve) => {

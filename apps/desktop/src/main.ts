@@ -326,6 +326,7 @@ import {
 } from "./attentionNotifications";
 import {
   CODE_FILE_HELPER_FILENAME,
+  SANDBOX_SCOPE_FILENAME,
   CODE_APPROVAL_PRELOAD_FILENAME,
   DESKTOP_PRELOAD_FILENAME,
   EXTENSION_BRIDGE_PRELOAD_FILENAME,
@@ -2117,6 +2118,14 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     const { broker, server: child } = await startDesktopHostServer(launch, {
       startBroker: startDesktopCredentialBroker,
       startServer: (broker) => {
+        const sandboxScopePath = resolveDesktopNativeHelperPath(
+          {
+            packaged: app.isPackaged,
+            resourcesPath: process.resourcesPath,
+            moduleUrl: import.meta.url,
+          },
+          SANDBOX_SCOPE_FILENAME,
+        );
         const codeFileHelperPath = resolveCodeFileHelperPath({
           packaged: app.isPackaged,
           resourcesPath: process.resourcesPath,
@@ -2140,6 +2149,9 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
               }),
           serveAvdBrokerUrl: nextServeAvdBroker.url,
           serveAvdBrokerToken: nextServeAvdBroker.token,
+          ...(process.platform === "darwin" && existsSync(sandboxScopePath)
+            ? { sandboxScopePath }
+            : {}),
           ...(process.platform === "darwin" && existsSync(codeFileHelperPath)
             ? { codeFileHelperPath }
             : {}),

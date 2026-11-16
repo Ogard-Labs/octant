@@ -92,7 +92,7 @@ export interface ProjectOverviewProps {
     projectId: ProjectId,
     permissionMode: PermissionMode | undefined,
     /** "keep" (the default) leaves the Project's sandbox choice as it is. */
-    fullAccessSandbox?: boolean | "settings" | "keep",
+    strict?: boolean | "inherit" | "keep",
   ) => Promise<boolean>;
   /** Sets who answers this Code Project's prompts at Auto; absent follows Settings. */
   readonly onAutoReviewerChange?: (

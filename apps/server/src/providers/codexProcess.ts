@@ -78,11 +78,8 @@ export type CodexLaunchAuthority =
   | {
       readonly kind: "catalog";
       /**
-       * Read for a Windows host whose new threads start at Full access with
-       * the sandbox off, the only level Windows runs. There the catalog read
-       * runs unconfined, as the turns it serves do; without it Windows refuses
-       * the read, since its confined form needs a sandbox Windows lacks.
-       * Other platforms ignore it.
+       * Legacy discovery hint. Metadata now runs through the native provider
+       * independently of a thread's requested protection; it never admits Strict.
        */
       readonly forOpenFullAccess?: true;
     }
@@ -98,6 +95,7 @@ export type CodexLaunchAuthority =
        * deny-default profile and proxied egress instead of running unwrapped.
        */
       readonly fullAccessSandbox?: boolean;
+      readonly strict?: boolean;
       readonly sandboxPolicy?: SandboxPolicySelection;
       /**
        * The person let Codex run its own subagents. Their requests reach the
@@ -140,10 +138,7 @@ export interface CodexProcessOptions {
   /** Confinement for the app-server below Full access; defaults to the platform's. */
   readonly confinement?: ProcessConfinementPort;
   readonly platform?: NodeJS.Platform;
-  /**
-   * Whether a catalog read on a Windows host is made for open Full access
-   * (the host's new threads start there); read as each catalog read starts.
-   */
+  /** Legacy discovery hint, retained for compatibility. Metadata does not admit Strict. */
   readonly windowsCatalogForOpenFullAccess?: () => boolean;
   /** Routes the app-server through its own egress proxy below Full access. */
   readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
@@ -156,11 +151,20 @@ const UNCONFINED: ProcessConfinementPort = {
   prepare: ({ executable, args }) => ({ command: executable, args }),
 };
 
-/** Whether a launch runs with no sandbox on Windows, the only form it has there. */
-function runsUnconfinedOnWindows(authority: CodexLaunchAuthority): boolean {
-  return authority.kind === "catalog"
-    ? authority.forOpenFullAccess === true
-    : authority.executionPolicy === "full-access" && authority.fullAccessSandbox !== true;
+/** Native provider execution and account metadata never attest a Strict boundary. */
+function runsWithoutOctantConfinement(
+  authority: CodexLaunchAuthority,
+  platform: NodeJS.Platform,
+): boolean {
+  if (authority.kind === "catalog") return true;
+  return (
+    authority.strict !== true &&
+    authority.fullAccessSandbox !== true &&
+    authority.sandboxPolicy === undefined &&
+    (authority.strict === false ||
+      authority.executionPolicy === "full-access" ||
+      platform === "win32")
+  );
 }
 
 const DEFAULT_OCTANT_VERSION = "0.0.0";
@@ -777,8 +781,12 @@ export function prepareCodexLaunch(input: {
   const { authority } = input;
   if (
     authority.kind === "thread" &&
-    authority.executionPolicy === "full-access" &&
-    authority.fullAccessSandbox !== true
+    (authority.executionPolicy === "full-access" ||
+      input.platform === "win32" ||
+      authority.strict === false) &&
+    authority.strict !== true &&
+    authority.fullAccessSandbox !== true &&
+    authority.sandboxPolicy === undefined
   ) {
     return {
       status: "prepared",
@@ -791,7 +799,7 @@ export function prepareCodexLaunch(input: {
       },
     };
   }
-  if (input.platform === "win32" && authority.kind === "catalog" && authority.forOpenFullAccess) {
+  if (authority.kind === "catalog") {
     // A scratch working directory of its own, removed when the read ends.
     let scratch: string | undefined;
     try {
@@ -1124,15 +1132,11 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
           options.windowsCatalogForOpenFullAccess?.() === true
             ? { kind: "catalog", forOpenFullAccess: true }
             : requested;
-        // On Windows a launch that runs unconfined (open Full access, or a
-        // catalog read made for it) reads its version unconfined too: the
-        // runtime it precedes has the same reach, and the confined read has
-        // no Windows form. Every other launch keeps the confined read, which
-        // refuses on Windows.
-        const versionProbeConfinement =
-          platform === "win32" && runsUnconfinedOnWindows(authority)
-            ? UNCONFINED
-            : resolved.versionProbeConfinement;
+        // A native launch probes its executable natively. Metadata and version
+        // results never authorize a restricted launch; Strict admits it afresh.
+        const versionProbeConfinement = runsWithoutOctantConfinement(authority, platform)
+          ? UNCONFINED
+          : resolved.versionProbeConfinement;
         const launchEnvironment =
           environment ??
           (resolved.inheritedEnvironment === undefined
@@ -1176,7 +1180,8 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
             // so its network is held as Accept edits' is, as Claude's sandbox
             // asks for it; open Full access gets no proxy.
             const network =
-              runtimePolicy === "full-access" && !keepsSandbox
+              (runtimePolicy === "full-access" && !keepsSandbox) ||
+              (authority.kind === "thread" && authority.strict === false)
                 ? undefined
                 : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
                     ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined

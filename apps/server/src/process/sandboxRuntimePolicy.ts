@@ -16,6 +16,7 @@ export interface SandboxTurnRequest {
 }
 export interface SandboxTurnPolicy {
   readonly strict?: boolean;
+  readonly legacy?: boolean;
   readonly selection?: SandboxPolicySelection;
   readonly summary: string;
   readonly current: () => boolean;
@@ -236,7 +237,10 @@ export function trackSandboxChild(
         await exited;
       }
       if (scope !== undefined) await revokeMacosSandboxScope(scope, child.pid);
-    })());
+    })().catch((error: unknown) => {
+      cleanup = undefined;
+      throw error;
+    }));
   let remove: () => void;
   try {
     remove = registerSandboxCleanup(selection, revoke);

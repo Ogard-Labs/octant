@@ -152,26 +152,23 @@ const ids = {
 
 describe("WorkTurnService", () => {
   it.each(["ask-first", "auto-accept-edits", "auto"] as const)(
-    "refuses a Windows Work turn at %s, naming the missing sandbox, before acquiring a provider or appending the journal",
+    "starts an ordinary Windows Work turn at %s using native approvals",
     async (threadAccess) => {
       const fixture = serviceFixture({ threadAccess });
       vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
       try {
         await expect(
           fixture.service.startFirstTurn(ids.window, startCommand()),
-        ).rejects.toMatchObject({
-          failure: { category: "unavailable", message: WINDOWS_SANDBOX_MISSING_REASON },
-        });
-        expect(fixture.acquireInputs).toHaveLength(0);
-        expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+        ).resolves.toMatchObject({ kind: "accepted" });
+        await vi.waitFor(() => expect(fixture.acquireInputs).toHaveLength(1));
       } finally {
         vi.unstubAllGlobals();
       }
     },
   );
 
-  it("refuses a Windows turn on a Full access thread when its caller's ceiling lowers the turn below Full access", async () => {
-    const fixture = serviceFixture({ threadAccess: "full-access" });
+  it("refuses Windows Strict before provider acquisition even when the caller narrows the level", async () => {
+    const fixture = serviceFixture({ threadAccess: "full-access", strict: true });
     vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
     try {
       await expect(
@@ -6330,6 +6327,7 @@ function serviceFixture(
     readonly readProviderModel?: WorkTurnServiceDependencies["persistence"]["readProviderModel"];
     readonly readProjectMemory?: WorkTurnServiceDependencies["persistence"]["readProjectMemory"];
     readonly threadAccess?: WorkAccess;
+    readonly strict?: boolean;
     readonly fullAccessSandbox?: boolean;
     readonly documentDelivery?: "canvas" | "native-artifacts";
     readonly onTurnRequested?: WorkTurnServiceDependencies["onTurnRequested"];
@@ -6467,6 +6465,7 @@ function serviceFixture(
         workingDirectory: ".",
         ...(options.threadAccess === undefined ? {} : { access: options.threadAccess }),
         ...(options.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+        ...(options.strict === undefined ? {} : { strict: options.strict }),
         ...(options.completionConfirmed?.() === true ? { completionConfirmed: true } : {}),
         ...(options.documentDelivery === undefined
           ? {}

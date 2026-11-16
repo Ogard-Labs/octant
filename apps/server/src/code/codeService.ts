@@ -925,9 +925,10 @@ function withoutPinned(thread: CodeThread): Omit<CodeThread, "pinned"> {
 /** A thread without the two choices a mode change states afresh. */
 function withoutAccessChoices(
   thread: CodeThread,
-): Omit<CodeThread, "autoApprove" | "fullAccessSandbox" | "planReturnPolicy"> {
+): Omit<CodeThread, "autoApprove" | "fullAccessSandbox" | "planReturnPolicy" | "strict"> {
   const {
     autoApprove: _autoApprove,
+    strict: _strict,
     fullAccessSandbox: _fullAccessSandbox,
     planReturnPolicy: _planReturnPolicy,
     ...rest
@@ -2046,6 +2047,9 @@ export class CodeService {
               }),
           // A change that leaves these out keeps what the person chose before.
           // Absent keeps the stored choice, as for the reviewer below.
+          ...((command.defaultStrict ?? current.defaultStrict) === undefined
+            ? {}
+            : { defaultStrict: command.defaultStrict ?? current.defaultStrict }),
           ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
             ? { defaultFullAccessSandbox: true }
             : {}),
@@ -2834,7 +2838,12 @@ export class CodeService {
                             : {}),
                           // Kept from the command, else from the thread; the
                           // guardrail stamp drops it below Full access.
-                          ...((command.fullAccessSandbox ?? current.fullAccessSandbox) === true
+                          ...(command.strict === "inherit" ||
+                          (command.strict ?? current.strict) === undefined
+                            ? {}
+                            : { strict: command.strict ?? current.strict }),
+                          ...(command.strict === undefined &&
+                          (command.fullAccessSandbox ?? current.fullAccessSandbox) === true
                             ? { fullAccessSandbox: true }
                             : {}),
                           version: command.expectedVersion + 1,
@@ -4770,7 +4779,11 @@ export class CodeService {
    * the request, on or off, always wins.
    */
   #withDefaultFullAccessSandbox(thread: CodeThread): CodeThread {
-    if (thread.executionPolicy !== "full-access" || thread.fullAccessSandbox !== undefined) {
+    if (
+      thread.executionPolicy !== "full-access" ||
+      thread.strict !== undefined ||
+      thread.fullAccessSandbox !== undefined
+    ) {
       return thread;
     }
     const project = this.#persistence.readProject?.(thread.projectId);

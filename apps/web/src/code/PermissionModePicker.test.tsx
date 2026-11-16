@@ -47,14 +47,14 @@ describe("the mode control's state at a glance", () => {
     rerender(
       <PermissionModePicker
         autoSupported
-        fullAccessSandbox
+        strict
         onChange={() => undefined}
-        onFullAccessSandboxChange={() => undefined}
+        onStrictChange={() => undefined}
         value="full-access"
       />,
     );
-    expect(screen.getByRole("button", { name: "Mode: Full access · Sandboxed" })).toHaveTextContent(
-      "Full access · Sandboxed",
+    expect(screen.getByRole("button", { name: "Mode: Full access · Strict" })).toHaveTextContent(
+      "Full access · Strict",
     );
     rerender(<PermissionModePicker autoSupported onChange={() => undefined} value="plan" />);
     expect(screen.getByRole("button", { name: "Mode: Plan" })).toHaveTextContent("");
@@ -62,23 +62,21 @@ describe("the mode control's state at a glance", () => {
 });
 
 describe("the sandbox at Full access in the mode picker", () => {
-  it("offers Keep the sandbox under Full access and saves the choice", async () => {
-    const onFullAccessSandboxChange = vi.fn();
+  it("offers Strict under Full access and saves the choice", async () => {
+    const onStrictChange = vi.fn();
     render(
       <PermissionModePicker
         autoSupported
         onChange={() => undefined}
-        onFullAccessSandboxChange={onFullAccessSandboxChange}
-        fullAccessSandbox={false}
+        onStrictChange={onStrictChange}
+        strict={false}
         fullAccessSandboxSupported
         value="full-access"
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: /^Mode:/ }));
-    await userEvent.click(
-      await screen.findByRole("menuitemcheckbox", { name: /Keep the sandbox/ }),
-    );
-    expect(onFullAccessSandboxChange).toHaveBeenCalledWith(true);
+    await userEvent.click(await screen.findByRole("menuitemcheckbox", { name: /Strict/ }));
+    expect(onStrictChange).toHaveBeenCalledWith(true);
   });
 
   it("names a sandboxed Full access thread on the trigger", () => {
@@ -86,13 +84,13 @@ describe("the sandbox at Full access in the mode picker", () => {
       <PermissionModePicker
         autoSupported
         onChange={() => undefined}
-        onFullAccessSandboxChange={() => undefined}
-        fullAccessSandbox
+        onStrictChange={() => undefined}
+        strict
         value="full-access"
       />,
     );
     expect(screen.getByRole("button", { name: /^Mode:/ })).toHaveAccessibleName(
-      "Mode: Full access · Sandboxed",
+      "Mode: Full access · Strict",
     );
   });
 
@@ -101,48 +99,75 @@ describe("the sandbox at Full access in the mode picker", () => {
       <PermissionModePicker
         autoSupported
         onChange={() => undefined}
-        onFullAccessSandboxChange={() => undefined}
+        onStrictChange={() => undefined}
         fullAccessSandboxSupported={false}
         value="full-access"
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: /^Mode:/ }));
-    const item = await screen.findByRole("menuitemcheckbox", { name: /Keep the sandbox/ });
+    const item = await screen.findByRole("menuitemcheckbox", { name: /Strict/ });
     expect(item).toHaveAttribute("aria-disabled", "true");
     expect(item).toHaveTextContent("can't keep the sandbox");
   });
 
   it("lets an inherited sandbox be turned off on a provider that cannot keep it", async () => {
-    const onFullAccessSandboxChange = vi.fn();
+    const onStrictChange = vi.fn();
     render(
       <PermissionModePicker
         autoSupported
         onChange={() => undefined}
-        onFullAccessSandboxChange={onFullAccessSandboxChange}
-        fullAccessSandbox
+        onStrictChange={onStrictChange}
+        strict
         fullAccessSandboxSupported={false}
         value="full-access"
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: /^Mode:/ }));
-    const item = await screen.findByRole("menuitemcheckbox", { name: /Keep the sandbox/ });
+    const item = await screen.findByRole("menuitemcheckbox", { name: /Strict/ });
     expect(item).not.toHaveAttribute("aria-disabled", "true");
     await userEvent.click(item);
-    expect(onFullAccessSandboxChange).toHaveBeenCalledWith(false);
+    expect(onStrictChange).toHaveBeenCalledWith(false);
   });
 
-  it("offers no sandbox choice below Full access", async () => {
+  it("names retained legacy protection and offers explicit migration to Strict", async () => {
+    const onStrictChange = vi.fn();
     render(
       <PermissionModePicker
         autoSupported
+        strict
+        legacyStrict
+        value="full-access"
         onChange={() => undefined}
-        onFullAccessSandboxChange={() => undefined}
+        onStrictChange={onStrictChange}
+      />,
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Mode: Full access · Legacy sandbox" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("menuitem", {
+        name: "Use Strict protections instead of the legacy sandbox",
+      }),
+    );
+    expect(onStrictChange).toHaveBeenCalledWith(true);
+  });
+
+  it("changes Strict below Full access without changing the access level", async () => {
+    const onStrictChange = vi.fn();
+    const onChange = vi.fn();
+    render(
+      <PermissionModePicker
+        autoSupported
+        onChange={onChange}
+        onStrictChange={onStrictChange}
         value="ask-first"
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: /^Mode:/ }));
     await screen.findByRole("menuitemradio", { name: /Full access/ });
-    expect(screen.queryByRole("menuitemcheckbox", { name: /Keep the sandbox/ })).toBeNull();
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /Strict/ }));
+    expect(onStrictChange).toHaveBeenCalledWith(true);
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it("reads Claude, Codex and Octant Harness models as able to keep the sandbox, and others or unknowns as not", () => {
@@ -156,7 +181,7 @@ describe("the sandbox at Full access in the mode picker", () => {
 });
 
 describe("the mode picker on a Windows host", () => {
-  it("offers Full access, shows every guarded level unavailable with the reason, and warns once before the first Full access pick", async () => {
+  it("offers native Windows levels with Strict off and warns once before the first Full access pick", async () => {
     const onChange = vi.fn();
     render(
       <HostPlatformContext.Provider value="win32">
@@ -171,8 +196,7 @@ describe("the mode picker on a Windows host", () => {
     await userEvent.click(screen.getByRole("button", { name: /^Mode:/ }));
     for (const name of [/^Auto/, /^Ask first/, /^Accept edits/, /^Plan/]) {
       const item = await screen.findByRole("menuitemradio", { name });
-      expect(item).toHaveAttribute("aria-disabled", "true");
-      expect(item).toHaveAccessibleDescription(WINDOWS_SANDBOX_MISSING_REASON);
+      expect(item).not.toHaveAttribute("aria-disabled", "true");
     }
     const full = screen.getByRole("menuitemradio", { name: /^Full access/ });
     expect(full).not.toHaveAttribute("aria-disabled", "true");
@@ -181,6 +205,24 @@ describe("the mode picker on a Windows host", () => {
     expect(onChange).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Use Full access" }));
     expect(onChange).toHaveBeenCalledWith("full-access");
+  });
+
+  it("refuses only enabling Strict on Windows and explains the unavailable confinement", async () => {
+    render(
+      <HostPlatformContext.Provider value="win32">
+        <PermissionModePicker
+          autoSupported
+          strict={false}
+          value="ask-first"
+          onChange={() => undefined}
+          onStrictChange={() => undefined}
+        />
+      </HostPlatformContext.Provider>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /^Mode:/ }));
+    const strict = await screen.findByRole("menuitemcheckbox", { name: /^Strict/ });
+    expect(strict).toHaveAttribute("aria-disabled", "true");
+    expect(strict).toHaveAccessibleDescription(WINDOWS_SANDBOX_MISSING_REASON);
   });
 
   it("keeps every level available on a Mac host", async () => {

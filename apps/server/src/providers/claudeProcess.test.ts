@@ -1,3 +1,4 @@
+import { configureSandboxRestrictionsAuthority } from "../process/sandboxRuntimePolicy";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -555,6 +556,57 @@ describe("Claude runtime confinement", () => {
       `proxy=${network.environment.HTTPS_PROXY}\n`,
       `proxy=${network.environment.HTTPS_PROXY}\n`,
     ]);
+  });
+
+  it("refuses a Strict native runtime that the selected Project could rewrite", () => {
+    const f = fixture();
+    const authority = mkdtempSync(join(tmpdir(), "octant-native-runtime-authority-"));
+    directories.push(authority);
+    const selection = decodeSandboxPolicySelection({
+      policy: {
+        schemaVersion: 1,
+        revision: 1,
+        filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
+        network: "existing-policy",
+        credentials: "existing-policy",
+        hostServices: "existing-policy",
+      },
+      context: {
+        root: realpathSync(f.root),
+        hostId: "host",
+        projectId: "20000000-0000-4000-8000-000000000001",
+        checkoutId: "checkout",
+        sessionId: "native-runtime:epoch",
+        provider: "claude",
+      },
+    });
+    configureSandboxRestrictionsAuthority({
+      validateSelection: () => true,
+      registerCleanup: () => () => undefined,
+      storageDirectory: () => authority,
+      active: () => selection,
+      beginTurn: () => ({ status: "refused", message: "unused" }),
+      deny: () => undefined,
+    });
+    try {
+      expect(() =>
+        makePort(f).spawn({
+          projectRoot: f.root,
+          executionPolicy: "full-access",
+          strict: true,
+          sandboxPolicy: selection,
+        })({
+          command: f.binaryPath,
+          args: [],
+          cwd: f.root,
+          env: f.environment,
+          signal: new AbortController().signal,
+        }),
+      ).toThrow("runtime stored in an allowed writable folder");
+      expect(pids(f.root)).toEqual([]);
+    } finally {
+      configureSandboxRestrictionsAuthority(undefined);
+    }
   });
 
   it("keeps the brokered model channel available while selected policy denies tool networking", async () => {

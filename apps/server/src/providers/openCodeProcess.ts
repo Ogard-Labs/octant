@@ -1331,7 +1331,11 @@ function prepareOpenCodeLaunch(
         stateHome,
         providerDataDirectory,
       ]);
-      if (executionPolicy === "full-access") {
+      if (
+        (executionPolicy === "full-access" || platform === "win32") &&
+        input.sandboxPolicy === undefined &&
+        input.fullAccessSandbox !== true
+      ) {
         return {
           command: input.binaryPath,
           args,

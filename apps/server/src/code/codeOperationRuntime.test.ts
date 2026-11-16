@@ -206,8 +206,9 @@ afterEach(() => {
 });
 
 describe("CodeOperationRuntime", () => {
-  it("refuses a Windows terminal below Full access, naming the missing sandbox, before it can start", async () => {
+  it("refuses a Windows Strict terminal before it can start", async () => {
     const fixture = runtimeFixture({});
+    fixture.setThread(decodeCodeThread({ ...thread(), strict: true }));
     vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
     try {
       await expect(
@@ -3611,6 +3612,7 @@ describe("CodeOperationRuntime", () => {
       command = "git status",
       withoutShield = false,
       rejectAnswer = false,
+      requiresUser = false,
     ) => {
       const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
       // The pending call comes from the connection, never from the event.
@@ -3650,6 +3652,7 @@ describe("CodeOperationRuntime", () => {
             requestId: "provider-approval-9",
             action: "Bash",
             description: "Bash · git status",
+            ...(requiresUser ? { requiresUser: true } : {}),
           }),
         ),
       );
@@ -3659,6 +3662,26 @@ describe("CodeOperationRuntime", () => {
         );
       return { connection, review, fixture, frames, approvalCall };
     };
+
+    it("keeps every Strict escape with the person when Shield would approve it", async () => {
+      const { connection, review, fixture, frames } = await runWith(
+        "allow",
+        "git status",
+        false,
+        false,
+        true,
+      );
+      try {
+        await vi.waitFor(async () =>
+          expect((await frames()).some((event) => event.kind === "approval-requested")).toBe(true),
+        );
+        expect(review).not.toHaveBeenCalled();
+        expect(connection.answerApproval).not.toHaveBeenCalled();
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
 
     it("asks the person about a push from the runtime's own shell below Full access instead of refusing it", async () => {
       const { connection, review, fixture, frames } = await runWith(
@@ -4499,11 +4522,13 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
-  it("runs a Windows Code turn at Full access and refuses one the composer narrows below it", async () => {
+  it("refuses Windows Strict and then runs an ordinary guarded Code turn with native approvals", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
     const fixture = runtimeFixture({ provider: providerDriver(connection) });
-    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+    fixture.setThread(
+      decodeCodeThread({ ...thread(), executionPolicy: "full-access", strict: true }),
+    );
     vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
     try {
       await expect(
@@ -4516,11 +4541,13 @@ describe("CodeOperationRuntime", () => {
           prompt: fixture.prompt,
           executionPolicy: "approval-gated",
         }),
-      ).resolves.toMatchObject({
-        kind: "operation-failed",
+      ).rejects.toMatchObject({
         failure: { category: "unavailable", message: WINDOWS_SANDBOX_MISSING_REASON },
       });
       expect(connection.send).not.toHaveBeenCalled();
+      fixture.setThread(
+        decodeCodeThread({ ...thread(), executionPolicy: "approval-gated", strict: false }),
+      );
       await expect(
         fixture.runtime.execute(windowId, {
           kind: "start-provider-turn",

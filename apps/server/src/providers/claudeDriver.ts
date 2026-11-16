@@ -742,7 +742,10 @@ export function claudeSandboxSettings(
   extraFolders: ReadonlyArray<string> = [],
   proxyPort?: number,
   fullAccessSandbox = false,
+  strict = false,
+  selectedPolicy?: SandboxPolicySelection,
 ): ClaudeSandboxSettings | undefined {
+  if (process.platform === "win32" && !strict && !fullAccessSandbox) return undefined;
   if (!claudeRunsSandbox(policy, fullAccessSandbox)) return undefined;
   return {
     enabled: true,
@@ -753,17 +756,40 @@ export function claudeSandboxSettings(
     // gate asks about every such command (maintainer decision, 2026-11-14).
     // A push or a `gh` call needs this: it reads `~/.ssh`, `~/.gitconfig`,
     // and `~/.config/gh`, which the sandbox denies.
-    // Plan's read-only rule and a Full access thread that kept its sandbox
-    // let no command out, so the sandbox itself holds them, not only the hook.
-    allowUnsandboxedCommands: claudeSandboxLetsCommandsOut(policy),
+    // Strict retains Claude's one-command escape, with a fresh user answer.
+    // The legacy Full-access-only preference keeps its original no-escape rule.
+    allowUnsandboxedCommands: claudeSandboxLetsCommandsOut(policy, strict),
     filesystem: {
       denyRead: ["/"],
       // An extra folder is granted exactly what the root is.
-      allowRead: [projectRoot, ...extraFolders],
-      allowWrite: [projectRoot, ...extraFolders],
+      allowRead: [
+        projectRoot,
+        ...extraFolders,
+        ...(selectedPolicy?.policy.filesystem.readOnlyRoots ?? []),
+        ...(selectedPolicy?.policy.filesystem.readWriteRoots ?? []),
+      ],
+      allowWrite: [
+        projectRoot,
+        ...extraFolders,
+        ...(selectedPolicy?.policy.filesystem.readWriteRoots ?? []),
+      ],
     },
-    network:
-      proxyPort === undefined ? { allowedDomains: ["*"] as const } : { httpProxyPort: proxyPort },
+    network: {
+      ...(proxyPort === undefined
+        ? { allowedDomains: ["*"] as const }
+        : { httpProxyPort: proxyPort }),
+      ...(strict &&
+      (selectedPolicy?.policy.hostServices === "blocked" ||
+        selectedPolicy?.policy.network === "deny" ||
+        proxyPort !== undefined)
+        ? {
+            allowAllUnixSockets: false as const,
+            allowUnixSockets: [] as const,
+            allowLocalBinding: false as const,
+            allowMachLookup: [] as const,
+          }
+        : {}),
+    },
   };
 }
 
@@ -1197,6 +1223,7 @@ interface ClaudePreToolGrant {
 interface ClaudePendingApprovalState extends ClaudePendingApproval {
   readonly decision: DeferredValue<ClaudeToolDecision>;
   readonly reuseKey: string;
+  readonly unsandboxed?: true;
   /** The pending call for an automatic reviewer; never published. */
   readonly call?: ProviderApprovalCall | undefined;
 }
@@ -3281,6 +3308,7 @@ function makeConnection(
         readonly modelId: ProviderModelId;
         readonly executionPolicy: ProviderExecutionPolicy;
         readonly fullAccessSandbox?: boolean;
+        readonly strict?: boolean;
         readonly autoApprove?: boolean;
         readonly modelOptionValues?: ProviderModelOptionValues;
         readonly singleUse?: boolean;
@@ -3374,31 +3402,35 @@ function makeConnection(
         );
         const ownClaudeAccountPaths = claudeOwnAccountPaths(environment.environment);
         const sandboxedFullAccess =
-          input.executionPolicy === "full-access" && input.fullAccessSandbox === true;
+          input.executionPolicy === "full-access" &&
+          (input.fullAccessSandbox === true || input.strict === true);
         const networkPolicy = sandboxedFullAccess ? "auto-accept-edits" : input.executionPolicy;
         // Claude's own process: its inference and in-process web fetch. It
         // runs at Auto under the same reviewer as its command sandbox.
-        const ownNetwork = await runSetupEffect(
-          acquireProviderRuntimeNetwork(options.runtimeNetwork, {
-            ...(options.sandboxPolicy === undefined
-              ? {}
-              : { sandboxPolicy: options.sandboxPolicy }),
-            runtime: "claude",
-            root: projectRoot,
-            executionPolicy: networkPolicy,
-            environment: environment.environment,
-            autoReview: input.autoApprove === true,
-            // A selected policy also wraps the process, so its proxy must
-            // use the backend's confined transport instead of host loopback.
-            ...(CONFINED_CLAUDE_EXECUTION_POLICIES.has(input.executionPolicy) ||
-            options.sandboxPolicy !== undefined
-              ? {}
-              : { listener: "loopback" as const }),
-            sessionId: String(input.sessionId),
-            ...(workThreadId === undefined ? {} : { threadId: workThreadId }),
-          }).pipe(Effect.provideService(Scope.Scope, scope)),
-          signal,
-        );
+        const ownNetwork =
+          input.strict === false
+            ? undefined
+            : await runSetupEffect(
+                acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                  ...(options.sandboxPolicy === undefined
+                    ? {}
+                    : { sandboxPolicy: options.sandboxPolicy }),
+                  runtime: "claude",
+                  root: projectRoot,
+                  executionPolicy: networkPolicy,
+                  environment: environment.environment,
+                  autoReview: input.autoApprove === true,
+                  // A selected policy also wraps the process, so its proxy must
+                  // use the backend's confined transport instead of host loopback.
+                  ...(CONFINED_CLAUDE_EXECUTION_POLICIES.has(input.executionPolicy) ||
+                  (options.sandboxPolicy !== undefined && input.strict !== true)
+                    ? {}
+                    : { listener: "loopback" as const }),
+                  sessionId: String(input.sessionId),
+                  ...(workThreadId === undefined ? {} : { threadId: workThreadId }),
+                }).pipe(Effect.provideService(Scope.Scope, scope)),
+                signal,
+              );
         const servers = await runSetupEffect(
           acquireProviderServerAccess(
             options.sandboxPolicy?.policy.hostServices === "blocked"
@@ -3446,7 +3478,21 @@ function makeConnection(
         }
         // The person's own Claude setup, as the host resolved it for this
         // session; absent on every session before the person turned it on.
-        const nativeSetup = input.nativeSetup;
+        // Native startup hooks and MCP servers run outside Claude's command
+        // sandbox. Withhold those features under Strict instead of rejecting
+        // its baseline boundary or silently treating them as confined.
+        const nativeSetup =
+          input.strict === true && input.nativeSetup !== undefined
+            ? {
+                ...input.nativeSetup,
+                hooks: false,
+                toolServers: false,
+                projectCode: false,
+                ...(ownNetwork !== undefined || options.sandboxPolicy?.policy.network === "deny"
+                  ? { webTools: false }
+                  : {}),
+              }
+            : input.nativeSetup;
         const policyExecutionOptions = claudeExecutionOptions(
           input.executionPolicy,
           input.autoApprove,
@@ -3495,36 +3541,44 @@ function makeConnection(
             projectRoot,
             isProjectConfinedPath: options.isProjectConfinedPath,
           });
-        const sandboxNetwork = claudeRunsSandbox(input.executionPolicy, sandboxedFullAccess)
-          ? await runSetupEffect(
-              acquireProviderRuntimeNetwork(options.runtimeNetwork, {
-                ...(options.sandboxPolicy === undefined
-                  ? {}
-                  : { sandboxPolicy: options.sandboxPolicy }),
-                runtime: "claude-sandbox",
-                root: projectRoot,
-                executionPolicy: networkPolicy,
-                autoReview: input.autoApprove === true,
-                sessionId: String(input.sessionId),
-                ...(workThreadId === undefined ? {} : { threadId: workThreadId }),
-                // The sandbox points its commands at a bare port on the
-                // host's loopback and sends no proxy credentials.
-                authentication: "none",
-                listener: "loopback",
-              }).pipe(Effect.provideService(Scope.Scope, scope)),
-              signal,
-            )
-          : undefined;
+        const sandboxNetwork =
+          input.strict !== false && claudeRunsSandbox(input.executionPolicy, sandboxedFullAccess)
+            ? await runSetupEffect(
+                acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                  ...(options.sandboxPolicy === undefined
+                    ? {}
+                    : { sandboxPolicy: options.sandboxPolicy }),
+                  runtime: "claude-sandbox",
+                  root: projectRoot,
+                  executionPolicy: networkPolicy,
+                  autoReview: input.autoApprove === true,
+                  sessionId: String(input.sessionId),
+                  ...(workThreadId === undefined ? {} : { threadId: workThreadId }),
+                  // The sandbox points its commands at a bare port on the
+                  // host's loopback and sends no proxy credentials.
+                  authentication: "none",
+                  listener: "loopback",
+                }).pipe(Effect.provideService(Scope.Scope, scope)),
+                signal,
+              )
+            : undefined;
         if (sandboxNetwork !== undefined && sandboxNetwork.endpoint.kind !== "loopback") {
           throw failure("incompatible", "Claude's sandbox needs its egress proxy on loopback.");
         }
-        const sandbox = claudeSandboxSettings(
-          input.executionPolicy,
-          projectRoot,
-          extraFolders,
-          sandboxNetwork?.endpoint.kind === "loopback" ? sandboxNetwork.endpoint.port : undefined,
-          sandboxedFullAccess,
-        );
+        const sandbox =
+          input.strict === false
+            ? undefined
+            : claudeSandboxSettings(
+                input.executionPolicy,
+                projectRoot,
+                extraFolders,
+                sandboxNetwork?.endpoint.kind === "loopback"
+                  ? sandboxNetwork.endpoint.port
+                  : undefined,
+                sandboxedFullAccess,
+                input.strict === true,
+                input.strict === true ? options.sandboxPolicy : undefined,
+              );
         let callbackState: SessionState | undefined;
         const insideFolder = (root: string, candidate: string): boolean => {
           try {
@@ -3585,6 +3639,7 @@ function makeConnection(
           }
           if (
             (input.executionPolicy === "full-access" &&
+              grant.unsandboxed !== true &&
               request.toolName !== "AskUserQuestion" &&
               !CLAUDE_LEVEL_CHANGE_TOOLS.has(request.toolName)) ||
             // Auto-accept edits covers exactly the file writes the gate above
@@ -3709,6 +3764,22 @@ function makeConnection(
           }
           const pending: ClaudePendingApprovalState = {
             ...mapped.request,
+            ...(grant.unsandboxed === true
+              ? {
+                  unsandboxed: true as const,
+                  event:
+                    mapped.request.event.kind === "approval-request"
+                      ? {
+                          ...mapped.request.event,
+                          ...(input.strict === true ? { requiresUser: true } : {}),
+                          description:
+                            input.strict === true
+                              ? `This command leaves Strict's command sandbox and can access personal files and host services. Approval applies to this command only. ${mapped.request.event.description}`
+                              : mapped.request.event.description,
+                        }
+                      : mapped.request.event,
+                }
+              : {}),
             decision: deferred<ClaudeToolDecision>(),
             reuseKey,
             call: providerApprovalCall({
@@ -3833,15 +3904,18 @@ function makeConnection(
           // The secret guard answers before every posture below Full access,
           // and says which rule refused and which channel to use. The
           // runtime's own account state is its own to read.
-          const secretRefusal = claudeSecretGuardApplies(input.executionPolicy)
-            ? claudeFileToolSecretRefusal(
-                request.toolName,
-                requestInput,
-                ownClaudeAccountPaths,
-                request.projectRoot,
-                claudeSearchesRunUnguarded(input.executionPolicy),
-              )
-            : undefined;
+          const secretRefusal =
+            sandboxedFullAccess ||
+            input.strict === true ||
+            (input.strict !== false && claudeSecretGuardApplies(input.executionPolicy))
+              ? claudeFileToolSecretRefusal(
+                  request.toolName,
+                  requestInput,
+                  ownClaudeAccountPaths,
+                  request.projectRoot,
+                  claudeSearchesRunUnguarded(input.executionPolicy),
+                )
+              : undefined;
           if (secretRefusal !== undefined) return deny(secretRefusal);
           // Full access with its sandbox keeps the Project's folders, where
           // the sandbox holds every command, so a worktree outside them is
@@ -3852,19 +3926,17 @@ function makeConnection(
               return deny("Claude tool request is outside the Project.");
             }
           }
-          // A command that asks to leave Claude's sandbox. Below Full access
-          // the sandbox lets it (`allowUnsandboxedCommands`), so the gate asks
-          // about every such command and never reuses an earlier answer for
-          // it; Plan's commands never leave its sandbox. At Full access no
-          // command is sandboxed, and a Full access thread that kept its
-          // sandbox does not let one out, so the flag changes nothing there.
+          // A native command escape always asks under Strict, including Full
+          // access. Each answer covers one command. Legacy Full-access-only
+          // protection keeps its former no-escape behavior; Plan never escapes.
           const escapesSandbox =
             CLAUDE_SHELL_TOOLS.has(request.toolName) &&
             requestInput.dangerouslyDisableSandbox === true;
           if (escapesSandbox && input.executionPolicy === "plan") {
             return deny("Plan runs every command inside its sandbox.");
           }
-          const asksUnsandboxed = escapesSandbox && input.executionPolicy !== "full-access";
+          const asksUnsandboxed =
+            escapesSandbox && (input.strict === true || input.executionPolicy !== "full-access");
           // Claude Code takes a hook "allow" as the final word and runs the
           // tool without calling `canUseTool`. Observed 2026-09-06: an
           // approval-gated thread answered "allow" here for a Project-confined
@@ -3936,7 +4008,8 @@ function makeConnection(
           // nobody; the path checks above still refuse a file outside the Project.
           // A level change is the person's at every level, Full access and
           // Plan included; the call reaches `canUseTool` and is put to them.
-          if (CLAUDE_LEVEL_CHANGE_TOOLS.has(request.toolName)) return askThroughGrant();
+          if (CLAUDE_LEVEL_CHANGE_TOOLS.has(request.toolName) || asksUnsandboxed)
+            return askThroughGrant();
           const decide = (): ClaudePreToolDecision | Promise<ClaudePreToolDecision> =>
             (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
             (input.executionPolicy === "auto-accept-edits" &&
@@ -3993,7 +4066,21 @@ function makeConnection(
           ) {
             return deny("Claude tool request is outside the Project.");
           }
-          if (!sessionHolds(activeState, candidate)) {
+          const configuredFolders =
+            input.strict === true ? options.sandboxPolicy?.policy.filesystem : undefined;
+          if (
+            configuredFolders !== undefined &&
+            CLAUDE_EDIT_TOOLS.has(request.toolName) &&
+            configuredFolders.readOnlyRoots.some((root) => insideFolder(root, candidate))
+          )
+            return deny("Strict refuses writes to this read-only folder.");
+          const configuredHolds =
+            configuredFolders !== undefined &&
+            [
+              ...configuredFolders.readWriteRoots,
+              ...(CLAUDE_READ_TOOLS.has(request.toolName) ? configuredFolders.readOnlyRoots : []),
+            ].some((root) => insideFolder(root, candidate));
+          if (!sessionHolds(activeState, candidate) && !configuredHolds) {
             // A file tool naming a folder outside the Project's folders asks
             // below Full access, as Claude Code does on its own (maintainer
             // decision, 2026-11-14); the secret guard above has already
@@ -4003,6 +4090,7 @@ function makeConnection(
             // Project's folders, so each of those is still refused.
             if (
               input.executionPolicy === "plan" ||
+              input.strict === true ||
               sandboxedFullAccess ||
               CLAUDE_SHELL_TOOLS.has(request.toolName) ||
               request.toolName === CLAUDE_ARTIFACT_TOOL
@@ -4166,6 +4254,7 @@ function makeConnection(
               ...(effort === undefined ? {} : { effort }),
               executionPolicy: input.executionPolicy,
               ...(sandboxedFullAccess ? { fullAccessSandbox: true } : {}),
+              ...(input.strict === undefined ? {} : { strict: input.strict }),
               ...(options.sandboxPolicy === undefined
                 ? {}
                 : { sandboxPolicy: options.sandboxPolicy }),
@@ -4434,6 +4523,7 @@ function makeConnection(
               // thread switched to another model carries its conversation on.
               modelId: input.modelId ?? identity.modelId,
               executionPolicy: input.executionPolicy,
+              ...(input.strict === undefined ? {} : { strict: input.strict }),
               ...(input.fullAccessSandbox === undefined
                 ? {}
                 : { fullAccessSandbox: input.fullAccessSandbox }),
@@ -4888,7 +4978,8 @@ function makeConnection(
               if (
                 answer.scope !== "once" &&
                 persistence === "current-session" &&
-                pending.toolName !== CLAUDE_ARTIFACT_TOOL
+                pending.toolName !== CLAUDE_ARTIFACT_TOOL &&
+                pending.unsandboxed !== true
               ) {
                 state.approvalReuse.add(pending.reuseKey);
               }

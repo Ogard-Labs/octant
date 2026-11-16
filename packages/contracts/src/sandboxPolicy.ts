@@ -173,6 +173,13 @@ export const SandboxRestrictionsSnapshot = Schema.Struct({
   policy: Schema.optional(SandboxPolicy),
   inherited: Schema.Boolean,
   running: Schema.Boolean,
+  strict: Schema.optional(Schema.Boolean),
+  strictSource: Schema.optional(Schema.Literal("thread", "project", "settings", "default")),
+  activePolicy: Schema.optional(SandboxPolicy),
+  activeStrict: Schema.optional(Schema.Boolean),
+  legacyStrict: Schema.optional(Schema.Boolean),
+  activeLegacyStrict: Schema.optional(Schema.Boolean),
+  pending: Schema.optional(Schema.Boolean),
   summary: Schema.NonEmptyTrimmedString,
   limitations: Schema.Array(Schema.String),
   capabilities: Schema.Struct({
@@ -211,6 +218,7 @@ export const decodeSandboxRestrictionsResult = Schema.decodeUnknownSync(SandboxR
 export const SANDBOX_POLICY_CHANGED = "sandbox.policy-changed@1";
 export const SANDBOX_POLICY_AGGREGATE_TYPE = "sandbox-policy";
 export const SandboxPolicyChanged = Schema.Struct({
+  requiresStrict: Schema.optional(Schema.Boolean),
   scope: SandboxRestrictionsScope,
   binding: Schema.String,
   policy: Schema.optional(SandboxPolicy),

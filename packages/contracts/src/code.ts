@@ -476,6 +476,7 @@ export const CodeThread = Schema.Struct({
    * before the flag existed replays as off (Full access stays fully open).
    */
   fullAccessSandbox: Schema.optional(Schema.Boolean),
+  strict: Schema.optional(Schema.Boolean),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -569,6 +570,7 @@ export const CodeSettings = Schema.Struct({
    * unless the thread says otherwise. Absent is off: Full access stays open.
    */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+  defaultStrict: Schema.optional(Schema.Boolean),
   /**
    * Whether an Android emulator Octant boots may load and save a quickboot
    * snapshot. Absent is off: every boot is cold, which is what a store
@@ -843,6 +845,7 @@ export const CodeCommand = Schema.Union(
     defaultAutoApprove: Schema.optional(Schema.Boolean),
     /** Absent keeps the stored choice. */
     defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+    defaultStrict: Schema.optional(Schema.Boolean),
     /** Absent keeps the stored choice. */
     androidEmulatorSnapshotBoot: Schema.optional(Schema.Boolean),
     /** Absent keeps the stored choice. */
@@ -995,6 +998,7 @@ export const CodeCommand = Schema.Union(
      * the thread's current choice; the host drops it below Full access.
      */
     fullAccessSandbox: Schema.optional(Schema.Boolean),
+    strict: Schema.optional(Schema.Union(Schema.Boolean, Schema.Literal("inherit"))),
   }).annotations(strict),
   /**
    * The person moves the thread to another account (provider instance) of the

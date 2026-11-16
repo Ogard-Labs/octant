@@ -1362,13 +1362,13 @@ export class WorkTurnService {
       options?.accessCeiling === undefined
         ? (thread?.access ?? DEFAULT_WORK_ACCESS)
         : clampWorkAccess(thread?.access ?? DEFAULT_WORK_ACCESS, options.accessCeiling);
-    // Judged at that level, not only the thread's stored one, before anything
-    // is journaled or started: a host without Octant's sandbox runs only the
-    // level that uses none.
+    // Refuse unsupported Strict/retained confinement before journaling;
+    // ordinary Windows turns use native approvals at their effective level.
     const sandboxRefusal = hostSandboxRefusal({
       platform: process.platform,
       access: {
         ...workThreadAccessOf(turnAccess),
+        ...(thread?.strict === undefined ? {} : { strict: thread.strict }),
         ...(thread?.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
       },
     });

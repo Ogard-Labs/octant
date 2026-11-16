@@ -481,6 +481,7 @@ describe("desktop packaging boundary", () => {
     expect(REQUIRED_DARWIN_HELPER_FILES).toEqual([
       "Octant.app/Contents/Resources/native/octant-keychain-helper",
       "Octant.app/Contents/Resources/native/octant-code-file-helper",
+      "Octant.app/Contents/Resources/native/octant-sandbox-scope",
       "Octant.app/Contents/Resources/native/octant-device-helper",
       "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
       "Octant.app/Contents/Resources/native/octant-browser-text-input.node",
@@ -531,6 +532,7 @@ describe("desktop packaging boundary", () => {
       "native/octant-browser-text-input.node",
       "native/octant-keychain-helper",
       "native/octant-code-file-helper",
+      "native/octant-sandbox-scope",
       "native/octant-device-helper",
       "native/cua-driver",
       "app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
@@ -546,9 +548,12 @@ describe("desktop packaging boundary", () => {
       "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-code-file-helper",
     );
     expect(FORBIDDEN_PACKAGED_FILES).toContain(
+      "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-sandbox-scope",
+    );
+    expect(FORBIDDEN_PACKAGED_FILES).toContain(
       "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-device-helper",
     );
-    expect(FORBIDDEN_LINUX_HELPER_PATTERNS).toHaveLength(5);
+    expect(FORBIDDEN_LINUX_HELPER_PATTERNS).toHaveLength(6);
     expect(
       FORBIDDEN_LINUX_HELPER_PATTERNS.some((pattern) =>
         pattern.test("native/octant-browser-text-input.node"),
@@ -911,6 +916,7 @@ describe("desktop packaging boundary", () => {
     const allowed = [
       "Octant.app/Contents/Resources/native/octant-keychain-helper",
       "Octant.app/Contents/Resources/native/octant-code-file-helper",
+      "Octant.app/Contents/Resources/native/octant-sandbox-scope",
       "Octant.app/Contents/Resources/native/octant-device-helper",
       "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
       "Octant.app/Contents/Resources/native/octant-browser-text-input.node",
@@ -1088,7 +1094,7 @@ describe("desktop packaging boundary", () => {
     ) as { readonly scripts: { readonly build: string } };
 
     expect(desktopPackage.scripts.build).toBe(
-      "tsdown && bun ../../scripts/build-keychain-helper.ts && bun ../../scripts/build-code-file-helper.ts && bun ../../scripts/build-device-helper.ts",
+      "tsdown && bun ../../scripts/build-keychain-helper.ts && bun ../../scripts/build-code-file-helper.ts && bun ../../scripts/build-sandbox-scope.ts && bun ../../scripts/build-device-helper.ts",
     );
   });
 

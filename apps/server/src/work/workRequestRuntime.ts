@@ -149,6 +149,7 @@ export class WorkRequestRuntime {
       connection === undefined ||
       input.projectRoot === undefined ||
       event.kind !== "approval-request" ||
+      event.requiresUser === true ||
       event.sessionId !== input.sessionId
     ) {
       return Effect.succeed(false);

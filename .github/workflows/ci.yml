@@ -43,7 +43,7 @@ jobs:
         run: >-
           bun run --cwd apps/server test --
           src/process/macosSandboxScopeProcess.test.ts src/process/macosSandboxSupervisorProcess.test.ts
-          src/process/sandboxLaunchPolicyProcess.test.ts
+          src/process/sandboxLaunchPolicyProcess.test.ts src/process/claudeApprovalProcess.test.ts
 
   # One machine ran every step below in a row and took about 28 minutes, 25 of
   # them in the web and server suites. The jobs now run side by side, and the
