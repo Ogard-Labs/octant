@@ -26,13 +26,28 @@ describe("A provider's own memory", () => {
     const toggle = screen.getByRole("switch", { name: "Use Codex work’s own memory" });
     expect(toggle).toBeChecked();
     expect(toggle).toHaveAccessibleDescription(/On by default/);
-    expect(toggle).toHaveAccessibleDescription(/stays off in Plan and in Chat/);
+    expect(toggle).toHaveAccessibleDescription(
+      /stays off in Plan and in Chat, because it writes its memory in the background/,
+    );
     expect(toggle).toHaveAccessibleDescription(/telemetry and self-update stay off either way/);
     await userEvent.click(toggle);
     expect(onChange).toHaveBeenCalledWith(false);
 
     rerender(view({ ...codex, ownMemory: false }));
     expect(screen.getByRole("switch", { name: "Use Codex work’s own memory" })).not.toBeChecked();
+  });
+
+  it("says Claude Code reads its memory in Plan and Chat without changing it", () => {
+    render(
+      <ProviderOwnMemorySetting
+        disabled={false}
+        instance={{ ...codex, displayName: "Claude work", driverKind: "claude" }}
+        onChange={vi.fn(async () => true)}
+      />,
+    );
+    expect(
+      screen.getByRole("switch", { name: "Use Claude work’s own memory" }),
+    ).toHaveAccessibleDescription(/In Plan and in Chat it reads its memory and cannot change it/);
   });
 });
 
