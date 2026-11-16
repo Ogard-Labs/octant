@@ -14228,7 +14228,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   it, so no approval leaves the server's authority.
 
   **Octant adds no restrictions of its own unless Strict is on**
-  (maintainer decision, 2026-11-16; designed, not built). A person who moves
+  (maintainer decision, 2026-11-16; partly built: the Strict setting and
+  the items marked built below). A person who moves
   from a provider's own CLI to Octant keeps every workflow that worked
   there, and Octant restricts a provider no more than any other agent
   workspace does. Outside Strict, the provider's own sandbox, permission
@@ -14334,7 +14335,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     refuses the home folder, as today.
   - **Stalled-turn limit.** At Full access the stalled-turn limit defaults
     to Off; below Full access it stays 30 minutes, and the person may set
-    either. Strict keeps 30 minutes at every level.
+    either. Strict keeps 30 minutes at every level (built: Settings ›
+    Providers & Models › Stalled-turn limit at Full access,
+    `fullAccessStalledTurnLimitMinutes`, Off by default; a Full access turn
+    under Strict, and every turn below Full access, takes the stalled-turn
+    limit).
   - **Opt-in extras.** A per-person list of provider tools to block, and in
     Strict a notice saying what Strict withheld.
 
@@ -14971,7 +14976,20 @@ approval-gated` command that undoes it. The terminal shows no one-time
     sign-ins, `~/.ssh` and cloud keys unreadable. A provider inside
     Octant's profile has no native escalation, so a command that needs to
     leave fails; Claude Code keeps its own request to leave its sandbox,
-    asked every time (below).
+    asked every time (below). The setting is built: a thread's choice
+    (`CodeThread.strict`, `WorkThread.strict`, changed with the mode), a
+    Project's default (`defaultStrict`, changed with the Project's default
+    mode) and the Code and Work defaults in Settings (`defaultStrict`; a
+    Chat thread, which has neither, is Strict when either Settings default
+    is), each shown with the trade-off it makes. The host reads it at each
+    launch and each call through one resolver (`createStrictResolver`),
+    never stamping it on the thread, so a thread that never chose follows
+    its Project and Settings as they are now; a launch that does not carry
+    the resolved value is Strict. A device the host's own person paired
+    turns it on or off as a local window does; a hub-introduced device and
+    an agent grant may turn it on, never off. Not built yet: the provider's
+    own sandbox outside Strict, so today every provider still runs in the
+    sandbox the table below shows whether Strict is on or off.
   - **Octant's sandbox stays the default** for providers with no sandbox of
     their own: OpenCode, Mistral Vibe and Pi.
   - **Per provider.** Codex runs its native workspace-write sandbox and its

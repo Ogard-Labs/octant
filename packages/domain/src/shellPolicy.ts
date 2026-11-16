@@ -194,6 +194,7 @@ export function defaultShellSettings(): ShellSettings {
     autoCompactIdleMinutes: null,
     autoCompactLimitPercent: null,
     stalledTurnLimitMinutes: DEFAULT_STALLED_TURN_LIMIT_MINUTES,
+    fullAccessStalledTurnLimitMinutes: null,
     providerToolCallPauseLimitMinutes: DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES,
     backgroundSessionIdleLimitMinutes: DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES,
     openInApplications: [...DEFAULT_OPEN_IN_APPLICATIONS],

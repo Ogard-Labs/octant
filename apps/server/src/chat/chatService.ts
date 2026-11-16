@@ -1,3 +1,4 @@
+import type { StalledTurnScope } from "../providers/turnBudget";
 import {
   decodeConversationInputReference,
   type ConversationInputPolicy,
@@ -716,6 +717,8 @@ export interface ChatServiceOptions {
   readonly recordExternalContentIngestion?: RecordExternalContentIngestion;
   /** Marks a thread whose runtime read outside content with its own tools. */
   readonly outsideContentMarks?: RuntimeOutsideContentMarking;
+  /** Strict for a thread now (`createStrictResolver`); absent reads as Strict. */
+  readonly resolveStrict?: (threadId: string) => boolean;
   readonly dataDirectory: string;
   readonly uuid: () => string;
   readonly clock: () => string;
@@ -741,7 +744,7 @@ export interface ChatServiceOptions {
    * The host's stalled-turn limit in milliseconds, `null` when it is Off,
    * read as each turn starts. Absent uses the default limit.
    */
-  readonly stalledTurnLimitMs?: () => number | null;
+  readonly stalledTurnLimitMs?: (turn: StalledTurnScope) => number | null;
   /**
    * The longest one provider tool call pauses the stalled-turn clock, in
    * milliseconds, `null` when that bound is Off, read as each turn starts.
@@ -1178,6 +1181,7 @@ export class ChatService {
   readonly #persistence: PersistenceService;
   readonly #recordExternalContentIngestion: RecordExternalContentIngestion | undefined;
   readonly #outsideContentMarks: RuntimeOutsideContentMarking | undefined;
+  readonly #resolveStrict: ((threadId: string) => boolean) | undefined;
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #driver: ChatServiceOptions["driver"];
@@ -1245,6 +1249,7 @@ export class ChatService {
     this.#persistence = options.persistence;
     this.#recordExternalContentIngestion = options.recordExternalContentIngestion;
     this.#outsideContentMarks = options.outsideContentMarks;
+    this.#resolveStrict = options.resolveStrict;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#driver = options.driver;
@@ -6997,6 +7002,7 @@ export class ChatService {
                 }),
               ),
               researchRoute: input.prepared.researchRoute,
+              strict: this.#resolveStrict?.(String(input.thread.id)) ?? true,
               ...(input.prepared.appManagedTools === undefined
                 ? {}
                 : { appManagedTools: input.prepared.appManagedTools }),

@@ -190,6 +190,7 @@ describe("Journal", () => {
         autoCompactIdleMinutes: null,
         autoCompactLimitPercent: null,
         stalledTurnLimitMinutes: 30,
+        fullAccessStalledTurnLimitMinutes: null,
         providerToolCallPauseLimitMinutes: 120,
         backgroundSessionIdleLimitMinutes: 120,
         lastContextSurface: "project-memory",

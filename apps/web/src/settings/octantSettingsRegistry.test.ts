@@ -186,6 +186,7 @@ describe("octantSettingsRegistry", () => {
       "work-default-model",
       "work-default-access",
       "work-full-access-sandbox",
+      "work-strict",
       "work-restart-continuation",
     ]);
   });
@@ -254,6 +255,7 @@ describe("octantSettingsRegistry", () => {
       "automatic-model-memory",
       "automatic-model-decision-review",
       "stalled-turn-limit",
+      "full-access-stalled-turn-limit",
       "provider-tool-call-pause-limit",
       "background-session-idle-limit",
       "opencode-managed-update",
@@ -285,6 +287,7 @@ describe("octantSettingsRegistry", () => {
       "code-default-access",
       "code-auto-reviewer",
       "code-full-access-sandbox",
+      "code-strict",
       "code-terminal-shell",
       "code-editor-executable",
       "code-editor-arguments",

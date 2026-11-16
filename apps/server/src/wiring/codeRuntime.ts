@@ -440,6 +440,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "selectCodeConversation"
     | "codeSessionConversation"
     | "threadWakeups"
+    | "resolveThreadStrict"
   > & {
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
@@ -450,6 +451,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   const imageDescriber = deps.imageDescriber;
   const {
     threadWakeups,
+    resolveThreadStrict,
     conversationInputTransfer,
     threadAwaitsHarnessApproval,
     agentMessageService,
@@ -850,8 +852,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         }),
       );
       codeOperationRuntime = createCodeOperationRuntime({
-        stalledTurnLimitMs: () =>
-          stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+        stalledTurnLimitMs: (turn) =>
+          stalledTurnLimitMs(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+            turn,
+          ),
         toolStepLimit: (fullAccess) =>
           threadToolStepLimit({
             fullAccess,
@@ -1703,6 +1708,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         forgeChanges: runtimeForgeChanges,
         readThreadExternalContentTaint: (threadId) =>
           readThreadExternalContentTaint(persistence.connection, String(threadId)),
+        resolveStrict: (threadId) => resolveThreadStrict(String(threadId)),
         resolveProviderCapabilities: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities,
         // A Code session hands its runtime's wake-ups to the host's schedule.

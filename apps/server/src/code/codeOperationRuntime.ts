@@ -1,4 +1,5 @@
 import { OwnerApprovalId } from "@octant/contracts/owner-approvals";
+import type { StalledTurnScope } from "../providers/turnBudget";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import type { DesignSystemTurnContext } from "../designSystems/designSystemContext";
 import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecovery";
@@ -400,7 +401,7 @@ export interface CodeOperationRuntimeOptions {
    * The host's stalled-turn limit in milliseconds, `null` when it is Off,
    * read as each turn starts. Absent uses the default limit.
    */
-  readonly stalledTurnLimitMs?: () => number | null;
+  readonly stalledTurnLimitMs?: (turn: StalledTurnScope) => number | null;
   /**
    * The person's tool-step limit for a turn at the given level, `undefined`
    * when it is off; a turn's event budget follows it. Read as each turn starts.
@@ -864,6 +865,12 @@ export interface CodeOperationRuntimeOptions {
   readonly readThreadExternalContentTaint?: (threadId: CodeThreadId) => {
     readonly externalContentIngested: boolean;
   };
+  /**
+   * Whether Strict is on for this thread now (`createStrictResolver`), read
+   * at each launch and each decision. Absent reads as Strict, so a runtime
+   * built without the resolver keeps every protection.
+   */
+  readonly resolveStrict?: (threadId: CodeThreadId) => boolean;
   /**
    * Octant Shield, which answers a provider's approval prompts before the
    * person is asked when it is the thread's reviewer at Auto. Absent, or
@@ -6306,6 +6313,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               }),
           ...(attachments === undefined ? {} : { attachments }),
           ...(harnessAutoReviewEnabled ? { harnessAutoReviewEnabled: true } : {}),
+          strict: this.#strict(active.thread.id),
           ...(nativeSetup === undefined ? {} : { nativeSetup }),
           ...(wakeups === undefined ? {} : { wakeups }),
           ...(active.runtimeTurn === true ? { runtimeTurn: true as const } : {}),
@@ -6570,8 +6578,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       autoApprove: true,
       posture: thread.executionPolicy,
       externalContentIngested,
+      strict: this.#strict(thread.id),
       capabilitySupported: capabilities.harnessAutoReview === "supported",
     });
+  }
+
+  #strict(threadId: CodeThreadId): boolean {
+    return this.#options.resolveStrict?.(threadId) ?? true;
   }
 
   #noteHarnessRetry(active: ActiveTurn, event: CodeOperationEvent): void {

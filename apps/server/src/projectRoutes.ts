@@ -315,6 +315,31 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           origin,
         );
       }
+      // A Project's Strict default turned off widens what its threads'
+      // providers may do; a restricted principal may turn it on, never off,
+      // and leaving it out returns the Project to Settings, which may be off.
+      if (
+        (command.kind === "change-code-project-permission-mode" ||
+          command.kind === "change-work-project-permission-mode") &&
+        command.strict !== true &&
+        boundPrincipalIsRestricted(request) &&
+        (command.strict === false ||
+          (await dependencies.service.search("")).some(
+            (project) =>
+              String(project.id) === String(command.projectId) &&
+              project.type !== "chat" &&
+              project.defaultStrict === true,
+          ))
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message: "A Project's Strict default is turned off on the host.",
+          },
+          403,
+          origin,
+        );
+      }
       // A saved action is a command the person later clicks to run in their own
       // shell, so only a window on the host writes the list.
       if (

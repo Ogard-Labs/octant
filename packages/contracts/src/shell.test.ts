@@ -101,6 +101,7 @@ const settings = {
   autoCompactIdleMinutes: null,
   autoCompactLimitPercent: null,
   stalledTurnLimitMinutes: 30,
+  fullAccessStalledTurnLimitMinutes: null,
   providerToolCallPauseLimitMinutes: 120,
   backgroundSessionIdleLimitMinutes: 120,
   navigatorAssistant: {},

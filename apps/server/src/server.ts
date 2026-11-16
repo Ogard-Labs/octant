@@ -249,6 +249,7 @@ export function startOctantServer(
       workTurnProjection,
       workTurnsCutOffByRestart,
       threadWakeups,
+      resolveThreadStrict,
     } = wireFoundations({ latencyStats, options, persistence });
     const {
       agentRunParentAuthority,
@@ -880,6 +881,7 @@ export function startOctantServer(
       terminalProcessPort,
     } = yield* wireCodeRuntime({
       imageDescriber,
+      resolveThreadStrict,
       isPairedDeviceScope,
       windowAuthorityStore,
       threadWakeups,
@@ -1066,6 +1068,7 @@ export function startOctantServer(
       workspacePresetRoutes,
     } = yield* wireChat({
       imageDescriber,
+      resolveThreadStrict,
       verifyModelToolsOnFirstUse,
       threadMoveHolds,
       conversationInputTransfer,
@@ -1144,6 +1147,7 @@ export function startOctantServer(
       workflowService,
     } = yield* wireWork({
       imageDescriber,
+      resolveThreadStrict,
       machineChangeFeed,
       threadWakeups,
       codeProjectAccess,

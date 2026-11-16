@@ -936,6 +936,18 @@ function withoutAccessChoices(
 }
 
 /**
+ * The thread's own Strict choice after a mode change: the command's, else the
+ * thread's; null clears it so the thread follows its Project and Settings.
+ */
+function threadStrictChoice(
+  requested: boolean | null | undefined,
+  current: boolean | undefined,
+): { readonly strict?: boolean } {
+  const chosen = requested === undefined ? current : requested;
+  return chosen === null || chosen === undefined ? {} : { strict: chosen };
+}
+
+/**
  * A thread back in play carries neither rest: completion and snooze are
  * dropped rather than stored as "not any more", so a thread that was never
  * put away and one that came back are the same record.
@@ -2049,6 +2061,9 @@ export class CodeService {
           ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
             ? { defaultFullAccessSandbox: true }
             : {}),
+          ...((command.defaultStrict ?? current.defaultStrict) === true
+            ? { defaultStrict: true }
+            : {}),
           ...((command.androidEmulatorSnapshotBoot ?? current.androidEmulatorSnapshotBoot) === true
             ? { androidEmulatorSnapshotBoot: true }
             : {}),
@@ -2837,6 +2852,10 @@ export class CodeService {
                           ...((command.fullAccessSandbox ?? current.fullAccessSandbox) === true
                             ? { fullAccessSandbox: true }
                             : {}),
+                          // Strict holds at every level: kept from the
+                          // command, else from the thread; null returns the
+                          // thread to its Project's and Settings' default.
+                          ...threadStrictChoice(command.strict, current.strict),
                           version: command.expectedVersion + 1,
                           updatedAt,
                         }
