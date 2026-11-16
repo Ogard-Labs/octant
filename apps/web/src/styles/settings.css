@@ -1505,13 +1505,15 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
    select, input and text area classes drew 12.92px on Appearance, Chat, Code
    and Octant Harness while the same controls on Memory and Host drew 14px, and
    plain recipe fields drew 15.08px. Every Settings field and select reads at
-   the detail size, the one buttons already use. */
+   the detail size, the one buttons already use. The plain recipe selectors
+   carry no weight from the page's own class, so a field with a size of its
+   own (the sheet's search field) keeps it. */
 .settings-view__select,
 .settings-view__text-input,
 .settings-view__textarea,
-.settings-view input[data-slot="input"],
-.settings-view input[role="combobox"],
-.settings-view textarea[data-slot="textarea"],
+:where(.settings-view) input[data-slot="input"],
+:where(.settings-view) input[role="combobox"],
+:where(.settings-view) textarea[data-slot="textarea"],
 .settings-view .octant-number-field__input,
 .settings-view .octant-number-stepper__input {
   font-size: var(--oct-text-detail);

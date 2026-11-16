@@ -9216,6 +9216,9 @@ function LaunchedShell(
                 onSelect: () => void controller.openSettings({ section: "host" }),
               }}
               detail={hostMemoryNotice.detail}
+              // A new notice is a new toast: kept mounted, the one after a
+              // notice that left by itself never started its own timer.
+              key={hostMemoryNotice.id}
               {...(hostMemoryNotice.transient ? { leavesAfterMs: TRANSIENT_NOTICE_MS } : {})}
               onDismiss={dismissHostMemoryNotice}
               title={hostMemoryNotice.title}

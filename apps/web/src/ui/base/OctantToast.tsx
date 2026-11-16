@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FocusEvent } from "react";
 import { CircleCheck, Info, TriangleAlert, X } from "../icons";
 import { OctantButton, OctantIconButton } from "./OctantButton";
 
@@ -29,7 +29,11 @@ export function OctantToast({
   onDismiss,
   leavesAfterMs,
 }: OctantToastProps) {
-  const [held, setHeld] = useState(false);
+  // The pointer and the keyboard each hold the notice. As one flag, the
+  // pointer leaving let go of a notice the keyboard was still on.
+  const [pointerOn, setPointerOn] = useState(false);
+  const [focusOn, setFocusOn] = useState(false);
+  const held = pointerOn || focusOn;
   const dismiss = useRef(onDismiss);
   dismiss.current = onDismiss;
   useEffect(() => {
@@ -41,10 +45,12 @@ export function OctantToast({
     leavesAfterMs === undefined
       ? {}
       : {
-          onBlur: () => setHeld(false),
-          onFocus: () => setHeld(true),
-          onPointerEnter: () => setHeld(true),
-          onPointerLeave: () => setHeld(false),
+          onBlur: (event: FocusEvent<HTMLDivElement>) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setFocusOn(false);
+          },
+          onFocus: () => setFocusOn(true),
+          onPointerEnter: () => setPointerOn(true),
+          onPointerLeave: () => setPointerOn(false),
         };
   const Icon =
     tone === "success"

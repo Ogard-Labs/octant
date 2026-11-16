@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { OctantToast } from "./OctantToast";
@@ -76,6 +76,37 @@ describe("OctantToast", () => {
       vi.advanceTimersByTime(9_999);
       expect(onDismiss).not.toHaveBeenCalled();
       vi.advanceTimersByTime(1);
+      expect(onDismiss).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stays while the keyboard is on it, even after the pointer has left", () => {
+    vi.useFakeTimers();
+    try {
+      const onDismiss = vi.fn();
+      render(
+        <OctantToast
+          action={{ label: "View host", onSelect: () => undefined }}
+          detail="Octant stopped 1 idle provider process."
+          leavesAfterMs={10_000}
+          onDismiss={onDismiss}
+          title="Octant freed memory"
+        />,
+      );
+      const notice = screen.getByRole("status");
+      fireEvent.pointerEnter(notice);
+      act(() => screen.getByRole("button", { name: /View host/ }).focus());
+      fireEvent.pointerLeave(notice);
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(onDismiss).not.toHaveBeenCalled();
+      // Focus moving to the notice's other control keeps the hold.
+      act(() => screen.getByRole("button", { name: "Dismiss notification" }).focus());
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(onDismiss).not.toHaveBeenCalled();
+      act(() => screen.getByRole("button", { name: "Dismiss notification" }).blur());
+      act(() => vi.advanceTimersByTime(10_000));
       expect(onDismiss).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
