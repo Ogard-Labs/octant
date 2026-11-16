@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AutomationSummary,
   decodeAutomationRun,
@@ -162,13 +162,16 @@ describe("automation projection", () => {
     expect(rebuilt.getFileSource(definition.id)).toEqual(source);
   });
 
-  it("holds more runs once the person raises a file routine's activity window, and clears it only after its runs finish, including replay", () => {
+  it("holds more runs once the person raises a file routine's activity window, and clears it only after its runs and their delegated children finish, including replay", () => {
     const { store, projection } = createHarness();
+    let childStatus: "running" | "completed" = "running";
     const commands = new AutomationCommandService({
       store,
       projection,
       hostId: String(automationDefinitionFixture().hostId),
       clock: () => now,
+      readChildren: (threadId) =>
+        threadId === "thread-of-finished-run" ? [{ lifecycleStatus: childStatus }] : [],
     });
     const definition = automationDefinitionFixture({
       trigger: {
@@ -238,7 +241,18 @@ describe("automation projection", () => {
       expectedVersion: 1,
       updatedAt: now,
     });
+    // The run has finished but a child it delegated is still writing.
+    const readRun = projection.getRun.bind(projection);
+    const withThread = vi.spyOn(projection, "getRun").mockImplementation((id) => {
+      const run = readRun(id);
+      return run !== undefined && String(run.id) === String(running.id)
+        ? ({ ...run, threadId: "thread-of-finished-run" } as typeof run)
+        : run;
+    });
+    expect(change({ kind: "clear" })).toMatchObject({ reason: "active-occurrence" });
+    childStatus = "completed";
     expect(change({ kind: "clear" }).kind).toBe("automation-updated");
+    withThread.mockRestore();
     const cleared = projection.getFileSource(definition.id);
     expect(cleared).toMatchObject({
       phase: "arming",

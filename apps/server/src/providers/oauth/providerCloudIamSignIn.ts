@@ -381,6 +381,14 @@ async function connectPersonCloudSource(input: {
     source: target.descriptor.source,
     scope: target.descriptor.scope,
   };
+  // Resolving a profile can run a credential process or an SSO request; the
+  // endpoint may be edited or removed meanwhile, so the grant is stored only
+  // if the endpoint still wants it, as a browser sign-in's settle does.
+  const current = cloudIamSignInTarget(dependencies.readInstance(input.instanceId));
+  if (current === undefined || !sameCloudIamGrant(pointer, current.descriptor)) {
+    await dependencies.broker.revoke(credentialRef).catch(() => undefined);
+    return { kind: "refused", reason: "invalid" };
+  }
   try {
     await forgetReplacedGrant(dependencies, input.instanceId, credentialRef);
     await dependencies.credentials.set(input.instanceId, encodeCloudIamCredential(pointer));

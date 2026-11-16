@@ -18,10 +18,12 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import type { AutomationEventSourcePreparation } from "./automationEventSources";
+import type { AutomationFileActivityPorts } from "./automationFileSourceActivity";
 import { isDeepStrictEqual } from "node:util";
 import {
   AutomationPolicyRejected,
   buildAutomationWeeklyResolution,
+  isAgentRunActiveStatus,
   isAutomationMutationAllowed,
   isAutomationRunLifecycleActive,
   resolveNextAutomationOccurrence,
@@ -54,6 +56,13 @@ export interface AutomationCommandServiceOptions {
   /** The identifier of the host that owns every definition this server holds. */
   readonly hostId: string;
   readonly clock: () => string;
+  /**
+   * A finished run's delegated children can still be writing into a file
+   * routine's input, and the activity scanner finds them only through the
+   * runs the window retains. Without this port a clear refuses any retained
+   * run that has a thread, since its children cannot be checked.
+   */
+  readonly readChildren?: AutomationFileActivityPorts["readChildren"];
 }
 
 /** Facts about a create that only the host can vouch for. */
@@ -82,12 +91,14 @@ export class AutomationCommandService {
   readonly #projection: AutomationProjection;
   readonly #hostId: string;
   readonly #clock: () => string;
+  readonly #readChildren: AutomationCommandServiceOptions["readChildren"];
 
   constructor(options: AutomationCommandServiceOptions) {
     this.#store = options.store;
     this.#projection = options.projection;
     this.#hostId = options.hostId;
     this.#clock = options.clock;
+    this.#readChildren = options.readChildren;
   }
 
   /**
@@ -300,7 +311,13 @@ export class AutomationCommandService {
         this.#projection.activeRun(current.id) !== undefined ||
         previous.activityWindow.some((runId) => {
           const run = this.#projection.getRun(runId as AutomationRunId);
-          return run === undefined || isAutomationRunLifecycleActive(run.lifecycle);
+          if (run === undefined || isAutomationRunLifecycleActive(run.lifecycle)) return true;
+          if (run.threadId === undefined) return false;
+          const children = this.#readChildren?.(String(run.threadId));
+          return (
+            children === undefined ||
+            children.some((child) => isAgentRunActiveStatus(child.lifecycleStatus))
+          );
         });
       if (stillRunning)
         return failure(

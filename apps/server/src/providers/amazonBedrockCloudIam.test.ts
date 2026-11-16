@@ -573,6 +573,50 @@ describe("Amazon Bedrock with cloud single sign-on, end to end", () => {
     ).toMatchObject({ kind: "signed-in" });
   });
 
+  it("forgets keys connected while the endpoint was removed instead of storing them for nothing", async () => {
+    let instance: ProviderInstance | undefined = bedrockInstance(String(instanceId));
+    const scene = await host({ instance: () => instance });
+    scene.terms.acknowledgeTerms({
+      principalKind: "local-window",
+      actorId: String(windowId),
+      descriptor: {
+        descriptorId: AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.descriptorId,
+        termsId: AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.termsId,
+      } as never,
+    });
+    const broker = scene.cloudIam.broker;
+    // The person removes the endpoint while the broker is still connecting.
+    const removedMeanwhile = new Proxy(broker, {
+      get(target, property) {
+        if (property === "connect")
+          return async (input: Parameters<typeof broker.connect>[0]) => {
+            const answer = await target.connect(input);
+            instance = undefined;
+            return answer;
+          };
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    expect(
+      await answerCloudIamSettingsCommand({
+        dependencies: { ...scene.cloudIam, broker: removedMeanwhile },
+        instanceId,
+        kind: "connect-access-keys",
+        principal: "local-window",
+        actorId: String(windowId),
+        accessKeys: {
+          accessKeyId: "AKIAEXAMPLEKEY000002",
+          secretAccessKey: "wJalrXUtnFEMIexampleSECRETkey0000000002",
+        },
+      }),
+    ).toEqual({ kind: "refused", reason: "invalid" });
+    await expect(scene.credentials.resolve(String(instanceId))).rejects.toBeDefined();
+    expect(
+      [...scene.store.values.values()].some((value) => value.includes("host-cloud-iam-grant")),
+    ).toBe(false);
+  });
+
   it("never begins a cloud sign-in from Settings' route", async () => {
     const scene = await host();
     for (const descriptorId of ["amazon-bedrock-cloud-iam", "azure-foundry-directory"]) {
