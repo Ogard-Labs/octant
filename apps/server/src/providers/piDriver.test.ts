@@ -447,7 +447,7 @@ describe("Pi provider driver", () => {
     }
   });
 
-  it.each(["authority", "catalogue"] as const)(
+  it.each(["authority", "catalogue", "Strict"] as const)(
     "closes an incompatible warm process before resuming the same history after a %s change",
     async (change) => {
       const f = fixture("0.85.1");
@@ -469,6 +469,7 @@ describe("Pi provider driver", () => {
                 sessionId,
                 modelId,
                 executionPolicy: "approval-gated",
+                strict: false,
               });
               const collected = terminal(yield* connection.subscribe);
               yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: [] });
@@ -493,6 +494,7 @@ describe("Pi provider driver", () => {
                 resumeCursor: cursor,
                 executionPolicy: change === "authority" ? "plan" : "approval-gated",
                 tools: change === "catalogue" ? [tool] : [],
+                strict: change === "Strict",
               });
               expect(f.starts).toHaveLength(2);
               expect(f.starts[1]).toMatchObject({ sessionId, resume: true });

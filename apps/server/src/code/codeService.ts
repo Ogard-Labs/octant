@@ -737,6 +737,8 @@ export interface CodeServiceOptions {
     thread: CodeThread,
   ) => { readonly root: string; readonly reader: Pick<GitHistoryPort, "read"> } | undefined;
   readonly persistence: CodePersistencePort;
+  /** How many coordinators a Code Project may hold, read from Settings at each change; absent is 4. */
+  readonly coordinatorsPerProject?: () => number;
   readonly access: CodeWindowAccessPort;
   readonly checkouts: CodeCheckoutObservationPort;
   readonly roots: CodeFileRootAuthorityPort;
@@ -925,11 +927,14 @@ function withoutPinned(thread: CodeThread): Omit<CodeThread, "pinned"> {
 /** A thread without the two choices a mode change states afresh. */
 function withoutAccessChoices(
   thread: CodeThread,
-): Omit<CodeThread, "autoApprove" | "fullAccessSandbox" | "planReturnPolicy"> {
+): Omit<CodeThread, "autoApprove" | "fullAccessSandbox" | "planReturnPolicy" | "strict"> {
+  // Strict is dropped too, so the change's own choice (or null, returning
+  // the thread to its Project's and Settings' default) is all that stays.
   const {
     autoApprove: _autoApprove,
     fullAccessSandbox: _fullAccessSandbox,
     planReturnPolicy: _planReturnPolicy,
+    strict: _strict,
     ...rest
   } = thread;
   return rest;
@@ -1043,6 +1048,7 @@ export class CodeServiceError extends Error {
 
 export class CodeService {
   readonly #persistence: CodePersistencePort;
+  readonly #coordinatorsPerProject: (() => number) | undefined;
   readonly #access: CodeWindowAccessPort;
   readonly #checkouts: CodeCheckoutObservationPort;
   readonly #roots: CodeFileRootAuthorityPort;
@@ -1104,6 +1110,7 @@ export class CodeService {
 
   constructor(options: CodeServiceOptions) {
     this.#persistence = options.persistence;
+    this.#coordinatorsPerProject = options.coordinatorsPerProject;
     this.#access = options.access;
     this.#checkouts = options.checkouts;
     this.#roots = options.roots;
@@ -4340,6 +4347,9 @@ export class CodeService {
       },
       make: command.coordinator,
       coordinatorsInProject,
+      ...(this.#coordinatorsPerProject === undefined
+        ? {}
+        : { coordinatorLimit: this.#coordinatorsPerProject() }),
     });
     if (decision.status === "refused") throw this.#failure("invalid", decision.message);
     if (decision.status === "unchanged") return current;

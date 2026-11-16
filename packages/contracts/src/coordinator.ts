@@ -1,4 +1,12 @@
 import { Schema } from "effect";
+import {
+  DEFAULT_COORDINATOR_ROUNDS,
+  DEFAULT_COORDINATOR_WAKES_PER_HOUR,
+  MAX_COORDINATOR_ROUNDS,
+  MAX_COORDINATOR_WAKES_PER_HOUR,
+  MAX_COORDINATORS_PER_PROJECT,
+  MAX_COORDINATORS_PER_PROJECT_SETTING,
+} from "./octantLimits";
 import { ProjectId } from "./projects";
 
 /**
@@ -52,22 +60,16 @@ export type CoordinatorWorkerListingByProject = typeof CoordinatorWorkerListingB
 
 export const DEFAULT_COORDINATOR_OPEN_WORKER_LIMIT = 6;
 export const MAX_COORDINATOR_OPEN_WORKER_LIMIT = 16;
-export const MAX_COORDINATORS_PER_PROJECT = 4;
-
-/**
- * A coordinator's hourly and round bounds when the person set none
- * (docs/design/coordinator-threads.md, Bounds and Talking to workers).
- */
-export const DEFAULT_COORDINATOR_WAKES_PER_HOUR = 30;
-export const DEFAULT_COORDINATOR_ROUNDS = 10;
+export {
+  DEFAULT_COORDINATOR_ROUNDS,
+  DEFAULT_COORDINATOR_WAKES_PER_HOUR,
+  MAX_COORDINATOR_ROUNDS,
+  MAX_COORDINATOR_WAKES_PER_HOUR,
+  MAX_COORDINATORS_PER_PROJECT,
+  MAX_COORDINATORS_PER_PROJECT_SETTING,
+};
 export const DEFAULT_COORDINATOR_STARTS_PER_HOUR = 60;
-/**
- * The most a person may set. These bounds are what stops two agents waking
- * each other without end and a coordinator filling a Project with threads, so
- * each keeps a finite top.
- */
-export const MAX_COORDINATOR_WAKES_PER_HOUR = 600;
-export const MAX_COORDINATOR_ROUNDS = 100;
+/** Keeps a coordinator from filling a Project with threads. */
 export const MAX_COORDINATOR_STARTS_PER_HOUR = 600;
 
 /**

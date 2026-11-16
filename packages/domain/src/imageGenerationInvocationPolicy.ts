@@ -188,15 +188,19 @@ export function listEligibleImageProfiles(
  * Project keeps generates at every level. A kept choice the host can no
  * longer run is reported so the caller drops it, and the call asks rather
  * than swapping in another model, at Full access too: the person named that
- * model, not whichever is left. With nothing kept, Full access generates only
- * when exactly one profile is ready, on that profile's default model: there
- * is then no profile to pick, and the agent's own model suggestion is not a
- * person's choice. Plan is refused before this is reached.
+ * model, not whichever is left. With nothing kept, Full access generates on
+ * the profile Settings names, else the first ready one, on that profile's
+ * default model: the agent's own model suggestion is not a person's choice.
+ * Plan is refused before this is reached.
  */
 export function imageGenerationWithoutAsking(input: {
   readonly profiles: ReadonlyArray<ImageGenerationProfileView>;
   readonly kept: ProjectImageGenerationChoice | undefined;
   readonly fullAccess: boolean;
+  /** The person chose Ask again, so the card comes back at Full access too. */
+  readonly askAgain?: boolean | undefined;
+  /** The image profile Settings names for Full access; absent means the first ready one. */
+  readonly defaultProfileInstanceId?: string | undefined;
 }):
   | { readonly kind: "generate"; readonly choice: ProjectImageGenerationChoice }
   | { readonly kind: "ask"; readonly keptUnavailable: boolean } {
@@ -209,12 +213,24 @@ export function imageGenerationWithoutAsking(input: {
     );
     return runnable ? { kind: "generate", choice: kept } : { kind: "ask", keptUnavailable: true };
   }
-  const [only, ...others] = profiles;
-  if (input.fullAccess && only !== undefined && others.length === 0) {
-    return {
-      kind: "generate",
-      choice: { profileInstanceId: only.instanceId, modelId: only.defaultModel },
-    };
+  // At Full access the card is skipped: the profile the person named in
+  // Settings when it is ready, else the first ready one, on its default model
+  // (maintainer decision, 2026-11-16). Strict plugs in here: under Strict,
+  // several ready profiles keep today's card.
+  if (input.fullAccess && input.askAgain !== true) {
+    const named =
+      input.defaultProfileInstanceId === undefined
+        ? undefined
+        : profiles.find(
+            (profile) => String(profile.instanceId) === String(input.defaultProfileInstanceId),
+          );
+    const chosen = named ?? profiles[0];
+    if (chosen !== undefined) {
+      return {
+        kind: "generate",
+        choice: { profileInstanceId: chosen.instanceId, modelId: chosen.defaultModel },
+      };
+    }
   }
   return { kind: "ask", keptUnavailable: false };
 }
