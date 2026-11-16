@@ -9,6 +9,7 @@ import {
   decodeCodeTerminalId,
   decodeLayoutNodeId,
   decodePaneId,
+  decodeEventActor,
   decodeProjectTerminalCommand,
   decodeProject,
   decodeProjectId,
@@ -814,11 +815,7 @@ describe("Project terminals", () => {
   describe("from a device the host's person paired", () => {
     const deviceId = "90000000-0000-4000-8000-0000000000de";
     const deviceScope = decodeWindowId(deviceId);
-    const deviceActor = {
-      kind: "remote-device",
-      actorId: Schema.decodeUnknownSync(ActorId)(deviceId),
-      deviceId,
-    } as const;
+    const deviceActor = decodeEventActor({ kind: "remote-device", actorId: deviceId, deviceId });
     const actors = (journal: Journal) =>
       journal
         .replay(decodeReplayCursor({ afterSequence: 0, limit: 100 }))

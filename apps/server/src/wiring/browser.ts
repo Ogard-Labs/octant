@@ -1,3 +1,4 @@
+import { REMOTE_ACCESS_EVENT_NAMES } from "@octant/contracts/remote-access";
 import { windowAdmitsProject } from "@octant/domain/shell-policy";
 import { BrowserDownloadPermissions } from "../browser/browserDownloadPermissions";
 import { browserDownloadPermissionJournal } from "../browser/browserDownloadPermissionJournal";
@@ -729,7 +730,9 @@ export function wireBrowser(deps: BrowserDependencies) {
     const liveProjectBrowsers = new ProjectBrowserService({
       runtime: browserRuntime,
       readProject: persistence.readProject,
-      canAccessProject: windowHoldsProject,
+      // A device the host's own person paired has no workspace here and
+      // reaches every active Project, as it does when it opens a thread there.
+      canAccessProject: personHoldsProject,
       isModeEnabled: (mode) =>
         enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
           mode,
@@ -749,7 +752,10 @@ export function wireBrowser(deps: BrowserDependencies) {
             event.eventName === "project.lifecycle-changed@1" ||
             event.eventName === "project.binding-relinked@1" ||
             event.eventName === "workspace.layout-replaced" ||
-            event.eventName === "shell.settings-replaced",
+            event.eventName === "shell.settings-replaced" ||
+            // A revoked or expired device's pages close with its authority.
+            event.eventName === REMOTE_ACCESS_EVENT_NAMES.deviceRevoked ||
+            event.eventName === REMOTE_ACCESS_EVENT_NAMES.deviceCredentialExpired,
         )
       ) {
         void liveProjectBrowsers.settle();
