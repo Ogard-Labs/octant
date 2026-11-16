@@ -225,6 +225,18 @@ describe("shell settings policy", () => {
       fullAccessStalledTurnLimitMinutes: null,
       providerToolCallPauseLimitMinutes: 120,
       backgroundSessionIdleLimitMinutes: 120,
+      threadWakeupsWaitingLimit: 8,
+      threadWakeupsRunMissedOnReturn: false,
+      messageWakesPerHour: 30,
+      messageWakeRounds: 10,
+      coordinatorsPerProject: 4,
+      pullRequestWatchWakeLimit: 10,
+      pullRequestWatchDays: 3,
+      autoFixAttemptsPerFailure: 3,
+      threadMessagesPerTurn: 3,
+      browserWaitLimitMinutes: 10,
+      childRunWaitLimitSeconds: 120,
+      agentRoutinesStartActiveAtFullAccess: false,
       // Navigator starts honestly unconfigured: no default model, no reviewer.
       navigatorAssistant: {},
       // Voice starts unconfigured: no transcription or synthesis endpoint.

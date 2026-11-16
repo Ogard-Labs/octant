@@ -252,15 +252,23 @@ export const MAX_BROWSER_HELD_DOWNLOADS = 5;
 export const MAX_BROWSER_HELD_DOWNLOAD_LIMIT = 50;
 
 /**
- * The longest any wait may last; a wait names its own limit up to this.
+ * The longest a wait may last unless Settings says otherwise; a wait names
+ * its own limit up to the one in force.
  *
  * Ten minutes, because a build, a deploy or an upload a page reports on
  * routinely outlasts the earlier 30 seconds, and an agent then polled with
- * repeated waits. It is not longer because one tool call must answer inside
+ * repeated waits. It is not longer by default because one tool call must answer inside
  * the eleven minutes the Claude runtime allows an app-managed call, and a
  * page's idle interval is ten minutes.
  */
 export const MAX_BROWSER_WAIT_MS = 600_000;
+/**
+ * The most a person may raise that limit to in Settings, in minutes. A
+ * Claude Code thread still ends an app-managed call at eleven minutes, which
+ * the setting's description says.
+ */
+export const MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING = 60;
+export const DEFAULT_BROWSER_WAIT_LIMIT_MINUTES = MAX_BROWSER_WAIT_MS / 60_000;
 /** How long a wait lasts when it names no limit. */
 export const DEFAULT_BROWSER_WAIT_MS = 10_000;
 
@@ -296,7 +304,10 @@ export const BrowserWaitFor = Schema.Struct({
   conditions: Schema.Array(BrowserWaitCondition).pipe(Schema.minItems(1), Schema.maxItems(5)),
   match: Schema.Literal("all", "any"),
   timeoutMs: Schema.optional(
-    Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(MAX_BROWSER_WAIT_MS)),
+    Schema.Int.pipe(
+      Schema.positive(),
+      Schema.lessThanOrEqualTo(MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING * 60_000),
+    ),
   ),
 }).annotations(strict);
 export type BrowserWaitFor = typeof BrowserWaitFor.Type;

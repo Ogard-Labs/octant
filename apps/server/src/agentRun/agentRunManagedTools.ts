@@ -2,6 +2,8 @@ import type { ConversationInputPolicy } from "@octant/contracts/conversation-inp
 import {
   MAX_PROVIDER_TOOL_RESULT_BYTES,
   AGENT_RUN_TERMINAL_STATUSES,
+  DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS,
+  MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING,
   MAX_AGENT_RUN_DEPENDENCIES,
   type AgentRun,
   type AgentRunId,
@@ -60,6 +62,8 @@ export interface AgentsManagedToolsOptions {
   readonly recordResultIngestion: (run: AgentRun) => boolean;
   readonly uuid: () => string;
   readonly sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
+  /** The longest one `wait` may block, in milliseconds, from Settings; absent is 120 seconds. */
+  readonly waitLimitMs?: () => number;
 }
 
 const AGENTS_TOOL_NAME = "octant_agents";
@@ -177,8 +181,9 @@ const AGENTS_TOOL_DEFINITION = {
       timeoutMs: {
         type: "integer",
         minimum: 0,
-        maximum: 120_000,
-        description: "How long wait blocks before returning the current status (max 120000).",
+        maximum: MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING * 1_000,
+        description:
+          "How long wait blocks before returning the current status. Octant holds it to the limit the person set in Settings, 120000 unless they changed it.",
       },
     },
     additionalProperties: false,
@@ -576,7 +581,8 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
       if (input.operation === "wait") {
         const runIds = input.runIds ?? (input.runId === undefined ? undefined : [input.runId]);
         if (runIds === undefined) return failure("invalid-agents-input");
-        const deadline = Date.now() + Math.min(Math.max(input.timeoutMs ?? 30_000, 0), 120_000);
+        const waitLimitMs = options.waitLimitMs?.() ?? DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS * 1_000;
+        const deadline = Date.now() + Math.min(Math.max(input.timeoutMs ?? 30_000, 0), waitLimitMs);
         if (input.runIds === undefined) {
           // One child keeps its original answer shape.
           for (;;) {

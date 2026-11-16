@@ -1,4 +1,5 @@
 import {
+  DEFAULT_THREAD_MESSAGES_PER_TURN,
   THREAD_DIALOGUE_TOOL_NAME,
   decodeChatThreadId,
   decodeThreadDialogueMessageInput,
@@ -13,7 +14,6 @@ import {
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 
 const THREAD_DIALOGUE_TOOL = THREAD_DIALOGUE_TOOL_NAME;
-const MAX_THREAD_DIALOGUE_MESSAGES_PER_TURN = 3;
 const MAX_THREAD_DIALOGUE_REPLY_LENGTH = 8_000;
 
 export interface ThreadDialogueServiceOptions {
@@ -40,6 +40,8 @@ export interface ThreadDialogueServiceOptions {
    * Absent means this host records no sidecars.
    */
   readonly isSideChat?: (threadId: string) => boolean;
+  /** How many messages one turn may send, read from Settings for each turn; absent is three. */
+  readonly messagesPerTurn?: () => number;
 }
 
 /** Provider-neutral, one-hop Chat coordination through explicit mention grants. */
@@ -71,6 +73,7 @@ export class ThreadDialogueService {
     const firstTarget = chatTargetIds[0];
     if (firstTarget === undefined) return undefined;
     let sends = 0;
+    const limit = this.#options.messagesPerTurn?.() ?? DEFAULT_THREAD_MESSAGES_PER_TURN;
     return {
       definitions: [THREAD_DIALOGUE_TOOL_DEFINITION],
       execute: async ({ name, inputJson, signal }) => {
@@ -86,11 +89,11 @@ export class ThreadDialogueService {
             isError: true,
           };
         }
-        if (sends >= MAX_THREAD_DIALOGUE_MESSAGES_PER_TURN) {
+        if (sends >= limit) {
           return {
             result: failedResult(
               firstTarget,
-              "This turn reached the three-message coordination limit.",
+              `This turn reached its limit of ${limit} thread messages, set in Settings.`,
             ),
             isError: true,
           };
@@ -185,7 +188,7 @@ export class ThreadDialogueService {
 const THREAD_DIALOGUE_TOOL_DEFINITION: ProviderToolDefinition = {
   name: THREAD_DIALOGUE_TOOL,
   description:
-    "Ask a Chat thread the user mentioned in this message one bounded question or instruction, and wait for its reply. Use it only when the user asks you to coordinate with that thread, never to act on it otherwise; a turn may ask at most three times, and the thread you ask cannot ask onward. Waiting means that thread is busy: tell the user rather than retrying. Put the reply you get in your own answer.",
+    "Ask a Chat thread the user mentioned in this message one bounded question or instruction, and wait for its reply. Use it only when the user asks you to coordinate with that thread, never to act on it otherwise; a turn may ask a few times (three unless the person changed it in Settings; the answer says when the limit is reached), and the thread you ask cannot ask onward. Waiting means that thread is busy: tell the user rather than retrying. Put the reply you get in your own answer.",
   inputSchema: {
     type: "object",
     properties: {

@@ -17,23 +17,27 @@ const boundedNonEmptyText = (maximumBytes: number) =>
     ),
   );
 
-/**
- * Automatic attempts Auto-fix makes on one distinct failure before it stops
- * and hands the pull request back to the person.
- */
-export const CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS = 3;
+import {
+  CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS,
+  CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_DAYS,
+  CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES,
+  MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_ATTEMPTS_SETTING,
+  MAX_CODE_PROJECT_PULL_REQUEST_WATCH_DAYS_SETTING,
+  MAX_CODE_PROJECT_PULL_REQUEST_WATCH_WAKES_SETTING,
+} from "./octantLimits";
+
+export {
+  CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS,
+  CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_DAYS,
+  CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES,
+  MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_ATTEMPTS_SETTING,
+  MAX_CODE_PROJECT_PULL_REQUEST_WATCH_DAYS_SETTING,
+  MAX_CODE_PROJECT_PULL_REQUEST_WATCH_WAKES_SETTING,
+};
 /** Failures one Auto-fix observation or wake names. */
 export const MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_FAILURES = 32;
-/**
- * Started wakes one watch makes before it stops, so a pull request that keeps
- * changing hands the thread back to the person instead of waking it forever.
- */
-export const CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES = 10;
-/**
- * How long a watch lasts after it is turned on. Three days covers a review
- * round across a weekend; a watch nobody renews then ends on its own.
- */
-export const CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_MS = 3 * 24 * 60 * 60 * 1000;
+export const CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_MS =
+  CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_DAYS * 24 * 60 * 60 * 1000;
 /** Signals one watch baseline or wake names. */
 export const MAX_CODE_PROJECT_PULL_REQUEST_WATCH_SIGNALS = 32;
 
@@ -164,7 +168,7 @@ export const CodeProjectPullRequestAutoFixState = Schema.Union(
       Schema.Struct({
         at: UtcTimestamp,
         attempt: Schema.Int.pipe(
-          Schema.between(1, CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS),
+          Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_ATTEMPTS_SETTING),
         ),
         result: CodeProjectPullRequestAutoFixWakeResult,
         failures: Schema.Array(CodeProjectPullRequestAutoFixFailure).pipe(
@@ -187,6 +191,13 @@ export const CodeProjectPullRequestSwitchesView = Schema.Struct({
   target: CodeProjectPullRequestSwitchTarget,
   mergeWhenReady: CodeProjectPullRequestMergeWhenReadyState,
   autoFix: CodeProjectPullRequestAutoFixState,
+  /**
+   * Auto-fix's attempts per failure as Settings has it now. Absent from a
+   * host older than the setting, which means the former fixed three.
+   */
+  autoFixAttempts: Schema.optional(
+    Schema.Int.pipe(Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_ATTEMPTS_SETTING)),
+  ),
   generatedAt: UtcTimestamp,
 }).annotations(strict);
 export type CodeProjectPullRequestSwitchesView = typeof CodeProjectPullRequestSwitchesView.Type;
@@ -284,7 +295,9 @@ export const CodeProjectPullRequestAutoFixRecorded = Schema.Struct({
         Schema.minItems(1),
         Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_FAILURES),
       ),
-      attempt: Schema.Int.pipe(Schema.between(1, CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS)),
+      attempt: Schema.Int.pipe(
+        Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_ATTEMPTS_SETTING),
+      ),
       result: CodeProjectPullRequestAutoFixWakeResult,
     }).annotations(strict),
     Schema.Struct({
@@ -353,7 +366,7 @@ export const CodeProjectPullRequestWatchRecorded = Schema.Struct({
         Schema.minItems(1),
         Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_WATCH_SIGNALS),
       ),
-      wake: Schema.Int.pipe(Schema.between(1, CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES)),
+      wake: Schema.Int.pipe(Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_WATCH_WAKES_SETTING)),
       result: CodeProjectPullRequestAutoFixWakeResult,
     }).annotations(strict),
     Schema.Struct({

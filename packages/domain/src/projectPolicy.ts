@@ -671,10 +671,14 @@ export function changeProjectImageGenerationChoice(
   if (unchanged) {
     reject("invalid-lifecycle", "Project image generation choice is already selected");
   }
-  const { imageGenerationChoice: _dropped, ...rest } = project;
+  const { imageGenerationChoice: _dropped, imageGenerationAskAgain: _asked, ...rest } = project;
   return {
     ...rest,
-    ...(choice === undefined ? {} : { imageGenerationChoice: choice }),
+    // Dropping the choice is the person's Ask again: the next call asks, at
+    // Full access too, until a choice is kept again.
+    ...(choice === undefined
+      ? { imageGenerationAskAgain: true as const }
+      : { imageGenerationChoice: choice }),
     version: nextVersion(project),
     updatedAt,
   };
