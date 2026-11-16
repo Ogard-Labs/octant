@@ -1,8 +1,9 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import {
+  installNodeSdk,
   validateWindowsNativeArtifacts,
   WINDOWS_NATIVE_ARTIFACTS,
 } from "./build-windows-native-artifacts";
@@ -43,5 +44,51 @@ it("refuses missing, foreign-architecture and QA-only native resources before ar
     );
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("retries a failed Node SDK install in a fresh devdir and proceeds once one succeeds", async () => {
+  const stage = await mkdtemp(join(tmpdir(), "octant-native-sdk-test-"));
+  const sdk = join(stage, "sdk");
+  try {
+    const seen: string[][] = [];
+    let attempts = 0;
+    await installNodeSdk(
+      sdk,
+      async () => {
+        attempts += 1;
+        seen.push(await readdir(sdk));
+        await writeFile(join(sdk, "partial"), "");
+        if (attempts === 1) throw Error("gyp ERR! Completion callback never invoked!");
+      },
+      async () => undefined,
+    );
+    expect(attempts).toBe(2);
+    // The second attempt starts from an empty devdir, not the partial extract.
+    expect(seen).toEqual([[], []]);
+  } finally {
+    await rm(stage, { recursive: true, force: true });
+  }
+});
+
+it("fails naming the Node SDK install after three failed attempts", async () => {
+  const stage = await mkdtemp(join(tmpdir(), "octant-native-sdk-test-"));
+  try {
+    let attempts = 0;
+    const failed = installNodeSdk(
+      join(stage, "sdk"),
+      async () => {
+        attempts += 1;
+        throw Error(`attempt ${attempts} failed`);
+      },
+      async () => undefined,
+    );
+    await expect(failed).rejects.toThrow(
+      "node-gyp install of the Node SDK failed after 3 attempts",
+    );
+    await expect(failed).rejects.toMatchObject({ cause: { message: "attempt 3 failed" } });
+    expect(attempts).toBe(3);
+  } finally {
+    await rm(stage, { recursive: true, force: true });
   }
 });
