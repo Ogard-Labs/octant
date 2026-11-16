@@ -60,6 +60,9 @@ export function CodeFilesViewer(props: CodeFilesViewerProps) {
   const [files, setFiles] = useState<ReadonlyArray<OpenFile>>([]);
   const [active, setActive] = useState<CodeRelativePath>();
   const [treeOpen, setTreeOpen] = useState(true);
+  // The checkout's listing failed: with no file open there is no tree to
+  // browse and no file to choose, so the whole pane is that one state.
+  const [listingFailed, setListingFailed] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const refreshActive = useRef<(() => void) | undefined>(undefined);
   const [changes, observeChanges] = useCheckoutChanges(props.controller.client, props.view);
@@ -192,8 +195,9 @@ export function CodeFilesViewer(props: CodeFilesViewerProps) {
   const barLead = useDockBarLead();
   const placement = useDockBarPlacement();
   const toggleTree = useCallback(() => setTreeOpen((value) => !value), []);
+  const unavailable = listingFailed && files.length === 0;
   useDockBarControls(
-    placement === undefined
+    placement === undefined || unavailable
       ? []
       : [
           {
@@ -228,7 +232,11 @@ export function CodeFilesViewer(props: CodeFilesViewerProps) {
     );
 
   return (
-    <div className="code-files-viewer" ref={root}>
+    <div
+      className="code-files-viewer"
+      data-unavailable={unavailable ? "true" : undefined}
+      ref={root}
+    >
       {barLead !== null ? (
         tabs === null ? null : (
           createPortal(tabs, barLead)
@@ -277,6 +285,7 @@ export function CodeFilesViewer(props: CodeFilesViewerProps) {
             {...props.explorer}
             changes={changes}
             onFilesChanged={onFilesChanged}
+            onUnavailableChange={setListingFailed}
             onKeepFile={(entry) => open(entry.path, true, true)}
             onOpenFile={(entry) => open(entry.path, false, true)}
             {...(active === undefined ? {} : { selectedPath: active })}

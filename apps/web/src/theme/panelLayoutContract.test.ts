@@ -36,7 +36,19 @@ describe("dock panel layout", () => {
     expect(selector).toMatch(/min-height:\s*0/);
   });
 
-  it("never tints or centres a panel's own notice", () => {
-    expect(panels).not.toMatch(/-soft|text-align:\s*center|justify-items:\s*center/);
+  it("never tints a panel's notice, and centres only a pane's whole state", () => {
+    expect(panels).not.toMatch(/-soft/);
+    // The one centred thing is the pane's state (nothing to show, unavailable,
+    // failed): a mark, one line, one muted line, in the pane's middle. A notice
+    // inside a pane's content stays on the content's own edge.
+    const from = panels.indexOf("a tool's state: a mark, one line, one muted line");
+    const to = panels.indexOf("header rows with a title and controls wrap");
+    expect(from).toBeGreaterThan(-1);
+    expect(to).toBeGreaterThan(from);
+    const state = panels.slice(from, to);
+    expect(state).toMatch(/text-align:\s*center/);
+    expect(state).toMatch(/margin:\s*auto/);
+    const rest = panels.slice(0, from) + panels.slice(to);
+    expect(rest).not.toMatch(/text-align:\s*center|justify-items:\s*center/);
   });
 });

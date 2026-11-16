@@ -1321,6 +1321,19 @@ is costly to render mounts only while open.
   host message written for an agent (a call to make, a profile to pass) is
   mapped to one short sentence and an action ("This Private page expired." with
   Open again), never shown as the host wrote it.
+- **A pane's state.** A tool pane (in the dock or the bottom panel) that has
+  nothing to show, is unavailable or failed as a whole shows one state in its
+  middle and nothing else: a 16px mark in the muted ink (never a warning
+  colour), one line in the primary ink at the detail size and medium weight,
+  one muted line with the reason, and the way out as one secondary button named
+  for what it does ("Try again"). A state never shares the pane with a second
+  message, a split column or an empty header row: Files whose checkout cannot
+  be read is that one state with no tree, no viewer column and no tab row, and
+  Review whose checkout cannot be read is one state with no findings notice
+  under it. A notice is for a pane that still has its content (part of a
+  listing failed, a diff is truncated) and keeps the row layout above. A
+  loading line is not a state: one quiet line at the pane's top inset, where
+  the content it stands in for begins.
 - **States.** On glass the fill is the dense 96% float; increased contrast and
   reduced transparency make it opaque.
 - **Accessibility.** Warning and danger are `alert`; the others `status`.

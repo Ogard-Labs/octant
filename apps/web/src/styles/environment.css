@@ -276,11 +276,38 @@ button.environment-link:hover .environment-row__trailing {
   width: auto;
 }
 
+/* Dropped under its head, the action is a row of the list: the row's height,
+   and its last glyph on the column the rows' chevrons take, so its words end
+   where every value ends. At 24px with an 8px end inset it stood 4px off both
+   edges ("All pull requests" beside "Not on GitHub"). */
 .environment-group__head-action {
   display: inline-flex;
+  min-height: var(--environment-row-h);
   flex: none;
+  align-items: center;
   margin-inline-start: auto;
-  padding-inline-end: var(--oct-space-2);
+  padding-inline-end: var(--oct-space-1);
+}
+
+/* Every row keeps the trailing slot a chevron takes, whether or not it opens
+   anything, so every value ends on one edge. Without it a row with nothing to
+   open ("Main folder", Computer use's "None") ended 22px past the others. */
+.environment-row:not(:has(> .environment-row__trailing, > .environment-row__action))::after {
+  width: var(--oct-icon-sm);
+  flex: none;
+  content: "";
+}
+
+/* The outside-content line is a row of the list too: the row's height, the
+   rows' 16px glyph and their text column. */
+.thread-environment-dock__body > .outside-content-row {
+  min-height: var(--environment-row-h);
+  gap: var(--oct-space-2);
+}
+
+.thread-environment-dock__body > .outside-content-row > .outside-content-row__icon {
+  width: var(--environment-icon-size, 16px);
+  height: var(--environment-icon-size, 16px);
 }
 
 /* An open row's content starts under its name, not under its glyph. */

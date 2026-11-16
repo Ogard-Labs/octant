@@ -135,8 +135,75 @@
   margin-block-end: 0;
 }
 
-/* ─── a tool's empty state: one quiet line at the panel's inset ───────── */
-.right-utility-dock__tool:not([data-dock-inset="true"]) .shell-state:not(.shell-state--page) {
+/* ─── a tool's state: a mark, one line, one muted line, in the pane's middle ─── */
+/* One pattern for every pane with nothing to show, a tool that is unavailable
+   and a tool that failed: the mark, the line that says it and one muted line,
+   centred, with the way back under them. Panes had three: a quiet line at the
+   inset (Tests, Artifacts), a centred line with a 15px title (Pull requests)
+   and a red notice with a button under it (Files). A loading line is not a
+   state: it keeps the top inset, where the content it stands in for begins. */
+:is(.right-utility-dock__tool:not([data-dock-inset="true"]), .bottom-utility-panel__content)
+  .shell-state:not(.shell-state--page, [data-state="loading"]),
+:is(.right-utility-dock__tool, .bottom-utility-panel__content) .surface-empty {
+  display: grid;
+  width: 100%;
+  max-width: none;
+  margin: auto;
+  padding: var(--oct-space-6) var(--oct-space-4);
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  justify-items: center;
+  gap: var(--oct-space-1);
+  text-align: center;
+}
+
+:is(.right-utility-dock__tool:not([data-dock-inset="true"]), .bottom-utility-panel__content)
+  .shell-state:not(.shell-state--page, [data-state="loading"])
+  > * {
+  grid-column: 1;
+  justify-items: center;
+  text-align: center;
+}
+
+:is(.right-utility-dock__tool:not([data-dock-inset="true"]), .bottom-utility-panel__content)
+  .shell-state:not(.shell-state--page, [data-state="loading"])
+  [data-slot="empty-media"],
+:is(.right-utility-dock__tool, .bottom-utility-panel__content) .surface-empty__icon {
+  width: 16px;
+  height: 16px;
+  margin-bottom: var(--oct-space-2);
+  color: var(--oct-muted);
+}
+
+:is(.right-utility-dock__tool:not([data-dock-inset="true"]), .bottom-utility-panel__content)
+  .shell-state:not(.shell-state--page, [data-state="loading"])
+  [data-slot="empty-title"],
+:is(.right-utility-dock__tool, .bottom-utility-panel__content) .surface-empty > .oct-row-label {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
+  overflow-wrap: anywhere;
+}
+
+:is(.right-utility-dock__tool:not([data-dock-inset="true"]), .bottom-utility-panel__content)
+  .shell-state:not(.shell-state--page, [data-state="loading"])
+  [data-slot="empty-description"],
+:is(.right-utility-dock__tool, .bottom-utility-panel__content) .surface-empty > .oct-row-detail {
+  max-width: 40ch;
+  margin-top: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+:is(.right-utility-dock__tool:not([data-dock-inset="true"]), .bottom-utility-panel__content)
+  .shell-state:not(.shell-state--page, [data-state="loading"])
+  [data-slot="empty-content"] {
+  margin-top: var(--oct-space-3);
+}
+
+/* A loading line: one quiet line at the pane's inset. */
+:is(.right-utility-dock__tool:not([data-dock-inset="true"]), .bottom-utility-panel__content)
+  .shell-state[data-state="loading"] {
   width: 100%;
   max-width: none;
   margin: 0;
@@ -149,28 +216,20 @@
   text-align: start;
 }
 
-.right-utility-dock__tool:not([data-dock-inset="true"])
-  .shell-state:not(.shell-state--page)
+:is(.right-utility-dock__tool:not([data-dock-inset="true"]), .bottom-utility-panel__content)
+  .shell-state[data-state="loading"]
   [data-slot="empty-media"] {
   width: 16px;
   height: 16px;
 }
 
-.right-utility-dock__tool:not([data-dock-inset="true"])
-  .shell-state:not(.shell-state--page)
+:is(.right-utility-dock__tool:not([data-dock-inset="true"]), .bottom-utility-panel__content)
+  .shell-state[data-state="loading"]
   [data-slot="empty-title"] {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-regular);
   overflow-wrap: anywhere;
-}
-
-.right-utility-dock__tool:not([data-dock-inset="true"])
-  .shell-state:not(.shell-state--page)
-  [data-slot="empty-description"] {
-  max-width: none;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
 }
 
 /* ─── header rows with a title and controls wrap instead of overlapping ─── */

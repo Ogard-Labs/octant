@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { CodeCheckoutId, CodeFileListingResult, CodeThreadId } from "@octant/contracts";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { CodeFilesViewer, type CodeFilesViewerProps } from "./CodeFilesViewer";
@@ -69,7 +71,9 @@ const listing = {
   },
 } as unknown as CodeFileListingResult;
 
-function mount(options: { readonly status?: ReadonlyArray<unknown> } = {}) {
+function mount(
+  options: { readonly status?: ReadonlyArray<unknown>; readonly listingFails?: boolean } = {},
+) {
   const onOpenInMainArea = vi.fn();
   const executeOperation = vi.fn(async () =>
     options.status === undefined
@@ -97,7 +101,10 @@ function mount(options: { readonly status?: ReadonlyArray<unknown> } = {}) {
           threadId,
           checkoutId,
           client: {
-            list: vi.fn(async () => listing),
+            list: vi.fn(async () => {
+              if (options.listingFails === true) throw new Error("Code checkout is unavailable.");
+              return listing;
+            }),
             watch: vi.fn(async function* () {}),
           } as never,
         }}
@@ -179,6 +186,22 @@ describe("CodeFilesViewer", () => {
     await user.click(await screen.findByRole("treeitem", { name: "a.ts" }));
     await user.click(await screen.findByRole("button", { name: "Open a.ts in main area" }));
     expect(onOpenInMainArea).toHaveBeenCalledWith("a.ts");
+  });
+
+  it("gives the whole pane to one state when the checkout cannot be read", async () => {
+    mount({ listingFails: true });
+    const state = await screen.findByRole("alert");
+    expect(state).toHaveTextContent("This checkout can't be read");
+    expect(state).toHaveTextContent("Code checkout is unavailable.");
+    expect(within(state).getByRole("button", { name: "Try again" })).toBeVisible();
+    // No tree to browse and no file to choose: the pane says so, and the
+    // stylesheet takes the tab row and the viewer's own column away.
+    const viewer = state.closest(".code-files-viewer");
+    await waitFor(() => expect(viewer).toHaveAttribute("data-unavailable", "true"));
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/code.css"), "utf8");
+    expect(styles).toMatch(
+      /\.code-files-viewer\[data-unavailable="true"\] > \.code-files-viewer__strip,\s*\.code-files-viewer\[data-unavailable="true"\] \.code-files-viewer__main \{\s*display: none;/,
+    );
   });
 
   it("hides and shows the file tree from the strip", async () => {

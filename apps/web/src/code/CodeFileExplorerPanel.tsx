@@ -6,14 +6,15 @@ import {
   type CodeThreadId,
 } from "@octant/contracts";
 import type { CodeFileListingClient } from "@octant/client-runtime";
-import { FolderTree, RefreshCw } from "../ui/icons";
+import { useEffect } from "react";
+import { FolderTree } from "../ui/icons";
 import {
   CodeFileExplorer,
   type CodeFileChange,
   type CodeFileExplorerEntry,
 } from "./CodeFileExplorer";
 import { useCodeFileListingController } from "./useCodeFileListingController";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
 /**
@@ -40,6 +41,11 @@ export interface CodeFileExplorerPanelProps {
   readonly windowCapability?: string;
   /** Called for every host-reported change, so an open editor can reload. */
   readonly onFilesChanged?: (notice: CodeFileChangeNotice) => void;
+  /**
+   * Told when the checkout's listing fails and when it reads again, so the
+   * pane around the tree can give the whole of itself to the one state.
+   */
+  readonly onUnavailableChange?: (unavailable: boolean) => void;
 }
 
 /**
@@ -64,6 +70,12 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
 
+  const unavailable = bound && controller.status === "error";
+  const onUnavailableChange = props.onUnavailableChange;
+  useEffect(() => {
+    onUnavailableChange?.(unavailable);
+  }, [onUnavailableChange, unavailable]);
+
   if (!bound) {
     return (
       <p className="code-file-explorer__status" role="status">
@@ -77,23 +89,17 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
     // The one sentence, and one way back. Rendering the tree as well put a
     // live filter field and "No files match" beneath an explanation that
     // there are no files to match.
+    // It is the pane's one state, so it is drawn as every pane's state is: a
+    // mark, one line, the host's sentence in the muted ink and the way back.
+    // A red notice with a button under it read as a toast over the pane's bar.
     return (
-      <div className="code-file-explorer-panel">
-        <OctantAlert className="code-file-explorer__error" tone="danger">
-          {controller.errorMessage ?? "Repository files are unavailable."}
-        </OctantAlert>
-        <div className="code-file-explorer-panel__recovery">
-          <OctantButton
-            onClick={() => void controller.refresh()}
-            size="sm"
-            type="button"
-            variant="secondary"
-          >
-            <RefreshCw aria-hidden="true" size={14} />
-            <span>Try again</span>
-          </OctantButton>
-        </div>
-      </div>
+      <OctantEmpty
+        action={{ label: "Try again", onClick: () => void controller.refresh() }}
+        message={controller.errorMessage ?? "Repository files are unavailable."}
+        role="alert"
+        state="warning"
+        title="This checkout can't be read"
+      />
     );
   }
 

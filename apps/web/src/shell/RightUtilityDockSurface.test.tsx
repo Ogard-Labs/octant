@@ -734,6 +734,7 @@ describe("tool tiles in the right sidebar", () => {
       DOMRect.fromRect({ x: 0, y: 0, width: 100, height: 100 }),
     );
     const files = screen.getByRole("region", { name: "Files" });
+    const mounted = new Map(mounts);
     dragTo(files.querySelector(".dock-tile__lead") as Element, 95, 50);
     const zone = document.querySelector('[data-dock-place-zone="ios-simulator"]') as HTMLElement;
     expect(document.querySelector('[data-dock-place-zone="files"]')).toBeNull();
@@ -747,6 +748,9 @@ describe("tool tiles in the right sidebar", () => {
     ).toBeInTheDocument();
     expect(document.querySelector(".dock-tiles__drag-shield")).toBeNull();
     expect(document.querySelector(".workspace-drag-preview")).toBeNull();
+    // A move never remounts a tool, so it can never open, close or reload a
+    // page or a shell: both tools are the ones that were mounted before it.
+    expect(new Map(mounts)).toEqual(mounted);
   });
 
   it("picks a pane up by its bar but never by one of the bar's controls", () => {

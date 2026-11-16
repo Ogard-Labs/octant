@@ -177,10 +177,27 @@ export function CodeDiffPane(props: CodeDiffPaneProps) {
     );
   }
   if (props.diff.state === "loading") return <OctantEmpty state="loading" title="Loading diff" />;
+  return <ChangesUnreadable message={props.diff.message} onRetry={props.onRefresh} />;
+}
+
+/**
+ * The comparison cannot be read: the pane's one state, in the shared pattern,
+ * with the host's sentence as its reason and the one way out.
+ */
+function ChangesUnreadable(props: {
+  readonly message: string;
+  readonly onRetry: (() => void) | undefined;
+}) {
   return (
-    <OctantAlert layout="row" tone="warning">
-      {props.diff.message}
-    </OctantAlert>
+    <OctantEmpty
+      {...(props.onRetry === undefined
+        ? {}
+        : { action: { label: "Try again", onClick: props.onRetry } })}
+      message={props.message}
+      role="alert"
+      state="warning"
+      title="Changes can't be read"
+    />
   );
 }
 
@@ -593,9 +610,7 @@ function AvailableDiff(
 
       {content.kind === "loading" ? <OctantEmpty state="loading" title="Loading diff" /> : null}
       {content.kind === "unavailable" ? (
-        <OctantAlert layout="row" tone="warning">
-          {content.message}
-        </OctantAlert>
+        <ChangesUnreadable message={content.message} onRetry={props.onRefresh} />
       ) : null}
       {content.kind === "ready" &&
       props.requestedCodeReviewFile !== undefined &&

@@ -208,6 +208,7 @@ function BoundReview(props: {
 
   const approvals = nativeCodeWorkspaceApprovals(props.hostBridge, props.view);
 
+  const unreadable = projection.state === "unavailable";
   return (
     <>
       {props.requestedCodeReviewFile === undefined ? null : (
@@ -241,7 +242,9 @@ function BoundReview(props: {
           setRefreshTick((value) => value + 1);
           void observe();
         }}
-        statusTrail={status === undefined ? null : <ReviewStatusChips status={status} />}
+        statusTrail={
+          status === undefined || unreadable ? null : <ReviewStatusChips status={status} />
+        }
         ignoreWhitespace={{
           value: ignoreWhitespace,
           onChange: setIgnoreWhitespace,
@@ -261,7 +264,7 @@ function BoundReview(props: {
             }
           : {})}
       />
-      {props.requestedCodeReviewFile === undefined ? null : (
+      {props.requestedCodeReviewFile === undefined || unreadable ? null : (
         <CodeLineNotes
           {...(noteAnchor === undefined ? {} : { anchor: noteAnchor })}
           {...(props.onSendLineNotes === undefined ? {} : { onSend: props.onSendLineNotes })}
@@ -270,16 +273,21 @@ function BoundReview(props: {
             : { sendUnavailable: props.lineNotesSendUnavailable })}
         />
       )}
-      <CodeLocalReview
-        client={props.client}
-        scope={scope}
-        executionPolicy={props.view.thread.executionPolicy}
-        {...(line === undefined ? {} : { line })}
-        {...(props.createUuid === undefined ? {} : { createUuid: props.createUuid })}
-        onRefreshComparison={() => void observe()}
-        onStatus={setStatus}
-        refreshTick={refreshTick}
-      />
+      {/* A checkout that cannot be read has no findings to load either: the
+          comparison's state is the pane's one message and its Try again the
+          one way out. Two warnings stood stacked there, each with its own. */}
+      {unreadable ? null : (
+        <CodeLocalReview
+          client={props.client}
+          scope={scope}
+          executionPolicy={props.view.thread.executionPolicy}
+          {...(line === undefined ? {} : { line })}
+          {...(props.createUuid === undefined ? {} : { createUuid: props.createUuid })}
+          onRefreshComparison={() => void observe()}
+          onStatus={setStatus}
+          refreshTick={refreshTick}
+        />
+      )}
     </>
   );
 }

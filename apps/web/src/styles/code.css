@@ -506,11 +506,6 @@ html:not([data-octant-reduced-transparency="true"])
   font-weight: 600;
 }
 
-.code-file-explorer-panel__recovery {
-  display: flex;
-  padding: 0 var(--oct-space-3) var(--oct-space-3);
-}
-
 .code-file-explorer__tree {
   min-height: 0;
   overflow: auto;
@@ -3146,6 +3141,8 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   display: flex;
   min-height: 0;
   flex: 1 1 0;
+  /* The panes' one empty pattern: the mark over its line. */
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: var(--oct-space-2);
@@ -3168,6 +3165,22 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 .code-files-viewer__frame[data-tree="closed"] > .code-files-viewer__tree {
   display: none;
+}
+
+/* The checkout cannot be read and no file is open: there is no tree to browse
+   and no file to choose, so the pane is the one state, in its middle. The
+   split drew "Choose a file to open it here." beside "Code checkout is
+   unavailable.", under a tab row with nothing in it. */
+.code-files-viewer[data-unavailable="true"] > .code-files-viewer__strip,
+.code-files-viewer[data-unavailable="true"] .code-files-viewer__main {
+  display: none;
+}
+
+.code-files-viewer[data-unavailable="true"] .code-files-viewer__tree {
+  display: flex;
+  width: auto;
+  flex: 1 1 0;
+  box-shadow: none;
 }
 
 .code-files-viewer__tree .code-file-explorer-panel {
