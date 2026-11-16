@@ -1591,6 +1591,71 @@ describe("a provider runtime under Bubblewrap", () => {
   });
 });
 
+describe("a Linux Chat or Plan capsule that admits processes", () => {
+  it("starts a process but refuses every write outside its private temp and the runtime's state", (context) => {
+    if (process.platform !== "linux" || !canRunHostBwrap()) {
+      if (process.env.OCTANT_REQUIRE_LINUX_ISOLATION === "1") {
+        throw new Error(`Bubblewrap is required at ${DEFAULT_BWRAP_PATH} but cannot run.`);
+      }
+      context.skip("needs a runnable Bubblewrap on Linux");
+    }
+    const { root, boundRoot, temporaryDirectory } = fixture();
+    const runtimeState = join(root, "runtime-state");
+    mkdirSync(runtimeState);
+    writeFileSync(join(boundRoot, "README.md"), "checkout");
+    // The flags a Linux Chat or Plan launch passes once its jail admits
+    // processes: the checkout read-only, processes allowed, the runtime's own
+    // state folder its one writable root beside the private temp.
+    const launch = buildBubblewrapLaunch({
+      executable: "/bin/sh",
+      args: [
+        "-c",
+        [
+          'attempt() { if (echo x > "$1") 2>/dev/null; then echo "wrote:$2"; else echo "refused:$2"; fi; }',
+          'attempt "$1/README.md" checkout',
+          'attempt "$1/new-file" checkout-new',
+          'attempt "$2/scratch" temp',
+          'attempt "$3/state" state',
+          "attempt /etc/octant-plan-probe system",
+          "attempt /tmp/octant-plan-probe shared-temp",
+          'if /bin/cat "$1/README.md" >/dev/null && /bin/true; then echo started; else echo refused:process; fi',
+        ].join("\n"),
+        "sh",
+        boundRoot,
+        temporaryDirectory,
+        runtimeState,
+      ],
+      boundRoot,
+      temporaryDirectory,
+      additionalWriteRoots: [runtimeState],
+      readRoots: [boundRoot, temporaryDirectory, runtimeState],
+      networkEgress: "none",
+      writeBoundRoot: false,
+      allowProcessExec: true,
+      allowProcessFork: true,
+      allowFileReadStar: true,
+    });
+    expect(launch.args).not.toContain("--seccomp");
+    expect(launch.args).toContain("--cap-drop");
+    const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+    expect(result.stderr).not.toContain("bwrap:");
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim().split("\n")).toEqual([
+      "refused:checkout",
+      "refused:checkout-new",
+      "wrote:temp",
+      "wrote:state",
+      "refused:system",
+      // The capsule's own `/tmp` is a private tmpfs, never the host's.
+      "wrote:shared-temp",
+      "started",
+    ]);
+    expect(readFileSync(join(boundRoot, "README.md"), "utf8")).toBe("checkout");
+    expect(existsSync(join(boundRoot, "new-file"))).toBe(false);
+    expect(existsSync("/tmp/octant-plan-probe")).toBe(false);
+  });
+});
+
 function hasFlagValue(args: ReadonlyArray<string>, flag: string, value: string): boolean {
   for (const [index, arg] of args.entries()) {
     if (arg === flag && args[index + 1] === value) return true;

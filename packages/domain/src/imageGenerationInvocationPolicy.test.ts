@@ -193,6 +193,17 @@ describe("an agent's image generation before anyone is asked", () => {
     });
   });
 
+  it("asks at Full access again once the person chose Ask again", () => {
+    expect(
+      imageGenerationWithoutAsking({
+        profiles: two,
+        kept: undefined,
+        fullAccess: true,
+        askAgain: true,
+      }),
+    ).toEqual({ kind: "ask", keptUnavailable: false });
+  });
+
   it("generates at Full access on the profile Settings names, else the first ready, and asks below it", () => {
     expect(
       imageGenerationWithoutAsking({ profiles: two, kept: undefined, fullAccess: true }),

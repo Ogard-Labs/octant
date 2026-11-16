@@ -4101,7 +4101,9 @@ describe("Code tool families", () => {
     // minutes), one more digit.
     // The page-tools and page-tool-call operations and the call's arguments
     // added about 60 bytes; what a page declares and who is asked is in help.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(7_083);
+    // The Browser wait's maximum became the Settings limit, up to 3600000 (an
+    // hour), one more digit.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(7_084);
   });
 
   it.each([

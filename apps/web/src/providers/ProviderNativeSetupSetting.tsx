@@ -105,7 +105,9 @@ export interface ProviderOwnMemorySettingProps {
  * The person's switch for one Claude Code or Codex account's own memory, on
  * by default and apart from "Run as itself": that switch and Full access never
  * turn memory on once the person turned it off. The text says what Octant does
- * not control while it is on, and where it stays off. Only the host's own person may
+ * not control while it is on, and what it may do in Plan and Chat: Claude Code
+ * reads its memory there and cannot change it, and Codex, which writes its
+ * memory in the background, keeps it off there. Only the host's own person may
  * change it, at a window on this host or on a device they paired (the server
  * refuses every other device).
  */
@@ -118,7 +120,10 @@ export function ProviderOwnMemorySetting(props: ProviderOwnMemorySettingProps) {
         <>
           Lets {name} keep and use its own memory in this account’s Work and Code threads, as in{" "}
           {name} itself. On by default. {name} decides what it remembers and carries it across
-          Projects; Octant does not show, journal, or clear it. It stays off in Plan and in Chat.
+          Projects; Octant does not show, journal, or clear it.{" "}
+          {props.instance.driverKind === "claude"
+            ? "In Plan and in Chat it reads its memory and cannot change it."
+            : "It stays off in Plan and in Chat, because it writes its memory in the background."}{" "}
           Octant’s Project memory and its memory of you work with this off. {name}’s telemetry and
           self-update stay off either way.
         </>

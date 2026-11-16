@@ -79,6 +79,8 @@ export interface ImageAgentToolPort {
   }) => Promise<ImageGenerationOfferOutcome>;
   /** The choice the person said to keep using without asking, for the thread's Project. */
   readonly remembered: () => ImageGenerationChoice | undefined;
+  /** The person chose Ask again, so Full access asks too. */
+  readonly asksAgain?: () => boolean;
   readonly forget: () => void | Promise<void>;
   /** Whether the turn's thread runs at Full access now; absent in Chat, which has no such level. */
   readonly fullAccess?: () => boolean;
@@ -203,6 +205,7 @@ export function createImageAgentTools(options: {
         profiles,
         kept: options.port.remembered(),
         fullAccess: options.port.fullAccess?.() === true,
+        askAgain: options.port.asksAgain?.() === true,
         defaultProfileInstanceId: options.port.defaultProfileInstanceId?.(),
       });
       let choice: ImageGenerationChoice | undefined;
@@ -503,7 +506,7 @@ export function createThreadImageAgentTools(input: {
   readonly threadKind: "chat-thread" | "work-thread" | "code-thread";
   readonly scopeId: ImageGenerationScopeId;
   readonly offers: Pick<ImageGenerationOfferService, "offer">;
-  readonly kept: Pick<KeptImageGenerationChoices, "remembered" | "forget">;
+  readonly kept: Pick<KeptImageGenerationChoices, "remembered" | "forget" | "asksAgain">;
   /** The host runs this turn as itself: a routine, a goal loop, a resume. */
   readonly unattended?: boolean;
   /** Whether the turn's thread runs at Full access now; Work and Code only. */
@@ -547,6 +550,7 @@ export function createThreadImageAgentTools(input: {
         });
       },
       remembered: () => input.kept.remembered(scope),
+      asksAgain: () => input.kept.asksAgain(scope),
       forget: () => input.kept.forget(scope),
       ...(input.fullAccess === undefined ? {} : { fullAccess: input.fullAccess }),
       ...(input.defaultProfileInstanceId === undefined

@@ -335,6 +335,11 @@ describe("Project creation and lifecycle", () => {
       const dropped = changeProjectImageGenerationChoice(kept, undefined, updatedAt);
       expect(dropped.version).toBe(3);
       expect("imageGenerationChoice" in dropped).toBe(false);
+      // Dropping is the person's Ask again; keeping a choice again clears it.
+      expect(dropped.imageGenerationAskAgain).toBe(true);
+      expect(
+        "imageGenerationAskAgain" in changeProjectImageGenerationChoice(dropped, choice, updatedAt),
+      ).toBe(false);
       expect(() => changeProjectImageGenerationChoice(project, undefined, updatedAt)).toThrow(
         ProjectPolicyRejected,
       );
