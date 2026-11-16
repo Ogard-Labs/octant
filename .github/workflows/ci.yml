@@ -169,7 +169,7 @@ jobs:
         shell: pwsh
         run: |
           $env:OCTANT_FAKE_CODEX_EXE = "$env:RUNNER_TEMP/fake-codex/codex.exe"
-          bun run test src/process/windowsProcessTree.test.ts src/code/terminalProcessPort.windows.test.ts src/code/terminalShell.test.ts src/harness/windowsFullAccessShell.test.ts src/providers/codexProcess.windows.test.ts src/process/nodeOwnedProcessReceipt.windows.test.ts
+          bun run test src/process/windowsProcessTree.test.ts src/code/terminalProcessPort.windows.test.ts src/code/terminalShell.test.ts src/harness/windowsFullAccessShell.test.ts src/providers/codexProcess.windows.test.ts src/process/nodeOwnedProcessReceipt.windows.test.ts --maxWorkers=1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   # The self-hostable share service (apps/share) ships as a Docker image. Build
