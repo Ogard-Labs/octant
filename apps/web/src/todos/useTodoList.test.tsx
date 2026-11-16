@@ -33,4 +33,33 @@ describe("a list on another computer", () => {
     await waitFor(() => expect(read.mock.calls.length).toBeGreaterThan(previous));
     unmount();
   });
+  it("keeps the new list when an old host answers after a switch", async () => {
+    const other = decodeTodoListView({
+      kind: "todo-list",
+      hostId: "22222222-2222-4222-8222-222222222222",
+      todos: [],
+    });
+    let resolveOld: ((result: typeof view) => void) | undefined;
+    const first = {
+      read: vi.fn(
+        () =>
+          new Promise<typeof view>((resolve) => {
+            resolveOld = resolve;
+          }),
+      ),
+      change: vi.fn(async () => view),
+    };
+    const second = { read: vi.fn(async () => other), change: vi.fn(async () => other) };
+    const { result, rerender } = renderHook(
+      ({ client, key }) => useTodoList(client, undefined, { key }),
+      { initialProps: { client: first, key: "first" } },
+    );
+    await waitFor(() => expect(first.read).toHaveBeenCalled());
+    rerender({ client: second, key: "second" });
+    await waitFor(() => expect(result.current.read).toEqual({ status: "ready", view: other }));
+    await act(async () => {
+      resolveOld?.(view);
+    });
+    expect(result.current.read).toEqual({ status: "ready", view: other });
+  });
 });

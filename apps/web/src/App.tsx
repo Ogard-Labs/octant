@@ -2888,12 +2888,17 @@ function LaunchedShell(
   useNewTodoShortcut(openTodoQuickAdd);
   const todoThreadRows = useMemo(
     () =>
-      todoThreadStates([
+      todoThreadStates(todoThisHostId, [
         { mode: "chat", rows: chatController.navigation },
         { mode: "work", rows: workNavigation.navigation },
         { mode: "code", rows: codeController.navigation },
       ]),
-    [chatController.navigation, workNavigation.navigation, codeController.navigation],
+    [
+      todoThisHostId,
+      chatController.navigation,
+      workNavigation.navigation,
+      codeController.navigation,
+    ],
   );
   const todosPage: TodosPageProps = {
     list: todoList,

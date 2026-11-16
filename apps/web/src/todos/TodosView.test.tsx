@@ -296,7 +296,7 @@ describe("starting from a to-do", () => {
       thread: { hostId: HOST, threadId: THREAD, mode: "code" },
     });
     const done = new Map([
-      [`code:${THREAD}`, { phase: "done" as const, label: "Done", title: "Ship the fix" }],
+      [`${HOST}:code:${THREAD}`, { phase: "done" as const, label: "Done", title: "Ship the fix" }],
     ]);
     const start = startProps({ threadStates: done });
     render(<Page client={host.client} start={start} />);

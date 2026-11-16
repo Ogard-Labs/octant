@@ -81,11 +81,14 @@ export function useTodoList(
     async (signal: AbortSignal) => {
       if (client === undefined || unreachable !== undefined) return;
       const before = changes.current;
+      const readFrom = generation.current;
       try {
         const view = await client.read(signal);
-        if (changes.current === before) setRead({ status: "ready", view });
+        if (!signal.aborted && generation.current === readFrom && changes.current === before) {
+          setRead({ status: "ready", view });
+        }
       } catch (error) {
-        if (signal.aborted) return;
+        if (signal.aborted || generation.current !== readFrom) return;
         const message = messageOf(error, "The to-do list could not be read.");
         setRead((current) =>
           current.status === "loading"
