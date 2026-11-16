@@ -243,11 +243,21 @@ the
 opt-in "Use my AWS profile", off by default, which reads the person's existing
 cloud profile in place of the portal sign-in (maintainer request, 2026-11-12).
 Built: a local desktop window's card shows "Sign in with a code" beside the
-terminal command, and a paired or remote client keeps the command alone. Not
-built yet: "Use my AWS profile"; no cloud profile is read. Decided
-(maintainer decision, 2026-11-16; designed, not built): the profile read is to
-be built and long-lived access keys allowed with a warning, under
-[Provider reach Octant no longer narrows](../architecture.md#security-and-authority). Add endpoint's Amazon Bedrock card opens its
+terminal command, and a paired or remote client keeps the command alone.
+Built (maintainer decision, 2026-11-16, under
+[Provider reach Octant no longer narrows](../architecture.md#security-and-authority)):
+when the endpoint is signed out, the detail page's Sign-in section also offers
+"Use my AWS profile" (a profile name and Connect profile) and long-lived
+access keys (Access key ID, Secret access key and Connect keys) beneath a
+warning that such keys work until someone revokes them and that a profile
+with single sign-on is preferred. Only a window on this host connects
+either, after the sign-in terms were accepted once. The host's credential
+broker reads the profile in place on each renewal as the AWS CLI does
+(shared-file keys, the token `aws sso login` cached, `credential_process`)
+and keeps the key pair; the server stores only the pointer, the journal
+names only the reference, and a refusal names its cause (no such profile,
+no current single sign-on session, a `credential_process` that printed no
+credentials, or a profile that only assumes a role, which is not read yet). Add endpoint's Amazon Bedrock card opens its
 own Connect: Name, Region (where the models run), Access portal, Portal
 region, Account ID, Role (the permission set), and Model IDs (1 to 64, since
 Bedrock lists none a role may use), each with a one-line hint, and no key or

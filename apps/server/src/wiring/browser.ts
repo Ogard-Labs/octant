@@ -766,7 +766,8 @@ export function wireBrowser(deps: BrowserDependencies) {
         )
           return undefined;
         if (mode === "work") {
-          // Work has no scoped script permission, so only its Full access admits one.
+          // Below Full access the tool asks the one-use permission before it
+          // dispatches; the service admits that only with its live answer.
           const work = workThreadProjection.read(decodeWorkThreadId(String(threadId)));
           return work?.lifecycle === "active"
             ? workThreadAccessOf(work.access).executionPolicy

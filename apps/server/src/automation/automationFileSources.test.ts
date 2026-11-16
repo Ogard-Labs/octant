@@ -882,6 +882,7 @@ describe("file input reconciliation on the host routine owner", () => {
             host.store.appendDefinitionLifecycleChanged(input),
           appendRunCreated: (input) => host.store.appendRunCreated(input),
           appendRunCancellation: (input) => host.store.appendRunCancellation(input),
+          appendFileSourceWindowChanged: (input) => host.store.appendFileSourceWindowChanged(input),
           appendOccurrenceLedger: () => {
             throw new Error("Injected re-arm ledger interruption");
           },

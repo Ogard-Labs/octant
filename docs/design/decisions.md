@@ -47,7 +47,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Context and usage](#context-and-usage)                                               | 10        | 9       | 1            | 0                   |
 | [Native harness](#native-harness)                                                     | 7         | 5       | 2            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
-| [Authority and approvals](#authority-and-approvals)                                   | 8         | 6       | 2            | 0                   |
+| [Authority and approvals](#authority-and-approvals)                                   | 8         | 7       | 1            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 16        | 9       | 6            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 9         | 6       | 3            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 12        | 5       | 7            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **280**   | **159** | **111**      | **10**              |
+| **All areas**                                                                         | **280**   | **160** | **110**      | **10**              |
 
 ## Principles and hard lines
 
@@ -421,9 +421,9 @@ A person who moves from a provider's own CLI to Octant keeps every workflow that
 - Below Full access, reading outside content still marks the thread but no longer makes a network MCP server or every Computer action ask again, delegation ask once, or a pull-request comment or review reply ask; Strict keeps those asks.
 - At Full access with several image profiles ready and no kept choice, the image is made on a default profile instead of asking; "Ask again" still brings the card back. Built.
 - A launch waiting on the host's resource queue keeps waiting instead of being refused after 30 minutes. Built.
-- Work below Full access gets Code's one-use Browser page-script permission.
-- `octant agent` takes an explicit per-run Full access flag the person sets, for that run's thread alone; another agent's `octant agent mcp` call still cannot choose it.
-- An extra folder may be the home folder behind a warning; credential folders stay protected and Strict refuses it.
+- Work below Full access gets Code's one-use Browser page-script permission. Built: Work's Browser tool asks through the same function Code's does; `oneUsePermission` is where Strict will keep Work refused.
+- `octant agent` takes an explicit per-run Full access flag the person sets, for that run's thread alone; another agent's `octant agent mcp` call still cannot choose it. Built: `octant agent --full-access` journals `fullAccessRunFlag` on the new thread and saves nothing on the Project; the host refuses the flag from anything but a window on this host.
+- An extra folder may be the home folder behind a warning; credential folders stay protected and Strict refuses it. Built: the host answers a home folder with the warning and a fresh single-use receipt for the same folder and window, and only a confirmed resend adds it.
 - The stalled-turn limit defaults to Off at Full access and stays 30 minutes below it.
 - Opt-in extras: a per-person list of provider tools to block, and in Strict a notice saying what was withheld.
 - Kept: read-only Plan, Chat with no folder or shell, outside folders asking below Full access, refused secret questions and unjournaled secrets, Run as itself off keeping web tools off, and never handing one provider another's credentials.
@@ -663,7 +663,7 @@ Status: Built. Since: —. Detail: [Architecture: Process topology](../architect
 Another agent on the host's machine starts and follows Octant threads through `octant agent mcp`, a stdio MCP server, or the `octant agent` command line. Both are ordinary local clients under the bridge secret, so the host keeps every authority decision.
 
 - `start_work` takes a prompt and an absolute folder or a Project name; the folder's Project decides Code or Work, and none means Chat. `send_message`, `read_thread`, `answer_question`, `stop_turn`, `list_projects`, `add_project`, `list_threads` and `list_waiting` (everything on the person's Needs you list) follow and continue the work.
-- The caller is not the person: the server never answers an approval or other request listed for the person, never starts a thread at Full access (the person is to get an explicit per-run Full access flag on `octant agent` under [Octant adds no restrictions of its own unless Strict is on](#octant-adds-no-restrictions-of-its-own-unless-strict-is-on); designed, not built), and adds a folder as a Project only when the call says the person asked to work there.
+- The caller is not the person: the server never answers an approval or other request listed for the person, never starts a thread at Full access (the person's own per-run flag, `octant agent --full-access`, does, under [Octant adds no restrictions of its own unless Strict is on](#octant-adds-no-restrictions-of-its-own-unless-strict-is-on); built), and adds a folder as a Project only when the call says the person asked to work there.
 - Each tool call opens its own window authority and revokes it when the call ends; a Chat send keeps its window until the send answers, and a turn keeps running after the window that started it is gone.
 - `octant agent --detach` starts a Work or Code turn and returns once the host lists it; `octant agent status <thread>` reads where it got to and what waits on the person.
 - Remote callers have no path here; a scoped grant for a bot on another machine would be its own decision.
@@ -1000,7 +1000,7 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 A Work or Code Project has one main folder plus extra folders the person adds; each gets the same access at the task's level. New tasks choose a server-issued working-folder identity and relative subdirectory at creation. Code Git and checkouts retain their own root.
 
 - Only a person adds or removes an extra folder, through a folder-picker receipt; each change is journaled with who and when and replays, and a Project made before the field existed has none.
-- An extra folder is never the home folder (to be allowed behind a warning outside Strict, credential folders still protected, under [Octant adds no restrictions of its own unless Strict is on](#octant-adds-no-restrictions-of-its-own-unless-strict-is-on); designed, not built) or above it, a system or credential folder, the main folder, or inside or around the main folder or another extra folder; a Project has at most 16.
+- An extra folder is the home folder only once the person confirms its warning (credential folders still protected, under [Octant adds no restrictions of its own unless Strict is on](#octant-adds-no-restrictions-of-its-own-unless-strict-is-on); built), and never a folder above it, a system or credential folder, the main folder, or inside or around the main folder or another extra folder (the confirmed home folder may hold them); a Project has at most 16.
 - The OS profiles, the provider sandboxes and approval scopes, the Octant Harness file tools and Octant Shield's fast read and edit rules grant an extra folder exactly what they grant the main folder; Plan reads it without writing, and Full access stays unwrapped.
 - Each Work and Code turn names the extra folders to the agent.
 - Worktrees, checkouts and Git stay in the main folder; an extra folder is a plain folder. A Project terminal and a saved Project action start in the main folder by default and in any folder the Project lists when the person picks one; the host refuses any other path, and the terminal binds every listed folder like the main one. A Code thread's terminal binds the same folders, and its start command may name a listed folder to start in.
@@ -1558,7 +1558,7 @@ Status: Partly built. Since: —; agent images in every mode 2026-11-07. Detail:
 Octant stops narrowing three kinds of provider reach that the provider itself allows (maintainer decision, 2026-11-16).
 
 - Ollama: a local-network or hosted address is allowed, and plain HTTP to a private-network address is allowed with a warning; a public address still needs HTTPS. Built: the host judges the address from its literal host (loopback, a private or overlay-network range, or an mDNS `.local` name), and Add endpoint shows the warning.
-- Bedrock request signing: the designed "Use my AWS profile" is built, and long-lived access keys are allowed with a warning. Not built yet.
+- Bedrock request signing: the designed "Use my AWS profile" is built, and long-lived access keys are allowed with a warning. Built: the credential broker reads a named profile in place as the AWS CLI does (shared-file keys, the single sign-on token `aws sso login` cached, and `credential_process`) and keeps an entered key pair; Bedrock's sign-in panel offers both at a window on this host, the keys behind a warning, and the server stores only the pointer and journals only the reference. Not built yet: a profile that only assumes a role (`role_arn` with `source_profile`, or web identity) is refused as unsupported.
 - Version pins: at Full access a release newer than the one a pin was reviewed against is offered as "unverified" instead of losing the pinned features (Kimi Code's command inventory, OpenCode's Octant tools, an ACP probe's claims); below Full access the pin holds.
 - Built: a Kimi Code release whose command inventory differs from the reviewed one is offered as unverified (the runtime card names its new commands), refused below Full access, and run with its listed commands at Full access. OpenCode's Octant tools were already offered at Full access on any release that accepts their declaration, reported as `mixed`.
 - Not built yet: Bedrock request signing (above), and an ACP probe's exact-release claims (usage, compaction, file review, forms, warm reuse, unadvertised HTTP tools) at Full access, which the probe reports for every level and would need a Full access value of their own.
@@ -2045,11 +2045,11 @@ Octant's fixed limits that protect no hard line become settings, with today's va
 - The message-wake bounds a thread outside a coordinator takes (30 wakes an hour, 10 rounds) are settings for every thread; one wake turn at a time holds because a thread runs one turn at a time.
 - The coordinators a Code Project may hold are a setting (default 4), and at Full access a coordinator's own file, shell and Git actions follow the level instead of Plan's read-only gate.
 - A pull-request watch's ten wakes and three days, Auto-fix's three attempts, a turn's three thread messages, a Browser wait's 10 minutes (up to an hour) and a child run's `wait` limit (120 seconds, up to an hour) are settings.
-- A file routine's 64-run activity window can be cleared or raised.
+- A file routine's 64-run activity window can be cleared or raised. Built: the person raises it up to 1,024 runs or clears it on the routine's detail, from a window on this host or a device its person paired; each change is journaled on the routine (`automation-file-source-window-changed@1`) with the whole resulting checkpoint, so replay rebuilds the same window and overflow. A clear is refused while any run it holds, or the routine's current run, is active, and the input then needs one quiet check before an arrival counts again.
 - A setting, off by default, "Start agent-created routines active at Full access", starts a routine an agent creates at Full access enabled instead of paused.
-- Built: every limit above but the routine window is a host setting in Settings › Permissions, journaled with the host's other settings and changed at a local window or a device the host's own person paired; the server reads each one where it applies. Not built yet: the file routine window keeps its fixed 64 runs, because a raised or cleared window must be journaled with the routine so a replay rebuilds the same overflow.
+- Built: every limit above but the routine window is a host setting in Settings › Permissions, journaled with the host's other settings and changed at a local window or a device the host's own person paired; the server reads each one where it applies.
 
-Status: Partly built. Since: 2026-11-16. Detail: [Architecture: Security and authority, Octant's own limits become settings](../architecture.md#security-and-authority).
+Status: Built. Since: 2026-11-16. Detail: [Architecture: Security and authority, Octant's own limits become settings](../architecture.md#security-and-authority).
 
 ## Sandbox and confinement
 

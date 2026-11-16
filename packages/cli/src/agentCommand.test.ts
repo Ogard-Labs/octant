@@ -547,6 +547,17 @@ describe("octant agent command line", () => {
     // The sandbox is refused without Full access rather than ignored.
     expect(resolveAgentCliCommand("agent", [], { sandbox: true })).toBeUndefined();
     expect(resolveAgentCliCommand("agent", [], { access: "auto", sandbox: true })).toBeUndefined();
+    // The per-run flag starts this run's new thread at Full access, and only that.
+    expect(resolveAgentCliCommand("agent", [], { "full-access": true })).toMatchObject({
+      access: "full-access",
+      fullAccessRun: true,
+    });
+    expect(
+      resolveAgentCliCommand("agent", [], { "full-access": true, access: "plan" }),
+    ).toBeUndefined();
+    expect(
+      resolveAgentCliCommand("agent", [], { "full-access": true, last: true }),
+    ).toBeUndefined();
     expect(resolveAgentCliCommand("agent", [], { theme: "neon" })).toBeUndefined();
     expect(resolveAgentCliCommand("agent", [], { theme: "octant", plain: true })).toMatchObject({
       theme: "octant",

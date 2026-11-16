@@ -51,6 +51,48 @@ describe("file input status and person review", () => {
     expect(screen.queryByRole("button", { name: "Review and re-arm" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Check input status" })).toBeEnabled();
   });
+  it("raises or clears the routine's activity history with the exact version it shows", async () => {
+    const execute = vi.fn<AutomationCenterController["execute"]>(async () => ({
+      kind: "automation-updated",
+      automation: definition,
+    }));
+    render(
+      <AutomationFileSourceStatus
+        automation={definition}
+        source={{
+          ...held,
+          phase: "needs-rearm",
+          reason: "activity-history-limit",
+          heldFiles: [],
+          activityWindowRuns: 64,
+          activityWindowLimit: 64,
+        }}
+        execute={execute}
+        refresh={() => undefined}
+      />,
+    );
+    expect(screen.getByText(/64 of 64 runs held/)).toBeVisible();
+    const raise = screen.getByRole("button", { name: "Raise limit" });
+    expect(raise).toBeDisabled();
+    const limit = screen.getByLabelText(/Runs to hold/);
+    await userEvent.clear(limit);
+    await userEvent.type(limit, "256");
+    await userEvent.click(raise);
+    expect(execute).toHaveBeenLastCalledWith(
+      {
+        kind: "change-file-automation-activity-window",
+        automationId: definition.id,
+        expectedVersion: definition.version,
+        change: { kind: "raise", activityWindowLimit: 256 },
+      },
+      "Activity history raised.",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Clear history" }));
+    expect(execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({ change: { kind: "clear" } }),
+      "Activity history cleared.",
+    );
+  });
   it("shows the held names and finite allowance before an exact explicit choice, with keyboard close", async () => {
     const execute = vi.fn<AutomationCenterController["execute"]>(async () => ({
       kind: "automation-resumed",
