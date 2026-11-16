@@ -7,11 +7,7 @@ import type { OctantInstructionsBlock } from "../octantInstructions/octantInstru
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
-import {
-  describedImageText,
-  providerCommandRefusal,
-  validateQuestionnaireAnswer,
-} from "@octant/domain";
+import { describedImageText, validateQuestionnaireAnswer } from "@octant/domain";
 import type { TurnImage, TurnImagesDescription } from "../harness/imageDescription";
 import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "./sideChatReturn";
 import {
@@ -3004,14 +3000,6 @@ export class ChatService {
     const accepted = await this.#withTurnAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
       this.#admitHarnessTurn(thread);
-      const commandRefusal = providerCommandRefusal({
-        prompt: command.prompt,
-        commands: this.#providerRuntimeRegistry?.observedState(thread.providerInstanceId)?.commands,
-        mode: "chat",
-      });
-      if (commandRefusal !== undefined) {
-        throw new ChatServiceError({ category: "unsupported", message: commandRefusal });
-      }
       if (command.submissionId !== undefined) {
         // Match on submissionId alone. A turn whose only attempt ended
         // failed, cancelled, or interrupted is still the turn this
