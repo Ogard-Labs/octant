@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   CodeEvidenceBatchResponse,
   CodeOperationResult,
+  CodeSearchResult,
   decodeHostAnswer,
 } from "@octant/contracts";
 import { parseUnifiedDiff } from "@octant/domain";
@@ -22,6 +23,36 @@ export type AgentDiff =
       readonly missingPaths: readonly string[];
     }
   | { readonly kind: "refused"; readonly message: string };
+
+/**
+ * Paths in the checkout the host binds to a Code thread whose names contain
+ * `query`. The host resolves the checkout, so a thread on a managed worktree
+ * gets its worktree's files, not the Project root's; an empty or refused
+ * search offers nothing rather than another checkout's files.
+ */
+export async function searchAgentCheckoutPaths(
+  session: OpenedLocalControlSession,
+  threadId: string,
+  checkoutId: string,
+  query: string,
+): Promise<ReadonlyArray<string>> {
+  if (query.length === 0) return [];
+  try {
+    const search = new URLSearchParams({ threadId, checkoutId, scope: "path", query });
+    const response = await session.send({
+      path: `/api/code/files/search?${search.toString()}`,
+      method: "GET",
+    });
+    if (response.status !== 200) return [];
+    const result = decodeHostAnswer(CodeSearchResult)(response.body);
+    if (result.status !== "searched") return [];
+    return result.search.matches
+      .filter((match) => match.folder === undefined)
+      .map((match) => String(match.path));
+  } catch {
+    return [];
+  }
+}
 
 /** Observe the checkout through the host, then resolve the evidence it returned. */
 export async function readAgentDiff(

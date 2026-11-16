@@ -85,6 +85,8 @@ export interface AgentThreadSnapshot {
   readonly version: number;
   /** The checkout bound to a Code thread, for host-authorized review. */
   readonly checkoutId?: string;
+  /** Its kind: a managed worktree is not the Project root's folder. */
+  readonly checkoutKind?: string;
   readonly projectId?: string;
   readonly access?: string;
   readonly modelOptionValues?: Readonly<Record<string, string>>;
@@ -491,6 +493,7 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
         title: current.thread.title,
         projectId: String(current.thread.projectId),
         checkoutId: String(current.checkout.id),
+        checkoutKind: current.checkout.kind,
         providerInstanceId: String(current.thread.providerInstanceId),
         modelId: String(current.thread.modelId),
         version: current.thread.version,

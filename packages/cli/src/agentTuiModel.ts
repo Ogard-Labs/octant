@@ -6,6 +6,7 @@ import type {
 } from "@octant/contracts";
 import { commandHostLines, readCommandHostNumbers } from "./agentHost";
 import type { AgentThreadSnapshot } from "./agentThread";
+import { isAbsolute, join } from "node:path";
 import { BUILT_IN_THEME_PRESET_IDS, resolveThemePresetTokens } from "@octant/theme";
 import {
   APPROVAL_OUTSIDE_CONTENT_REASON,
@@ -497,4 +498,30 @@ export function readTuiApprovalAnswer(
     else next.add(index);
   }
   return { kind: "tick", ticked: next };
+}
+
+/**
+ * The file an `@path` image mention attaches. An absolute path names its own
+ * file. A relative one is read from the Project root, which a managed
+ * worktree's folder is not: the host does not hand a worktree's image bytes
+ * back, so a relative image there is refused rather than read from the
+ * Project root's other version of it.
+ */
+export function mentionAttachmentPath(input: {
+  readonly path: string;
+  readonly filesRoot: string | undefined;
+  readonly checkoutKind: string | undefined;
+}):
+  | { readonly kind: "path"; readonly path: string }
+  | { readonly kind: "refused"; readonly message: string } {
+  if (isAbsolute(input.path)) return { kind: "path", path: input.path };
+  if (input.checkoutKind === "managed-worktree")
+    return {
+      kind: "refused",
+      message: `${input.path}: give the image's full path; this thread works in its own worktree.`,
+    };
+  return {
+    kind: "path",
+    path: input.filesRoot === undefined ? input.path : join(input.filesRoot, input.path),
+  };
 }

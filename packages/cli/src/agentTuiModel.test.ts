@@ -6,6 +6,7 @@ import {
   describeAgentGoalLedger,
   goalPanelPageSize,
   goalPanelRequest,
+  mentionAttachmentPath,
   approvalPanelHosts,
   APPROVAL_PANEL_HOST_ROWS,
   paletteFor,
@@ -470,5 +471,47 @@ describe("goal ledger", () => {
     expect(goalPanelRequest("", true)).toEqual({ kind: "close" });
     expect(goalPanelRequest("2", true)).toEqual({ kind: "page", number: 2 });
     expect(goalPanelRequest("later", false)).toBeUndefined();
+  });
+});
+
+describe("image mentions in the terminal composer", () => {
+  it("attaches an absolute path as written, whatever root the thread has", () => {
+    expect(
+      mentionAttachmentPath({
+        path: "/tmp/screenshot.png",
+        filesRoot: "/workspace/project",
+        checkoutKind: "existing-worktree",
+      }),
+    ).toEqual({ kind: "path", path: "/tmp/screenshot.png" });
+    expect(
+      mentionAttachmentPath({
+        path: "/tmp/screenshot.png",
+        filesRoot: undefined,
+        checkoutKind: "managed-worktree",
+      }),
+    ).toEqual({ kind: "path", path: "/tmp/screenshot.png" });
+  });
+
+  it("reads a relative path from the Project root", () => {
+    expect(
+      mentionAttachmentPath({
+        path: "docs/shot.png",
+        filesRoot: "/workspace/project",
+        checkoutKind: "existing-worktree",
+      }),
+    ).toEqual({ kind: "path", path: "/workspace/project/docs/shot.png" });
+  });
+
+  it("refuses a relative image in a managed worktree instead of reading the Project root's copy", () => {
+    expect(
+      mentionAttachmentPath({
+        path: "docs/shot.png",
+        filesRoot: "/workspace/project",
+        checkoutKind: "managed-worktree",
+      }),
+    ).toEqual({
+      kind: "refused",
+      message: "docs/shot.png: give the image's full path; this thread works in its own worktree.",
+    });
   });
 });

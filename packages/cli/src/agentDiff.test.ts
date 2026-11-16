@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readAgentDiff, selectAgentDiff } from "./agentDiff";
+import { readAgentDiff, searchAgentCheckoutPaths, selectAgentDiff } from "./agentDiff";
 import type { OpenedLocalControlSession } from "./localControl";
 
 const threadId = "00000000-0000-4000-8000-000000000001";
@@ -115,4 +115,58 @@ it("opens exactly the chosen file's host diff, including its headers", () => {
     expect(read.text).toContain("diff --git a/b.ts b/b.ts");
     expect(read.text).not.toContain("a/a.ts");
   }
+});
+
+describe("terminal file suggestions", () => {
+  it("suggests files from the checkout the host binds to the thread, not from a local folder", async () => {
+    const requests: string[] = [];
+    const session: OpenedLocalControlSession = {
+      kind: "opened",
+      windowId: "window",
+      close: async () => undefined,
+      send: async (request) => {
+        requests.push(`${request.method} ${request.path}`);
+        return {
+          status: 200,
+          body: {
+            status: "searched",
+            search: {
+              kind: "code-search",
+              threadId,
+              checkoutId,
+              scope: "path",
+              query: "ag",
+              matches: [
+                { scope: "path", fileId: contentId, path: "src/agent.ts" },
+                {
+                  scope: "path",
+                  fileId: "00000000-0000-4000-8000-000000000004",
+                  path: "agenda.md",
+                  folder: "/elsewhere/notes",
+                },
+              ],
+              truncated: false,
+              observedAt: "2026-11-16T12:00:00.000Z",
+            },
+          },
+        };
+      },
+    };
+    expect(await searchAgentCheckoutPaths(session, threadId, checkoutId, "ag")).toEqual([
+      "src/agent.ts",
+    ]);
+    expect(requests).toEqual([
+      `GET /api/code/files/search?threadId=${threadId}&checkoutId=${checkoutId}&scope=path&query=ag`,
+    ]);
+  });
+
+  it("offers nothing when the host refuses the search", async () => {
+    const session: OpenedLocalControlSession = {
+      kind: "opened",
+      windowId: "window",
+      close: async () => undefined,
+      send: async () => ({ status: 403, body: { category: "unauthorized", message: "No." } }),
+    };
+    expect(await searchAgentCheckoutPaths(session, threadId, checkoutId, "ag")).toEqual([]);
+  });
 });

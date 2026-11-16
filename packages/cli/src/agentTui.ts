@@ -91,13 +91,19 @@ import {
   type TuiToolLine,
   type TuiTranscriptEntry,
   approvalPanelOutsideContent,
+  mentionAttachmentPath,
 } from "./agentTuiModel";
 import { ProjectBootstrap, McpServerConnectionListing, decodeHostAnswer } from "@octant/contracts";
 import { agentTuiMark } from "./agentTuiMark";
 import { compactTextChunks, terminalMarkdownTables } from "./agentTuiMarkdown";
 import { agentTuiLayout } from "./agentTuiLayout";
 import type { OpenedLocalControlSession } from "./localControl";
-import { readAgentDiff, selectAgentDiff, type AgentDiff } from "./agentDiff";
+import {
+  readAgentDiff,
+  searchAgentCheckoutPaths,
+  selectAgentDiff,
+  type AgentDiff,
+} from "./agentDiff";
 
 export interface RunAgentTuiInput {
   readonly session: OpenedLocalControlSession;
@@ -243,7 +249,8 @@ class AgentScreen {
     | undefined;
   #files: ReadonlyArray<string> | undefined;
   #filesRoot: string | undefined = process.cwd();
-  #filesProjectId: string | undefined;
+  /** The Project and checkout the file cache and root belong to. */
+  #filesKey: string | undefined;
   #wasRunning = false;
   #pendingFollowUp:
     | { readonly suggestionId: string; readonly turnId: string; readonly prompt: string }
@@ -524,11 +531,14 @@ class AgentScreen {
     if (navigationFailed) this.#note = "Thread list unavailable; retrying.";
     else if (this.#note === "Thread list unavailable; retrying.") this.#note = "";
     this.#threads = navigation;
-    if (thread?.projectId !== this.#filesProjectId) {
-      this.#filesProjectId = thread?.projectId;
+    // A Code thread's checkout can change without its Project changing, and a
+    // managed worktree is not the Project root, so the cache follows both.
+    const filesKey = `${thread?.projectId ?? ""}\u0000${thread?.checkoutId ?? ""}`;
+    if (filesKey !== this.#filesKey) {
+      this.#filesKey = filesKey;
       this.#files = undefined;
       this.#filesRoot = thread?.mode === "chat" ? process.cwd() : undefined;
-      if (thread?.projectId !== undefined) {
+      if (thread?.projectId !== undefined && thread.checkoutKind !== "managed-worktree") {
         const projects = await this.#input.session.send({
           path: "/api/projects/bootstrap",
           method: "GET",
@@ -627,9 +637,18 @@ class AgentScreen {
         .map((thread) => `#${thread.title}`);
       this.#suggestions = { kind: "thread", items };
     } else {
-      if (this.#files === undefined)
-        this.#files = this.#filesRoot === undefined ? [] : await scanFiles(this.#filesRoot);
-      const items = this.#files
+      const thread = this.#thread;
+      const files =
+        thread?.mode === "code" && thread.checkoutId !== undefined
+          ? await searchAgentCheckoutPaths(
+              this.#input.session,
+              thread.id,
+              thread.checkoutId,
+              token[2] ?? "",
+            )
+          : (this.#files ??= this.#filesRoot === undefined ? [] : await scanFiles(this.#filesRoot));
+      if (this.#destroyed) return;
+      const items = files
         .filter((file) => file.toLowerCase().includes(needle))
         .slice(0, MAX_FILE_SUGGESTIONS)
         .map((file) => `@${file}`);
@@ -654,10 +673,19 @@ class AgentScreen {
       // Coding runtimes read source paths inside the bound Project. Images use
       // the mode's staged attachment route, as in the app composer.
       if (this.#port.mode !== "chat" && !attachmentMediaType(path)?.startsWith("image/")) continue;
+      const attached = mentionAttachmentPath({
+        path,
+        filesRoot: this.#filesRoot,
+        checkoutKind: this.#thread?.checkoutKind,
+      });
+      if (attached.kind === "refused") {
+        refused.push(attached.message);
+        continue;
+      }
       const uploaded = await uploadAgentAttachment(
         this.#input.session,
         this.#threadId,
-        this.#filesRoot === undefined ? path : join(this.#filesRoot, path),
+        attached.path,
         this.#port.mode,
       );
       if (uploaded.kind === "uploaded") attachmentIds.push(uploaded.attachmentId);
