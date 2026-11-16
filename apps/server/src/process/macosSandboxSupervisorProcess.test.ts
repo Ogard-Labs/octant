@@ -132,6 +132,63 @@ time.sleep(12)
       expect(normal.stdout).toBe("completed");
       expect(readdirSync(root).some((name) => name.endsWith(".scope"))).toBe(false);
 
+      const librarySource = join(root, "loader.c");
+      const library = join(root, "loader.dylib");
+      const payloadSource = join(root, "payload.c");
+      const payload = join(root, "payload");
+      const canary = join(root, "outside-profile");
+      writeFileSync(
+        librarySource,
+        `#include <fcntl.h>
+#include <stdlib.h>
+#include <unistd.h>
+__attribute__((constructor)) static void injected(void) {
+ const char *path=getenv("OCTANT_SCOPE_LOADER_CANARY");
+ if(path){int fd=open(path,O_WRONLY|O_CREAT,0600);if(fd>=0){write(fd,"escaped",7);close(fd);}}
+}`,
+      );
+      writeFileSync(payloadSource, "int main(void) { return 0; }\n");
+      execFileSync(
+        "/usr/bin/xcrun",
+        ["clang", "-Wall", "-Wextra", "-Werror", "-dynamiclib", "-o", library, librarySource],
+        { timeout: 15000 },
+      );
+      execFileSync(
+        "/usr/bin/xcrun",
+        ["clang", "-Wall", "-Wextra", "-Werror", "-o", payload, payloadSource],
+        { timeout: 15000 },
+      );
+      const loaderEnvironment = {
+        ...process.env,
+        DYLD_INSERT_LIBRARIES: library,
+        OCTANT_SCOPE_LOADER_CANARY: canary,
+      };
+      const control = spawnSync(payload, [], { cwd: root, env: loaderEnvironment, timeout: 5000 });
+      expect(control.status).toBe(0);
+      expect(existsSync(canary)).toBe(true);
+      rmSync(canary);
+      const loader = spawnSync(
+        executable,
+        [
+          "--run",
+          root,
+          "loader:epoch",
+          "--",
+          "/usr/bin/sandbox-exec",
+          "-p",
+          `(version 1)(allow default)(deny file-write* (literal "${canary}"))`,
+          payload,
+        ],
+        {
+          cwd: root,
+          timeout: 10000,
+          encoding: "utf8",
+          env: loaderEnvironment,
+        },
+      );
+      expect(loader.status, loader.stderr).toBe(0);
+      expect(existsSync(canary)).toBe(false);
+
       const previous = heartbeat(beat);
       const hostScript = `const {spawn}=require("node:child_process"); const fs=require("node:fs");
 const child=spawn(process.argv[1],["--run",process.argv[2],"host-death:epoch","--","/usr/bin/sandbox-exec","-p","(version 1)(allow default)","/usr/bin/python3",process.argv[3]],{cwd:process.argv[2],stdio:"ignore"});
