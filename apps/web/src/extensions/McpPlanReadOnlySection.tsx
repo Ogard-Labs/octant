@@ -177,7 +177,7 @@ export function McpPlanReadOnlySection(props: McpPlanReadOnlySectionProps) {
               ))}
             </ul>
           )}
-          <form className="endpoint-flow__form" onSubmit={(event) => void add(event)}>
+          <form className="endpoint-flow__form" noValidate onSubmit={(event) => void add(event)}>
             <div className="endpoint-flow__field">
               <label htmlFor={`${ids}-provider`}>Provider</label>
               <OctantSelectField

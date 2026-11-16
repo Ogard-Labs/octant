@@ -113,7 +113,14 @@ With the setup on, Claude Code starts with `settingSources: ["user"]` (plus
 and Plan. With its tool servers on (every level but Plan) it starts with
 `strictMcpConfig: false` in every Project, so the account's own MCP servers,
 its claude.ai connectors, and its plugins' servers start
-(maintainer decision, 2026-11-14). A Project's `.mcp.json` stays held until
+(maintainer decision, 2026-11-14). In Plan, with tool servers off, a session
+whose person marked some of the account's servers "Read-only — allowed in
+Plan" also starts with `strictMcpConfig: false` and `user`, under a flag
+`allowedMcpServers` list of those servers and Octant's own and
+`disableClaudeAiConnectors`, so only the marked servers start; Codex switches
+every unmarked server off by name in a Plan thread's config, and OpenCode's
+Plan launch carries only the marked servers
+([Plan and Chat tool parity](../architecture.md#security-and-authority)). A Project's `.mcp.json` stays held until
 the person trusts the Project: Claude Code 2.1.211 reads `.mcp.json` only
 while the `project` setting source is on, its home servers only while `user`
 is, and its per-folder servers only while `local` is (read from the bundled
