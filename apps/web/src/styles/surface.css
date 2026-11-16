@@ -534,6 +534,15 @@
   flex: 0 0 auto;
 }
 
+/* A draft's pane starts at the window's top with its header over its first
+   44px; Code Home's pane starts under the title band. The home column starts
+   one band lower in a draft, so choosing a Project on Code Home (which turns
+   it into a draft) leaves the question and the composer where they were.
+   Measured before: both rose 44px on the choice. */
+.workspace-pane[data-surface-kind="draft-thread"] .welcome:has(> .home-start) {
+  padding-top: calc(min(8vh, 64px) + var(--oct-title-rail-h));
+}
+
 .welcome__mark {
   margin-bottom: var(--oct-space-2);
   color: var(--octant-text-primary);

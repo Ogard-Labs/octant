@@ -969,9 +969,10 @@ file. Save remains the explicit disk write.
 ## Start-screen cards
 
 Every start screen shows one question and its composer. **New task**, in
-every mode, stops there, with the composer docked at the foot of the page.
-**Code Home**, where Code lands with nothing chosen, adds Code's prompt
-suggestions (at most four, on one line) and one calm list under the composer;
+Chat and Work, stops there, with the composer docked at the foot of the page.
+**Code Home**, where Code lands with nothing chosen and what a Code New task
+is, adds Code's prompt
+suggestions (four cards, on one line) and one calm list under the composer;
 Chat's and Work's home add the list too. No start screen has tabs or action
 tiles. These are the rules; each card's rows,
 wording, and reads are specified in [Start screen](start-screen.md).

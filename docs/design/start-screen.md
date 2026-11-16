@@ -53,13 +53,19 @@ a host whose setting is off has memory on.
 
 ### Layout
 
-There are two start screens. **New task**, in every mode, is the question in
+There are two start screens. **New task**, in Chat and Work, is the question in
 the middle of the page and the composer docked at its foot, and nothing else;
 Chat and Work add their starter chips only before the mode's first thread.
-**Code Home** is where Code lands with nothing chosen (the Code welcome tab):
-the question and the composer, then Code's prompt suggestions and
-[the list](#the-list). With those the page scrolls and the
-composer sits under the question. Switching to Code opens no draft of its own,
+**Code Home** is where Code lands with nothing chosen (the Code welcome tab)
+and what a Code New task is: the question and the composer, then Code's prompt
+suggestions and [the list](#the-list). With those the page scrolls and the
+composer sits under the question. A Code New task is the same page with its
+Project named in the question (maintainer request, 2026-11-16): as the bare
+question over a composer at the page's foot, choosing a Project on Code Home
+threw the composer down the page and left it empty. The question and the
+composer stand at one height in both, so the choice moves nothing (a draft's
+pane starts under its own header, so its column starts one title band lower).
+Switching to Code opens no draft of its own,
 and a New task draft left with no text or images counts as nothing chosen:
 switching to Code gives its pane back to Code Home, while a draft with text
 stays as New task. Neither screen has tabs or action tiles:
@@ -633,9 +639,10 @@ the fixed proposal text directly under them in the composer. Rendered review
 showed the question above a fixed proposal read as an invitation to write a
 different task.
 
-**New task**, in every mode, is the question and the composer and nothing
+**New task**, in Chat and Work, is the question and the composer and nothing
 else; Chat and Work add one row of outline starter chips only before the
-mode's first thread. **Code Home** is where Code lands with nothing chosen:
+mode's first thread. **Code Home** is where Code lands with nothing chosen,
+and a Code New task is the same page with its Project named:
 the same question and composer, then Code's prompt suggestions, the card area
 (the list and the cards, on by default), and Code's agent home
 (assigned work and Continue inside the list). There the page scrolls and the composer sits under

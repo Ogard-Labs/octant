@@ -4449,7 +4449,7 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
   });
 
-  it("lists the threads to continue on Code Home and leaves them off a new task", async () => {
+  it("lists the threads to continue on Code Home and keeps them under a Code new task", async () => {
     const user = userEvent.setup();
     const codeApi = codes();
     vi.mocked(codeApi.queryBoard).mockImplementation(async () => {
@@ -4493,8 +4493,11 @@ describe("App", () => {
     expect(
       await screen.findByRole("heading", { name: "What are we building today?" }),
     ).toBeVisible();
-    expect(screen.queryByRole("region", { name: "Continue" })).toBeNull();
-    expect(screen.queryByText("Ai slop callouts")).toBeNull();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Home" })).not.toHaveAttribute("aria-current"),
+    );
+    const kept = await screen.findByRole("region", { name: "Continue" }, { timeout: 4000 });
+    expect(within(kept).getByText("Ai slop callouts")).toBeVisible();
   });
 
   it("lands Code on Code Home again after a New task draft is left empty", async () => {
@@ -4510,13 +4513,17 @@ describe("App", () => {
     );
     const modes = () => within(screen.getByRole("group", { name: "Workspace mode" }));
 
+    // A Code draft is Code Home's page with a draft in its composer, so the
+    // rail's Home mark is what tells the two apart.
+    const home = () => screen.getByRole("button", { name: "Home" });
     await screen.findByRole("button", { name: "Customize" });
     await user.click(composeButton("New task"));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Customize" })).toBeNull());
+    await waitFor(() => expect(home()).not.toHaveAttribute("aria-current"));
 
     await user.click(modes().getByRole("button", { name: "Work" }));
     await user.click(modes().getByRole("button", { name: "Code" }));
 
+    await waitFor(() => expect(home()).toHaveAttribute("aria-current", "page"));
     expect(await screen.findByRole("button", { name: "Customize" })).toBeVisible();
   });
 
@@ -4535,8 +4542,11 @@ describe("App", () => {
     await screen.findByRole("button", { name: "Customize" });
     expect(screen.getByRole("button", { name: "Home" })).toHaveAttribute("aria-current", "page");
     await user.click(composeButton("New task"));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Customize" })).toBeNull());
-    expect(screen.getByRole("button", { name: "Home" })).not.toHaveAttribute("aria-current");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Home" })).not.toHaveAttribute("aria-current"),
+    );
+    // The draft keeps Code Home's list under its composer.
+    expect(await screen.findByRole("button", { name: "Customize" })).toBeVisible();
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Half a thought");
 
     await user.click(screen.getByRole("button", { name: "Home" }));
@@ -4751,7 +4761,8 @@ describe("App", () => {
         expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(""),
       );
       expect(screen.queryByText("feature/handed-by-start-a-fix")).toBeNull();
-      expect(screen.queryByRole("region", { name: "CI failures" })).toBeNull();
+      // The clean draft is Code Home's page again, list and all.
+      expect(screen.getByRole("region", { name: "CI failures" })).toBeVisible();
     },
   );
 

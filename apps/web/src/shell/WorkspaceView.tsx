@@ -1907,7 +1907,11 @@ function renderNonCodeTab(
           {...(props.onChangeCodeNewThreadWorkspace === undefined
             ? {}
             : { onChangeCodeNewThreadWorkspace: props.onChangeCodeNewThreadWorkspace })}
-          startPresentation={startPresentation}
+          // A Code draft is Code Home with its Project named: the composer
+          // under the question, the suggestions and the list. As the bare
+          // question over a composer at the page's foot, choosing a Project
+          // on Code Home threw the composer down the page and emptied it.
+          startPresentation={tab.mode === "code" ? "home" : startPresentation}
           {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
           {...(props.selectedCreateHostId === undefined
             ? {}
