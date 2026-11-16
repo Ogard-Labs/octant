@@ -3,6 +3,7 @@ import type { ProjectSummary } from "@octant/contracts/projects";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { homeRelativePath } from "../lib/homeRelativePath";
 import type { OctantHostBridge } from "../shell/hostBridge";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { FolderPicker } from "./FolderPicker";
@@ -177,31 +178,34 @@ export function ProjectFoldersSection(props: ProjectFoldersSectionProps) {
         </div>
       ) : null}
       {homeWarning === undefined ? null : (
-        <div className="project-folders__warning" role="alert">
-          <p>
-            <strong>Add your home folder?</strong> {homeWarning.warning}
-          </p>
-          <div className="project-folders__actions">
-            <OctantButton
-              disabled={pending}
-              onClick={() => void add(homeWarning.receiptId, true)}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Confirm
-            </OctantButton>
-            <OctantButton
-              disabled={pending}
-              onClick={() => setHomeWarning(undefined)}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              Cancel
-            </OctantButton>
-          </div>
-        </div>
+        <OctantAlert
+          action={
+            <div className="project-folders__actions">
+              <OctantButton
+                disabled={pending}
+                onClick={() => void add(homeWarning.receiptId, true)}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Confirm
+              </OctantButton>
+              <OctantButton
+                disabled={pending}
+                onClick={() => setHomeWarning(undefined)}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Cancel
+              </OctantButton>
+            </div>
+          }
+          title="Add your home folder?"
+          tone="warning"
+        >
+          {homeWarning.warning}
+        </OctantAlert>
       )}
       <p
         aria-live={failed ? "assertive" : "polite"}

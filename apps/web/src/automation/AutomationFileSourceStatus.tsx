@@ -5,6 +5,7 @@ import {
   type AutomationFileSourceSummary,
 } from "@octant/contracts";
 import { useEffect, useId, useRef, useState } from "react";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
@@ -406,7 +407,7 @@ function AutomationFileActivityWindow(props: {
         Clear only once this routine&apos;s runs and their cleanup are finished; it then watches
         again after one quiet check.
       </p>
-      {message === undefined ? null : <p role="alert">{message}</p>}
+      {message === undefined ? null : <OctantAlert tone="warning">{message}</OctantAlert>}
     </section>
   );
 }
