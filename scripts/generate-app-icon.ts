@@ -20,10 +20,11 @@ const CANVAS = 1024;
 /**
  * How much of the tile's width the aperture mark spans. At 0.54 the tile
  * matched its neighbours in the Dock but the mark sat in a wide black margin,
- * so the icon read as smaller than the apps beside it (maintainer request,
- * 2026-11-16).
+ * so the icon read as smaller than the apps beside it; 0.64 still read small
+ * in the Dock, because the mark is a ring and most of its box is empty
+ * (maintainer request, 2026-11-16, twice).
  */
-const MARK_SHARE = 0.64;
+const MARK_SHARE = 0.76;
 
 /** Apple's continuous corner is closer to a superellipse than to a circular arc. */
 function squirclePath(): string {
