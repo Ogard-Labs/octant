@@ -385,6 +385,11 @@ export class WorkRequestService {
         ? entry.request.detail.levelChange
         : undefined;
     if (levelChange !== undefined) {
+      // A stale answer changes nothing: the version is checked before the
+      // level moves, not only when the delivery is prepared.
+      if (entry.request.version !== command.expectedVersion) {
+        return failure("stale", "Work request version is stale.");
+      }
       const changed = this.#levelChanges?.change({
         threadId: entry.request.threadId,
         kind: levelChange.to === "plan" ? "enter-plan" : "exit-plan",
@@ -427,6 +432,16 @@ export class WorkRequestService {
           });
         }
       } catch {
+        // The provider never heard the answer, so the level moves back and the
+        // request is left as it was: a retry applies the change again and
+        // delivers it, rather than finding the thread already moved.
+        if (levelChange !== undefined) {
+          this.#levelChanges?.change({
+            threadId: entry.request.threadId,
+            kind: levelChange.to === "plan" ? "exit-plan" : "enter-plan",
+            actor: answeredBy,
+          });
+        }
         return this.#deliveryFailure(prepared.request, "resolution", answeredBy);
       }
       const confirmed = this.#confirmDelivery(prepared.request, answeredBy);

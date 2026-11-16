@@ -1723,6 +1723,64 @@ describe("an agent's ask to plan first or to leave Plan", () => {
     expect(projection.lookup(request.requestId)?.request.status).toBe("pending");
   });
 
+  it("changes nothing for a stale answer", async () => {
+    const change = vi.fn(() => ({ status: "changed" as const }));
+    const answerApproval = vi.fn(async () => undefined);
+    const { service } = createService({
+      providerSessions: { answerApproval },
+      levelChanges: { change, endTurn: () => undefined },
+    });
+    const request = recordLevelChange(service);
+
+    const result = await service.resolve({
+      kind: "resolve-work-request",
+      requestId: request.requestId,
+      expectedVersion: request.version + 1,
+      resolution: { kind: "approval", approved: true },
+    });
+
+    expect(result).toMatchObject({ status: "failure", failure: { code: "stale" } });
+    expect(change).not.toHaveBeenCalled();
+    expect(answerApproval).not.toHaveBeenCalled();
+  });
+
+  it("moves the level back when the provider never hears the answer, so a retry can apply it again", async () => {
+    const levels: Array<string> = [];
+    let fail = true;
+    const { service, projection } = createService({
+      providerSessions: {
+        answerApproval: async () => {
+          if (fail) throw new Error("provider unreachable");
+        },
+      },
+      levelChanges: {
+        change: (input) => {
+          levels.push(input.kind);
+          return { status: "changed" };
+        },
+        endTurn: () => levels.push("end-turn"),
+      },
+    });
+    const request = recordLevelChange(service);
+    const answer = (expectedVersion: number) =>
+      service.resolve({
+        kind: "resolve-work-request",
+        requestId: request.requestId,
+        expectedVersion,
+        resolution: { kind: "approval", approved: true },
+      });
+
+    await answer(request.version);
+    expect(levels).toEqual(["exit-plan", "enter-plan"]);
+    const pending = projection.lookup(request.requestId)?.request;
+    expect(pending?.status).toBe("pending");
+
+    fail = false;
+    const retried = await answer(pending?.version ?? request.version);
+    expect(retried.status).toBe("ok");
+    expect(levels).toEqual(["exit-plan", "enter-plan", "exit-plan", "end-turn"]);
+  });
+
   it("keeps the level and the turn when the person says no", async () => {
     const change = vi.fn(() => ({ status: "changed" as const }));
     const endTurn = vi.fn();
