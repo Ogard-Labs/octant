@@ -565,6 +565,30 @@ switch of the runtime, not a documented interface: a runtime that ignores or
 renames it leaves the tool out, and Octant admits `Artifact` only in a session
 that offers it ([full built-in tool set](#full-built-in-tool-set)).
 
+Under [Octant adds no restrictions of its own unless Strict is on](../architecture.md#security-and-authority)
+(maintainer decision, 2026-11-16; designed, not built), the account switch
+alone decides whether a Work or Code launch offers `Artifact`; the thread's
+Canvas or artifacts choice only points Octant's delivery instructions. The
+tool keeps every action, so Claude Design's `/design` and `/slides` run as
+in Claude Code: `quickstart`, publishing from a type with no local file,
+`read`, `list` and updates. A publish naming a local file follows the
+thread's file rules. Chat and Plan launches offer the read-only actions and
+refuse publishing. The telemetry guard follows the person's own provider
+settings outside Strict, so the switch no longer lifts it.
+
+**Several Claude accounts.** Each Claude account is its own provider
+instance with its own `CLAUDE_CONFIG_DIR` and secure-storage folder, its own
+claude.ai sign-in and its own artifacts switch. A thread runs on one
+account at a time, and its `Artifact` calls publish to, read from and list
+that account's claude.ai gallery and design systems only; Octant never
+lends one account's sign-in to another's session. The published page's
+address and the account that published it are journaled on the call. When
+a thread later runs on a different account, it may still update a page an
+earlier account published only where claude.ai gives the new account
+access, and claude.ai's refusal reaches the model as the call's result.
+An account with the switch off offers no `Artifact`, whatever another
+account allows, and an API-key account never offers it.
+
 Each Claude session owns its runtime process, so the connection implements
 `forceStop`, reported as the `forceStop` capability: it sends `SIGKILL` to that
 session's own process group, ends the session `interrupted`, and touches no other

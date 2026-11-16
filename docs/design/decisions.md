@@ -31,7 +31,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | ------------------------------------------------------------------------------------- | --------- | ------- | ------------ | ------------------- |
 | [Principles and hard lines](#principles-and-hard-lines)                               | 7         | 5       | 2            | 0                   |
 | [Guardrails and review](#guardrails-and-review)                                       | 9         | 3       | 6            | 0                   |
-| [Key providers](#key-providers)                                                       | 4         | 0       | 1            | 3                   |
+| [Key providers](#key-providers)                                                       | 6         | 0       | 1            | 5                   |
 | [Release scope](#release-scope)                                                       | 7         | 2       | 4            | 1                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 6       | 1            | 0                   |
 | [App-managed tools](#app-managed-tools)                                               | 6         | 4       | 2            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **269**   | **158** | **103**      | **8**               |
+| **All areas**                                                                         | **271**   | **158** | **103**      | **10**              |
 
 ## Principles and hard lines
 
@@ -106,7 +106,7 @@ Status: Built. Since: 2026-10-31. Detail: [Architecture: Overview and principles
 At Full access, in Work and Code, nothing prompts, nothing expires into a refusal, and nothing is refused because the thread read outside content, except the closed list of seven exceptions below (maintainer request, 2026-11-12). A rule anywhere that asks at Full access and is not on the list is wrong, and the list wins. Adding an ask at Full access means adding it to the list in the owning specification in the same change, with its reason.
 
 - Every hard line: no telemetry, secrets never journaled, signed updates, authority checked on the host, the journal, Plan read-only, spend ceilings, and an agent never marking a thread Done.
-- Merge, plain force-push and push to the default branch, which follow the pull-request merge rules and the Project's "Agents may merge" switch.
+- Merge, plain force-push and push to the default branch through Octant's own pull-request tool or Octant Harness, which follow the pull-request merge rules and the Project's "Agents may merge" switch; a provider's own commands leave the list outside Strict under [Octant adds no restrictions of its own unless Strict is on](#octant-adds-no-restrictions-of-its-own-unless-strict-is-on) (designed, not built).
 - Computer use: the first action in each application asks, once per thread, because it drives the person's real desktop.
 - The Browser on a signed-in profile: a site approval per origin and profile, which the person can remember or widen to "Allow all sites in this profile". A Private page needs none.
 - Paying, buying, or sending a message as the person through the Browser or Computer (an email, a chat, a social post, a form that sends a message). A pull-request comment or review reply is not such a send and follows the pull-request rules.
@@ -269,7 +269,7 @@ At the Reviewed level a reviewer stands in for the person's click: the provider'
 
 - The person chooses the reviewer in Settings › Code › Access with a Project override; the provider's own is the default where it exists (built for Code in Settings › Code › Access and on a Code Project's overview).
 - A verdict the provider reports is journaled with the provider as approver and shown like a person's approval, with the call it covered. Built in Code: Codex reports approvals and denials, Claude Code only denials; Mistral Vibe's auto-approve mode reports none over ACP. The capability report says which (`reviewVerdicts`), and the host never infers a verdict from a call that ran.
-- Taint withdraws the provider's own reviewer for irreversible, publish and new-egress classes.
+- Taint withdraws the provider's own reviewer for irreversible, publish and new-egress classes; outside Strict it is to keep the reviewer and only mark the thread ([Octant adds no restrictions of its own unless Strict is on](#octant-adds-no-restrictions-of-its-own-unless-strict-is-on), designed, not built).
 - Built in Code for the two key CLI providers and for Mistral Vibe's auto-approve mode.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Reviewed](../architecture.md#security-and-authority).
@@ -346,7 +346,7 @@ The key providers run inside Octant as they run on their own, with their native 
 - Octant still journals a native child run, marks outside content a native web tool read, and reports each capability honestly.
 - Every ACP agent is a key provider (maintainer decision, 2026-11-14): its account and thread switches work as the others' do; a Project trusted for it loads, in Work and Code outside Plan, the Project entries its launch otherwise holds unreadable (Gemini CLI and Qwen Code start there instead of refusing it, and Grok Build's own trust list becomes readable); Kimi Code reads its home `AGENTS.md`, skills, MCP servers, plugins and hooks with the matching features, Kilo its own skills, and fx the Project's `AGENTS.md`; each reports only those features. Kilo's and Devin's managed configuration stays, since it carries the level's permission and Octant's chosen agent or mode (built).
 - Each ACP agent's own subagents run in Work and Code outside Plan, at every level there, wherever the person's setup carries them, as Mistral Vibe's do; Plan and Chat run none. Octant releases Grok Build's `GROK_SUBAGENTS` and Devin's `subagents_enabled`, and a permission request naming a call Octant never saw is shown as "A <agent> subagent asks to run a tool. <agent> doesn't say which." with Allow and Deny under the thread's level instead of failing the turn (maintainer decision, 2026-11-14; built). Only Mistral Vibe names child sessions; for any other agent, the first request naming a call Octant never saw journals a child run that says Octant cannot see its tool calls or when it ends, and marks the thread as having read outside content (maintainer decision, 2026-11-14; built).
-- Kimi Code's own slash commands run in Work and Code outside Plan, the probe still pinning its reviewed command inventory; Plan and Chat refuse them, since a command can write (maintainer decision, 2026-11-14; built).
+- Kimi Code's own slash commands run in Work and Code outside Plan, the probe still pinning its reviewed command inventory; Plan and Chat refuse them, since a command can write (maintainer decision, 2026-11-14; built). Every provider's own slash commands are to run in every mode, the level's tool rules deciding what a command may do ([Octant adds no restrictions of its own unless Strict is on](#octant-adds-no-restrictions-of-its-own-unless-strict-is-on), designed, not built).
 - Every other provider keeps the deny rules for Project code and skills until it is promoted the same way.
 - A person turns it off for a key provider account (Run as itself) or trusts a Work or Code Project for a key provider (Trusted providers), only as the host's own person, from a window on the host or a device they paired (maintainer decision, 2026-11-12); both are journaled and the host resolves them for every session it starts or resumes.
 - A Project's own settings, hooks, MCP servers and plugins load only in a Project the person trusted for that provider, at every level but Plan.
@@ -401,6 +401,37 @@ OpenCode's `task` subagents are always allowed outside Plan, instead of followin
 - Each child session's own requests still reach the person through the parent's approval path at the thread's level, and Octant's server answers and journals them.
 
 Status: Designed, not built. Since: 2026-11-15. Detail: [Provider runtimes: Key providers](provider-runtimes.md#key-providers) and [Architecture: Security and authority](../architecture.md#security-and-authority).
+
+### Octant adds no restrictions of its own unless Strict is on
+
+A person who moves from a provider's own CLI to Octant keeps every workflow that worked there, and Octant restricts a provider no more than any other agent workspace does; Octant's extra protections are the opt-in Strict setting, and Full access adds nothing (maintainer decision, 2026-11-16).
+
+- Environment: a provider receives the host's environment less Octant's own secrets and other providers' keys; Strict keeps today's fixed list for Claude Code.
+- Outside content still marks and shows the thread but no longer withdraws provider web search or the provider's own reviewer; Strict keeps the withdrawal.
+- A provider's own tools may use the files Octant protects at every level; Octant's own file tools keep refusing them below Full access, and Strict refuses them for every tool.
+- Denials go back to the model; three denials no longer end a Code turn.
+- A provider's own git and `gh` commands, merge, force-push and push to the default branch included, follow its own permission mode and run unasked at Full access, still journaled; Octant's own pull-request tool and Octant Harness keep the merge rules; Strict asks for the provider's commands too.
+- Provider channels (telemetry, error reports, `/bug`, `/feedback`, marketplace installs) follow the person's provider settings, self-update stays off, and Strict turns every channel off.
+- Codex may sign in to Amazon Bedrock through an AWS profile or exported credentials; Strict refuses them.
+- A provider's own slash commands run in every mode and level; the level's tool rules decide what a command may do.
+- A Project the person trusted in the provider's own CLI counts as trusted in Octant; Octant's card stays only where the provider has no trust record, and Strict requires Octant's own trust.
+- A person may choose Full access as their default level in Settings; new threads still start asking by default.
+- Work threads get the Plan level, with the provider's own plan mode and plan-mode tools.
+- Opt-in extras: a per-person list of provider tools to block, and in Strict a notice saying what was withheld.
+- Kept: read-only Plan, Chat with no folder or shell, outside folders asking below Full access, refused secret questions and unjournaled secrets, Run as itself off keeping web tools off, and never handing one provider another's credentials.
+
+Status: Designed, not built. Since: 2026-11-16. Detail: [Architecture: Security and authority](../architecture.md#security-and-authority).
+
+### Claude artifacts and Claude Design work as in Claude Code
+
+With an account's Claude artifacts switch on, Claude's `Artifact` tool works as in Claude Code, so Claude Design's `/design` and `/slides` work in Octant (maintainer decision, 2026-11-16).
+
+- Every action works: `quickstart`, publishing from a type with no local file, `read`, `list` and updates; a publish naming a local file follows the thread's file rules.
+- The account switch alone decides the offer in Work and Code; the thread's Canvas or artifacts choice only points Octant's delivery instructions. Chat and Plan offer the read-only actions and refuse publishing.
+- With several Claude accounts, each is its own provider instance with its own sign-in, configuration folder and switch; a thread's calls reach only the claude.ai account it runs on, the publishing account is journaled with the page, and claude.ai decides whether a later account may update an earlier account's page.
+- An API-key account never offers the tool.
+
+Status: Designed, not built. Since: 2026-11-16. Detail: [Provider runtimes: Claude Code](provider-runtimes.md#claude-code) and [Architecture: Security and authority](../architecture.md#security-and-authority).
 
 ## Release scope
 
@@ -1968,12 +1999,12 @@ Below Full access, a provider that has a sandbox of its own runs in it, as it do
 - Octant configures the native sandbox rather than wrapping it in its own profile: writable roots are the Project's folders, network follows Network limits, and Octant's protected paths become the provider's deny rules wherever it supports them.
 - Claude Code is the exception: Octant passes its sandbox no settings (no writable roots, network, read or deny rules, or auto-allow change), so it runs as the person's own Claude Code settings configure it; Plan keeps its read-only confinement.
 - The provider's request to run one command outside its sandbox reaches the person as an Octant approval (Reviewed's reviewer at Reviewed); approved runs that one command, and denied or unanswered stays refused.
-- Strict is an opt-in set in the same places as the opt-in sandbox at Full access (per thread, as a Project's default, and in Settings): the provider runs inside Octant's profile, provider sign-ins, `~/.ssh` and cloud keys stay unreadable, and native escalation is off.
-- Strict for Claude Code is today's configuration of Claude's own sandbox, since macOS refuses nested Seatbelt: reads and writes held to the Project's folders, network per Network limits, and `autoAllowBashIfSandboxed: false`.
+- Strict is an opt-in set in the same places as the opt-in sandbox at Full access (per thread, as a Project's default, and in Settings): the provider runs inside Octant's profile, provider sign-ins, `~/.ssh` and cloud keys stay unreadable, and a provider inside Octant's profile has no native escalation.
+- Strict for Claude Code is today's configuration of Claude's own sandbox, since macOS refuses nested Seatbelt: reads and writes held to the Project's folders, network per Network limits, and `autoAllowBashIfSandboxed: false`, with Claude's own request to run one command outside its sandbox still asking every time (maintainer decision, 2026-11-16).
 - Octant's sandbox stays the default for providers with no sandbox of their own: OpenCode, Mistral Vibe and Pi.
 - Per provider: Codex takes its native workspace-write sandbox and escalation in place of Octant's profile, since macOS refuses nested Seatbelt; Gemini CLI and Qwen Code use their native sandboxes; Copilot CLI and Cursor follow after their ACP releases are checked, and Grok Build after a check of why it launches with `GROK_SANDBOX=off`.
 - Accepted trade-off: below Full access a native sandbox may allow reads outside the Project, other credentials included, as the provider on its own does.
-- Unchanged: server-side approval authority and journaling, read-only Plan and no shell in Chat, the paired-device and routine rules, environment scrubbing and never handing one provider another's credentials, and outside-content tracking.
+- Unchanged: server-side approval authority and journaling, read-only Plan and no shell in Chat, the paired-device and routine rules, never handing one provider another's credentials, and marking outside content; the rest of what Octant adds moves into Strict under [Octant adds no restrictions of its own unless Strict is on](#octant-adds-no-restrictions-of-its-own-unless-strict-is-on).
 - Not part of this rule: a host-side command executor, and restarting a session at wider authority.
 
 Status: Designed, not built. Since: 2026-11-15. Detail: [Architecture: Security and authority, Providers run in their own sandbox](../architecture.md#security-and-authority).
@@ -3204,6 +3235,7 @@ A key provider's artifact publishing is off for every account until the person e
 - The person's own opt-out always wins over the setting, and a host-level umbrella opt-out is never removed.
 - The environment is fixed when the runtime starts (once per turn), so turning either choice off takes effect on the next turn.
 - Each publish asks below Full access, and at Full access nothing asks, publishing included ([Hosted artifact publishing](#hosted-artifact-publishing)). Plan never publishes, and published pages are reported as outside content.
+- To change under [Claude artifacts and Claude Design work as in Claude Code](#claude-artifacts-and-claude-design-work-as-in-claude-code) (designed, not built): the account switch alone offers the tool, every action works, and the telemetry guard follows the person's provider settings outside Strict.
 
 Status: Partly built. Since: 2026-10-28. Detail: [Provider runtimes: artifact launch](provider-runtimes.md#claude-code) and [Model endpoints: provider artifacts](model-endpoints.md#claude-artifacts).
 
