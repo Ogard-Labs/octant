@@ -62,6 +62,9 @@
   background: var(--octant-control-hover);
   border-color: var(--octant-border-strong);
 }
+.octant-chip:active {
+  background: var(--octant-control-pressed);
+}
 
 .octant-chip[aria-pressed="true"],
 .octant-chip[data-active="true"] {
@@ -718,6 +721,9 @@ html[data-octant-reduced-motion="true"]
 .octant-popover-option:hover {
   background: var(--octant-control-hover);
 }
+.octant-popover-option:active {
+  background: var(--octant-control-pressed);
+}
 
 .octant-popover-option[aria-disabled="true"],
 .octant-popover-option:disabled {
@@ -1370,6 +1376,9 @@ html[data-octant-increased-contrast="true"] .turn-action-menu__more .shell-icon-
 .thread-task-viewer__trigger[aria-expanded="true"] {
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
+}
+.thread-task-viewer__trigger:active {
+  background: var(--octant-control-pressed);
 }
 
 .thread-task-viewer__evidence {

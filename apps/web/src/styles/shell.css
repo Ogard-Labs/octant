@@ -683,6 +683,9 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
 }
+.open-in-menu__trigger:active {
+  background: var(--oct-wash-pressed);
+}
 
 .window-chrome__zen-recovery {
   pointer-events: auto;
@@ -3019,44 +3022,6 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   background: var(--octant-workspace);
 }
 
-/* The same geometry as `.welcome`: the question takes the free height and
-   centres in it, which docks the composer at the foot of the page where the
-   thread continues, 12px above the pane's foot as a thread's composer sits,
-   so a start screen beside a thread puts its composer on the same line.
-
-   The canvas also takes a level above the ground, which paints at z-index 0 under this
-   same start screen. Without one the ground's dots landed over the greeting
-   and over the suggestion cards, which reads as the cards being
-   see-through. */
-.draft-thread__canvas {
-  position: relative;
-  z-index: 1;
-  box-sizing: border-box;
-  display: flex;
-  width: min(100% - var(--oct-thread-gutter), var(--oct-composer-width));
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  min-height: 100%;
-  padding-block: min(8vh, 64px) 12px;
-  margin: 0 auto;
-  gap: var(--oct-space-2);
-}
-
-.draft-thread__welcome {
-  display: grid;
-  flex: 1 1 auto;
-  align-content: center;
-  justify-items: start;
-  gap: 4px;
-  margin-bottom: 24px;
-}
-
-.draft-thread__welcome {
-  justify-items: center;
-  text-align: center;
-}
-
 .new-thread-welcome__mark {
   margin-bottom: 4px;
   color: var(--oct-accent-fg);
@@ -3150,28 +3115,6 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
 .draft-thread__recent-detail {
   color: var(--oct-meta);
   font-size: var(--oct-text-detail);
-}
-
-/* The cards themselves share the Code home's suggestion recipe below. They
-   sit a clear step under the composer: pressed up against its band they read
-   as part of the card, and the prompt lost its edge. */
-.draft-thread__intent-cards {
-  order: 3;
-  margin-top: 56px;
-}
-
-/* The card area sits between the composer and the suggestions or Continue list.
-   Items in this flex column are ordered by number, and an unnumbered one would
-   paint above the composer. */
-.draft-thread__canvas > .home-start {
-  order: 3;
-}
-
-.draft-thread__composer {
-  order: 2;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 
 /* A New coordinator draft's settings, one quiet line under the composer:
@@ -3541,114 +3484,11 @@ form > .work-composer-adapter__attachments {
   flex: 0 0 auto;
 }
 
-.draft-thread__error {
-  margin: 0;
-  color: var(--octant-destructive);
-  font-size: var(--oct-text-detail);
-}
-
-.draft-thread__hint,
 .work-composer-adapter__hint {
   margin: 0;
   padding: 0 2px;
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .draft-thread__intent-card {
-    transition: none;
-  }
-  .draft-thread__intent-cards > button:hover:not(:disabled) {
-    transform: none;
-  }
-}
-
-@media (max-width: 640px) {
-  .draft-thread__canvas {
-    width: calc(100% - 24px);
-    padding: 24px 12px;
-  }
-
-  .draft-thread.chat-welcome {
-    box-sizing: border-box;
-    height: auto;
-    overflow-y: auto;
-    padding-block: 0;
-  }
-
-  /* The start screen's composer stands the panel's 20px from each edge, as a
-     thread's composer does (its width is the viewport less 40px). A 12px margin
-     and 12px of padding on top of the panel's inset made 44px of it. */
-  .draft-thread.chat-welcome .welcome {
-    box-sizing: border-box;
-    width: 100%;
-    justify-content: flex-start;
-    padding: 12px 0;
-    gap: 16px;
-  }
-
-  .draft-thread__intent-cards {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* The Work and Code page before a thread exists: one question, one sentence
-   saying what the choice means, and the two things to do, centred on the
-   same axis as every other start screen. It had been a left-aligned eyebrow,
-   paragraph, and tip over two cards, which read as a settings form. */
-.agent-mode-welcome__panel {
-  position: relative;
-  z-index: 1;
-  box-sizing: border-box;
-  display: grid;
-  width: min(100% - 48px, 560px);
-  justify-items: center;
-  gap: var(--oct-space-3);
-  margin: 0 auto;
-  padding-block: min(20vh, 180px) var(--oct-space-12);
-  text-align: center;
-}
-
-.agent-mode-welcome__mark {
-  display: grid;
-  width: 44px;
-  height: 44px;
-  place-items: center;
-  margin-bottom: var(--oct-space-1);
-  border: 1px solid var(--oct-hairline);
-  border-radius: var(--oct-radius-sm);
-  color: var(--oct-fg);
-  background: var(--octant-card);
-}
-
-.agent-mode-welcome__lead {
-  max-width: 46ch;
-  margin: 0;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-sm);
-  line-height: 1.5;
-}
-
-.agent-mode-welcome__actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: var(--oct-space-2);
-  margin-top: var(--oct-space-3);
-}
-
-@media (max-width: 640px) {
-  .agent-mode-welcome__panel {
-    width: calc(100% - 32px);
-    padding-block: var(--oct-space-12) var(--oct-space-6);
-  }
-
-  .agent-mode-welcome__actions {
-    width: 100%;
-    flex-direction: column;
-    align-items: stretch;
-  }
 }
 
 .work-composer-adapter,
@@ -3665,19 +3505,6 @@ form > .work-composer-adapter__attachments {
 
 .work-composer-adapter {
   background: var(--octant-app-background);
-}
-
-.work-thread-workspace .draft-thread__canvas {
-  box-sizing: border-box;
-  display: flex;
-  width: min(100% - 48px, 768px);
-  flex-direction: column;
-  align-items: stretch;
-  min-height: 100%;
-  justify-content: flex-start;
-  padding-block: min(16vh, 148px) 48px;
-  margin: 0 auto;
-  gap: var(--oct-space-2);
 }
 
 .work-composer-adapter__attach-btn {
@@ -4465,18 +4292,8 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
    (Start something new), and where the latest threads stand (Continue).
    Sections are a label, a note, and a hairline panel; Continue's cards lead
    with a tile that names the thread's delivery state. */
-/* One suggestion card for the draft thread's intents and the Add-a-folder
-   page's two choices (the Code prompts are chips, below). A hairline card
-   on the card fill, a 13px title, and a 12px line saying what it fills in.
-   The button is the card, so the paint keys on the element inside the cards
-   group rather than on a class the button recipe owns. */
-.draft-thread__intent-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: var(--oct-space-2);
-}
-
-/* Code's prompts are the suggestion card above with a glyph on top: four on
+/* Code's prompts are suggestion cards: a hairline card on the card fill, a
+   13px title and a 12px line saying what it fills in, with a glyph on top, four on
    one line on the composer's edges. As label-only chips they were four grey
    words, and what each would do was only in a tooltip. Under 664px of column
    (four 160px cards and their gaps) they stand two by two, never three and
@@ -4529,7 +4346,6 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   -webkit-line-clamp: 2;
 }
 
-.draft-thread__intent-cards > button,
 .code-home__suggestions > button {
   display: grid;
   height: auto;
@@ -4547,10 +4363,12 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   white-space: normal;
 }
 
-.draft-thread__intent-cards > button:hover:not(:disabled),
 .code-home__suggestions > button:hover:not(:disabled) {
   border-color: var(--octant-border-strong);
   background: var(--octant-card);
+}
+.code-home__suggestions > button:active:not(:disabled) {
+  background: var(--oct-wash-pressed);
 }
 
 /* After the shared card paint, whose wider side padding it replaces: four

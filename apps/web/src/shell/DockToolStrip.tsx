@@ -196,7 +196,7 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
                 props.shown?.has(tool.id) === true && tool.id !== props.active ? "Shown" : undefined
               }
               aria-selected={tool.id === props.active}
-              className="dock-tool-strip__select content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent window-no-drag"
+              className="dock-tool-strip__select content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent active:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent window-no-drag"
               data-dock-tab={tool.id}
               data-shown={props.shown?.has(tool.id) === true ? "true" : undefined}
               draggable={props.onTabDragStart === undefined ? undefined : true}

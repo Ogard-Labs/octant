@@ -162,7 +162,21 @@ describe("ChatWelcome", () => {
     expect(onCreateChat).toHaveBeenCalledWith("Ship the preview");
   });
 
-  it("lists no recent threads and offers starter ideas only while there are none", () => {
+  it("puts the question, the composer, the starter ideas and the list in one column", async () => {
+    const { container } = render(<ChatWelcome onCreateChat={vi.fn()} />);
+    const column = container.querySelector(".welcome");
+    const children = Array.from(column?.children ?? []);
+    expect(children[0]).toHaveClass("welcome__heading");
+    expect(children[0]).toContainElement(
+      screen.getByRole("heading", { name: "What are we building today?" }),
+    );
+    expect(children[1]).toHaveClass("composer-stack");
+    expect(children[1]).toContainElement(screen.getByRole("textbox", { name: "First message" }));
+    expect(children[2]).toBe(screen.getByRole("group", { name: "Starter ideas" }));
+    expect(children[3]).toHaveClass("home-start");
+  });
+
+  it("lists the threads to continue under the composer and offers starter ideas only while there are none", async () => {
     const first = render(<ChatWelcome onCreateChat={vi.fn()} />);
     expect(screen.getByRole("group", { name: "Starter ideas" })).toBeVisible();
     first.unmount();
@@ -173,7 +187,7 @@ describe("ChatWelcome", () => {
         recentThreads={[{ id: "thread-a", title: "Latency telemetry", onOpen: vi.fn() }]}
       />,
     );
-    expect(screen.queryByText("Latency telemetry")).not.toBeInTheDocument();
+    expect(await screen.findByText("Latency telemetry")).toBeVisible();
     expect(screen.queryByRole("group", { name: "Starter ideas" })).not.toBeInTheDocument();
   });
 

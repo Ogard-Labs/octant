@@ -381,6 +381,33 @@ describe("CodeDiffPane", () => {
     expect(block(".code-diff-pane__body")).toMatch(/flex:\s*1 1 0/);
   });
 
+  it("lets the checks and findings words leave a narrow tile before anything is cut", () => {
+    const css = readFileSync(resolve(import.meta.dirname, "../styles/code.css"), "utf8");
+    const from = css.indexOf("@container git-history (max-width: 519px) {");
+    expect(from).toBeGreaterThanOrEqual(0);
+    const query = css.slice(from, css.indexOf("\n}\n", from));
+    expect(query).toContain(".review-status-chip__words {");
+    expect(query).toMatch(/clip-path:\s*inset\(50%\)/);
+    // The words are hidden by clipping, never by display, so they stay the name.
+    expect(query).not.toMatch(/display:\s*none/);
+  });
+
+  it("draws every diff line at the one diff line height", () => {
+    const read = (file: string) => readFileSync(resolve(import.meta.dirname, file), "utf8");
+    const tokens = read("../styles/octant.css");
+    expect(tokens.match(/^\s*--oct-line-diff:/gm)).toHaveLength(1);
+    const table = read("../styles/code.css");
+    const from = table.indexOf("\n.unified-diff__table {");
+    expect(table.slice(from, table.indexOf("}", from))).toMatch(
+      /line-height:\s*var\(--oct-line-diff\)/,
+    );
+    // The pull request's diff reads the same token; the description's original
+    // source shares the wrapper and is left at the code block's reading size.
+    expect(read("./project-pull-request-review.css")).toMatch(
+      /code-block__pre\):not\(\s*\.code-pr-review__source \*\s*\)\s*\{[^}]*line-height:\s*var\(--oct-line-diff\)/,
+    );
+  });
+
   it("loads exact Git evidence and compares one changed file at a time", async () => {
     const code = client();
     const fixture = runtime();

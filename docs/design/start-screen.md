@@ -53,28 +53,31 @@ a host whose setting is off has memory on.
 
 ### Layout
 
-There are two start screens. **New task**, in Chat and Work, is the question in
-the middle of the page and the composer docked at its foot, and nothing else;
-Chat and Work add their starter chips only before the mode's first thread.
-**Code Home** is where Code lands with nothing chosen (the Code welcome tab)
-and what a Code New task is: the question and the composer, then Code's prompt
-suggestions and [the list](#the-list). With those the page scrolls and the
-composer sits under the question. A Code New task is the same page with its
-Project named in the question (maintainer request, 2026-11-16): as the bare
-question over a composer at the page's foot, choosing a Project on Code Home
-threw the composer down the page and left it empty. The question and the
-composer stand at one height in both, so the choice moves nothing (a draft's
-pane starts under its own header, so its column starts one title band lower).
-Switching to Code opens no draft of its own,
+Chat, Work and Code share one start screen, a top-anchored column: the
+question, the composer directly under it, then the mode's own prompt
+suggestions (Code's four cards; Chat's starter chips only before its first
+thread; Work has none) and [the list](#the-list). The page scrolls. **Home** is
+where a mode lands with nothing chosen (its welcome tab), and a **New task** is
+the same page with its Project named in the question. The question and the
+composer stand at one height and one width in every mode, on Home and in a
+draft, so pressing New task, choosing a Project or switching mode moves nothing
+(a draft's pane starts under its own header, so its column starts one title
+band lower). One stylesheet rule places the column for all three. Once a thread
+exists its composer is docked at the pane's foot. Earlier, Chat and Work put
+the question mid-page over a composer docked at the foot, and Code did not;
+that left two layouts, and a Code draft's bare question over a docked composer
+threw the composer down the page when a Project was chosen (maintainer request,
+2026-11-16: the Code layout is used for all three).
+Switching to a mode opens no draft of its own,
 and a New task draft left with no text or images counts as nothing chosen:
-switching to Code gives its pane back to Code Home, while a draft with text
-stays as New task. Neither screen has tabs or action tiles:
+switching to the mode gives its pane back to Home, while a draft with text
+stays as New task. No start screen has tabs or action tiles:
 adding a folder lives in the composer's Project picker, a terminal in the
 workspace tools, and what is running or waiting for review in the sidebar.
 
 ### The list
 
-Under the composer a start screen (Code Home, and Chat's and Work's home) shows
+Under the composer a start screen (Home and New task, in every mode) shows
 **one calm list**, not a wall of cards. The list, the suggestions and everything
 below end on the composer's own edges at every reading width. Its sections come
 in a fixed order and each is drawn only while it has rows:
@@ -243,8 +246,7 @@ picking a pull request from the Pull requests read opens it.
 
 ## Card area behavior
 
-Under the composer, Code Home and Chat's and Work's home carry the list and the
-cards; New task has none. The composer paints first; the area mounts on the frame
+Under the composer, every start screen carries the list and the cards. The composer paints first; the area mounts on the frame
 after the first commit, and each card begins its reads only then, so a start
 screen never waits on a card. A card that is off or unavailable is never mounted
 and reads nothing.
@@ -597,10 +599,10 @@ composer `/` list never carries it.
 
 ## Welcome screen
 
-Chat, Work, and Code open on the same screen: one question in the middle of
-the page and one soft composer docked at its foot, where it stays once the
-thread starts, so the first message is typed where every later one is. No
-mark stands over the question. The hero asks "What are we building today?"
+Chat, Work, and Code open on the same screen: one question at the top of a
+column with one soft composer directly under it, then the mode's list; once a
+thread starts, its composer is docked at the pane's foot. No mark stands over
+the question. The hero asks "What are we building today?"
 (the hero role: regular weight, -0.012em tracking, the primary ink in every
 style and never the accent) at a window title's size, `--oct-text-xl` (20px)
 on a 26px line, at every width. Until 2026-11-16 the Octant aperture stood
@@ -640,14 +642,13 @@ the fixed proposal text directly under them in the composer. Rendered review
 showed the question above a fixed proposal read as an invitation to write a
 different task.
 
-**New task**, in Chat and Work, is the question and the composer and nothing
-else; Chat and Work add one row of outline starter chips only before the
-mode's first thread. **Code Home** is where Code lands with nothing chosen,
-and a Code New task is the same page with its Project named:
-the same question and composer, then Code's prompt suggestions, the card area
-(the list and the cards, on by default), and Code's agent home
-(assigned work and Continue inside the list). There the page scrolls and the composer sits under
-the question. The cards appear on no other start screen. Neither screen has
+**Home** is where a mode lands with nothing chosen, and a **New task** is the
+same page with its Project named: the same question and composer in every
+mode, then the mode's prompt suggestions (Code's cards; Chat's one row of
+outline starter chips only before its first thread; Work has none) and the
+card area (the list and the cards, on by default), with Code's agent home
+(assigned work and Continue inside the list). The page scrolls and the
+composer sits under the question. No start screen has
 tabs or action tiles: adding a folder lives in the composer's Project picker. Their anatomy is in
 [Start screen: presentation](#presentation); their
 behavior is in [Workspace](workspace.md#start-screen-cards).
@@ -753,10 +754,9 @@ Navigator's models in a section of Settings › Octant Harness. No display name 
 compact recent-task rows and their status and Git cues.
 Empty Code entry offers folder setup and a direct route to Code settings; opening
 that setting never turns on projectless threads.
-A Work or Code pane with no thread and no Project asks one centred question
-("Pick a folder to work in"), says in one sentence what choosing a folder
-means, and offers Choose a folder… as the primary action with starting
-without one beside it; once a Project exists the new task leads instead.
+A Work or Code pane with no thread and no Project is Home like any other: the
+composer's Project picker offers adding a folder, and a provider that is not
+ready shows **Set up a provider** in the composer's model control.
 
 First run is a four-step wizard with a progress rail: Providers, Project, Model,
 and Mode, in that order, followed by an uncounted readiness view titled Your first

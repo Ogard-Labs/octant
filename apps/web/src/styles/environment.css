@@ -178,6 +178,10 @@ button.environment-link:hover {
   background: var(--octant-control-hover);
   text-decoration: none;
 }
+button.environment-group__header:active,
+button.environment-link:active {
+  background: var(--octant-control-pressed);
+}
 
 .environment-group__title,
 .environment-row__title {

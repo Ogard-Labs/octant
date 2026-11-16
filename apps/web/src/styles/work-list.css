@@ -98,6 +98,9 @@
 .work-list__row:hover {
   background: var(--octant-control-hover);
 }
+.work-list__row:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--octant-control-pressed);
+}
 
 .work-list__title {
   display: -webkit-box;

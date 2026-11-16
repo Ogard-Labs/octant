@@ -190,6 +190,10 @@
   background: color-mix(in oklab, var(--oct-fg) 5%, transparent);
 }
 
+.working-now__row:active:not(:disabled) .working-now__face {
+  background: var(--oct-wash-pressed);
+}
+
 .working-now__head {
   display: flex;
   min-width: 0;
@@ -310,6 +314,10 @@
 .pull-requests-card__row:hover:not(:disabled) .pull-requests-card__face,
 .pull-requests-card__row:focus-visible .pull-requests-card__face {
   background: color-mix(in oklab, var(--oct-fg) 5%, transparent);
+}
+
+.pull-requests-card__row:active:not(:disabled) .pull-requests-card__face {
+  background: var(--oct-wash-pressed);
 }
 
 .pull-requests-card__title {

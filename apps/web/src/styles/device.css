@@ -71,6 +71,9 @@
 .device-toolbar__device--switch[aria-expanded="true"] {
   background: var(--oct-fg-soft);
 }
+.device-toolbar__device--switch:active {
+  background: var(--oct-wash-pressed);
+}
 
 .device-toolbar__name {
   overflow: hidden;
@@ -153,6 +156,9 @@
 .device-toolbar__more[aria-expanded="true"] {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
+}
+.device-toolbar__more:active {
+  background: var(--oct-wash-pressed);
 }
 
 .device-dot {

@@ -75,18 +75,27 @@ export interface CodeLocalReviewStatus {
 /** Checks and findings as quiet meta text with icons, not paragraphs. */
 export function ReviewStatusChips(props: { readonly status: CodeLocalReviewStatus }) {
   const { checks, checksNote, findings } = props.status;
+  const findingsText =
+    findings === undefined
+      ? ""
+      : findings === 0
+        ? "No findings"
+        : `${findings} ${findings === 1 ? "finding" : "findings"}`;
+  // In a narrow tile the words leave and the glyph stays (the stylesheet keys on
+  // the words span), so the tooltip carries them too.
   return (
     <>
-      <span className="review-status-chip" title={checksNote}>
+      <span
+        className="review-status-chip"
+        title={checksNote === undefined ? checks : `${checks}. ${checksNote}`}
+      >
         <FlaskConical aria-hidden="true" size={12} />
-        {checks}
+        <span className="review-status-chip__words">{checks}</span>
       </span>
       {findings === undefined ? null : (
-        <span className="review-status-chip">
+        <span className="review-status-chip" title={findingsText}>
           <MessageSquare aria-hidden="true" size={12} />
-          {findings === 0
-            ? "No findings"
-            : `${findings} ${findings === 1 ? "finding" : "findings"}`}
+          <span className="review-status-chip__words">{findingsText}</span>
         </span>
       )}
     </>

@@ -122,6 +122,9 @@
 .todo-row[data-selected="true"] {
   background: var(--oct-fg-soft);
 }
+.todo-row:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
 
 .todo-row[data-dragging="true"] {
   opacity: 0.5;

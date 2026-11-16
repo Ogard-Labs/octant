@@ -1563,6 +1563,9 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   color: var(--octant-text-primary);
   background: var(--oct-selection);
 }
+.project-memory-inspector__header button:active {
+  background: var(--oct-wash-pressed);
+}
 
 .project-memory-inspector__toolbar {
   display: flex;

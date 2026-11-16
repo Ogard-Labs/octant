@@ -984,13 +984,12 @@ file. Save remains the explicit disk write.
 
 ## Start-screen cards
 
-Every start screen shows one question and its composer. **New task**, in
-Chat and Work, stops there, with the composer docked at the foot of the page.
-**Code Home**, where Code lands with nothing chosen and what a Code New task
-is, adds Code's prompt
-suggestions (four cards, on one line) and one calm list under the composer;
-Chat's and Work's home add the list too. No start screen has tabs or action
-tiles. These are the rules; each card's rows,
+Every start screen is one column in every mode: the question, its composer
+directly under it, then the mode's prompt suggestions (Code's four cards, on one
+line; Chat's starter chips before its first thread) and one calm list. Home,
+where a mode lands with nothing chosen, and New task, which is Home with the
+Project named, put the question and the composer in the same place. No start
+screen has tabs or action tiles. These are the rules; each card's rows,
 wording, and reads are specified in [Start screen](start-screen.md).
 
 - **Paint order.** The composer paints first. The card area mounts on the frame
@@ -1009,7 +1008,8 @@ wording, and reads are specified in [Start screen](start-screen.md).
   header. The ground behind the column keeps a fifth of its strength. See
   [Start screen: The list](start-screen.md#the-list).
 - **Cards, in default order.** Needs you, Working now, Running services, Pull
-  requests, CI failures, and Computers, each on by default, on Code Home only.
+  requests, CI failures, and Computers, each on by default, on every mode's
+  home.
 - **Unavailable is hidden.** A card this window cannot read is hidden and left
   out of Customize rather than shown broken: Needs you without a
   pending-request reader (a remote window); Pull requests and CI failures
@@ -1176,7 +1176,10 @@ its menu's moves) is offered on the same test: the tool room the thread's
 minimum and Environment leave must hold two 280px columns and the dock's own
 handle (568px), so a place that is offered is never then drawn stacked. Where the window has
 960px of tool room two columns widen the dock to it (480px each); with less
-they share the room there is. The thread keeps its 560px minimum beside one
+they share the room there is. Once the person drags the dock's edge the two
+columns follow that width, down to their floor (568px); before 2026-11-16 a
+dragged width under 960px was raised back, so the handle moved and the dock
+did not. The thread keeps its 560px minimum beside one
 column or two (from a 1100px window up), so a second column never takes the
 thread under it or moves Environment. Until 2026-11-16 a place beside needed the
 whole 960px, which refused the drop on a 1920px screen with the sidebar and
@@ -3474,7 +3477,9 @@ hunks; they fold into the bar's More menu when it is narrow. A row of their own
 under the bar held four icons at its right end and nothing else. Where no pane
 bar hosts them (the bottom panel) the review keeps one 36px toolbar row. One 32px status line follows and never wraps (the marks shorten first): "N files changed · +a −d" at the left and, at
 the right, the recorded checks ("No tests run") and the finding count ("No
-findings") as quiet meta text with icons, then an info icon whose tooltip carries
+findings") as quiet meta text with icons (in a tile narrower than 520px the
+words leave and the icons stay, the words kept as each mark's name and tooltip,
+before any text is cut), then an info icon whose tooltip carries
 the scope sentences (checkout changes only; extra Project folders are not
 included; local only, GitHub review mutation unavailable). No paragraph states
 an empty result: a "Findings" header with its count appears only when findings
@@ -3485,7 +3490,10 @@ wide, a short scrolling list above the diffs when narrower. A path is cut from
 its start and keeps its own order (a dot-folder's leading dot stays where it is:
 `.config/settings.json` drew as `config/settings.json.`). Diffs run edge to
 edge of the pane, each file under a sticky 28px header, with hunks in the existing diff
-colours and line numbers in meta ink.
+colours and line numbers in meta ink. Every diff line, in Review, a commit and a
+pull request's diff, is one height, `--oct-line-diff` (the body leading on the 12px
+size, in whole pixels): since 2026-11-16, because two panels drew the same line
+at 28px (the line-number buttons set the row) and 22px.
 
 ### What's new card and announcement
 

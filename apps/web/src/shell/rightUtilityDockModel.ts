@@ -242,15 +242,19 @@ export function resolveDockPresentationWidth(input: {
 
 /**
  * The width two columns of tools ask for where the window has the room for it:
- * the side-by-side width, or a wider one the person dragged to. Where the room
- * is missing the tool columns keep `resolveDockPresentationWidth` and stack, so
- * a second column never takes width from the thread or moves Environment.
+ * the side-by-side width until the person sizes the dock, then the width they
+ * dragged to, down to the two columns' floor. Where the room is missing the
+ * tool columns keep `resolveDockPresentationWidth` and stack, so a second
+ * column never takes width from the thread or moves Environment. A dragged
+ * width under 960px used to be raised back to 960px, so with two columns the
+ * handle moved and nothing followed: the thread could not be given room back
+ * without closing a column.
  */
 export function resolveTwoColumnDockWidth(input: {
   readonly storedWidth: number;
   readonly widthChosen: boolean;
 }): number {
-  return Math.max(input.widthChosen ? input.storedWidth : 0, TILED_DOCK_WIDTH);
+  return input.widthChosen ? Math.max(input.storedWidth, TILED_DOCK_MIN_WIDTH) : TILED_DOCK_WIDTH;
 }
 
 /**

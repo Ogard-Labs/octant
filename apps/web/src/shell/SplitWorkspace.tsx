@@ -818,7 +818,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                           role="presentation"
                         >
                           <OctantTabsTab
-                            className="content-tab__select rounded-lg border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent data-active:bg-transparent data-active:text-inherit"
+                            className="content-tab__select rounded-lg border-0 bg-transparent text-inherit hover:bg-transparent active:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent data-active:bg-transparent data-active:text-inherit"
                             onClickCapture={(event) => {
                               const source = tabDragSource(entry);
                               // A completed drag ends in a click; it must not
@@ -886,7 +886,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                           role="presentation"
                         >
                           <OctantTabsTab
-                            className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent data-active:bg-transparent data-active:text-inherit"
+                            className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent active:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent data-active:bg-transparent data-active:text-inherit"
                             value={view.key}
                           >
                             <span>{view.title}</span>

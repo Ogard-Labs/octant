@@ -429,7 +429,6 @@ import { useProviderController } from "./providers/useProviderController";
 import { ModelToolVerificationContext } from "./providers/ModelToolVerificationContext";
 import { useDiscoveryController } from "./providers/useDiscoveryController";
 import { useProviderBootstrap } from "./providers/useProviderBootstrap";
-import { hasSelectableProviderModels } from "./providers/providerBootstrapPolicy";
 import { useArchivedChatThreadSearch } from "./chat/useArchivedChatThreadSearch";
 import { threadSearchAnswer, useTranscriptSearch } from "./shell/useTranscriptSearch";
 import type { ThreadSearchClient } from "@octant/client-runtime/thread-search-client";
@@ -4101,7 +4100,6 @@ function LaunchedShell(
     providerController,
     providerGroups: bootstrapProviderGroups,
   });
-  const providerReady = hasSelectableProviderModels(bootstrapProviderGroups);
   // A ready or degraded provider still lists chat-only and unverified-tool
   // models in the Code picker, each carrying the reason it cannot be used.
   // Those entries are not choices: offering them here would let create,
@@ -8827,7 +8825,6 @@ function LaunchedShell(
                       crossContextOffer={controller.crossContextOffer}
                       createHostId={createHostId}
                       createHostViewScope={createHostViewScope}
-                      discoveryController={discoveryController}
                       dockOpen={dockOpen}
                       {...(dockSurface === undefined
                         ? {}
@@ -8894,7 +8891,6 @@ function LaunchedShell(
                       tabActivation={controller.tabActivation}
                       workspaceVersion={controller.workspaceVersion}
                       providerController={providerController}
-                      providerReady={providerReady}
                       {...(revealTurn === undefined ? {} : { revealTurn })}
                       serverUrl={props.launch.serverUrl}
                       settings={controller.settings}

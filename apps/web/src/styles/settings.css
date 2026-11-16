@@ -320,6 +320,9 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   background: var(--oct-fill-3);
   color: var(--octant-text-primary);
 }
+.settings-view__outline-link:active {
+  background: var(--oct-wash-pressed);
+}
 
 .settings-view__outline-link[aria-current="location"] {
   background: var(--oct-fill-2);
@@ -343,6 +346,12 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
     .settings-collapse__toggle
   ):hover {
   background: var(--oct-fill-3);
+}
+.settings-view
+  [data-slot="button"][data-variant="ghost"]:not([data-size^="icon"]):not(
+    .settings-collapse__toggle
+  ):active {
+  background: var(--oct-wash-pressed);
 }
 
 .settings-view [data-slot="button"][data-variant="link"] {
@@ -925,6 +934,9 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .settings-search-results__option:hover {
   background: var(--octant-control-hover);
+}
+.settings-search-results__option:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--octant-control-pressed);
 }
 
 .settings-search-results__label {
@@ -1665,6 +1677,9 @@ textarea.settings-view__text-input {
    ghost hover fill and the secondary selected fill itself. */
 .settings-scheme__card:hover {
   background: var(--muted);
+}
+.settings-scheme__card:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
 }
 
 .settings-scheme__card[aria-checked="true"] {

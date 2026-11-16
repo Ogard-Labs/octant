@@ -265,6 +265,17 @@
   overflow: auto;
 }
 
+/* The diff's lines are the review tool's height, not the code block's reading
+   leading (measured 22px against the review tool's rows). The description's
+   original source shares the wrapper and is reading text, so it keeps the
+   code block's own size. */
+:is(pre.code-pr-review__diff, .code-pr-review__diff .code-block__pre):not(
+  .code-pr-review__source *
+) {
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-line-diff);
+}
+
 .code-pr-review__prose ul {
   list-style: disc;
 }

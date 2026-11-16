@@ -555,6 +555,10 @@ p.provider-limits__warning {
   background: color-mix(in oklab, var(--oct-fg) 7%, transparent);
 }
 
+.rail-usage__ring:active .rail-usage__face {
+  background: var(--oct-wash-pressed);
+}
+
 /* Only the ring turns: the provider's logo inside is an svg too, and a rule
    on every svg child drew each logo at the ring's full size, rotated a quarter
    turn, over its own ring. */

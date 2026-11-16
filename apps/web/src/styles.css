@@ -802,6 +802,9 @@ strong {
 .octant-menu__trigger[data-popup-open] {
   background: var(--octant-control-hover);
 }
+.octant-menu__trigger:active {
+  background: var(--octant-control-pressed);
+}
 
 .octant-menu__positioner {
   z-index: var(--oct-z-popup);
@@ -1956,6 +1959,9 @@ html[data-octant-native-host="true"]
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
 }
+.workspace-disclosure__action:active {
+  background: var(--octant-control-pressed);
+}
 
 /* Separates "what kind of tab" from "which one", so the two lists do not read
    as one long menu of unrelated things. */
@@ -2481,6 +2487,9 @@ html[data-octant-native-host="true"]
 .endpoint-row__link:hover {
   background: var(--oct-fg-soft);
 }
+.endpoint-row__link:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
 
 .endpoint-mark {
   display: grid;
@@ -2870,6 +2879,9 @@ html[data-octant-native-host="true"]
 
 .endpoint-kind:hover {
   background: var(--oct-fg-soft);
+}
+.endpoint-kind:active {
+  background: var(--oct-wash-pressed);
 }
 
 .endpoint-kind__text {
@@ -3889,6 +3901,9 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
 }
+.folder-picker__breadcrumb:active {
+  background: var(--octant-control-pressed);
+}
 
 .folder-picker__breadcrumb--current {
   cursor: default;
@@ -3925,6 +3940,9 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
 
 .folder-picker__item:hover {
   background: var(--octant-control-hover);
+}
+.folder-picker__item:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--octant-control-pressed);
 }
 
 .folder-picker__item-nav {
@@ -4397,6 +4415,9 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
 .local-servers__more:hover,
 .local-servers__more:focus-visible {
   background: var(--oct-fg-soft);
+}
+.local-servers__more:active {
+  background: var(--oct-wash-pressed);
 }
 
 .local-servers__menu {
@@ -5186,6 +5207,10 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .folder-picker__item-nav:hover {
   background: var(--muted);
 }
+.composer-model-picker__rail-item:active,
+.folder-picker__item-nav:active {
+  background: var(--oct-wash-pressed);
+}
 
 /* The button recipe sizes every glyph inside a button to 1rem, which drew
    these 20px marks at 13px; the tab keeps a readable 16px mark. */
@@ -5398,6 +5423,9 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .composer-model-picker__catalog:hover {
   background: var(--octant-control-hover);
 }
+.composer-model-picker__catalog:active {
+  background: var(--octant-control-pressed);
+}
 
 .composer-model-picker__catalog--on {
   color: var(--octant-text-primary);
@@ -5454,6 +5482,9 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .composer-model-picker__row:hover,
 .composer-model-picker__row:focus-within {
   background: var(--octant-control-hover);
+}
+.composer-model-picker__row:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--octant-control-pressed);
 }
 
 /* The chosen model carries the selected wash and a check after its name. */
@@ -5541,6 +5572,9 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .composer-model-picker__more:hover {
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
+}
+.composer-model-picker__more:active {
+  background: var(--octant-control-pressed);
 }
 
 .composer-model-picker__model-name {
@@ -6047,6 +6081,9 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: var(--oct-fg);
   background: var(--octant-control-hover);
 }
+.browser-annotate__tool:active:not(:disabled):not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--octant-control-pressed);
+}
 
 .browser-annotate__tool[aria-pressed="true"] {
   color: var(--oct-fg);
@@ -6533,6 +6570,9 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .composer-pool-control__trigger:focus-visible {
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
+}
+.composer-pool-control__trigger:active:not(:disabled) {
+  background: var(--octant-control-pressed);
 }
 
 .composer-pool-control__trigger:disabled {
@@ -7107,6 +7147,9 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
 }
+.code-board__filters-toggle:active {
+  background: var(--oct-wash-pressed);
+}
 
 .code-board__filter-count {
   min-width: 18px;
@@ -7286,6 +7329,9 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .code-board__card-details summary:hover {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
+}
+.code-board__card-details summary:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
 }
 
 .code-board__view-popover {
@@ -7939,6 +7985,11 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: var(--oct-fg);
   background: var(--oct-fill-2);
 }
+/* A press on the tab itself (its first child spans it), not on its close. */
+.content-tab:has(> :first-child:active) {
+  background: var(--oct-wash-pressed);
+}
+
 /* The open tab is clearly filled, in the primary ink, with no tinted ring. */
 .content-tab:has([role="tab"][aria-selected="true"]) {
   color: var(--oct-fg);
@@ -8038,6 +8089,10 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .workspace-content-tabs .content-tab:hover {
   background: color-mix(in oklab, var(--oct-fg) 7%, transparent);
 }
+.workspace-content-tabs .content-tab:has(> :first-child:active) {
+  background: var(--oct-wash-pressed);
+}
+
 /* Picked for side by side: a step between a plain tab and the open one. */
 .workspace-content-tabs .content-tab[data-selected="true"] {
   background: color-mix(in oklab, var(--oct-fg) 8%, transparent);

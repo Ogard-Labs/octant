@@ -573,6 +573,9 @@ html:not([data-octant-reduced-transparency="true"])
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
 }
+.code-file-explorer__entry:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
 
 /* The file the editor is showing takes the selection fill and the hairline
    edge the sidebar and dock tabs draw. */
@@ -934,7 +937,7 @@ html:not([data-octant-reduced-transparency="true"])
   border-collapse: collapse;
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  line-height: var(--oct-leading-body);
+  line-height: var(--oct-line-diff);
 }
 
 .unified-diff__number {
@@ -1020,6 +1023,9 @@ html:not([data-octant-reduced-transparency="true"])
 
 .code-diff-pane__file:hover {
   background: var(--oct-fg-soft);
+}
+.code-diff-pane__file:active {
+  background: var(--oct-wash-pressed);
 }
 
 .code-diff-pane__file[aria-current="true"] {
@@ -1448,6 +1454,9 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .work-files-panel__row--openable:focus-visible {
   background: var(--oct-fg-soft);
 }
+.work-files-panel__row--openable:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
 
 /* Code surfaces moved from styles.css. */
 
@@ -1473,6 +1482,9 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-views__filter[aria-expanded="true"] {
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
+}
+.code-project-views__filter:active {
+  background: var(--octant-control-pressed);
 }
 
 .code-project-views__row {
@@ -1559,6 +1571,9 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   color: var(--octant-text-primary);
   background: var(--oct-fill-4);
 }
+.code-project-views__inline-button:active {
+  background: var(--oct-wash-pressed);
+}
 
 /* The chosen view keeps its own colour: the rail is glyphs only, so colour is
    the fastest way to read which one is showing. */
@@ -1600,6 +1615,10 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-views__swatch:hover,
 .code-project-views__swatch:focus-visible {
   background-color: var(--muted);
+}
+.code-project-views__new:active,
+.code-project-views__swatch:active {
+  background: var(--oct-wash-pressed);
 }
 
 .code-project-views__fieldset {
@@ -3293,6 +3312,26 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
    measured 9.5px wide. */
 .review-status-chip > svg {
   flex: none;
+}
+
+/* Where the tile cannot hold the checks and findings words beside the counts
+   (measured: "No tests run" and "No findings" cut to "No te" and "No fi" at a
+   320px tile), the chips keep their glyph and the words stay for screen readers
+   and the tooltip. This is the first thing to give way, ahead of any ellipsis.
+   The review measures itself: a tile's width is not the viewport's. */
+@container git-history (max-width: 519px) {
+  .review-status-chip {
+    position: relative;
+  }
+
+  .review-status-chip__words {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
 }
 
 .code-diff-pane__file-status {

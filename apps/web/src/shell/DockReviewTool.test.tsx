@@ -100,6 +100,17 @@ describe("Review beside the active thread", () => {
     expect(screen.queryByRole("button", { name: "Refresh findings and checks" })).toBeNull();
   });
 
+  it("names the checks and findings in words a narrow tile can hide", async () => {
+    render(<DockReviewTool {...bound()} loadRuntime={runtime().loadRuntime} />);
+    const findings = (await screen.findByText("No findings")).closest(".review-status-chip");
+    expect(findings).toHaveAttribute("title", "No findings");
+    expect(screen.getByText("No tests run").closest(".review-status-chip")).toHaveAttribute(
+      "title",
+      expect.stringContaining("No tests run"),
+    );
+    expect(screen.getByText("No findings")).toHaveClass("review-status-chip__words");
+  });
+
   it("takes the diff to a file chosen in the changed-files list", async () => {
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoView;

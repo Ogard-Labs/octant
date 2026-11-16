@@ -139,6 +139,9 @@
 .artifact-row__open:hover {
   background: var(--oct-surface);
 }
+.artifact-row__open:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
 
 .artifact-row__title {
   overflow: hidden;
@@ -226,6 +229,9 @@
   background: var(--oct-surface);
   color: var(--oct-fg);
 }
+.artifact-tags__chip-remove:active {
+  background: var(--oct-wash-pressed);
+}
 
 .artifact-tags__add {
   display: inline-flex;
@@ -285,6 +291,9 @@
 
 .artifact-card__button:hover {
   background: color-mix(in oklab, var(--oct-surface) 94%, var(--oct-fg));
+}
+.artifact-card__button:active {
+  background: var(--oct-wash-pressed);
 }
 
 .artifact-card__preview {

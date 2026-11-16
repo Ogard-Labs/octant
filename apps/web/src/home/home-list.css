@@ -113,6 +113,10 @@ button.home-list__row:hover {
   background: var(--oct-wash-hover);
 }
 
+button.home-list__row:active {
+  background: var(--oct-wash-pressed);
+}
+
 .home-list__glyph {
   display: inline-flex;
   grid-area: glyph;

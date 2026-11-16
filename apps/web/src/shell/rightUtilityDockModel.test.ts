@@ -142,10 +142,15 @@ describe("how wide the right utility dock is", () => {
     expect(resolveTwoColumnDockWidth({ storedWidth: 420, widthChosen: false })).toBe(
       TILED_DOCK_WIDTH,
     );
-    expect(resolveTwoColumnDockWidth({ storedWidth: 700, widthChosen: true })).toBe(
-      TILED_DOCK_WIDTH,
-    );
     expect(resolveTwoColumnDockWidth({ storedWidth: 1100, widthChosen: true })).toBe(1100);
+  });
+
+  it("follows a drag that makes two columns narrower, down to the columns' floor", () => {
+    // Raised back to 960px, the handle moved and the dock did not.
+    expect(resolveTwoColumnDockWidth({ storedWidth: 700, widthChosen: true })).toBe(700);
+    expect(resolveTwoColumnDockWidth({ storedWidth: 300, widthChosen: true })).toBe(
+      TILED_DOCK_MIN_WIDTH,
+    );
   });
 
   it("lets two columns stand side by side where the room holds each at its floor", () => {

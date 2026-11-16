@@ -9,7 +9,6 @@ import { useExtensionDraftSelections } from "./useExtensionDraftSelections";
 import { providerFamilyForThread } from "../providers/providerFamily";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
-import { Compass, GraduationCap, ListChecks, PenLine } from "../ui/icons";
 import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
 import { pastedImageName } from "./composerImagePaste";
 import { useCallback, useRef, useState, type KeyboardEvent } from "react";
@@ -28,7 +27,7 @@ import {
 } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
-import { StartSuggestionChip } from "../composer/StartSuggestionChip";
+import { ChatStarterIdeas } from "./ChatStarterIdeas";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ComposerStartTray } from "../composer/ComposerStartTray";
@@ -37,14 +36,19 @@ import { WelcomeHeading } from "../composer/WelcomeHeading";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { DraftRecentThread } from "../shell/DraftThreadWorkspace";
+import { HomeStartList, type HomeStartModel } from "../shell/HomeStart";
+import type { HomeListContributor, HomeListRead } from "../home/homeCards";
+import { recentThreadRows } from "../home/useStartListRows";
 import { WorkKindSwitch } from "../shell/WorkKindSwitch";
 
 export interface ChatWelcomeProps {
   /**
-   * The threads this mode already has. The start screen lists none of them
-   * (the sidebar does); it offers starter ideas only while there are none.
+   * The threads this mode already has: the start list offers them to continue,
+   * and the starter ideas appear only while there are none.
    */
   readonly recentThreads?: ReadonlyArray<DraftRecentThread>;
+  /** The cards the start list draws under the composer; absent leaves only Continue. */
+  readonly homeStart?: HomeStartModel;
   readonly creating?: boolean;
   readonly errorMessage?: string;
   readonly hosts?: ReadonlyArray<HostIdentity>;
@@ -74,30 +78,16 @@ export interface ChatWelcomeProps {
   readonly status?: ChatControllerStatus;
 }
 
-const starterIdeas = [
-  {
-    label: "Write",
-    prompt: "Draft something clear and concise, then help me refine it.",
-    icon: PenLine,
-  },
-  {
-    label: "Learn",
-    prompt: "Explain a concept clearly, then check my understanding.",
-    icon: GraduationCap,
-  },
-  {
-    label: "Plan",
-    prompt: "Turn this goal into a practical plan with clear next steps.",
-    icon: ListChecks,
-  },
-  {
-    label: "Explore",
-    prompt: "Help me explore the options, tradeoffs, and open questions.",
-    icon: Compass,
-  },
-] as const;
-
 export function ChatWelcome(props: ChatWelcomeProps) {
+  const continueRows: ReadonlyArray<HomeListContributor> = [
+    {
+      id: "continue",
+      useRows: (): HomeListRead => ({
+        status: "ready",
+        rows: recentThreadRows(props.recentThreads ?? []),
+      }),
+    },
+  ];
   const ready = props.status === undefined || props.status === "ready";
   const [prompt, setPrompt] = useNewTaskPrompt();
   const [attachmentNotice, setAttachmentNotice] = useState<string>();
@@ -410,25 +400,19 @@ export function ChatWelcome(props: ChatWelcomeProps) {
           />
         </div>
         {(props.recentThreads?.length ?? 0) === 0 ? (
-          <div aria-label="Starter ideas" className="chat-welcome__suggestions" role="group">
-            {starterIdeas.map((idea) => {
-              const Icon = idea.icon;
-              return (
-                <StartSuggestionChip
-                  disabled={!ready || props.creating}
-                  key={idea.label}
-                  onClick={() => {
-                    setPrompt(idea.prompt);
-                    textareaRef.current?.focus();
-                  }}
-                >
-                  <Icon aria-hidden="true" size={14} />
-                  {idea.label}
-                </StartSuggestionChip>
-              );
-            })}
-          </div>
+          <ChatStarterIdeas
+            disabled={!ready || props.creating === true}
+            onChoose={(idea) => {
+              setPrompt(idea);
+              textareaRef.current?.focus();
+            }}
+          />
         ) : null}
+        <HomeStartList
+          cacheScope={["chat", String(props.selectedHostId ?? "")].join("|")}
+          extraRows={continueRows}
+          homeStart={props.homeStart}
+        />
       </div>
     </section>
   );

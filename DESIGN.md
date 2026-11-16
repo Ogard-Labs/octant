@@ -1780,9 +1780,9 @@ not, and read as a different background beside them.
 A start screen (the welcome screen, Code Home, a new thread) stands on the
 application ground; every other page covers it with the reading veil.
 
-- **Layout**: the question (the hero role, the 32px mark above it at 8px) centres
-  in the free height; the composer docks 12px above the pane's foot, so a start
-  screen beside a thread puts its composer on the same line. The column is
+- **Layout**: the question (the hero role) sits at the top of the column with the
+  composer directly under it, then the mode's list; the composer docks 12px above
+  the pane's foot only once a thread exists. The column is
   `min(100% - var(--oct-thread-gutter), var(--oct-composer-width))`, 64px or 8vh
   from the top, 16px between parts. The hint is 12px meta, centred.
 - **Where a ground shows.** Every ground shows behind the start screens by

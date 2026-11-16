@@ -78,7 +78,6 @@ import {
   draftThreadModePresentation,
   resolveCodeNewThreadWorkspace,
   type CreateHostViewScope,
-  type DraftIntentCard,
   type PickerGroup,
 } from "@octant/domain";
 import {
@@ -127,9 +126,9 @@ import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import { HostSelector } from "./HostSelector";
-import { HomeStart } from "./HomeStart";
+import { ChatStarterIdeas } from "../chat/ChatStarterIdeas";
+import { HomeStartList } from "./HomeStart";
 import { WelcomeHeading } from "../composer/WelcomeHeading";
-import { HomeDashboard } from "../home/HomeDashboard";
 import type { HomeListContributor, HomeListRead } from "../home/homeCards";
 import {
   recentThreadRows,
@@ -160,14 +159,6 @@ export interface DraftRecentThread {
   readonly onOpen: () => void;
 }
 
-/**
- * Which start screen a draft is. **Home** is where Code lands with nothing
- * chosen: the composer with what is next, what to continue, prompt
- * suggestions, and the cards. **New task** is the question and the composer
- * alone, in every mode.
- */
-export type DraftStartPresentation = "home" | "new-task";
-
 export interface DraftThreadWorkspaceProps {
   readonly mode: OctantMode;
   /** Records a Code Project's remembered new-thread workspace; absent where it cannot be recorded. */
@@ -175,7 +166,6 @@ export interface DraftThreadWorkspaceProps {
     projectId: ProjectId,
     workspace: CodeNewThreadWorkspace,
   ) => Promise<boolean>;
-  readonly startPresentation?: DraftStartPresentation;
   /**
    * What this mode already has open, shown under the composer. A start screen
    * with nothing below the prompt left most of the pane empty and gave the
@@ -342,10 +332,6 @@ export interface DraftThreadWorkspaceProps {
     readonly onPendingIssueConsumed?: () => void;
   };
 }
-
-const NO_HOME_CARDS: ReadonlyArray<HomeCardDefinition> = [];
-const NO_HOME_CARD_CHOICE: HomeCardCustomization = { order: [], visibility: [] };
-function ignoreCardChoice(): void {}
 
 /**
  * Ready-made first prompts for a Code thread. Four, because they stand on one
@@ -791,7 +777,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     else props.onAttachFolder?.();
   }
 
-  const home = props.startPresentation === "home";
   const githubHomeClient =
     props.mode === "code" && props.githubClient !== undefined && props.githubPluginEnabled !== false
       ? props.githubClient
@@ -835,9 +820,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   };
   // What only this screen knows joins the start list: Code's assigned work and
   // threads to continue, or Chat's and Work's latest threads.
-  const homeListExtras: ReadonlyArray<HomeListContributor> | undefined = !home
-    ? undefined
-    : props.mode === "code"
+  const homeListExtras: ReadonlyArray<HomeListContributor> =
+    props.mode === "code"
       ? [
           ...(githubHomeClient === undefined && linearHome === undefined
             ? []
@@ -896,22 +880,16 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             }),
           },
         ];
-  const homeStartNode = !home ? undefined : (
-    <HomeStart
-      dashboard={
-        <HomeDashboard
-          cards={props.homeStart?.cards ?? NO_HOME_CARDS}
-          customization={props.homeStart?.cardCustomization ?? NO_HOME_CARD_CHOICE}
-          cacheScope={[
-            props.mode,
-            props.serverUrl ?? "",
-            String(props.selectedHostId ?? props.hostId ?? LOCAL_HOST_ID),
-            String(selectedProjectId ?? ""),
-          ].join("|")}
-          extraRows={homeListExtras}
-          onCustomizationChange={props.homeStart?.onCardCustomizationChange ?? ignoreCardChoice}
-        />
-      }
+  const homeStartNode = (
+    <HomeStartList
+      cacheScope={[
+        props.mode,
+        props.serverUrl ?? "",
+        String(props.selectedHostId ?? props.hostId ?? LOCAL_HOST_ID),
+        String(selectedProjectId ?? ""),
+      ].join("|")}
+      extraRows={homeListExtras}
+      homeStart={props.homeStart}
     />
   );
 
@@ -1016,8 +994,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       );
     const composer = (
       <CodeComposerAdapter
-        {...(home ? { suggestions: CODE_SUGGESTIONS } : {})}
-        {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}
+        suggestions={CODE_SUGGESTIONS}
+        homeStart={homeStartNode}
         {...(coordinatorSettings === undefined ? {} : { afterComposer: coordinatorSettings })}
         {...(promptRequest === undefined ? {} : { promptRequest })}
         {...hostSelectorBinding}
@@ -1167,7 +1145,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       <>
         <WorkComposerAdapter
           {...(promptRequest === undefined ? {} : { promptRequest })}
-          {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}
+          homeStart={homeStartNode}
           {...hostSelectorBinding}
           {...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId })}
           {...(selectedProjectName === undefined ? {} : { projectName: selectedProjectName })}
@@ -1401,22 +1379,17 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     }
   }
 
-  function applyIntentCard(card: DraftIntentCard) {
-    setPrompt((current) => (current.trim() === "" ? `${card.label}: ` : current));
-    textareaRef.current?.focus();
-  }
-
   return (
     <section aria-label={`New ${presentation.eyebrow} thread`} className="draft-thread">
-      <div className="draft-thread__canvas">
-        <div className="draft-thread__welcome">
+      <div className="welcome">
+        <div className="welcome__heading">
           <WelcomeHeading
             {...(selectedProjectName === undefined
               ? {}
               : { projectChosen: true, projectName: selectedProjectName })}
           />
         </div>
-        <div className="draft-thread__composer composer-stack">
+        <div className="composer-stack">
           <ThreadComposer
             notices={
               props.errorMessage === undefined
@@ -1565,24 +1538,16 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           />
         </div>
 
-        {homeStartNode}
-
-        {home && (props.recentThreads?.length ?? 0) === 0 ? (
-          <div className="draft-thread__intent-cards" role="group" aria-label="Suggested actions">
-            {presentation.intentCards.map((card) => (
-              <OctantButton
-                className="draft-thread__intent-card"
-                key={card.id}
-                onClick={() => applyIntentCard(card)}
-                type="button"
-                variant="ghost"
-              >
-                <span className="draft-thread__intent-label">{card.label}</span>
-                <span className="draft-thread__intent-description">{card.description}</span>
-              </OctantButton>
-            ))}
-          </div>
+        {props.mode === "chat" && (props.recentThreads?.length ?? 0) === 0 ? (
+          <ChatStarterIdeas
+            disabled={props.creating === true}
+            onChoose={(idea) => {
+              setPrompt(idea);
+              textareaRef.current?.focus();
+            }}
+          />
         ) : null}
+        {homeStartNode}
       </div>
     </section>
   );

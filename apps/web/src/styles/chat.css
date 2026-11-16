@@ -28,7 +28,6 @@
 }
 
 .chat-welcome__suggestions {
-  order: 3;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
@@ -578,6 +577,9 @@
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
 }
+.thread-work-shelf__history > button:active {
+  background: var(--oct-wash-pressed);
+}
 
 .thread-work-shelf__narrow-label {
   display: none;
@@ -667,6 +669,10 @@
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
   border-color: var(--octant-border-strong);
+}
+.thread-work-shelf__item-actions button:active,
+.thread-work-shelf form button:active {
+  background: var(--oct-wash-pressed);
 }
 
 .thread-work-shelf form {
@@ -920,11 +926,6 @@
 }
 
 @media (max-width: 680px) {
-  .chat-welcome .welcome {
-    justify-content: center;
-    padding: 28px 0;
-  }
-
   .chat-welcome__suggestions {
     gap: var(--oct-space-1);
   }
@@ -1068,6 +1069,9 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
 .tracker-reference-chip:hover {
   border-color: var(--octant-border-strong, var(--oct-border));
   background: var(--oct-selection);
+}
+.tracker-reference-chip:active {
+  background: var(--oct-wash-pressed);
 }
 
 .tracker-reference-chip__raw {

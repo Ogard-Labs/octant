@@ -499,12 +499,11 @@
 }
 
 /* ── Welcome composer ──────────────────────────────────────────────────
-   Chat, Work, and Code start from the same geometry: one question in the
-   middle of the page and the raised `.composer` docked at its foot, where it
-   sits once the thread starts, so the first message is typed where every
-   later one is: 12px above the pane's foot, the thread composer's margin, so
-   a start screen beside a thread puts its composer on the same line. The
-   per-mode adapters only decide which controls sit in the composer's tray. */
+   Chat, Work, and Code start from the same column, top-anchored: the question,
+   the raised `.composer` directly under it, then that mode's list. One
+   definition serves all three and their drafts; the per-mode adapters only
+   decide which controls sit in the composer's tray. Once a thread exists the
+   composer is docked at the pane's foot, 12px above it, as before. */
 
 .welcome {
   display: flex;
@@ -519,8 +518,6 @@
   gap: var(--oct-space-4);
 }
 
-/* The question takes the free height and centres in it, which is what docks
-   the composer at the foot of the page. */
 .welcome__heading {
   display: grid;
   flex: 1 1 auto;
@@ -530,22 +527,34 @@
   text-align: center;
 }
 
-/* With a list under the composer (Code's recent work) the question keeps its own
-   height instead of taking the free height. Taking it put the composer at the
-   foot while the list was still empty, then rode it up about 200px as the rows
-   and cards arrived (measured: 446px, 314px, 217px over 1.7s). The composer now
-   sits where the arrived list would leave it, so late data fills the space
-   below and moves nothing. */
+/* With a list under the composer the question keeps its own height instead of
+   taking the free height. Taking it put the composer at the foot while the list
+   was still empty, then rode it up about 200px as the rows and cards arrived
+   (measured: 446px, 314px, 217px over 1.7s). The composer now sits where the
+   arrived list would leave it, so late data fills the space below and moves
+   nothing. */
 .welcome:has(> .home-start) > .welcome__heading {
   flex: 0 0 auto;
 }
 
-/* A draft's pane starts at the window's top with its header over its first
-   44px; Code Home's pane starts under the title band. The home column starts
-   one band lower in a draft, so choosing a Project on Code Home (which turns
-   it into a draft) leaves the question and the composer where they were.
-   Measured before: both rose 44px on the choice. */
-.workspace-pane[data-surface-kind="draft-thread"] .welcome:has(> .home-start) {
+/* Chat says its hint in the composer's placeholder, so its heading has no quiet
+   line; the line's room stays, so the composer sits on the same row in all
+   three modes. */
+.welcome:has(> .home-start) > .welcome__heading:not(:has(.welcome__status))::after {
+  content: "";
+  height: calc(1em * var(--oct-leading-detail));
+  font-size: var(--oct-text-detail);
+}
+
+/* A draft pane that has a title row (a draft beside another pane) starts at
+   the window's top with that row over its first 44px; a pane without one, home
+   or a draft alone, starts under the title band. The home column starts one
+   band lower under a title row, so the question and the composer stand at one
+   height in every case. Measured in Code before the rule: both rose 44px when
+   a Project was chosen. Keyed on the surface kind alone, it later pushed a
+   draft that stands alone (every New task now) 44px down instead. */
+.workspace-pane[data-surface-kind="draft-thread"]:has(> .workspace-pane__header)
+  .welcome:has(> .home-start) {
   padding-top: calc(min(8vh, 64px) + var(--oct-title-rail-h));
 }
 

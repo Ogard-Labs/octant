@@ -173,6 +173,11 @@
   --oct-line-meta: round(calc(var(--oct-leading-meta) * 1em), 1px);
   --oct-line-detail: round(calc(var(--oct-leading-detail) * 1em), 1px);
   --oct-leading-code: 1.7;
+  /* The one line height of a diff, in the review tool, a commit, and a pull
+     request's diff: the body leading on the 12px size, in whole pixels. Two
+     surfaces drew 28px (the line-number buttons set the row) and 22px (the
+     code block's reading leading) for the same line. */
+  --oct-line-diff: round(calc(var(--oct-leading-body) * var(--oct-text-xs)), 1px);
 
   --oct-weight-regular: 400;
   --oct-weight-medium: 500;
@@ -974,6 +979,9 @@ html {
 .card-interactive:hover {
   border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
   background: var(--oct-surface-warm);
+}
+.card-interactive:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
 }
 
 /* ─── feature cell ──────────────────────────────────────────────────── */
@@ -2261,6 +2269,10 @@ input.switch:checked::after {
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
 }
+.menu-item:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
+
 .menu-item[aria-disabled="true"] {
   opacity: var(--oct-disabled-opacity);
   pointer-events: none;
@@ -2593,6 +2605,10 @@ input.switch:checked::after {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
 }
+.pager-item:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
+
 .pager-item[aria-current="page"] {
   color: var(--oct-fg);
   border-color: var(--oct-border);
@@ -3156,6 +3172,10 @@ input.switch:checked::after {
 .filerow:hover {
   background: var(--oct-fg-soft);
 }
+.filerow:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
+
 .filerow .filerow-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3177,6 +3197,9 @@ input.switch:checked::after {
 .filecard-more:hover {
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
+}
+.filecard-more:active {
+  background: var(--oct-wash-pressed);
 }
 
 /* ─── run status ──────────────────────────────────────────────────────
@@ -3250,6 +3273,10 @@ input.switch:checked::after {
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
 }
+.dock-row:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
+
 .dock-row .icon {
   color: var(--oct-meta);
 }
@@ -3535,6 +3562,10 @@ input.switch:checked::after {
 .issuerow:hover {
   background: var(--oct-fg-soft);
 }
+.issuerow:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
+
 .issuerow .issuerow-main {
   min-width: 0;
   flex: 1;
@@ -3785,6 +3816,10 @@ input.switch:checked::after {
 .suite > summary:hover {
   background: var(--oct-fg-soft);
 }
+.suite > summary:active {
+  background: var(--oct-wash-pressed);
+}
+
 .suite > summary .chev {
   color: var(--oct-meta);
   transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
@@ -3865,6 +3900,10 @@ input.switch:checked::after {
 .notif:hover {
   background: var(--oct-fg-soft);
 }
+.notif:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
+
 .notif.is-unread {
   border-left-color: var(--oct-accent-fg);
   background: var(--oct-border-soft);
@@ -4005,6 +4044,10 @@ input.switch:checked::after {
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
 }
+.tree-item:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
+
 .tree-item[aria-selected="true"] {
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
@@ -4212,6 +4255,10 @@ input.switch:checked::after {
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
 }
+.sidebar-item:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
+
 .sidebar-item[aria-current="page"] {
   background: var(--oct-selection);
   color: var(--oct-fg);
@@ -4315,6 +4362,10 @@ input.switch:checked::after {
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
 }
+.mode:active {
+  background: var(--oct-wash-pressed);
+}
+
 .mode[aria-current="page"] {
   background: var(--oct-selection);
   color: var(--oct-fg);
@@ -4462,6 +4513,10 @@ input.switch:checked::after {
 .mode-trigger:hover {
   background: var(--oct-fg-soft);
 }
+.mode-trigger:active {
+  background: var(--oct-wash-pressed);
+}
+
 .mode-trigger .mode-caret {
   margin-left: auto;
   color: var(--oct-meta);
@@ -4876,9 +4931,18 @@ input.switch:checked::after {
   :is(button, [role="button"])[data-variant="secondary"]:hover:not(:disabled) {
   background: color-mix(in oklab, var(--octant-text-primary) 11%, transparent);
 }
+.composer-field__attach
+  :is(button, [role="button"])[data-variant="secondary"]:active:not(:disabled) {
+  background: var(--oct-fill-1);
+}
+
 .composer-field__actions :is(button, [role="button"])[data-variant="ghost"]:hover:not(:disabled) {
   background: color-mix(in oklab, var(--octant-text-primary) 8%, transparent);
 }
+.composer-field__actions :is(button, [role="button"])[data-variant="ghost"]:active:not(:disabled) {
+  background: var(--oct-fill-1);
+}
+
 .composer-field__actions button[data-variant="default"] {
   background: var(--octant-text-primary);
   color: var(--octant-workspace);
@@ -5116,6 +5180,10 @@ html[data-octant-reduced-motion="true"] .composer-field__actions button[data-var
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
 }
+.composer-row [role="combobox"]:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
+
 /* A bordered box inside the composer's own box read as a form field nested in
    a form field. The trigger is a quiet chip that only gains a ground when
    pointed at, so the typed message stays the loudest thing in the frame. */
@@ -5190,8 +5258,7 @@ html[data-octant-reduced-motion="true"] .composer-field__actions button[data-var
    split's width is published below the shell. */
 .composer.thread-composer,
 .composer-stack,
-.welcome,
-.draft-thread__canvas {
+.welcome {
   --oct-composer-width: min(
     var(--oct-thread-measure, 680px),
     var(--octant-split-composer-width, 100vw) - 40px
@@ -5503,6 +5570,10 @@ html[data-octant-reduced-motion="true"] .callout {
 .thread-info__panel > details > summary:hover {
   background: var(--octant-control-hover);
 }
+.thread-info__panel > details > summary:active {
+  background: var(--octant-control-pressed);
+}
+
 .thread-info__panel > button > svg:last-child,
 .thread-info__panel > .task-access-details > button > svg:last-child {
   flex: 0 0 auto;
@@ -5671,6 +5742,9 @@ html[data-octant-reduced-motion="true"] .callout {
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
 }
+.chip .chip-x:active {
+  background: var(--oct-wash-pressed);
+}
 
 /* ─── terminal ────────────────────────────────────────────────────────
    A surface for real terminal output. It sets only the frame, the face,
@@ -5755,6 +5829,10 @@ html[data-octant-reduced-motion="true"] .callout {
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
 }
+.filetab-close:active {
+  background: var(--oct-wash-pressed);
+}
+
 .filetabs-add {
   display: grid;
   place-items: center;
@@ -5768,6 +5846,9 @@ html[data-octant-reduced-motion="true"] .callout {
 .filetabs-add:hover {
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
+}
+.filetabs-add:active {
+  background: var(--oct-wash-pressed);
 }
 
 /* ─── drop zone ───────────────────────────────────────────────────────
@@ -5881,6 +5962,10 @@ html[data-octant-reduced-motion="true"] .callout {
 .refcard:hover {
   background: var(--oct-surface-warm);
 }
+.refcard:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
+
 .refcard .refcard-title {
   display: block;
   color: var(--oct-fg);
@@ -7216,6 +7301,10 @@ html[data-octant-native-host="true"]
 .run-row:hover {
   background: var(--oct-fg-soft);
 }
+.run-row:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
+
 .run-row .st {
   margin-top: var(--oct-space-1);
 }
@@ -7379,6 +7468,10 @@ html[data-octant-native-host="true"]
 .linkrow:hover {
   background: var(--oct-fg-soft);
 }
+.linkrow:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
+
 .linkrow .linkrow-main {
   min-width: 0;
   flex: 1;
@@ -7915,6 +8008,10 @@ html[data-octant-native-host="true"]
 .ctxbar:hover {
   background: var(--oct-surface-warm);
 }
+.ctxbar:active {
+  background: var(--oct-wash-pressed);
+}
+
 .ctxbar .ctxbar-gap {
   flex: 1;
 }
@@ -8367,6 +8464,10 @@ html[data-octant-native-host="true"]
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
 }
+.setnav-item:active {
+  background: var(--oct-wash-pressed);
+}
+
 /* The open page takes the same neutral wash of the ink as the open thread in
    the workspace sidebar. The selection role carries the theme's hue, and on
    Onyx the open page read as a green slab on the glass. */
@@ -8973,6 +9074,10 @@ html[data-octant-native-host="true"]
 .hostrow:hover {
   background: var(--oct-fg-soft);
 }
+.hostrow:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
+
 .hostrow .host-main {
   flex: 1;
   min-width: 0;
@@ -9021,6 +9126,10 @@ html[data-octant-native-host="true"]
 .result:hover {
   background: var(--oct-fg-soft);
 }
+.result:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
+
 .result-where {
   display: flex;
   flex-wrap: wrap;

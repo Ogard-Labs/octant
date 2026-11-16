@@ -125,6 +125,17 @@ describe("WorkComposerAdapter", () => {
     expect(html).not.toContain("confined folder");
   });
 
+  it("puts the question, the composer and the list in one column", () => {
+    const { container } = render(
+      <WorkComposerAdapter {...baseProps} homeStart={<div className="home-start">List</div>} />,
+    );
+    const children = Array.from(container.querySelector(".welcome")?.children ?? []);
+    expect(children[0]).toHaveClass("welcome__heading");
+    expect(children[1]).toHaveClass("composer-stack");
+    expect(children[1]).toContainElement(screen.getByRole("textbox", { name: "First message" }));
+    expect(children[2]).toHaveClass("home-start");
+  });
+
   it("renders the no-Project state with an attach folder action", () => {
     const html = renderToStaticMarkup(
       <WorkComposerAdapter {...baseProps} onAttachFolder={() => {}} />,

@@ -284,6 +284,15 @@ async function openDockToolFromLauncher(
   await user.click(within(menu).getByRole("menuitemcheckbox", { name: tool }));
 }
 
+/** Work with nothing open: the Work welcome tab, which renders Work's home. */
+function workHomeShellBootstrap(): ShellBootstrap {
+  const value = bootstrap();
+  return {
+    ...value,
+    workspace: applyWorkspaceOperation(value.workspace, { kind: "set-active-mode", mode: "work" }),
+  };
+}
+
 /** Code with nothing open: the Code welcome tab, which renders Code Home. */
 function codeHomeShellBootstrap(): ShellBootstrap {
   const value = bootstrap();
@@ -4529,6 +4538,44 @@ describe("App", () => {
     const kept = await screen.findByRole("region", { name: "Continue" }, { timeout: 4000 });
     expect(within(kept).getByText("Ai slop callouts")).toBeVisible();
   });
+
+  it.each([
+    ["Chat", chatShellBootstrap, "New chat"],
+    ["Work", workHomeShellBootstrap, "New task"],
+    ["Code", codeHomeShellBootstrap, "New task"],
+  ] as const)(
+    "keeps the %s question and composer in the same column when New task opens from home",
+    async (_mode, bootstrapFor, compose) => {
+      const user = userEvent.setup();
+      render(
+        <App
+          isNarrow={false}
+          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+          projectClient={projects({ ...projectBootstrap(), availability: [] })}
+          projectWindowCapability={projectWindowCapability}
+          shellClient={client(bootstrapFor())}
+        />,
+      );
+      // The question and the composer are the column's first two children, so
+      // the one stylesheet rule that places the column places both screens alike.
+      const columnHead = () => {
+        const heading = screen.getByRole("heading", { name: "What are we building today?" });
+        const column = heading.closest(".welcome");
+        return Array.from(column?.children ?? [])
+          .slice(0, 2)
+          .map((child) => child.className.split(" ")[0]);
+      };
+      await screen.findByRole("textbox", { name: "First message" });
+      const onHome = columnHead();
+      expect(onHome).toEqual(["welcome__heading", "composer-stack"]);
+
+      await user.click(await findComposeButton(compose));
+      await waitFor(() =>
+        expect(screen.getByRole("region", { name: /Workspace pane: New / })).toBeVisible(),
+      );
+      expect(columnHead()).toEqual(onHome);
+    },
+  );
 
   it("lands Code on Code Home again after a New task draft is left empty", async () => {
     const user = userEvent.setup();

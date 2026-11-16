@@ -102,7 +102,7 @@ export function PanelTab(props: {
     >
       <OctantButton
         aria-selected={props.selected}
-        className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent data-active:bg-transparent data-active:text-inherit window-no-drag"
+        className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent active:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent data-active:bg-transparent data-active:text-inherit window-no-drag"
         data-panel-tab={props.id}
         onClick={props.onSelect}
         onDoubleClick={props.onKeep}

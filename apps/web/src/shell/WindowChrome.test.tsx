@@ -534,15 +534,15 @@ describe("WindowChrome", () => {
     const surface = readFileSync(resolve(process.cwd(), "src/styles/surface.css"), "utf8");
     const ground =
       surface.match(/\.app-backdrop\[data-placement="welcome"\]\s*\{[^}]+\}/)?.[0] ?? "";
-    const canvas = cssRule(".draft-thread__canvas");
+    const lifted = surface.match(/\.welcome-stage > :not\(\.app-backdrop\)\s*\{[^}]+\}/)?.[0] ?? "";
 
     // The ground is one layer in the frame under the panes, and the start
     // screen's own content takes a level above the stage's. Sharing a level
     // with the content painted the dither's dots over the greeting and over
     // the suggestion cards, which reads as the cards being see-through.
     expect(ground).toContain("z-index: -1;");
-    expect(canvas).toContain("position: relative;");
-    expect(canvas).toContain("z-index: 1;");
+    expect(lifted).toContain("position: relative;");
+    expect(lifted).toContain("z-index: 1;");
   });
 
   it("keeps semantic shell borders and controls restrained", () => {

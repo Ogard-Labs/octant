@@ -258,6 +258,9 @@
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
 }
+.dock-tool-strip__close:active {
+  background: var(--oct-wash-pressed);
+}
 
 /* The count sits at the strip's right end, so a menu hung from it ran past
    the dock's clipped left edge; the menu hangs from the strip instead and
@@ -474,6 +477,9 @@
 .dock-card__action:hover,
 .dock-card__action:focus-visible {
   background: var(--octant-control-hover);
+}
+.dock-card__action:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--octant-control-pressed);
 }
 
 .dock-card__spinner {
@@ -1339,6 +1345,9 @@
 .dock-bar-named:hover,
 .dock-bar-named[aria-expanded="true"] {
   background: var(--octant-control);
+}
+.dock-bar-named:active {
+  background: var(--oct-wash-pressed);
 }
 
 /* A state that must read at a glance stays in words (View only). */

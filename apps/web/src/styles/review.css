@@ -117,6 +117,10 @@
   box-shadow: var(--oct-elev-subtle);
 }
 
+.review-row:active .review-row__face {
+  background: var(--oct-wash-pressed);
+}
+
 .review-row__title {
   display: -webkit-box;
   overflow: hidden;
@@ -244,6 +248,10 @@
 .review-file[aria-current="true"] .review-file__face {
   background: var(--oct-surface);
   box-shadow: var(--oct-elev-subtle);
+}
+
+.review-file:active .review-file__face {
+  background: var(--oct-wash-pressed);
 }
 
 .review-file__path {

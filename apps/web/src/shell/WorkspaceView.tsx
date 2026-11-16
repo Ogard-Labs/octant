@@ -184,9 +184,8 @@ import type { WorkPromotionController } from "../work/useWorkPromotionController
 import type { CodeThreadProviderChoice } from "../code/codeThreadCreate";
 import { ProjectCanvasInventory } from "../projects/ProjectCanvasInventory";
 import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
-import type { DraftRecentThread, DraftStartPresentation } from "./DraftThreadWorkspace";
+import type { DraftRecentThread } from "./DraftThreadWorkspace";
 import type { OctantMode } from "@octant/contracts/modes";
-import { AgentModeWelcome } from "./AgentModeWelcome";
 import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import { WorkThreadEnvironment } from "../environment/WorkThreadEnvironment";
 import { ChatThreadEnvironment } from "../environment/ChatThreadEnvironment";
@@ -648,7 +647,6 @@ export interface WorkspaceViewProps {
   readonly onDraftPendingMessage?: string;
   readonly onDraftCancelFirstTurn?: () => void;
   readonly onAttachFolder?: () => void;
-  readonly onOpenDraftThread?: (mode: "work" | "code") => void;
   readonly onOpenCodeSettings?: () => void;
   readonly onOpenProviderSettings?: () => void;
   readonly onOpenReviewerSettings?: () => void;
@@ -656,8 +654,6 @@ export interface WorkspaceViewProps {
   /** Opens Settings at Image generation, where a thread's Create image action points. */
   readonly onOpenImageSettings?: () => void;
   readonly onOpenSettings?: () => void;
-  readonly providerReady?: boolean;
-  readonly providerBootstrapMessage?: string;
   readonly chatWelcomeCreating?: boolean;
   readonly chatWelcomeError?: string;
 }
@@ -1866,22 +1862,23 @@ function renderNonCodeTab(
   },
   openProviderSettings: (() => void) | undefined,
   drafts: NewTaskDrafts | undefined,
-  startPresentation: DraftStartPresentation = "new-task",
 ): React.ReactNode {
-  // Code's welcome tab is only a routing placeholder. Keep one start surface
-  // so a split or restored fallback never sends the reader through a second
-  // "Start a Code thread" screen before reaching the real composer.
-  if (tab.kind === "welcome" && tab.mode === "code") {
+  // Code's and Work's welcome tab is only a routing placeholder. Keep one
+  // start surface so a split or restored fallback never sends the reader
+  // through a second "Start a thread" screen before reaching the real
+  // composer; Chat's own welcome (below) is the same column.
+  if (tab.kind === "welcome" && (tab.mode === "code" || tab.mode === "work")) {
+    const mode = tab.mode;
     const projectId =
-      props.draftProjectSelection?.code ??
-      props.workspace.contextByMode.code.projectId ??
+      props.draftProjectSelection?.[mode] ??
+      props.workspace.contextByMode[mode].projectId ??
       undefined;
     return renderNonCodeTab(
       {
         kind: "draft-thread",
         id: tab.id,
-        mode: "code",
-        title: "New Code thread",
+        mode,
+        title: mode === "code" ? "New Code thread" : "New Work thread",
         ...(projectId === undefined ? {} : { projectId }),
       },
       props,
@@ -1889,10 +1886,6 @@ function renderNonCodeTab(
       canvasContext,
       openProviderSettings,
       drafts,
-      // Opening Code with nothing chosen lands on Code Home: the composer
-      // with what is next, what to continue, and the cards. New task is the
-      // question and the composer alone.
-      "home",
     );
   }
   if (tab.kind === "draft-thread") {
@@ -1907,11 +1900,9 @@ function renderNonCodeTab(
           {...(props.onChangeCodeNewThreadWorkspace === undefined
             ? {}
             : { onChangeCodeNewThreadWorkspace: props.onChangeCodeNewThreadWorkspace })}
-          // A Code draft is Code Home with its Project named: the composer
-          // under the question, the suggestions and the list. As the bare
-          // question over a composer at the page's foot, choosing a Project
-          // on Code Home threw the composer down the page and emptied it.
-          startPresentation={tab.mode === "code" ? "home" : startPresentation}
+          // Every mode's start screen is one column: the question, the
+          // composer under it, then the list. A draft is the home page with
+          // its Project named, so choosing a Project moves nothing.
           {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
           {...(props.selectedCreateHostId === undefined
             ? {}
@@ -2777,85 +2768,66 @@ function renderNonCodeTab(
       />
     );
   }
-  if (tab.mode === "chat") {
-    const recentThreads = draftRecentThreads("chat", props);
-    return (
-      <NewTaskDraftScopeContext.Provider value={`chat-welcome:${String(paneId)}`}>
-        <ChatWelcome
-          {...(recentThreads.length === 0 ? {} : { recentThreads })}
-          {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-          {...(props.selectedCreateHostId === undefined
-            ? {}
-            : { selectedHostId: props.selectedCreateHostId })}
-          {...(props.lastSelectedHealthyHostId === undefined
-            ? {}
-            : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-          {...(props.createHostViewScope === undefined
-            ? {}
-            : { viewScope: props.createHostViewScope })}
-          {...(props.onSelectCreateHost === undefined
-            ? {}
-            : { onSelectHost: props.onSelectCreateHost })}
-          {...(props.chatWelcomeError === undefined
-            ? props.chatController.errorMessage === undefined
-              ? {}
-              : { errorMessage: props.chatController.errorMessage }
-            : { errorMessage: props.chatWelcomeError })}
-          {...(props.chatWelcomeCreating === undefined
-            ? {}
-            : { creating: props.chatWelcomeCreating })}
-          {...(props.extensionClient === undefined
-            ? {}
-            : { extensionClient: props.extensionClient })}
-          onCreateChat={(prompt, modelOptionValues, extensionSelections, attachments) => {
-            if (attachments !== undefined) {
-              return props.onCreateChat(
-                prompt,
-                modelOptionValues,
-                paneId,
-                extensionSelections,
-                attachments,
-              );
-            } else if (extensionSelections === undefined) {
-              props.onCreateChat(prompt, modelOptionValues, paneId);
-            } else {
-              props.onCreateChat(prompt, modelOptionValues, paneId, extensionSelections);
-            }
-          }}
-          providerGroups={props.draftProviderGroups ?? []}
-          {...(props.draftSelectedProviderInstanceId === undefined
-            ? {}
-            : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
-          {...(props.draftSelectedModelId === undefined
-            ? {}
-            : { selectedModelId: props.draftSelectedModelId })}
-          {...(props.onDraftSelectProvider === undefined
-            ? {}
-            : { onSelectProvider: props.onDraftSelectProvider })}
-          {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
-          onRetry={props.chatController.retry}
-          status={props.chatController.status}
-        />
-      </NewTaskDraftScopeContext.Provider>
-    );
-  }
+  // Every other surface returned above, and Code's and Work's welcome tabs became
+  // their home drafts, so what is left is Chat's welcome.
+  const recentThreads = draftRecentThreads("chat", props);
   return (
-    <AgentModeWelcome
-      hasProjects={props.projects.some(
-        (project) => project.type === tab.mode && project.lifecycle === "active",
-      )}
-      mode={tab.mode === "code" ? "code" : "work"}
-      onAddFolder={props.onAttachFolder ?? (() => {})}
-      {...(props.onOpenDraftThread === undefined
-        ? {}
-        : {
-            onOpenDraft: () => props.onOpenDraftThread?.(tab.mode === "code" ? "code" : "work"),
-          })}
-      providerReady={props.providerReady ?? true}
-      {...(props.providerBootstrapMessage === undefined
-        ? {}
-        : { providerMessage: props.providerBootstrapMessage })}
-    />
+    <NewTaskDraftScopeContext.Provider value={`chat-welcome:${String(paneId)}`}>
+      <ChatWelcome
+        {...(recentThreads.length === 0 ? {} : { recentThreads })}
+        {...(props.homeStart === undefined ? {} : { homeStart: props.homeStart })}
+        {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+        {...(props.selectedCreateHostId === undefined
+          ? {}
+          : { selectedHostId: props.selectedCreateHostId })}
+        {...(props.lastSelectedHealthyHostId === undefined
+          ? {}
+          : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+        {...(props.createHostViewScope === undefined
+          ? {}
+          : { viewScope: props.createHostViewScope })}
+        {...(props.onSelectCreateHost === undefined
+          ? {}
+          : { onSelectHost: props.onSelectCreateHost })}
+        {...(props.chatWelcomeError === undefined
+          ? props.chatController.errorMessage === undefined
+            ? {}
+            : { errorMessage: props.chatController.errorMessage }
+          : { errorMessage: props.chatWelcomeError })}
+        {...(props.chatWelcomeCreating === undefined
+          ? {}
+          : { creating: props.chatWelcomeCreating })}
+        {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        onCreateChat={(prompt, modelOptionValues, extensionSelections, attachments) => {
+          if (attachments !== undefined) {
+            return props.onCreateChat(
+              prompt,
+              modelOptionValues,
+              paneId,
+              extensionSelections,
+              attachments,
+            );
+          } else if (extensionSelections === undefined) {
+            props.onCreateChat(prompt, modelOptionValues, paneId);
+          } else {
+            props.onCreateChat(prompt, modelOptionValues, paneId, extensionSelections);
+          }
+        }}
+        providerGroups={props.draftProviderGroups ?? []}
+        {...(props.draftSelectedProviderInstanceId === undefined
+          ? {}
+          : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
+        {...(props.draftSelectedModelId === undefined
+          ? {}
+          : { selectedModelId: props.draftSelectedModelId })}
+        {...(props.onDraftSelectProvider === undefined
+          ? {}
+          : { onSelectProvider: props.onDraftSelectProvider })}
+        {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
+        onRetry={props.chatController.retry}
+        status={props.chatController.status}
+      />
+    </NewTaskDraftScopeContext.Provider>
   );
 }
 

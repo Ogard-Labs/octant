@@ -98,13 +98,14 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
     props.tabs.map((tab) => ("surface" in tab ? tab.surface : tab).id),
   );
   const reserved = stripOpen ? ENVIRONMENT_STRIP_WIDTH : 0;
+  const tileColumns = props.isNarrow
+    ? 1
+    : stripOpen
+      ? (split.toolLayout?.columns.length ?? 1)
+      : (props.tiles?.layout?.columns.length ?? 1);
   const ceiling = dockWidthCeiling(workspaceWidth, {
     reservedWidth: reserved,
-    tileColumns: props.isNarrow
-      ? 1
-      : stripOpen
-        ? (split.toolLayout?.columns.length ?? 1)
-        : (props.tiles?.layout?.columns.length ?? 1),
+    tileColumns,
     viewportWidth: typeof window === "undefined" ? undefined : window.innerWidth,
     primaryMinimum: props.primaryMinimum,
   });
@@ -148,7 +149,15 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       className="right-utility-dock__resize"
       edge="leading"
       maximum={ceiling}
-      minimum={columnFixed ? MIN_CONTEXT_SIDEBAR_WIDTH : flexibleDockMinimum(ceiling)}
+      // Two columns side by side stop at their own floor, where the dock's
+      // width stops following the handle; one column keeps the tool minimum.
+      minimum={
+        columnFixed
+          ? MIN_CONTEXT_SIDEBAR_WIDTH
+          : tileColumns >= 2 && ceiling >= TILED_DOCK_MIN_WIDTH
+            ? TILED_DOCK_MIN_WIDTH
+            : flexibleDockMinimum(ceiling)
+      }
       {...(props.onCancelWidthPreview === undefined
         ? {}
         : { onCancel: props.onCancelWidthPreview })}

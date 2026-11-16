@@ -142,6 +142,9 @@
 .inbox-card .inbox-row:has(.inbox-view__row:focus-visible) {
   background: var(--oct-fg-soft);
 }
+.inbox-card .inbox-row:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
 
 .inbox-card .inbox-row--static:hover {
   background: none;

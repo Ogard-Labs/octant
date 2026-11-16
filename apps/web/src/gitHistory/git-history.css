@@ -253,6 +253,10 @@
 .git-history__diffs summary:focus-visible {
   background: var(--oct-surface-warm);
 }
+.git-history__diffs summary:active {
+  background: var(--oct-wash-pressed);
+}
+
 .git-history__diffs .unified-diff__file-header {
   display: none;
 }
