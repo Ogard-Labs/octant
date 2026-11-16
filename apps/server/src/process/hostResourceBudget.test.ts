@@ -89,4 +89,30 @@ describe("shared host resource budget", () => {
     expect(await another).toBeUndefined();
     expect(vi.getTimerCount()).toBe(0);
   });
+  it("keeps a launch waiting past 30 minutes for as long as its own deadline allows", async () => {
+    vi.useFakeTimers();
+    let paused = true;
+    const budget = new HostResourceBudget({
+      policy: () => ({
+        ...DEFAULT_HOST_RESOURCE_POLICY,
+        mode: paused ? ("paused" as const) : ("automatic" as const),
+      }),
+      read: () => idle,
+    });
+    let settled = false;
+    const pending = budget.acquire(undefined, 2 * 60 * 60_000).then((lease) => {
+      settled = true;
+      return lease;
+    });
+    await vi.advanceTimersByTimeAsync(45 * 60_000);
+    expect(settled).toBe(false);
+    expect(budget.snapshot().queuedCommands).toBe(1);
+    paused = false;
+    budget.recheck(() => undefined);
+    await vi.advanceTimersByTimeAsync(10_000);
+    const lease = await pending;
+    expect(lease).toBeDefined();
+    lease?.release();
+    budget.dispose();
+  });
 });

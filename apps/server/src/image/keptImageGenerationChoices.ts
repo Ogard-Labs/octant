@@ -21,6 +21,8 @@ export interface KeptImageGenerationChoices {
   remember(scope: ThreadScope, choice: ProjectImageGenerationChoice): Promise<void>;
   remembered(scope: ThreadScope): ProjectImageGenerationChoice | undefined;
   forget(scope: ThreadScope): Promise<void>;
+  /** The person chose Ask again for this thread's Project. */
+  asksAgain(scope: ThreadScope): boolean;
 }
 
 export function createKeptImageGenerationChoices(options: {
@@ -30,7 +32,7 @@ export function createKeptImageGenerationChoices(options: {
   readonly projectOf: (scope: ThreadScope) => ProjectId | undefined;
   readonly readProject: (
     projectId: ProjectId,
-  ) => Pick<Project, "version" | "imageGenerationChoice"> | undefined;
+  ) => Pick<Project, "version" | "imageGenerationChoice" | "imageGenerationAskAgain"> | undefined;
   /** Journals the Project's choice through the Project command path. */
   readonly changeProject: (command: {
     readonly kind: "change-project-image-generation-choice";
@@ -75,6 +77,12 @@ export function createKeptImageGenerationChoices(options: {
       return projectId === undefined
         ? options.threadChoices.remembered(scope)
         : options.readProject(projectId)?.imageGenerationChoice;
+    },
+    asksAgain(scope) {
+      const projectId = options.projectOf(scope);
+      return (
+        projectId !== undefined && options.readProject(projectId)?.imageGenerationAskAgain === true
+      );
     },
     async forget(scope) {
       const projectId = options.projectOf(scope);

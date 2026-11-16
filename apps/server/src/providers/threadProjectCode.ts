@@ -12,6 +12,8 @@ import {
   type WorkThread,
 } from "@octant/contracts";
 import { projectCodeEntries, projectCodeTrust } from "@octant/domain";
+import type { ProviderCliProjectTrust } from "./providerCliProjectTrust";
+import { projectTrustsProvider } from "./providerNativeSetup";
 
 export interface ThreadProjectCodeSources {
   readonly readWorkThread: (threadId: WorkThread["id"]) => WorkThread | undefined;
@@ -20,6 +22,8 @@ export interface ThreadProjectCodeSources {
   readonly readProviderInstance: (id: ProviderInstanceId) => ProviderInstance | undefined;
   /** Whether an entry exists at this path; a symbolic link counts without being followed. */
   readonly exists?: (path: string) => Promise<boolean>;
+  /** Whether the provider's own CLI already trusts the Project's folder; absent reads none. */
+  readonly readProviderCliTrust?: ProviderCliProjectTrust;
 }
 
 /**
@@ -54,7 +58,7 @@ export async function readThreadProjectCode(
   return projectCodeTrust({
     driverKind: instance.driverKind,
     projectType: project.type,
-    trusted: (project.nativeProviders ?? []).some((kind) => kind === instance.driverKind),
+    trusted: projectTrustsProvider(project, instance.driverKind, sources.readProviderCliTrust),
     present: present.filter((path): path is string => path !== undefined),
   });
 }

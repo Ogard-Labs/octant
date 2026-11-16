@@ -2,9 +2,10 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { ExtensionPackageState, type ExtensionActivationState } from "@octant/contracts/extensions";
 import {
-  isExtensionComponentHostConfined,
+  isExtensionComponentHostAdmitted,
   isExtensionComponentModeSafe,
   resolveExtensionActivation,
+  outsideDriverHostLaunch,
   resolveOutsideDriverActivation,
   resolveOutsideDriverRebind,
 } from "./activation";
@@ -82,14 +83,14 @@ describe("effective extension activation", () => {
     ["linux", "canvas-export-target", false],
     ["win32", "canvas-export-target", false],
     ["darwin", "provider-driver", true],
-    ["linux", "provider-driver", false],
+    ["linux", "provider-driver", true],
     ["win32", "provider-driver", false],
     ["linux", "mcp-server", true],
   ] as const)(
-    "lets a %s host run a stored %s component only where it is confined: %s",
+    "lets a %s host run a stored %s component only where it confines it or the person's driver runs labelled: %s",
     (platform, kind, expected) => {
       expect(
-        isExtensionComponentHostConfined(platform, {
+        isExtensionComponentHostAdmitted(platform, {
           id: "component" as never,
           kind,
           displayName: "Component",
@@ -275,15 +276,22 @@ describe("outside driver activation for a provider instance", () => {
     expect(resolve(packageState())).toEqual({ kind: "effective" });
   });
 
-  it("is host-prohibited off macOS before anything about the package is read", () => {
-    expect(resolve(packageState(), { platform: "linux" })).toEqual({
+  it("admits the same trusted, switched-on package on Linux, and is host-prohibited on Windows before anything is read", () => {
+    expect(resolve(packageState(), { platform: "linux" })).toEqual({ kind: "effective" });
+    expect(resolve(packageState({ trusted: false }), { platform: "linux" })).toEqual({
       kind: "blocked",
-      reason: "host-prohibited",
+      reason: "untrusted",
     });
     expect(resolve(undefined, { platform: "win32" })).toEqual({
       kind: "blocked",
       reason: "host-prohibited",
     });
+  });
+
+  it("runs an outside driver confined on macOS, unconfined on Linux, and not at all on Windows", () => {
+    expect(outsideDriverHostLaunch("darwin")).toBe("confined");
+    expect(outsideDriverHostLaunch("linux")).toBe("unconfined");
+    expect(outsideDriverHostLaunch("win32")).toBe("prohibited");
   });
 
   it("is superseded when the package selects any other version or digest", () => {

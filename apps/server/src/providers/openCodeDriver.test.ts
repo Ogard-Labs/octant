@@ -163,28 +163,17 @@ describe("OpenCode driver", () => {
   it("proves MCP declaration support through a confined loopback probe lease", async () => {
     const fixture = driverFixture();
     const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
-    if (process.platform === "darwin") {
-      expect(probe.capabilities.appManagedTools).toBe("supported");
-      expect(fixture.processInputs[0]).toMatchObject({
-        mode: "chat",
-        executionPolicy: "plan",
-        loopbackPorts: [expect.any(Number)],
-      });
-      expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
-      expect(fixture.calls.some((call) => call.startsWith("mcp.disconnect:"))).toBe(true);
-    } else {
-      expect(probe.capabilities.appManagedTools).toBe("unsupported");
-      // Linux's Chat and Plan capsule admits processes, so the probe attests
-      // it; elsewhere turns run only in Work and Code outside Plan, so the
-      // probe attests that jail.
-      expect(fixture.processInputs[0]).toMatchObject(
-        process.platform === "linux"
-          ? { mode: "chat", executionPolicy: "plan" }
-          : { mode: "code", executionPolicy: "approval-gated" },
-      );
-      expect(fixture.processInputs[0]?.loopbackPorts).toBeUndefined();
-      expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(false);
-    }
+    // macOS and Linux reach the bridge, and both probe the Chat and Plan
+    // jail, which starts the git stand-in; elsewhere turns run only in Work
+    // and Code outside Plan, so the probe attests that jail.
+    expect(probe.capabilities.appManagedTools).toBe("supported");
+    expect(fixture.processInputs[0]).toMatchObject(
+      process.platform === "darwin" || process.platform === "linux"
+        ? { mode: "chat", executionPolicy: "plan", loopbackPorts: [expect.any(Number)] }
+        : { mode: "code", executionPolicy: "approval-gated", loopbackPorts: [expect.any(Number)] },
+    );
+    expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
+    expect(fixture.calls.some((call) => call.startsWith("mcp.disconnect:"))).toBe(true);
   });
 
   it("keeps app tools unsupported when the provider rejects the MCP declaration", async () => {

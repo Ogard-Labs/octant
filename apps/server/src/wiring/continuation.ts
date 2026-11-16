@@ -140,6 +140,13 @@ export function wireContinuation(deps: ContinuationDependencies) {
       clock: () => new Date(),
       uuid: randomUUID,
       ports: { work: workThreadWakeupPort, code: codeThreadWakeupPort },
+      limits: () => {
+        const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+        return {
+          waitingPerThread: settings.threadWakeupsWaitingLimit,
+          runMissedOnReturn: settings.threadWakeupsRunMissedOnReturn,
+        };
+      },
       onError: (message, error) => console.error(`[wake-ups] ${message}`, error),
     });
     const unsubscribeThreadWakeups = persistence.journal.subscribeCommitted((append) =>

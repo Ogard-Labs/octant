@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ProviderInstance } from "@octant/contracts";
 import { afterEach, describe, expect, it } from "vitest";
+import { createProviderCliProjectTrust } from "./providerCliProjectTrust";
 import { readThreadProjectCode, type ThreadProjectCodeSources } from "./threadProjectCode";
 
 const threadId = "80000000-0000-4000-8000-000000000070";
@@ -33,6 +34,7 @@ function sources(input: {
   readonly root: string;
   readonly driverKind: ProviderInstance["driverKind"];
   readonly nativeProviders?: ReadonlyArray<string>;
+  readonly readProviderCliTrust?: ThreadProjectCodeSources["readProviderCliTrust"];
 }): ThreadProjectCodeSources {
   const thread = { id: threadId, projectId, providerInstanceId: instanceId };
   return {
@@ -46,6 +48,9 @@ function sources(input: {
         ...(input.nativeProviders === undefined ? {} : { nativeProviders: input.nativeProviders }),
       }) as never,
     readProviderInstance: () => ({ id: instanceId, driverKind: input.driverKind }) as never,
+    ...(input.readProviderCliTrust === undefined
+      ? {}
+      : { readProviderCliTrust: input.readProviderCliTrust }),
   };
 }
 
@@ -84,6 +89,42 @@ describe("reading a thread's untrusted Project code", () => {
       provider: "mistral-vibe",
       found: ["settings", "hooks"],
     });
+  });
+
+  it("counts a Project trusted in the provider's own CLI as trusted, and asks where the CLI has no record", async () => {
+    const parent = projectRoot({ "app/.claude/settings.json": "{}" });
+    const root = join(parent, "app");
+    const home = projectRoot({
+      ".claude.json": JSON.stringify({
+        projects: { [parent]: { hasTrustDialogAccepted: true } },
+      }),
+      ".codex/config.toml": "",
+    });
+    const codexConfig = { projects: { [root]: { trust_level: "trusted" } } };
+    const trust = createProviderCliProjectTrust({
+      home,
+      environment: {},
+      parseToml: () => codexConfig,
+    });
+    // Claude Code's trust of a folder above the Project covers it.
+    await expect(
+      readThreadProjectCode(sources({ root, driverKind: "claude", readProviderCliTrust: trust }), {
+        threadId,
+        mode: "code",
+      }),
+    ).resolves.toMatchObject({ status: "trusted", provider: "claude" });
+    expect(trust("codex", root)).toBe(true);
+    expect(trust("codex", join(root, "nested"))).toBe(false);
+    // A folder no CLI trusted keeps Octant's card.
+    const elsewhere = mkdtempSync(join(tmpdir(), "octant-untrusted-"));
+    roots.push(elsewhere);
+    writeFileSync(join(elsewhere, ".mcp.json"), "{}");
+    await expect(
+      readThreadProjectCode(
+        sources({ root: elsewhere, driverKind: "claude", readProviderCliTrust: trust }),
+        { threadId, mode: "code" },
+      ),
+    ).resolves.toMatchObject({ status: "untrusted" });
   });
 
   it("reports nothing for a Project folder without the provider's Project code", async () => {

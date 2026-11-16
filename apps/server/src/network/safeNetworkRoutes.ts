@@ -5,6 +5,8 @@ import {
   type SafeNetworksRefusalReason,
   type SafeNetworksView,
 } from "@octant/contracts/safe-networks";
+import { principalActsAsHostPerson } from "../clientPrincipal";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -53,8 +55,9 @@ function failure(message: string, status: number, origin: string | null): Respon
 /**
  * Settings › Permissions › Safe networks: the account default, a Project's
  * override, and the hosts its runtimes were recently refused. The principal
- * comes from the authenticated request; only a person at a local window
- * changes what is trusted.
+ * comes from the authenticated request; only the host's own person changes
+ * what is trusted, at a local window or on a device they paired, which is
+ * journaled as the actor.
  */
 export function createSafeNetworkRouteHandler(dependencies: SafeNetworkRouteDependencies) {
   const now = dependencies.now ?? Date.now;
@@ -87,7 +90,15 @@ export function createSafeNetworkRouteHandler(dependencies: SafeNetworkRouteDepe
         now: now(),
         ...(body === undefined ? {} : { body }),
       });
-      principal = context.principal.kind === "remote-device" ? "remote-device" : "local-window";
+      principal =
+        context.principal.kind === "local-window"
+          ? { principal: "local-window" }
+          : principalActsAsHostPerson(context.principal)
+            ? {
+                principal: "person-paired-device",
+                actor: eventActorForPrincipal(context.principal),
+              }
+            : { principal: "remote-device" };
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failure("Safe network request is unauthorized.", 401, origin);
@@ -110,10 +121,10 @@ export function createSafeNetworkRouteHandler(dependencies: SafeNetworkRouteDepe
     }
     const change: SafeNetworksChange =
       command.kind === "set-limits"
-        ? dependencies.store.setLimits({ enabled: command.enabled, principal })
+        ? dependencies.store.setLimits({ enabled: command.enabled, ...principal })
         : command.kind === "set-places"
-          ? dependencies.store.set({ scope: command.scope, places: command.places, principal })
-          : dependencies.store.clearProject({ projectId: String(command.projectId), principal });
+          ? dependencies.store.set({ scope: command.scope, places: command.places, ...principal })
+          : dependencies.store.clearProject({ projectId: String(command.projectId), ...principal });
     const projectId =
       command.kind === "clear-project-override"
         ? String(command.projectId)

@@ -39,6 +39,7 @@ import type {
 import {
   CLAUDE_ATTACHMENTS_READ_ONLY,
   CLAUDE_MEMORY_WRITE_REFUSAL,
+  claudeMemoryWriteRefusal,
   CLAUDE_PLAN_CAPTURED_MESSAGE,
   CLAUDE_PLAN_MCP_SERVER_REFUSAL,
   claudeExecutionOptions,
@@ -1364,6 +1365,45 @@ describe("Claude execution policy", () => {
       ).resolves.not.toMatchObject({ behavior: "deny" });
     } finally {
       await acquired.close();
+    }
+  });
+
+  it("refuses a Chat write into Claude's memory when the instructions file or a memory folder is itself a link", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "octant-claude-memory-")));
+    try {
+      const configurationDirectory = join(root, "account");
+      const elsewhere = join(root, "elsewhere");
+      await mkdir(join(configurationDirectory, "projects", "-chat"), { recursive: true });
+      await mkdir(join(elsewhere, "memory"), { recursive: true });
+      await writeFile(join(configurationDirectory, "instructions.md"), "x");
+      await symlink(
+        join(configurationDirectory, "instructions.md"),
+        join(configurationDirectory, "CLAUDE.md"),
+      );
+      await symlink(
+        join(elsewhere, "memory"),
+        join(configurationDirectory, "projects", "-chat", "memory"),
+      );
+      const refusal = (target: string) =>
+        claudeMemoryWriteRefusal({
+          mode: "chat",
+          executionPolicy: "approval-gated",
+          toolName: "Write",
+          target,
+          workingDirectory: root,
+          configurationDirectory,
+        });
+      expect(refusal(join(configurationDirectory, "CLAUDE.md"))).toBe(CLAUDE_MEMORY_WRITE_REFUSAL);
+      expect(refusal(join(configurationDirectory, "instructions.md"))).toBe(
+        CLAUDE_MEMORY_WRITE_REFUSAL,
+      );
+      expect(
+        refusal(join(configurationDirectory, "projects", "-chat", "memory", "MEMORY.md")),
+      ).toBe(CLAUDE_MEMORY_WRITE_REFUSAL);
+      expect(refusal(join(elsewhere, "memory", "MEMORY.md"))).toBe(CLAUDE_MEMORY_WRITE_REFUSAL);
+      expect(refusal(join(elsewhere, "notes.md"))).toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 

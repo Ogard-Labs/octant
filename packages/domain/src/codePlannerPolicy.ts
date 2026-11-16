@@ -86,6 +86,8 @@ export function decideCodePlannerDesignation(input: {
     /** Already a coordinator by its own record, so already counted. */
     readonly threadIsCoordinator: boolean;
     readonly otherCoordinators: number;
+    /** How many coordinators a Code Project may hold, from Settings; absent is the default. */
+    readonly coordinatorLimit?: number;
   };
 }): CodePlannerDesignationDecision {
   const project = requireActiveCodeProject(input.project);
@@ -117,14 +119,15 @@ export function decideCodePlannerDesignation(input: {
       "A worker thread cannot be the planner; its coordinator directs it.",
     );
   }
+  const coordinatorLimit = coordinatorFacts?.coordinatorLimit ?? MAX_COORDINATORS_PER_PROJECT;
   if (
     coordinatorFacts !== undefined &&
     !coordinatorFacts.threadIsCoordinator &&
-    coordinatorFacts.otherCoordinators >= MAX_COORDINATORS_PER_PROJECT
+    coordinatorFacts.otherCoordinators >= coordinatorLimit
   ) {
     return refusal(
       "coordinator-limit-reached",
-      `The planner counts as a coordinator, and a Code Project may have at most ${String(MAX_COORDINATORS_PER_PROJECT)}.`,
+      `The planner counts as a coordinator, and a Code Project may have at most ${String(coordinatorLimit)}, the number set in Settings.`,
     );
   }
   return { status: "designate" };

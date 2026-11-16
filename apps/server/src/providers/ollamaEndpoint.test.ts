@@ -24,14 +24,19 @@ function ndjson(values: readonly unknown[]) {
 }
 
 describe("Ollama native endpoint", () => {
-  it("accepts only the native API on literal loopback HTTP endpoints", () => {
+  it("accepts the native API on loopback or a private network over HTTP, or anywhere over HTTPS", () => {
     expect(makeOllamaEndpoint({ baseUrl: "http://[::1]:11434/" }).baseUrl).toBe(
       "http://[::1]:11434",
     );
+    expect(makeOllamaEndpoint({ baseUrl: "http://192.168.1.5:11434/" }).baseUrl).toBe(
+      "http://192.168.1.5:11434",
+    );
+    expect(makeOllamaEndpoint({ baseUrl: "https://ollama.com/" }).baseUrl).toBe(
+      "https://ollama.com",
+    );
 
     for (const baseUrl of [
-      "https://127.0.0.1:11434/",
-      "http://192.168.1.5:11434/",
+      "http://ollama.example.com:11434/",
       "http://user@localhost:11434/",
       "http://localhost:11434/v1/",
       "http://localhost:11434/?token=secret",

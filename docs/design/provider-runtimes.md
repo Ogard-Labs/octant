@@ -1381,11 +1381,15 @@ registration closed. 2.0.22 names the calling session in the call's
 another session. App-managed tools are reported only for 2.0.22 and 2.0.27 exactly,
 the 2.x releases the hostile-configuration check was repeated against (2.0.27
 passed the same check and the same app-tool round trip through a real launch
-as 2.0.22, with no change to routes or events), and
-only on macOS, where the probe registers an empty bridge and OpenCode lists
-its tools. Decided under [Provider reach Octant no longer narrows](../architecture.md#security-and-authority) (designed, not built):
-at Full access a newer 2.x release is offered the tools as "unverified"
-instead of losing them, and Linux reports them as macOS does. Project resolution
+as 2.0.22, with no change to routes or events), on macOS and Linux, where
+the probe registers an empty bridge and OpenCode lists its tools (Linux
+built under [Provider reach Octant no longer narrows](../architecture.md#security-and-authority),
+maintainer decision, 2026-11-16). A Linux launch reaches the bridge as Pi's
+does: on the shared host network a provider launch has by default, or, when
+Network limits proxy the launch, through the egress forwarder's loopback
+relay, which opens only the bridge's port; Windows is not offered the tools.
+Decided under the same entry (designed, not built): at Full access a newer
+2.x release is offered the tools as "unverified" instead of losing them. Project resolution
 starts Git, which the Chat, Plan, and Work jail refuses; on macOS those
 launches get the failing `git` stand-in described under
 [Security and authority](../architecture.md#security-and-authority), so 2.x offers turns in
@@ -1786,8 +1790,11 @@ infers them from the driver kind.
 Octant's tools reach an ACP session only through the session MCP bridge, and
 only when the agent's `initialize` result advertises `mcpCapabilities.http`
 (or the profile names an exact release that accepts it unadvertised) and the
-host is macOS (decided: Linux as macOS, under
-[Provider reach Octant no longer narrows](../architecture.md#security-and-authority); designed, not built).
+host is macOS or Linux (Linux built under
+[Provider reach Octant no longer narrows](../architecture.md#security-and-authority),
+maintainer decision, 2026-11-16). A Linux launch reaches the bridge on the
+shared host network, or through the egress forwarder's loopback relay for
+the bridge's port alone when Network limits proxy it.
 Otherwise the session reports app-managed tools `unsupported`,
 and a session that is offered tools is refused before `session/new` rather
 than started without them.
@@ -1970,7 +1977,7 @@ runtime outside the sandbox the receipt rests on, so a release that proves
 exclusivity below Full access is mixed there too, unless the thread keeps the
 opt-in sandbox. The capability is reported only when the connection check saw
 the runtime accept the tool endpoint's declaration; that check runs on macOS
-only, so on Linux nothing is reported as mixed. Every reader of the tool
+and Linux, so both report mixed. Every reader of the tool
 gate follows the level the turn runs at (maintainer decision, 2026-11-13): a
 child agent session reads the level its own session runs at; a routine's own
 Browser target reads its running turn's level; a saved flow, which runs

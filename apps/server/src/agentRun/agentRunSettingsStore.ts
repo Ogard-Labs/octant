@@ -97,7 +97,14 @@ export class AgentRunSettingsStore {
     return this.#current;
   }
 
-  update(input: UpdateAgentRunSettingsInput): AgentRunPolicySettings {
+  /**
+   * Journals the change as `actor` when a device the host's own person paired
+   * made it, else as the host's own person.
+   */
+  update(
+    input: UpdateAgentRunSettingsInput,
+    actor: typeof EventActor.Type = this.#actor,
+  ): AgentRunPolicySettings {
     if (input.expectedVersion !== this.#current.version) {
       throw new AgentRunSettingsStoreError(
         "conflict",
@@ -147,7 +154,7 @@ export class AgentRunSettingsStore {
             eventName: AGENT_RUN_SETTINGS_UPDATED,
             eventVersion: 1,
             correlationId: decodeCorrelationId(this.#uuid()),
-            actor: this.#actor,
+            actor,
             occurredAt: updatedAt,
             payload: settings,
           },

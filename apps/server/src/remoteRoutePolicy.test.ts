@@ -384,6 +384,52 @@ describe("remote route policy", () => {
     expect(classifyProductAction(new Request(`${origin}/api/octant-instructions`))).toBeUndefined();
   });
 
+  it("forwards Safe networks for a device the host's person paired, and names no catalogued action for any other device", async () => {
+    const fixture = handler();
+    const read = await fixture.route(request("/api/access/safe-networks?projectId=p"));
+    await read.arrayBuffer();
+    const post = await fixture.route(
+      request("/api/access/safe-networks", {
+        method: "POST",
+        headers: { origin, "sec-fetch-site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    await post.arrayBuffer();
+    expect(read.status).toBe(200);
+    expect(post.status).toBe(200);
+    expect(fixture.authenticatedProduct).toHaveBeenCalledTimes(2);
+    expect(
+      classifyProductAction(new Request(`${origin}/api/access/safe-networks`, { method: "POST" })),
+    ).toBeUndefined();
+  });
+
+  it("forwards a thread's wake-ups for a device the host's person paired, and names no catalogued action for any other device", async () => {
+    const fixture = handler();
+    const read = await fixture.route(
+      request("/api/thread-wakeups?mode=code&threadId=93000000-0000-4000-8000-000000000001"),
+    );
+    await read.arrayBuffer();
+    const post = await fixture.route(
+      request("/api/thread-wakeups/commands", {
+        method: "POST",
+        headers: { origin, "sec-fetch-site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    await post.arrayBuffer();
+
+    expect(read.status).toBe(200);
+    expect(post.status).toBe(200);
+    expect(fixture.authenticatedProduct).toHaveBeenCalledTimes(2);
+    expect(
+      classifyProductAction(
+        new Request(`${origin}/api/thread-wakeups/commands`, { method: "POST" }),
+      ),
+    ).toBeUndefined();
+    expect(classifyProductAction(new Request(`${origin}/api/thread-wakeups`))).toBeUndefined();
+  });
+
   it("forwards a thread's notes and recap for a device the host's person paired, and names no catalogued action for any other device", async () => {
     const fixture = handler();
     const post = await fixture.route(

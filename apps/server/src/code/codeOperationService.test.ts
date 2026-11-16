@@ -3389,7 +3389,7 @@ describe("CodeOperationService", () => {
     );
   });
 
-  it("runs a coordinator's turn under Plan's read-only gate and carries its roster", async () => {
+  it("runs a coordinator's turn at Full access at that level, and carries its roster", async () => {
     const fixture = providerTurnFixture({
       thread: decodeCodeThread({ ...thread(), executionPolicy: "full-access", coordinator: true }),
       isCoordinatorThread: () => true,
@@ -3405,11 +3405,33 @@ describe("CodeOperationService", () => {
 
     expect(fixture.turns.start).toHaveBeenCalledWith(
       expect.objectContaining({
-        thread: expect.objectContaining({ executionPolicy: "plan" }),
+        thread: expect.objectContaining({ executionPolicy: "full-access" }),
         context: expect.arrayContaining([
           { kind: "user-message", text: "Coordinator roster, written by Octant." },
         ]),
       }),
+    );
+  });
+
+  it("runs a coordinator's turn below Full access under Plan's read-only gate", async () => {
+    const fixture = providerTurnFixture({
+      thread: decodeCodeThread({
+        ...thread(),
+        executionPolicy: "auto-accept-edits",
+        coordinator: true,
+      }),
+      isCoordinatorThread: () => true,
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        executionPolicy: "auto-accept-edits",
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+
+    expect(fixture.turns.start).toHaveBeenCalledWith(
+      expect.objectContaining({ thread: expect.objectContaining({ executionPolicy: "plan" }) }),
     );
   });
 

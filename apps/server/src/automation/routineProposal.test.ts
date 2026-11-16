@@ -143,7 +143,7 @@ function harness(options: { readonly mode?: "work" | "code" } = {}) {
       },
       proposal,
     );
-  proposals.bindRequestedCreate(({ windowId: scope, proposal }) => {
+  proposals.bindRequestedCreate(({ windowId: scope, proposal, active }) => {
     const built = draft(proposal);
     if (built.status === "refused") return { status: "not-created", message: built.message };
     const created = commands.execute(
@@ -154,7 +154,7 @@ function harness(options: { readonly mode?: "work" | "code" } = {}) {
         principal: { kind: "local-window", windowId: String(scope), capabilityGeneration: 0 },
         origin: { kind: "interactive" },
         definition: built.draft,
-        initialLifecycle: "paused",
+        ...(active === true ? {} : { initialLifecycle: "paused" }),
       }),
       { originThreadId: proposal.threadId },
     );
@@ -211,6 +211,7 @@ function harness(options: { readonly mode?: "work" | "code" } = {}) {
     scope: WindowId = windowId,
     isAutomationOrigin = false,
     posture?: ProviderExecutionPolicy,
+    startsActiveAtFullAccess = false,
   ) =>
     createRoutineProposalTools({
       windowId: scope,
@@ -218,6 +219,7 @@ function harness(options: { readonly mode?: "work" | "code" } = {}) {
       isAutomationOrigin,
       proposals,
       ...(posture === undefined ? {} : { readPosture: () => posture }),
+      startsActiveAtFullAccess: () => startsActiveAtFullAccess,
       now: () => NOW_MS,
     });
   const routines = (
@@ -379,6 +381,31 @@ describe("routine proposals from a thread", () => {
     expect(routine?.authorityProfile.effective).toMatchObject({
       executionPolicy: "approval-gated",
     });
+  });
+
+  it("creates the routine enabled at Full access when the person's Settings start such routines active", async () => {
+    const h = harness({ mode: "code" });
+    const outcome = await h
+      .tools(windowId, false, "full-access", true)
+      .execute({ name: "octant_propose_routine", inputJson: weeklyInput });
+    expect(outcome).toMatchObject({ result: { status: "created", paused: false } });
+    expect(outcome.routine).toMatchObject({ name: "Monday report", paused: false });
+    const [item] = h.projection.listSummaries({
+      hostId: "local" as never,
+      mode: "all",
+      limit: 10,
+    }).items;
+    expect(h.projection.getDefinition(item?.id as never)).toMatchObject({ lifecycle: "enabled" });
+    // Below Full access the same choice changes nothing: the agent's own
+    // suggestion still waits for the person's card.
+    const below = h.tools(windowId, false, "auto-accept-edits", true).execute({
+      name: "octant_propose_routine",
+      inputJson: weeklyInput,
+    });
+    const [card] = await cardAppears(h.handler);
+    if (card === undefined) throw new Error("Expected the card");
+    await decide(h.handler, String(card.proposalId), "decline");
+    expect(await below).toMatchObject({ result: { status: "declined" } });
   });
 
   it("still asks on a card for a follow-up the agent suggests at Full access", async () => {

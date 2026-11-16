@@ -16,6 +16,7 @@ import { Schema } from "effect";
 import {
   ActorId,
   CorrelationId,
+  DEFAULT_THREAD_WAKEUPS_WAITING,
   decodeCodeThreadUpdated,
   decodeThreadRetentionThreadPurged,
   decodeThreadWakeupChanged,
@@ -100,7 +101,19 @@ export interface ThreadWakeupServiceOptions {
   readonly unschedule?: (handle: ThreadWakeupTimerHandle) => void;
   /** How long a wake-up whose thread is busy waits before it is offered again. */
   readonly busyRetryMs?: number;
+  /**
+   * The person's limits from Settings, read at each request and each due
+   * time so a change applies at once. Absent is the defaults: 8 waiting a
+   * thread, and a missed wake-up waits for the person.
+   */
+  readonly limits?: () => ThreadWakeupLimits;
   readonly onError?: (message: string, error: unknown) => void;
+}
+
+export interface ThreadWakeupLimits {
+  readonly waitingPerThread: number;
+  /** Run a wake-up that came due while the host was down or asleep once, on return. */
+  readonly runMissedOnReturn: boolean;
 }
 
 /** `setTimeout` clamps a delay above 2^31-1 ms to one; a later time is armed in chunks. */
@@ -160,6 +173,15 @@ export class ThreadWakeupService {
     for (const held of [...this.#held.values()]) {
       if (held.wakeup.status === "pending") this.#arm(held);
     }
+  }
+
+  #limits(): ThreadWakeupLimits {
+    return (
+      this.#options.limits?.() ?? {
+        waitingPerThread: DEFAULT_THREAD_WAKEUPS_WAITING,
+        runMissedOnReturn: false,
+      }
+    );
   }
 
   stop(): void {
@@ -289,7 +311,10 @@ export class ThreadWakeupService {
     if (!this.#portFor(mode).threadOpen(threadId)) {
       return { status: "refused", reason: "This thread can no longer take wake-ups." };
     }
-    const admitted = admitThreadWakeup({ waitingCount: this.#waitingIn(mode, threadId).length });
+    const admitted = admitThreadWakeup({
+      waitingCount: this.#waitingIn(mode, threadId).length,
+      waitingLimit: this.#limits().waitingPerThread,
+    });
     if (admitted.status === "refused") return admitted;
     const now = this.#options.clock();
     const planned =
@@ -407,7 +432,9 @@ export class ThreadWakeupService {
         this.#arm(held);
         return;
       }
-      if (due === "missed") {
+      // The person may ask in Settings for a missed wake-up to run once on
+      // return; a recurring one then carries on from its next match.
+      if (due === "missed" && !this.#limits().runMissedOnReturn) {
         this.#append(held, { ...held.wakeup, status: "missed" }, "missed");
         return;
       }

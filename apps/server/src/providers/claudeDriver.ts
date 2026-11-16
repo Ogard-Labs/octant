@@ -3,7 +3,7 @@ import { readClaudeInstructionFiles } from "./claudeInstructionFiles";
 import { providerApprovalCall } from "./providerApprovalCall";
 import { claudeGitIdentityEnvironment, type ClaudeGitIdentity } from "./claudeGitIdentity";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
@@ -1036,15 +1036,52 @@ export function claudeMemoryWriteRefusal(input: {
 }): string | undefined {
   if (input.mode !== "chat" && input.executionPolicy !== "plan") return undefined;
   if (!CLAUDE_EDIT_TOOLS.has(input.toolName)) return undefined;
-  const configuration = canonicalClaudeAccountDirectory(input.configurationDirectory).path;
-  const target = canonicalClaudeAccountDirectory(
-    resolve(input.workingDirectory, input.target),
-  ).path;
-  if (target === join(configuration, "CLAUDE.md")) return CLAUDE_MEMORY_WRITE_REFUSAL;
-  const projects = join(configuration, CLAUDE_PROJECTS_FOLDER);
-  if (!target.startsWith(`${projects}/`)) return undefined;
-  const [, folder] = target.slice(projects.length + 1).split("/");
-  return folder === CLAUDE_MEMORY_FOLDER ? CLAUDE_MEMORY_WRITE_REFUSAL : undefined;
+  const configurations = new Set([
+    resolve(input.configurationDirectory),
+    canonicalClaudeAccountDirectory(input.configurationDirectory).path,
+  ]);
+  // The written path is judged as named and with symlinks resolved, and the
+  // protected paths are too: a `CLAUDE.md` or `memory` folder that is itself
+  // a link must not let a write through its destination or its link.
+  const written = resolve(input.workingDirectory, input.target);
+  const targets = new Set([written, canonicalClaudeAccountDirectory(written).path]);
+  const instructions = new Set<string>();
+  const memoryFolders = new Set<string>();
+  for (const configuration of configurations) {
+    const file = join(configuration, "CLAUDE.md");
+    instructions.add(file);
+    instructions.add(canonicalClaudeAccountDirectory(file).path);
+    const projects = join(configuration, CLAUDE_PROJECTS_FOLDER);
+    for (const entry of claudeProjectFolders(projects)) {
+      const folder = join(projects, entry, CLAUDE_MEMORY_FOLDER);
+      memoryFolders.add(folder);
+      memoryFolders.add(canonicalClaudeAccountDirectory(folder).path);
+    }
+  }
+  for (const target of targets) {
+    if (instructions.has(target)) return CLAUDE_MEMORY_WRITE_REFUSAL;
+    for (const configuration of configurations) {
+      // A memory folder the runtime has not created yet is still memory.
+      const projects = join(configuration, CLAUDE_PROJECTS_FOLDER);
+      if (target.startsWith(`${projects}/`)) {
+        const [, folder] = target.slice(projects.length + 1).split("/");
+        if (folder === CLAUDE_MEMORY_FOLDER) return CLAUDE_MEMORY_WRITE_REFUSAL;
+      }
+    }
+    for (const folder of memoryFolders) {
+      if (target === folder || target.startsWith(`${folder}/`)) return CLAUDE_MEMORY_WRITE_REFUSAL;
+    }
+  }
+  return undefined;
+}
+
+/** The per-checkout folders under the runtime's projects folder; none when it is absent. */
+function claudeProjectFolders(projects: string): ReadonlyArray<string> {
+  try {
+    return readdirSync(projects);
+  } catch {
+    return [];
+  }
 }
 
 /** The runtime's folder of per-checkout session state under its configuration directory. */

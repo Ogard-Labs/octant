@@ -6,14 +6,25 @@ import {
   decodeComputerUseStopRequest,
 } from "@octant/contracts";
 import { ComputerUseRuntimeError, type ComputerUseRuntime } from "./computerUse/computerUseRuntime";
-import { authenticateRouteWindowId } from "./principalRouteContext";
+import { principalActsAsHostPerson } from "./clientPrincipal";
+import { authenticateRoutePrincipal } from "./principalRouteContext";
+import { eventActorForPrincipal } from "./principalEventActor";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
 const DEFAULT_BODY_LIMIT = 1_048_576;
 
 export function createComputerUseRouteHandler(options: {
-  readonly runtime: Pick<ComputerUseRuntime, "inspect" | "list" | "decide" | "stop">;
+  readonly runtime: Pick<
+    ComputerUseRuntime,
+    | "inspect"
+    | "list"
+    | "decide"
+    | "stop"
+    | "listForHostPerson"
+    | "inspectForHostPerson"
+    | "stopForHostPerson"
+  >;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
@@ -47,12 +58,30 @@ export function createComputerUseRouteHandler(options: {
     }
 
     let ownerWindowId;
+    let pairedPerson = false;
+    let pairedDeviceId = "";
     try {
-      ownerWindowId = authenticateRouteWindowId({
+      const context = authenticateRoutePrincipal({
         request,
         store: options.windowAuthorityStore,
         now: (options.now ?? Date.now)(),
       });
+      ownerWindowId = context.scopeId;
+      // A device the host's own person paired is that person: it sees and
+      // stops every session on this host, not only ones its own turns
+      // started. Any other device session holds no part of this surface.
+      if (context.principal.kind === "remote-device") {
+        if (!principalActsAsHostPerson(context.principal)) {
+          return failure(
+            "unauthorized",
+            "Computer use is stopped by the host's own person.",
+            403,
+            origin,
+          );
+        }
+        pairedPerson = true;
+        pairedDeviceId = eventActorForPrincipal(context.principal).actorId;
+      }
     } catch (error) {
       return failure(
         error instanceof WindowAuthorityError ? "unauthorized" : "invalid",
@@ -81,7 +110,13 @@ export function createComputerUseRouteHandler(options: {
           return failure("invalid", "Computer-use session list request is invalid.", 400, origin);
         }
         return new Response(
-          JSON.stringify(decodeComputerUseSessionList(options.runtime.list(ownerWindowId))),
+          JSON.stringify(
+            decodeComputerUseSessionList(
+              pairedPerson
+                ? options.runtime.listForHostPerson()
+                : options.runtime.list(ownerWindowId),
+            ),
+          ),
           {
             status: 200,
             headers: { "content-type": "application/json", ...corsHeaders(origin) },
@@ -89,7 +124,9 @@ export function createComputerUseRouteHandler(options: {
         );
       } else if (path === "/api/computer-use/inspect") {
         const scope = decodeComputerUseSessionScope(body.value);
-        result = options.runtime.inspect({ ownerWindowId, ...scope });
+        result = pairedPerson
+          ? options.runtime.inspectForHostPerson(scope)
+          : options.runtime.inspect({ ownerWindowId, ...scope });
         if (result === undefined) {
           return failure(
             "unavailable",
@@ -103,7 +140,9 @@ export function createComputerUseRouteHandler(options: {
         result = await options.runtime.decide({ ownerWindowId, ...decision });
       } else {
         const stop = decodeComputerUseStopRequest(body.value);
-        result = await options.runtime.stop({ ownerWindowId, ...stop });
+        result = pairedPerson
+          ? await options.runtime.stopForHostPerson(stop, { deviceId: pairedDeviceId })
+          : await options.runtime.stop({ ownerWindowId, ...stop });
       }
       return new Response(JSON.stringify(decodeComputerUseSessionView(result)), {
         status: 200,

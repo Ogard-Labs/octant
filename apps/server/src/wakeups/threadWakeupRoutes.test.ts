@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { decodeThreadWakeup, decodeWindowId } from "@octant/contracts";
+import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { createThreadWakeupRouteHandler } from "./threadWakeupRoutes";
 
@@ -84,5 +85,64 @@ describe("thread wake-up routes", () => {
       kind: "thread-wakeup-refused",
     });
     expect(refused.cancel).not.toHaveBeenCalled();
+  });
+
+  it("lets a device the host's own person paired list and cancel a wake-up, journaled with the device as actor", async () => {
+    const deviceId = "93000000-0000-4000-8000-0000000000d1";
+    const opened: string[] = [];
+    const { handle, service, cancel } = setup((thread) => {
+      opened.push(thread);
+      return true;
+    });
+    const forwarded = (
+      admittedBy: "host-person" | "hub-roster" | undefined,
+      init?: RequestInit,
+    ) => {
+      const request = new Request(
+        init === undefined
+          ? `http://127.0.0.1/api/thread-wakeups?mode=code&threadId=${threadId}`
+          : "http://127.0.0.1/api/thread-wakeups/commands",
+        init,
+      );
+      bindPrincipalRouteContext(request, {
+        principal: {
+          kind: "remote-device",
+          hostId: "11111111-1111-4111-8111-111111111111",
+          deviceId,
+          credentialGeneration: 1,
+          origin: "https://remote.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "93000000-0000-4000-8000-0000000000aa",
+          ...(admittedBy === undefined ? {} : { admittedBy }),
+        } as never,
+        scopeId: deviceId as never,
+      });
+      return request;
+    };
+    const cancelBody = {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "cancel-thread-wakeup", wakeupId }),
+    };
+
+    for (const admittedBy of ["hub-roster", undefined] as const) {
+      expect((await handle(forwarded(admittedBy)))?.status).toBe(403);
+      expect((await handle(forwarded(admittedBy, cancelBody)))?.status).toBe(403);
+    }
+    expect(service.list).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+
+    const listed = await handle(forwarded("host-person"));
+    expect(listed?.status).toBe(200);
+    expect(await listed?.json()).toEqual({ wakeups: [wakeup] });
+    const cancelled = await handle(forwarded("host-person", cancelBody));
+    expect(await cancelled?.json()).toMatchObject({ kind: "thread-wakeup-updated" });
+    expect(cancel).toHaveBeenCalledWith(wakeupId, {
+      kind: "remote-device",
+      actorId: deviceId,
+      deviceId,
+    });
+    expect(opened).toEqual([threadId, threadId]);
   });
 });

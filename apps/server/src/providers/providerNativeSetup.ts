@@ -7,12 +7,33 @@ import type {
   ProviderNativeSetup,
 } from "@octant/contracts";
 import { accountRunsAsItself, resolveProviderNativeSetup } from "@octant/domain";
+import type { ProviderCliProjectTrust } from "./providerCliProjectTrust";
 
 export interface ProviderNativeSetupSources {
   readonly readProviderInstance: (id: ProviderInstanceId) => ProviderInstance | undefined;
   readonly readProject: (id: ProjectId) => Project | undefined;
   /** The thread's own choice, or undefined when it inherits. */
   readonly readThreadNativeSetup?: (threadId: string) => "on" | "off" | undefined;
+  /** Whether the provider's own CLI already trusts the Project's folder; absent reads none. */
+  readonly readProviderCliTrust?: ProviderCliProjectTrust;
+}
+
+/**
+ * Whether a Work or Code Project trusts a key provider: the person trusted it
+ * in Octant, or already in the provider's own CLI, whose record Octant's one
+ * card would only ask again (maintainer decision, 2026-11-16).
+ *
+ * Strict plugs in here: under Strict only Octant's own trust counts.
+ */
+export function projectTrustsProvider(
+  project: Exclude<Project, { readonly type: "chat" }>,
+  driverKind: ProviderInstance["driverKind"],
+  readProviderCliTrust: ProviderCliProjectTrust | undefined,
+): boolean {
+  return (
+    (project.nativeProviders ?? []).some((kind) => kind === driverKind) ||
+    readProviderCliTrust?.(driverKind, project.binding.canonicalRoot) === true
+  );
 }
 
 export interface SessionNativeSetupInput {
@@ -36,7 +57,8 @@ export function nativeSetupOption(setup: ProviderNativeSetup | undefined): {
  * What a session of this thread may load of the provider's own setup, read
  * from the journal when the session starts or resumes: the account's switch
  * and the Project's trust, both set only by a person at a window on this
- * host. Nothing a thread, an agent, or a remote client sends reaches either.
+ * host, or the trust the person gave the folder in the provider's own CLI.
+ * Nothing a thread, an agent, or a remote client sends reaches any of them.
  */
 export function sessionNativeSetup(
   sources: ProviderNativeSetupSources,
@@ -51,7 +73,7 @@ export function sessionNativeSetup(
   const projectTrusts =
     project !== undefined &&
     project.type !== "chat" &&
-    (project.nativeProviders ?? []).some((kind) => kind === instance.driverKind);
+    projectTrustsProvider(project, instance.driverKind, sources.readProviderCliTrust);
   const threadChoice =
     input.threadId === undefined ? undefined : sources.readThreadNativeSetup?.(input.threadId);
   return resolveProviderNativeSetup({
