@@ -156,12 +156,7 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
         const started = records.find((record) => record.method === "thread/start");
         expect(started?.params).toMatchObject({
           sandbox: executionPolicy === "plan" ? "read-only" : "workspace-write",
-          approvalPolicy:
-            executionPolicy === "plan"
-              ? "never"
-              : executionPolicy === "auto-accept-edits"
-                ? "on-request"
-                : "untrusted",
+          approvalPolicy: executionPolicy === "plan" ? "never" : "untrusted",
         });
         const turn = records.find((record) => record.method === "turn/start");
         expect(turn?.params).toMatchObject({

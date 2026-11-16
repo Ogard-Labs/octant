@@ -612,24 +612,28 @@ s=socket.socket(); s.connect(("127.0.0.1", ${proxyPort})); s.sendall(b"GET http:
         args: [join(f.project, "probe.py")],
         boundRoot: f.project,
         temporaryDirectory: f.scratch,
+        // Match the runtime toolchain baseline; this probe tests network authority.
+        allowFileReadStar: true,
         networkEgress: { kind: "proxied", endpoint: proxy.proxy.endpoint },
         sandboxPolicy: selected,
       });
-      const result = await new Promise<{ code: number | null; stderr: string }>(
-        (resolve, reject) => {
-          let stderr = "";
-          const child = spawn(launch.command, [...launch.args], {
-            cwd: f.project,
-            env: { PATH: "/usr/bin:/bin", HOME: f.scratch },
-          });
-          child.stderr.on("data", (chunk) => {
-            stderr += chunk;
-          });
-          child.once("error", reject);
-          child.once("exit", (code) => resolve({ code, stderr }));
-        },
-      );
-      expect(result.code, result.stderr).toBe(0);
+      const result = await new Promise<{
+        code: number | null;
+        signal: string | null;
+        stderr: string;
+      }>((resolve, reject) => {
+        let stderr = "";
+        const child = spawn(launch.command, [...launch.args], {
+          cwd: f.project,
+          env: { PATH: "/usr/bin:/bin", HOME: f.scratch },
+        });
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk;
+        });
+        child.once("error", reject);
+        child.once("exit", (code, signal) => resolve({ code, signal, stderr }));
+      });
+      expect(result.code, JSON.stringify({ signal: result.signal, stderr: result.stderr })).toBe(0);
     } finally {
       await proxy.proxy.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));
