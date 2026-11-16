@@ -549,7 +549,10 @@ export async function installTerminalLauncher(
   await writeFile(join(directory, "octant"), terminalLauncherScript(identity), { mode: 0o755 });
   await chmod(join(directory, "octant"), 0o755);
 }
-export const PACKAGED_LINUX_EXECUTABLE_FILES = [LINUX_LANGUAGE_SERVER_BINARY] as const;
+export const PACKAGED_LINUX_EXECUTABLE_FILES = [
+  LINUX_LANGUAGE_SERVER_BINARY,
+  "app/apps/server/dist/native/octant-sandbox-launch",
+] as const;
 export const PACKAGED_ARM64_FILES = [
   "native/octant-desktop-peer-status.node",
   "native/octant-browser-text-input.node",
@@ -565,6 +568,7 @@ export const PACKAGED_ARM64_FILES = [
   DARWIN_LANGUAGE_SERVER_BINARY,
 ] as const;
 export const PACKAGED_LINUX_NATIVE_FILES = [
+  "app/apps/server/dist/native/octant-sandbox-launch",
   `native/${DESKTOP_PEER_LINUX_FILENAME}`,
   "app/apps/server/node_modules/node-pty/build/Release/pty.node",
   "app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",

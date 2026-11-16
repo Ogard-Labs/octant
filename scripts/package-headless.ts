@@ -377,7 +377,21 @@ async function assembleRepositoryArtifact(
   await requireBuiltFile(repositoryRoot, "apps/server/dist/main.mjs");
   const serverDist = resolve(repositoryRoot, "apps/server/dist");
   for (const file of await collectFiles(serverDist)) {
-    push("server", `lib/server/${file}`, join(serverDist, file));
+    push(
+      file === "native/octant-sandbox-launch" ? "native-module" : "server",
+      `lib/server/${file}`,
+      join(serverDist, file),
+    );
+  }
+  if (target.platform === "linux") {
+    await requireBuiltFile(repositoryRoot, "apps/server/dist/native/octant-sandbox-launch");
+  } else {
+    await requireBuiltFile(repositoryRoot, "apps/desktop/dist/native/octant-sandbox-scope");
+    push(
+      "native-module",
+      "lib/server/native/octant-sandbox-scope",
+      resolve(repositoryRoot, "apps/desktop/dist/native/octant-sandbox-scope"),
+    );
   }
   await requireBuiltFile(repositoryRoot, "packages/cli/dist/bin.mjs");
   push("cli", "bin/octant", resolve(repositoryRoot, "packages/cli/dist/bin.mjs"));

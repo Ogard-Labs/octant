@@ -14045,6 +14045,12 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     not proof. These capability gaps must remain visible without blocking
     unrelated native provider features.
 
+    Desktop and headless artifacts carry the native launch helper as a verified
+    native executable. The Linux server snapshots its installed helper image
+    before workloads run and stages a private hash-checked copy; the headless
+    manifest preserves its executable role. macOS headless scope lookup uses
+    the artifact's server-native directory and still requires a GUI session.
+
     `OCTANT_SANDBOX_RESTRICTIONS_PREVIEW=1` permits new custom enrollment on
     supported hosts. Disabling preview stops new enrollment, not enforcement of
     saved restrictions. If a selected boundary becomes unavailable, its launch

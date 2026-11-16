@@ -51,6 +51,7 @@ export function macosSandboxScopeExecutable(): string | undefined {
   const candidates =
     configured === undefined
       ? [
+          fileURLToPath(new URL("./native/octant-sandbox-scope", import.meta.url)),
           fileURLToPath(
             new URL("../../../desktop/dist/native/octant-sandbox-scope", import.meta.url),
           ),
