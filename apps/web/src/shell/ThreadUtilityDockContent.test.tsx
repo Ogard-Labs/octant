@@ -205,7 +205,7 @@ describe("thread utility dock content", () => {
       />,
     );
     expect(
-      await screen.findAllByText(/turned off in Settings/i, {}, { timeout: 10_000 }),
+      await screen.findAllByText("Subagents are turned off", {}, { timeout: 10_000 }),
     ).not.toHaveLength(0);
     expect(screen.queryByRole("form", { name: "Create subagent" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Task")).not.toBeInTheDocument();
