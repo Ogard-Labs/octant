@@ -712,14 +712,10 @@
   }
 }
 
-/* The working-tree view's lines and cards were children of a list with no
-   padding of their own, while its segmented control and findings head were
-   inset, so half the lines sat on the tile's edge. The list owns one gutter
-   and the delivery pane inside it stops adding its own. Its blocks (a line,
-   a callout, a section) had no space between them or under the segmented
-   control, so text started on the control's bottom edge and a callout's edge
-   met the next block's: the list keeps the tile's 12px inset at its top and
-   12px between blocks. */
+/* The working-tree view runs edge to edge in its pane: the diff's status line,
+   file list and file headers bring their own 12px inset, and the diffs have
+   none. A 12px gutter round the whole view drew the diffs short of both edges
+   (measured 1204..1584 in a pane at 1192..1596). */
 .right-utility-dock__tool .git-history__list--changes {
   gap: 0;
   padding: 0;
@@ -733,7 +729,7 @@
     .code-delivery-pane > [role="alert"],
     .code-delivery-pane > [role="status"]
   ) {
-  padding-inline: 0;
+  padding-inline: var(--oct-space-3);
 }
 
 /* The findings block is a list's one child and holds its own blocks (the

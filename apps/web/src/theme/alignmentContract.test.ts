@@ -176,7 +176,7 @@ describe("the shell's edges and gaps", () => {
     // Two pixels of padding around a 24px segment make every tray 28px tall.
     expect(rule(octant, ".modeswitch__tray")).toMatch(/padding:\s*2px;/);
     expect(toggleGroup).toContain("p-[2px]");
-    expect(toggleGroup).toContain("h-[round(1.846rem,2px)]");
+    expect(toggleGroup).toContain("h-[round(1.714rem,2px)]");
     expect(toggleGroup).not.toContain("h-[round(1.75rem,2px)]");
   });
 

@@ -355,15 +355,20 @@ under the fill).
 ### Type
 
 **Face.** Interface text uses the platform face (`system-ui, -apple-system,
-BlinkMacSystemFont, 'Segoe UI', sans-serif`, SF Pro on a Mac) at the system's
-own text rendering, which draws fuller strokes. Grayscale smoothing
-(`-webkit-font-smoothing: antialiased`, `-moz-osx-font-smoothing: grayscale`)
-thins light text on a dark ground and read weak beside the icons (maintainer
-request, 2026-11-15), so it is off by default. Geist is an Appearance choice,
-and Appearance's Smooth text switch (off by default, hidden off a Mac,
-`fontSmoothing` in the theme settings, default `"off"`; a stored `"auto"` or
-`"on"` keeps smoothing) turns it on. Reading text stays regular weight and
-names stay medium.
+BlinkMacSystemFont, 'Segoe UI', sans-serif`, SF Pro on a Mac), smooth and
+strong: grayscale smoothing (`-webkit-font-smoothing: antialiased`,
+`-moz-osx-font-smoothing: grayscale`) draws calm edges, and because it thins a
+stroke (light text on a dark ground most) the weights step up with it. Smoothed
+at the plain weights the text read weak beside its icons, and unsmoothed it was
+strong but grainy at its edges (maintainer requests, 2026-11-15 and 2026-11-16).
+The platform face draws every weight in between (a 14px line grows 5.4px for
+each 50 from 400 to 650, measured), so with smoothing on reading text is 450, a
+name or a label 600 and a heading 650; the page title keeps 700, and the
+body's own weight, which a person can set, takes the same half step. Geist is
+an Appearance choice, and Appearance's Smooth text switch (on by default,
+hidden off a Mac, `fontSmoothing` in the theme settings, default `"on"`; a
+stored `"off"` stays off) returns the system's fuller strokes at the plain
+weights (400, 500, 600).
 Code, paths and identifiers use Geist Mono (`'Geist Mono Variable', 'SF Mono',
 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace`); the terminal
 defaults to 12px at 1.4 with ligatures off, the editor to 13px at 1.5.
@@ -422,10 +427,12 @@ half pixel.
   `--oct-text-2xl` 26, `--oct-text-3xl` 36, `--oct-text-4xl` 72. Nothing
   essential is under 12px. Feature CSS reads a token, never
   `calc(N * var(--oct-text-step))`.
-- **Weights**: 400 `--oct-weight-regular` (reading), 500
-  `--oct-weight-medium` (labels, controls, menu options, names in navigation and list rows), 600
-  `--oct-weight-strong` (section labels, card titles, page and dialog titles),
-  700 `--oct-weight-title` (the large title only).
+- **Weights**: `--oct-weight-regular` (reading), `--oct-weight-medium`
+  (labels, controls, menu options, names in navigation and list rows),
+  `--oct-weight-strong` (section labels, card titles, page and dialog titles):
+  450, 600 and 650 with Smooth text on (the default), 400, 500 and 600 with it
+  off, which are the weights the type table names. 700 `--oct-weight-title`
+  (the large title only) either way. The utility classes follow the tokens.
 - **Tracking**: the platform's own per size (`--oct-tracking-sf-11` to `-24`,
   see Native type) on the body and the roles; `--oct-tracking-tight` -0.025em
   (dialog titles, reply headings and display type, the 17 to 20px values),
@@ -490,8 +497,11 @@ token.
 | 44     | `--oct-title-rail-h`                                                                                 | The title band and the icon rail's width                                                |
 | 44     | `--oct-nav-head-h`, `--oct-menu-row-two-h`                                                           | The account row, a two-line row, a touch target, the one-row composer                   |
 
-Recipe heights are rem rounded to a whole 2px (`h-[round(2.154rem,2px)]` is 28
-at a 13px root) so they grow with the interface size. Other shell heights:
+Recipe heights are rem rounded to a whole 2px (`h-[round(2rem,2px)]` is 28
+at the 14px default root) so they grow with the interface size. They were
+written for a 13px root, and the 14px default drew every recipe control 2px
+tall of its row (a 30px button in a 28px row, a 26px segment in a 24px tray)
+until the recipes were rebased (2026-11-16). Other shell heights:
 `--oct-rail-tab-h` 30, `--oct-statusbar-h` 26, `--oct-surface-header-h` 40.
 `--oct-control-height` (44) and `--oct-control-height-sm` (34) are touch and
 compact field heights; a new desktop control takes a recipe height.
@@ -689,7 +699,7 @@ failed, never painted.
 | Glass                 | Off, Subtle, Strong; Tint                                                      | [Translucency](#translucency)                                   |
 | Density               | Comfortable (default), Compact                                                 | Below                                                           |
 | Interface font        | System (default), Geist, a custom stack; size 12 to 16 in steps, 14 by default | `--octant-ui-font-*`, `--oct-text-step`                         |
-| Smooth text           | Off (default), on; hidden off a Mac                                            | `data-octant-font-smoothing`; grayscale smoothing only when on  |
+| Smooth text           | On (default), off; hidden off a Mac                                            | `data-octant-font-smoothing`; grayscale smoothing only when on  |
 | Transcript            | Small, Medium, Large; Narrow, Medium, Wide                                     | `--oct-transcript-font-size`; the column measure                |
 | Code, terminal        | Family, size, line height, ligatures                                           | `--octant-editor-*`, `--octant-terminal-*`                      |
 | Background            | A ground, its options, and where it shows                                      | [Home with the drawn ground](#home-with-the-drawn-ground)       |

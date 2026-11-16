@@ -100,7 +100,7 @@ describe("theme contracts", () => {
   });
 
   it("draws text at the system's fuller strokes by default, and keeps a stored choice", () => {
-    expect(DEFAULT_THEME_SETTINGS.fontSmoothing).toBe("off");
+    expect(DEFAULT_THEME_SETTINGS.fontSmoothing).toBe("on");
     expect(decodeThemeSettings({ ...validSettings, fontSmoothing: "on" }).fontSmoothing).toBe("on");
   });
 

@@ -6848,8 +6848,14 @@ describe("App", () => {
       expect(bandTool(tool)).toHaveAttribute("aria-pressed", "true");
       expect(screen.getByRole("region", { name: tool })).toBeVisible();
     }
-    expect(screen.getByRole("region", { name: "Environment" })).toBeVisible();
+    const section = screen.getByRole("region", { name: "Environment" });
+    expect(section).toBeVisible();
     expect(bandTool("Environment")).toHaveAttribute("aria-pressed", "true");
+    // The section keeps its content beside the tools: it is on screen though
+    // it is never a tile, and drew empty when only tiles counted as shown.
+    expect(
+      await within(section).findByRole("region", { name: "Environment details" }),
+    ).toBeInTheDocument();
   });
 
   it("opens the thread Terminal in a remembered bottom panel and still offers another", async () => {

@@ -53,10 +53,19 @@ describe("native feel", () => {
     expect(rule(surface, ".oct-page-title")).toContain("var(--oct-tracking-sf-26)");
   });
 
-  it("smooths text only when the person turns Smooth text on", () => {
+  it("smooths text by default and steps the weights up with it, so smooth text stays strong", () => {
     const bridge = read("styles/octant-bridge.css");
-    expect(bridge).toContain('html[data-octant-font-smoothing="on"] {');
-    expect(bridge).not.toContain(':not([data-octant-font-smoothing="off"])');
+    const smooth = rule(bridge, 'html:not([data-octant-font-smoothing="off"])');
+    expect(smooth).toContain("-webkit-font-smoothing: antialiased");
+    expect(smooth).toContain("--oct-weight-regular: 450");
+    expect(smooth).toContain("--oct-weight-medium: 600");
+    expect(smooth).toContain("--oct-weight-strong: 650");
+    // The body's own weight, which a person can set, takes the same half step.
+    expect(read("styles.css")).toContain(
+      "font-weight: calc(var(--octant-ui-font-weight) + var(--oct-weight-smooth-lift, 0));",
+    );
+    // The utility classes follow the tokens, so no component keeps a plain 500.
+    expect(bridge).toContain("--font-weight-medium: var(--oct-weight-medium);");
   });
 
   it("keeps code and the terminal off the body's tracking so their columns stay whole", () => {

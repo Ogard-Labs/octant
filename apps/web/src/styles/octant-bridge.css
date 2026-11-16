@@ -292,10 +292,28 @@ html[data-octant-density="compact"] {
 }
 
 /* ─── text smoothing ────────────────────────────────────────────────
-   The default draws the system's fuller strokes: grayscale smoothing thins
-   light text on a dark ground, which read weak next to its icons. The Smooth
-   text switch in Appearance turns grayscale smoothing on. The properties do nothing on another platform. */
-html[data-octant-font-smoothing="on"] {
+   Smooth and strong is the default: grayscale smoothing draws calm edges, and
+   because it thins a stroke (light text on a dark ground most), the weights
+   step up with it so the text stays strong. Smoothed at the plain weights it
+   read weak beside its icons; unsmoothed it was strong but grainy at the
+   edges. The platform face draws every weight in between (measured: a 14px
+   line grows 5.4px for each 50 from 400 to 650), so reading text is 450, a
+   name or a label 600 and a heading 650; the page title keeps 700. The body's
+   own weight, which a person can set, takes the same half step. Smooth text
+   off in Appearance returns the system's fuller strokes at the plain weights.
+   The smoothing properties do nothing on another platform. */
+html:not([data-octant-font-smoothing="off"]) {
+  --oct-weight-regular: 450;
+  --oct-weight-medium: 600;
+  --oct-weight-strong: 650;
+  --oct-weight-smooth-lift: 50;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* The utility classes components carry follow the same three weights. */
+html {
+  --font-weight-normal: var(--oct-weight-regular);
+  --font-weight-medium: var(--oct-weight-medium);
+  --font-weight-semibold: var(--oct-weight-strong);
 }

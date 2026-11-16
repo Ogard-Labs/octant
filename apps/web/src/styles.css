@@ -183,7 +183,7 @@
   --octant-terminal-font-ligatures: none;
   font-family: var(--octant-ui-font-family);
   font-size: var(--octant-ui-font-size);
-  font-weight: var(--octant-ui-font-weight);
+  font-weight: calc(var(--octant-ui-font-weight) + var(--oct-weight-smooth-lift, 0));
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }

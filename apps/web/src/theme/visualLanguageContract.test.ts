@@ -985,7 +985,7 @@ describe("the public-block visual language", () => {
       )?.[0] ?? "";
 
     expect(tabs).toContain(
-      "inline-flex h-[round(2.154rem,2px)] w-fit items-center gap-1 text-muted-foreground",
+      "inline-flex h-[round(2rem,2px)] w-fit items-center gap-1 text-muted-foreground",
     );
     expect(tabs).not.toContain("rounded-lg bg-muted p-[3px]");
     // Base UI writes `data-active` on the selected tab, never `data-selected`.

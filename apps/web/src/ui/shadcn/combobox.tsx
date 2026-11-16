@@ -13,7 +13,7 @@ export function ComboboxInputGroup({
   return (
     <ComboboxPrimitive.InputGroup
       className={cn(
-        "relative flex h-[round(2.154rem,2px)] w-full min-w-0 items-center rounded-md border border-input bg-transparent shadow-xs transition-[color,box-shadow] outline-none window-no-drag",
+        "relative flex h-[round(2rem,2px)] w-full min-w-0 items-center rounded-md border border-input bg-transparent shadow-xs transition-[color,box-shadow] outline-none window-no-drag",
         className,
       )}
       data-slot="combobox-input-group"
@@ -45,7 +45,7 @@ export function ComboboxTrigger({
   return (
     <ComboboxPrimitive.Trigger
       className={cn(
-        "mr-1 inline-flex size-[round(1.846rem,2px)] cursor-default items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:size-(--oct-icon-md)",
+        "mr-1 inline-flex size-[round(1.714rem,2px)] cursor-default items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:size-(--oct-icon-md)",
         className,
       )}
       data-slot="combobox-trigger"

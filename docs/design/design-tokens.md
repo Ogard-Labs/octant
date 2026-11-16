@@ -331,9 +331,9 @@ Source: [Motion](../../DESIGN.md#motion),
   `prefers-reduced-motion` transitions and animations stop without removing state;
   a running indicator keeps a shape that reads as busy. Under
   `prefers-reduced-transparency` frosted panels go solid.
-- **Platform face, platform rendering.** The platform face, default smoothing, fuller strokes (no
-  antialiased thinning on dark; Smooth text turns it on), `text-rendering: optimizeLegibility`, no
-  synthetic bold.
+- **Platform face, smooth and strong.** The platform face with grayscale smoothing and the weights
+  stepped up with it (450, 600, 650; Smooth text off returns the system's fuller strokes at 400,
+  500, 600), `text-rendering: optimizeLegibility`, no synthetic bold.
 - Implemented, not specified: `text-wrap: pretty` on paragraphs and `balance` on
   headings (`octant.css:452`, `:458`); tabular figures wherever a number is
   compared (`apps/web/src/styles.css:829`, `:1108`; DESIGN.md names them per

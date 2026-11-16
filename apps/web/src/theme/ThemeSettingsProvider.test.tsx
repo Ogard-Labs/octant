@@ -160,7 +160,8 @@ describe("ThemeSettingsProvider", () => {
       </ThemeSettingsProvider>,
     );
     expect(root.dataset.octantDensity).toBe("comfortable");
-    expect(root.dataset.octantFontSmoothing).toBe("off");
+    // Smooth is the default; only a stored "off" turns it off.
+    expect(root.dataset.octantFontSmoothing).toBe("on");
     expect(root.style.getPropertyValue("--oct-contrast-scale")).toBe("");
     result.rerender(
       <ThemeSettingsProvider

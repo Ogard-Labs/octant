@@ -169,7 +169,7 @@ search, counts, and Show all remain outside that scroller.
 Appearance also offers density (Comfortable or Compact), a Custom preset per mode
 built from Ground, Ink, Accent and a Contrast step (Soft, Standard, Firm; a seed
 set whose text cannot stay readable is refused with the failing role named), and
-a Smooth text switch for grayscale smoothing (off by default), shown only on a Mac. The values are
+a Smooth text switch for grayscale smoothing at a heavier weight (on by default), shown only on a Mac. The values are
 in [DESIGN.md: Appearance](../../DESIGN.md#appearance).
 
 ## Models, providers, and skills

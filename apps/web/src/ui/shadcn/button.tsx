@@ -59,15 +59,15 @@ const buttonVariants = cva(
       // which gives 20, 24, 28, and 32 at the default size.
       size: {
         default:
-          "h-[round(2.154rem,2px)] gap-1 px-2 has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1",
-        xs: "h-[round(1.538rem,2px)] gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 [&_svg:not([class*='size-'])]:size-(--oct-icon-xs)",
-        sm: "h-[round(1.846rem,2px)] gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 [&_svg:not([class*='size-'])]:size-(--oct-icon-sm)",
-        lg: "h-[round(2.462rem,2px)] gap-1 px-2 has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1",
-        icon: "size-[round(2.154rem,2px)]",
+          "h-[round(2rem,2px)] gap-1 px-2 has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1",
+        xs: "h-[round(1.429rem,2px)] gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 [&_svg:not([class*='size-'])]:size-(--oct-icon-xs)",
+        sm: "h-[round(1.714rem,2px)] gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 [&_svg:not([class*='size-'])]:size-(--oct-icon-sm)",
+        lg: "h-[round(2.286rem,2px)] gap-1 px-2 has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1",
+        icon: "size-[round(2rem,2px)]",
         "icon-xs":
-          "size-[round(1.538rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-(--oct-icon-xs)",
+          "size-[round(1.429rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-(--oct-icon-xs)",
         "icon-sm":
-          "size-[round(1.846rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-(--oct-icon-sm)",
+          "size-[round(1.714rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-(--oct-icon-sm)",
       },
     },
     // A chip is one line, 28px at the default size, borderless on a resting
@@ -75,7 +75,7 @@ const buttonVariants = cva(
     compoundVariants: [
       {
         variant: "chip",
-        class: "h-[round(2.154rem,2px)] px-3 py-0 text-xs",
+        class: "h-[round(2rem,2px)] px-3 py-0 text-xs",
       },
     ],
     defaultVariants: {

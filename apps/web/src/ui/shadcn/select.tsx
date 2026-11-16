@@ -18,7 +18,7 @@ export function SelectTrigger({
     <SelectPrimitive.Trigger
       className={cn(
         fieldPaint,
-        "flex h-[round(2.154rem,2px)] w-full items-center justify-between gap-2 px-2 py-1 text-sm text-foreground whitespace-nowrap outline-none transition-colors disabled:pointer-events-none disabled:cursor-default disabled:opacity-(--oct-disabled-opacity) aria-invalid:border-destructive aria-invalid:ring-destructive/20 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-(--oct-icon-md) [&_svg:not([class*='text-'])]:text-muted-foreground",
+        "flex h-[round(2rem,2px)] w-full items-center justify-between gap-2 px-2 py-1 text-sm text-foreground whitespace-nowrap outline-none transition-colors disabled:pointer-events-none disabled:cursor-default disabled:opacity-(--oct-disabled-opacity) aria-invalid:border-destructive aria-invalid:ring-destructive/20 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-(--oct-icon-md) [&_svg:not([class*='text-'])]:text-muted-foreground",
         className,
       )}
       data-slot="select-trigger"

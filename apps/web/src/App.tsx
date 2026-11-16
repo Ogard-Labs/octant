@@ -3615,9 +3615,19 @@ function LaunchedShell(
     const dockResolution = resolveDockSurface(dockSurface);
     // The modal dock has room for one tool, so a stored layout is not drawn
     // there and only the focused tool is on screen.
+    // Beside the tool columns the Environment section is on screen whenever its
+    // tab is open, though it is never a tile: left out of the shown tabs, the
+    // section was drawn with nothing in it.
     const dockShownTabIds = isNarrow
       ? shownUtilityTabIds(withoutTileLayout(displayedDockState))
-      : shownUtilityTabIds(displayedDockState);
+      : [
+          ...new Set([
+            ...shownUtilityTabIds(displayedDockState),
+            ...displayedDockState.tabs
+              .filter((tab) => tab.surface === "environment")
+              .map((tab) => tab.id),
+          ]),
+        ];
     const dockShownTabs = displayedDockState.tabs.filter(
       (tab) =>
         dockShownTabIds.includes(tab.id) && resolveDockSurface(tab.surface).kind === "surface",
