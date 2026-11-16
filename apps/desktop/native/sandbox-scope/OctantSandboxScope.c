@@ -262,7 +262,16 @@ static int serve(const char *path) {
 static int launchctl(char *const args[]) {
   pid_t pid;
   char *clean[] = {"PATH=/usr/bin:/bin", NULL};
-  int error = posix_spawn(&pid, "/bin/launchctl", NULL, NULL, args, clean);
+  posix_spawn_file_actions_t actions;
+  posix_spawnattr_t attributes;
+  if (posix_spawn_file_actions_init(&actions)) return -1;
+  if (posix_spawnattr_init(&attributes)) { posix_spawn_file_actions_destroy(&actions); return -1; }
+  int error = posix_spawnattr_setflags(&attributes, POSIX_SPAWN_CLOEXEC_DEFAULT);
+  for (int i = 0; i < 3 && !error; ++i)
+    error = posix_spawn_file_actions_addopen(&actions, i, "/dev/null", O_RDWR, 0);
+  if (!error) error = posix_spawn(&pid, "/bin/launchctl", &actions, &attributes, args, clean);
+  posix_spawn_file_actions_destroy(&actions);
+  posix_spawnattr_destroy(&attributes);
   if (error) return -1;
   int status;
   double deadline = now() + 5;
