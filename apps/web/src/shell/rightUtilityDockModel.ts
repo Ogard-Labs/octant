@@ -284,7 +284,8 @@ export function dockWidthCeiling(
  * let a second tool squeeze the thread and move Environment.
  */
 export const WIDE_PRIMARY_MIN = 560;
-const NARROW_PRIMARY_MIN = 360;
+/** The least the thread column is ever given beside the dock. */
+export const NARROW_PRIMARY_MIN = 360;
 const WIDE_VIEWPORT = 1100;
 
 /**

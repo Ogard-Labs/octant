@@ -1,3 +1,5 @@
+import { MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
+import { ENVIRONMENT_STRIP_WIDTH, NARROW_PRIMARY_MIN } from "./rightUtilityDockModel";
 import type {
   DockTileColumn,
   DockTileLayout,
@@ -161,4 +163,33 @@ export function storedTileShares(
       return at === -1 ? tile.share : (toolShares[at] ?? 0) * kept;
     }),
   };
+}
+
+/**
+ * The narrowest workspace that holds the thread at its least (360px), the
+ * Environment section and one tool column at its least (280px) side by side.
+ */
+export const ENVIRONMENT_BESIDE_TOOLS_MIN_WORKSPACE =
+  NARROW_PRIMARY_MIN + ENVIRONMENT_STRIP_WIDTH + MIN_CONTEXT_SIDEBAR_WIDTH;
+
+/** Whether a workspace this wide holds the Environment section beside a tool column. */
+export function workspaceHoldsEnvironmentBesideTools(workspaceWidth: number): boolean {
+  return workspaceWidth >= ENVIRONMENT_BESIDE_TOOLS_MIN_WORKSPACE;
+}
+
+/**
+ * What the dock draws in a workspace too narrow for the section and a tool
+ * column together: while a tool pane is shown the section gives way, so the
+ * state is returned without it. Its tab stays in the stored state, so the
+ * section is back when the last pane leaves the view or the window widens.
+ * Without this the dock kept both at their minimums and ran past the window's
+ * edge: at 1100px with the sidebar open it ended 112px outside, with the top
+ * pane's Close under the window's own toggles. Takes a state Environment is
+ * already apart in (`environmentApart`).
+ */
+export function environmentGivenWay(state: ThreadUtilityDockState): ThreadUtilityDockState {
+  const split = splitEnvironmentStrip(state);
+  if (split.environmentTabId === undefined || split.toolTabIds.length === 0) return state;
+  const { environmentTabId } = split;
+  return { ...state, tabs: state.tabs.filter((tab) => tab.id !== environmentTabId) };
 }

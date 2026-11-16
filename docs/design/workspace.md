@@ -2790,6 +2790,23 @@ the sidebar was drawn 88px wide. With the sidebar giving first (1400px window,
 2026-11-16), opening Environment beside a tool moved the thread, its title and
 its tool row 60px.
 
+**A window too narrow for both.** The Environment section stands beside a tool
+column only where the workspace holds the thread's 360px, the section's 300px
+and a 280px tool column together (940px; with the sidebar open at 280px, a
+window of about 1276px). In a narrower workspace the section **gives way**
+while a tool pane is shown: the dock draws the tool panes alone, the section's
+tab stays open, and the section is back when the last pane leaves the view or
+the window widens. Its button then reads not pressed, carries the open dot
+when the section is open behind the pane, and is disabled with the reason ("No
+room beside a tool in this window. Close the tool, hide the sidebar or widen
+the window."). Alone, the section opens at any width above the drawer's. So
+nothing runs past the window's edge and no pane control meets the window's
+toggles. Measured before (sidebar open, Environment and Files, 2026-11-16): at
+1100px and 1000px the dock ended 112px and 212px outside the window with
+Files' Close under the toggles; at 1212px the sidebar gave 60px to make it
+fit. After: at 1000px, 1100px and 1212px the dock ends on the window's inner
+edge, Close stands 12px before the toggles, and the sidebar keeps its width.
+
 **The thread box and the tool row.** The thread and its Environment section,
 open or not, are one box, and that box has a narrowest width for a window
 (`threadBoxMinimum`, `--octant-thread-box-min`): the thread's own minimum, or

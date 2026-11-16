@@ -3,6 +3,7 @@ import {
   browserPageToShow,
   buildDockToolButtons,
   type DockToolButtonsInput,
+  ENVIRONMENT_NO_ROOM_BESIDE_TOOL,
 } from "./dockToolButtonsModel";
 
 const tool = (id: DockToolButtonsInput["surfaces"][number]["id"]) => ({
@@ -100,6 +101,37 @@ describe("the title band's tool buttons", () => {
     expect(open?.pressed).toBe(true);
     expect(open?.press).toEqual({ kind: "close", tabIds: ["environment"] });
     expect(open?.menu).toEqual([{ value: "close", label: "Close Environment" }]);
+  });
+
+  it("refuses Environment, and says why, while the section has given way to a tool in a narrow window", () => {
+    const gaveWay = byId(
+      buildDockToolButtons(
+        input({
+          environmentSection: true,
+          environmentGaveWay: { open: true },
+          tabs: [{ id: "files", surface: "files" }],
+          shownTabIds: ["files"],
+          activeTabId: "files",
+        }),
+      ),
+      "environment",
+    );
+    // Not on screen, so not pressed; still open behind the pane, so the dot.
+    expect(gaveWay).toMatchObject({
+      pressed: false,
+      open: true,
+      press: { kind: "refused" },
+      disabledReason: ENVIRONMENT_NO_ROOM_BESIDE_TOOL,
+      menu: [],
+    });
+    const closed = byId(
+      buildDockToolButtons(
+        input({ environmentSection: true, environmentGaveWay: { open: false } }),
+      ),
+      "environment",
+    );
+    expect(closed).toMatchObject({ pressed: false, open: false });
+    expect(closed?.disabledReason).toBe(ENVIRONMENT_NO_ROOM_BESIDE_TOOL);
   });
 
   it("opens an unopened tool beside the focused tile", () => {

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  ENVIRONMENT_BESIDE_TOOLS_MIN_WORKSPACE,
   environmentApart,
+  environmentGivenWay,
+  workspaceHoldsEnvironmentBesideTools,
   splitEnvironmentStrip,
   withEnvironmentOpen,
   storedColumnShares,
@@ -159,5 +162,57 @@ describe("Environment kept apart from the tool tiles", () => {
     expect(opened.active).toBe("terminal");
     expect(withEnvironmentOpen(opened)).toBe(opened);
     expect(withEnvironmentOpen({ tabs: [] }).active).toBe("environment");
+  });
+});
+
+describe("Environment in a workspace too narrow for it beside a tool", () => {
+  it("fits from the thread's 360px, its own 300px and a 280px tool column up", () => {
+    expect(ENVIRONMENT_BESIDE_TOOLS_MIN_WORKSPACE).toBe(940);
+    expect(workspaceHoldsEnvironmentBesideTools(940)).toBe(true);
+    // 1212px window, 280px sidebar and the rail: the dock ran past the edge.
+    expect(workspaceHoldsEnvironmentBesideTools(876)).toBe(false);
+  });
+
+  it("gives way while a tool pane is shown, and is drawn alone", () => {
+    const alone: ThreadUtilityDockState = { tabs: [tabs[0]], active: "env" };
+    expect(environmentGivenWay(alone)).toBe(alone);
+    const beside = environmentApart({ tabs: [tabs[0], tabs[1]], active: "browser" });
+    const drawn = environmentGivenWay(beside);
+    expect(drawn.tabs.map((tab) => tab.id)).toEqual(["browser"]);
+    expect(drawn.active).toBe("browser");
+    expect(splitEnvironmentStrip(drawn).environmentTabId).toBeUndefined();
+  });
+
+  it("stays while the only other tool is a card, since no pane is shown", () => {
+    const state: ThreadUtilityDockState = {
+      tabs: [tabs[0], tabs[1]],
+      active: "env",
+      minimised: ["browser"],
+    };
+    expect(environmentGivenWay(environmentApart(state)).tabs.map((tab) => tab.id)).toEqual([
+      "env",
+      "browser",
+    ]);
+  });
+
+  it("keeps the tiles as they were, in a layout too", () => {
+    const state = environmentApart({
+      tabs: [...tabs],
+      active: "terminal",
+      layout: {
+        columns: [
+          {
+            share: 1,
+            tiles: [
+              { tabId: "browser", share: 0.5 },
+              { tabId: "terminal", share: 0.5 },
+            ],
+          },
+        ],
+      },
+    });
+    const drawn = environmentGivenWay(state);
+    expect(drawn.layout).toEqual(state.layout);
+    expect(drawn.tabs.map((tab) => tab.id)).toEqual(["browser", "terminal"]);
   });
 });

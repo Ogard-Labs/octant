@@ -165,7 +165,17 @@ export interface DockToolButtonsInput {
    * nothing, since it is never a tile.
    */
   readonly environmentSection?: boolean;
+  /**
+   * The window is too narrow for the Environment section beside the tool pane
+   * that is shown, so the section has given way. `open` says whether it is
+   * still open behind the pane, to return when the pane leaves the view.
+   */
+  readonly environmentGaveWay?: { readonly open: boolean };
 }
+
+/** Why the Environment button does nothing while the section has given way. */
+export const ENVIRONMENT_NO_ROOM_BESIDE_TOOL =
+  "No room beside a tool in this window. Close the tool, hide the sidebar or widen the window.";
 
 function describeButton(
   tool: { readonly id: RightUtilityDockSurfaceId; readonly label: string },
@@ -193,6 +203,17 @@ function describeButton(
     tabIds,
     ...(tabId === undefined ? {} : { tabId }),
   };
+  if (tool.id === "environment" && input.environmentGaveWay !== undefined && !narrow) {
+    // Open but not shown is the quiet dot; pressed would claim it is on screen.
+    return {
+      ...base,
+      pressed: false,
+      open: input.environmentGaveWay.open,
+      menu: [],
+      press: { kind: "refused" },
+      disabledReason: ENVIRONMENT_NO_ROOM_BESIDE_TOOL,
+    };
+  }
   if (tool.id === "environment" && input.environmentSection === true && !narrow) {
     const [section] = tabs;
     if (section === undefined) {

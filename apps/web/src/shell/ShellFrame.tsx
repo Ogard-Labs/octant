@@ -25,6 +25,12 @@ export interface ShellFrameProps {
   readonly material: ResolvedSidebarMaterial;
   readonly onCommitSidebarWidth: (width: number) => void;
   readonly onPreviewSidebarWidth: (width: number) => void;
+  /**
+   * The workspace's width (everything right of the sidebar), told on mount and
+   * whenever it changes. The caller decides what fits in it; it should keep
+   * only the answer, since this runs on every frame of a window resize.
+   */
+  readonly onWorkspaceWidth?: (width: number) => void;
   readonly sidebar: ReactNode;
   readonly sidebarCollapsed?: boolean;
   /** A collapsed sidebar stays as its icon rail rather than leaving nothing. */
@@ -194,13 +200,21 @@ function useClosingSidebarCopy(
  * with whatever opens beside it, cannot measure the workspace in CSS. Written
  * straight to the element: a window resize must not render the shell.
  */
-function useWorkspaceWidthVariable(layer: RefObject<HTMLDivElement | null>, present: boolean) {
+function useWorkspaceWidthVariable(
+  layer: RefObject<HTMLDivElement | null>,
+  present: boolean,
+  onWidth: ((width: number) => void) | undefined,
+) {
+  const report = useRef(onWidth);
+  report.current = onWidth;
   useLayoutEffect(() => {
     const node = layer.current;
     if (!present || node === null) return undefined;
     const publish = () => {
       const width = node.clientWidth;
-      if (width > 0) node.style.setProperty("--octant-workspace-width", `${width}px`);
+      if (width <= 0) return;
+      node.style.setProperty("--octant-workspace-width", `${width}px`);
+      report.current?.(width);
     };
     publish();
     if (typeof ResizeObserver === "undefined") return undefined;
@@ -213,7 +227,11 @@ function useWorkspaceWidthVariable(layer: RefObject<HTMLDivElement | null>, pres
 export function ShellFrame(props: ShellFrameProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const workspaceLayerRef = useRef<HTMLDivElement | null>(null);
-  useWorkspaceWidthVariable(workspaceLayerRef, props.standaloneSurface === undefined);
+  useWorkspaceWidthVariable(
+    workspaceLayerRef,
+    props.standaloneSurface === undefined,
+    props.onWorkspaceWidth,
+  );
   const { sliding, settle } = useSidebarSliding(props.sidebarCollapsed === true);
   useClosingSidebarCopy(shellRef, props.sidebarCollapsed === true, sliding);
   return (

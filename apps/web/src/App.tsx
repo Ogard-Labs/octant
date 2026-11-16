@@ -491,8 +491,10 @@ import {
 } from "./shell/rightUtilityDockSelection";
 import {
   environmentApart,
+  environmentGivenWay,
   splitEnvironmentStrip,
   withEnvironmentOpen,
+  workspaceHoldsEnvironmentBesideTools,
 } from "./shell/dockEnvironmentStrip";
 import { describeUtilityTabs } from "./shell/utilityTabs";
 import { sidebarRowMode, threadDragSurface } from "./shell/threadDragSurface";
@@ -906,6 +908,13 @@ function LaunchedShell(
   }, [hostSidebarVibrancyActive]);
   const viewportIsNarrow = useNarrowViewport();
   const isNarrow = props.isNarrow ?? viewportIsNarrow;
+  // Whether the workspace holds the Environment section beside a tool column.
+  // Only the answer is kept, so a window resize renders the shell when it
+  // crosses that width and not on every frame.
+  const [workspaceHoldsEnvironment, setWorkspaceHoldsEnvironment] = useState(true);
+  const noteWorkspaceWidth = useCallback((width: number) => {
+    setWorkspaceHoldsEnvironment(workspaceHoldsEnvironmentBesideTools(width));
+  }, []);
   const nativeHost = props.nativeHost ?? props.hostBridge;
   const controller = useShellController({
     ...(props.shellClient === undefined ? {} : { client: props.shellClient }),
@@ -3612,7 +3621,11 @@ function LaunchedShell(
         : retained;
       // Beside the tool columns Environment is a section of its own, never a
       // tile; the drawer has no section and shows it as any tool.
-      return isNarrow ? held : environmentApart(held);
+      if (isNarrow) return held;
+      // Where the window cannot hold the section and a tool column together,
+      // the section gives way while a tool pane is shown.
+      const apart = environmentApart(held);
+      return workspaceHoldsEnvironment ? apart : environmentGivenWay(apart);
     };
     const displayedDockState = displayDockState(dockState);
     const dockSurface = displayedDockState.tabs.find(
@@ -3713,6 +3726,7 @@ function LaunchedShell(
     fallbackBottomPanelState,
     isNarrow,
     projectPullRequestReviewOpen,
+    workspaceHoldsEnvironment,
   ]);
   const {
     activeBottomSurface,
@@ -6046,6 +6060,15 @@ function LaunchedShell(
           bottomActive: activeBottomSurface?.id,
           capsFull: dockCapsFull,
           environmentSection: !isNarrow,
+          ...(!isNarrow &&
+          !workspaceHoldsEnvironment &&
+          splitEnvironmentStrip(displayedDockState).toolTabIds.length > 0
+            ? {
+                environmentGaveWay: {
+                  open: dockState.tabs.some((tab) => tab.surface === "environment"),
+                },
+              }
+            : {}),
         })
       : NO_DOCK_TOOL_BUTTONS,
   );
@@ -8606,6 +8629,7 @@ function LaunchedShell(
         }
         sidebarResizable={!isNarrow}
         sidebarWidth={sidebarWidth}
+        onWorkspaceWidth={noteWorkspaceWidth}
         wideContextOpen={!isNarrow && dockPresentedOpen}
         dockTileColumns={dockPresentedOpen ? dockToolColumns : 1}
         {...(dockPresentedOpen && dockTwoColumnWidth !== undefined
