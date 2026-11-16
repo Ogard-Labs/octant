@@ -212,10 +212,22 @@ export function signInConsent(termsSummary: string): string {
 }
 
 export interface ProviderOAuthCommand {
-  readonly kind: "status" | "acknowledge" | "begin" | "poll" | "sign-out" | "sign-out-locally";
+  readonly kind:
+    | "status"
+    | "acknowledge"
+    | "begin"
+    | "poll"
+    | "sign-out"
+    | "sign-out-locally"
+    | "connect-aws-profile"
+    | "connect-access-keys";
   readonly instanceId: string;
   readonly descriptorId: string;
   readonly attemptId?: string;
+  /** Amazon Bedrock: the person's AWS profile, read by the host's broker in place. */
+  readonly awsProfile?: string;
+  /** Amazon Bedrock: a long-lived key pair, kept by the host's broker alone. */
+  readonly accessKeys?: { readonly accessKeyId: string; readonly secretAccessKey: string };
 }
 
 export interface ProviderOAuthCommandResult {
