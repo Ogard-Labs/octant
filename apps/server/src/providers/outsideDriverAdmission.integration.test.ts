@@ -900,8 +900,23 @@ describe("outside driver admission end to end", () => {
     expect(context.launches).toHaveLength(3);
   });
 
-  it("admits nothing on a host that cannot confine a driver", async () => {
+  it("lists a trusted driver on Linux as running without confinement and adds a provider from it", async () => {
     const context = await host({ platform: "linux" });
+    const entry = await context.install();
+    await context.admit(entry.extensionId);
+    const listed = (await context.providers.bootstrap(windowId)).outsideDrivers;
+    expect(listed).toHaveLength(1);
+    expect(listed?.[0]?.hostConfinement).toBe("unconfined");
+    await context.addProvider(entry);
+    expect(
+      (await context.providers.bootstrap(windowId)).instances.some(
+        (instance) => instance.driverKind === "outside-harness-endpoint",
+      ),
+    ).toBe(true);
+  });
+
+  it("admits nothing on a host that runs no driver", async () => {
+    const context = await host({ platform: "win32" });
     const entry = await context.install();
     await context.admit(entry.extensionId);
     expect((await context.providers.bootstrap(windowId)).outsideDrivers).toBeUndefined();

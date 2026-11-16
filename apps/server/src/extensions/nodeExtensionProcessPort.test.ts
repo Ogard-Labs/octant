@@ -607,31 +607,70 @@ describe("node extension process port", () => {
     expect(spawned).toBe(false);
   });
 
-  it("never starts an outside driver on Linux, where extension processes have no confinement", async () => {
-    let spawned = false;
+  it("runs an outside driver on Linux without confinement, with its fixed environment, and refuses a Canvas export target there", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-driver-linux-"));
+    receiptDirectories.push(root);
+    const packageRoot = join(root, "package");
+    await mkdir(packageRoot);
+    const temporaryDirectory = join(root, "tmp");
+    await mkdir(temporaryDirectory, { mode: 0o700 });
+    const launches: Array<{
+      readonly command: string;
+      readonly args: ReadonlyArray<string>;
+      readonly env: SpawnOptions["env"];
+    }> = [];
     const spawn = ((...input: Parameters<typeof nodeSpawn>) => {
-      spawned = true;
-      return nodeSpawn(...input);
+      const [command, args, options] = input;
+      launches.push({ command: String(command), args: [...(args ?? [])], env: options?.env });
+      return nodeSpawn(process.execPath, ["-e", ""], options);
     }) as typeof nodeSpawn;
     const port = createNodeExtensionProcessPort({
       spawn,
       shutdownTimeoutMs: 100,
       platform: "linux",
+      homeDirectory: join(root, "home"),
     });
+    const child = await port.start({
+      ...startInput,
+      args: [join(packageRoot, "main.mjs")],
+      cwd: packageRoot,
+      readiness: "spawn",
+      sandbox: {
+        kind: "outside-driver",
+        runtime: "bun",
+        instanceId: "instance-a",
+        packageRoot,
+        temporaryDirectory,
+      },
+    });
+    await child.stop();
+    expect(launches).toHaveLength(1);
+    expect(launches[0]?.command).toBe(process.execPath);
+    expect(launches[0]?.args).toEqual([join(packageRoot, "main.mjs")]);
+    // No inherited variable and no key reaches it; only the fixed set.
+    expect(launches[0]?.env).toMatchObject({
+      HOME: temporaryDirectory,
+      TMPDIR: temporaryDirectory,
+    });
+    expect(launches[0]?.env).not.toHaveProperty("OCTANT_EXTENSION_ID");
+
+    const exportFolder = join(root, "export-tmp");
+    await mkdir(exportFolder, { mode: 0o700 });
     await expect(
       port.start({
         ...startInput,
         readiness: "spawn",
         sandbox: {
-          kind: "outside-driver",
+          kind: "canvas-export",
           runtime: "bun",
           instanceId: "instance-a",
-          packageRoot: process.cwd(),
-          temporaryDirectory: tmpdir(),
+          packageRoot,
+          temporaryDirectory: exportFolder,
+          workerEntryPoint: join(packageRoot, "worker.mjs"),
         },
       }),
     ).rejects.toThrow("could not be started");
-    expect(spawned).toBe(false);
+    expect(launches).toHaveLength(1);
   });
 
   it("lets a Homebrew runtime read its own libraries and OpenSSL config, not the rest of the prefix", async () => {

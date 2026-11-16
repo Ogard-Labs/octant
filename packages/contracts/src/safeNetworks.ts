@@ -101,28 +101,34 @@ export const SafeNetworkScope = Schema.Union(
 );
 export type SafeNetworkScope = typeof SafeNetworkScope.Type;
 
-/** Only a person at a local window changes what is trusted. */
-const localWindow = Schema.Struct({ kind: Schema.Literal("local-window") }).annotations(strict);
+/**
+ * Only the host's own person changes what is trusted: at a local window, or on
+ * a device that person paired, whose id the event's actor names.
+ */
+const SafeNetworkPerson = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("local-window") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("person-paired-device") }).annotations(strict),
+);
 
 /** The whole list for one scope, in canonical form, replacing the one before. */
 export const SafeNetworksPlacesSetPayload = Schema.Struct({
   scope: SafeNetworkScope,
   places: SafeNetworkPlaces,
-  principal: localWindow,
+  principal: SafeNetworkPerson,
 }).annotations(strict);
 export type SafeNetworksPlacesSetPayload = typeof SafeNetworksPlacesSetPayload.Type;
 
 /** Network limits turned on or off for runtimes launched from now on. */
 export const SafeNetworksLimitsSetPayload = Schema.Struct({
   enabled: Schema.Boolean,
-  principal: localWindow,
+  principal: SafeNetworkPerson,
 }).annotations(strict);
 export type SafeNetworksLimitsSetPayload = typeof SafeNetworksLimitsSetPayload.Type;
 
 /** A Project goes back to the account default. */
 export const SafeNetworksProjectOverrideClearedPayload = Schema.Struct({
   projectId: AggregateId,
-  principal: localWindow,
+  principal: SafeNetworkPerson,
 }).annotations(strict);
 export type SafeNetworksProjectOverrideClearedPayload =
   typeof SafeNetworksProjectOverrideClearedPayload.Type;

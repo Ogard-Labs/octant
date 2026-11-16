@@ -47,7 +47,14 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
 const REPLAY_BATCH = 500;
 
-export type SafeNetworkPrincipal = "local-window" | "remote-device";
+/**
+ * Who asks for a change. The host's own person changes what is trusted, at a
+ * local window or on a device they paired, which is journaled as the actor;
+ * any other device session (`remote-device`) is refused.
+ */
+export type SafeNetworkPrincipal =
+  | { readonly principal: "local-window" | "remote-device" }
+  | { readonly principal: "person-paired-device"; readonly actor: EventActorValue };
 
 export type SafeNetworksChange =
   | { readonly kind: "changed" }
@@ -134,15 +141,17 @@ export class SafeNetworkStore {
     return this.#limitsOn;
   }
 
-  setLimits(input: {
-    readonly enabled: boolean;
-    readonly principal: SafeNetworkPrincipal;
-  }): SafeNetworksChange {
-    if (input.principal !== "local-window")
-      return { kind: "refused", reason: "needs-local-window" };
-    const payload = { enabled: input.enabled, principal: { kind: "local-window" as const } };
+  setLimits(input: { readonly enabled: boolean } & SafeNetworkPrincipal): SafeNetworksChange {
+    const person = this.#person(input);
+    if (person === undefined) return { kind: "refused", reason: "needs-local-window" };
+    const payload = { enabled: input.enabled, principal: person.principal };
     if (
-      !this.#append(SAFE_NETWORKS_LIMITS_AGGREGATE_ID, SAFE_NETWORKS_EVENT_NAMES.limitsSet, payload)
+      !this.#append(
+        SAFE_NETWORKS_LIMITS_AGGREGATE_ID,
+        SAFE_NETWORKS_EVENT_NAMES.limitsSet,
+        payload,
+        person.actor,
+      )
     ) {
       return { kind: "refused", reason: "unavailable" };
     }
@@ -160,13 +169,14 @@ export class SafeNetworkStore {
     return this.#projects.get(projectId) ?? null;
   }
 
-  set(input: {
-    readonly scope: SafeNetworkScope;
-    readonly places: ReadonlyArray<SafeNetworkPlace>;
-    readonly principal: SafeNetworkPrincipal;
-  }): SafeNetworksChange {
-    if (input.principal !== "local-window")
-      return { kind: "refused", reason: "needs-local-window" };
+  set(
+    input: {
+      readonly scope: SafeNetworkScope;
+      readonly places: ReadonlyArray<SafeNetworkPlace>;
+    } & SafeNetworkPrincipal,
+  ): SafeNetworksChange {
+    const person = this.#person(input);
+    if (person === undefined) return { kind: "refused", reason: "needs-local-window" };
     if (
       input.scope.kind === "project" &&
       !this.#options.projectExists(String(input.scope.projectId))
@@ -191,9 +201,9 @@ export class SafeNetworkStore {
     const payload = {
       scope: input.scope,
       places: canonical,
-      principal: { kind: "local-window" as const },
+      principal: person.principal,
     };
-    if (!this.#append(aggregateId, SAFE_NETWORKS_EVENT_NAMES.placesSet, payload)) {
+    if (!this.#append(aggregateId, SAFE_NETWORKS_EVENT_NAMES.placesSet, payload, person.actor)) {
       return { kind: "refused", reason: "unavailable" };
     }
     this.#apply(SAFE_NETWORKS_EVENT_NAMES.placesSet, payload);
@@ -201,18 +211,22 @@ export class SafeNetworkStore {
     return { kind: "changed" };
   }
 
-  clearProject(input: {
-    readonly projectId: string;
-    readonly principal: SafeNetworkPrincipal;
-  }): SafeNetworksChange {
-    if (input.principal !== "local-window")
-      return { kind: "refused", reason: "needs-local-window" };
+  clearProject(input: { readonly projectId: string } & SafeNetworkPrincipal): SafeNetworksChange {
+    const person = this.#person(input);
+    if (person === undefined) return { kind: "refused", reason: "needs-local-window" };
     if (!this.#projects.has(input.projectId)) return { kind: "changed" };
     const payload = {
       projectId: input.projectId,
-      principal: { kind: "local-window" as const },
+      principal: person.principal,
     };
-    if (!this.#append(input.projectId, SAFE_NETWORKS_EVENT_NAMES.projectOverrideCleared, payload)) {
+    if (
+      !this.#append(
+        input.projectId,
+        SAFE_NETWORKS_EVENT_NAMES.projectOverrideCleared,
+        payload,
+        person.actor,
+      )
+    ) {
       return { kind: "refused", reason: "unavailable" };
     }
     this.#apply(SAFE_NETWORKS_EVENT_NAMES.projectOverrideCleared, payload);
@@ -237,7 +251,27 @@ export class SafeNetworkStore {
     }
   }
 
-  #append(aggregateId: string, eventName: string, payload: unknown): boolean {
+  /** The recorded principal and actor of a change the host's own person asked for. */
+  #person(input: SafeNetworkPrincipal):
+    | {
+        readonly principal: { readonly kind: "local-window" | "person-paired-device" };
+        readonly actor: EventActorValue;
+      }
+    | undefined {
+    if (input.principal === "person-paired-device") {
+      return { principal: { kind: "person-paired-device" }, actor: decodeActor(input.actor) };
+    }
+    return input.principal === "local-window"
+      ? { principal: { kind: "local-window" }, actor: this.#actor }
+      : undefined;
+  }
+
+  #append(
+    aggregateId: string,
+    eventName: string,
+    payload: unknown,
+    actor: EventActorValue,
+  ): boolean {
     const version = this.#versions.get(aggregateId) ?? 0;
     try {
       this.#options.journal.append({
@@ -252,7 +286,7 @@ export class SafeNetworkStore {
             eventName: decodeEventName(eventName),
             eventVersion: 1,
             correlationId: decodeCorrelationId(this.#options.uuid()),
-            actor: this.#actor,
+            actor,
             occurredAt: decodeTimestamp(this.#options.clock()),
             payload,
           },
