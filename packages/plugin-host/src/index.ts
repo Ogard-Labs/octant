@@ -2,6 +2,7 @@ export * from "./bundledSkills";
 export * from "./bundledProviderDrivers";
 export * from "./bundledLanguageServers";
 export * from "./activation";
+export * from "./acpAgents";
 export * from "./canvasSkillContributions";
 export * from "./canvasExportContributions";
 export * from "./addressing";

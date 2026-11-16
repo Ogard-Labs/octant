@@ -44,7 +44,11 @@ export interface PiExtensionUiRequest extends PiRpcEvent {
 
 export interface PiRpcClient {
   readonly exited: Promise<void>;
-  request(type: string, fields?: Readonly<Record<string, unknown>>): Promise<PiRpcResponse>;
+  request(
+    type: string,
+    fields?: Readonly<Record<string, unknown>>,
+    options?: { readonly timeoutMs?: number },
+  ): Promise<PiRpcResponse>;
   send(fields: Readonly<Record<string, unknown>> & { readonly type: string }): Promise<void>;
   respondToUi(
     id: string,
@@ -226,7 +230,11 @@ export function makePiRpcClient(options: Options): PiRpcClient {
     return writeQueue;
   };
 
-  const request = (type: string, fields: Readonly<Record<string, unknown>> = {}) => {
+  const request = (
+    type: string,
+    fields: Readonly<Record<string, unknown>> = {},
+    requestOptions: { readonly timeoutMs?: number } = {},
+  ) => {
     if (pending.size >= pendingLimit) {
       return Promise.reject(new PiRpcFailure("capacity", "Pi RPC request capacity reached."));
     }
@@ -235,7 +243,7 @@ export function makePiRpcClient(options: Options): PiRpcClient {
       const timeout = setTimeout(() => {
         pending.delete(id);
         reject(new PiRpcFailure("timeout", "Pi RPC request timed out."));
-      }, requestTimeoutMs);
+      }, requestOptions.timeoutMs ?? requestTimeoutMs);
       pending.set(id, { resolve, reject, timeout });
       void write({ id, type, ...fields }).catch((error: unknown) => {
         clearTimeout(timeout);
