@@ -153,6 +153,7 @@ import type { CanvasWiring } from "./canvas";
 import type { HarnessStateWiring } from "./harnessState";
 import type { WorkRequestStateWiring } from "./workRequestState";
 import { workTurnToolLevel } from "../work/workTurnToolLevel";
+import { hostProviderCliProjectTrust } from "../providers/providerCliProjectTrust";
 
 export type WorkDependencies = Pick<ServerStart, "persistence"> & {
   /** Sees images; absent on a host started without one. */
@@ -547,6 +548,9 @@ export function wireWork(deps: WorkDependencies) {
         createRoutineProposalTools({
           ...routineTurn,
           proposals: routineProposalService,
+          startsActiveAtFullAccess: () =>
+            (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+              .agentRoutinesStartActiveAtFullAccess,
           readPosture: readRoutinePosture,
         }),
         createRoutineTools({
@@ -632,6 +636,7 @@ export function wireWork(deps: WorkDependencies) {
       onRequestSettled: (input, release) => workRequestService.onSettled(input, release),
       persistence: {
         ...persistence,
+        readProviderCliTrust: hostProviderCliProjectTrust(),
         readProviderModel: (providerInstanceId, modelId) =>
           persistence
             .readProviderCatalog?.(providerInstanceId)
@@ -858,6 +863,9 @@ export function wireWork(deps: WorkDependencies) {
               readImageGenerationCustomSources: () =>
                 (persistence.readShellSettings()?.settings ?? defaultShellSettings())
                   .imageGeneration.customSources,
+              defaultProfileInstanceId: () =>
+                (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                  .imageGeneration.defaultProfileInstanceId,
               readsImages: () =>
                 providerRuntimeRegistry
                   .observedState(input.thread.providerInstanceId)
@@ -1951,6 +1959,10 @@ export function wireWork(deps: WorkDependencies) {
     // thread, counted in the store Code's wakes use so a restart keeps the
     // hourly and round bounds.
     const workMessageWake = new WorkMessageWake({
+      messageWakeDefaults: () => {
+        const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+        return { wakesPerHour: settings.messageWakesPerHour, rounds: settings.messageWakeRounds };
+      },
       readThread: (threadId) => {
         let thread: ReturnType<typeof workThreadProjection.read>;
         try {

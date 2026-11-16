@@ -106,7 +106,7 @@ import { ExternalContentIngestionStore } from "../context/externalContentIngesti
 import { ThreadStandingAnswerStore } from "../context/threadStandingAnswerStore";
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
-import { windowAdmitsProject } from "@octant/domain/shell-policy";
+import { defaultShellSettings, windowAdmitsProject } from "@octant/domain/shell-policy";
 import { outsideContentRefusesDelegation } from "@octant/domain/untrusted-content-policy";
 import { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
 import { NativeHarnessRoutingStore } from "../harness/nativeHarnessRoutingStore";
@@ -1329,6 +1329,9 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
             return true;
           };
     return createAgentsManagedTools({
+      waitLimitMs: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+          .childRunWaitLimitSeconds * 1_000,
       admission: agentRunAdmission,
       orchestration: agentRunOrchestration,
       persistence: agentRunPersistence,

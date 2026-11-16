@@ -35,6 +35,7 @@ import {
   workerClockTime,
   workerModelHandles,
   workerRolesConfigured,
+  type MessageWakeDefaults,
   type WorkerCandidateVerdict,
   type WorkerChoiceRequest,
   type WorkerModelChoice,
@@ -148,6 +149,8 @@ export interface CoordinatorServicePorts {
   readonly wakes?: CoordinatorWakes;
   readonly uuid: () => string;
   readonly now: () => number;
+  /** Settings' message-wake bounds for a thread no coordinator bounded, read at each wake. */
+  readonly messageWakeDefaults?: () => MessageWakeDefaults;
   readonly onError?: (message: string, error: unknown) => void;
 }
 
@@ -1220,6 +1223,7 @@ export class CoordinatorService {
       wakeTurnRunning: false,
       wakeTurnsInLastHour: this.#ports.counts.wakesSince(recipientId, now - HOUR_MS),
       bounds: this.#boundsFor(recipient),
+      defaults: this.#ports.messageWakeDefaults?.(),
     });
     if (decision.status !== "wake") return;
     this.#ports.counts.recordWake(recipientId, now);
@@ -1307,6 +1311,7 @@ export class CoordinatorService {
             hop: wake.hop,
             wakeTurnRunning: false,
             wakeTurnsInLastHour: 0,
+            defaults: this.#ports.messageWakeDefaults?.(),
           });
     if (recipient === undefined || decision?.status !== "wake") {
       this.#ports.wakes?.settled(wake.threadId, { wakeId: wake.wakeId, outcome: "dropped" });

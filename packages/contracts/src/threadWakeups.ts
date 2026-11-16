@@ -19,6 +19,8 @@ export const decodeThreadWakeupId = Schema.decodeUnknownSync(ThreadWakeupId);
 export const ThreadWakeupMode = Schema.Literal("work", "code");
 export type ThreadWakeupMode = typeof ThreadWakeupMode.Type;
 
+export { DEFAULT_THREAD_WAKEUPS_WAITING, MAX_THREAD_WAKEUPS_WAITING_SETTING } from "./octantLimits";
+
 export const MAX_THREAD_WAKEUP_PROMPT_CHARACTERS = 4_096;
 export const MAX_THREAD_WAKEUP_CRON_CHARACTERS = 128;
 
