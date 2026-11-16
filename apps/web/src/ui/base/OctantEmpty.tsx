@@ -133,7 +133,10 @@ function StateEmpty(props: OctantEmptyStateProps) {
   const StateIcon = stateIcons[props.state];
   return (
     <Empty
-      className="shell-state"
+      // The card's edge is an outline, and a state has no card. The stylesheet
+      // cleared a border the card no longer draws, which left a hairline box
+      // around "Code is disconnected".
+      className="shell-state outline-0"
       data-state={props.state}
       role={props.role ?? (props.state === "loading" ? "status" : undefined)}
     >

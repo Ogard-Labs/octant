@@ -274,6 +274,26 @@ describe("BrowserWorkspace", () => {
     );
   });
 
+  it("lays the notes row under the page at its own height, outranking the workspace's grid", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    // The workspace's grid is declared at one class's weight in a later sheet,
+    // so the notes layout needs two: while the grid won, the row's 45% cap
+    // measured its own row and cut "Point at something" in half.
+    expect(styles).toMatch(
+      /\.browser-workspace\.browser-workspace--feedback \{\s*display: flex;\s*flex-direction: column;/,
+    );
+    const row = styles.match(/\n\.product-feedback \{([^}]*)\}/)?.[1] ?? "";
+    expect(row).toMatch(/flex:\s*0 0 auto/);
+    expect(row).toMatch(/max-height:\s*min\(45%, 420px\)/);
+  });
+
+  it("stands a thread's recovery state in the middle of the pane", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    expect(styles).toMatch(
+      /:is\(\.code-thread-workspace, \.work-thread-workspace, \.chat-workspace\)\s*> \.shell-state:not\(\.shell-state--page, \[data-state="loading"\]\) \{\s*margin: auto;/,
+    );
+  });
+
   it("draws the address field with the control corner and the field border, and no pill", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
     const field = styles.match(/\.browser-workspace__field \{([^}]*)\}/)?.[1] ?? "";

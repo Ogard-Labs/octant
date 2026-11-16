@@ -3537,6 +3537,16 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   box-shadow: none;
 }
 
+/* A state that is all a thread has to show (the service is disconnected, the
+   surface failed) stands in the middle of the pane. As the workspace's first
+   child it sat in the pane's top corner, flush to both edges, and read as a
+   card that had lost its place. A loading line keeps the top, where the
+   content it stands in for will start. */
+:is(.code-thread-workspace, .work-thread-workspace, .chat-workspace)
+  > .shell-state:not(.shell-state--page, [data-state="loading"]) {
+  margin: auto;
+}
+
 /* Without the card around it, a filled well would be the only raised shape
    left in the state; the glyph carries the severity on its own. */
 .shell-state [data-slot="empty-media"] {
@@ -5839,13 +5849,20 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
   box-sizing: border-box;
-  flex: 0 1 auto;
+  /* It keeps its own height up to the cap and scrolls past it; the page above
+     gives way, never this row. */
+  flex: 0 0 auto;
   min-height: 0;
   max-height: min(45%, 420px);
   overflow: auto;
 }
 
-.browser-workspace--feedback {
+/* Named twice so it outranks the workspace's own grid, which is declared in a
+   later stylesheet at the same weight. While the grid won, the notes row sat in
+   an implicit row and its 45% cap measured that row, not the pane: the row was
+   cut to under half its own height and "Point at something" lost its lower
+   half (measured 20px of a 44px row, 2026-11-16). */
+.browser-workspace.browser-workspace--feedback {
   display: flex;
   flex-direction: column;
 }
