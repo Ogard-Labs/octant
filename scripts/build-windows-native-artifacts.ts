@@ -38,6 +38,41 @@ export async function validateWindowsNativeArtifacts(directory: string): Promise
   }
 }
 
+const NODE_SDK_INSTALL_ATTEMPTS = 3;
+
+/**
+ * Installs the Node SDK into its owned devdir, retrying a failed install.
+ * On hosted Windows runners the headers download answered 200 and node-gyp
+ * then died extracting it ("gyp ERR! Completion callback never invoked!",
+ * November 2026), on runs whose code had passed before. The devdir is removed
+ * and made again before each attempt, so no partial extract is reused, and
+ * node-gyp still checks the headers and node.lib against SHASUMS256 on every
+ * attempt. The last attempt's error is the one reported.
+ */
+export async function installNodeSdk(
+  sdk: string,
+  install: () => Promise<void>,
+  wait: (milliseconds: number) => Promise<void> = (milliseconds) =>
+    new Promise((settle) => setTimeout(settle, milliseconds)),
+): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    await rm(sdk, { recursive: true, force: true });
+    await mkdir(sdk, { recursive: true });
+    try {
+      await install();
+      return;
+    } catch (error) {
+      if (attempt >= NODE_SDK_INSTALL_ATTEMPTS) {
+        throw new Error(
+          `node-gyp install of the Node SDK failed after ${NODE_SDK_INSTALL_ATTEMPTS} attempts.`,
+          { cause: error },
+        );
+      }
+      await wait(attempt * 2_000);
+    }
+  }
+}
+
 /** Build existing native sources on their matching host; SDK integrity belongs to installed node-gyp. */
 export async function buildWindowsNativeArtifacts(destination: string): Promise<void> {
   if (process.platform !== "win32" || process.arch !== "x64")
@@ -57,18 +92,20 @@ export async function buildWindowsNativeArtifacts(destination: string): Promise<
     );
     // Public install verifies the official headers and node.lib against SHASUMS256.
     // An owned devdir excludes stale SDK caches and concurrent package builders.
-    await run(
-      "node",
-      [
-        nodeGyp,
-        "install",
-        `--target=${version}`,
-        "--arch=x64",
-        `--devdir=${sdk}`,
-        "--dist-url=https://nodejs.org/download/release",
-      ],
-      { cwd: root, env: sdkEnvironment },
-    );
+    await installNodeSdk(sdk, async () => {
+      await run(
+        "node",
+        [
+          nodeGyp,
+          "install",
+          `--target=${version}`,
+          "--arch=x64",
+          `--devdir=${sdk}`,
+          "--dist-url=https://nodejs.org/download/release",
+        ],
+        { cwd: root, env: sdkEnvironment },
+      );
+    });
     const ownerBuild = join(stage, "owner");
     const credentialBuild = join(stage, "credentials");
     const peerBuild = join(stage, "desktop-peer");

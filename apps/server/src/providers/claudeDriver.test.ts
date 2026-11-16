@@ -13,6 +13,10 @@ import {
 } from "@octant/contracts";
 import { Effect, Exit, Fiber, Option, PubSub, Scope, Stream } from "effect";
 import {
+  WINDOWS_KEPT_SANDBOX_REFUSAL,
+  WINDOWS_STRICT_REFUSAL,
+} from "@octant/domain/guardrail-policy";
+import {
   renderProviderContextSections,
   renderProviderTurnPrompt,
 } from "@octant/provider-sdk/chat-conformance";
@@ -253,6 +257,7 @@ function harness(
     readonly planMcpServers?: () => ReadonlyArray<string>;
     readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
     readonly authorityNow?: () => number;
+    readonly platform?: NodeJS.Platform;
     readonly maxTrackedToolUses?: number;
     readonly runtimeTurnsPerTurn?: () => number;
     readonly gitIdentity?: (checkoutRoot: string) => Promise<{ name?: string; email?: string }>;
@@ -409,6 +414,7 @@ function harness(
       ...(options.gitIdentity === undefined ? {} : { gitIdentity: options.gitIdentity }),
       ...(options.runtimeNetwork === undefined ? {} : { runtimeNetwork: options.runtimeNetwork }),
       ...(options.authorityNow === undefined ? {} : { authorityNow: options.authorityNow }),
+      ...(options.platform === undefined ? {} : { platform: options.platform }),
       ...(options.maxTrackedToolUses === undefined
         ? {}
         : { maxTrackedToolUses: options.maxTrackedToolUses }),
@@ -1604,6 +1610,40 @@ describe("Claude execution policy", () => {
     expect(sandboxed.opens[0]?.sandbox?.allowUnsandboxedCommands).toBe(false);
     expect(sandboxed.opens[0]?.authEnvironment.GIT_AUTHOR_NAME).toBeUndefined();
     await fullAccess.close();
+  });
+
+  it("starts Claude on Windows below Full access outside Strict with its own permission modes, and refuses Strict and a kept sandbox by name before it runs", async () => {
+    const started = harness("subscription", "current-session", { platform: "win32" });
+    const acquired = await acquire(started.driver);
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    expect(started.opens[0]?.executionPolicy).toBe("approval-gated");
+    // Claude Code has no command sandbox on Windows; requiring one would leave
+    // every command unable to run.
+    expect(started.opens[0]?.sandbox).toBeUndefined();
+    await acquired.close();
+
+    for (const [level, message] of [
+      [{ executionPolicy: "approval-gated" }, WINDOWS_STRICT_REFUSAL],
+      [
+        { executionPolicy: "full-access", fullAccessSandbox: true, strict: false },
+        WINDOWS_KEPT_SANDBOX_REFUSAL,
+      ],
+    ] as const) {
+      const refused = harness("subscription", "current-session", { platform: "win32" });
+      const connection = await acquire(refused.driver);
+      await expect(
+        Effect.runPromise(connection.connection.start({ sessionId, modelId, ...level })),
+      ).rejects.toMatchObject({ message: expect.stringContaining(message) });
+      expect(refused.opens).toHaveLength(0);
+      await connection.close();
+    }
   });
 
   it("passes the gate for calls made after a cd into a subfolder and refuses a cd out of the Project", async () => {

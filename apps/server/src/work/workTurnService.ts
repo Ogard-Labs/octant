@@ -135,7 +135,7 @@ import {
   workProjectKeepsStatusFile,
   changedThreadToolStep,
   clampWorkAccess,
-  hostSandboxRefusal,
+  hostProviderTurnRefusal,
   threadToolStepLimit,
   workThreadAccessOf,
   workTurnCapabilityFacts,
@@ -1390,14 +1390,16 @@ export class WorkTurnService {
         ? (thread?.access ?? DEFAULT_WORK_ACCESS)
         : clampWorkAccess(thread?.access ?? DEFAULT_WORK_ACCESS, options.accessCeiling);
     // Judged at that level, not only the thread's stored one, before anything
-    // is journaled or started: a host without Octant's sandbox runs only the
-    // level that uses none.
-    const sandboxRefusal = hostSandboxRefusal({
+    // is journaled or started: on a host without Octant's sandbox a turn below
+    // Full access runs with the provider's own approvals, and only Strict and
+    // a kept sandbox, which need Octant's sandbox, refuse.
+    const sandboxRefusal = hostProviderTurnRefusal({
       platform: process.platform,
       access: {
         ...workThreadAccessOf(turnAccess),
         ...(thread?.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
       },
+      strict: this.#resolveStrict?.(String(command.threadId)) ?? true,
     });
     if (sandboxRefusal !== undefined) throw this.#failure("unavailable", sandboxRefusal);
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);

@@ -159,17 +159,23 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
-      - name: Compile the fake Codex app-server into a Windows program
+      - name: Compile the fake provider runtimes into Windows programs
         shell: pwsh
         run: |
           bun build --compile apps/server/src/providers/fixtures/fakeCodexCli.ts --outfile "$env:RUNNER_TEMP/fake-codex/codex.exe"
           if ($LASTEXITCODE -ne 0) { throw 'The fake Codex did not compile' }
-      - name: Run Full access turns' processes, shells and terminals on Windows
+          bun build --compile apps/server/src/providers/fixtures/fakeClaudeCli.ts --outfile "$env:RUNNER_TEMP/fake-claude/claude.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'The fake Claude did not compile' }
+          bun build --compile apps/server/src/providers/fixtures/fakeOpenCodeCli.ts --outfile "$env:RUNNER_TEMP/fake-opencode/opencode.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'The fake OpenCode did not compile' }
+      - name: Run provider launches, shells and terminals on Windows
         working-directory: apps/server
         shell: pwsh
         run: |
           $env:OCTANT_FAKE_CODEX_EXE = "$env:RUNNER_TEMP/fake-codex/codex.exe"
-          bun run test src/process/windowsProcessTree.test.ts src/code/terminalProcessPort.windows.test.ts src/code/terminalShell.test.ts src/harness/windowsFullAccessShell.test.ts src/providers/codexProcess.windows.test.ts src/process/nodeOwnedProcessReceipt.windows.test.ts
+          $env:OCTANT_FAKE_CLAUDE_EXE = "$env:RUNNER_TEMP/fake-claude/claude.exe"
+          $env:OCTANT_FAKE_OPENCODE_EXE = "$env:RUNNER_TEMP/fake-opencode/opencode.exe"
+          bun run test src/process/windowsProcessTree.test.ts src/code/terminalProcessPort.windows.test.ts src/code/terminalShell.test.ts src/harness/windowsFullAccessShell.test.ts src/providers/codexProcess.windows.test.ts src/providers/providerFamilies.windows.test.ts src/process/windowsProviderProgram.test.ts src/process/nodeOwnedProcessReceipt.windows.test.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   # The self-hostable share service (apps/share) ships as a Docker image. Build

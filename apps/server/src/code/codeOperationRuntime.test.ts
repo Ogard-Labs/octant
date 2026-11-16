@@ -153,6 +153,7 @@ import {
   defaultWindowWorkspace,
   contextKeyForProject,
   WINDOWS_SANDBOX_MISSING_REASON,
+  WINDOWS_STRICT_REFUSAL,
 } from "@octant/domain";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
@@ -4501,7 +4502,7 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
-  it("runs a Windows Code turn at Full access and refuses one the composer narrows below it", async () => {
+  it("runs a Windows Code turn at Full access and refuses a Strict one the composer narrows below it, naming Strict", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
     const fixture = runtimeFixture({ provider: providerDriver(connection) });
@@ -4520,13 +4521,40 @@ describe("CodeOperationRuntime", () => {
         }),
       ).resolves.toMatchObject({
         kind: "operation-failed",
-        failure: { category: "unavailable", message: WINDOWS_SANDBOX_MISSING_REASON },
+        failure: { category: "unavailable", message: WINDOWS_STRICT_REFUSAL },
       });
       expect(connection.send).not.toHaveBeenCalled();
       await expect(
         fixture.runtime.execute(windowId, {
           kind: "start-provider-turn",
           operationId: operationId(16),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    } finally {
+      vi.unstubAllGlobals();
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("runs a Windows Code turn below Full access outside Strict with the provider's own approvals", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      resolveStrict: () => false,
+    });
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(17),
           threadId,
           checkoutId,
           sessionId,
@@ -11743,6 +11771,7 @@ function runtimeFixture(options: {
   supportsAcpClientCapabilities?: boolean;
   /** The checkout root a turn resolves (default a path that does not exist). */
   checkoutRoot?: string;
+  resolveStrict?: Parameters<typeof createCodeOperationRuntime>[0]["resolveStrict"];
   acpTerminalConfinement?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["acpTerminalConfinement"];
@@ -12143,6 +12172,7 @@ function runtimeFixture(options: {
     ...(options.computerUseTools === undefined
       ? {}
       : { computerUseTools: options.computerUseTools }),
+    ...(options.resolveStrict === undefined ? {} : { resolveStrict: options.resolveStrict }),
     ...(options.resolveSelectedExtensions === undefined
       ? {}
       : { resolveSelectedExtensions: options.resolveSelectedExtensions }),
