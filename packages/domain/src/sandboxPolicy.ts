@@ -63,7 +63,10 @@ export function admitSandboxPolicy(
   if (policy.credentials === "isolated" && !capabilities.isolatedCredentials) {
     rules.push("credentials.isolated");
   }
-  if (policy.hostServices === "blocked" && !capabilities.blockedHostServices) {
+  if (
+    (policy.hostServices === "blocked" || (policy.localServices?.length ?? 0) > 0) &&
+    !capabilities.blockedHostServices
+  ) {
     rules.push("hostServices.blocked");
   }
   return rules.length === 0
@@ -102,6 +105,11 @@ export function intersectSandboxPolicies(
   return {
     schemaVersion: 1,
     approvedDestinations,
+    localServices: (child.localServices ?? []).filter((service) =>
+      parent.localServices?.some(
+        (allowed) => allowed.host === service.host && allowed.port === service.port,
+      ),
+    ),
     revision: Math.max(parent.revision, child.revision),
     filesystem: {
       readOnlyRoots,
@@ -118,4 +126,14 @@ export function intersectSandboxPolicies(
         ? "blocked"
         : "existing-policy",
   };
+}
+
+/** Brackets are HTTP authority syntax, never an alternate address or DNS grant. */
+export function sandboxLocalServiceAllowed(
+  services: SandboxPolicy["localServices"],
+  host: string,
+  port: number,
+): boolean {
+  const literal = host === "[::1]" ? "::1" : host;
+  return services?.some((service) => service.host === literal && service.port === port) === true;
 }

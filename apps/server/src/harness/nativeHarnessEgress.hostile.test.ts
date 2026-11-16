@@ -2898,6 +2898,7 @@ describe("native harness tool egress grants and learn mode", () => {
 
   it("keeps a block-all policy's exact exception ceiling for both tools and program capsules", async () => {
     const host = egressHost();
+    const origin = await tcpFixture();
     grantThreadRule(host, "pypi.example.com");
     const selected = decodeSandboxPolicySelection({
       policy: {
@@ -2908,6 +2909,7 @@ describe("native harness tool egress grants and learn mode", () => {
         approvedDestinations: [{ host: "registry.example.com", port: 443 }],
         credentials: "existing-policy",
         hostServices: "blocked",
+        localServices: [{ host: "127.0.0.1", port: origin.port }],
       },
       context: {
         root: "/project",
@@ -2944,6 +2946,16 @@ describe("native harness tool egress grants and learn mode", () => {
           expect(started.launch.proxy.permitsHostRequest("registry.example.com", 443)).toBe(true);
           expect(started.launch.proxy.permitsHostRequest("registry.example.com", 80)).toBe(false);
           expect(started.launch.proxy.permitsHostRequest("pypi.example.com", 443)).toBe(false);
+          expect(started.launch.proxy.permitsHostRequest("localhost", origin.port)).toBe(false);
+          expect(started.launch.proxy.permitsHostRequest("127.0.0.1", origin.port + 1)).toBe(false);
+          const tunnel = await openTunnel(
+            started.launch.proxy,
+            `127.0.0.1:${origin.port}`,
+            basicAuthorization(started.launch.proxy.token),
+          );
+          expect(tunnel.status).toBe(200);
+          expect(await roundTrip(tunnel.socket, "ping", 4)).toBe("ping");
+          tunnel.socket.destroy();
         } finally {
           await started.launch.finish();
         }

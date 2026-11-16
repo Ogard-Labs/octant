@@ -11,6 +11,28 @@ export const policy = {
 } as const;
 
 describe("sandbox policy contract", () => {
+  it("accepts exact loopback services without accepting names, ranges or ambient sockets", () => {
+    const localServices = [
+      { host: "127.0.0.1", port: 5173 },
+      { host: "::1", port: 8080 },
+    ];
+    expect(
+      decodeSandboxPolicy({ ...policy, hostServices: "blocked", localServices }).localServices,
+    ).toEqual(localServices);
+    expect(() => decodeSandboxPolicy({ ...policy, localServices })).toThrow();
+    for (const service of [
+      { host: "localhost", port: 5173 },
+      { host: "127.0.0.2", port: 5173 },
+      { host: "0.0.0.0", port: 5173 },
+      { host: "::ffff:127.0.0.1", port: 5173 },
+      { host: "127.0.0.1", port: 0 },
+      { host: "127.0.0.1", port: 65536 },
+      { host: "127.0.0.1", port: 5173, socket: "/run/docker.sock" },
+    ])
+      expect(() =>
+        decodeSandboxPolicy({ ...policy, hostServices: "blocked", localServices: [service] }),
+      ).toThrow();
+  });
   it("requires a complete versioned policy without changing old settings", () => {
     expect(decodeSandboxPolicy(policy)).toEqual(policy);
     expect(() => decodeSandboxPolicy({ ...policy, schemaVersion: 2 })).toThrow();

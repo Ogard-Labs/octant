@@ -94,4 +94,23 @@ describe("sandbox policy selection and admission", () => {
       filesystem: { readOnlyRoots: ["/library"], readWriteRoots: ["/cache/build"] },
     });
   });
+  it("does not transfer a parent's local-service grant to another port or address", () => {
+    const localServices = [{ host: "127.0.0.1" as const, port: 5173 }];
+    const parent: SandboxPolicy = { ...policy, hostServices: "blocked", localServices };
+    expect(
+      intersectSandboxPolicies(parent, {
+        ...parent,
+        localServices: [
+          ...localServices,
+          { host: "127.0.0.1", port: 8080 },
+          { host: "::1", port: 5173 },
+        ],
+      }).localServices,
+    ).toEqual(localServices);
+    expect(intersectSandboxPolicies(parent, policy).localServices).toEqual([]);
+    expect(admitSandboxPolicy(parent, capabilities)).toMatchObject({
+      status: "refused",
+      rules: ["hostServices.blocked"],
+    });
+  });
 });

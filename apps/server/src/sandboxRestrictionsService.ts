@@ -45,6 +45,8 @@ import {
   sandboxNetworkLimitsOn,
   type SandboxTurnRequest,
   type SandboxTurnAdmission,
+  type SandboxTurnPolicy,
+  type SandboxCommandState,
   type SandboxRestrictionsAuthority,
 } from "./process/sandboxRuntimePolicy";
 
@@ -286,7 +288,7 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
       "Claude Strict withholds native startup hooks, MCP servers, Project startup code, REPL, Workflow scripts and worktree creation outside its command sandbox. Native web tools are withheld when tool networking is filtered; brokered Octant tools keep their own policy checks.",
       `Claude Strict command toolchain reads: ${claudeSandboxToolchainReads(platform).join(", ")}. No home/account folder is added by that toolchain grant; writes remain confined to allowed folders.`,
       "Protected project paths require a proven backend and are unavailable on this host.",
-      "Exact credential and host-service grants are not supported; protected-file rules remain enforced.",
+      "Local-service grants permit only the named loopback address and port through the scoped proxy; service effects are a separate authority. Fixed credential commands use their separate one-use recipient/account review. General credential isolation remains unavailable; protected-file rules remain enforced.",
     ];
     try {
       if (effective !== undefined) this.#validate(effective);
@@ -403,7 +405,10 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
         !denial.grantable ||
         (denial.operation !== "read" &&
           denial.operation !== "write" &&
-          !(denial.operation === "network" && denial.destination !== undefined))
+          !(
+            denial.operation === "network" &&
+            (denial.destination !== undefined || denial.localService !== undefined)
+          ))
       )
         return refused(
           "not-grantable",
@@ -416,7 +421,13 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
       const current = this.#effective(scope)?.policy;
       if (current === undefined)
         return refused("not-grantable", "The sandbox policy is no longer selected.");
-      if (denial.operation === "network" && denial.destination !== undefined) {
+      if (denial.operation === "network" && denial.localService !== undefined) {
+        policy = decodeSandboxPolicy({
+          ...current,
+          hostServices: "blocked",
+          localServices: [...(current.localServices ?? []), denial.localService],
+        });
+      } else if (denial.operation === "network" && denial.destination !== undefined) {
         policy = decodeSandboxPolicy({
           ...current,
           approvedDestinations: [...(current.approvedDestinations ?? []), denial.destination],
@@ -722,6 +733,9 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
           Object.freeze(destination);
         if (selection.policy.approvedDestinations !== undefined)
           Object.freeze(selection.policy.approvedDestinations);
+        for (const service of selection.policy.localServices ?? []) Object.freeze(service);
+        if (selection.policy.localServices !== undefined)
+          Object.freeze(selection.policy.localServices);
         for (const identity of selection.context.rootIdentities ?? []) Object.freeze(identity);
         if (selection.context.rootIdentities !== undefined)
           Object.freeze(selection.context.rootIdentities);
@@ -891,6 +905,58 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
       }
     }
     return turn?.selection;
+  }
+  commandState(threadId: string): SandboxCommandState {
+    const turn = this.#turns.get(threadId);
+    if (turn !== undefined)
+      return {
+        strict: turn.strict === true,
+        legacy: turn.legacy === true,
+        binding: JSON.stringify([
+          turn.strict === true,
+          turn.legacy === true,
+          turn.selection?.policy,
+          turn.ending,
+        ]),
+      };
+    const scope = { kind: "session", threadId } as const;
+    const strict = this.#strictPolicy(scope);
+    const record = this.#activeRecord(scope, strict.legacy);
+    return {
+      strict: strict.enabled,
+      legacy: strict.legacy,
+      binding: JSON.stringify([
+        strict.enabled,
+        strict.legacy,
+        strict.enabled
+          ? (record?.policy ?? (!strict.legacy ? defaultStrictPolicy : undefined))
+          : undefined,
+        false,
+      ]),
+    };
+  }
+  currentTurn(threadId: string): SandboxTurnPolicy | undefined {
+    const turn = this.#turns.get(threadId);
+    if (turn === undefined || turn.ending) return undefined;
+    const selection = this.active(threadId);
+    return {
+      ...(selection === undefined ? {} : { selection }),
+      strict: turn.strict === true,
+      legacy: turn.legacy === true,
+      summary: selection === undefined ? "" : sandboxPolicySummary(selection),
+      current: () => {
+        try {
+          return (
+            this.#turns.get(threadId)?.nonce === turn.nonce &&
+            !turn.ending &&
+            this.active(threadId) === selection
+          );
+        } catch {
+          return false;
+        }
+      },
+      end: () => undefined,
+    };
   }
   deny(input: Omit<SandboxPolicyDenial, "id" | "count" | "dismissed">): void {
     const parentThreadId = this.#turns.get(input.threadId)?.parentThreadId;

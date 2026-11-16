@@ -119,6 +119,70 @@ function fixture(strict = true) {
   };
 }
 describe.skipIf(process.platform !== "linux")("trusted sandbox restrictions", () => {
+  it("keeps command consent bound to the admitted policy while a requested change is pending", async () => {
+    const f = fixture();
+    f.save({ kind: "set-policy", scope: f.settings, policy: f.policy, expectedVersion: 0 });
+    const before = f.service.commandState(threadId);
+    const active = f.start();
+    if (active.status !== "admitted") throw new Error("Missing admitted turn");
+    expect(f.service.commandState(threadId)).toEqual(before);
+    const borrowed = f.service.currentTurn(threadId);
+    expect(borrowed?.selection).toBe(active.turn.selection);
+    await borrowed?.end();
+    expect(active.turn.current()).toBe(true);
+    f.save({
+      kind: "set-policy",
+      scope: f.settings,
+      policy: { ...f.policy, network: "deny" },
+      expectedVersion: 1,
+    });
+    expect(f.service.commandState(threadId)).toEqual(before);
+    await active.turn.end();
+    expect(borrowed?.current()).toBe(false);
+    expect(f.service.commandState(threadId)).not.toEqual(before);
+  });
+  it("keeps a local-service grant pending for an active turn and persists only the requested Project endpoint", async () => {
+    const f = fixture();
+    f.save({ kind: "set-policy", scope: f.settings, policy: f.policy, expectedVersion: 0 });
+    const active = f.start();
+    if (active.status !== "admitted") throw new Error("Missing admitted turn");
+    f.service.deny({
+      threadId,
+      projectId: f.project.id,
+      code: "sandbox-network-denied",
+      ruleId: "network.destinations",
+      operation: "network",
+      resource: "127.0.0.1:5173",
+      localService: { host: "127.0.0.1", port: 5173 },
+      message: "Local service blocked",
+      remedy: "Review the service's effects.",
+      grantable: true,
+    });
+    const denial = f.service.snapshot({ kind: "session", threadId }).denials[0];
+    if (denial === undefined) throw new Error("Missing service denial");
+    expect(
+      f.save({
+        kind: "grant-denial",
+        denialId: denial.id,
+        duration: "project",
+        expectedVersion: 1,
+      }),
+    ).toMatchObject({
+      policy: { hostServices: "blocked", localServices: [{ host: "127.0.0.1", port: 5173 }] },
+    });
+    expect(active.turn.selection?.policy.localServices).toBeUndefined();
+    expect(f.service.snapshot({ kind: "session", threadId })).toMatchObject({ pending: true });
+    await active.turn.end();
+    const next = f.start();
+    if (next.status !== "admitted") throw new Error("Missing next turn");
+    expect(next.turn.selection?.policy.localServices).toEqual([{ host: "127.0.0.1", port: 5173 }]);
+    expect(Object.isFrozen(next.turn.selection?.policy.localServices)).toBe(true);
+    expect(Object.isFrozen(next.turn.selection?.policy.localServices?.[0])).toBe(true);
+    await next.turn.end();
+    expect(
+      f.create().snapshot({ kind: "project", projectId: f.project.id }).policy?.localServices,
+    ).toEqual([{ host: "127.0.0.1", port: 5173 }]);
+  });
   it("keeps a saved policy inactive outside Strict and shows a change pending until the active turn ends", async () => {
     const f = fixture(false);
     const saved = f.save({

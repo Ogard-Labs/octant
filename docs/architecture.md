@@ -14016,6 +14016,16 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     separate authorities, not general proxies. Proxy loss never opens a direct
     route. Authentication exceptions retain their existing account scope.
 
+    Explicit local-service exceptions name `127.0.0.1` or `::1` and one port.
+    They require ambient host-service blocking and use the authenticated scoped
+    proxy. Names, ranges, Unix sockets and neighboring ports are not grants;
+    literal connections do not consult DNS. Helpers inherit only an exact
+    parent endpoint. Each redirect is independently authorized, and scope
+    expiry closes live proxy tunnels and host-owned HTTP requests. The panel
+    and denial card disclose that the service's effects are a separate authority;
+    access to a service does not promise that its downstream effects are
+    confined to Project files. No raw Docker socket or host executor is granted.
+
     | Backend/route                     | Supported boundary and required proof                                                                                                                                                                                                                                                                                                                                                                             |
     | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
     | Linux Bubblewrap                  | PID/network namespaces, capability isolation, configured writable roots, separate-filesystem read-only mounts, enforced proxy and descendant revocation. A static launch helper pins mount sources by object identity using `openat2`, then closes inherited mount descriptors before loading workload code; changed paths refuse. Requires the installed helper and a kernel supporting `openat2`/`close_range`. |
@@ -14048,7 +14058,7 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     Read-only folders on the same filesystem as writable roots remain unavailable
     until access-time alias mediation exists: a read-only mount or named-path
     rule does not protect a writable hard-link alias. Overlapping grants refuse.
-    Selected protected paths and expanded narrow credential/service grants are
+    Selected protected paths and general credential isolation are
     explicitly unsupported capabilities, not delivered effects or silently
     ignored configuration. Linux late-created-name protection retains its
     production access-time mediation dependency; enumeration and watchers are
@@ -17600,7 +17610,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
     the originating registered local window or, not built yet, the originating
     paired device, and ordinary Code command policy.
     Ask for approvals and Auto-accept edits keep the recipient OS-confined;
-    Full access permits ordinary unrestricted commands. Plan and unknown postures
+    Full access with Strict off permits ordinary unrestricted commands. Strict
+    keeps the recipient confined at Full access too. A host command borrows the
+    active turn's immutable policy or owns a freshly admitted command scope;
+    credential consent records the effective Strict state. Changes to that
+    authority invalidate pending consent. Plan and unknown postures
     refuse. Ordinary approvals and Auto Shield remain additional to credential
     consent; saving a binding never approves an ordinary command or destination.
     No routine, managed-child tool set,
@@ -17631,7 +17645,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     variables are excluded before startup, and bootstrap-only Electron flags
     are removed before the recipient. The runtime remains part of the trusted
     host installation; its replacement is not covered by the recipient pin.
-    Below Full access, `op` authenticates outside confinement and can launch only
+    Below Full access and under Strict, `op` authenticates outside confinement and can launch only
     the already prepared Seatbelt or Bubblewrap target. The policy, read roots
     and pin derive from the recipient, not `op`. The capsule runs only fixed
     host code before the recipient: native env promotes the launch proxy URL
@@ -17650,7 +17664,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     their own-account exemption, and the default `~/.op` and `~/.config/op`
     directories stay denied even beneath broader roots. Credentials remain in
     the recipient environment; no file or callback returns them to Octant.
-    At Full access the recipient and descendants have ordinary Full access.
+    At Full access with Strict off the recipient and descendants have ordinary Full access.
     All postures receive credentials directly from `op`; default vendor concealment cannot
     prevent encoding, file writes or network disclosure. Octant does not claim
     exact-value redaction for values it never receives.

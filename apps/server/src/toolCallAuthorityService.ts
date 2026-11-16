@@ -169,6 +169,7 @@ export class ToolCallAuthorityService {
       const networkDenied =
         sandbox.policy.network === "deny" &&
         (sandbox.policy.approvedDestinations?.length ?? 0) === 0 &&
+        (sandbox.policy.localServices?.length ?? 0) === 0 &&
         entry?.requiredCapabilityClass === "network";
       if (
         networkDenied &&

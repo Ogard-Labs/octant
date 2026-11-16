@@ -62,6 +62,36 @@ function fixture() {
   return { settings, change };
 }
 describe("sandbox restrictions settings", () => {
+  it("validates and saves an exact local service while blocking other ambient services", async () => {
+    const client = fixture();
+    const user = userEvent.setup();
+    render(<SandboxRestrictionsSettings client={client} />);
+    const input = await screen.findByRole("textbox", { name: "Local service address and port" });
+    await user.type(input, "localhost:5173");
+    await user.click(screen.getByRole("button", { name: "Add local service" }));
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(/Use 127.0.0.1:port/)).toBeVisible();
+    await user.clear(input);
+    await user.type(input, "127.0.0.1:5173");
+    await user.click(screen.getByRole("button", { name: "Add local service" }));
+    expect(screen.getByText("127.0.0.1:5173")).toBeVisible();
+    expect(input).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Save sandbox restrictions" }));
+    expect(client.change).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "set-policy",
+        policy: expect.objectContaining({
+          hostServices: "blocked",
+          localServices: [{ host: "127.0.0.1", port: 5173 }],
+        }),
+      }),
+    );
+    expect(await screen.findByText("Settings changed. Reload before saving.")).toBeVisible();
+    expect(screen.getByText("127.0.0.1:5173")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Remove local service 127.0.0.1:5173" }));
+    expect(screen.queryByText("127.0.0.1:5173")).not.toBeInTheDocument();
+  });
   it("opens the requested session, explains immutable turns and shows an exact exception before granting", async () => {
     const client = fixture();
     const user = userEvent.setup();

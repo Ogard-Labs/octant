@@ -317,10 +317,14 @@ type AppendEvent = { readonly eventName: string; readonly payload: unknown };
 
 function sandboxProxyPolicy(
   selection: SandboxPolicySelection | undefined,
-): Pick<ToolEgressProxyOptions, "decision" | "blockAmbientPrivateAddresses"> {
+): Pick<ToolEgressProxyOptions, "decision" | "blockAmbientPrivateAddresses" | "localServices"> {
   if (selection === undefined) return {};
-  const base =
-    selection.policy.hostServices === "blocked" ? { blockAmbientPrivateAddresses: true } : {};
+  const base = {
+    ...(selection.policy.hostServices === "blocked" ? { blockAmbientPrivateAddresses: true } : {}),
+    ...(selection.policy.localServices === undefined
+      ? {}
+      : { localServices: selection.policy.localServices }),
+  };
   if (selection.policy.network === "deny")
     return {
       ...base,

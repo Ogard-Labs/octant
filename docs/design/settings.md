@@ -299,6 +299,16 @@ person's Network limits choice. Full access · Strict says that some actions sti
 require approval; Claude's native escape asks for each command and is never a
 remembered folder or session grant.
 
+Local service exceptions accept an exact `127.0.0.1:port` or `[::1]:port` and
+enable ambient host-service blocking. The entered endpoint remains a draft
+until Save; invalid input keeps focus and an associated error, and stale saves
+retain the draft. Each endpoint can be removed. The description and inline
+denial card identify the service's effects as a separate authority, rather than
+claiming that a host service can affect only Project files. Credential-command
+approval shows the effective Strict boundary, including at Full access, while
+the existing fixed recipient/account/reference review and one-use consent stay
+in Secret stores.
+
 Running protection and requested changes are distinct. **Changes pending** means
 the old admitted policy remains in effect; stop the turn and start a new run to
 apply the change. Merely editing a setting cannot alter a running process. Scope

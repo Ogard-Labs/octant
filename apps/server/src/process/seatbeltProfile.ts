@@ -1072,6 +1072,7 @@ export function makeProcessConfinementLive(
               sandboxPolicy: selectedPolicy,
               networkEgress:
                 ((selectedPolicy.policy.approvedDestinations?.length ?? 0) > 0 ||
+                  (selectedPolicy.policy.localServices?.length ?? 0) > 0 ||
                   (selectedPolicy.policy.network === "existing-policy" &&
                     ((sandboxNetworkSnapshot(selectedPolicy)?.limitsOn ??
                       sandboxNetworkLimitsOn()) ||

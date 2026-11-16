@@ -2,7 +2,7 @@ import { pinLinuxLaunch } from "./linuxPinnedLaunch";
 import { Effect, Schema } from "effect";
 import { makeOpenCodeProcessLive } from "../providers/openCodeProcess";
 import { startLinuxControlRelay } from "./linuxControlRelay";
-import { ToolEgressLaunch, ToolEgressRuleId } from "@octant/contracts";
+import { ToolEgressLaunch } from "@octant/contracts";
 import { startToolEgressProxy } from "../harness/nativeHarnessEgressProxy";
 import { configureSandboxRestrictionsAuthority, trackSandboxChild } from "./sandboxRuntimePolicy";
 import { execFileSync, spawnSync, spawn } from "node:child_process";
@@ -542,59 +542,52 @@ if cat "$3/outside"; then exit 35; fi
     },
   );
 
-  it.skipIf(process.platform !== "linux")(
-    "allows the brokered destination while denying direct TCP and ambient Unix services",
-    async () => {
-      const f = fixture();
-      const hostSocket = join(f.project, "host.sock");
-      const server = createServer((socket) => {
-        socket.once("data", () => {
-          socket.end("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
-        });
+  it("allows an exact local service while denying direct TCP and ambient Unix services", async () => {
+    const f = fixture();
+    const hostSocket = join(f.project, "host.sock");
+    const server = createServer((socket) => {
+      socket.once("data", () => {
+        socket.end("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
       });
-      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-      const unix = createServer((socket) => socket.destroy());
-      await new Promise<void>((resolve) => unix.listen(hostSocket, resolve));
-      const address = server.address();
-      if (address === null || typeof address === "string") throw new Error("Missing TCP address");
-      const proxy = await startToolEgressProxy({
-        launch: Schema.decodeUnknownSync(ToolEgressLaunch)({
-          launchId: "30000000-0000-4000-8000-000000000001",
-          threadId: "10000000-0000-4000-8000-000000000001",
-          projectId: f.sandboxPolicy.context.projectId,
-        }),
-        endpoint: { kind: "unix-socket", parentDirectory: f.base },
-        taint: () => ({ threadTainted: false, parentTainted: false }),
-        rules: () => [],
-        clock: () => new Date().toISOString(),
-        decision: {
-          kind: "provider-runtime",
-          decide: ({ host, port }) =>
-            host === "allowed.example.com" && port === 80
-              ? {
-                  kind: "allow",
-                  host,
-                  port,
-                  by: "project-rule",
-                  ruleId: Schema.decodeUnknownSync(ToolEgressRuleId)(
-                    "40000000-0000-4000-8000-000000000001",
-                  ),
-                }
-              : { kind: "refuse", reason: "no-rule", host, port },
-          privateAddressAllowed: () => false,
-        },
-        records: {
-          launchStarted: async () => ({ status: "appended" }),
-          decisionsRecorded: async () => ({ status: "appended" }),
-          launchSummarized: async () => ({ status: "appended" }),
-        },
-        resolveAll: async () => ["93.184.216.34"],
-        connect: () => netConnect({ host: "127.0.0.1", port: address.port, allowHalfOpen: true }),
-      });
-      if (proxy.status !== "listening") throw new Error("Proxy failed");
-      try {
-        const token = Buffer.from(`octant:${proxy.proxy.token}`).toString("base64");
-        const script = `import socket
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const unix = createServer((socket) => socket.destroy());
+    await new Promise<void>((resolve) => unix.listen(hostSocket, resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("Missing TCP address");
+    const proxy = await startToolEgressProxy({
+      launch: Schema.decodeUnknownSync(ToolEgressLaunch)({
+        launchId: "30000000-0000-4000-8000-000000000001",
+        threadId: "10000000-0000-4000-8000-000000000001",
+        projectId: f.sandboxPolicy.context.projectId,
+      }),
+      endpoint:
+        process.platform === "linux"
+          ? { kind: "unix-socket", parentDirectory: f.base }
+          : { kind: "loopback" },
+      localServices: [{ host: "127.0.0.1", port: address.port }],
+      blockAmbientPrivateAddresses: true,
+      taint: () => ({ threadTainted: false, parentTainted: false }),
+      rules: () => [],
+      clock: () => new Date().toISOString(),
+      decision: {
+        kind: "provider-runtime",
+        decide: ({ host, port }) => ({ kind: "refuse", reason: "no-rule", host, port }),
+        privateAddressAllowed: () => false,
+      },
+      records: {
+        launchStarted: async () => ({ status: "appended" }),
+        decisionsRecorded: async () => ({ status: "appended" }),
+        launchSummarized: async () => ({ status: "appended" }),
+      },
+      resolveAll: async () => ["93.184.216.34"],
+      connect: () => netConnect({ host: "127.0.0.1", port: address.port, allowHalfOpen: true }),
+    });
+    if (proxy.status !== "listening") throw new Error("Proxy failed");
+    try {
+      const proxyPort = proxy.proxy.endpoint.kind === "loopback" ? proxy.proxy.endpoint.port : 3128;
+      const token = Buffer.from(`octant:${proxy.proxy.token}`).toString("base64");
+      const script = `import socket
 for family, target in [(socket.AF_INET, ("127.0.0.1", ${address.port})), (socket.AF_UNIX, "${hostSocket}")]:
  try:
   s=socket.socket(family); s.settimeout(1); s.connect(target)
@@ -602,46 +595,47 @@ for family, target in [(socket.AF_INET, ("127.0.0.1", ${address.port})), (socket
   pass
  else:
   raise RuntimeError("ambient service escaped")
-s=socket.socket(); s.connect(("127.0.0.1", 3128)); s.sendall(b"GET http://allowed.example.com/ HTTP/1.1\\r\\nHost: allowed.example.com\\r\\nProxy-Authorization: Basic ${token}\\r\\nConnection: close\\r\\n\\r\\n"); assert b"200" in s.recv(4096)`;
-        writeFileSync(join(f.project, "probe.py"), script);
-        const selected = {
-          ...f.sandboxPolicy,
-          policy: {
-            ...f.sandboxPolicy.policy,
-            hostServices: "blocked" as const,
-            network: "unrestricted" as const,
-          },
-        };
-        const launch = makeProcessConfinementLive().prepare({
-          executable: "/usr/bin/python3",
-          args: [join(f.project, "probe.py")],
-          boundRoot: f.project,
-          temporaryDirectory: f.scratch,
-          networkEgress: { kind: "proxied", endpoint: proxy.proxy.endpoint },
-          sandboxPolicy: selected,
-        });
-        const result = await new Promise<{ code: number | null; stderr: string }>(
-          (resolve, reject) => {
-            let stderr = "";
-            const child = spawn(launch.command, [...launch.args], {
-              cwd: f.project,
-              env: { PATH: "/usr/bin:/bin", HOME: f.scratch },
-            });
-            child.stderr.on("data", (chunk) => {
-              stderr += chunk;
-            });
-            child.once("error", reject);
-            child.once("exit", (code) => resolve({ code, stderr }));
-          },
-        );
-        expect(result.code, result.stderr).toBe(0);
-      } finally {
-        await proxy.proxy.close();
-        await new Promise<void>((resolve) => server.close(() => resolve()));
-        await new Promise<void>((resolve) => unix.close(() => resolve()));
-      }
-    },
-  );
+s=socket.socket(); s.connect(("127.0.0.1", ${proxyPort})); s.sendall(b"GET http://127.0.0.1:${address.port}/ HTTP/1.1\\r\\nHost: 127.0.0.1:${address.port}\\r\\nProxy-Authorization: Basic ${token}\\r\\nConnection: close\\r\\n\\r\\n"); assert b"200" in s.recv(4096)`;
+      writeFileSync(join(f.project, "probe.py"), script);
+      const selected = {
+        ...f.sandboxPolicy,
+        policy: {
+          ...f.sandboxPolicy.policy,
+          hostServices: "blocked" as const,
+          network: "deny" as const,
+          localServices: [{ host: "127.0.0.1" as const, port: address.port }],
+          filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
+        },
+      };
+      const launch = makeProcessConfinementLive().prepare({
+        executable: "/usr/bin/python3",
+        args: [join(f.project, "probe.py")],
+        boundRoot: f.project,
+        temporaryDirectory: f.scratch,
+        networkEgress: { kind: "proxied", endpoint: proxy.proxy.endpoint },
+        sandboxPolicy: selected,
+      });
+      const result = await new Promise<{ code: number | null; stderr: string }>(
+        (resolve, reject) => {
+          let stderr = "";
+          const child = spawn(launch.command, [...launch.args], {
+            cwd: f.project,
+            env: { PATH: "/usr/bin:/bin", HOME: f.scratch },
+          });
+          child.stderr.on("data", (chunk) => {
+            stderr += chunk;
+          });
+          child.once("error", reject);
+          child.once("exit", (code) => resolve({ code, stderr }));
+        },
+      );
+      expect(result.code, result.stderr).toBe(0);
+    } finally {
+      await proxy.proxy.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await new Promise<void>((resolve) => unix.close(() => resolve()));
+    }
+  });
 
   it("runs a permitted dependency-install, edit, test and Git workflow with persistent atomic writes", () => {
     const f = fixture();

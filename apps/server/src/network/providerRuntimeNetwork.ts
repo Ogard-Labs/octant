@@ -423,6 +423,11 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
     };
     const started = await startToolEgressProxy({
       launch: proxyLaunch,
+      ...(input.sandboxPolicy?.policy.localServices === undefined
+        ? {}
+        : {
+            localServices: input.sandboxPolicy.policy.localServices,
+          }),
       ...(input.sandboxPolicy?.policy.hostServices === "blocked"
         ? { blockAmbientPrivateAddresses: true }
         : {}),

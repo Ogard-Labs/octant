@@ -102,6 +102,12 @@ export function SandboxRestrictionsNotice() {
           ? `Allow ${denial.operation} access to ${denial.resource}. Applies next turn.`
           : denial.remedy}
       </p>
+      {denial.localService === undefined ? null : (
+        <p>
+          This permits the named service's effects as a separate authority; other ambient host
+          services stay blocked.
+        </p>
+      )}
       {snapshot.denials.length > 1 ? (
         <p>{snapshot.denials.length - 1} more blocked actions in Sandbox restrictions.</p>
       ) : null}

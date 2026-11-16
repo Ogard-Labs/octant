@@ -1,4 +1,9 @@
-import { authorizeSandboxHostRequest } from "../process/sandboxRuntimePolicy";
+import {
+  authorizeSandboxHostRequest,
+  registerSandboxCleanup,
+  sandboxToolPolicy,
+  sandboxLocalServicePermitted,
+} from "../process/sandboxRuntimePolicy";
 import { lookup } from "node:dns/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -60,7 +65,8 @@ export async function fetchPublicUrl(
     }
     authorizeSandboxHostRequest(current);
     const address = await resolveAddress(current.hostname);
-    if (isPrivateAddress(address)) throw new PublicFetchRefused("private-destination");
+    if (isPrivateAddress(address) && !sandboxLocalServicePermitted(current))
+      throw new PublicFetchRefused("private-destination");
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     const onAbort = () => controller.abort();
@@ -73,6 +79,7 @@ export async function fetchPublicUrl(
       });
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get("location");
+        await response.body?.cancel();
         if (location === null) throw new PublicFetchRefused("redirect-without-location");
         current = new URL(location, current);
         continue;
@@ -113,6 +120,8 @@ export function createPinnedFetch(
   return (url, init) =>
     new Promise<Response>((resolve, reject) => {
       authorizeSandboxHostRequest(url);
+      const selection = sandboxToolPolicy();
+      const localService = sandboxLocalServicePermitted(url);
       const secure = url.protocol === "https:";
       const lookup = (
         hostname: string,
@@ -124,6 +133,12 @@ export function createPinnedFetch(
       ) => {
         resolveAll(hostname).then(
           (addresses) => {
+            try {
+              authorizeSandboxHostRequest(url);
+            } catch (error) {
+              callback(error instanceof Error ? error : new Error("Expired network authority"));
+              return;
+            }
             if (addresses.length === 0) {
               callback(new PublicFetchRefused("unresolvable"));
               return;
@@ -142,7 +157,7 @@ export function createPinnedFetch(
       };
       const request = (secure ? httpsRequest : httpRequest)(
         {
-          host: url.hostname,
+          host: localService && url.hostname === "[::1]" ? "::1" : url.hostname,
           port: url.port.length > 0 ? Number(url.port) : secure ? 443 : 80,
           path: `${url.pathname}${url.search}`,
           method: init.body === undefined ? "GET" : "POST",
@@ -170,6 +185,22 @@ export function createPinnedFetch(
         },
       );
       request.on("error", reject);
+      if (selection !== undefined) {
+        try {
+          const remove = registerSandboxCleanup(selection, async () => {
+            if (request.closed) return;
+            await new Promise<void>((closed) => {
+              request.once("close", closed);
+              request.destroy(new PublicFetchRefused("sandbox-request-expired"));
+            });
+          });
+          request.once("close", remove);
+        } catch (error) {
+          request.destroy();
+          reject(error);
+          return;
+        }
+      }
       request.end(init.body);
     });
 }

@@ -60,12 +60,16 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
   const [draft, setDraft] = useState<SandboxPolicy>(initialPolicy);
   const [path, setPath] = useState("");
   const [access, setAccess] = useState("read-only");
+  const [serviceAddress, setServiceAddress] = useState("");
+  const [serviceProblem, setServiceProblem] = useState<string>();
+  const serviceInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string>();
   const [loadFailed, setLoadFailed] = useState(false);
   const [reload, setReload] = useState(0);
   const drafts = useRef(new Map<string, SandboxPolicy>());
   const pathId = useId();
+  const serviceId = useId();
   const scopeKey = JSON.stringify(scope);
   useEffect(() => {
     if (props.initialScope !== undefined) {
@@ -172,6 +176,31 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
       setProblem(undefined);
     } catch {
       setProblem("Use an absolute folder path without . or .. segments.");
+    }
+  };
+  const addService = () => {
+    try {
+      const match = /^(127\.0\.0\.1|\[::1\]):([1-9][0-9]{0,4})$/.exec(serviceAddress.trim());
+      if (match === null) throw new Error("Invalid endpoint");
+      const service = { host: match[1] === "[::1]" ? "::1" : match[1], port: Number(match[2]) };
+      updateDraft(
+        decodeSandboxPolicy({
+          ...draft,
+          hostServices: "blocked",
+          localServices: [
+            ...(draft.localServices ?? []).filter(
+              (entry) => entry.host !== service.host || entry.port !== service.port,
+            ),
+            service,
+          ],
+        }),
+      );
+      setServiceAddress("");
+      setServiceProblem(undefined);
+      serviceInput.current?.focus();
+    } catch {
+      setServiceProblem("Use 127.0.0.1:port or [::1]:port, with a port from 1 to 65535.");
+      serviceInput.current?.focus();
     }
   };
   const folders = [
@@ -423,9 +452,81 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                   ]}
                   onValueChange={(hostServices) => {
                     if (hostServices === "existing-policy" || hostServices === "blocked")
-                      updateDraft({ ...draft, hostServices });
+                      updateDraft({
+                        ...draft,
+                        hostServices,
+                        ...(hostServices === "existing-policy" ? { localServices: [] } : {}),
+                      });
                   }}
                 />
+              </SettingRow>
+              <SettingRow
+                settingId="sandbox-policy-local-services"
+                scope={
+                  snapshot.scope.kind === "project"
+                    ? "project"
+                    : snapshot.scope.kind === "session"
+                      ? "thread"
+                      : "host"
+                }
+                label="Local service exceptions"
+                description="Allow an exact address and port through the proxy while blocking other ambient host services; the service's effects are a separate authority."
+              >
+                <div className="settings-section-stack">
+                  {(draft.localServices ?? []).map((service) => {
+                    const endpoint = `${service.host === "::1" ? "[::1]" : service.host}:${service.port}`;
+                    return (
+                      <SettingsCompactRow key={endpoint} label={endpoint}>
+                        <OctantButton
+                          variant="ghost"
+                          disabled={busy}
+                          aria-label={`Remove local service ${endpoint}`}
+                          onClick={() =>
+                            updateDraft({
+                              ...draft,
+                              localServices: draft.localServices?.filter(
+                                (entry) => entry !== service,
+                              ),
+                            })
+                          }
+                        >
+                          Remove
+                        </OctantButton>
+                      </SettingsCompactRow>
+                    );
+                  })}
+                  <label htmlFor={serviceId}>Local service address and port</label>
+                  <div className="settings-view__actions">
+                    <OctantInput
+                      id={serviceId}
+                      ref={serviceInput}
+                      value={serviceAddress}
+                      onChange={(event) => {
+                        setServiceAddress(event.target.value);
+                        setServiceProblem(undefined);
+                      }}
+                      disabled={busy || !snapshot.capabilities.blockedHostServices}
+                      placeholder="127.0.0.1:5173"
+                      aria-invalid={serviceProblem !== undefined}
+                      aria-describedby={
+                        serviceProblem === undefined ? undefined : `${serviceId}-error`
+                      }
+                    />
+                    <OctantButton
+                      disabled={
+                        busy ||
+                        !snapshot.capabilities.blockedHostServices ||
+                        serviceAddress.trim() === ""
+                      }
+                      onClick={addService}
+                    >
+                      Add local service
+                    </OctantButton>
+                  </div>
+                  {serviceProblem === undefined ? null : (
+                    <OctantFieldError id={`${serviceId}-error`}>{serviceProblem}</OctantFieldError>
+                  )}
+                </div>
               </SettingRow>
               <SettingRow
                 settingId="sandbox-policy-credentials"
@@ -437,7 +538,7 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                       : "host"
                 }
                 label="Personal files and credentials"
-                description="Existing protected-file rules remain active; provider sign-in uses its existing scoped channel."
+                description="Protected-file rules stay active. Provider sign-in uses its scoped channel; saved credential commands keep their separate one-use recipient and account review in Secret stores."
               >
                 <span className="oct-meta">
                   {snapshot.strict === true ? "Standard Strict rules" : "Saved for Strict"}
@@ -518,6 +619,9 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                       <p className="oct-meta">
                         Grant {denial.operation} access to {denial.resource}. Saved for future runs;
                         this does not enable Strict.
+                        {denial.localService === undefined
+                          ? null
+                          : " This permits the named service's effects as a separate authority; other ambient host services stay blocked."}
                       </p>
                     ) : null}
                     <div className="settings-view__actions">

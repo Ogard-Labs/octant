@@ -326,7 +326,8 @@ export function compileSandboxLaunchPolicy(
       };
     if (
       selection.policy.network === "deny" &&
-      (selection.policy.approvedDestinations?.length ?? 0) > 0 &&
+      ((selection.policy.approvedDestinations?.length ?? 0) > 0 ||
+        (selection.policy.localServices?.length ?? 0) > 0) &&
       launch.networkEgress !== "none" &&
       typeof launch.networkEgress !== "object"
     )
@@ -338,6 +339,7 @@ export function compileSandboxLaunchPolicy(
     const networkEgress =
       selection.policy.network === "deny" &&
       (selection.policy.approvedDestinations?.length ?? 0) === 0 &&
+      (selection.policy.localServices?.length ?? 0) === 0 &&
       launch.sandboxProviderChannel !== true
         ? "none"
         : selection.policy.network === "unrestricted" &&

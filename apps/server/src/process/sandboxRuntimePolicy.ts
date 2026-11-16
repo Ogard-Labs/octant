@@ -2,8 +2,12 @@ import { macosSandboxScopeIdentity, revokeMacosSandboxScope } from "./macosSandb
 import type { SandboxPolicyLaunchDetails } from "@octant/contracts/sandbox-policy";
 import type { SafeNetworkPlace } from "@octant/contracts";
 import type { ToolEgressRule } from "@octant/domain/tool-egress-policy";
-import { decodeSandboxNetworkDestination } from "@octant/contracts/sandbox-policy";
+import {
+  decodeSandboxNetworkDestination,
+  decodeSandboxLocalService,
+} from "@octant/contracts/sandbox-policy";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { sandboxLocalServiceAllowed } from "@octant/domain/sandbox-policy";
 import type { SandboxPolicySelection, SandboxPolicyDenial } from "@octant/contracts/sandbox-policy";
 
 export interface SandboxTurnRequest {
@@ -22,10 +26,17 @@ export interface SandboxTurnPolicy {
   readonly current: () => boolean;
   readonly end: () => void | Promise<void>;
 }
+export interface SandboxCommandState {
+  readonly strict: boolean;
+  readonly legacy: boolean;
+  readonly binding: string;
+}
 export type SandboxTurnAdmission =
   | { readonly status: "admitted"; readonly turn: SandboxTurnPolicy }
   | { readonly status: "refused"; readonly message: string };
 export interface SandboxRestrictionsAuthority {
+  readonly commandState?: (threadId: string) => SandboxCommandState;
+  readonly currentTurn?: (threadId: string) => SandboxTurnPolicy | undefined;
   readonly recordLaunch?: (
     selection: SandboxPolicySelection,
     details: SandboxPolicyLaunchDetails,
@@ -84,6 +95,29 @@ export function beginSandboxTurn(request: SandboxTurnRequest): SandboxTurnAdmiss
 export function activeSandboxPolicy(threadId: string): SandboxPolicySelection | undefined {
   return authority?.active(threadId);
 }
+
+/** A host command borrows a running turn's immutable boundary or owns a fresh one. */
+export function acquireSandboxCommand(request: SandboxTurnRequest): SandboxTurnAdmission {
+  const existing = authority?.currentTurn?.(request.threadId);
+  if (existing !== undefined) return { status: "admitted", turn: existing };
+  // Authorities without a turn view still expose an active Strict selection.
+  const selection = activeSandboxPolicy(request.threadId);
+  if (selection !== undefined)
+    return {
+      status: "admitted",
+      turn: {
+        selection,
+        strict: true,
+        summary: sandboxPolicySummary(selection),
+        end: () => undefined,
+        current: () => sandboxSelectionIsCurrent(selection),
+      },
+    };
+  return beginSandboxTurn(request);
+}
+export function sandboxCommandState(threadId: string): SandboxCommandState | undefined {
+  return authority?.commandState?.(threadId);
+}
 export function recordSandboxDenial(
   input: Omit<SandboxPolicyDenial, "id" | "count" | "dismissed">,
 ): void {
@@ -127,6 +161,7 @@ export async function withSandboxToolPolicy<T>(
   try {
     network =
       (selection.policy.approvedDestinations?.length ?? 0) > 0 ||
+      (selection.policy.localServices?.length ?? 0) > 0 ||
       (selection.policy.network === "existing-policy" &&
         ((sandboxNetworkSnapshot(selection)?.limitsOn ?? networkLimitsOn()) ||
           selection.policy.hostServices === "blocked")) ||
@@ -266,11 +301,14 @@ export function authorizeSandboxHostRequest(url: URL): void {
   const port = url.port === "" ? (url.protocol === "https:" ? 443 : 80) : Number(url.port);
   const permitted =
     (selection.policy.network === "unrestricted" && selection.policy.hostServices !== "blocked") ||
-    (selection.policy.network === "existing-policy" && !sandboxNetworkLimitsOn()) ||
+    (selection.policy.network === "existing-policy" &&
+      selection.policy.hostServices !== "blocked" &&
+      !sandboxNetworkLimitsOn()) ||
     sandboxToolNetwork()?.permitsHostRequest(url.hostname, port) === true;
   if (
     (selection.policy.network !== "deny" ||
-      (selection.policy.approvedDestinations?.length ?? 0) > 0) &&
+      (selection.policy.approvedDestinations?.length ?? 0) > 0 ||
+      (selection.policy.localServices?.length ?? 0) > 0) &&
     permitted
   )
     return;
@@ -281,14 +319,32 @@ export function authorizeSandboxHostRequest(url: URL): void {
   );
 }
 
+/** The ordinary public-only host transport gains no ambient private authority. */
+export function sandboxLocalServicePermitted(url: URL): boolean {
+  const selection = sandboxToolPolicy();
+  return (
+    selection !== undefined &&
+    sandboxLocalServiceAllowed(
+      selection.policy.localServices,
+      url.hostname,
+      Number(url.port || (url.protocol === "https:" ? 443 : 80)),
+    )
+  );
+}
+
 export function recordSandboxNetworkDenial(threadId: string, host: string, port: number): void {
   const selection = activeSandboxPolicy(threadId);
   if (selection === undefined) return;
   let destination: import("@octant/contracts/sandbox-policy").SandboxNetworkDestination | undefined;
+  let localService: import("@octant/contracts/sandbox-policy").SandboxLocalService | undefined;
   try {
     destination = decodeSandboxNetworkDestination({ host, port });
   } catch {
-    /* Invalid or local-service destinations cannot become a network exception. */
+    try {
+      localService = decodeSandboxLocalService({ host: host === "[::1]" ? "::1" : host, port });
+    } catch {
+      /* Other private destinations never become local-service grants. */
+    }
   }
   recordSandboxDenial({
     threadId,
@@ -298,9 +354,10 @@ export function recordSandboxNetworkDenial(threadId: string, host: string, port:
     operation: "network",
     resource: `${host}:${port}`,
     ...(destination === undefined ? {} : { destination }),
+    ...(localService === undefined ? {} : { localService }),
     message: `Network access to ${host}:${port} is blocked by this sandbox.`,
     remedy: "Review the exact destination and port before allowing it for this session or Project.",
-    grantable: destination !== undefined,
+    grantable: destination !== undefined || localService !== undefined,
   });
 }
 

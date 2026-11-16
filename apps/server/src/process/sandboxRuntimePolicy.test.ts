@@ -5,6 +5,7 @@ import {
   configureSandboxToolNetwork,
   sandboxToolPolicy,
   withSandboxToolPolicy,
+  authorizeSandboxHostRequest,
 } from "./sandboxRuntimePolicy";
 const selection = decodeSandboxPolicySelection({
   policy: {
@@ -52,6 +53,23 @@ function fixture() {
   };
 }
 describe("sandbox host-tool lifetime", () => {
+  it("does not turn off blocked host services when Network limits are off", async () => {
+    fixture();
+    configureSandboxToolNetwork(
+      async () => ({
+        permitsHostRequest: () => false,
+        environment: {},
+        networkEgress: "none",
+        close: async () => undefined,
+      }),
+      () => false,
+    );
+    await withSandboxToolPolicy("thread", async () => {
+      expect(() => authorizeSandboxHostRequest(new URL("http://127.0.0.1:5173"))).toThrow(
+        /refused/,
+      );
+    });
+  });
   it("keeps the admitted selection across awaits and refuses detached asynchronous work after the call ends", async () => {
     fixture();
     let release = () => {};

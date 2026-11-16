@@ -118,7 +118,8 @@ export function createNativeHarnessShell(
       if (
         egress === undefined ||
         (policy?.policy.network === "deny" &&
-          (policy?.policy.approvedDestinations?.length ?? 0) === 0) ||
+          (policy?.policy.approvedDestinations?.length ?? 0) === 0 &&
+          (policy?.policy.localServices?.length ?? 0) === 0) ||
         (policy?.policy.network === "unrestricted" && policy?.policy.hostServices !== "blocked")
       )
         return runScript(options, input, undefined);

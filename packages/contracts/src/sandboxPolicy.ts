@@ -38,6 +38,14 @@ export const SandboxNetworkDestination = Schema.Struct({
 export type SandboxNetworkDestination = typeof SandboxNetworkDestination.Type;
 export const decodeSandboxNetworkDestination = Schema.decodeUnknownSync(SandboxNetworkDestination);
 
+/** A separate host-service authority: no DNS names, address ranges or Unix sockets. */
+export const SandboxLocalService = Schema.Struct({
+  host: Schema.Literal("127.0.0.1", "::1"),
+  port: ToolEgressPort,
+}).annotations(strict);
+export type SandboxLocalService = typeof SandboxLocalService.Type;
+export const decodeSandboxLocalService = Schema.decodeUnknownSync(SandboxLocalService);
+
 export const SandboxPolicy = Schema.Struct({
   schemaVersion: Schema.Literal(1),
   revision: Schema.Number.pipe(Schema.int(), Schema.between(0, Number.MAX_SAFE_INTEGER)),
@@ -57,7 +65,14 @@ export const SandboxPolicy = Schema.Struct({
   ),
   credentials: Schema.Literal("existing-policy", "isolated"),
   hostServices: Schema.Literal("existing-policy", "blocked"),
-}).annotations(strict);
+  localServices: Schema.optional(Schema.Array(SandboxLocalService).pipe(Schema.maxItems(64))),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (policy) => (policy.localServices?.length ?? 0) === 0 || policy.hostServices === "blocked",
+    ),
+  );
 export type SandboxPolicy = typeof SandboxPolicy.Type;
 
 export const decodeSandboxPolicy = Schema.decodeUnknownSync(SandboxPolicy);
@@ -130,6 +145,7 @@ export const decodeSandboxRestrictionsCommand = Schema.decodeUnknownSync(
 
 export const SandboxPolicyDenial = Schema.Struct({
   destination: Schema.optional(SandboxNetworkDestination),
+  localService: Schema.optional(SandboxLocalService),
   id: Schema.UUID,
   threadId: Schema.UUID,
   projectId: ProjectId,

@@ -268,6 +268,7 @@ export interface RuntimeEgressRequest {
 
 /** What let a request through; the address check after resolution depends on it. */
 export type RuntimeEgressAllowedBy =
+  | "local-service"
   | "unrestricted"
   | "provider"
   | "launch"

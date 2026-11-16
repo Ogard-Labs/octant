@@ -1246,6 +1246,8 @@ export function wireHarness(deps: HarnessDependencies) {
   contributeChildTools((input) => nativeHarnessComposition.forAgentRun(input));
   const prepareCredentialCommand = createCommandCredentialPreparation({
     readThread: (id) => persistence.readCodeThread(id),
+    providerKind: (thread) =>
+      persistence.readProviderInstance(thread.providerInstanceId)?.driverKind,
     ordinary: nativeHarnessComposition,
     egress: toolEgressRules,
     endpoint: harnessEgressEndpoint,
