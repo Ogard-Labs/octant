@@ -183,6 +183,16 @@ it is current while that start screen shows. The `home` keybinding
 screen's composer scope, so its unsent text comes back with it. Before Home,
 the start screen had no way back once a person left it.
 
+**A new task takes the whole window.** Started while the window shows a split,
+New task (the row, the band's button, the key, the palette, a Project's own
+New task) leaves its draft as the mode's only pane: the other panes close in
+the same server step, so nothing is drawn in between, and their threads stay
+in the list. A zoom on one pane ends with the split. Opened into one half, the
+draft stood beside a thread the person had not asked to keep in view, and
+half a window is not where a task starts. Every other open keeps the rule
+under [Panes and content navigation](#panes-and-content-navigation): it
+replaces one pane.
+
 **New thread** also leads the sidebar's list as a row (28px, the control radius,
 a 16px icon, the label and the `new-thread` key cap at its right in the meta ink),
 beside the band's compose button; both run the same action. The command palette
@@ -1155,10 +1165,18 @@ it was shown again. At 960px and below the dock is a
 sheet over the page (a floating container with its own 16px corner) that holds
 one tool, so its tile is the same flat pane with no neighbour: a tile is flat
 at every width, and no width gives one a corner of its own, a shadow or a gap. Columns stand side by side only when the tile area can give each 280px and
-otherwise stack. The thread keeps 440px beside two columns (560px beside one,
-from a 1100px window up), because at 560px two tools could never stand side by
-side in a 1440px window: with the sidebar open a second column widens the dock to
-about 620px, about 306px per column. Stacked columns stay resizable. A tool the bottom panel takes, or one
+otherwise stack, and a place beside a tile (a drop on its left or right side, or
+its menu's moves) is offered on the same test: the tool room the thread's
+minimum and Environment leave must hold two 280px columns and the dock's own
+handle (568px), so a place that is offered is never then drawn stacked. Where the window has
+960px of tool room two columns widen the dock to it (480px each); with less
+they share the room there is. The thread keeps its 560px minimum beside one
+column or two (from a 1100px window up), so a second column never takes the
+thread under it or moves Environment. Until 2026-11-16 a place beside needed the
+whole 960px, which refused the drop on a 1920px screen with the sidebar and
+Environment open (716px of tool room) and left no way to stand a tool up as a
+narrow column. A newly opened tool still goes below the focused one; only a
+person puts a tool beside another. Stacked columns stay resizable. A tool the bottom panel takes, or one
 that becomes unavailable, loses its tile and returns as a tab. Opening a dock tool leaves the bottom panel open; only a tool the panel
 already shows leaves it for the dock.
 The shell loads each tool through `dockModuleRegistry`; modules under
@@ -1347,7 +1365,11 @@ from the **tool row** in the thread pane's own header, after the title, so a
 thread and the controls that act on it read as one box. The title band keeps the
 window's controls only: Show sidebar, Back and Forward while the sidebar is
 hidden, the Open in and Project action slots, the Code start screen's
-uncommitted-changes count, and the bottom-panel and dock toggles. At 961px and
+uncommitted-changes count. It has no switch for the dock or the bottom panel:
+every tool is a panel that its button in the thread header's row opens, and that
+a person can move between the side and the bottom, so a window-level "show the
+side" or "show the bottom" switch no longer named anything (the side one only
+opened Review, 2026-11-16). At 961px and
 wider the focused pane has the row, and so does every other pane of a split that
 shows a thread. A single pane and its Environment section are one box under one
 header: the header runs on over the section, and the row ends on the box's
@@ -1372,8 +1394,7 @@ tool region is at its 280px the panes give and their rows fold. Measured
 each with both rows folded, and are 440px each with full rows beside a 577px
 tool region. A start screen has no title, so its header is the row alone,
 laid over the band. Closing the last open tool closes the dock, so the thread
-takes the window back, and the row stays where it is; the dock toggle still
-opens the empty dock. The row is one
+takes the window back, and the row stays where it is, and pressing any tool's button opens the dock again. The row is one
 icon button for each of Environment, Terminal, Review, Browser, and Files, in that order,
 then **More tools**, a menu of every other tool the thread can use, grouped as the
 launcher groups them, each a checked item while that tool is shown, and after the
@@ -1390,13 +1411,17 @@ tool is on screen, in the dock or in the bottom panel's front tab while the pane
 the tool is open but not shown (a bottom-panel tool behind the front one included; pressing it brings it forward). When both columns are full a tool that is not shown
 is not refused: its press shows it in the focused tile's place, the replaced tool stays
 open but hidden, and the button says "Shows in place of <the focused tool>". On a new Code task
-before its thread exists the buttons are disabled with "Available once the task starts". A press leaves focus
+before its thread exists the buttons are disabled with "Available once the task starts", except that once the
+start screen has a Project, Terminal and Browser read **Project terminal** and **Project browser**
+and are enabled (a Project on a server offers the terminal only): pressing one opens the dock straight into the Project's own
+terminal or browser, no thread involved; the open one reads pressed, pressing it again closes the dock and
+stops the shell, and pressing the other switches. A press leaves focus
 on the button. The row is one toolbar named "Tools" with one Tab stop and arrow-key
 movement, and it keeps its own width in the header: the title gives way first.
 The five tools with a button of their own (Environment, Terminal, Review, Browser,
 Files) have a context menu on that button (right click, the menu key or Shift+F10): Show
 below for an open tool that is not on screen, Show alone, Hide from view and the
-moves the caps allow for a tile, Minimise to card on Browser and Terminal, New Terminal on Terminal and New Browser page on
+moves the caps allow for a tile, **Move to bottom panel** on a shown tool the panel can hold (the same move as the drag to the thread's foot, absent in the drawer and in Chat; on a tool's own first tab only, since the panel holds one of each tool, and never on Browser, whose tab beside cannot close without ending the thread's session), **Move to the side** on a tool the bottom panel holds (it leaves the panel's tabs, and the panel stays for the tools still in it), Minimise to card on Browser and Terminal, New Terminal on Terminal and New Browser page on
 Browser, and Close. A minimised tool's button is not pressed, carries the dot, and reads "Minimised to a card"; pressing it restores the tool. Each such button is also the drag source for an open tool: dropped on the dock body, the right third
 shows the tool beside, the lower third below, and anywhere else replaces the
 focused tile. A tool opened from More tools has neither: it is shown beside the
@@ -1580,7 +1605,7 @@ thread's open tools; the bottom panel never has one.
   reading open but not shown (the dot and "Open"), and no page or shell is closed or stopped (closing a tab with its
   own browser context ends that context, which a card that only previews must
   never do; the floating preview it replaces only hid itself). The keyboard goes
-  to the tool's button in the row, else the dock toggle, looked for again as the
+  to the tool's button in the row, else the dock itself, looked for again as the
   row re-renders so focus never falls to the page. Pressing the button shows the
   tool. Closing the tool stays the tile bar's close and **Close** on its button's
   menu. The Browser card's X is the exception to Hide: it is **Close Browser** and
@@ -1614,7 +1639,7 @@ thread's open tools; the bottom panel never has one.
   being brought forward when the agent hands the page over to sign in, and it
   does not stop a new session opening the Browser tool once, except that a
   session announced while the person has the Browser minimised leaves it
-  minimised, its card or the dock toggle's dot being the sign (the sign-in
+  minimised, its card being the sign (the sign-in
   hand-over, which the person has to act on, still restores it). That holds only
   where the shelf is drawn: the narrow window's modal dock has neither card nor
   dot, so there a new session opens the Browser like any other tab, which clears
@@ -1624,10 +1649,10 @@ thread's open tools; the bottom panel never has one.
   because the dock remounts; a later session shows it again. A Browser whose
   session is not live is a card only if the person minimised it. The thread pane
   keeps polling for the session without asking for a picture, and tells the dock.
-- **The dock toggle.** The dock is closed on a thread whose agent Browser is live
-  and has a tab: its card cannot be seen, so the window's dock toggle carries one
-  quiet dot described as "Browser is active". It is a dot, never a count or an
-  accent ring, and the modal dock, which draws no shelf, shows none.
+- **A closed dock shows no sign.** The window has no dock toggle to carry a dot,
+  and the Browser button in the thread header's row marks only a Browser the
+  person has open or minimised, so a live agent Browser behind a closed dock is
+  not signalled until the dock opens and its card shows.
 - **The Terminal card** shows the shell's current tail, live, in a read-only
   instance of the terminal engine at the smallest type the terminal settings
   allow, filling the preview (the shell's last lines, as many as the 104px preview holds), with no input, no focus and no resize sent to the shell.
@@ -2406,8 +2431,9 @@ the central workspace. The central pane remains the thread, board, Project
 overview, or Project-level list. An unsplit conversation uses the title band
 for the Project/thread breadcrumb and compact thread strip, so the transcript
 does not repeat a second title block. Split panes and utility surfaces retain
-their own pane headers and lifecycle controls. Capability-gated toggles for
-Open in, bottom panel, and right dock remain window chrome. Several Browsers are one Browser
+their own pane headers and lifecycle controls. Open in remains window chrome;
+the bottom panel and the right dock have no title-band switch, and their tools
+open from the thread header's tool row. Several Browsers are one Browser
 tool: their pages sit in a row of their own at the top of the Browser, with a +
 for a new page, and closing the Browser closes every page. A page opened from
 a new Browser tab (an address, a local server) stays that tab, and the tab
@@ -2825,11 +2851,11 @@ when the section is open behind the pane, and is disabled with the reason ("No
 room beside a tool in this window. Close the tool, hide the sidebar or widen
 the window."). Alone, the section opens at any width above the drawer's. So
 nothing runs past the window's edge and no pane control meets the window's
-toggles. Measured before (sidebar open, Environment and Files, 2026-11-16): at
+trailing controls. Measured before (sidebar open, Environment and Files, 2026-11-16): at
 1100px and 1000px the dock ended 112px and 212px outside the window with
 Files' Close under the toggles; at 1212px the sidebar gave 60px to make it
 fit. After: at 1000px, 1100px and 1212px the dock ends on the window's inner
-edge, Close stands 12px before the toggles, and the sidebar keeps its width.
+edge, Close stands 12px before the trailing controls, and the sidebar keeps its width.
 
 **The thread box and the tool row.** The thread and its Environment section,
 open or not, are one box, and that box has a narrowest width for a window
@@ -2946,14 +2972,14 @@ size: no width animates from narrow to wide.
 Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed. The bottom panel starts closed. An explicit dock show or hide is restored per window; merely mounting the default records no choice, so an initial narrow frame does not become a saved close. The active-pane eligibility rules below still determine whether dock chrome is shown.
 
 A welcome, Project, or other pane with neither a bound thread nor a valid
-launchable tool keeps the dock closed and omits its toggle. A new Code task's
-pane before its thread exists keeps the toggle but starts closed, whatever the
+launchable tool keeps the dock closed and draws no tool row. A new Code task's
+pane before its thread exists keeps the dock available but starts closed, whatever the
 window's saved choice: it has nothing of a thread's to show, and opened by
 default it covered a third of a blank start screen to say its tools were not
-available yet. Opened there by the person, its tool row shows the common
-tools disabled ("Available once the task starts") and its body says so (or,
-once the start screen has a Project, holds that Project's quick tools). That
-show or hide belongs to the draft and is never saved as the window's choice;
+available yet. The window has no dock switch; the
+draft's dock opens from the Project terminal and Project browser buttons in the pane header once the start
+screen has a Project (they open the Project's quick tools straight into the tool pressed), and without a
+Project every button waits ("Available once the task starts") and the dock stays closed. A show or hide there belongs to the draft and is never saved as the window's choice;
 once the task has a thread the window's own choice applies again. Restored presentation for another subject never makes unavailable
 chrome visible.
 
@@ -2973,8 +2999,7 @@ one), so neighbouring bars line up, the top pane's bar and the thread's header
 are one line across the window, and nothing in a pane moves when a neighbour
 opens or closes. Docked, the dock has no head over its panes: they start at the
 window's top, a top pane's bar stands in the title band on the band's ground,
-and the last column's top bar ends before the window's bottom-panel and dock
-toggles. Its leading edge names the tool once (the icon and name; for the
+and the last column's top bar ends before the window's trailing controls. Its leading edge names the tool once (the icon and name; for the
 Browser the bar is its row of pages, each named for what it shows, with its close, and the new-page
 control; a shell's sessions and Files' open files lead their bars the same way) and its trailing edge
 holds the tile's controls: **Minimise <tool>** on a Browser or Terminal and a **Close
@@ -3054,8 +3079,10 @@ A tool's button carries the placement a tab menu once did. Its context
 menu (right click, the menu key or Shift+F10) offers **Show below** for an open
 tool that is not on screen (disabled when the caps refuse it), and, for a tile in
 a layout, **Show alone**, **Hide from view** and the moves that are possible,
-then **New Terminal** on Terminal and **New Browser page** on Browser, then
-**Close <tool>**; what does not apply is absent. These menus, and dragging,
+then **Move to bottom panel** where the drag to the foot is offered (a shown tool the panel holds a tab for, on its
+own first tab, and not Browser; not in the drawer), **Move to the side** on a tool the bottom panel holds, then **New Terminal** on Terminal and
+**New Browser page** on Browser, then **Close <tool>**; what does not apply is absent. The bottom panel is
+reached by this item or the drag, and the tool's button then toggles it; the window has no switch that opens it empty. These menus, and dragging,
 belong to the five tools with a button of their own (Environment, Terminal,
 Review, Browser, Files); a tool opened from More tools is shown the same way
 and is then arranged, hidden and closed from its own tile's bar, a tool alone
@@ -3114,9 +3141,8 @@ button for it. Show on a card returns the tool as a
 tile of its own, to the place it left while that place still exists and else as
 the last tile, focused, without taking a shown tool's tile.
 While an agent's Browser session is live and the thread's Browser is out of sight
-the Browser shows as a card without being minimised; with the dock closed, the
-window's dock toggle (not in the modal dock, which has no shelf) carries one quiet
-dot described as "Browser is active". The
+the Browser shows as a card without being minimised; with the dock closed nothing
+in the window signals it. The
 rules, reads and limits are in [Workspace](#tool-lifecycles).
 
 ### Environment tool

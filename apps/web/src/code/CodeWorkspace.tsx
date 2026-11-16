@@ -26,19 +26,11 @@ import {
   presentAppleSimulatorLiveFrame,
   type AppleSimulatorLiveFrameAttach,
 } from "@octant/domain";
-import { FolderGit2, LoaderCircle, TriangleAlert } from "../ui/icons";
+import { FolderGit2, TriangleAlert } from "../ui/icons";
 import { documentIsVisible } from "../polling/documentVisibility";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTabActivatedThisSession } from "../shell/TabActivation";
-import {
-  OctantEmpty,
-  OctantEmptyHeader,
-  OctantEmptyDescription,
-  OctantEmptyEyebrow,
-  OctantEmptyMedia,
-  OctantEmptyRoot,
-  OctantEmptyTitle,
-} from "../ui/base/OctantEmpty";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { CodeGitPane } from "./CodeGitPane";
 import type { CodeEditorFileProjection } from "./MonacoEditorPane";
 import { CodeOverview, type CodeOverviewSurfaceKind } from "./CodeOverview";
@@ -1109,7 +1101,6 @@ function GitWorkspaceSurface(
     return (
       <OctantEmpty
         action={{ label: "Retry Git observation", onClick: () => void observe() }}
-        eyebrow="Code workspace"
         message={failure}
         role="alert"
         state="warning"
@@ -1183,7 +1174,6 @@ function PullRequestWorkspaceSurface(
     return (
       <OctantEmpty
         action={{ label: "Retry pull request observation", onClick: () => void observe() }}
-        eyebrow="Code workspace"
         message={failure}
         role="alert"
         state="warning"
@@ -1229,20 +1219,7 @@ function PullRequestWorkspaceSurface(
 }
 
 function GitObservationLoading() {
-  return (
-    <OctantEmptyRoot role="status">
-      <OctantEmptyMedia>
-        <LoaderCircle aria-hidden="true" className="shell-state__spinner" size={16} />
-      </OctantEmptyMedia>
-      <OctantEmptyHeader>
-        <OctantEmptyEyebrow>Git workspace</OctantEmptyEyebrow>
-        <OctantEmptyTitle>Loading Git state</OctantEmptyTitle>
-        <OctantEmptyDescription>
-          Loading exact checkout status and diff evidence.
-        </OctantEmptyDescription>
-      </OctantEmptyHeader>
-    </OctantEmptyRoot>
-  );
+  return <OctantEmpty state="loading" title="Loading Git state" />;
 }
 
 /**
@@ -1497,14 +1474,7 @@ function TerminalWorkspaceSurface(
     if (outcome.status === "refused") setRebindRefusal(checkoutRebindRefusal(outcome.reason));
   };
   if (props.checkoutAvailability === "waiting") {
-    return (
-      <OctantEmpty
-        eyebrow="Code terminal"
-        message="Octant is reconnecting the authoritative worktree before repository processes can start."
-        state="loading"
-        title="Connecting repository checkout"
-      />
-    );
+    return <OctantEmpty state="loading" title="Connecting repository checkout" />;
   }
   if (props.checkoutAvailability === "unavailable") {
     return (
@@ -1514,26 +1484,19 @@ function TerminalWorkspaceSurface(
           onClick: () => void rebindCheckout(),
           glyph: FolderGit2,
         }}
-        eyebrow="Code terminal"
-        message={
-          rebindRefusal ??
-          "Octant could not read this thread's checkout: the Project may now bind a different one, or its folder could not be read. Octant kept the thread fail-closed rather than move its authority on its own. Put the thread on the Project's current checkout to start repository processes again."
-        }
+        // The same state, in the same words, as Files draws for this checkout:
+        // the paragraph that used to stand here ran past the bottom panel's
+        // short height and was cut off. The action says what the way back is.
+        message={rebindRefusal ?? "Code checkout is unavailable."}
         role="alert"
         state="warning"
-        title="Repository checkout unavailable"
+        title="This checkout can't be read"
       />
     );
   }
   if (reattaching || starting) {
     return (
       <OctantEmpty
-        eyebrow="Code terminal"
-        message={
-          reattaching
-            ? "Octant is reconnecting this tab to its existing repository process."
-            : "Octant is requesting the exact checkout authority and attaching one terminal process."
-        }
         state="loading"
         title={reattaching ? "Reattaching repository terminal" : "Starting repository terminal"}
       />
@@ -1594,7 +1557,7 @@ function TerminalWorkspaceSurface(
         (failure === undefined ? undefined : checkoutUnreadableReason(failure)) ??
         (props.threadPolicy === "plan"
           ? "Plan mode is read-only and cannot start repository processes."
-          : "No terminal process is attached. Start one explicitly; Octant never restarts it silently.")
+          : "Octant never restarts a terminal on its own.")
       }
       {...(failure === undefined ? {} : { role: "alert" as const })}
       state={failure === undefined ? "neutral" : "warning"}

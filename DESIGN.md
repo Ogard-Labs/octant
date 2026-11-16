@@ -1289,8 +1289,9 @@ is costly to render mounts only while open.
 - **Tokens.** Inverted: the ink as a fill with the surface colour on it, at most
   280px, 8 by 12px padding, `--oct-radius-sm`, 14px. Card: at most 320px, 12px
   padding, `--oct-radius-lg`, the float and `--octant-shadow-overlay`. 8px from
-  the trigger, after 350ms, at `--oct-z-popup`.
-- **States.** Opens on hover after 350ms and on keyboard focus-visible (a key
+  the trigger, after 500ms, at `--oct-z-popup`.
+- **States.** Opens on hover after 500ms (a pointer passing over a row of icon
+  buttons names none of them) and on keyboard focus-visible (a key
   that moves focus: Tab, an arrow, Home, End), never on focus a click caused or
   a sheet or menu handed back to its trigger. Closes on pointer leave, on a
   press of its trigger (without fading over what opened) and on Escape.
@@ -1418,7 +1419,7 @@ list scrolls; add actions stay pinned under the list.
 See [Window frame](#window-frame). Open in is the one band control with an
 edge (outline, 28px, control corner). In native full screen macOS hides the
 traffic lights, so the desktop reports the change and no traffic-light width is
-reserved there. Behaviour of the tool row and toggles is
+reserved there. Behaviour of the tool row is
 in [Workspace: Shell grid and tool row](docs/design/workspace.md#shell-grid-and-tool-row).
 
 ### One tile bar
@@ -1432,7 +1433,7 @@ sidebar's fill, a step off the pane) with its hairline drawn inside it. The
 dock has no head of its own over its panes: a top pane's bar stands in the
 title band, on the thread header's line, on the band's ground with no fill or
 rule of its own, and the pane's fill starts under it; the last column's top bar
-ends before the window's toggles. Controls are 24px with 16px glyphs; a view
+ends before the window's trailing controls. Controls are 24px with 16px glyphs; a view
 choice is a 28px word tray of 24px segments; an action everyone knows is an icon
 button with a tooltip. A bar carries no Arrange button: a pane is arranged by
 dragging its bar, and the same moves are the bar's context menu (right click,

@@ -12,7 +12,7 @@ import type { ShellActions } from "./shellActions";
 export interface WindowChromeContainerProps {
   readonly actions: Pick<
     ShellActions,
-    "addDockTab" | "recoverZen" | "startNewThreadDraft" | "toggleBottomPanel" | "toggleDock"
+    "addDockTab" | "recoverZen" | "startNewThreadDraft" | "toggleDock"
   >;
   readonly activeMode: OctantMode;
   readonly activeSurface: string;
@@ -31,11 +31,7 @@ export interface WindowChromeContainerProps {
   readonly windowCapability?: string;
   /** Moves when the host says the Code board changed, so the count is read again. */
   readonly codeBoardRevision: number;
-  readonly bottomPanelAvailable: boolean;
-  readonly bottomPanelPresentedOpen: boolean;
   readonly dockAvailable: boolean;
-  /** The agent's Browser is live and has a card the closed dock is holding. */
-  readonly dockBrowserActive: boolean;
   readonly dockPresentedOpen: boolean;
   readonly hostBridge?: OctantHostBridge;
   readonly hostReservesTitlebarInset: boolean;
@@ -50,7 +46,7 @@ export interface WindowChromeContainerProps {
 }
 
 /**
- * The window's top chrome: the sidebar, dock and bottom panel disclosures. A
+ * The window's top chrome: the sidebar and the narrow window's dock disclosure. A
  * thread's tool buttons are not here; they stand in its pane's header. Every
  * input is a primitive or a stable action, so a shell render that changed none
  * of them leaves it alone.
@@ -62,10 +58,7 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
     actions,
     activeMode,
     activeSurface,
-    bottomPanelAvailable,
-    bottomPanelPresentedOpen,
     dockAvailable,
-    dockBrowserActive,
     dockPresentedOpen,
     hostReservesTitlebarInset,
     isNarrow,
@@ -120,12 +113,7 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
     <WindowChrome
       {...(changes === undefined ? {} : { changes })}
       activeSurface={activeSurface}
-      bottomPanelAvailable={bottomPanelAvailable && !isNarrow}
-      bottomPanelExpanded={bottomPanelPresentedOpen}
       dockAvailable={dockAvailable}
-      // The modal dock draws no shelf, so a dot there would promise a card
-      // that cannot be shown.
-      dockBrowserActive={dockBrowserActive && !dockPresentedOpen && !isNarrow}
       dockExpanded={dockPresentedOpen}
       dockLabel="Right sidebar"
       {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
@@ -142,7 +130,6 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
           }
         : {})}
       onRecoverZen={() => void actions.recoverZen()}
-      onToggleBottomPanel={actions.toggleBottomPanel}
       onToggleDock={actions.toggleDock}
       zenRecoveryNeeded={zenRecoveryNeeded}
     />

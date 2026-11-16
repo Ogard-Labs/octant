@@ -36,6 +36,112 @@ function input(overrides: Partial<DockToolButtonsInput> = {}): DockToolButtonsIn
 const byId = (model: ReturnType<typeof buildDockToolButtons>, id: string) =>
   [...model.buttons, ...model.more].find((button) => button.id === id);
 
+describe("a new Code task's Project tool buttons", () => {
+  const awaiting = [
+    { id: "terminal", label: "Terminal" },
+    { id: "browser", label: "Browser" },
+    { id: "files", label: "Files" },
+  ] as const;
+  const draft = (quickTools?: DockToolButtonsInput["quickTools"]) =>
+    buildDockToolButtons({
+      ...input({ surfaces: [] }),
+      awaitingThread: awaiting,
+      ...(quickTools === undefined ? {} : { quickTools }),
+    });
+
+  it("enables Project terminal and Project browser once a Project is chosen and leaves the rest waiting", () => {
+    const model = draft({ tools: ["terminal", "browser"] });
+    expect(byId(model, "terminal")).toMatchObject({
+      label: "Project terminal",
+      pressed: false,
+      press: { kind: "quick-open", tool: "terminal" },
+    });
+    expect(byId(model, "browser")).toMatchObject({
+      label: "Project browser",
+      press: { kind: "quick-open", tool: "browser" },
+    });
+    expect(byId(model, "files")?.disabledReason).toBe("Available once the task starts");
+  });
+
+  it("reads the open Project tool as pressed and closes the dock on the next press", () => {
+    const model = draft({ tools: ["terminal", "browser"], open: "terminal" });
+    expect(byId(model, "terminal")).toMatchObject({
+      pressed: true,
+      press: { kind: "quick-close" },
+    });
+    expect(byId(model, "browser")?.pressed).toBe(false);
+  });
+
+  it("offers only the terminal for a Project on a server", () => {
+    const model = draft({ tools: ["terminal"] });
+    expect(byId(model, "terminal")?.press.kind).toBe("quick-open");
+    expect(byId(model, "browser")?.press.kind).toBe("refused");
+  });
+
+  it("keeps every button waiting when no Project is chosen", () => {
+    const model = draft();
+    expect(byId(model, "terminal")?.press.kind).toBe("refused");
+    expect(byId(model, "browser")?.press.kind).toBe("refused");
+  });
+});
+
+describe("moving a tool between the side and the bottom panel by menu", () => {
+  const shownReview = {
+    tabs: [{ id: "review", surface: "review" as const }],
+    shownTabIds: ["review"],
+  };
+
+  it("offers Move to bottom panel on a shown tool the panel accepts", () => {
+    const model = buildDockToolButtons(input({ ...shownReview, bottomAccepts: ["review"] }));
+    expect(byId(model, "review")?.menu.map((item) => item.value)).toContain("to-bottom");
+    expect(byId(model, "review")?.menu.find((item) => item.value === "to-bottom")?.label).toBe(
+      "Move to bottom panel",
+    );
+  });
+
+  it("does not offer it where the drag is not available or the panel does not take the tool", () => {
+    const refused = buildDockToolButtons(input({ ...shownReview, bottomAccepts: ["files"] }));
+    expect(byId(refused, "review")?.menu.map((item) => item.value)).not.toContain("to-bottom");
+    const none = buildDockToolButtons(input(shownReview));
+    expect(byId(none, "review")?.menu.map((item) => item.value)).not.toContain("to-bottom");
+    const narrow = buildDockToolButtons(
+      input({ ...shownReview, bottomAccepts: ["review"], narrow: true }),
+    );
+    expect(byId(narrow, "review")?.menu.map((item) => item.value)).not.toContain("to-bottom");
+  });
+
+  it("moves only a tool's own first tab below, and never the Browser", () => {
+    // The panel holds one of each tool: from a second Terminal the move would
+    // start another shell below and close the first one beside.
+    const second = buildDockToolButtons(
+      input({
+        tabs: [{ id: "second-shell", surface: "terminal" as const }],
+        shownTabIds: ["second-shell"],
+        bottomAccepts: ["terminal", "browser"],
+      }),
+    );
+    expect(byId(second, "terminal")?.menu.map((item) => item.value)).not.toContain("to-bottom");
+    // Closing the Browser's tab beside ends the thread's session.
+    const browser = buildDockToolButtons(
+      input({
+        tabs: [{ id: "browser", surface: "browser" as const }],
+        shownTabIds: ["browser"],
+        bottomAccepts: ["terminal", "browser"],
+      }),
+    );
+    expect(byId(browser, "browser")?.menu.map((item) => item.value)).not.toContain("to-bottom");
+  });
+
+  it("offers Move to the side on a tool the bottom panel holds", () => {
+    const model = buildDockToolButtons(
+      input({ bottomHeld: ["terminal"], bottomActive: "terminal", bottomPresentedOpen: true }),
+    );
+    expect(byId(model, "terminal")?.menu.find((item) => item.value === "to-side")?.label).toBe(
+      "Move to the side",
+    );
+  });
+});
+
 describe("the title band's tool buttons", () => {
   it("lists the dedicated tools in band order and leaves the rest to More", () => {
     const model = buildDockToolButtons(input());

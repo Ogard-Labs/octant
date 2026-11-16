@@ -352,7 +352,6 @@ export type ShellActions = {
   readonly spendRevealTurn: () => void;
   readonly splitPane: ShellController["splitPane"];
   readonly startNewThreadDraft: (mode: OctantMode) => void;
-  readonly toggleBottomPanel: (opener: HTMLElement) => void;
   readonly toggleDock: (opener: HTMLElement) => void;
   readonly runDockToolMenu: (surface: RightUtilityDockSurfaceId, value: string) => void;
   readonly toggleDockTool: (surface: RightUtilityDockSurfaceId, opener: HTMLElement) => void;

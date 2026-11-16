@@ -48,15 +48,12 @@ it("moves the Nightly identity into the collapsed window's measured leading cont
 function renderChrome(overrides: Partial<React.ComponentProps<typeof WindowChrome>> = {}) {
   const props: React.ComponentProps<typeof WindowChrome> = {
     activeSurface: "Welcome to Code",
-    bottomPanelAvailable: true,
-    bottomPanelExpanded: false,
     dockAvailable: false,
     dockExpanded: false,
     dockLabel: "Right sidebar",
     hostBridge: hostBridge(),
     isNarrow: false,
     material: "opaque",
-    onToggleBottomPanel: vi.fn(),
     onToggleDock: vi.fn(),
     ...overrides,
   };
@@ -64,10 +61,10 @@ function renderChrome(overrides: Partial<React.ComponentProps<typeof WindowChrom
 }
 
 it("keeps every control of the trailing cluster no-drag on its own box", () => {
-  const { container } = renderChrome({ dockAvailable: true });
+  const { container } = renderChrome({ dockAvailable: true, isNarrow: true });
   const cluster = container.querySelector(".window-chrome__trailing");
   const buttons = [...(cluster?.querySelectorAll("button") ?? [])];
-  expect(buttons.length).toBeGreaterThan(1);
+  expect(buttons.length).toBeGreaterThan(0);
   // The dock header's drag rectangles come later in the document and would
   // outrank a no-drag rectangle that only an ancestor supplied.
   for (const button of buttons) expect(button.closest(".window-no-drag")).not.toBeNull();
@@ -171,31 +168,6 @@ function atRuleBlock(atRule: string, source = styles): string {
 }
 
 describe("WindowChrome", () => {
-  it("marks the dock toggle with one quiet dot, described in words, while the agent's Browser is active", () => {
-    const { rerender, props } = renderChrome({ dockAvailable: true });
-    const toggle = screen.getByRole("button", { name: "Open Right sidebar" });
-    expect(toggle).not.toHaveAttribute("aria-description");
-    expect(toggle).not.toHaveAttribute("data-activity");
-
-    rerender(<WindowChrome {...props} dockBrowserActive />);
-    const marked = screen.getByRole("button", { name: "Open Right sidebar" });
-    expect(marked).toHaveAccessibleDescription("Browser is active");
-    expect(marked).toHaveAttribute("data-activity", "browser");
-    // A dot, not a count: nothing is added to the button's text.
-    expect(marked).toHaveTextContent("");
-    expect(shellStyles).toMatch(
-      /\.window-chrome__button\[data-activity="browser"\]::after\s*\{[^}]*width:\s*6px/,
-    );
-  });
-
-  it("never marks the narrow window's overflow button: the modal dock draws no card for the dot to promise", () => {
-    const { rerender, props } = renderChrome({ dockAvailable: true, isNarrow: true });
-    rerender(<WindowChrome {...props} dockBrowserActive />);
-    expect(screen.getByRole("button", { name: "More window actions" })).not.toHaveAttribute(
-      "data-activity",
-    );
-  });
-
   it("offers Back and Forward beside Show sidebar while the sidebar is hidden, off at either end", async () => {
     const user = userEvent.setup();
     const history = {
@@ -963,36 +935,10 @@ describe("WindowChrome", () => {
     );
   });
 
-  it("exposes exactly one wide utility dock toggle only when a real surface is available", () => {
-    const { props, rerender } = renderChrome({
-      dockAvailable: true,
-    });
-
-    const dock = screen.getByRole("button", { name: "Open Right sidebar" });
-    expect(dock).toHaveAttribute("title", "Open Right sidebar");
-    expect(dock).toHaveAttribute("aria-expanded", "false");
-    expect(dock).toHaveAttribute("aria-controls", "right-utility-dock");
-    expect(dock).toHaveAttribute("data-dock-opener", "true");
-
-    dock.click();
-    expect(props.onToggleDock).toHaveBeenCalledWith(dock);
-
-    rerender(<WindowChrome {...props} dockAvailable dockExpanded />);
-    expect(screen.getByRole("button", { name: "Close Right sidebar" })).toHaveAttribute(
-      "aria-expanded",
-      "true",
-    );
-
-    rerender(<WindowChrome {...props} dockAvailable={false} />);
-    expect(screen.queryByRole("button", { name: /Right sidebar/i })).not.toBeInTheDocument();
-  });
-
-  it("keeps the window's own toggles and carries no tool buttons", () => {
+  it("draws no panel toggle in the wide title bar, because every tool opens from the thread header", () => {
     renderChrome({ dockAvailable: true });
-    const bottom = screen.getByRole("button", { name: "Open bottom panel" });
-    const dock = screen.getByRole("button", { name: "Open Right sidebar" });
-    expect(bottom.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // A thread's tools stand in its pane's header, beside the thread.
+    expect(screen.queryByRole("button", { name: /bottom panel/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Right sidebar/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("toolbar", { name: "Tools" })).not.toBeInTheDocument();
   });
 
@@ -1017,10 +963,9 @@ describe("WindowChrome", () => {
     expect(overflow).toHaveFocus();
   });
 
-  it("keeps workspace actions quiet without duplicating sidebar identity or the page title", async () => {
-    const user = userEvent.setup();
+  it("keeps workspace actions quiet without duplicating sidebar identity or the page title", () => {
     const bridge = hostBridge();
-    const { container, props } = renderChrome({ hostBridge: bridge });
+    const { container } = renderChrome({ hostBridge: bridge });
 
     expect(container.querySelector("[data-traffic-light-safe-space]")).not.toBeInTheDocument();
     expect(container.querySelector(".window-chrome__leading")).not.toBeInTheDocument();
@@ -1036,13 +981,6 @@ describe("WindowChrome", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
     expect(screen.queryByRole("button", { name: "Open Zen" })).not.toBeInTheDocument();
-    const bottomPanel = screen.getByRole("button", { name: "Open bottom panel" });
-    expect(bottomPanel).toHaveAttribute("aria-controls", "bottom-utility-panel");
-    expect(bottomPanel).toHaveClass("window-no-drag");
-    bottomPanel.focus();
-    await user.keyboard("{Enter}");
-    expect(props.onToggleBottomPanel).toHaveBeenCalledWith(bottomPanel);
-
     expect(screen.queryByRole("group", { name: "Window controls" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Minimize window" })).not.toBeInTheDocument();
 
@@ -1055,7 +993,7 @@ describe("WindowChrome", () => {
 
   it("uses disclosure keyboard behavior for narrow overflow actions", async () => {
     const user = userEvent.setup();
-    const { container, props } = renderChrome({ isNarrow: true });
+    const { container, props } = renderChrome({ isNarrow: true, dockAvailable: true });
 
     expect(screen.queryByRole("button", { name: "Open Zen" })).not.toBeInTheDocument();
 
@@ -1068,27 +1006,27 @@ describe("WindowChrome", () => {
     expect(overflow).toHaveAttribute("aria-expanded", "true");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(container.querySelector(".window-chrome__disclosure")).toBeInTheDocument();
-    const openBottomPanel = screen.getByRole("button", { name: "Open bottom panel" });
-    expect(openBottomPanel).toHaveFocus();
+    const openDock = screen.getByRole("button", { name: "Open Right sidebar" });
+    expect(openDock).toHaveFocus();
 
     await user.keyboard("{Escape}");
     expect(overflow).toHaveAttribute("aria-expanded", "false");
     expect(overflow).toHaveFocus();
 
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("button", { name: "Open bottom panel" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Open Right sidebar" })).toHaveFocus();
     await user.keyboard("{Enter}");
-    expect(props.onToggleBottomPanel).toHaveBeenCalledOnce();
+    expect(props.onToggleDock).toHaveBeenCalledOnce();
     expect(overflow).toHaveAttribute("aria-expanded", "false");
     expect(overflow).toHaveFocus();
   });
 
   it("resets disclosure state and focus across narrow-wide-narrow transitions", async () => {
     const user = userEvent.setup();
-    const { props, rerender } = renderChrome({ isNarrow: true });
+    const { props, rerender } = renderChrome({ isNarrow: true, dockAvailable: true });
 
     await user.click(screen.getByRole("button", { name: "More window actions" }));
-    expect(screen.getByRole("button", { name: "Open bottom panel" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Open Right sidebar" })).toHaveFocus();
 
     rerender(<WindowChrome {...props} isNarrow={false} />);
     expect(screen.queryByRole("button", { name: "More window actions" })).not.toBeInTheDocument();
@@ -1097,12 +1035,12 @@ describe("WindowChrome", () => {
     rerender(<WindowChrome {...props} isNarrow />);
     const overflow = screen.getByRole("button", { name: "More window actions" });
     expect(overflow).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("button", { name: "Open bottom panel" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open Right sidebar" })).not.toBeInTheDocument();
     expect(document.body).toHaveFocus();
 
     overflow.focus();
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("button", { name: "Open bottom panel" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Open Right sidebar" })).toHaveFocus();
   });
 
   it("keeps the browser sidebar opener clear of native titlebar spacing", async () => {
@@ -1163,22 +1101,20 @@ describe("WindowChrome", () => {
       },
     );
 
-    const reserveFor = (dockAvailable: boolean): string => {
+    const reserveFor = (withChanges: boolean): string => {
       const surface = document.createElement("div");
       surface.className = "shell-frame";
       document.body.appendChild(surface);
       const { unmount } = render(
         <WindowChrome
           activeSurface="Welcome to Code"
-          bottomPanelAvailable
-          bottomPanelExpanded={false}
-          dockAvailable={dockAvailable}
+          dockAvailable
           dockExpanded={false}
           dockLabel="Right sidebar"
           isNarrow={false}
           material="opaque"
-          onToggleBottomPanel={vi.fn()}
           onToggleDock={vi.fn()}
+          {...(withChanges ? { changes: { updating: true, onOpen: vi.fn() } } : {})}
         />,
         { container: surface.appendChild(document.createElement("div")) },
       );
@@ -1188,10 +1124,10 @@ describe("WindowChrome", () => {
       return reserve;
     };
 
-    // A thread that renders the dock toggle needs a wider band than one that
-    // does not; a constant reserve is wrong for one of them by construction.
-    expect(reserveFor(false)).toBe("40px");
-    expect(reserveFor(true)).toBe("80px");
+    // A start screen that draws the changes count needs a wider band than one
+    // that does not; a constant reserve is wrong for one of them by construction.
+    expect(reserveFor(false)).toBe("");
+    expect(reserveFor(true)).toBe("40px");
 
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -1450,14 +1386,11 @@ describe("WindowChrome", () => {
     const { container } = render(
       <WindowChrome
         activeSurface="Welcome to Code"
-        bottomPanelAvailable
-        bottomPanelExpanded={false}
         dockAvailable={false}
         dockExpanded={false}
         dockLabel="Right sidebar"
         isNarrow={false}
         material="opaque"
-        onToggleBottomPanel={vi.fn()}
         onToggleDock={vi.fn()}
       />,
     );
@@ -1472,9 +1405,7 @@ describe("WindowChrome", () => {
     );
     expect(cssRule(".window-chrome__drag-space")).toContain("pointer-events: none;");
     expect(container.querySelectorAll(".window-drag-region")).toHaveLength(0);
-    for (const control of screen.getAllByRole("button")) {
-      expect(control).toHaveClass("window-no-drag");
-    }
+    expect(container.querySelector(".window-chrome__trailing")).toHaveClass("window-no-drag");
     expect(screen.queryByRole("button", { name: "Minimize window" })).not.toBeInTheDocument();
   });
 });

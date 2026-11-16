@@ -85,7 +85,6 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".settings-accent__dot",
   ".thread-activity-pip__pulse",
   ".dock-mini-card__dot",
-  '.window-chrome__button[data-activity="browser"]::after',
   ".code-project-views__color-dot",
   ".code-overview__lifecycle-mark",
   ".code-debug-breakpoint::before, .code-debug-breakpoint-unresolved::before",

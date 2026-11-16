@@ -55,6 +55,20 @@ export interface StartQuickToolsPlacement {
   /** The active Code draft's chosen Project. */
   readonly projectId: ProjectId | undefined;
   readonly chooseProject: (draftScope: string, projectId: ProjectId | undefined) => void;
+  /** A press on the header's Project terminal or Project browser button, waiting for the dock. */
+  readonly request?: QuickToolRequest | undefined;
+  /** The dock took the request: a later mount must not replay it. */
+  readonly consumeRequest?: (() => void) | undefined;
+  /** Which tool the dock has open, so the header's button reads pressed. */
+  readonly reportOpen?: ((tool: QuickToolKind | undefined) => void) | undefined;
+}
+
+export type QuickToolKind = "terminal" | "browser";
+
+/** The header button asks the dock for a tool; the nonce tells two presses apart. */
+export interface QuickToolRequest {
+  readonly tool: QuickToolKind;
+  readonly nonce: number;
 }
 
 export const StartQuickToolsPlacementContext = createContext<StartQuickToolsPlacement | undefined>(
@@ -65,6 +79,11 @@ export function StartQuickToolsPlacementProvider(props: {
   /** The draft scope of the active pane's Code start screen, if it has one. */
   readonly activeDraftScope: string | undefined;
   readonly children: ReactNode;
+  readonly request?: QuickToolRequest | undefined;
+  readonly onConsumeRequest?: () => void;
+  readonly onOpenChange?: (tool: QuickToolKind | undefined) => void;
+  /** The active draft's chosen Project, for the header's Project tool buttons. */
+  readonly onProjectChange?: (projectId: ProjectId | undefined) => void;
 }) {
   const [chosen, setChosen] = useState<ReadonlyMap<string, ProjectId>>(() => new Map());
   const chooseProject = useCallback((draftScope: string, projectId: ProjectId | undefined) => {
@@ -78,9 +97,18 @@ export function StartQuickToolsPlacementProvider(props: {
   }, []);
   const projectId =
     props.activeDraftScope === undefined ? undefined : chosen.get(props.activeDraftScope);
+  const onProjectChange = props.onProjectChange;
+  useEffect(() => onProjectChange?.(projectId), [onProjectChange, projectId]);
+  const { request, onConsumeRequest, onOpenChange } = props;
   const placement = useMemo<StartQuickToolsPlacement>(
-    () => ({ projectId, chooseProject }),
-    [projectId, chooseProject],
+    () => ({
+      projectId,
+      chooseProject,
+      request,
+      consumeRequest: onConsumeRequest,
+      reportOpen: onOpenChange,
+    }),
+    [projectId, chooseProject, request, onConsumeRequest, onOpenChange],
   );
   return (
     <StartQuickToolsPlacementContext.Provider value={placement}>
@@ -106,6 +134,18 @@ export function StartQuickTools(props: { readonly projectId: ProjectId }) {
   const [starting, setStarting] = useState(false);
   const [message, setMessage] = useState<string>();
   const runningTerminal = useRef<CodeTerminalId | undefined>(undefined);
+  // One start at a time, whoever asks: the list's row is disabled while a
+  // shell starts, but a header button's request is not a press on that row,
+  // and a second start would overwrite the first shell's id and leave it
+  // running with nothing able to stop it.
+  const startInFlight = useRef(false);
+  // Which panel-and-Project a start belongs to. A shell that finishes starting
+  // after the panel left or the Project changed is stopped, not adopted.
+  const generation = useRef(0);
+  const placement = useContext(StartQuickToolsPlacementContext);
+  const reportOpen = placement?.reportOpen;
+  const request = placement?.request;
+  const consumeRequest = placement?.consumeRequest;
   // A server Project's terminal is a login on its server. It has no other
   // folder here, and the browser would be this computer's, so neither is offered.
   const onServer =
@@ -116,6 +156,7 @@ export function StartQuickTools(props: { readonly projectId: ProjectId }) {
     const client = services?.projectTerminalClient;
     const projectId = props.projectId;
     return () => {
+      generation.current += 1;
       const terminalId = runningTerminal.current;
       runningTerminal.current = undefined;
       if (client !== undefined && terminalId !== undefined) {
@@ -125,13 +166,39 @@ export function StartQuickTools(props: { readonly projectId: ProjectId }) {
     };
   }, [props.projectId, services?.projectTerminalClient]);
 
+  useEffect(() => {
+    reportOpen?.(open?.kind);
+  }, [open?.kind, reportOpen]);
+  // Leaving the dock leaves nothing open for the header's buttons to claim.
+  useEffect(() => () => reportOpen?.(undefined), [reportOpen]);
+
+  // The header's Project terminal and Project browser buttons ask for a tool
+  // by request, so the dock opens straight into it. A request that arrived
+  // before this dock mounted is taken on mount, then cleared, so it never
+  // replays when the dock is shown again.
+  const openRef = useRef(open);
+  openRef.current = open;
+  const takeRequest = useRef<(tool: QuickToolKind) => void>(() => undefined);
+  useEffect(() => {
+    if (request === undefined || services === undefined) return;
+    consumeRequest?.();
+    takeRequest.current(request.tool);
+  }, [consumeRequest, request, services]);
+
   if (services === undefined) return null;
   const { projectTerminalClient } = services;
 
   async function openTerminal(folder?: string): Promise<void> {
+    if (startInFlight.current) return;
+    startInFlight.current = true;
+    const startedFor = generation.current;
     setStarting(true);
     setMessage(undefined);
     const terminalId = decodeCodeTerminalId(crypto.randomUUID());
+    const stop = () =>
+      void projectTerminalClient
+        .execute({ kind: "stop", projectId: props.projectId, terminalId })
+        .catch(() => undefined);
     try {
       const started = await projectTerminalClient.execute({
         kind: "start",
@@ -149,18 +216,32 @@ export function StartQuickTools(props: { readonly projectId: ProjectId }) {
         setMessage("The Project terminal did not start.");
         return;
       }
+      if (startedFor !== generation.current) {
+        stop();
+        return;
+      }
       runningTerminal.current = terminalId;
       setOpen({ kind: "terminal", terminalId });
     } catch {
       // The reply was lost, not necessarily the start: stop whatever began.
       setMessage("The Project terminal could not be started.");
-      void projectTerminalClient
-        .execute({ kind: "stop", projectId: props.projectId, terminalId })
-        .catch(() => undefined);
+      stop();
     } finally {
+      startInFlight.current = false;
       setStarting(false);
     }
   }
+
+  takeRequest.current = (tool) => {
+    // A request that lands while a shell is starting is dropped: the tool it
+    // asks for is either that shell or one the person can ask for again.
+    if (startInFlight.current) return;
+    if (openRef.current?.kind === tool) return;
+    if (openRef.current !== undefined) close();
+    if (tool === "browser") {
+      if (!onServer) setOpen({ kind: "browser" });
+    } else void openTerminal();
+  };
 
   function close(): void {
     const terminalId = runningTerminal.current;

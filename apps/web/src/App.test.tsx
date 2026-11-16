@@ -41,8 +41,10 @@ import { App } from "./App";
 import { composerThreadDrafts } from "./composer/composerThreadDraftStore";
 import {
   threadUtilityDockKey,
+  writeBottomPanelToolPresentation,
   writeUtilityDockPresentation,
 } from "./shell/rightUtilityDockSelection";
+import { writeBottomPanelPresentation } from "./shell/useShellPresentation";
 import {
   archivedChatThread,
   bindingReceipt,
@@ -191,10 +193,38 @@ function chooseProjectTree(modes: ReadonlyArray<string> = ["chat", "work", "code
   }
 }
 
-/** Tests that need a visible dock ask for it through the ordinary shell action. */
+/**
+ * Tests that need a visible dock open it as a person does: the narrow window's
+ * overflow menu still has its one "Open Right sidebar" action, and a wide
+ * window opens the dock by pressing a tool's button in the thread header.
+ */
 async function showRightUtilityDock(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   if (screen.queryByRole("complementary", { name: "Right Utility Dock" }) !== null) return;
-  await user.click(await screen.findByRole("button", { name: "Open Right sidebar" }));
+  const toggle = screen.queryByRole("button", { name: "Open Right sidebar" });
+  if (toggle !== null) {
+    await user.click(toggle);
+    return;
+  }
+  await user.click(within(await findToolRow()).getByRole("button", { name: "Environment" }));
+}
+
+/**
+ * The bottom panel as a thread that moved its Terminal there leaves it. The
+ * window has no button that opens the panel empty, so a test that needs it open
+ * starts from this stored state, before the app renders.
+ */
+function seedBottomPanelTerminal(): void {
+  writeBottomPanelPresentation(globalThis, String(windowId), { open: true, height: 260 });
+  writeBottomPanelToolPresentation(
+    globalThis,
+    String(windowId),
+    new Map([
+      [
+        threadUtilityDockKey("code", String(codeThreadId)),
+        { tabs: [{ id: "terminal", surface: "terminal" }], active: "terminal" },
+      ],
+    ]),
+  );
 }
 
 /**
@@ -6405,20 +6435,16 @@ describe("App", () => {
         screen.queryByRole("complementary", { name: "Right Utility Dock" }),
       ).not.toBeInTheDocument(),
     );
-    expect(screen.getByRole("button", { name: "Open Right sidebar" })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
 
-    // The toggle leaves the Board and shows the dock again rather than
-    // closing a dock that was only stepped aside.
-    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+    // Leaving the Board shows the dock again, as it was, rather than finding it
+    // closed: it was only stepped aside.
+    await user.click(screen.getByRole("button", { name: "Back to workspace" }));
     expect(await screen.findByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Back to workspace" })).not.toBeInTheDocument();
   });
 
-  it("hands the pane to the Board and gives the bottom panel back afterwards, toggle included", async () => {
+  it("hands the pane to the Board and gives the bottom panel back afterwards", async () => {
     window.localStorage.clear();
+    seedBottomPanelTerminal();
     const user = userEvent.setup();
     const initial = codeShellBootstrap();
     const workspaceWithContext = {
@@ -6449,7 +6475,6 @@ describe("App", () => {
       />,
     );
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
-    await user.click(screen.getByRole("button", { name: "Open bottom panel" }));
     await screen.findByRole("region", { name: "Bottom panel" });
 
     // The Board is a page about many threads and shows none of them, so the
@@ -6459,76 +6484,64 @@ describe("App", () => {
     await waitFor(() =>
       expect(screen.queryByRole("region", { name: "Bottom panel" })).not.toBeInTheDocument(),
     );
-    expect(screen.getByRole("button", { name: "Open bottom panel" })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
 
-    // The toggle leaves the Board and shows the panel again, with the tab it
-    // had, rather than closing a panel that was only stepped aside.
-    await user.click(screen.getByRole("button", { name: "Open bottom panel" }));
+    // Leaving the Board shows the panel again, with the tab it had, rather than
+    // finding it closed: it was only stepped aside.
+    await user.click(screen.getByRole("button", { name: "Back to workspace" }));
     const restored = await screen.findByRole("region", { name: "Bottom panel" });
     expect(within(restored).getByRole("tab", { name: "Terminal" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Back to workspace" })).not.toBeInTheDocument();
   });
 
-  it.each(["add", "bottom"])(
-    "starts a restored dock terminal only after an explicit %s gesture",
-    async (gesture) => {
-      window.localStorage.clear();
-      const user = userEvent.setup();
-      const codeApi = codes();
-      vi.mocked(codeApi.executeOperation).mockImplementation(async (command) => ({
-        kind: "operation-failed",
-        operationId: command.operationId,
-        failure: { category: "unavailable", message: "Terminal is unavailable." },
-      }));
-      writeUtilityDockPresentation(globalThis, String(windowId), {
-        open: true,
-        threads: new Map([
-          [
-            threadUtilityDockKey("code", String(codeThreadId)),
-            {
-              tabs: [{ id: "terminal", surface: "terminal" }],
-              active: "terminal",
-            },
-          ],
-        ]),
-      });
-      render(
-        <App
-          codeClient={codeApi}
-          contextClient={contextClient()}
-          isNarrow={false}
-          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
-          projectClient={projects()}
-          projectWindowCapability={projectWindowCapability}
-          providerClient={providersWithToolModel()}
-          shellClient={client(codeShellBootstrap())}
-        />,
-      );
-      const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-      expect(await within(dock).findByRole("button", { name: "Start terminal" })).toBeVisible();
+  it("starts a restored dock terminal only after an explicit add gesture", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    const codeApi = codes();
+    vi.mocked(codeApi.executeOperation).mockImplementation(async (command) => ({
+      kind: "operation-failed",
+      operationId: command.operationId,
+      failure: { category: "unavailable", message: "Terminal is unavailable." },
+    }));
+    writeUtilityDockPresentation(globalThis, String(windowId), {
+      open: true,
+      threads: new Map([
+        [
+          threadUtilityDockKey("code", String(codeThreadId)),
+          {
+            tabs: [{ id: "terminal", surface: "terminal" }],
+            active: "terminal",
+          },
+        ],
+      ]),
+    });
+    render(
+      <App
+        codeClient={codeApi}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    expect(await within(dock).findByRole("button", { name: "Start terminal" })).toBeVisible();
+    expect(
+      vi
+        .mocked(codeApi.executeOperation)
+        .mock.calls.some(([command]) => command.kind === "start-terminal"),
+    ).toBe(false);
+    await user.pointer({ target: bandTool("Terminal"), keys: "[MouseRight]" });
+    await user.click(await screen.findByRole("menuitem", { name: "New Terminal" }));
+    await waitFor(() =>
       expect(
         vi
           .mocked(codeApi.executeOperation)
-          .mock.calls.some(([command]) => command.kind === "start-terminal"),
-      ).toBe(false);
-      if (gesture === "bottom") {
-        await user.click(screen.getByRole("button", { name: "Open bottom panel" }));
-      } else {
-        await user.pointer({ target: bandTool("Terminal"), keys: "[MouseRight]" });
-        await user.click(await screen.findByRole("menuitem", { name: "New Terminal" }));
-      }
-      await waitFor(() =>
-        expect(
-          vi
-            .mocked(codeApi.executeOperation)
-            .mock.calls.filter(([command]) => command.kind === "start-terminal"),
-        ).toHaveLength(1),
-      );
-    },
-  );
+          .mock.calls.filter(([command]) => command.kind === "start-terminal"),
+      ).toHaveLength(1),
+    );
+  });
 
   it("retains terminal selection across thread switches without activating another thread", async () => {
     window.localStorage.clear();
@@ -6728,6 +6741,7 @@ describe("App", () => {
 
   it("keeps focus on a tool's button when it closes the bottom panel's last tab", async () => {
     window.localStorage.clear();
+    seedBottomPanelTerminal();
     const user = userEvent.setup();
     render(
       <App
@@ -6743,7 +6757,6 @@ describe("App", () => {
     );
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
-    await user.click(screen.getByRole("button", { name: "Open bottom panel" }));
     await screen.findByRole("region", { name: "Bottom panel" });
     const terminal = within(await findToolRow()).getByRole("button", { name: "Terminal" });
     await waitFor(() => expect(terminal).toHaveAttribute("aria-pressed", "true"));
@@ -6888,8 +6901,9 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
-  it("opens the thread Terminal in a remembered bottom panel and still offers another", async () => {
+  it("shows the thread Terminal in a remembered bottom panel and still offers another", async () => {
     window.localStorage.clear();
+    seedBottomPanelTerminal();
     const user = userEvent.setup();
     render(
       <App
@@ -6905,13 +6919,8 @@ describe("App", () => {
     );
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
-    await user.click(screen.getByRole("button", { name: "Open bottom panel" }));
     const panel = await screen.findByRole("region", { name: "Bottom panel" });
     expect(within(panel).getByRole("tab", { name: "Terminal" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Close bottom panel" })).toHaveAttribute(
-      "aria-expanded",
-      "true",
-    );
 
     // A terminal in the bottom panel does not spend the reader's only terminal:
     // a second one is a second shell, so the dock keeps offering it.
@@ -6938,11 +6947,14 @@ describe("App", () => {
 
     await user.click(within(panel).getByRole("button", { name: "Hide bottom panel" }));
     expect(screen.queryByRole("region", { name: "Bottom panel" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open bottom panel" })).toHaveFocus();
+    // The button of the tool the panel was showing (Review, the last added) is
+    // where focus lands: the window has no panel switch to return to.
+    await waitFor(() => expect(bandTool("Review")).toHaveFocus());
   });
 
   it("keeps the bottom panel open when a tool opens in the dock beside it", async () => {
     window.localStorage.clear();
+    seedBottomPanelTerminal();
     const user = userEvent.setup();
     render(
       <App
@@ -6958,7 +6970,6 @@ describe("App", () => {
     );
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
-    await user.click(screen.getByRole("button", { name: "Open bottom panel" }));
     const panel = await screen.findByRole("region", { name: "Bottom panel" });
     await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
@@ -6972,6 +6983,7 @@ describe("App", () => {
 
   it("closes the bottom panel's tool from its row button when the panel holds it", async () => {
     window.localStorage.clear();
+    seedBottomPanelTerminal();
     const user = userEvent.setup();
     render(
       <App
@@ -6987,7 +6999,6 @@ describe("App", () => {
     );
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
-    await user.click(screen.getByRole("button", { name: "Open bottom panel" }));
     const panel = await screen.findByRole("region", { name: "Bottom panel" });
     expect(within(panel).getByRole("tab", { name: "Terminal" })).toBeVisible();
     await showRightUtilityDock(user);
@@ -7003,6 +7014,38 @@ describe("App", () => {
       expect(screen.queryByRole("region", { name: "Bottom panel" })).not.toBeInTheDocument(),
     );
     expect(bandTool("Terminal")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("moves a shown tool to the bottom panel from its button's menu and back to the side", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    render(
+      <App
+        codeClient={codes()}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await user.click(bandTool("Files"));
+    await screen.findByRole("region", { name: "Files" });
+    expect(screen.queryByRole("region", { name: "Bottom panel" })).toBeNull();
+
+    await user.pointer({ target: bandTool("Files"), keys: "[MouseRight]" });
+    await user.click(await screen.findByRole("menuitem", { name: "Move to bottom panel" }));
+    const panel = await screen.findByRole("region", { name: "Bottom panel" });
+    expect(within(panel).getByRole("tab", { name: "Files" })).toBeVisible();
+
+    await user.pointer({ target: bandTool("Files"), keys: "[MouseRight]" });
+    await user.click(await screen.findByRole("menuitem", { name: "Move to the side" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Bottom panel" })).toBeNull());
+    expect(await screen.findByRole("region", { name: "Files" })).toBeVisible();
   });
 
   it("retains the restored Terminal tab when another bottom tool opens", async () => {
@@ -7149,32 +7192,27 @@ describe("App", () => {
       expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull(),
     );
 
-    // It is still one press away, and then says what it will offer.
-    await showRightUtilityDock(user);
-    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(screen.getByRole("button", { name: "Close Right sidebar" })).toBeVisible();
-    expect(within(dock).queryByRole("group", { name: "Quick tools" })).toBeNull();
-    for (const name of ["Environment", "Terminal", "Browser", "Files"]) {
+    // The window has no dock switch. The row's thread tools wait for the
+    // thread, while the Project's own terminal and browser are enabled and are
+    // the way into the draft's dock.
+    expect(screen.queryByRole("button", { name: /Right sidebar/ })).toBeNull();
+    for (const name of ["Environment", "Files"]) {
       const tool = bandTool(name);
       expect(tool).toHaveAttribute("aria-disabled", "true");
       expect(tool).toHaveAttribute("aria-description", "Available once the task starts");
     }
-    expect(within(dock).queryByRole("button", { name: "Add tool" })).toBeNull();
-    // The draft has a Project, so the dock holds its quick tools, and the
-    // stage carries no second column beside it.
-    const projectTools = within(dock).getByRole("complementary", { name: "Project tools" });
-    expect(within(projectTools).getByRole("button", { name: "Terminal" })).toBeEnabled();
-    expect(within(projectTools).getByText("Other tools open once the task starts")).toBeVisible();
-    // A header's own Terminal button waits for the thread; the one in the
-    // stage is the dock's, so only that one is counted here.
-    const bandTerminal = within(toolRow()).getByRole("button", { name: "Terminal" });
-    expect(bandTerminal).toHaveAttribute("aria-disabled", "true");
-    expect(bandTerminal).toHaveAttribute("aria-description", "Available once the task starts");
-    expect(
-      screen
-        .getAllByRole("button", { name: "Terminal" })
-        .filter((button) => button.closest('[role="toolbar"][aria-label="Tools"]') === null),
-    ).toHaveLength(1);
+    expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
+    expect(bandTool("Project browser")).not.toHaveAttribute("aria-disabled");
+    await user.click(bandTool("Project browser"));
+    expect(await screen.findByRole("complementary", { name: "Project browser" })).toBeVisible();
+    await waitFor(() =>
+      expect(bandTool("Project browser")).toHaveAttribute("aria-pressed", "true"),
+    );
+    expect(bandTool("Project terminal")).toHaveAttribute("aria-pressed", "false");
+    await user.click(bandTool("Project browser"));
+    await waitFor(() =>
+      expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull(),
+    );
 
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Start here");
     await user.click(screen.getByRole("button", { name: "Create thread" }));

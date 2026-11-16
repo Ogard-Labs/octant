@@ -2,7 +2,6 @@ import type { RevealedThreadTurn } from "./shell/WorkspaceView";
 import { OctantEmpty } from "./ui/base/OctantEmpty";
 import { AgentThreadAttributionProvider } from "./agentAccess/agentThreadAttribution";
 import { QuestionnaireDraftsProvider } from "./transcript/questionnaireDrafts";
-import { useAgentBrowserCard } from "./threadActivity/browserCardActivity";
 import {
   WorktreePreparationDialog,
   type PreparationTarget,
@@ -240,6 +239,8 @@ import { useWindowHistory, type WindowPage, type WindowPlace } from "./shell/win
 import {
   StartQuickToolsContext,
   StartQuickToolsPlacementProvider,
+  type QuickToolKind,
+  type QuickToolRequest,
   type StartQuickToolsServices,
 } from "./shell/StartQuickTools";
 import {
@@ -1334,6 +1335,14 @@ function LaunchedShell(
   // Kept per draft: with two new tasks open, opening the dock on one must not
   // close it on the other.
   const [draftDocksShown, setDraftDocksShown] = useState<ReadonlySet<string>>(() => new Set());
+  // The header's Project terminal and Project browser buttons on a new Code
+  // task: the request they make of the dock, the tool it reports open, and the
+  // Project the start screen chose (which decides whether they are enabled).
+  const [quickToolRequest, setQuickToolRequest] = useState<QuickToolRequest | undefined>(undefined);
+  const [quickToolOpen, setQuickToolOpen] = useState<QuickToolKind | undefined>(undefined);
+  const [quickToolsProjectId, setQuickToolsProjectId] = useState<ProjectId | undefined>(undefined);
+  const quickToolNonce = useRef(0);
+  const consumeQuickToolRequest = useCallback(() => setQuickToolRequest(undefined), []);
   const setActivePaneDockVisible = useCallback(
     (next: boolean) => {
       const draftKey = draftDockKeyRef.current;
@@ -3719,6 +3728,7 @@ function LaunchedShell(
       dockToolsAwaitingThread,
       launchableDockSurfaces,
       renderedBottomPanelState,
+      retainedBottomPanelState,
     };
   }, [
     activeMode,
@@ -3756,6 +3766,7 @@ function LaunchedShell(
     dockToolsAwaitingThread,
     launchableDockSurfaces,
     renderedBottomPanelState,
+    retainedBottomPanelState,
   } = dockPresentation;
   // The pull requests the active Code thread is already about, offered where a
   // reader adds a tab. Read from the same catalogue the Environment panel uses,
@@ -3803,15 +3814,6 @@ function LaunchedShell(
     bottomPanelOpen &&
     activeBottomSurface?.id === "browser" &&
     activeBottomTab?.browserContextId === undefined;
-  // The agent's Browser is live, out of sight, and has a tab the dock's card
-  // would stand for: with the dock closed that card is invisible, so the toggle
-  // says so. Only a thread's own Browser tab counts as the card's tab.
-  const agentBrowserContext = useAgentBrowserCard(
-    activeMode === "chat" || dockThreadId === undefined ? undefined : String(dockThreadId),
-  );
-  const dockBrowserActive =
-    agentBrowserContext !== undefined &&
-    displayedDockState.tabs.some((tab) => tab.surface === "browser");
   const bottomPanelHeight = previewBottomPanelHeight ?? bottomPanelPresentation.height;
   const providerController = useProviderController({
     ...(props.providerClient === undefined ? {} : { client: props.providerClient }),
@@ -4514,7 +4516,12 @@ function LaunchedShell(
     });
     openDockTab("agents");
   }
-  function openDockTab(surface: RightUtilityDockSurfaceId, opener?: HTMLElement) {
+  function openDockTab(
+    surface: RightUtilityDockSurfaceId,
+    opener?: HTMLElement,
+    // The caller has already taken the tool out of the bottom panel's tabs.
+    options?: { readonly leavesBottomPanel?: true },
+  ) {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
     if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
     if (surface === "review") setRequestedAgentReview(undefined);
@@ -4524,7 +4531,7 @@ function LaunchedShell(
     widenDockFor(surface);
     markInteraction("renderer", "dock-open-requested");
     markInteractionAfterPaint("dock-open");
-    closeBottomPanelHolding(surface);
+    if (options?.leavesBottomPanel !== true) closeBottomPanelHolding(surface);
     if (opener !== undefined) dockOpener.current = { element: opener, logicalTarget: "dock" };
     setActivePaneDockVisible(true);
     if (dockThreadKey === undefined) {
@@ -4919,9 +4926,17 @@ function LaunchedShell(
     }
     persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
     if (restoreFocus) {
-      queueMicrotask(() =>
-        document.querySelector<HTMLElement>('[data-bottom-panel-opener="true"]')?.focus(),
-      );
+      // The window has no panel switch to return to, so focus goes to the
+      // button of the tool the panel was showing, as closing its last tab does.
+      const surface = activeBottomSurface?.id;
+      queueMicrotask(() => {
+        if (surface === undefined) return;
+        (
+          document.querySelector<HTMLElement>(
+            `.workspace-pane[data-active="true"] [data-dock-tool="${surface}"]`,
+          ) ?? document.querySelector<HTMLElement>(`[data-dock-tool="${surface}"]`)
+        )?.focus();
+      });
     }
   }
 
@@ -4939,44 +4954,16 @@ function LaunchedShell(
     }
     if (nextState.tabs.length === 0) closeBottomPanel(restoreFocus);
   }
-  function toggleBottomPanel(opener: HTMLElement) {
-    // With a reader up the panel is stepped aside, not closed, so the toggle
-    // leaves the reader and shows it again rather than closing something the
-    // person cannot see (the dock's toggle reads the same way).
-    if (readerOpen) {
-      closeWorkspaceReaders();
-      if (bottomPanelOpen) return;
-    } else if (bottomPanelOpen) {
-      closeBottomPanel(false);
-      opener.focus();
-      return;
-    }
-    if (!bottomPanelAvailable) return;
-    const nextSurface = activeBottomSurface ?? bottomPanelSurfaces[0];
-    if (nextSurface === undefined) return;
-    if (nextSurface.id === "terminal") {
-      dockTabActivation.noteActivated(workspaceDockTabId(undefined, "terminal"));
-    }
-    const nextBottomState = openUtilityTabState(renderedBottomPanelState, nextSurface.id);
-    if (dockThreadKey === undefined) {
-      setFallbackBottomPanelState(nextBottomState);
-    } else {
-      setBottomPanelStatesByThread((current) =>
-        new Map(current).set(dockThreadKey, nextBottomState),
-      );
-    }
-    closeDockTab(nextSurface.id);
-    if (dockTabs.length === 1 && dockTabs[0]?.id === nextSurface.id) setDockVisible(false);
-    persistBottomPanelPresentation({ ...bottomPanelPresentation, open: true });
-  }
-
   function openBottomTool(surface: RightUtilityDockSurfaceId) {
     if (!bottomPanelSurfaces.some((candidate) => candidate.id === surface)) return;
     if (surface === "review") setRequestedAgentReview(undefined);
     if (surface === "terminal") {
       dockTabActivation.noteActivated(workspaceDockTabId(undefined, "terminal"));
     }
-    const nextBottomState = openUtilityTabState(renderedBottomPanelState, surface);
+    // From the panel's own tabs, not the ones it draws: an empty panel draws a
+    // Terminal so it is never blank, and opening from that drawing put a
+    // Terminal nobody asked for beside every tool moved below.
+    const nextBottomState = openUtilityTabState(retainedBottomPanelState, surface);
     if (dockThreadKey === undefined) {
       setFallbackBottomPanelState(nextBottomState);
     } else {
@@ -5041,6 +5028,16 @@ function LaunchedShell(
         if (!dockOpen) setActivePaneDockVisible(true);
         restoreDockTool(press.tabId);
         return;
+      case "quick-open":
+        quickToolNonce.current += 1;
+        setQuickToolRequest({ tool: press.tool, nonce: quickToolNonce.current });
+        if (!dockOpen) setActivePaneDockVisible(true);
+        return;
+      case "quick-close":
+        // Closing the dock unmounts the quick tools, which stops the shell.
+        setQuickToolRequest(undefined);
+        setActivePaneDockVisible(false);
+        return;
       case "close-bottom":
         // The panel's own close sends focus to its toggle; this press came
         // from the tool's button, which keeps it.
@@ -5071,6 +5068,16 @@ function LaunchedShell(
    * model that drew the menu.
    */
   function runDockToolMenu(surface: RightUtilityDockSurfaceId, value: string) {
+    if (value === "to-side") {
+      // The reverse of the drag to the thread's foot. The tool leaves the
+      // panel's own tabs, so the panel stays for the tools still in it (and
+      // closes when this was its last) and a later move below does not bring
+      // a forgotten copy back; beside, it opens as the same tool, not a
+      // second one.
+      closeBottomPanelTab(surface, false);
+      openDockTab(surface, undefined, { leavesBottomPanel: true });
+      return;
+    }
     const button = [...dockToolButtons.buttons, ...dockToolButtons.more].find(
       (candidate) => candidate.id === surface,
     );
@@ -5086,7 +5093,8 @@ function LaunchedShell(
       for (const id of surface === "browser" ? button.tabIds : [tabId]) closeDockTab(id);
       return;
     }
-    if (value === "minimise") minimiseDockTool(tabId);
+    if (value === "to-bottom") openBottomTool(surface);
+    else if (value === "minimise") minimiseDockTool(tabId);
     else if (value === "below") {
       if (!dockOpen) setActivePaneDockVisible(true);
       showDockTabBelow(tabId);
@@ -5896,7 +5904,6 @@ function LaunchedShell(
       spendRevealTurn,
       splitPane: controller.splitPane,
       startNewThreadDraft,
-      toggleBottomPanel,
       toggleDock,
       toggleDockTool,
       pressPaneDockTool,
@@ -6063,6 +6070,21 @@ function LaunchedShell(
           layout: displayedDockState.layout,
           dockPresentedOpen,
           bottomHeld: bottomHeldSurfaces,
+          ...(bottomPanelAvailable && !isNarrow
+            ? { bottomAccepts: bottomPanelSurfaces.map((surface) => surface.id) }
+            : {}),
+          ...(dockHoldsForCodeDraft && quickToolsProjectId !== undefined
+            ? {
+                quickTools: {
+                  tools:
+                    serverCodeProjectFor(serverCodeProjects.projects, quickToolsProjectId) ===
+                    undefined
+                      ? (["terminal", "browser"] as const)
+                      : (["terminal"] as const),
+                  open: dockPresentedOpen ? quickToolOpen : undefined,
+                },
+              }
+            : {}),
           bottomPresentedOpen: bottomPanelPresentedOpen,
           bottomActive: activeBottomSurface?.id,
           capsFull: dockCapsFull,
@@ -8552,10 +8574,7 @@ function LaunchedShell(
             serverUrl={props.launch.serverUrl}
             windowCapability={props.projectWindowCapability}
             codeBoardRevision={machineChanges.codeNavigation}
-            bottomPanelAvailable={bottomPanelAvailable}
-            bottomPanelPresentedOpen={bottomPanelPresentedOpen}
             dockAvailable={dockAvailable}
-            dockBrowserActive={dockBrowserActive}
             dockPresentedOpen={dockPresentedOpen}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             hostReservesTitlebarInset={hostReservesTitlebarInset}
@@ -8680,6 +8699,10 @@ function LaunchedShell(
                       ? `code:${String(activePaneId)}`
                       : undefined
                   }
+                  onConsumeRequest={consumeQuickToolRequest}
+                  onOpenChange={setQuickToolOpen}
+                  onProjectChange={setQuickToolsProjectId}
+                  request={quickToolRequest}
                 >
                   <div className="primary-workspace-layer">
                     <ReaderPagesContainer
