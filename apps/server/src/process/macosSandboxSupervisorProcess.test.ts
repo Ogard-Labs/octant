@@ -32,6 +32,7 @@ describe.skipIf(process.platform !== "darwin")("native sandbox scope supervisor"
     chmodSync(root, 0o700);
     const executable = join(root, "scope");
     const beat = join(root, "heartbeat");
+    const extensionProbe = join(root, "extension-probe");
     const script = join(root, "work.py");
     const epoch = "native-test:epoch";
     let child: ReturnType<typeof spawn> | undefined;
@@ -54,6 +55,25 @@ describe.skipIf(process.platform !== "darwin")("native sandbox scope supervisor"
         ],
         { timeout: 20000 },
       );
+      execFileSync(
+        "/usr/bin/xcrun",
+        [
+          "clang",
+          "-O2",
+          "-Wall",
+          "-Wextra",
+          "-Werror",
+          "-Wno-deprecated-declarations",
+          "-o",
+          extensionProbe,
+          fileURLToPath(new URL("./fixtures/macosFileExtension.c", import.meta.url)),
+          "-lsandbox",
+        ],
+        { timeout: 20000 },
+      );
+      const extension = spawnSync(extensionProbe, [root], { encoding: "utf8", timeout: 10000 });
+      expect(extension.status, extension.stderr).toBe(0);
+      console.info("native object-bound extension capability:", extension.stdout.trim());
       writeFileSync(
         script,
         `import os, sys, time, signal
