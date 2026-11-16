@@ -55,7 +55,9 @@ describe("integration authentication routes", () => {
     const handler = createHandler();
     const value = request();
     bindLocalWindow(value);
-    expect((await handler(value))?.status).toBe(200);
+    const response = await handler(value);
+    expect(response?.status).toBe(200);
+    expect((await response?.arrayBuffer())?.byteLength).toBeLessThanOrEqual(4_096);
     expect(service.snapshot).toHaveBeenCalledWith("linear", expect.anything());
   });
 
@@ -79,7 +81,9 @@ describe("integration authentication routes", () => {
       } as never,
       scopeId: "scope" as never,
     });
-    expect((await handler(value))?.status).toBe(403);
+    const response = await handler(value);
+    expect(response?.status).toBe(403);
+    expect((await response?.arrayBuffer())?.byteLength).toBeLessThanOrEqual(4_096);
     expect(service.execute).not.toHaveBeenCalled();
   });
 
@@ -124,7 +128,9 @@ describe("integration authentication routes", () => {
       { kind: "operation", operationId: "list-issues", input: { search: "browse" } },
       expect.anything(),
     );
-    expect(await response?.text()).not.toMatch(/lin_api_|access_token|refresh_token/);
+    const text = await response?.text();
+    expect(text).not.toMatch(/lin_api_|access_token|refresh_token/);
+    expect(new TextEncoder().encode(text).byteLength).toBeLessThanOrEqual(512 * 1_024);
   });
 
   it("allows a remote device to read issues and refuses authentication-shaped bodies", async () => {
