@@ -123,6 +123,15 @@
   align-items: center;
 }
 
+/* Back leads the title, its glyph on the column's left edge: the 16px glyph
+   sits 6px inside its 28px button, so the button reaches that far past the
+   edge, as a page header's Back does. Among the trailing icons it pointed left
+   from the right end of the row, the one destination where Back was not first. */
+.pr-page__list-back {
+  flex: 0 0 auto;
+  margin-inline-start: calc((var(--oct-icon-md) - var(--oct-rail-button-h)) / 2);
+}
+
 /* The column's own 8px gap spaces the search, the chips and the rows. The
    toolbar's 16px bottom margin added a second one under the search: 24px
    there against 8px between the chips and the status line. The field is the

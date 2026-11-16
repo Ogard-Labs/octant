@@ -1966,9 +1966,11 @@ host restart and is cleared when GitHub authority is revoked.
 **The Pull requests and Issues lists.** The Pull requests destination is a
 list column and a reading pane, not a full-width list. The list column is
 384px with its own scroll (the same width whether or not a row is chosen, so choosing one moves
-nothing): a header with the title and, as icon buttons with
+nothing): a header with Back first when the page can close (its glyph on the
+column's left edge, as on every destination; maintainer request, 2026-11-16),
+then the title and, as icon buttons with
 tooltips, Sort, Filter, Repository settings (only while the list is not
-grouped) and Refresh (with the back arrow first when the page can close), on a 16px inset line
+grouped) and Refresh, on a 16px inset line
 that the title, the count, the search field and the chips share, the icons ending on the search
 field's right edge, the count under the title; a search field that also takes
 a pasted pull-request link and narrows the list to the one it names; quiet

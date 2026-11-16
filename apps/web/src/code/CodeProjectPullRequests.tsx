@@ -831,22 +831,21 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       <div className="pr-page__frame">
         <div className="pr-page__list">
           <header className="pr-page__list-head">
+            {/* Back leads the title, as it does on every destination. */}
+            {props.onClose === undefined ? null : (
+              <OctantButton
+                aria-label="Back to workspace"
+                className="work-list__icon-button pr-page__list-back"
+                onClick={props.onClose}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <ArrowLeft aria-hidden="true" size={16} />
+              </OctantButton>
+            )}
             <h1 className="pr-page__list-title">Pull requests</h1>
-            <div className="pr-page__list-actions">
-              {props.onClose === undefined ? null : (
-                <OctantButton
-                  aria-label="Back to workspace"
-                  className="work-list__icon-button"
-                  onClick={props.onClose}
-                  size="icon"
-                  type="button"
-                  variant="ghost"
-                >
-                  <ArrowLeft aria-hidden="true" size={16} />
-                </OctantButton>
-              )}
-              {listActions}
-            </div>
+            <div className="pr-page__list-actions">{listActions}</div>
             {ready && !firstLoad ? (
               <div className="pr-page__list-sub">
                 {countCopy === undefined ? null : (
