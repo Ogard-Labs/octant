@@ -139,6 +139,19 @@ describe("the prototype host process", () => {
     expect(sent).toEqual([{ kind: "ready" }]);
   });
 
+  it("waits for a dead proxy that Chromium applies a moment after it is set, and serves nothing until then", async () => {
+    const made = fakeSession();
+    let reads = 0;
+    made.session.resolveProxy.mockImplementation(async () => {
+      reads += 1;
+      return reads <= 2 ? "DIRECT" : NO_ROUTE;
+    });
+    const { host: started, sent } = host(made.session);
+    await started.start();
+    expect(sent).toEqual([{ kind: "ready" }]);
+    expect(made.session.serve).toHaveBeenCalledOnce();
+  });
+
   it("is unavailable, and serves nothing, when a name still resolves or an address would leave", async () => {
     const resolving = fakeSession({ resolves: true });
     const named = host(resolving.session);
