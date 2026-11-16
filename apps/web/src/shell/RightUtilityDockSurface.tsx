@@ -1,18 +1,10 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { X } from "../ui/icons";
-import {
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-  type DragEvent,
-  type ReactNode,
-  type Ref,
-} from "react";
+import { useContext, useEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import { DockShelf, type DockShelfEntry } from "./DockShelf";
 import { DockTiles, type DockTileContent } from "./DockTiles";
 import { DockToolButtons, type DockToolButtonsProps } from "./DockToolButtons";
-import { endDockToolDrag, useDraggedDockTool } from "./dockToolDrag";
+import { registerDockDropTarget, useDraggedDockTool, type DockDragPoint } from "./dockToolDrag";
 import { DockToolIcon } from "./dockToolIcons";
 import { PageFavicon } from "./PageFavicon";
 import { PanelTab, PanelTabStrip } from "./PanelTabs";
@@ -215,7 +207,11 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     environmentTab !== undefined &&
     shelfDrawn &&
     !(props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface");
-  const draggedTool = useDraggedDockTool();
+  const drag = useDraggedDockTool();
+  // A tool dragged from its button in the title band; a pane dragged by its
+  // bar lands among the tiles, which take it themselves.
+  const draggedTool = drag?.source === "button" ? drag.tabId : undefined;
+  const dropShield = useRef<HTMLDivElement>(null);
   const [dropZone, setDropZone] = useState<"beside" | "below" | "replace">();
   const root = useRef<HTMLDivElement>(null);
   // Hiding a tile or closing a tool unmounts the control that held keyboard
@@ -282,20 +278,8 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       for (const timer of timers) clearTimeout(timer);
     };
   }, [refocus]);
-  // A drag that ends where no dragend reaches (its source unmounted) must not
-  // leave the drop target over the dock.
   useEffect(() => {
-    if (draggedTool === undefined) return;
-    const clear = () => {
-      endDockToolDrag();
-      setDropZone(undefined);
-    };
-    window.addEventListener("dragend", clear);
-    window.addEventListener("drop", clear);
-    return () => {
-      window.removeEventListener("dragend", clear);
-      window.removeEventListener("drop", clear);
-    };
+    if (draggedTool === undefined) setDropZone(undefined);
   }, [draggedTool]);
   const surfaceOfTab = (tabId: string): RightUtilityDockSurfaceId | undefined => {
     const tab = props.tabs.find((candidate) => candidate.id === tabId);
@@ -309,25 +293,51 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       ? {}
       : { minimised: [...tiles.minimised] }),
   };
-  function zoneAt(event: DragEvent<HTMLElement>): "beside" | "below" | "replace" {
-    const rect = event.currentTarget.getBoundingClientRect();
+  /** The part of the dock body the pointer is over, or undefined outside it. */
+  const zoneAt = useRef<(point: DockDragPoint) => "beside" | "below" | "replace" | undefined>(
+    () => undefined,
+  );
+  zoneAt.current = (point) => {
+    const rect = dropShield.current?.getBoundingClientRect();
+    if (
+      rect === undefined ||
+      point.clientX < rect.left ||
+      point.clientX > rect.right ||
+      point.clientY < rect.top ||
+      point.clientY > rect.bottom
+    )
+      return undefined;
     const sideways = props.columnsFit !== false;
-    if (sideways && rect.width > 0 && event.clientX - rect.left > (rect.width * 2) / 3)
+    if (sideways && rect.width > 0 && point.clientX - rect.left > (rect.width * 2) / 3)
       return "beside";
-    if (rect.height > 0 && event.clientY - rect.top > (rect.height * 2) / 3) return "below";
+    if (rect.height > 0 && point.clientY - rect.top > (rect.height * 2) / 3) return "below";
     return "replace";
-  }
-  function dropTool(event: DragEvent<HTMLElement>) {
-    event.preventDefault();
-    const id = draggedTool;
-    const zone = zoneAt(event);
-    endDockToolDrag();
-    setDropZone(undefined);
-    if (id === undefined) return;
+  };
+  const dropTool = useRef<(id: string, zone: "beside" | "below" | "replace") => void>(
+    () => undefined,
+  );
+  dropTool.current = (id, zone) => {
     if (zone === "beside") tiles?.onShowBeside(id);
     else if (zone === "below") tiles?.onShowBelow(id);
     else props.onSelectSurface(id);
-  }
+  };
+  useEffect(
+    () =>
+      registerDockDropTarget({
+        over: (dragged, point) => {
+          if (dragged.source !== "button") return;
+          setDropZone(point === undefined ? undefined : zoneAt.current(point));
+        },
+        drop: (dragged, point) => {
+          if (dragged.source !== "button") return false;
+          const zone = zoneAt.current(point);
+          if (zone === undefined) return false;
+          dropTool.current(dragged.tabId, zone);
+          return true;
+        },
+      }),
+    [],
+  );
   /**
    * A paged tool's pages (the Browser's pages, the Terminal's sessions) are its
    * pane's bar, alone or among tiles. Every Browser and Terminal has the row,
@@ -558,15 +568,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   );
   const dragShield =
     draggedTool !== undefined && tiles !== undefined && !tiles.narrow ? (
-      <div
-        className="dock-tiles__drag-shield"
-        onDragLeave={() => setDropZone(undefined)}
-        onDragOver={(event) => {
-          event.preventDefault();
-          setDropZone(zoneAt(event));
-        }}
-        onDrop={dropTool}
-      >
+      <div className="dock-tiles__drag-shield" ref={dropShield}>
         {dropZone === undefined || dropZone === "replace" ? null : (
           <div
             aria-hidden="true"

@@ -17,6 +17,13 @@ import {
 } from "../browser/useNativeBrowserSurface";
 import { DockBarRow, TILE_CONTROLS, useFoldedControls } from "./DockBarRow";
 import { DockBarContext, useDockBarSlot } from "./dockBarControls";
+import {
+  cancelDockToolDrag,
+  pressDockToolDrag,
+  registerDockDropTarget,
+  useDraggedDockTool,
+  type DockDragPoint,
+} from "./dockToolDrag";
 import { IconButton } from "./IconButton";
 import {
   OctantMenuItem,
@@ -112,6 +119,11 @@ export interface DockTilesProps {
   readonly onResizeColumns: (shares: ReadonlyArray<number>) => void;
   readonly onResizeColumn: (columnIndex: number, shares: ReadonlyArray<number>) => void;
 }
+
+/** Where a dragged pane lands. */
+type Landing =
+  | { readonly kind: "edge"; readonly tabId: string; readonly edge: DockTileEdge }
+  | { readonly kind: "bottom" };
 
 type Preview =
   | { readonly kind: "columns"; readonly shares: ReadonlyArray<number> }
@@ -320,7 +332,8 @@ export function DockTiles(props: DockTilesProps) {
   const [preview, setPreview] = useState<Preview>();
   const [dragging, setDragging] = useState(false);
   // The tile whose bar is being dragged, and the edge it is over.
-  const [moving, setMoving] = useState<string>();
+  const drag = useDraggedDockTool();
+  const moving = drag?.source === "bar" ? drag.tabId : undefined;
   const [over, setOver] = useState<{ readonly tabId: string; readonly edge: DockTileEdge }>();
   const [stacked, setStacked] = useState(false);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -356,10 +369,12 @@ export function DockTiles(props: DockTilesProps) {
   // A drag whose divider has gone, or whose tiles changed under it, must not
   // leave the shield up (the native page stays out of the window) or a preview
   // drawn that no commit will ever replace.
+  const movingNow = useRef(moving);
+  movingNow.current = moving;
   useEffect(() => {
     setDragging(false);
     setPreview(undefined);
-    setMoving(undefined);
+    if (movingNow.current !== undefined) cancelDockToolDrag();
     setOver(undefined);
   }, [shape]);
   const sideways = props.columnsFit !== false;
@@ -374,8 +389,64 @@ export function DockTiles(props: DockTilesProps) {
       ? bottomZoneBox()
       : undefined;
   useEffect(() => {
-    if (moving === undefined) setOverBottom(false);
+    if (moving !== undefined) return;
+    setOver(undefined);
+    setOverBottom(false);
   }, [moving]);
+  // Where a dragged pane would land for a pointer position: an edge of another
+  // tile, or the bottom panel. The zones are hit by their rectangles, since the
+  // dragged bar holds the pointer for the length of the drag.
+  const placeAt = useRef<(tabId: string, point: DockDragPoint) => Landing | undefined>(
+    () => undefined,
+  );
+  placeAt.current = (tabId, point) => {
+    const inside = (rect: DOMRect) =>
+      point.clientX >= rect.left &&
+      point.clientX <= rect.right &&
+      point.clientY >= rect.top &&
+      point.clientY <= rect.bottom;
+    const bottom = document.querySelector("[data-dock-bottom-zone]");
+    if (bottom !== null && inside(bottom.getBoundingClientRect())) return { kind: "bottom" };
+    const zones = area.current?.querySelectorAll<HTMLElement>("[data-dock-place-zone]") ?? [];
+    for (const zone of Array.from(zones)) {
+      const rect = zone.getBoundingClientRect();
+      const target = zone.dataset.dockPlaceZone;
+      if (target === undefined || !inside(rect)) continue;
+      const edge = edgeAt(rect, point, sideways);
+      return allowed(tabId, target, edge) ? { kind: "edge", tabId: target, edge } : undefined;
+    }
+    return undefined;
+  };
+  const land = useRef<(tabId: string, landing: Landing) => void>(() => undefined);
+  land.current = (tabId, landing) => {
+    if (landing.kind === "bottom") props.bottomPanel?.onMove(tabId);
+    else props.onPlaceTile(tabId, landing.tabId, landing.edge);
+  };
+  useEffect(
+    () =>
+      registerDockDropTarget({
+        over: (dragged, point) => {
+          if (dragged.source !== "bar") return;
+          const landing = point === undefined ? undefined : placeAt.current(dragged.tabId, point);
+          setOverBottom(landing?.kind === "bottom");
+          setOver((current) =>
+            landing?.kind !== "edge"
+              ? undefined
+              : current?.tabId === landing.tabId && current.edge === landing.edge
+                ? current
+                : { tabId: landing.tabId, edge: landing.edge },
+          );
+        },
+        drop: (dragged, point) => {
+          if (dragged.source !== "bar") return false;
+          const landing = placeAt.current(dragged.tabId, point);
+          if (landing === undefined) return false;
+          land.current(dragged.tabId, landing);
+          return true;
+        },
+      }),
+    [],
+  );
 
   const placed = arrange(props.layout, preview, stacked, size);
   const labelOf = (tabId: string | undefined) =>
@@ -406,6 +477,7 @@ export function DockTiles(props: DockTilesProps) {
           if (content === undefined) return null;
           return (
             <Tile
+              tabId={tabId}
               box={box}
               content={content}
               focused={tabId === props.focusedTabId}
@@ -420,12 +492,7 @@ export function DockTiles(props: DockTilesProps) {
                 : { onMinimise: () => props.onMinimiseTile?.(tabId) })}
               moving={tabId === moving}
               onMove={(direction) => props.onMoveTile(tabId, direction)}
-              onDragStart={() => setMoving(tabId)}
               sideways={sideways}
-              onDragEnd={() => {
-                setMoving(undefined);
-                setOver(undefined);
-              }}
               places={placed.tiles.flatMap(({ tabId: otherId }) =>
                 otherId === tabId
                   ? []
@@ -506,9 +573,10 @@ export function DockTiles(props: DockTilesProps) {
             takes the native page out of the window for the length of the drag. */}
         {dragging ? <div aria-hidden="true" className="dock-tiles__resize-shield" /> : null}
         {moving === undefined ? null : (
-          // A drag over a native page never reaches the document, so this
-          // shield (in the overlay selector) takes the page out of the window
-          // for the length of the drag, and each tile takes the drop itself.
+          // A native page is a window-level view over the document: nothing
+          // drawn here shows through it. This shield (in the overlay selector)
+          // takes the page out of the window for the length of the drag, so
+          // the places a pane can land are seen on every tile.
           <div aria-hidden="true" className="dock-tiles__drag-shield">
             {placed.tiles.map(({ tabId, box }) => {
               if (tabId === moving) return null;
@@ -520,37 +588,6 @@ export function DockTiles(props: DockTilesProps) {
                   className="dock-tiles__place-zone"
                   data-dock-place-zone={tabId}
                   key={tabId}
-                  onDragLeave={() =>
-                    setOver((current) => (current?.tabId === tabId ? undefined : current))
-                  }
-                  onDragOver={(event) => {
-                    const next = edgeAt(
-                      event.currentTarget.getBoundingClientRect(),
-                      event,
-                      sideways,
-                    );
-                    if (!allowed(moving, tabId, next)) {
-                      setOver(undefined);
-                      return;
-                    }
-                    event.preventDefault();
-                    setOver((current) =>
-                      current?.tabId === tabId && current.edge === next
-                        ? current
-                        : { tabId, edge: next },
-                    );
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    const next = edgeAt(
-                      event.currentTarget.getBoundingClientRect(),
-                      event,
-                      sideways,
-                    );
-                    setMoving(undefined);
-                    setOver(undefined);
-                    if (allowed(moving, tabId, next)) props.onPlaceTile(moving, tabId, next);
-                  }}
                   style={{
                     left: across.start,
                     top: down.start,
@@ -574,25 +611,17 @@ export function DockTiles(props: DockTilesProps) {
               <div
                 className="dock-tiles__bottom-zone"
                 data-dock-bottom-zone="true"
-                onDragLeave={() => setOverBottom(false)}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  setOverBottom(true);
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  const tabId = moving;
-                  setMoving(undefined);
-                  setOver(undefined);
-                  props.bottomPanel?.onMove(tabId);
-                }}
                 style={bottomZone}
               >
-                {overBottom ? (
-                  <div className="workspace-drop-overlay dock-tiles__place" data-drop-edge="panel">
-                    <span>Bottom panel</span>
-                  </div>
-                ) : null}
+                {/* The zone lies over the thread, away from the panes, so it is
+                    marked for the whole drag and lit while the pointer is in it. */}
+                <div
+                  className="workspace-drop-overlay dock-tiles__place"
+                  data-drop-edge="panel"
+                  data-over={overBottom ? "true" : undefined}
+                >
+                  <span>Bottom panel</span>
+                </div>
               </div>,
               document.body,
             )}
@@ -612,6 +641,7 @@ function bottomZoneBox(): CSSProperties | undefined {
 }
 
 function Tile(props: {
+  readonly tabId: string;
   readonly box: Box;
   readonly content: DockTileContent;
   readonly focused: boolean;
@@ -624,8 +654,6 @@ function Tile(props: {
   /** Places left and right of another pane exist in this window. */
   readonly sideways: boolean;
   readonly onMove: (direction: DockTileMove) => void;
-  readonly onDragStart: () => void;
-  readonly onDragEnd: () => void;
   /** Every placement among the other tiles the menu may offer. */
   readonly places: ReadonlyArray<{
     readonly edge: DockTileEdge;
@@ -656,7 +684,6 @@ function Tile(props: {
     };
   }, []);
   const { host: barHost, items: barItems, leadRef } = useDockBarSlot("tiled");
-  const pressedControl = useRef(false);
   const bar = useRef<HTMLDivElement>(null);
   // Every pane has the one bar, alone or among tiles: the same height, insets
   // and controls, so nothing in a pane moves when a neighbour opens or closes.
@@ -700,23 +727,20 @@ function Tile(props: {
         // The whole bar picks the pane up: its name, a tab's label or its
         // empty run. A press that began on a control (an action, Arrange,
         // Close, a tab's close, a field) is that control's, never a drag.
-        draggable={props.draggable}
-        onDragEnd={props.onDragEnd}
-        onDragStart={(event) => {
-          if (pressedControl.current) {
-            event.preventDefault();
-            return;
-          }
-          // Some engines refuse to start a drag that carries no data.
-          event.dataTransfer.setData("text/plain", content.label);
-          event.dataTransfer.effectAllowed = "move";
-          props.onDragStart();
-        }}
-        onPointerDownCapture={(event) => {
+        data-pane-drag={props.draggable ? "true" : undefined}
+        onPointerDown={(event) => {
+          if (!props.draggable) return;
           const from = event.target instanceof Element ? event.target : null;
-          pressedControl.current =
+          if (
             from?.closest('button:not([role="tab"]), input, select, textarea, [role="menu"]') !==
-            null;
+            null
+          )
+            return;
+          pressDockToolDrag(event, {
+            tabId: props.tabId,
+            source: "bar",
+            label: content.label,
+          });
         }}
         ref={bar}
       >

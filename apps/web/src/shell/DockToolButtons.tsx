@@ -2,7 +2,7 @@ import { Ellipsis, GitPullRequest } from "../ui/icons";
 import { Fragment, useRef, useState, type KeyboardEvent } from "react";
 import { DockToolIcon, dockToolIcon } from "./dockToolIcons";
 import { groupDockTools } from "./dockToolGroups";
-import { endDockToolDrag, startDockToolDrag } from "./dockToolDrag";
+import { pressDockToolDrag } from "./dockToolDrag";
 import type { DockToolButton, DockToolButtonsModel } from "./dockToolButtonsModel";
 import type { DockUtilityLauncherReference } from "./DockUtilityLauncher";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
@@ -157,19 +157,15 @@ function ToolButton(props: {
           data-dock-open={button.open ? "true" : undefined}
           data-dock-tool-item=""
           data-dock-tool={button.id}
-          draggable={draggable ? true : undefined}
+          data-pane-drag={draggable ? "true" : undefined}
           icon={dockToolIcon(button.id)}
           label={button.label}
           onClick={(event) => {
             if (!disabled) props.onPress(button.id, event.currentTarget);
           }}
-          onDragEnd={() => endDockToolDrag()}
-          onDragStart={(event) => {
-            if (dragId === undefined) return;
-            // Some engines refuse to start a drag that carries no data.
-            event.dataTransfer.setData("text/plain", button.label);
-            event.dataTransfer.effectAllowed = "move";
-            startDockToolDrag(dragId);
+          onPointerDown={(event) => {
+            if (!draggable || dragId === undefined) return;
+            pressDockToolDrag(event, { tabId: dragId, source: "button", label: button.label });
           }}
           onKeyDown={(event) => {
             // The menu key is the only keyboard route the browser turns into a

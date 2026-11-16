@@ -635,7 +635,9 @@ describe("tool tiles in the right sidebar", () => {
       "aria-pressed",
       "true",
     );
-    expect(within(row).getByRole("button", { name: "Files" })).not.toHaveAttribute("draggable");
+    expect(within(row).getByRole("button", { name: "Files" })).not.toHaveAttribute(
+      "data-pane-drag",
+    );
     await user.click(within(row).getByRole("button", { name: "Files" }));
     expect(screen.getByText("Live files")).toBeVisible();
     expect(screen.queryByText("Live environment")).not.toBeInTheDocument();
@@ -701,53 +703,96 @@ describe("tool tiles in the right sidebar", () => {
     expect(value()).toBe(50);
   });
 
+  /** A pointer event with a position, which jsdom's own events do not carry. */
+  function pointerAt(
+    kind: "pointerDown" | "pointerMove" | "pointerUp" | "pointerCancel",
+    target: Element,
+    clientX: number,
+    clientY: number,
+  ) {
+    const event = createEvent[kind](target, { button: 0 });
+    Object.defineProperties(event, {
+      clientX: { value: clientX },
+      clientY: { value: clientY },
+      pointerId: { value: 1 },
+    });
+    fireEvent(target, event);
+  }
+
+  /** Presses on a source and travels far enough to be a drag, ending at the point. */
+  function dragTo(source: Element, clientX: number, clientY: number) {
+    pointerAt("pointerDown", source, 10, 10);
+    // The first move past the threshold lifts the pane and draws the zones; the
+    // next one finds the zone under the pointer.
+    pointerAt("pointerMove", document.body, clientX, clientY);
+    pointerAt("pointerMove", document.body, clientX, clientY);
+  }
+
   it("moves a tile when its bar is dragged onto another tile's edge, and shows the edge while over it", async () => {
     render(<TiledDock initial={tiledState()} />);
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
       DOMRect.fromRect({ x: 0, y: 0, width: 100, height: 100 }),
     );
-    const dataTransfer = { setData: vi.fn(), effectAllowed: "" };
     const files = screen.getByRole("region", { name: "Files" });
-    fireEvent.dragStart(files.querySelector(".dock-tile__lead") as Element, { dataTransfer });
+    dragTo(files.querySelector(".dock-tile__lead") as Element, 95, 50);
     const zone = document.querySelector('[data-dock-place-zone="ios-simulator"]') as HTMLElement;
     expect(document.querySelector('[data-dock-place-zone="files"]')).toBeNull();
-    // jsdom has no DragEvent, so the pointer position is put on the event by hand.
-    const at = (type: "dragOver" | "drop") => {
-      const event = createEvent[type](zone);
-      Object.defineProperties(event, { clientX: { value: 95 }, clientY: { value: 50 } });
-      fireEvent(zone, event);
-    };
-    at("dragOver");
     expect(zone.querySelector("[data-drop-edge='right']")).not.toBeNull();
-    at("drop");
+    // A label with the tool's name follows the pointer.
+    expect(document.querySelector(".workspace-drag-preview")).toHaveTextContent("Files");
+    pointerAt("pointerUp", document.body, 95, 50);
     // Files is now the right-hand column; the divider is named for its new order.
     expect(
       await screen.findByRole("separator", { name: "Resize iOS Simulator and Files" }),
     ).toBeInTheDocument();
     expect(document.querySelector(".dock-tiles__drag-shield")).toBeNull();
+    expect(document.querySelector(".workspace-drag-preview")).toBeNull();
   });
 
   it("picks a pane up by its bar but never by one of the bar's controls", () => {
     render(<TiledDock initial={tiledState()} />);
-    const dataTransfer = { setData: vi.fn(), effectAllowed: "" };
     const files = screen.getByRole("region", { name: "Files" });
     const bar = files.querySelector(".dock-tile__bar") as HTMLElement;
-    expect(bar).toHaveAttribute("draggable", "true");
+    expect(bar).toHaveAttribute("data-pane-drag", "true");
+    // The platform's own drag-and-drop is not used: it never began in the
+    // desktop window.
+    expect(bar).not.toHaveAttribute("draggable");
     // A press that began on Close is Close's: no drag starts from it.
     const close = within(files).getByRole("button", { name: "Close Files" });
-    fireEvent.pointerDown(close);
-    fireEvent.dragStart(close, { dataTransfer });
+    pointerAt("pointerDown", close, 10, 10);
+    pointerAt("pointerMove", document.body, 60, 60);
     expect(document.querySelector(".dock-tiles__drag-shield")).toBeNull();
     expect(files).not.toHaveAttribute("data-moving");
-    // The bar's own run lifts the pane, and ending the drag (a drop outside
-    // every zone, or Escape) puts everything back.
-    fireEvent.pointerDown(bar);
-    fireEvent.dragStart(bar, { dataTransfer });
+    pointerAt("pointerUp", document.body, 60, 60);
+    // The bar's own run lifts the pane, and Escape puts everything back.
+    pointerAt("pointerDown", bar, 10, 10);
+    pointerAt("pointerMove", document.body, 60, 60);
     expect(files).toHaveAttribute("data-moving", "true");
     expect(document.querySelector('[data-dock-place-zone="ios-simulator"]')).not.toBeNull();
-    fireEvent.dragEnd(bar, { dataTransfer });
+    fireEvent.keyDown(document.body, { key: "Escape" });
     expect(files).not.toHaveAttribute("data-moving");
     expect(document.querySelector(".dock-tiles__drag-shield")).toBeNull();
+    expect(
+      screen.getByRole("separator", { name: "Resize Files and iOS Simulator" }),
+    ).toBeInTheDocument();
+  });
+
+  it("leaves a pane where it is when its bar is only pressed, or released outside every place", () => {
+    render(<TiledDock initial={tiledState()} />);
+    const files = screen.getByRole("region", { name: "Files" });
+    const bar = files.querySelector(".dock-tile__bar") as HTMLElement;
+    // A press that travels less than the threshold is a click: nothing lifts.
+    pointerAt("pointerDown", bar, 10, 10);
+    pointerAt("pointerMove", document.body, 12, 11);
+    expect(files).not.toHaveAttribute("data-moving");
+    expect(document.querySelector(".dock-tiles__drag-shield")).toBeNull();
+    pointerAt("pointerUp", document.body, 12, 11);
+    // A drag released where no zone is (every rectangle is empty here) moves nothing.
+    pointerAt("pointerDown", bar, 10, 10);
+    pointerAt("pointerMove", document.body, 300, 300);
+    expect(files).toHaveAttribute("data-moving", "true");
+    pointerAt("pointerUp", document.body, 300, 300);
+    expect(files).not.toHaveAttribute("data-moving");
     expect(
       screen.getByRole("separator", { name: "Resize Files and iOS Simulator" }),
     ).toBeInTheDocument();
@@ -760,17 +805,13 @@ describe("tool tiles in the right sidebar", () => {
     const bounds = vi
       .spyOn(HTMLElement.prototype, "getBoundingClientRect")
       .mockReturnValue(DOMRect.fromRect({ x: 0, y: 0, width: 100, height: 100 }));
-    const dataTransfer = { setData: vi.fn(), effectAllowed: "" };
     const canvas = screen.getByRole("region", { name: "Canvas" });
-    fireEvent.dragStart(canvas.querySelector(".dock-tile__bar") as Element, { dataTransfer });
-    const zone = document.querySelector('[data-dock-place-zone="files"]') as HTMLElement;
-    const over = createEvent.dragOver(zone);
     // The pointer is at the far right edge: with columns it would be "right of".
-    Object.defineProperties(over, { clientX: { value: 98 }, clientY: { value: 20 } });
-    fireEvent(zone, over);
+    dragTo(canvas.querySelector(".dock-tile__bar") as Element, 98, 20);
+    const zone = document.querySelector('[data-dock-place-zone="files"]') as HTMLElement;
     expect(zone.querySelector("[data-drop-edge='right']")).toBeNull();
     expect(zone.querySelector("[data-drop-edge='top']")).not.toBeNull();
-    fireEvent.dragEnd(canvas.querySelector(".dock-tile__bar") as Element, { dataTransfer });
+    fireEvent.keyDown(document.body, { key: "Escape" });
     bounds.mockRestore();
   });
 
@@ -795,18 +836,21 @@ describe("tool tiles in the right sidebar", () => {
     );
     try {
       render(<TiledDock bottom={{ surfaces: ["files"], onMove }} initial={tiledState()} />);
-      const dataTransfer = { setData: vi.fn(), effectAllowed: "" };
       // The simulator cannot stand in the panel, so it is offered no zone.
       const simulator = screen.getByRole("region", { name: "iOS Simulator" });
-      fireEvent.dragStart(simulator.querySelector(".dock-tile__bar") as Element, { dataTransfer });
+      dragTo(simulator.querySelector(".dock-tile__bar") as Element, 200, 500);
       expect(document.querySelector("[data-dock-bottom-zone]")).toBeNull();
-      fireEvent.dragEnd(simulator.querySelector(".dock-tile__bar") as Element, { dataTransfer });
+      fireEvent.keyDown(document.body, { key: "Escape" });
       const files = screen.getByRole("region", { name: "Files" });
-      fireEvent.dragStart(files.querySelector(".dock-tile__bar") as Element, { dataTransfer });
+      pointerAt("pointerDown", files.querySelector(".dock-tile__bar") as Element, 10, 10);
+      pointerAt("pointerMove", document.body, 200, 500);
+      // The zone is marked for the whole drag and lit while the pointer is in it.
       const zone = document.querySelector("[data-dock-bottom-zone]") as HTMLElement;
-      fireEvent.dragOver(zone, { dataTransfer });
       expect(within(zone).getByText("Bottom panel")).toBeInTheDocument();
-      fireEvent.drop(zone, { dataTransfer });
+      expect(zone.querySelector("[data-over='true']")).toBeNull();
+      pointerAt("pointerMove", document.body, 200, 500);
+      expect(zone.querySelector("[data-over='true']")).not.toBeNull();
+      pointerAt("pointerUp", document.body, 200, 500);
       expect(onMove).toHaveBeenCalledWith("files");
       expect(document.querySelector("[data-dock-bottom-zone]")).toBeNull();
     } finally {
@@ -932,26 +976,12 @@ describe("tool tiles in the right sidebar", () => {
       .mockImplementation(() => DOMRect.fromRect({ x: 0, y: 0, width: 300, height: 300 }));
     try {
       render(<TiledDock initial={opened("files", "environment")} />);
-      const transfer = { setData: vi.fn(), effectAllowed: "" };
-      expect(toolButton("Files")).toHaveAttribute("draggable", "true");
-      fireEvent.dragStart(toolButton("Files"), { dataTransfer: transfer });
-      // Some engines refuse to start a drag that carries no data.
-      expect(transfer.setData).toHaveBeenCalledWith("text/plain", "Files");
-      expect(transfer.effectAllowed).toBe("move");
+      expect(toolButton("Files")).toHaveAttribute("data-pane-drag", "true");
+      dragTo(toolButton("Files"), 280, 100);
       const shield = document.querySelector(".dock-tiles__drag-shield");
       if (shield === null) throw new Error("Expected the drop target over the dock body.");
-      // jsdom's drag events carry no pointer position, so it is set directly.
-      const dragged = (kind: "dragOver" | "drop") => {
-        const event = createEvent[kind](shield);
-        Object.defineProperties(event, {
-          clientX: { value: 280 },
-          clientY: { value: 100 },
-        });
-        fireEvent(shield, event);
-      };
-      dragged("dragOver");
       expect(shield.querySelector(".dock-tiles__drop")).toHaveAttribute("data-drop-edge", "right");
-      dragged("drop");
+      pointerAt("pointerUp", document.body, 280, 100);
       await waitFor(() => expect(screen.getByRole("region", { name: "Files" })).toBeVisible());
       expect(screen.getByRole("region", { name: "Environment" })).toBeVisible();
       expect(document.querySelector(".dock-tiles__drag-shield")).toBeNull();

@@ -200,27 +200,28 @@ describe("the title band's tool buttons", () => {
     expect(screen.getByRole("button", { name: "More tools" })).toBeInTheDocument();
   });
 
-  it("makes an open tool's button the drag source, carrying its name", () => {
-    const transfer = { setData: vi.fn(), effectAllowed: "" };
+  it("makes an open tool's button a drag source without taking its click", () => {
+    const onPress = vi.fn();
     render(
       <DockToolButtons
         model={model({
           buttons: [button("files", "Files", { tabId: "files", tabIds: ["files"] })],
         })}
-        onPress={vi.fn()}
+        onPress={onPress}
       />,
     );
     const files = screen.getByRole("button", { name: "Files" });
-    expect(files).toHaveAttribute("draggable", "true");
-    fireEvent.dragStart(files, { dataTransfer: transfer });
-    expect(transfer.setData).toHaveBeenCalledWith("text/plain", "Files");
-    expect(transfer.effectAllowed).toBe("move");
-    fireEvent.dragEnd(files);
+    expect(files).toHaveAttribute("data-pane-drag", "true");
+    // A press that does not travel stays a click on the button.
+    fireEvent.pointerDown(files, { button: 0 });
+    fireEvent.pointerUp(document.body);
+    fireEvent.click(files);
+    expect(onPress).toHaveBeenCalledWith("files", files);
   });
 
   it("does not drag a tool that has no tab, or any tool when the dock has no drop zones", () => {
     const { rerender } = render(<DockToolButtons model={model()} onPress={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "Terminal" })).not.toHaveAttribute("draggable");
+    expect(screen.getByRole("button", { name: "Terminal" })).not.toHaveAttribute("data-pane-drag");
     rerender(
       <DockToolButtons
         dragSource={false}
@@ -228,7 +229,7 @@ describe("the title band's tool buttons", () => {
         onPress={vi.fn()}
       />,
     );
-    expect(screen.getByRole("button", { name: "Files" })).not.toHaveAttribute("draggable");
+    expect(screen.getByRole("button", { name: "Files" })).not.toHaveAttribute("data-pane-drag");
   });
 
   it("renders nothing when no tool is available", () => {

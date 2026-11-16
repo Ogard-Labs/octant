@@ -1519,11 +1519,13 @@
 
 /* A pane is picked up by its bar. While it is dragged it reads lifted (a
    step back in opacity) and nothing else moves until the drop. */
-.dock-tile__bar[draggable="true"] {
+.dock-tile__bar[data-pane-drag="true"] {
   cursor: grab;
+  /* A press that travels is a drag, never a text selection. */
+  user-select: none;
 }
 
-.dock-tile__bar[draggable="true"] :is(button, input, [role="tab"]) {
+.dock-tile__bar[data-pane-drag="true"] :is(button, input, [role="tab"]) {
   cursor: default;
 }
 
@@ -1541,6 +1543,10 @@
 .dock-tiles__bottom-zone {
   position: fixed;
   z-index: 6;
+}
+
+.dock-tiles__bottom-zone > .workspace-drop-overlay:not([data-over="true"]) {
+  opacity: 0.55;
 }
 
 /* A tab dropped on the right third or the lower third becomes a tile there. */
