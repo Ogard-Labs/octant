@@ -117,10 +117,8 @@ export function ComposerContextMeter() {
     fallback === undefined || reported !== undefined ? undefined : bindingLimit(fallback);
   // A window nothing named has no share to draw: the ring stays empty rather
   // than reading a guessed denominator as a full window.
-  const percent =
-    windowModel === undefined
-      ? (reported?.percent ?? limit?.percent ?? 0)
-      : (windowModel.percent ?? 0);
+  const reading = composerContextReading({ snapshot, fallback });
+  const percent = reading.kind === "window" ? reading.percent : (limit?.percent ?? 0);
   const usedPercent = Math.round(Math.max(0, Math.min(100, percent)) * 10) / 10;
   const limitAlert =
     snapshot?.serviceLimits.quota === "exhausted"
@@ -384,26 +382,90 @@ export function composerContextOccupancy(input: {
       readonly label: string;
     }
   | undefined {
+  const reading = composerContextReading(input);
+  if (reading.kind !== "window") return undefined;
+  return {
+    usedTokens: reading.usedTokens,
+    totalTokens: reading.totalTokens,
+    percent: reading.percent,
+    label: reading.label,
+  };
+}
+
+/**
+ * What the host knows about how full a thread's window is: the share against a
+ * named maximum, the used figure alone when no maximum is named, or nothing.
+ * The composer's ring, the dock overview and the Environment strip's Context
+ * section all read this one answer, so they cannot disagree. It never
+ * estimates: a window nothing named has no share, and a thread nothing
+ * reported on has no figure.
+ */
+export type ComposerContextReading =
+  | {
+      readonly kind: "window";
+      readonly usedTokens: number;
+      readonly totalTokens: number;
+      readonly percent: number;
+      readonly label: string;
+      /** The parts the host or the provider reported, without free or reserved room. */
+      readonly segments: ReadonlyArray<ContextWindowSegment>;
+    }
+  | { readonly kind: "used"; readonly usedTokens: number }
+  | { readonly kind: "none" };
+
+export function composerContextReading(input: {
+  readonly snapshot?: ContextInspectorSnapshot | undefined;
+  readonly fallback?: ComposerContextUsageFallback | undefined;
+}): ComposerContextReading {
   if (input.snapshot !== undefined) {
     const model = contextWindowModel(input.snapshot);
     if (model.totalTokens === undefined || model.percent === undefined || model.totalTokens <= 0) {
-      return undefined;
+      // Entries Octant could not count make the used figure a floor, not a reading.
+      return model.usedSource === "unknown"
+        ? { kind: "none" }
+        : { kind: "used", usedTokens: model.usedTokens };
     }
     return {
+      kind: "window",
       usedTokens: model.usedTokens,
       totalTokens: model.totalTokens,
       percent: model.percent,
       label: `${compactTokens(model.usedTokens)} of ${compactTokens(model.totalTokens)}`,
+      segments: heldSegments(model.segments),
     };
   }
-  const reported = input.fallback === undefined ? undefined : reportedWindow(input.fallback);
-  if (reported === undefined) return undefined;
-  return {
-    usedTokens: reported.usedTokens,
-    totalTokens: reported.windowTokens,
-    percent: reported.percent,
-    label: `${compactTokens(reported.usedTokens)} of ${compactTokens(reported.windowTokens)}`,
-  };
+  const fallback = input.fallback;
+  if (fallback === undefined) return { kind: "none" };
+  const reported = reportedWindow(fallback);
+  if (reported !== undefined) {
+    return {
+      kind: "window",
+      usedTokens: reported.usedTokens,
+      totalTokens: reported.windowTokens,
+      percent: reported.percent,
+      label: `${compactTokens(reported.usedTokens)} of ${compactTokens(reported.windowTokens)}`,
+      segments: heldSegments(reported.model.segments),
+    };
+  }
+  return fallback.contextTokens === undefined
+    ? { kind: "none" }
+    : { kind: "used", usedTokens: fallback.contextTokens };
+}
+
+/**
+ * The parts that fill the window. A bare "Used" segment is the whole figure
+ * again, so it is no breakdown.
+ */
+function heldSegments(
+  segments: ReadonlyArray<ContextWindowSegment>,
+): ReadonlyArray<ContextWindowSegment> {
+  const held = segments.filter(
+    (segment) =>
+      (segment.kind === "content" || segment.kind === "overhead") &&
+      segment.tokens !== undefined &&
+      segment.percent !== undefined,
+  );
+  return held.length === 1 && held[0]?.key === "used" ? [] : held;
 }
 
 /**

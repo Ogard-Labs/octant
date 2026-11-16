@@ -19,6 +19,7 @@ import { buildSubagentRows, type SubagentRow } from "../agents/subagentRows";
 import { SubagentProviderMark, useSubagentProviders } from "../agents/subagentProviders";
 import { OctantButton } from "../ui/base/OctantButton";
 import { EnvironmentGroup } from "./EnvironmentGroup";
+import { useEnvironmentSectionFolded, useReportRunning } from "./environmentSections";
 
 /** Running rows shown before "+N more"; the Agents tool holds the rest. */
 const MAX_RUNNING_ROWS = 5;
@@ -72,6 +73,8 @@ export function EnvironmentSubagents(props: {
   const toReview = ended.filter((entry) => subagentNeedsReview(entry)).length;
   const finished = ended.length - toReview;
   const shown = working.slice(0, MAX_RUNNING_ROWS);
+  // The section above this row says "N running" while it is folded.
+  useReportRunning(controller.status === "ready" ? working.length : undefined);
   // Opens with the first run and then stays as the person left it. Following
   // the work both ways closed the group by itself when the last run ended:
   // five rows gone at once, and the result line with them.
@@ -82,7 +85,8 @@ export function EnvironmentSubagents(props: {
   }, [working.length]);
   const open = chosen ?? (working.length > 0 || hadWork);
   // The clock runs only while a row that shows it is on screen.
-  const now = useNow(open && shown.length > 0);
+  const sectionFolded = useEnvironmentSectionFolded();
+  const now = useNow(open && !sectionFolded && shown.length > 0);
 
   return (
     <EnvironmentGroup

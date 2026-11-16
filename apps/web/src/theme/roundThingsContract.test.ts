@@ -132,6 +132,7 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".goal-loop__burn-bar",
   ".dock-card__bar",
   ".environment-move__bar",
+  ".environment-context__meter, .environment-context__mini",
   ".thread-move-frozen__progress",
   ".rail-usage__bar",
   ".plan-usage__bar--smooth",

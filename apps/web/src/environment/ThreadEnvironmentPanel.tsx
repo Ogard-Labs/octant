@@ -1,5 +1,7 @@
 import { Folder, GitBranch } from "../ui/icons";
-import { EnvironmentRow } from "./EnvironmentGroup";
+import { EnvironmentCard, EnvironmentRow } from "./EnvironmentGroup";
+import { EnvironmentContextSection } from "./EnvironmentContextSection";
+import { EnvironmentFoldScope } from "./environmentSections";
 import { DockModuleBoundary } from "../shell/DockModuleBoundary";
 import { OutsideContentRow } from "../composer/OutsideContentNotice";
 import { EnvironmentSuggestedTasks } from "../followUps/FollowUpSuggestionChips";
@@ -24,6 +26,10 @@ export interface ThreadEnvironmentSummaryFacts {
 
 export interface ThreadEnvironmentPanelProps {
   readonly summary: ThreadEnvironmentSummaryFacts;
+  /** The mode the thread is in; a person's folded sections are remembered per mode. */
+  readonly mode?: "chat" | "work" | "code";
+  /** The Project's name, said by the Environment section when it is folded. */
+  readonly projectName?: string | undefined;
   readonly open: boolean;
   readonly active?: boolean;
   /**
@@ -91,28 +97,32 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
         {/* The whole summary stays one sentence for assistive technology;
             the visible parts are its layout. */}
         <span className="visually-hidden">{sentence}</span>
-        <p aria-hidden="true" className="environment-card__caption">
-          Environment
-        </p>
-        {/* The computer is the section's first row, not a section of its own:
-            a label over one row, then a hairline, spent 68px on one fact. */}
-        {props.computer === undefined ? null : (
-          <div className="thread-environment-dock__computer">{props.computer}</div>
-        )}
-        <EnvironmentRow
-          icon={Folder}
-          label={props.summary.identity.label}
-          path={headline.place}
-          title={sentence}
-        />
-        {headline.branch === undefined ? null : (
+        <EnvironmentCard
+          caption="Environment"
+          foldId="environment"
+          summary={props.projectName ?? "This computer"}
+        >
+          {/* The computer is the section's first row, not a section of its own:
+              a label over one row, then a hairline, spent 68px on one fact. */}
+          {props.computer === undefined ? null : (
+            <div className="thread-environment-dock__computer">{props.computer}</div>
+          )}
           <EnvironmentRow
-            detail={props.summary.checkout}
-            icon={GitBranch}
-            label={headline.branch}
-            title={headline.branch}
+            icon={Folder}
+            label={props.summary.identity.label}
+            path={headline.place}
+            title={sentence}
           />
-        )}
+          {headline.branch === undefined ? null : (
+            <EnvironmentRow
+              detail={props.summary.checkout}
+              icon={GitBranch}
+              label={headline.branch}
+              title={headline.branch}
+            />
+          )}
+        </EnvironmentCard>
+        <EnvironmentContextSection />
         {props.headerContent}
       </header>
       <div className="thread-environment-dock__body">
@@ -122,7 +132,13 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
       </div>
     </section>
   );
-  const isolated = <DockModuleBoundary>{content}</DockModuleBoundary>;
+  const isolated = (
+    <DockModuleBoundary>
+      <EnvironmentFoldScope {...(props.mode === undefined ? {} : { mode: props.mode })}>
+        {content}
+      </EnvironmentFoldScope>
+    </DockModuleBoundary>
+  );
   return dockHost === null ? isolated : createPortal(isolated, dockHost);
 }
 

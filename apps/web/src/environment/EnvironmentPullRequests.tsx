@@ -23,6 +23,7 @@ import {
 } from "../code/CodeProjectPullRequests";
 import { OctantButton } from "../ui/base/OctantButton";
 import { EnvironmentGroup } from "./EnvironmentGroup";
+import { useReportSummary } from "./environmentSections";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface EnvironmentPullRequestsProps {
@@ -145,6 +146,17 @@ export function EnvironmentPullRequests(props: EnvironmentPullRequestsProps) {
         : rows.length === 0
           ? "None"
           : `${String(rows.length)} open`;
+  // The Delivery section says this while it is folded; before the first read
+  // answers there is nothing true to say.
+  useReportSummary(
+    view === undefined
+      ? undefined
+      : !connected
+        ? "Not on GitHub"
+        : rows.length === 0
+          ? "No pull requests"
+          : `${String(rows.length)} pull ${rows.length === 1 ? "request" : "requests"}`,
+  );
 
   return (
     <EnvironmentGroup

@@ -119,6 +119,8 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
               ),
             })}
         open={environmentOpen}
+        mode="work"
+        projectName={project?.name}
         summary={{
           identity: projection.identity,
           ...(thread === undefined

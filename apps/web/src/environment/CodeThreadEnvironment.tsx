@@ -37,6 +37,7 @@ import type { CodeAttachmentReference } from "@octant/contracts";
 import { CodeCheckoutProvider } from "./CodeCheckoutContext";
 import { EnvironmentGitGroup } from "./EnvironmentGitGroup";
 import { EnvironmentCard, EnvironmentGroup, EnvironmentRow } from "./EnvironmentGroup";
+import { EnvironmentRunningReport } from "./environmentSections";
 import { EnvironmentExtraFolders } from "./EnvironmentExtraFolders";
 import { EnvironmentPullRequests } from "./EnvironmentPullRequests";
 import { countGroupedLocalServerListenersByScope } from "./localServerGroups";
@@ -249,10 +250,12 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
             })}
         open={environmentOpen}
         headerContent={
-          <section className="environment-checkout" aria-label="Checkout">
-            <p aria-hidden="true" className="environment-card__caption">
-              Changes
-            </p>
+          <EnvironmentCard
+            caption="Changes"
+            className="environment-checkout"
+            foldId="changes"
+            summary={changesSummary(controller.status, controller.observation)}
+          >
             <EnvironmentGitGroup
               {...(freshThreadAction === undefined ? {} : { action: freshThreadAction })}
               {...(controller.errorMessage === undefined
@@ -282,8 +285,10 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
             {props.onOpenWorktrees === undefined ? null : (
               <EnvironmentRow icon={GitFork} label="Worktrees" onClick={props.onOpenWorktrees} />
             )}
-          </section>
+          </EnvironmentCard>
         }
+        mode="code"
+        projectName={props.project?.name}
         summary={{
           identity: projection.identity,
           ...(readyObservation === undefined
@@ -311,7 +316,18 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
         {/* Two captioned cards, one row grammar: what is live on this checkout
             first, then what the thread delivers and what it has cost. */}
         <div className="environment-list">
-          <EnvironmentCard caption="Running">
+          <EnvironmentCard caption="Running" foldId="running">
+            {/* Servers serving this checkout count as running; the section's
+                folded line adds the subagents and a live computer-use session. */}
+            <EnvironmentRunningReport
+              count={
+                !localServersAvailable
+                  ? 0
+                  : runningServerCounts === undefined
+                    ? undefined
+                    : runningServerCounts.currentCheckout
+              }
+            />
             <EnvironmentGroup
               icon={Server}
               onOpenChange={setServersOpen}
@@ -360,7 +376,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
             )}
             <ThreadActivityEnvironment />
           </EnvironmentCard>
-          <EnvironmentCard caption="Delivery">
+          <EnvironmentCard caption="Delivery" foldId="delivery">
             {pullRequestClient === undefined || props.project === undefined ? null : (
               <EnvironmentPullRequests
                 enabled={environmentOpen}
@@ -512,6 +528,25 @@ function deliveryOutcomeLabel(outcome: CodeDeliveryOutcomeKind): string {
   return (
     CODE_DELIVERY_OUTCOME_OPTIONS.find((option) => option.id === outcome)?.label ?? String(outcome)
   );
+}
+
+/**
+ * What the Changes section says when folded: the counts its head already
+ * shows, "Clean", or a word for a repository that cannot be read. Nothing
+ * while the first read is out.
+ */
+function changesSummary(
+  status: ReturnType<typeof useCodeEnvironmentController>["status"],
+  observation: ReturnType<typeof useCodeEnvironmentController>["observation"],
+): string | undefined {
+  if (status === "error") return "Unavailable";
+  if (observation === undefined) return undefined;
+  if (observation.status !== "ready") return "Unavailable";
+  if (observation.changes === "clean") return "Clean";
+  if (observation.insertions === undefined || observation.deletions === undefined) {
+    return "Uncommitted";
+  }
+  return `+${observation.insertions.toLocaleString("en")} \u2212${observation.deletions.toLocaleString("en")}`;
 }
 
 function serverSummary(

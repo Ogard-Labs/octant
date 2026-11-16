@@ -72,6 +72,8 @@ export function ChatThreadEnvironment(props: ChatThreadEnvironmentProps) {
               ),
             })}
         open={environmentOpen}
+        mode="chat"
+        projectName={project?.name}
         summary={{ identity: projection.identity }}
       >
         <ChatEnvironmentFacts
@@ -166,7 +168,7 @@ function ChatEnvironmentCounts(props: {
   return (
     <div className="environment-chat-group">
       <dl>
-        <ChatFact label="Context" value={props.project?.name ?? "Unfiled Chat"} />
+        <ChatFact label="Project" value={props.project?.name ?? "Unfiled Chat"} />
         <ChatFact
           label="Memory"
           value={props.project === undefined ? "Unavailable for unfiled Chat" : "Project-scoped"}

@@ -3195,6 +3195,37 @@ Environment, and hiding one never stops its session. Computer-use approval and
 stop controls stay with its card. It does not duplicate the Agents dock. Missing checkout context
 is neutral explanatory text rather than a warning callout.
 
+**Folding sections, and Context.** Every section title of the strip (Environment,
+Context, Changes, Running, Delivery) is a button that folds its rows away. Folded,
+the section is one row: the title, a small right-pointing chevron straight after
+it, and at the right edge a short summary in the meta ink: the Project's name
+(or "This computer") for Environment; the percent used with a small meter for
+Context; the counts the Changes row shows, "Clean", "Uncommitted" when there are
+changes the host has not counted, or "Unavailable"; "N running"
+(servers serving this checkout, working subagents, a live computer-use session)
+or "Nothing running"; and the pull request state ("N pull requests", "Not on
+GitHub"). A summary appears only when something true is already known, so
+nothing is claimed before a read answers. Open, the strip looks as it did and
+the chevron (pointing down) shows only while the title row is pointed at or
+holds the keyboard, and always on touch. The title row keeps one height. The
+rows stay mounted while folded, so a summary keeps following them, but they
+leave the tab order; no section folds or unfolds by itself (a subagent starting
+under a folded Running changes its summary to "1 running" and nothing else).
+The choice is this device's, kept in local storage per window and per mode and
+never sent to the host; it defaults to all open. The dock overview's
+Environment card is its own summary and does not follow it.
+
+Context sits after Environment. It says how full the thread's context window is
+from what the host or the provider reported, read through the same selector as
+the composer's ring: "N% used" with "used / maximum" at the right, one 4px
+meter (segmented by category in the categorical hues only when categories are
+reported), and one row per reported category (swatch, name, tokens, percent).
+With used tokens but no named maximum it shows the used figure alone, with no
+percent and no meter; with nothing reported it is one meta line saying so, with
+no meter, no zero and no summary. It never estimates. A Compact session button
+sits at its foot where the thread offers one, through the composer's own
+confirmation and host path (maintainer request, 2026-11-16).
+
 **Subagents in Environment.** The Subagents row carries the working, to
 review and done counts. It opens by itself when a subagent starts working and
 then stays as the person left it; it never closes by itself, so the rows and

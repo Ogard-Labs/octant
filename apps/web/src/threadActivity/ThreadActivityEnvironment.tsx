@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 import { PictureInPicture2 } from "../ui/icons";
 import { EnvironmentTile } from "../environment/EnvironmentGroup";
+import { useReportRunning } from "../environment/environmentSections";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface ThreadActivityPreviewState {
@@ -14,6 +15,9 @@ export const ThreadActivityPreviewContext = createContext<ThreadActivityPreviewS
 /** Presentation only: the preview keeps ownership of its sessions and approvals. */
 export function ThreadActivityEnvironment() {
   const preview = useContext(ThreadActivityPreviewContext);
+  // A live computer-use session is what the Running section counts; with no
+  // preview host there can be none.
+  useReportRunning(preview?.available === true ? 1 : 0);
   if (preview === null) return null;
   const action = preview.hidden ? "Show" : "Hide";
   // One row in the rail's rhythm: what it is on the left, what it is doing on
