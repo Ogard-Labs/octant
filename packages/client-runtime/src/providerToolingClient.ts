@@ -8,6 +8,11 @@ import {
   type ProviderToolingApplyRequest,
   type ProviderToolingRequest,
 } from "@octant/contracts";
+import {
+  McpPlanReadOnlyResult,
+  McpPlanReadOnlySettings,
+  type McpPlanReadOnlyCommand,
+} from "@octant/contracts/mcp-plan-read-only";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ProviderToolingClientOptions {
@@ -41,6 +46,13 @@ export interface ProviderToolingClient {
   apply(request: ProviderToolingApplyRequest): Promise<ProviderToolingApplyResult>;
   /** Drops a change that was shown and not run, and deletes any secret held for it. */
   cancel(planId: string): Promise<ProviderToolingCancelResult>;
+  /**
+   * The provider MCP servers the person marked "Read-only — allowed in Plan".
+   * Unlike the commands above, a device the person paired may read and change
+   * these marks.
+   */
+  planReadOnly(): Promise<McpPlanReadOnlySettings>;
+  setPlanReadOnly(command: McpPlanReadOnlyCommand): Promise<McpPlanReadOnlyResult>;
 }
 
 export function createProviderToolingClient(
@@ -50,6 +62,7 @@ export function createProviderToolingClient(
     path: string,
     body: unknown,
     decode: (value: unknown) => A,
+    method: "GET" | "POST" = "POST",
   ): Promise<A> => {
     let url: URL;
     try {
@@ -64,12 +77,12 @@ export function createProviderToolingClient(
     let response: Response;
     try {
       response = await fetch(url.toString(), {
-        method: "POST",
+        method,
         headers: {
-          "content-type": "application/json",
+          ...(method === "POST" ? { "content-type": "application/json" } : {}),
           "x-octant-window-capability": options.windowCapability,
         },
-        body: JSON.stringify(body),
+        ...(method === "POST" ? { body: JSON.stringify(body) } : {}),
       });
     } catch {
       throw new ProviderToolingClientFailure("Provider tooling is unavailable.", 0);
@@ -88,6 +101,8 @@ export function createProviderToolingClient(
   const decodePlan = decodeHostAnswer(ProviderToolingPlanResult);
   const decodeApply = decodeHostAnswer(ProviderToolingApplyResult);
   const decodeCancel = decodeHostAnswer(ProviderToolingCancelResult);
+  const decodePlanReadOnly = decodeHostAnswer(McpPlanReadOnlySettings);
+  const decodePlanReadOnlyResult = decodeHostAnswer(McpPlanReadOnlyResult);
   return {
     list: (providerInstanceId) =>
       send("/api/provider-tooling/list", { providerInstanceId }, decodeList),
@@ -95,15 +110,16 @@ export function createProviderToolingClient(
       send("/api/provider-tooling/plan", { providerInstanceId, request }, decodePlan),
     apply: (request) => send("/api/provider-tooling/apply", request, decodeApply),
     cancel: (planId) => send("/api/provider-tooling/cancel", { planId }, decodeCancel),
+    planReadOnly: () => send("/api/mcp-plan-read-only", undefined, decodePlanReadOnly, "GET"),
+    setPlanReadOnly: (command) =>
+      send("/api/mcp-plan-read-only/commands", command, decodePlanReadOnlyResult),
   };
 }
 
 function isRefusal(value: unknown): boolean {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as Record<string, unknown>).status === "refused"
-  );
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return record.status === "refused" || record.kind === "mcp-plan-read-only-refused";
 }
 
 function readError(value: unknown): string | undefined {

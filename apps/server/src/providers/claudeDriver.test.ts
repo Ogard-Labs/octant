@@ -39,6 +39,7 @@ import type {
 import {
   CLAUDE_MEMORY_WRITE_REFUSAL,
   CLAUDE_PLAN_CAPTURED_MESSAGE,
+  CLAUDE_PLAN_MCP_SERVER_REFUSAL,
   claudeExecutionOptions,
   claudeSandboxSettings,
   claudeFileToolSecretRefusal,
@@ -53,7 +54,11 @@ import {
   type ClaudeEnvironmentScope,
   type ClaudeEnvironmentScopeOptions,
 } from "./claudeEnvironment";
-import { claudeLoginKeychainPath, type ClaudeProcessPort } from "./claudeProcess";
+import {
+  claudeLoginKeychainPath,
+  claudePlanRunsCommands,
+  type ClaudeProcessPort,
+} from "./claudeProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import { draftGitText } from "../code/codeGitDraftService";
 import { makeContextSummaryGenerator } from "../context/contextSummaryGenerator";
@@ -232,6 +237,7 @@ function harness(
     readonly runtimeVersion?: string;
     readonly artifactDelivery?: () => boolean;
     readonly ownMemory?: () => boolean;
+    readonly planMcpServers?: () => ReadonlyArray<string>;
     readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
     readonly authorityNow?: () => number;
     readonly maxTrackedToolUses?: number;
@@ -386,6 +392,7 @@ function harness(
         ? {}
         : { artifactDelivery: options.artifactDelivery }),
       ...(options.ownMemory === undefined ? {} : { ownMemory: options.ownMemory }),
+      ...(options.planMcpServers === undefined ? {} : { planMcpServers: options.planMcpServers }),
       ...(options.gitIdentity === undefined ? {} : { gitIdentity: options.gitIdentity }),
       ...(options.runtimeNetwork === undefined ? {} : { runtimeNetwork: options.runtimeNetwork }),
       ...(options.authorityNow === undefined ? {} : { authorityNow: options.authorityNow }),
@@ -783,8 +790,8 @@ describe("Claude execution policy", () => {
       ],
       fullToolSet: false,
     });
-    // A Code Plan turn runs read-only commands only where its Seatbelt profile
-    // can name the programs; Chat has no shell, and Work never runs in Plan.
+    // A Code Plan turn runs read-only commands only where its sandbox can hold
+    // the shell; Chat has no shell, and Work never runs in Plan.
     expect(claudeExecutionOptions("plan", false, "code", "darwin").tools).toEqual([
       "Read",
       "Glob",
@@ -797,8 +804,12 @@ describe("Claude execution policy", () => {
       "TaskGet",
       "Bash",
     ]);
+    // Linux holds each command in a nested capsule where the host can build one.
+    expect(claudeExecutionOptions("plan", false, "code", "linux").tools.includes("Bash")).toBe(
+      claudePlanRunsCommands("linux"),
+    );
     for (const [mode, platform] of [
-      ["code", "linux"],
+      ["code", "win32"],
       ["chat", "darwin"],
       ["work", "darwin"],
     ] as const) {
@@ -4794,6 +4805,51 @@ describe("Claude artifact delivery", () => {
       } finally {
         await acquired.close();
       }
+    }
+  });
+
+  it("asks in Plan about a call to an account MCP server the person marked and refuses one they did not", async () => {
+    const f = harness("subscription", "current-session", {
+      planMcpServers: () => ["docs-search"],
+    });
+    const acquired = await acquire(f.driver, "code");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "plan",
+          nativeSetup: {
+            subagents: true,
+            webTools: true,
+            skills: true,
+            toolServers: false,
+            hooks: false,
+            projectCode: false,
+          },
+        }),
+      );
+      const open = f.opens.at(-1)!;
+      expect(open.planMcpServers).toEqual(["docs-search"]);
+      const signal = new AbortController().signal;
+      const answer = (toolName: string, toolUseId: string) =>
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName,
+          input: { query: "x" },
+          toolUseId,
+          signal,
+        });
+      await expect(answer("mcp__docs-search__query", "mcp-marked")).resolves.toEqual({
+        behavior: "ask",
+      });
+      await expect(answer("mcp__linear__search", "mcp-unmarked")).resolves.toEqual({
+        behavior: "deny",
+        message: CLAUDE_PLAN_MCP_SERVER_REFUSAL,
+      });
+    } finally {
+      await acquired.close();
     }
   });
 

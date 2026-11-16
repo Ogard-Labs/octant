@@ -89,7 +89,7 @@ import {
   type ClaudePendingQuestion,
 } from "./claudeEventMapper";
 import { CLAUDE_TASK_TOOLS, ClaudeTaskList, readClaudeStoredTaskList } from "./claudeTaskList";
-import { providerOwnMemoryLaunches } from "@octant/domain";
+import { planReadOnlyToolServers, providerOwnMemoryLaunches } from "@octant/domain";
 import {
   canonicalClaudeAccountDirectory,
   claudeArtifactLaunchEnvironment,
@@ -512,6 +512,20 @@ function claudeNativeToolAnswer(
     return "ask";
   }
   return undefined;
+}
+
+/** Claude's answer to a Plan call of an account MCP server the person did not mark. */
+export const CLAUDE_PLAN_MCP_SERVER_REFUSAL =
+  'This MCP server is not allowed in Plan. Mark it "Read-only — allowed in Plan" in Settings to use it here.';
+
+/**
+ * The account MCP server a tool belongs to (`mcp__<server>__<tool>`), or
+ * undefined for any other tool and for Octant's own server.
+ */
+function claudeAccountMcpServer(toolName: string): string | undefined {
+  if (!toolName.startsWith("mcp__") || toolName.startsWith("mcp__octant__")) return undefined;
+  const end = toolName.indexOf("__", "mcp__".length);
+  return end <= "mcp__".length ? undefined : toolName.slice("mcp__".length, end);
 }
 
 /**
@@ -1138,6 +1152,11 @@ export interface ClaudeDriverOptions {
    * launch. Absent is off.
    */
   readonly ownMemory?: () => boolean;
+  /**
+   * The account's own MCP servers the person marked "Read-only — allowed in
+   * Plan" on this host, read at each launch. Absent starts none in Plan.
+   */
+  readonly planMcpServers?: () => ReadonlyArray<string>;
   readonly process: ClaudeProcessPort;
   readonly sdk: ClaudeAgentSdkPort;
   /** Where the command sandbox sends its network below Full access; absent keeps the sandbox's own rules. */
@@ -3476,6 +3495,13 @@ function makeConnection(
         // The person's own Claude setup, as the host resolved it for this
         // session; absent on every session before the person turned it on.
         const nativeSetup = input.nativeSetup;
+        // The account's own MCP servers a Plan session starts: the person's
+        // marks, read at each launch, and no other.
+        const planMcpServers = planReadOnlyToolServers({
+          executionPolicy: input.executionPolicy,
+          setup: nativeSetup,
+          marked: options.planMcpServers?.() ?? [],
+        });
         const policyExecutionOptions = claudeExecutionOptions(
           input.executionPolicy,
           input.autoApprove,
@@ -3807,12 +3833,23 @@ function makeConnection(
             return deny("Claude tool authority state was exhausted.");
           }
           expireClaudePreToolGrants(activeState, factories.authorityNow());
+          // In Plan only the account's servers the person marked start. A call
+          // to any other is refused with what to do about it.
+          const planServer = claudeAccountMcpServer(request.toolName);
+          if (
+            input.executionPolicy === "plan" &&
+            planServer !== undefined &&
+            !planMcpServers.includes(planServer)
+          ) {
+            return deny(CLAUDE_PLAN_MCP_SERVER_REFUSAL);
+          }
           if (
             !claudeOffersTool(
               {
                 tools: executionOptions.tools,
                 ...(withheldTools === undefined ? {} : { withheldTools }),
                 ...(nativeSetup === undefined ? {} : { nativeSetup }),
+                planMcpServers,
               },
               request.toolName,
             ) ||
@@ -3991,6 +4028,11 @@ function makeConnection(
             isPlanShellCommand(input.executionPolicy, request.toolName, executionOptions.tools)
               ? settledUnasked()
               : askThroughGrant();
+          // A marked server's call in Plan is put to the person, whatever
+          // their own rules allow: Plan runs nothing that writes unasked.
+          if (input.executionPolicy === "plan" && planServer !== undefined) {
+            return askThroughGrant();
+          }
           // The person's own Claude tools name no file to confine: a subagent
           // start and a skill read act inside the session, and a web read or
           // an MCP server call asks below Full access.
@@ -4212,6 +4254,7 @@ function makeConnection(
               ),
               ...(ownNetwork === undefined ? {} : { network: ownNetwork }),
               ...(keepsOwnMemory ? { ownMemory: true as const } : {}),
+              ...(planMcpServers.length === 0 ? {} : { planMcpServers }),
               model: input.modelId,
               ...(effort === undefined ? {} : { effort }),
               executionPolicy: input.executionPolicy,

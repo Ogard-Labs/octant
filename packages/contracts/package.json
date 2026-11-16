@@ -85,6 +85,7 @@
     "./guardrail-lowering": "./src/guardrailLowering.ts",
     "./provider-tooling": "./src/providerTooling.ts",
     "./protected-files": "./src/protectedFiles.ts",
+    "./mcp-plan-read-only": "./src/mcpPlanReadOnly.ts",
     "./archived-worktrees": "./src/archivedWorktrees.ts",
     "./disk-cleanup": "./src/diskCleanup.ts",
     "./person-memory": "./src/personMemory.ts",
