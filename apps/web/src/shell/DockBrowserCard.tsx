@@ -33,6 +33,8 @@ export function DockBrowserCard(props: {
   readonly onExpand: () => void;
   /** The Browser's pages; choosing one makes it the page the card shows. */
   readonly pages?: DockCardPages;
+  /** The page's name as its tab reads it; the card's own read is the fallback. */
+  readonly pageName?: string;
   readonly pollIntervalMs?: number;
   readonly threadId: BrowserThreadId;
   /** The desktop app's bridge, whose own picture of the page the card prefers. */
@@ -110,7 +112,8 @@ export function DockBrowserCard(props: {
   const waitingForDesktop =
     capture !== undefined && surfaceContextId !== undefined && !desktopPicture.answered;
   const waitingForServer = props.client !== undefined && snapshot === undefined;
-  const title = observation?.title ?? hostOf(observation?.url) ?? "Browser";
+  // The dock names the page the same way its tab does (live title first).
+  const title = props.pageName ?? observation?.title ?? hostOf(observation?.url) ?? "Browser";
   // A signed-in page acts as the person's account, so the card names the
   // profile it lives in beside the page.
   const profile = profileNameOf(snapshot?.context?.policy.profile);

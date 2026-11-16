@@ -4,7 +4,16 @@ import {
   BrowserAutomationClientFailure,
   type BrowserAutomationClient,
 } from "@octant/client-runtime/browser-automation-client";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -12,6 +21,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { threadImageOffers } from "../composer/threadImageOffers";
 import { BrowserWorkspace, RENDERER_OVERLAY_SELECTOR } from "./BrowserWorkspace";
 import { boundsInsideViewport } from "./useNativeBrowserSurface";
+import {
+  browserTabPageOf,
+  publishBrowserTabPage,
+  resetBrowserTabPages,
+  useBrowserTabPages,
+} from "./browserTabPages";
 
 /** The toolbar's trailing more menu holds the actions that have no button of their own. */
 async function openMore(): Promise<void> {
@@ -210,6 +225,32 @@ function stubNativeSurfaceDom(): () => void {
 }
 
 describe("BrowserWorkspace", () => {
+  it("keeps the dock's name for a tab while its pane is still loading", () => {
+    resetBrowserTabPages();
+    const browser = client();
+    browser.inspectThread = vi.fn(() => new Promise<never>(() => undefined)) as never;
+    const tab = {
+      kind: "browser",
+      id: "90000000-0000-4000-8000-000000000010",
+      mode: "work",
+      title: "Browser",
+      threadId,
+    } as const;
+    publishBrowserTabPage(String(threadId), "dock-tab", {
+      title: "Earned",
+      url: "https://www.example.org/",
+    });
+    const view = render(
+      <BrowserWorkspace client={browser} dockTabId="dock-tab" tab={tab as never} />,
+    );
+    const stored = renderHook(() => useBrowserTabPages());
+    expect(browserTabPageOf(stored.result.current, String(threadId), "dock-tab")?.title).toBe(
+      "Earned",
+    );
+    view.unmount();
+    resetBrowserTabPages();
+  });
+
   // Opening a page records it as recent; a later test must not start from it.
   afterEach(() => globalThis.localStorage.clear());
 

@@ -18,7 +18,7 @@ import type { ProjectId } from "@octant/contracts/projects";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import type { buildModelPickerGroups } from "@octant/domain";
 import type { SideChatSidecar } from "@octant/contracts";
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo } from "react";
 import { useMinuteTick } from "../polling/useMinuteTick";
 import type { AgentRunViewRequest } from "../agents/AgentRunHierarchy";
 import type { createChatReadCursorStore } from "../chat/useChatController";
@@ -30,7 +30,13 @@ import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 import { modelDisplayName } from "../providers/providerModelLabel";
 import type { ProviderController } from "../providers/useProviderController";
 import { BottomUtilityPanel } from "../shell/BottomUtilityPanel";
-import { browserPageHost, DockBrowserCard } from "../shell/DockBrowserCard";
+import { DockBrowserCard } from "../shell/DockBrowserCard";
+import {
+  browserTabName,
+  browserTabPageOf,
+  forgetClosedBrowserTabs,
+  useBrowserTabPages,
+} from "../browser/browserTabPages";
 import { PageFavicon } from "../shell/PageFavicon";
 import { dockShelfEntries, type DockShelfEntry } from "../shell/DockShelf";
 import type { DockCardControls } from "../shell/RightUtilityDockSurface";
@@ -157,6 +163,8 @@ export interface DockContainerProps {
   readonly codeThreadView?: CodeThreadView;
   readonly contextSnapshot?: ContextInspectorSnapshot;
   readonly displayedDockState: ThreadUtilityDockState;
+  /** The thread's stored tabs, dock and bottom panel; absent until its state has loaded. */
+  readonly storedDockTabs?: ReadonlyArray<{ readonly id: string; readonly surface: string }>;
   readonly dockPresentationWidth: number;
   readonly dockPresentedOpen: boolean;
   /** The pull requests the thread is about, listed in More tools. */
@@ -624,12 +632,22 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
       : undefined;
   };
   const pageIcon = (tabId: string): string | undefined => pageObservation(tabId)?.faviconDataUrl;
-  // The tab's name is what the page shows: its title, else its host.
-  const pageTitle = (tabId: string): string | undefined => {
-    const observation = pageObservation(tabId);
-    const title = observation?.title?.trim();
-    return title !== undefined && title !== "" ? title : browserPageHost(observation?.url);
-  };
+  // The tab's name is what the page shows: the pane's live title, else its
+  // host; the server's last read only for a tab whose pane has not reported.
+  const livePages = useBrowserTabPages();
+  const pageThreadId = dockThread?.threadId;
+  // Pruned against the stored tabs: the displayed list leaves out tabs the
+  // bottom panel holds, and a mounted pane would not republish a forgotten name.
+  const storedDockTabs = props.storedDockTabs;
+  useEffect(() => {
+    if (pageThreadId === undefined) return;
+    forgetClosedBrowserTabs(pageThreadId, storedDockTabs);
+  }, [pageThreadId, storedDockTabs]);
+  const pageTitle = (tabId: string): string =>
+    browserTabName(
+      pageThreadId === undefined ? undefined : browserTabPageOf(livePages, pageThreadId, tabId),
+      pageObservation(tabId),
+    );
 
   /** The Browser context of the page a card stands for, when that page has one of its own. */
   function contextOf(entry: DockShelfEntry): string | undefined {
@@ -786,13 +804,14 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
                       key={`browser:${dockThread.threadId}:${contextId ?? ""}`}
                       onClose={controls.onClose}
                       onExpand={controls.onShow}
+                      pageName={pageTitle(entry.tabId)}
                       pages={{
                         label: "Browser pages",
                         items: displayedDockState.tabs
                           .filter((tab) => tab.surface === "browser")
                           .map((tab) => ({
                             id: tab.id,
-                            label: pageTitle(tab.id) ?? "New tab",
+                            label: pageTitle(tab.id),
                             icon: <PageFavicon src={pageIcon(tab.id)} />,
                             current: tab.id === entry.tabId,
                           })),

@@ -367,9 +367,10 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           const favicon = surface === "browser" ? props.pageIcon?.(page.id) : undefined;
           const label =
             surface === "browser" ? (props.pageTitle?.(page.id) ?? "New tab") : page.label;
+          // The close button names the tab as the tab reads, never "Browser 2".
           return (
             <PanelTab
-              closeLabel={`Close ${page.label}`}
+              closeLabel={`Close ${label}`}
               icon={
                 surface === "browser" ? (
                   <PageFavicon src={favicon} />

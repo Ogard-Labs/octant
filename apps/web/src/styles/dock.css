@@ -2057,8 +2057,21 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
 }
 
 /* The pages' row in the Browser's body is a panel tab bar (see .panel-tabs). */
-.dock-browser-pages > .content-tab {
-  flex: 0 1 auto;
+/* A page tab has one fixed width (160px), so a title arriving or changing
+   moves no neighbour and never the close button under the pointer; the label
+   ellipsizes inside it. With too many tabs for the row they still shrink
+   together. The tile bar's own tab rule is as specific, so it is named too. */
+.dock-browser-pages > .content-tab,
+.dock-tile__lead .dock-browser-pages > .content-tab {
+  flex: 0 1 160px;
+  width: 160px;
+  max-width: 160px;
+}
+
+.dock-browser-pages > .content-tab > .content-tab__select,
+.dock-tile__lead .dock-browser-pages > .content-tab > .content-tab__select {
+  flex: 1 1 auto;
+  max-width: none;
 }
 
 .dock-browser-pages__page-body {

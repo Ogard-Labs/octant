@@ -93,7 +93,7 @@ row has one control where it had a name and an icon. Elsewhere it is a small
 icon after the Project (or in the leading cell). Its name is its tooltip and
 its accessible name. It opens one menu above the row from its leading edge,
 drawn as every other menu the row opens: the same edge, corner and
-4px inset, 288px wide and never wider than the line, with rows 30px tall that
+4px inset, 288px wide and never wider than the line, with rows 28px tall that
 answer the pointer across their whole width. A row is its name leading, and at
 the trailing edge its current value in muted ink and its arrow. The level in
 force heads the menu, its name over where it came from ("Matches your
@@ -2482,7 +2482,18 @@ open from the thread header's tool row. Several Browsers are one Browser
 tool: their pages sit in a row of their own at the top of the Browser, with a +
 for a new page, and closing the Browser closes every page. A page opened from
 a new Browser tab (an address, a local server) stays that tab, and the tab
-takes the page's title. The host announces that page as it announces an
+takes the page's title. A Browser tab is named for its page's live title, as
+the pane reports it, else the page's host, and reads "New tab" only while it
+has no page; the dock's tab row, a tile's bar, the minimised card and its
+pages menu and a tab's close label all use that one name, and the server's last
+read of the thread's pages names only a tab whose pane has not reported. The
+title is page-authored text: shown as plain text, trimmed, on one line, with
+control and bidirectional-control characters removed and capped at 200
+characters, and used for nothing but display. A name outlives its pane (a pane
+that has nothing to report never clears it) and goes when the tab leaves the
+thread's stored tabs. Every Browser page tab has one fixed width (160px, the
+label ellipsizing inside it), so a title arriving moves nothing (maintainer
+request, 2026-11-16). The host announces that page as it announces an
 agent's session; an announcement whose every session is already a tab of the
 dock's Browser opens nothing, where it used to open the thread's shared
 Browser tab and leave an empty "New tab" beside the page.

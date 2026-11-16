@@ -2,6 +2,7 @@ import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useBrowserAccountProfiles } from "./useBrowserAccountProfiles";
 import { browserProfileFromChoice, formatBrowserElementSnapshot } from "@octant/domain";
 import { browserProfileLabel } from "./browserProfileCopy";
+import { livePageOf, publishBrowserTabPage } from "./browserTabPages";
 import type { BrowserAgentAvailability } from "@octant/contracts";
 import { agentAvailabilityNote } from "./BrowserAgentStatus";
 import { useElementWidth } from "./useElementWidth";
@@ -189,6 +190,11 @@ export interface BrowserWorkspaceProps {
    * picture goes: a Browser with no thread composer beside it offers nothing.
    */
   readonly canDrawOnPage?: boolean;
+  /**
+   * The dock tab this pane is the page of. With it the pane reports its page's
+   * live title and address, which name the tab in the dock.
+   */
+  readonly dockTabId?: string;
 }
 
 export function BrowserWorkspace(props: BrowserWorkspaceProps) {
@@ -542,6 +548,22 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     if (committedAddress === undefined || !/^https?:/i.test(committedAddress)) return;
     setRecentPages(recordRecentBrowserPage(committedAddress));
   }, [committedAddress]);
+  // The dock names this tab for the page shown here. A page the person drives
+  // natively is known only to the pane, not to the server's last read; title
+  // and address come from the same source so a label never pairs one page's
+  // title with another's address.
+  const livePage = livePageOf({
+    activeContext,
+    native: nativeContext ? nativeState : undefined,
+    observation: snapshot?.observation,
+  });
+  const liveTitle = livePage?.title;
+  const liveAddress = livePage?.url;
+  const reportThreadId = props.tab.threadId === undefined ? undefined : String(props.tab.threadId);
+  useEffect(() => {
+    if (props.dockTabId === undefined || reportThreadId === undefined) return;
+    publishBrowserTabPage(reportThreadId, props.dockTabId, { title: liveTitle, url: liveAddress });
+  }, [liveAddress, liveTitle, props.dockTabId, reportThreadId]);
   const shownFavicon = snapshot?.observation?.faviconDataUrl;
   useEffect(() => {
     if (committedAddress !== undefined && shownFavicon !== undefined)

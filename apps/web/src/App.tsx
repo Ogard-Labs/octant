@@ -1672,6 +1672,18 @@ function LaunchedShell(
     dockThreadKey === undefined
       ? fallbackDockState
       : threadUtilityDockState(dockStatesByThread, dockThreadKey);
+  // Every tab the thread holds, in the dock and in the bottom panel, for the
+  // dock to forget the names of closed Browser tabs; absent until a state exists.
+  const storedDockTabs = useMemo(
+    () =>
+      dockThreadKey === undefined || !dockStatesByThread.has(dockThreadKey)
+        ? undefined
+        : [
+            ...dockState.tabs,
+            ...threadUtilityDockState(bottomPanelStatesByThread, dockThreadKey).tabs,
+          ],
+    [bottomPanelStatesByThread, dockState, dockStatesByThread, dockThreadKey],
+  );
   // One drag pipeline for pane grips and sidebar rows. A sidebar row of
   // another Project of this mode lands as its own pane; the host resolves that
   // pane's Project and judges every call made from it.
@@ -8955,6 +8967,7 @@ function LaunchedShell(
                         ? {}
                         : { contextSnapshot: contextController.snapshot })}
                       displayedDockState={displayedDockState}
+                      {...(storedDockTabs === undefined ? {} : { storedDockTabs })}
                       dockPresentationWidth={dockPresentationWidth}
                       dockPresentedOpen={dockPresentedOpen}
                       dockReferences={dockReferences}

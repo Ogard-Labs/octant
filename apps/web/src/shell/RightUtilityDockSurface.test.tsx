@@ -100,7 +100,7 @@ describe("the right sidebar surface", () => {
     expect(dockStylesheet).not.toContain("--oct-radius-xs");
     expect(ruleBody(dockStylesheet, ".dock-tool-strip__tab")).not.toMatch(/overflow:\s*hidden/);
   });
-  it("shows several Browsers as one Browser tool with a row of pages named for what they show", async () => {
+  it("shows several Browsers as one Browser tool with a row of pages and close buttons named for what they show", async () => {
     const user = userEvent.setup();
     const onOpenTab = vi.fn();
     const onSelectSurface = vi.fn();
@@ -124,7 +124,7 @@ describe("the right sidebar surface", () => {
       "aria-selected",
       "true",
     );
-    expect(within(pages).getByRole("button", { name: "Close Browser 2" })).toBeInTheDocument();
+    expect(within(pages).getByRole("button", { name: "Close Octant docs" })).toBeInTheDocument();
     expect(screen.getByText("Live Browser 2")).toBeVisible();
     await user.click(within(pages).getByRole("tab", { name: "New tab" }));
     expect(onSelectSurface).toHaveBeenCalledWith("browser-1");

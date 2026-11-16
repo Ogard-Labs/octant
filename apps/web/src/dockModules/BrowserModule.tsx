@@ -38,6 +38,7 @@ export default function BrowserModule(props: Props) {
   return (
     <BrowserWorkspace
       canDrawOnPage
+      dockTabId={props.utilityTabId ?? "browser"}
       client={props.browserAutomationClient}
       {...(props.onAgentBrowserRecovery === undefined
         ? {}
