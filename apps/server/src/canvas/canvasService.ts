@@ -61,6 +61,7 @@ import {
   type CanvasDefinition,
   type CanvasProvenance,
   type CanvasWorkspaceScope,
+  type EventActor,
   type UtcTimestamp,
 } from "@octant/contracts";
 import {
@@ -921,6 +922,8 @@ export class CanvasService {
     requestInput: unknown,
     context: CanvasAuthorizationContext,
     project: CanvasProjectRecord | undefined,
+    /** A device the host's own person paired, which the journal names; absent, the person here. */
+    deviceActor?: EventActor,
   ): CanvasHtmlImportResult {
     let request: CanvasHtmlImportRequest;
     try {
@@ -965,6 +968,7 @@ export class CanvasService {
     const opened = this.#open(create, context, project, {
       blocks: [page.block],
       importedPage: true,
+      ...(deviceActor === undefined ? {} : { deviceActor }),
     });
     if (opened.kind === "denied") return opened;
     return decodeCanvasHtmlImportResult({
@@ -987,6 +991,8 @@ export class CanvasService {
       readonly designSystem?: CanvasDesignSystem;
       /** The blocks hold a page a person imported from outside Octant. */
       readonly importedPage?: true;
+      /** The device the journal names for the create, when one asked. */
+      readonly deviceActor?: EventActor;
     },
   ): CanvasCreateResult {
     const { blocks, authoredBy, presentation, designSystem } = document;
@@ -1080,6 +1086,7 @@ export class CanvasService {
         version,
         occurredAt: admitted.receipt.createdAt,
         ...(document.importedPage === true ? { importedPage: true } : {}),
+        ...(document.deviceActor === undefined ? {} : { actor: document.deviceActor }),
       });
       this.#projection.applyCreated({ canvasId, version });
       // A created Canvas is a committed version like any other, and since an

@@ -161,6 +161,7 @@ describe("Settings › Agent access", () => {
       grants: async () => ({ kind: "grants", grants: [view] }),
       threads: async () => ({ threads: [] }),
       revoke,
+      command: vi.fn(),
     };
     render(<AgentAccessSettingsSection client={client} projectNames={projectNames} />);
     await userEvent.click(await screen.findByRole("button", { name: "Revoke Home bot" }));
@@ -177,6 +178,7 @@ describe("Started by", () => {
     const client: AgentGrantClient = {
       grants: async () => ({ kind: "grants", grants: [] }),
       revoke: async () => ({ kind: "done" }),
+      command: async () => ({ kind: "done" }),
       threads: async () => ({
         threads: [
           { threadId: "t-agent", grantId: view.grant.grantId, agentName: "Home bot", mode: "code" },
@@ -210,6 +212,7 @@ describe("Sent by", () => {
     const client: AgentGrantClient = {
       grants: async () => ({ kind: "grants", grants: [] }),
       revoke: async () => ({ kind: "done" }),
+      command: async () => ({ kind: "done" }),
       threads: async () => ({
         threads: [],
         turns: [{ threadId: "t-project", turnKey: agentTurn, agentName: "Home bot" }],

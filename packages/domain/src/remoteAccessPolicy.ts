@@ -141,6 +141,9 @@ const LOCAL_HOST_ACTIONS = new Set([
   "desktop.device.rename",
   "provider.credentials.write",
   "provider.credentials.read",
+  // Making or widening an outside agent's grant, its connection codes and
+  // keys: the person's own act, from a local window or a device they paired.
+  "agent-access.manage",
   "provider.oauth.acknowledge-terms",
   "provider.oauth.begin",
   "provider.oauth.refresh",

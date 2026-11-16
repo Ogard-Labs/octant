@@ -42,6 +42,7 @@ import { SECRET_QUESTION_REFUSAL } from "./secretQuestion";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000101");
 const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000102");
+const otherSessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000104");
 const modelId = "anthropic/claude-sonnet" as ProviderModelId;
 const now = "2026-07-15T00:00:00.000Z";
 
@@ -923,7 +924,8 @@ describe("OpenCode driver", () => {
     ["full-access", "external_directory", "allow"],
     ["approval-gated", "edit", "ask"],
     ["approval-gated", "bash", "ask"],
-    ["approval-gated", "task", "ask"],
+    ["approval-gated", "task", "allow"],
+    ["auto-accept-edits", "task", "allow"],
     ["approval-gated", "todowrite", "ask"],
     ["approval-gated", "external_directory", "ask"],
     ["plan", "read", "allow"],
@@ -982,7 +984,8 @@ describe("OpenCode driver", () => {
       expect(work).toEqual(await rulesFor("code"));
       const shell = executionPolicy === "full-access" ? "allow" : "ask";
       expect(evaluatePermission(work, "bash")).toBe(shell);
-      expect(evaluatePermission(work, "task")).toBe(shell);
+      // OpenCode's subagents start unasked at every level outside Plan.
+      expect(evaluatePermission(work, "task")).toBe("allow");
       expect(evaluatePermission(work, "external_directory")).toBe(
         executionPolicy === "full-access" ? "allow" : "ask",
       );
@@ -3126,6 +3129,9 @@ describe("OpenCode driver", () => {
     ["approval-gated", "edit", "ask"],
     ["approval-gated", "bash", "ask"],
     ["approval-gated", "shell", "ask"],
+    ["approval-gated", "task", "allow"],
+    ["approval-gated", "subagent", "allow"],
+    ["auto-accept-edits", "subagent", "allow"],
     ["approval-gated", "external_directory", "ask"],
     ["auto-accept-edits", "edit", "allow"],
     ["auto-accept-edits", "bash", "ask"],
@@ -3416,6 +3422,65 @@ describe("OpenCode driver", () => {
     }
   });
 
+  it.each([
+    ["allows", false, "allow"],
+    ["refuses", true, "deny"],
+  ] as const)(
+    "%s OpenCode's own read of a protected file below Full access when Strict is %s, and always refuses another provider's sign-in",
+    async (_verb, strict, cloudRead) => {
+      const cloud = join(homedir(), ".aws", "credentials");
+      const codexSignIn = join(homedir(), ".codex", "auth.json");
+      const fixture = driverFixture({
+        protectedPaths: { belowFullAccess: [cloud, codexSignIn], atFullAccess: [codexSignIn] },
+      });
+      await Effect.runPromise(
+        Effect.scoped(
+          fixture.driver
+            .acquire({ instanceId, projectRoot: "/tmp/project" })
+            .pipe(
+              Effect.flatMap((connection) =>
+                connection.start({ sessionId, modelId, executionPolicy: "approval-gated", strict }),
+              ),
+            ),
+        ),
+      );
+      const rules = fixture.createdPermissions[0]!.map((rule) => ({
+        action: rule.permission,
+        resource: rule.pattern,
+        effect: rule.action,
+      }));
+      expect(lastMatch(rules, "read", cloud)).toBe(cloudRead);
+      expect(lastMatch(rules, "read", codexSignIn)).toBe("deny");
+      expect(fixture.processInputs[0]?.strict).toBe(strict ? undefined : false);
+    },
+  );
+
+  it("refuses a session outside Strict on an OpenCode process that started Strict", async () => {
+    const fixture = driverFixture();
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
+              Effect.flatMap(() => connection.stop(sessionId)),
+              Effect.flatMap(() =>
+                connection.start({
+                  sessionId: otherSessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                  strict: false,
+                }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(JSON.stringify(exit)).toContain("cannot be widened");
+    expect(fixture.processInputs).toHaveLength(1);
+  });
+
   it("gives 2.x Work mode the shell and child-agent rules Code mode gets at each level", () => {
     for (const policy of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
       expect(betaAgentPermissionRules(policy, "work")).toEqual(
@@ -3424,7 +3489,15 @@ describe("OpenCode driver", () => {
     }
     const rules = betaAgentPermissionRules("approval-gated", "work");
     expect(evaluateV2Permission(rules, "bash")).toBe("ask");
-    expect(evaluateV2Permission(rules, "subagent")).toBe("ask");
+    expect(evaluateV2Permission(rules, "subagent")).toBe("allow");
+  });
+
+  it("keeps a person's own deny of OpenCode subagents over the unasked start outside Plan", () => {
+    const own = [{ action: "task", resource: "*", effect: "deny" as const }];
+    expect(
+      evaluateV2Permission(betaAgentPermissionRules("approval-gated", "code", [], own), "task"),
+    ).toBe("deny");
+    expect(evaluateV2Permission(betaAgentPermissionRules("plan", "code"), "subagent")).toBe("deny");
   });
 
   it("launches a 2.x Code session with its posture and only its own app tool bridge allowed", async () => {
@@ -3838,6 +3911,7 @@ function driverFixture(
     readonly commands?: FixtureCommands;
     /** The command route fails after the turn's context was queued. */
     readonly commandFailure?: "context-queued";
+    readonly protectedPaths?: { belowFullAccess: string[]; atFullAccess: string[] };
   } = {},
 ) {
   const calls: string[] = [];
@@ -4030,6 +4104,12 @@ function driverFixture(
         };
       },
       ...(options.readOwnSetup === undefined ? {} : { readOwnSetup: options.readOwnSetup }),
+      ...(options.protectedPaths === undefined
+        ? {}
+        : {
+            protectedPaths: () =>
+              options.protectedPaths ?? { belowFullAccess: [], atFullAccess: [] },
+          }),
       permissionPersistence: () =>
         typeof options.permissionPersistence === "function"
           ? options.permissionPersistence()

@@ -2223,8 +2223,15 @@ artifact format and copies no other product's identifiers.
   policy's request authorization, before the page is read. The server builds
   the create request itself (blank intent, no sources) and writes the Canvas
   through the same create path, so an import can reach no Project, thread, or
-  mode a create could not. The remote gateway admits neither create nor import
-  for a paired device; both stay local-window actions.
+  mode a create could not. A device the host's own person paired imports too
+  (maintainer decision, 2026-11-12): it has no window context on the host, so
+  the route reads the mode and Project from the request's own workspace scope,
+  checks that Project is active and of that mode (a Chat import in no Project
+  stays owned by the thread it names, which the create policy checks), and
+  journals the create with the device as actor while the version keeps the
+  person as its author. A device the hub's roster introduced has no window
+  context and is refused. A device's plain create, and an import control in
+  the paired browser, are not built.
 - **Bounds and refusals.** The page is at most 256 KiB of UTF-8
   (`CANVAS_HTML_IMPORT_MAX_BYTES`), checked on the host; a body past the
   route's 1 MiB read is answered as too large too. What survives the import

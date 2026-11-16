@@ -1049,6 +1049,8 @@ export function startOctantServer(
       resolveThreadStrict,
       resolveProjectStrict,
       onWindowRevoked,
+      isPairedDeviceScope,
+      isRestrictedDeviceScope,
       desktopLeases,
       installDesktopPreviewRequest,
       workThreadProjection,

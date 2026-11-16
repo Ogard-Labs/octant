@@ -19,6 +19,7 @@ import {
   decodeCodeThreadId,
   decodeProjectId,
   decodeWindowId,
+  type WindowId,
 } from "@octant/contracts";
 import { Effect, Schema } from "effect";
 import {
@@ -114,7 +115,12 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
   Pick<ComputerUseWiring, "desktopLeases" | "installDesktopPreviewRequest"> &
   Pick<
     AuthorityWiring,
-    "agentRunPersistence" | "codeSessionAuthority" | "windowAuthorityStore" | "onWindowRevoked"
+    | "agentRunPersistence"
+    | "codeSessionAuthority"
+    | "windowAuthorityStore"
+    | "onWindowRevoked"
+    | "isPairedDeviceScope"
+    | "isRestrictedDeviceScope"
   > &
   Pick<AgentRunsWiring, "externalContentIngestionStore" | "managedWorktreeReceipts"> &
   Pick<WorkspaceWiring, "projectRootPort" | "projectService"> &
@@ -260,6 +266,8 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         };
       },
     });
+    const personPairedDevice = (scopeId: WindowId): boolean =>
+      deps.isPairedDeviceScope(scopeId) && !deps.isRestrictedDeviceScope(scopeId);
     const projectTerminals =
       sharedTerminals === undefined
         ? undefined
@@ -278,6 +286,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             worktreePreparation,
             childWorktreeSources,
             readProject: persistence.readProject,
+            personPairedDevice,
             canAccessProject: (scopeId, projectId) => {
               const project = persistence.readProject(projectId);
               if (
@@ -285,6 +294,17 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
                 serverProjectStore.workProject(String(projectId)) === undefined
               )
                 return canAccessCodeProject(scopeId, projectId);
+              // A device the host's own person paired has no workspace here; it
+              // reaches every active local Work Project while Work is on, as it
+              // does when it opens a thread there.
+              if (personPairedDevice(scopeId))
+                return (
+                  project?.type === "work" &&
+                  project.lifecycle === "active" &&
+                  enabledModes(
+                    persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+                  ).includes("work")
+                );
               // A Work window reaches the Work Project its own persisted
               // workspace binds, while it is live, as a Code window does.
               return (

@@ -9,6 +9,7 @@ import {
   decodeCodeTerminalId,
   decodeLayoutNodeId,
   decodePaneId,
+  decodeEventActor,
   decodeProjectTerminalCommand,
   decodeProject,
   decodeProjectId,
@@ -17,6 +18,7 @@ import {
   type ProjectId,
   type ProjectTerminalCommand,
   type ProjectTerminalResult,
+  type WindowId,
   type WindowWorkspace,
 } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
@@ -210,6 +212,8 @@ function harness(
     readonly serverProject?: ConstructorParameters<
       typeof ProjectTerminalService
     >[0]["serverProject"];
+    readonly personPairedDevice?: (scope: string) => boolean;
+    readonly deviceQuietMs?: number;
     readonly strict?: boolean;
   } = {},
 ) {
@@ -249,6 +253,13 @@ function harness(
     uuid: () => `91000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
     clock: () => now,
     ...(options.serverProject === undefined ? {} : { serverProject: options.serverProject }),
+    ...(options.personPairedDevice === undefined
+      ? {}
+      : {
+          personPairedDevice: (scope: WindowId) =>
+            options.personPairedDevice?.(String(scope)) === true,
+        }),
+    ...(options.deviceQuietMs === undefined ? {} : { deviceQuietMs: options.deviceQuietMs }),
     ...(options.strict === undefined ? {} : { strict: () => options.strict === true }),
   });
   const events = () =>
@@ -780,7 +791,7 @@ describe("Project terminals", () => {
     expect(terminals.launches[0]?.executionPolicy).toBe("full-access");
   });
 
-  it("refuses a paired device outright, even for a shell its window already owns", async () => {
+  it("refuses a device the host's person did not pair, even for a shell its window already owns", async () => {
     const { service, terminals, events } = harness();
     await service.execute(windowId, "local-window", start());
 
@@ -801,6 +812,94 @@ describe("Project terminals", () => {
     expect(terminals.launches).toHaveLength(1);
     expect(terminals.writes).toEqual([]);
     expect(events()).toHaveLength(1);
+  });
+
+  describe("from a device the host's person paired", () => {
+    const deviceId = "90000000-0000-4000-8000-0000000000de";
+    const deviceScope = decodeWindowId(deviceId);
+    const deviceActor = decodeEventActor({ kind: "remote-device", actorId: deviceId, deviceId });
+    const actors = (journal: Journal) =>
+      journal
+        .replay(decodeReplayCursor({ afterSequence: 0, limit: 100 }))
+        .filter((event) => event.aggregateType === "project-terminal")
+        .map((event) => ({ name: event.eventName, actor: event.actor }));
+
+    it("opens the person's shell in a Project the device reaches, owned by and journaled as that device", async () => {
+      const { service, terminals, journal } = harness({
+        access: (scope, id) => scope === deviceId && id === ids.project,
+        personPairedDevice: (scope) => scope === deviceId,
+      });
+
+      const started = await service.execute(deviceScope, "local-window", start(), deviceActor);
+      const typed = await service.execute(
+        deviceScope,
+        "local-window",
+        { kind: "write", projectId, terminalId, data: "ls\r" },
+        deviceActor,
+      );
+      const stolen = await service.execute(windowId, "local-window", {
+        kind: "write",
+        projectId,
+        terminalId,
+        data: "whoami\r",
+      });
+      await service.execute(deviceScope, "local-window", { kind: "stop", projectId, terminalId });
+
+      expect(started).toMatchObject({ terminal: { state: "running" } });
+      expect(typed.kind).toBe("project-terminal");
+      expect(refusal(stolen)).toBe("unauthorized");
+      expect(terminals.writes).toEqual(["ls\r"]);
+      expect(actors(journal)).toEqual([
+        { name: "code.project-terminal-started@1", actor: deviceActor },
+        { name: "code.project-terminal-ended@1", actor: deviceActor },
+      ]);
+    });
+
+    it("keeps saved actions and worktree setup at a window", async () => {
+      const { service, terminals } = harness({
+        access: () => true,
+        personPairedDevice: (scope) => scope === deviceId,
+      });
+      const suggested = await service.execute(
+        deviceScope,
+        "local-window",
+        { kind: "suggest-actions", projectId },
+        deviceActor,
+      );
+      expect(refusal(suggested)).toBe("unauthorized");
+      expect(terminals.launches).toEqual([]);
+    });
+
+    it("ends the device's shell when the device goes quiet, and when it stops acting as the person", async () => {
+      let paired = true;
+      const quiet = harness({
+        access: () => true,
+        personPairedDevice: (scope) => scope === deviceId,
+        deviceQuietMs: 40,
+      });
+      await quiet.service.execute(deviceScope, "local-window", start(), deviceActor);
+      await vi.waitFor(() => expect(quiet.terminals.terminated).toEqual([ids.terminal]));
+      expect(actors(quiet.journal).at(-1)).toEqual({
+        name: "code.project-terminal-ended@1",
+        actor: deviceActor,
+      });
+
+      const revoked = harness({
+        access: () => true,
+        personPairedDevice: (scope) => paired && scope === deviceId,
+        deviceQuietMs: 60_000,
+      });
+      await revoked.service.execute(deviceScope, "local-window", start(), deviceActor);
+      paired = false;
+      const after = await revoked.service.execute(deviceScope, "local-window", {
+        kind: "read-output",
+        projectId,
+        terminalId,
+        afterCharacters: 0,
+      });
+      expect(refusal(after)).toBe("authority-revoked");
+      expect(revoked.terminals.terminated).toEqual([ids.terminal]);
+    });
   });
 
   it("outside Strict opens the person's own terminal unconfined, in a Code or a Work Project", async () => {
