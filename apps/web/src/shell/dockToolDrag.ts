@@ -97,12 +97,13 @@ export function pressDockToolDrag(
   let started = false;
   let ghost: HTMLElement | undefined;
 
-  const end = (point: DockDragPoint | undefined) => {
+  /** `held`: the drag was given up while the button may still be down. */
+  const end = (point: DockDragPoint | undefined, held = false) => {
     window.removeEventListener("pointermove", onMove, true);
     window.removeEventListener("pointerup", onUp, true);
     window.removeEventListener("pointercancel", onCancel, true);
     window.removeEventListener("keydown", onKeyDown, true);
-    window.removeEventListener("blur", onCancel);
+    window.removeEventListener("blur", onAbandon);
     cancelActive = undefined;
     if (!started) return;
     ghost?.remove();
@@ -119,13 +120,28 @@ export function pressDockToolDrag(
     for (const target of Array.from(targets)) target.over(drag, undefined);
     publish(undefined);
     // The release that ends a drag is not a click on whatever it began on: a
-    // tool's button would close its tool, a tab would be chosen.
+    // tool's button would close its tool, a tab would be chosen. A drag given
+    // up with the button still down (Escape, a window that lost focus) has its
+    // release still to come, so the click is swallowed until that release has
+    // passed; a new press means the old one is over, and nothing of a later
+    // gesture is ever swallowed.
     const swallow = (click: MouseEvent) => {
       click.preventDefault();
       click.stopPropagation();
     };
+    const disarm = () => {
+      window.removeEventListener("click", swallow, true);
+      window.removeEventListener("pointerup", afterRelease, true);
+      window.removeEventListener("pointerdown", disarm, true);
+    };
+    const afterRelease = () => setTimeout(disarm, 0);
     window.addEventListener("click", swallow, true);
-    setTimeout(() => window.removeEventListener("click", swallow, true), 0);
+    if (point !== undefined || !held) {
+      setTimeout(disarm, 0);
+    } else {
+      window.addEventListener("pointerup", afterRelease, true);
+      window.addEventListener("pointerdown", disarm, true);
+    }
   };
   const onMove = (move: PointerEvent) => {
     if (move.pointerId !== pointerId) return;
@@ -154,16 +170,17 @@ export function pressDockToolDrag(
     if (up.pointerId === pointerId) end(up);
   };
   const onCancel = () => end(undefined);
+  const onAbandon = () => end(undefined, true);
   const onKeyDown = (key: KeyboardEvent) => {
     if (key.key !== "Escape" || !started) return;
     key.preventDefault();
     key.stopPropagation();
-    end(undefined);
+    end(undefined, true);
   };
-  cancelActive = onCancel;
+  cancelActive = onAbandon;
   window.addEventListener("pointermove", onMove, true);
   window.addEventListener("pointerup", onUp, true);
   window.addEventListener("pointercancel", onCancel, true);
   window.addEventListener("keydown", onKeyDown, true);
-  window.addEventListener("blur", onCancel);
+  window.addEventListener("blur", onAbandon);
 }
