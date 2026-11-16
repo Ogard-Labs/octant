@@ -71,8 +71,13 @@ describe("Claude instruction files", () => {
     expect(trusted).toBeUndefined();
   });
 
-  it("reads nothing for Chat, which has no folder", async () => {
-    expect(await instructionsFor({ mode: "chat" })).toBeUndefined();
+  it("gives a Chat or Plan turn the account's CLAUDE.md as read-only memory, and Chat no Project file", async () => {
+    const chat = await instructionsFor({ mode: "chat" });
+    expect(chat).toContain("Global: answer briefly.");
+    expect(chat).not.toContain("Project: use tabs.");
+    const plan = await instructionsFor({ mode: "code", executionPolicy: "plan" });
+    expect(plan).toContain("Global: answer briefly.");
+    expect(plan).toContain("Project: use tabs.");
   });
 
   it("skips an oversized file and a symlink out of the Project, saying why", async () => {

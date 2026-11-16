@@ -5,6 +5,8 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   statSync,
@@ -21,7 +23,7 @@ import {
   captureOpenCodeRuntimeConfig,
   createPrivateOpenCodeProfile,
   makeOpenCodeProcessLive,
-  OPENCODE_LINUX_CHAT_PLAN_REFUSAL,
+  OPENCODE_CHAT_PLAN_REFUSAL,
   openCodeServerArgs,
   projectOpenCodeRuntimeConfig,
   probeOpenCodeBinary,
@@ -832,7 +834,7 @@ describe("OpenCodeProcessPort", () => {
     expect(execRules).toEqual(['(allow process-exec (literal "/usr/bin/false"))']);
   });
 
-  it("refuses a 2.x Chat or Plan launch on Linux before anything starts", async () => {
+  it("refuses a 2.x Chat or Plan launch before anything starts where the jail can start no process", async () => {
     const fixture = probeWrapper("v2-ready");
     for (const launch of [
       { mode: "chat", executionPolicy: "plan" },
@@ -852,7 +854,7 @@ describe("OpenCodeProcessPort", () => {
           Effect.scoped(
             makeOpenCodeProcessLive({
               confinement,
-              platform: "linux",
+              platform: "win32",
               runtimeConfigResolver: async () => undefined,
               startupTimeoutMs: 2_000,
             }).start({ binaryPath: fixture.binaryPath, cwd: fixture.root, ...launch }),
@@ -861,9 +863,52 @@ describe("OpenCodeProcessPort", () => {
       );
       expect(refused).toMatchObject({
         category: "unsupported",
-        message: OPENCODE_LINUX_CHAT_PLAN_REFUSAL,
+        message: OPENCODE_CHAT_PLAN_REFUSAL,
       });
       expect(servePrepared).toBe(false);
+    }
+  });
+
+  it("starts a 2.x Chat or Plan launch on Linux in a read-only view that admits processes, with the git stand-in first", async () => {
+    const fixture = probeWrapper("v2-ready");
+    for (const launch of [
+      { mode: "chat", executionPolicy: "approval-gated" },
+      { mode: "code", executionPolicy: "plan" },
+      { mode: "work", executionPolicy: "plan" },
+    ] as const) {
+      let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+      let standinTarget: string | undefined;
+      const confinement: ProcessConfinementPort = {
+        prepare: (input) => {
+          captured = input;
+          const standin = readdirSync(input.temporaryDirectory).find((entry) =>
+            entry.startsWith("git-standin-"),
+          );
+          if (standin !== undefined) {
+            standinTarget = readlinkSync(join(input.temporaryDirectory, standin, "bin", "git"));
+          }
+          return { command: input.executable, args: input.args };
+        },
+      };
+      const observed = await Effect.runPromise(
+        Effect.scoped(
+          makeOpenCodeProcessLive({
+            confinement,
+            platform: "linux",
+            runtimeConfigResolver: async () => undefined,
+            startupTimeoutMs: 2_000,
+          }).start({ binaryPath: fixture.binaryPath, cwd: fixture.root, ...launch }),
+        ),
+      );
+      expect(observed.runtime).toBe("beta");
+      expect(captured, `${launch.mode} ${launch.executionPolicy}`).toMatchObject({
+        writeBoundRoot: false,
+        allowProcessExec: true,
+        allowProcessFork: true,
+      });
+      expect(captured?.extraRules).toBeUndefined();
+      // A repository's own Git configuration never runs from Chat or Plan.
+      expect(standinTarget).toBe("/usr/bin/false");
     }
   });
 

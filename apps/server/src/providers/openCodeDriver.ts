@@ -63,6 +63,7 @@ import {
   type OpenCodeManagedToolsBridge,
 } from "./openCodeManagedTools";
 import {
+  openCodeChatPlanJailStartsProcesses,
   openCodeServesCommandRoutes,
   openCodeServesNativeRoutes,
   openCodeServesQuestionForms,
@@ -467,8 +468,9 @@ function openCodeBetaCapabilities(
     fileChanges: native ? "supported" : "unsupported",
     sessionCompaction: { chat: compaction, work: compaction, code: compaction },
     appManagedTools: reported.appManagedTools,
-    // Off macOS the launch refuses Chat and Plan (`openCodeRefusesTurnHere`).
-    ...(platform === "darwin"
+    // On a host whose Chat and Plan jail starts no process the launch refuses
+    // both (`openCodeRefusesTurnHere`).
+    ...(openCodeChatPlanJailStartsProcesses(platform)
       ? {}
       : {
           turnModes: {
@@ -1494,7 +1496,8 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
             // Probe the app-owned transport with an empty, private catalogue.
             // This is a non-generating declaration check: it does not send a
             // model prompt and its bridge is closed before the probe scope
-            // returns. It runs wherever the launch can reach the bridge.
+            // returns. It runs wherever the launch can reach the bridge (macOS
+            // and Linux).
             const bridge = appToolBridgeReachesLaunchOn(process.platform)
               ? yield* Effect.acquireRelease(
                   Effect.tryPromise({
@@ -1508,14 +1511,15 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
                   (ownedBridge) => Effect.promise(() => ownedBridge.close()),
                 )
               : undefined;
-            // On macOS, probe under the Chat/Plan jail, not the Code jail:
-            // the git stand-in (fork plus exec of /usr/bin/false only) is
-            // what makes a 2.x runtime serve a Git work tree in Chat and
-            // Plan. Attesting under Code confinement would pass even without
-            // it. Elsewhere a 2.x Chat or Plan launch is refused, so the probe
+            // Probe under the Chat/Plan jail, not the Code jail, wherever
+            // that jail can start the git stand-in (macOS's single exec,
+            // Linux's read-only capsule that admits processes): it is what
+            // makes a 2.x runtime serve a Git work tree in Chat and Plan, and
+            // attesting under Code confinement would pass even without it.
+            // Elsewhere a 2.x Chat or Plan launch is refused, so the probe
             // attests the jail turns do run in there: Work and Code at Ask
             // first, which allows a process.
-            const probesTurnJail = process.platform !== "darwin";
+            const probesTurnJail = !openCodeChatPlanJailStartsProcesses(process.platform);
             const runtime = yield* acquireRuntime(
               options,
               projectRoot,

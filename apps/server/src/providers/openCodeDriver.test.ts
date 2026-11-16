@@ -163,11 +163,12 @@ describe("OpenCode driver", () => {
   it("proves MCP declaration support through a confined loopback probe lease", async () => {
     const fixture = driverFixture();
     const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
-    // Linux reaches the bridge as macOS does. Off macOS turns run only in
-    // Work and Code outside Plan, so the probe attests that jail there.
+    // macOS and Linux reach the bridge, and both probe the Chat and Plan
+    // jail, which starts the git stand-in; elsewhere turns run only in Work
+    // and Code outside Plan, so the probe attests that jail.
     expect(probe.capabilities.appManagedTools).toBe("supported");
     expect(fixture.processInputs[0]).toMatchObject(
-      process.platform === "darwin"
+      process.platform === "darwin" || process.platform === "linux"
         ? { mode: "chat", executionPolicy: "plan", loopbackPorts: [expect.any(Number)] }
         : { mode: "code", executionPolicy: "approval-gated", loopbackPorts: [expect.any(Number)] },
     );
@@ -1680,9 +1681,10 @@ describe("OpenCode driver", () => {
       userQuestions: "supported",
       fileChanges: "unsupported",
     });
-    // Off macOS the launch refuses Chat and Plan, and the report says so.
+    // Where the Chat and Plan jail starts no process the launch refuses both,
+    // and the report says so.
     expect(probe.capabilities.turnModes).toEqual(
-      process.platform === "darwin"
+      process.platform === "darwin" || process.platform === "linux"
         ? undefined
         : {
             chat: "unsupported",

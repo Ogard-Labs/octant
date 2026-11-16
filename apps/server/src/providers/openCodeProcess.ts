@@ -269,28 +269,29 @@ const READINESS_PATTERN = /^(?:opencode )?server listening on (http:\/\/[^\s]+)$
  * route in a work tree. A private temp directory with a `bin/git` symlink to
  * `/usr/bin/false` put first on PATH makes the spawn succeed and git exit
  * non-zero, which OpenCode reads as "not a git project" and serves anyway.
- * The jail allows fork plus exec of exactly this one binary — no real git,
- * no shell, no other exec. The stand-in is macOS only. Linux confinement
- * cannot grant that one exec without also allowing fork, which reopens the
- * Plan jail, so a 2.x Chat or Plan launch on Linux is refused before it
- * starts (`openCodeRefusesTurnHere`).
+ * On macOS the jail allows fork plus exec of exactly this one binary — no
+ * real git, no shell, no other exec. Linux cannot grant one exec alone, so its
+ * Chat and Plan jail admits processes inside a read-only view instead
+ * (maintainer decision, 2026-11-16); the stand-in is still put first there, so
+ * a repository's own Git configuration (`core.fsmonitor`, hooks) never runs
+ * from a Chat or Plan launch on either platform.
  */
 const GIT_STANDIN_TARGET = "/usr/bin/false";
 
 /**
- * Why a 2.x Chat or Plan launch is refused off macOS. Linux confinement can
- * only deny fork outright, and 2.x has to start `git` to serve a work tree,
- * so the jail those modes need cannot serve one there. Work and Code outside
- * Plan already allow a shell, so 2.x runs there (maintainer decision,
- * 2026-11-14).
+ * Why a 2.x Chat or Plan launch is refused on a host that is neither macOS nor
+ * Linux. macOS grants the git stand-in its one exec, and Linux's Chat and Plan
+ * jail admits processes inside a read-only view (maintainer decision,
+ * 2026-11-16); elsewhere the jail those modes need can start no process, and
+ * 2.x has to start `git` to serve a work tree.
  */
-export const OPENCODE_LINUX_CHAT_PLAN_REFUSAL =
-  "OpenCode 2 runs on Linux only in Work and Code outside Plan: Chat and Plan allow no process, and OpenCode 2 cannot serve a Git work tree without starting one. Use Work or Code at Ask first or above, or another provider for Chat and Plan.";
+export const OPENCODE_CHAT_PLAN_REFUSAL =
+  "OpenCode 2 runs on this host only in Work and Code outside Plan: Chat and Plan allow no process here, and OpenCode 2 cannot serve a Git work tree without starting one. Use Work or Code at Ask first or above, or another provider for Chat and Plan.";
 
 /**
  * Whether this launch is one the host's confinement cannot give a 2.x
- * runtime: Chat or Plan (no fork, no exec) wherever the git stand-in is not
- * available. Work and Code outside Plan launch as they always have.
+ * runtime: Chat or Plan on a host whose jail can start no process. Work and
+ * Code outside Plan launch as they always have.
  */
 export function openCodeRefusesTurnHere(input: {
   readonly runtime: OpenCodeRuntime;
@@ -300,10 +301,20 @@ export function openCodeRefusesTurnHere(input: {
 }): boolean {
   return (
     input.runtime === "beta" &&
-    input.platform !== "darwin" &&
+    !openCodeChatPlanJailStartsProcesses(input.platform) &&
     (input.mode === "chat" || input.executionPolicy === "plan")
   );
 }
+
+/**
+ * Whether a 2.x Chat or Plan launch can start the processes it needs here:
+ * macOS through the git stand-in's single exec grant, Linux because its read-only
+ * Chat and Plan jail admits processes.
+ */
+export function openCodeChatPlanJailStartsProcesses(platform: NodeJS.Platform): boolean {
+  return platform === "darwin" || platform === "linux";
+}
+
 /** A 2.x launch whose caller named no posture runs nothing without refusal. */
 const BETA_DENY_ALL: ReadonlyArray<PermissionV2Rule> = [
   { action: "*", resource: "*", effect: "deny" },
@@ -1262,7 +1273,7 @@ function prepareOpenCodeLaunch(
   // protocol selected by the version probe aligned with its CLI contract.
   const args = openCodeServerArgs(runtime, port);
   if (openCodeRefusesTurnHere({ runtime, platform, mode, executionPolicy })) {
-    return Effect.fail(failure("unsupported", OPENCODE_LINUX_CHAT_PLAN_REFUSAL));
+    return Effect.fail(failure("unsupported", OPENCODE_CHAT_PLAN_REFUSAL));
   }
   return Effect.try({
     try: () => {
@@ -1336,18 +1347,25 @@ function prepareOpenCodeLaunch(
       // Chat and Plan have no shell; an in-process provider shell emits no
       // permission request, so the jail itself must refuse to spawn it. Work
       // launches exactly as Code does at the same level.
-      const jailDeniesProcess = executionPolicy === "plan" || mode === "chat";
+      const chatOrPlan = executionPolicy === "plan" || mode === "chat";
       // OpenCode 2 runs `git rev-parse` at startup to resolve its project.
-      // Under the Chat/Plan jail that spawn fails with EPERM and the
-      // server answers 500 for every route in a work tree. On macOS the
-      // stand-in puts an always-failing `git` first on PATH so the spawn
-      // succeeds and git exits non-zero, which OpenCode reads as "not a git
-      // project". The jail allows fork plus exec of exactly /usr/bin/false
-      // and nothing else. Linux confinement cannot express that one exec
-      // without also allowing fork, which is the hole the Plan jail exists
-      // to close, so a 2.x Chat or Plan launch on Linux was refused above.
-      // OpenCode 1.x and Work and Code modes are unchanged.
-      const betaGitStandin = runtime === "beta" && jailDeniesProcess && platform === "darwin";
+      // Under a jail that starts nothing that spawn fails with EPERM and the
+      // server answers 500 for every route in a work tree, so a 2.x Chat or
+      // Plan launch gets the always-failing `git` stand-in first on PATH,
+      // which OpenCode reads as "not a git project". On macOS the jail allows
+      // fork plus exec of exactly /usr/bin/false and nothing else. Linux
+      // cannot express that one exec, so its Chat and Plan jail admits
+      // processes inside the same read-only view: the checkout and every
+      // other bound folder read-only, a private writable temp and the
+      // runtime's own state folders, the launch's network rule, and
+      // Bubblewrap's no-new-privileges (maintainer decision, 2026-11-16).
+      // Its permission rules still deny the shell and delegation. OpenCode
+      // 1.x needs no process and keeps the jail that starts none.
+      const linuxReadOnlyJailStartsProcesses =
+        runtime === "beta" && chatOrPlan && platform === "linux";
+      const jailDeniesProcess = chatOrPlan && !linuxReadOnlyJailStartsProcesses;
+      const betaGitStandin =
+        runtime === "beta" && chatOrPlan && openCodeChatPlanJailStartsProcesses(platform);
       if (betaGitStandin) {
         const standinBin = prepareGitStandinDirectory(profile);
         const existingPath = profile.environment.PATH;
@@ -1393,10 +1411,11 @@ function prepareOpenCodeLaunch(
         ...(platform === "linux" && typeof networkEgress === "object" && loopbackPorts.length > 0
           ? { loopbackRelayPorts: loopbackPorts }
           : {}),
-        writeBoundRoot: !(executionPolicy === "plan" || mode === "chat"),
+        writeBoundRoot: !chatOrPlan,
         allowProcessExec: !jailDeniesProcess,
-        // The stand-in needs fork so OpenCode can spawn the failing git; exec
-        // stays denied except for the single /usr/bin/false literal grant.
+        // On macOS the stand-in needs fork so OpenCode can spawn the failing
+        // git; exec stays denied except for the single /usr/bin/false literal
+        // grant.
         allowProcessFork: !jailDeniesProcess || betaGitStandin,
         allowFileReadStar: true,
         // The agent is a loopback HTTP server: the confinement has to let it
