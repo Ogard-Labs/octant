@@ -143,6 +143,8 @@ const WorkThreadCommandFields = {
 
 export const CreateWorkThreadCommand = Schema.Struct({
   kind: Schema.Literal("create-work-thread"),
+  /** An explicit initial level, admitted and journaled with creation. */
+  access: Schema.optional(WorkAccess),
   threadId: WorkThreadId,
   projectId: ProjectId,
   title: Schema.NonEmptyTrimmedString,

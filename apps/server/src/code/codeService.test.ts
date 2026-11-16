@@ -1019,6 +1019,37 @@ describe("CodeService commands", () => {
     );
   });
 
+  it("keeps the shared Code model default across settings saves and clears it explicitly", async () => {
+    const fixture = serviceFixture();
+    const chosen = { providerInstanceId: ids.provider, modelId: "model-a" };
+    const saved = await fixture.service.execute(ids.window, {
+      kind: "update-code-settings",
+      expectedVersion: 0,
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      defaultModel: chosen,
+    });
+    expect(saved).toMatchObject({ settings: { defaultModel: chosen } });
+    if (saved.kind !== "settings-updated") throw new Error("Settings were not saved");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: saved.settings } as never);
+    const kept = await fixture.service.execute(ids.window, {
+      kind: "update-code-settings",
+      expectedVersion: 1,
+      defaultExecutionPolicy: "plan",
+      defaultPermissionPersistence: "current-session",
+    });
+    expect(kept).toMatchObject({ settings: { defaultModel: chosen } });
+    const cleared = await fixture.service.execute(ids.window, {
+      kind: "update-code-settings",
+      expectedVersion: 1,
+      defaultExecutionPolicy: "plan",
+      defaultPermissionPersistence: "current-session",
+      defaultModel: null,
+    });
+    if (cleared.kind !== "settings-updated") throw new Error("Settings were not saved");
+    expect(cleared.settings.defaultModel).toBeUndefined();
+  });
+
   it("keeps the bundled language server switch a person turned off across later default changes", async () => {
     const fixture = serviceFixture();
 
@@ -1941,12 +1972,43 @@ describe("CodeService commands", () => {
     ).resolves.toMatchObject({ thread: { executionPolicy: "full-access" } });
   });
 
+  it("refuses a sandboxed Full access create before journaling when its runtime is unknown", async () => {
+    const fixture = serviceFixture({
+      threads: [],
+      project: rememberedFullAccessProject as Project,
+    });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-code-thread",
+        thread: thread({
+          executionPolicy: "full-access",
+          permissionPersistence: "project-default",
+          fullAccessSandbox: true,
+        }),
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
   it("starts a new Full access thread with its Project's sandbox choice unless the request says otherwise", async () => {
     const sandboxedProject = {
       ...(rememberedFullAccessProject as Project),
       defaultFullAccessSandbox: true,
     } as Project;
     const fixture = serviceFixture({ threads: [], project: sandboxedProject });
+    fixture.persistence.readProviderInstance.mockReturnValue(
+      decodeProviderInstance({
+        id: ids.provider,
+        displayName: "Codex",
+        driverKind: "codex",
+        configuration: { kind: "codex-cli", binaryPath: "codex" },
+        enabled: true,
+        environmentPolicy: "inherit-host",
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    );
     await expect(
       fixture.service.execute(ids.window, {
         kind: "create-code-thread",

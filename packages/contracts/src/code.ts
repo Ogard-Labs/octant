@@ -522,7 +522,13 @@ const RetiredDefaultFolderThreadsSwitch = Schema.optionalToOptional(Schema.Boole
   encode: () => Option.none(),
 });
 
+export const CodeDefaultModel = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+}).annotations(strict);
+
 export const CodeSettings = Schema.Struct({
+  defaultModel: Schema.optional(CodeDefaultModel),
   defaultExecutionPolicy: ProviderExecutionPolicy,
   defaultPermissionPersistence: PermissionPersistence,
   externalEditor: Schema.optional(CodeExternalEditor),
@@ -825,6 +831,7 @@ export const CodeCommand = Schema.Union(
   MergeCodeForkContextCommand,
   Schema.Struct({
     kind: Schema.Literal("update-code-settings"),
+    defaultModel: Schema.optional(Schema.NullOr(CodeDefaultModel)),
     expectedVersion: AggregateVersion,
     defaultExecutionPolicy: ProviderExecutionPolicy,
     defaultPermissionPersistence: PermissionPersistence,

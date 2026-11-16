@@ -2702,6 +2702,7 @@ export function useCodeController(options: CodeControllerOptions) {
 
   const updateSettings = useCallback(
     async (input: {
+      readonly defaultModel?: CodeBootstrap["settings"]["defaultModel"] | null;
       readonly defaultExecutionPolicy: CodeThread["executionPolicy"];
       readonly defaultPermissionPersistence: CodeThread["permissionPersistence"];
       readonly externalEditor?: CodeExternalEditor;

@@ -19,7 +19,8 @@
     "fmt:check": "oxfmt --check",
     "build": "tsdown",
     "test": "vitest run --testTimeout=15000",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "test:tui": "bun ../../scripts/smoke-terminal-client.ts"
   },
   "dependencies": {
     "@octant/client-runtime": "workspace:*",

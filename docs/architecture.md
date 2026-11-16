@@ -6611,7 +6611,10 @@ The exact API, account limitations and verification boundary are owned by
 - **CLI model selection.** An explicit `octant agent --model` selects the
   provider account and model for a new Chat thread before its first prompt.
   Work and Code also list enabled text providers, including native coding runtimes.
-  Work reads its configured provider/model default; without a usable default,
+  Code and Work read their host-configured provider/model defaults. The Code
+  first-run model choice is saved in Code settings (`defaultModel`), shared
+  with the terminal; the app's current draft choice remains a local preference.
+  Without a usable default,
   an interactive terminal offers a picker. Noninteractive callers must supply
   a unique model when several choices exist. Unknown or ambiguous
   names refuse before inference; a qualified name must identify exactly one
@@ -10281,10 +10284,21 @@ the model at another size.
   projection, preserves its mode when switching, and opens the destination
   through the host's window commands. At 100 columns it shows the thread list;
   at 140 it also shows thread information. `/threads` remains available at
-  smaller widths. `/next-waiting` opens another pending thread in the current
+  smaller widths; Ctrl+B and Ctrl+G reveal the hidden panels. `/next-waiting` opens another pending thread in the current
   mode; an unavailable navigation read retains the last list with a notice.
   Ctrl+P opens the command palette; Ctrl+O pauses or resumes. `/model` sends
   the mode's versioned provider-change command and preserves host refusals.
+  The composer names access and the model's effort; `/effort` changes a
+  declared selection through that same versioned provider command. Cost and
+  speed use reported host metrics and remain unreported when absent. The
+  information panel reads host MCP connection states and bounded current
+  checkout evidence; its files are not attributed to the thread. Approvals and
+  questions remain in the conversation, with the full host-selection and
+  single-use details retained. Plain streaming text appends to the native
+  buffer; styled replies coalesce adjacent spans and use a bounded render cache.
+  The native-renderer benchmark exercises a growing 2,000-line reply with a
+  16 ms p95 refresh/render budget; this is measured in its recorded environment,
+  not promised for every terminal or host.
   Source-path mentions remain prompt context for Code and Work, whose runtimes
   read their bound Project. Image mentions stage through their attachment routes
   and the next turn carries those identifiers. The screen is loaded only when

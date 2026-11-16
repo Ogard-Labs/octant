@@ -453,6 +453,7 @@ const WORK_FULL_ACCESS_LOCAL_ONLY = "Full access is chosen in the Octant window 
 /** Whether a command would put a Work thread, or new Work threads, at Full access. */
 function raisesWorkToFullAccess(command: WorkThreadCommand): boolean {
   switch (command.kind) {
+    case "create-work-thread":
     case "change-work-thread-access":
       return command.access === "full-access";
     case "update-work-settings":

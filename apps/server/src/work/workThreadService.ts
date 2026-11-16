@@ -56,6 +56,7 @@ import { Schema } from "effect";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
 import {
   defaultFullAccessSandboxFor,
+  fullAccessSandboxSupported,
   guardrailLowered,
   permissionModeOf,
   workAccessOfPermissionMode,
@@ -785,18 +786,20 @@ export class WorkThreadService {
           ...(command.workingFolderId === undefined
             ? {}
             : { workingFolderId: command.workingFolderId }),
-          // The host decides the access from its Project's override, else its
-          // own settings; nothing the renderer sends can raise it.
+          // Explicit access uses the same route admission as a later change.
+          // Otherwise keep the Project and Settings defaults.
           access:
+            command.access ??
             (project.defaultPermissionMode === undefined
               ? undefined
               : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
             this.#currentSettings().defaultAccess,
           // The opt-in sandbox only rides along when the resolved access is
           // Full access: the request's choice, else the Project's, else Settings'.
-          ...(((project.defaultPermissionMode === undefined
-            ? undefined
-            : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
+          ...((command.access ??
+            (project.defaultPermissionMode === undefined
+              ? undefined
+              : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
             this.#currentSettings().defaultAccess) === "full-access" &&
           (command.fullAccessSandbox ??
             defaultFullAccessSandboxFor({ project, settings: this.#currentSettings() }))
@@ -806,6 +809,7 @@ export class WorkThreadService {
           createdAt: decodeTimestamp(this.#clock()),
           updatedAt: decodeTimestamp(this.#clock()),
         });
+        this.#requireInitialSandbox(created);
         // A follow-up from a marked thread carries text an agent wrote there,
         // so the thread starts marked, in one journal unit with its creation.
         const journaled = journalWithInheritedMark({
@@ -1637,8 +1641,8 @@ export class WorkThreadService {
         : { modelOptionValues: command.modelOptionValues }),
       bindingRevisionId,
       workingDirectory: ".",
-      access: this.#currentSettings().defaultAccess,
-      ...(this.#currentSettings().defaultAccess === "full-access" &&
+      access: command.access ?? this.#currentSettings().defaultAccess,
+      ...((command.access ?? this.#currentSettings().defaultAccess) === "full-access" &&
       (command.fullAccessSandbox ??
         defaultFullAccessSandboxFor({ settings: this.#currentSettings() }))
         ? { fullAccessSandbox: true }
@@ -1647,6 +1651,7 @@ export class WorkThreadService {
       createdAt: decodeTimestamp(this.#clock()),
       updatedAt: decodeTimestamp(this.#clock()),
     });
+    this.#requireInitialSandbox(created);
     const journaled = journalWithInheritedMark({
       journal: this.#persistence.journal,
       record: this.#recordExternalContentIngestion,
@@ -1670,6 +1675,14 @@ export class WorkThreadService {
     }
     this.#projection.apply({ kind: "thread-created", thread: created });
     return { kind: "thread-created", thread: created };
+  }
+
+  #requireInitialSandbox(thread: WorkThread): void {
+    if (thread.access !== "full-access" || thread.fullAccessSandbox !== true) return;
+    const provider = this.#persistence.readProviderInstance(thread.providerInstanceId);
+    if (provider === undefined || !fullAccessSandboxSupported(provider.driverKind)) {
+      throw this.#failure("unsupported", "This provider cannot keep the sandbox at Full access.");
+    }
   }
 
   async #requireAccessibleActiveWorkProject(

@@ -3892,10 +3892,17 @@ function LaunchedShell(
       // Without Work's settings there is no version to write against yet, so
       // the choice has not been taken rather than merely deferred.
       if (mode === "work" && workSettings.status === "loading") return false;
-      rememberModelChoice(selection);
-      return true;
+      const settings = codeController.bootstrap?.settings;
+      if (settings === undefined) return false;
+      const saved = await codeController.updateSettings({
+        defaultExecutionPolicy: settings.defaultExecutionPolicy,
+        defaultPermissionPersistence: settings.defaultPermissionPersistence,
+        defaultModel: selection,
+      });
+      if (saved) rememberModelChoice(selection);
+      return saved;
     },
-    [workSettings],
+    [workSettings, codeController],
   );
   const workDefaultModel = workSettings.settings;
   const firstRunWorkModel = useMemo(() => {
@@ -4113,7 +4120,9 @@ function LaunchedShell(
   const rawDraftSelection =
     draftProviderInstanceId !== undefined && draftModelId !== undefined
       ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
-      : undefined;
+      : activeMode === "code"
+        ? codeController.bootstrap?.settings.defaultModel
+        : undefined;
   const preferredChatSelection =
     resolveDraftProviderSelection(chatProviderGroups, rawDraftSelection) ??
     resolveDraftProviderSelection(chatProviderGroups, firstRunChatDefault) ??

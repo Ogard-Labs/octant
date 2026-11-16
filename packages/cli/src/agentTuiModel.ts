@@ -77,6 +77,7 @@ export interface TuiLeadActions {
   readonly route: string;
   readonly model: string;
   readonly duration: string;
+  readonly speed?: string;
   readonly stopReason: string;
   /** The last calls, newest last; `toolCalls` counts what came before too. */
   readonly tools: ReadonlyArray<TuiToolLine>;
@@ -242,6 +243,12 @@ export function transcriptFrom(
               route: record.route.kind,
               model: "candidate" in record.route ? String(record.route.candidate.modelId) : "—",
               duration: formatDuration(record.startedAt, record.endedAt),
+              ...(record.metrics?.decodeMs === undefined ||
+              record.metrics.decodeOutputTokens === undefined
+                ? {}
+                : {
+                    speed: `${record.metrics.precision === "approximate" ? "~" : ""}${Math.round((record.metrics.decodeOutputTokens * 1000) / record.metrics.decodeMs)} tok/s`,
+                  }),
               stopReason: record.stopReason,
               tools: toolLines(record.tools ?? []),
             },

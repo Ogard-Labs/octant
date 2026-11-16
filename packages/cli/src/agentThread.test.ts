@@ -119,6 +119,20 @@ function host(codeAccessPersistence: "current-session" | "project-default") {
         return { status: 200, body: projects(codeAccessPersistence) };
       }
       if (request.path === "/api/providers/bootstrap") return { status: 200, body: providers };
+      if (request.path === "/api/code/bootstrap")
+        return {
+          status: 200,
+          body: {
+            settings: {
+              defaultExecutionPolicy: "approval-gated",
+              defaultPermissionPersistence: "current-session",
+              version: 0,
+              updatedAt: now,
+            },
+            threads: [],
+            checkouts: [],
+          },
+        };
       if (request.path === "/api/shell/bootstrap") {
         return { status: 200, body: { workspaceVersion: 1 } };
       }
@@ -203,6 +217,20 @@ function workHost() {
         };
       }
       if (request.path === "/api/providers/bootstrap") return { status: 200, body: providers };
+      if (request.path === "/api/code/bootstrap")
+        return {
+          status: 200,
+          body: {
+            settings: {
+              defaultExecutionPolicy: "approval-gated",
+              defaultPermissionPersistence: "current-session",
+              version: 0,
+              updatedAt: now,
+            },
+            threads: [],
+            checkouts: [],
+          },
+        };
       if (request.path === "/api/shell/bootstrap") {
         return { status: 200, body: { workspaceVersion: 1 } };
       }
@@ -405,7 +433,7 @@ describe("starting a Code thread from the terminal", () => {
 });
 
 describe("starting a Work thread from the terminal with an asked-for access", () => {
-  it("moves a new Work thread to Full access through the composer's access command", async () => {
+  it("creates a Work thread with its requested access atomically", async () => {
     const fake = workHost();
 
     const result = await createAgentThread(fake.session, {
@@ -416,13 +444,11 @@ describe("starting a Work thread from the terminal with an asked-for access", ()
     });
 
     expect(result).toMatchObject({ kind: "created", mode: "work", projectName: "Client" });
-    const change = fake
-      .workCommands()
-      .find((command) => command.kind === "change-work-thread-access");
-    expect(change).toMatchObject({ access: "full-access", expectedVersion: 1 });
+    const change = fake.workCommands().find((command) => command.kind === "create-work-thread");
+    expect(change).toMatchObject({ access: "full-access" });
   });
 
-  it("carries the sandbox with the Work thread's raise to Full access, so it is not dropped at creation", async () => {
+  it("carries the sandbox with the Work thread's initial Full access", async () => {
     const fake = workHost();
 
     const result = await createAgentThread(fake.session, {
@@ -434,9 +460,7 @@ describe("starting a Work thread from the terminal with an asked-for access", ()
     });
 
     expect(result).toMatchObject({ kind: "created", mode: "work" });
-    const change = fake
-      .workCommands()
-      .find((command) => command.kind === "change-work-thread-access");
+    const change = fake.workCommands().find((command) => command.kind === "create-work-thread");
     expect(change).toMatchObject({ access: "full-access", fullAccessSandbox: true });
   });
 
@@ -1250,6 +1274,44 @@ describe("coding provider selection from the terminal", () => {
     });
     expect(result.kind).toBe("created");
     expect(fake.created()).toBeDefined();
+  });
+
+  it("uses the host Code default before offering an interactive model choice", async () => {
+    const fake = host("current-session");
+    let picked = false;
+    const session = {
+      ...fake.session,
+      send: async (request: LocalControlRequest) => {
+        if (request.path === "/api/code/bootstrap")
+          return {
+            status: 200,
+            body: {
+              settings: {
+                defaultExecutionPolicy: "approval-gated",
+                defaultPermissionPersistence: "current-session",
+                defaultModel: { providerInstanceId: ids.provider, modelId: "loopback-model" },
+                version: 0,
+                updatedAt: now,
+              },
+              threads: [],
+              checkouts: [],
+            },
+          };
+        return fake.session.send(request);
+      },
+    };
+    expect(
+      await createAgentThread(session, {
+        mode: "code",
+        title: "Default model",
+        projectName: "Repo",
+        chooseModel: async () => {
+          picked = true;
+          return undefined;
+        },
+      }),
+    ).toMatchObject({ kind: "created" });
+    expect(picked).toBe(false);
   });
 
   it.each(["code", "work"] as const)(

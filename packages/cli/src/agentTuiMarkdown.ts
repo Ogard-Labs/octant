@@ -10,7 +10,7 @@ export function terminalMarkdownTables(text: string): string {
       .split(/(?<!\\)\|/)
       .map((cell) => cell.trim().replace(/\\\|/g, "│"));
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
+    const line = lines[i] ?? "";
     if (/^\s*```/.test(line)) fenced = !fenced;
     const separator = lines[i + 1];
     if (
@@ -21,9 +21,13 @@ export function terminalMarkdownTables(text: string): string {
     ) {
       const rows = [cells(line)];
       i += 1;
-      while (lines[i + 1]?.includes("|") && lines[i + 1]!.trim().length > 0)
-        rows.push(cells(lines[++i]!));
-      const widths = rows[0]!.map((_, column) =>
+      for (;;) {
+        const next = lines[i + 1];
+        if (next === undefined || !next.includes("|") || next.trim().length === 0) break;
+        i += 1;
+        rows.push(cells(next));
+      }
+      const widths = (rows[0] ?? []).map((_, column) =>
         Math.min(36, Math.max(...rows.map((row) => Array.from(row[column] ?? "").length))),
       );
       const rule = (left: string, mid: string, right: string) =>
@@ -52,4 +56,24 @@ export function terminalMarkdownTables(text: string): string {
     } else result.push(line);
   }
   return result.join("\n");
+}
+
+/** One native span per continuous style, rather than one span per source line. */
+export function compactTextChunks(
+  chunks: readonly import("@opentui/core").TextChunk[],
+): import("@opentui/core").TextChunk[] {
+  const result: import("@opentui/core").TextChunk[] = [];
+  for (const chunk of chunks) {
+    const previous = result.at(-1);
+    if (
+      previous !== undefined &&
+      previous.attributes === chunk.attributes &&
+      previous.link?.url === chunk.link?.url &&
+      (previous.fg?.equals(chunk.fg) ?? chunk.fg === undefined) &&
+      (previous.bg?.equals(chunk.bg) ?? chunk.bg === undefined)
+    )
+      previous.text += chunk.text;
+    else result.push({ ...chunk });
+  }
+  return result;
 }

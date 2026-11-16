@@ -214,6 +214,17 @@ describe("Work thread routes", () => {
 
     for (const raise of [
       access("full-access"),
+      {
+        kind: "create-work-thread",
+        threadId,
+        projectId: thread().projectId,
+        title: "New",
+        providerInstanceId: thread().providerInstanceId,
+        modelId: thread().modelId,
+        bindingRevisionId: "72000000-0000-4000-8000-000000000008",
+        hostId: "local",
+        access: "full-access",
+      },
       { kind: "update-work-settings", expectedVersion: 1, defaultAccess: "full-access" },
     ]) {
       const refused = await route(fromDevice(raise));

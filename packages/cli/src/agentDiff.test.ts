@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readAgentDiff } from "./agentDiff";
+import { readAgentDiff, selectAgentDiff } from "./agentDiff";
 import type { OpenedLocalControlSession } from "./localControl";
 
 const threadId = "00000000-0000-4000-8000-000000000001";
@@ -92,4 +92,27 @@ describe("terminal checkout review", () => {
       kind: "refused",
     });
   });
+});
+
+it("opens exactly the chosen file's host diff, including its headers", () => {
+  const text =
+    "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-a\n+b\ndiff --git a/b.ts b/b.ts\n--- a/b.ts\n+++ b/b.ts\n@@ -1 +1 @@\n-c\n+d\n";
+  const read = selectAgentDiff(
+    {
+      kind: "ready",
+      text,
+      truncated: false,
+      files: [
+        { path: "a.ts", additions: 1, deletions: 1 },
+        { path: "b.ts", additions: 1, deletions: 1 },
+      ],
+      missingPaths: [],
+    },
+    "b.ts",
+  );
+  expect(read.kind).toBe("ready");
+  if (read.kind === "ready") {
+    expect(read.text).toContain("diff --git a/b.ts b/b.ts");
+    expect(read.text).not.toContain("a/a.ts");
+  }
 });

@@ -19,6 +19,7 @@ import {
   ThreadGoal,
   ChatNavigation,
   CodeNavigation,
+  CodeBoardView,
   WorkThreadNavigation,
   ChatAttachment,
   CodeAttachmentReference,
@@ -542,6 +543,7 @@ export interface AgentNavigationThread {
   readonly updatedAt: string;
   readonly executing: boolean;
   readonly awaitingInput: boolean;
+  readonly readyForReview?: boolean;
 }
 
 /** Lightweight projections; these reads never observe Git or change the active window. */
@@ -562,6 +564,24 @@ export async function listAgentNavigation(
     mode === "code"
       ? decodeHostAnswer(CodeNavigation)(response.body)
       : decodeHostAnswer(WorkThreadNavigation)(response.body);
+  const reviewIds = new Set<string>();
+  if (mode === "code") {
+    const board = await session.send({
+      path: "/api/code/board",
+      method: "POST",
+      body: { version: 1 },
+    });
+    if (board.status === 200) {
+      for (const card of decodeHostAnswer(CodeBoardView)(board.body).cards) {
+        if (
+          !card.executing &&
+          card.reviewState.freshness === "fresh" &&
+          card.reviewState.state === "pending"
+        )
+          reviewIds.add(String(card.threadId));
+      }
+    }
+  }
   return view.threads
     .filter((thread) => thread.lifecycle === "active")
     .map((thread) => {
@@ -574,6 +594,7 @@ export async function listAgentNavigation(
         updatedAt: thread.updatedAt,
         executing: runtime?.executing === true,
         awaitingInput: runtime?.awaitingInput === true,
+        readyForReview: reviewIds.has(String(thread.id)),
       };
     })
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -581,10 +602,12 @@ export async function listAgentNavigation(
 
 export interface AgentModelChoice {
   readonly instanceId: string;
+  readonly driverKind?: import("@octant/contracts").ProviderDriverKind;
   readonly endpoint: string;
   readonly modelId: string;
   readonly displayName: string;
   readonly contextLimit: number | undefined;
+  readonly options?: import("@octant/contracts").ProviderModel["options"];
 }
 
 /** Models offered by enabled providers, including native coding runtimes. */
@@ -628,10 +651,12 @@ export async function listAgentModels(
     for (const model of observed?.models ?? []) {
       choices.push({
         instanceId: String(instance.id),
+        driverKind: instance.driverKind,
         endpoint: instance.displayName,
         modelId: String(model.id),
         displayName: model.displayName ?? String(model.id),
         contextLimit: model.contextLimit,
+        options: model.options,
       });
     }
   }
@@ -641,7 +666,9 @@ export async function listAgentModels(
 export async function changeAgentModel(
   session: OpenedLocalControlSession,
   thread: Pick<ChatThreadView, "thread">,
-  choice: Pick<AgentModelChoice, "instanceId" | "modelId">,
+  choice: Pick<AgentModelChoice, "instanceId" | "modelId"> & {
+    readonly modelOptionValues?: Readonly<Record<string, string>>;
+  },
 ): Promise<HostRefusal | { readonly kind: "changed" }> {
   const response = await session.send({
     path: "/api/chat/commands",
@@ -652,6 +679,9 @@ export async function changeAgentModel(
       expectedVersion: thread.thread.version,
       providerInstanceId: choice.instanceId,
       modelId: choice.modelId,
+      ...(choice.modelOptionValues === undefined
+        ? {}
+        : { modelOptionValues: choice.modelOptionValues }),
     },
   });
   if (response.status !== 200) {
@@ -668,7 +698,9 @@ export async function changeAgentThreadModel(
     readonly version: number;
     readonly mode: "chat" | "work" | "code";
   },
-  choice: Pick<AgentModelChoice, "instanceId" | "modelId">,
+  choice: Pick<AgentModelChoice, "instanceId" | "modelId"> & {
+    readonly modelOptionValues?: Readonly<Record<string, string>>;
+  },
 ): Promise<HostRefusal | { readonly kind: "changed" }> {
   if (thread.mode === "chat")
     return changeAgentModel(
@@ -685,6 +717,9 @@ export async function changeAgentThreadModel(
       expectedVersion: thread.version,
       providerInstanceId: choice.instanceId,
       modelId: choice.modelId,
+      ...(choice.modelOptionValues === undefined
+        ? {}
+        : { modelOptionValues: choice.modelOptionValues }),
     },
   });
   const body = response.body as {

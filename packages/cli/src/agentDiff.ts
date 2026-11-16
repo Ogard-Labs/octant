@@ -14,6 +14,11 @@ export type AgentDiff =
       readonly branch?: string;
       readonly text: string;
       readonly truncated: boolean;
+      readonly files: readonly {
+        readonly path: string;
+        readonly additions: number;
+        readonly deletions: number;
+      }[];
       readonly missingPaths: readonly string[];
     }
   | { readonly kind: "refused"; readonly message: string };
@@ -76,15 +81,44 @@ export async function readAgentDiff(
       if (item === undefined) return { kind: "refused", message: "Diff evidence is unavailable." };
       text = item.text;
     }
-    const shown = new Set(parseUnifiedDiff(text).map((file) => file.path));
+    const files = parseUnifiedDiff(text).map(({ path, additions, deletions }) => ({
+      path,
+      additions,
+      deletions,
+    }));
+    const shown = new Set(files.map((file) => file.path));
     return {
       kind: "ready",
       ...(result.head.kind === "branch" ? { branch: result.head.name } : {}),
       text,
+      files,
       truncated: result.diff.truncated === true,
       missingPaths: result.changedPaths.map(String).filter((path) => !shown.has(path)),
     };
   } catch {
     return { kind: "refused", message: "Checkout changes could not be read from the host." };
   }
+}
+
+/** Keep the host's exact hunk text when opening one file from checkout review. */
+export function selectAgentDiff(
+  diff: Extract<AgentDiff, { kind: "ready" }>,
+  path: string,
+): AgentDiff {
+  const file = parseUnifiedDiff(diff.text, { retainSource: true }).find(
+    (file) => file.path === path,
+  );
+  if (file?.source !== undefined)
+    return {
+      ...diff,
+      text: diff.text.slice(file.source.start, file.source.end),
+      files: diff.files.filter((file) => file.path === path),
+      missingPaths: [],
+    };
+  if (diff.missingPaths.includes(path))
+    return { ...diff, text: "", files: [], missingPaths: [path] };
+  return {
+    kind: "refused",
+    message: "That file is no longer in the current checkout changes. Refresh the file list.",
+  };
 }

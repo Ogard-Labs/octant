@@ -18,6 +18,7 @@ import {
 } from "@octant/domain";
 import {
   defaultFullAccessSandboxFor,
+  fullAccessSandboxSupported,
   guardrailLowered,
   permissionModeOf,
 } from "@octant/domain/guardrail-policy";
@@ -2026,6 +2027,10 @@ export class CodeService {
           throw this.#failure("stale", "Code settings changed; reload and retry.");
         }
         const settings = decodeCodeSettings({
+          ...((command.defaultModel === undefined ? current.defaultModel : command.defaultModel) ==
+          null
+            ? {}
+            : { defaultModel: command.defaultModel ?? current.defaultModel }),
           defaultExecutionPolicy: command.defaultExecutionPolicy,
           defaultPermissionPersistence: command.defaultPermissionPersistence,
           ...(command.externalEditor === undefined
@@ -2246,6 +2251,14 @@ export class CodeService {
           )) === undefined
         )
           throw this.#failure("invalid", "The selected working folder is unavailable.");
+        if (thread.executionPolicy === "full-access" && thread.fullAccessSandbox === true) {
+          const provider = this.#persistence.readProviderInstance?.(thread.providerInstanceId);
+          if (provider === undefined || !fullAccessSandboxSupported(provider.driverKind))
+            throw this.#failure(
+              "unsupported",
+              "This provider cannot keep the sandbox at Full access.",
+            );
+        }
         executionContext?.onCreationBoundary?.();
         this.#journalNewThread(thread.id, inheritedMark ?? terminalSession?.mark, () => {
           this.#append(
