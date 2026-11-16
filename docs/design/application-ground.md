@@ -63,7 +63,16 @@ ground runs there, every scene keeps a third. A ground whose scope is the start
 screens is one layer in the window frame, a level under the sidebar, the title
 band and the panes, and it is shown only while every pane holds a start screen
 (a destination page hides it, and so does a thread beside a start screen, which
-paints its own fill). It paints the page where the stage is and, on a wide
+paints its own fill). Under Glass a start screen keeps the window's glass under
+its ground, whichever scope put the ground there: one veil, half a second coat
+of the window's own tint, lies in the pane's fill layer under the ground, so
+the cells read and the screen stays glass, and the same start screen looks the
+same with the ground behind start screens only or behind every page. Before
+2026-11-16 the start-screens scope painted the theme's opaque page under the
+ground (a black slab in a window of glass) and the every-page scope lay the
+ground on the bare glass, where it was barely there (maintainer report).
+Reduced transparency and increased contrast keep the opaque page. In the
+opaque material it paints the page where the stage is and, on a wide
 window, runs on under the sidebar over the sidebar's own width and the height of
 the window below the title band, as the same picture: a scene is composed for the
 stage and continues to the left, so no seam and no second composition shows at the
