@@ -1193,6 +1193,51 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 16 * 1_024,
   })),
+  // Agents settings and the local work resource limits, read and changed by a
+  // device the host's own person paired; the route refuses every other device
+  // session and journals the device as the actor.
+  {
+    kind: "exact" as const,
+    path: "/api/agent-run-settings",
+    methods: ["GET", "PUT"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/agent-run-settings/resources",
+    methods: ["GET"] as const,
+  },
+  // Safe networks and the Network limits switch, read and changed by a device
+  // the host's own person paired; the route refuses a change from every other
+  // device session and journals the device as the actor.
+  {
+    kind: "exact" as const,
+    path: "/api/access/safe-networks",
+    methods: ["GET", "POST"] as const,
+    // `?projectId=`; the route reads only that key.
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 64 * 1_024,
+  },
+  // A thread's wake-ups, read and cancelled or run by a device the host's own
+  // person paired; the route refuses every other device session itself.
+  {
+    kind: "exact" as const,
+    path: "/api/thread-wakeups",
+    methods: ["GET"] as const,
+    // `?mode=&threadId=`; the route refuses every other query itself.
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/thread-wakeups/commands",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 4_096,
+  },
   {
     kind: "exact" as const,
     path: "/api/usage/host-health",

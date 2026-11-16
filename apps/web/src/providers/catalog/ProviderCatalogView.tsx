@@ -318,9 +318,16 @@ function kindLabel(state: ProviderCatalogState): string {
   return state.setup === "endpoint" ? "Model endpoint" : "Agent runtime";
 }
 
-/** An outside driver never borrows the bundled label: it says where it came from. */
+/**
+ * An outside driver never borrows the bundled label: it says where it came
+ * from, and on a host with no confinement for its process, that it runs
+ * without one.
+ */
 function originLabel(entry: CatalogEntry): string {
-  return entry.source.kind === "outside" ? "Outside driver" : "Bundled";
+  if (entry.source.kind !== "outside") return "Bundled";
+  return entry.source.listing.hostConfinement === "unconfined"
+    ? "Outside driver · Runs without confinement"
+    : "Outside driver";
 }
 
 function CatalogRow(props: { readonly entry: CatalogEntry; readonly onOpen: () => void }) {
@@ -551,6 +558,13 @@ function OutsidePackageFacts(props: {
             ? "Installed from a folder on this computer and signed by its publisher: Octant verified the signature and checked its files against the digest you trusted. Nobody else reviewed it. Trust, switches, and removal are under Plugins."
             : "Installed from a folder on this computer. It is unsigned developer input: Octant checked its files against the digest you trusted, and nobody else reviewed it. Trust, switches, and removal are under Plugins."}
       </p>
+      {listing.hostConfinement === "unconfined" ? (
+        <p className="settings-section-line">
+          This computer has no sandbox for provider drivers, so this one runs without one: it can
+          read and change what your account can, and reach the network. Octant still starts it with
+          a fixed environment and no provider keys.
+        </p>
+      ) : null}
       <dl className="provider-catalog__facts">
         <div className="provider-catalog__fact">
           <dt>Source</dt>
@@ -581,6 +595,14 @@ function OutsidePackageFacts(props: {
         <div className="provider-catalog__fact">
           <dt>Trusted</dt>
           <dd>{state.trusted ? "Yes, by you, at this digest" : "No"}</dd>
+        </div>
+        <div className="provider-catalog__fact">
+          <dt>Sandbox</dt>
+          <dd>
+            {listing.hostConfinement === "unconfined"
+              ? "None on this computer"
+              : "Confined: no network, no other programs"}
+          </dd>
         </div>
         <div className="provider-catalog__fact">
           <dt>Driver version</dt>

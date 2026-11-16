@@ -182,19 +182,21 @@ export class ExtensionToolApprovalService {
     const pending = this.#pending.get(decision.approvalId);
     if (pending === undefined || !this.#answerableBy(pending, answerer)) return false;
     if (decision.remember === true) {
-      // A remembered approval grows only from the host's own person, answering
-      // from the local window or the device they paired whose own turn raised
-      // the prompt, and only to a prompt that offered it: one a host-owned, a
-      // hub-introduced device's, or an agent grant's turn raised arrives with
-      // no `remember`, whoever answers. The host's own scope is nobody, so it
-      // may settle its prompt but never remember one, and a hub-introduced
-      // device approves once only. A refused or failed `remember` leaves the
-      // call waiting, to be approved once.
+      // A remembered approval grows only from the host's own person: the local
+      // window whose own turn raised the prompt, or a device they paired,
+      // which is that person for any prompt it may answer. It grows only from
+      // a prompt that offered it: one a host-owned, a hub-introduced device's,
+      // or an agent grant's turn raised arrives with no `remember`, whoever
+      // answers. The host's own scope is nobody, so it may settle its prompt
+      // but never remember one, and a hub-introduced device approves once
+      // only. A refused or failed `remember` leaves the call waiting, to be
+      // approved once.
       if (
         decision.decision !== "approved" ||
         pending.remember === undefined ||
         !actsAsHostPerson(answerer.kind) ||
-        String(pending.windowId) !== String(answerer.scopeId) ||
+        (answerer.kind !== "person-paired-device" &&
+          String(pending.windowId) !== String(answerer.scopeId)) ||
         this.options.isHostScope?.(answerer.scopeId) === true ||
         !pending.remember(decision.rememberScope ?? "tool", answerer.actor)
       ) {
@@ -213,13 +215,23 @@ export class ExtensionToolApprovalService {
    * that thread answers either; the answer settles only this prompt and lends
    * the window nothing else of the other scope.
    *
-   * A paired device answers only the prompts its own turns raised, and only
-   * while their thread still stands in the recorded Project. It never answers
-   * a local window's, another device's, or the host's prompt.
+   * A device the host's own person paired is that person: it answers any
+   * prompt whose thread still stands in the recorded Project, whichever window,
+   * device or host turn raised it, as the person at the machine could.
+   *
+   * Any other device session answers only the prompts its own turns raised,
+   * and only while their thread still stands in the recorded Project. It never
+   * answers a local window's, another device's, or the host's prompt.
    */
   #answerableBy(pending: PendingApproval, answerer: ExtensionToolApprovalAnswerer): boolean {
     const { isHostScope, isPairedDeviceScope, threadAuthorityIsCurrent, windowCanReachThread } =
       this.options;
+    if (answerer.kind === "person-paired-device") {
+      return (
+        threadAuthorityIsCurrent !== undefined &&
+        threadAuthorityIsCurrent(pending.view.threadId, pending.view.projectId)
+      );
+    }
     if (answerer.kind === "remote-device") {
       return (
         String(pending.windowId) === String(answerer.scopeId) &&

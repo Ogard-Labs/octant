@@ -12,6 +12,7 @@ import {
 } from "@octant/contracts";
 import type { ExtensionEffectiveState, ExtensionPackageState } from "@octant/contracts/extensions";
 import {
+  outsideDriverHostLaunch,
   resolveOutsideDriverActivation,
   resolveOutsideDriverRebind,
 } from "@octant/plugin-host/activation";
@@ -261,6 +262,9 @@ export class OutsideDriverAdmission {
           ...(packageState.publisher?.selected === undefined
             ? {}
             : { publisherKey: packageState.publisher.selected }),
+          ...(outsideDriverHostLaunch(this.#platform) === "unconfined"
+            ? { hostConfinement: "unconfined" }
+            : {}),
         });
         return listing._tag === "Right" ? [listing.right] : [];
       }),
