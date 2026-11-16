@@ -611,6 +611,8 @@ export interface CodeOperationRuntimeOptions {
    * reaching the provider with the pictures silently dropped.
    */
   readonly supportsAttachments?: (thread: CodeThread) => boolean;
+  /** See `CodeOperationServiceOptions.takesFileNatively`. */
+  readonly takesFileNatively?: (thread: CodeThread, mediaType: string) => boolean;
   /** Sees images, for a thread whose model cannot read the images a turn attached. */
   readonly describeImages?: CodeOperationServiceOptions["describeImages"];
   readonly routineBrowserTools?: (input: {
@@ -1600,6 +1602,9 @@ export function createCodeOperationRuntime(
     ...(options.supportsAttachments === undefined
       ? {}
       : { supportsAttachments: options.supportsAttachments }),
+    ...(options.takesFileNatively === undefined
+      ? {}
+      : { takesFileNatively: options.takesFileNatively }),
     ...(options.describeImages === undefined ? {} : { describeImages: options.describeImages }),
     conversationTurns: (threadId, read) =>
       codeThreadTurns((page) => events.conversation(page), threadId, read),
@@ -3172,6 +3177,8 @@ interface ActiveTurn {
   readonly rootIdentity?: { readonly device: string; readonly inode: string };
   /** The Project's extra folders, granted what the checkout is granted. */
   readonly extraFolders: ReadonlyArray<string>;
+  /** The thread's attachments folder, read at every level and written at none. */
+  readonly attachmentsFolder?: string;
   /** A kept session's terms, from the Project as it stood when `extraFolders` was read. */
   readonly sessionTerms?: string;
   /** The runtime started this turn by itself; it attaches to the kept session and sends nothing. */
@@ -4132,6 +4139,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(input.extensionTools === undefined || serverTools !== undefined
         ? {}
         : { extensionTools: input.extensionTools }),
+      // A server thread's runtime runs on its server, where this host's
+      // attachments folder is not.
+      ...(input.attachmentsFolder === undefined || serverTools !== undefined
+        ? {}
+        : { attachmentsFolder: input.attachmentsFolder }),
       ...(serverTools === undefined ? {} : { serverTools }),
       ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
         ? {}
@@ -6271,6 +6283,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           checkoutRoot: active.checkoutRoot,
           providerRoot: active.providerRoot,
           extraFolders: active.extraFolders,
+          ...(active.attachmentsFolder === undefined
+            ? {}
+            : { attachmentsFolder: active.attachmentsFolder }),
           prompt,
           ...(delivery.context.length === 0 ? {} : { context: delivery.context }),
           contextAccount,

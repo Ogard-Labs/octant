@@ -37,6 +37,7 @@ import type {
   ClaudeSessionMetadata,
 } from "./claudeAgentSdkPort";
 import {
+  CLAUDE_ATTACHMENTS_READ_ONLY,
   CLAUDE_MEMORY_WRITE_REFUSAL,
   CLAUDE_PLAN_CAPTURED_MESSAGE,
   CLAUDE_PLAN_MCP_SERVER_REFUSAL,
@@ -4851,6 +4852,55 @@ describe("Claude artifact delivery", () => {
     } finally {
       await acquired.close();
     }
+  });
+
+  it("reads the thread's attached files unasked in Plan and refuses every write into them", async () => {
+    const attachmentsFolder = "/tmp/octant-data/code-threads/thread-1";
+    const file = `${attachmentsFolder}/40000000-0000-4000-8000-000000000031/report.pdf`;
+    for (const executionPolicy of ["plan", "approval-gated"] as const) {
+      const f = harness("subscription", "current-session");
+      const scope = await Effect.runPromise(Scope.make());
+      const connection = await Effect.runPromise(
+        f.driver
+          .acquire({ instanceId, projectRoot, mode: "code", attachmentsFolder })
+          .pipe(Effect.provideService(Scope.Scope, scope)),
+      );
+      try {
+        await Effect.runPromise(connection.start({ sessionId, modelId, executionPolicy }));
+        const open = f.opens.at(-1)!;
+        expect(open.attachmentsFolder).toBe(attachmentsFolder);
+        const signal = new AbortController().signal;
+        const call = (toolName: string, input: Record<string, unknown>, toolUseId: string) =>
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName,
+            input,
+            toolUseId,
+            signal,
+          });
+        await expect(call("Read", { file_path: file }, `read-${executionPolicy}`)).resolves.toEqual(
+          { behavior: "allow" },
+        );
+        // Plan holds no write tool; Guarded holds one and still may not
+        // change an attached file.
+        await expect(
+          call("Write", { file_path: file, content: "changed" }, `write-${executionPolicy}`),
+        ).resolves.toMatchObject(
+          executionPolicy === "plan"
+            ? { behavior: "deny" }
+            : { behavior: "deny", message: CLAUDE_ATTACHMENTS_READ_ONLY },
+        );
+      } finally {
+        await Effect.runPromise(Scope.close(scope, Exit.void));
+      }
+    }
+    // Below Full access the command sandbox reads the folder and never writes it.
+    const sandbox = claudeSandboxSettings("approval-gated", projectRoot, [], undefined, false, [
+      attachmentsFolder,
+    ]);
+    expect(sandbox?.filesystem.allowRead).toContain(attachmentsFolder);
+    expect(sandbox?.filesystem.allowWrite).not.toContain(attachmentsFolder);
   });
 
   it("refuses an Artifact call in Plan without raising an approval, because publishing leaves the computer", async () => {

@@ -40,7 +40,7 @@ import {
   threadAccessOf,
   type PickerGroup,
 } from "@octant/domain";
-import { ChevronDown, CirclePause, X } from "lucide-react";
+import { ChevronDown, CirclePause, FileText, X } from "lucide-react";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadAccountControl } from "../providers/ThreadAccountControl";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
@@ -117,7 +117,7 @@ import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import type { HostId } from "@octant/contracts/host";
 import type { AutomationClient, CodeClient, ThreadMentionClient } from "@octant/client-runtime";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
-import { useCodeAttachments } from "./useCodeAttachments";
+import { isImageAttachment, useCodeAttachments } from "./useCodeAttachments";
 import {
   threadImageOfferKey,
   useThreadImageOffers,
@@ -807,11 +807,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     windowCapability: props.windowCapability,
     hostId: props.hostId,
     refused: serverCheckout || props.pairedDevice === true,
-    onFiles: (files) => {
-      if (seesImages.takesImages === false)
-        attachments.refuse(seesImages.refusal ?? "Choose a vision model to attach images.");
-      else void attachments.attach(files);
-    },
+    onFiles: (files) => void attachFiles(files),
   });
   // A picture marked up in this thread's Browser arrives here as a file and
   // meets the same checks as one dropped on the composer.
@@ -1253,20 +1249,28 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       }
     }
   }
-  function attachFromTransfer(items: DataTransfer | null): boolean {
-    if (props.attachmentClient === undefined || items === null) return false;
-    const files = [...items.files];
-    if (files.length === 0) return false;
-    // The host refuses this turn anyway. Saying so at the paste is kinder than
-    // letting the user write the message first and lose it at send.
-    if (seesImages.takesImages === false) {
+  /**
+   * Attach dropped, pasted or chosen files. Any file may be attached; an
+   * image needs a model that reads images, which the host would otherwise
+   * refuse at send, so a picture for one that does not is refused here and
+   * every other file still attaches.
+   */
+  function attachFiles(files: ReadonlyArray<File>): Promise<string | undefined> {
+    if (seesImages.takesImages !== false) return attachments.attach(files);
+    const others = files.filter((file) => !isImageAttachment(file));
+    if (others.length < files.length) {
       attachments.refuse(
         seesImages.refusal ??
           `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`,
       );
-      return true;
     }
-    void attachments.attach(files);
+    return others.length === 0 ? Promise.resolve(undefined) : attachments.attach(others);
+  }
+  function attachFromTransfer(items: DataTransfer | null): boolean {
+    if (props.attachmentClient === undefined || items === null) return false;
+    const files = [...items.files];
+    if (files.length === 0) return false;
+    void attachFiles(files);
     return true;
   }
 
@@ -2734,17 +2738,25 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               />
               <TrackerReferenceComposerHints draft={draft} />
               {attachments.staged.length === 0 ? null : (
-                <div className="code-thread-workspace__attachments" aria-label="Attached images">
+                <div className="code-thread-workspace__attachments" aria-label="Attached files">
                   {attachments.staged.map(({ previewUrl, reference }) => (
                     <span
                       className="chip code-thread-workspace__attachment"
                       key={reference.attachmentId}
                     >
-                      <img
-                        alt={reference.displayName}
-                        className="code-thread-workspace__attachment-thumb"
-                        src={previewUrl}
-                      />
+                      {previewUrl === "" ? (
+                        <FileText
+                          aria-hidden="true"
+                          className="code-thread-workspace__attachment-thumb"
+                          size={16}
+                        />
+                      ) : (
+                        <img
+                          alt={reference.displayName}
+                          className="code-thread-workspace__attachment-thumb"
+                          src={previewUrl}
+                        />
+                      )}
                       <span className="code-thread-workspace__attachment-name">
                         {reference.displayName}
                       </span>
@@ -2876,18 +2888,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             ariaLabel: "Thread context",
             attach: (
               <ComposerAttachButton
-                accept="image/png,image/jpeg,image/webp,image/gif"
                 busy={attachments.busy}
                 refusedReason={
                   props.attachmentClient === undefined
-                    ? "Image attachments are unavailable on this host."
-                    : seesImages.takesImages === false
-                      ? (seesImages.refusal ??
-                        `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`)
-                      : undefined
+                    ? "Attachments are unavailable on this host."
+                    : undefined
                 }
                 onRefused={attachments.refuse}
-                onFileSelected={(file) => void attachments.attach([file])}
+                onFileSelected={(file) => void attachFiles([file])}
               />
             ),
             leading: (

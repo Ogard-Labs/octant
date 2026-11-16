@@ -1666,12 +1666,13 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
             }
             return normalized;
           }),
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) =>
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], attachmentsFolder }) =>
       instanceId !== options.instanceId
         ? Effect.fail(fail("invalid-configuration", "Provider instance does not match driver."))
         : Effect.gen(function* () {
+            const readOnlyFolders = attachmentsFolder === undefined ? [] : [attachmentsFolder];
             if (
-              [projectRoot, ...extraFolders].some(
+              [projectRoot, ...extraFolders, ...readOnlyFolders].some(
                 (root) => !isAbsolute(root) || resolve(root) !== root,
               )
             ) {
@@ -1693,6 +1694,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               resumeToolCatalogs,
               rememberedEditsFor(projectRoot),
               sessionsHoldingStaleContext,
+              readOnlyFolders,
             );
           }),
   };
@@ -1797,6 +1799,8 @@ function makeConnection(
   resumeToolCatalogs: Map<string, ReadonlyArray<ProviderToolDefinition>>,
   rememberedEdits: Set<string>,
   sessionsHoldingStaleContext: Set<string>,
+  /** The thread's attachments folder, read at every level and written at none. */
+  readOnlyFolders: ReadonlyArray<string> = [],
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
     const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
@@ -1947,6 +1951,7 @@ function makeConnection(
             mode,
             projectRoot,
             extraFolders,
+            readOnlyFolders,
             questionForms: openCodeServesQuestionForms(runtimeVersion),
             remembersInOpenCode: opencodeRemembersApproval(
               state,
@@ -2180,7 +2185,9 @@ function makeConnection(
                     ownSkills,
                     ownPermissions(ownSetup),
                     options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
+                    readOnlyFolders,
                   ),
+                  ...(readOnlyFolders.length === 0 ? {} : { readOnlyFolders }),
                   ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
                   onProcessStarted: (process) =>
                     options.runtimeRegistry.trackProcess(options.instanceId, process),
@@ -2602,6 +2609,7 @@ function makeConnection(
                         state.nativeSetup?.skills === true,
                         state.own,
                         state.protectedPaths,
+                        readOnlyFolders,
                       ),
                       model: splitModelId(input.modelId),
                     }),
@@ -2962,6 +2970,7 @@ function makeConnection(
                                 state.nativeSetup?.skills === true,
                                 state.own,
                                 state.protectedPaths,
+                                readOnlyFolders,
                               ),
                             }),
                           );
@@ -3395,6 +3404,7 @@ function mapAndOffer(
     readonly mode: "chat" | "work" | "code";
     readonly projectRoot: string;
     readonly extraFolders: ReadonlyArray<string>;
+    readonly readOnlyFolders: ReadonlyArray<string>;
     /** Whether this release's question forms were read (`openCodeServesQuestionForms`). */
     readonly questionForms: boolean;
     /** An approval here is answered `always`, a grant kept in OpenCode's own store. */
@@ -3477,6 +3487,7 @@ function mapAndOffer(
                 webTools: state.own.webTools,
               },
               state.protectedPaths,
+              beta.readOnlyFolders,
             ),
             action,
           );
@@ -3759,6 +3770,7 @@ export function permissionRules(
   ownSkills = false,
   own: OwnPermissions = NO_OWN_PERMISSIONS,
   protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
+  readOnlyFolders: ReadonlyArray<string> = [],
 ): PermissionRuleset {
   let rules: PermissionRuleset;
   if (policy === "full-access") {
@@ -3827,6 +3839,9 @@ export function permissionRules(
   // The person's own skills load once they let OpenCode run as itself; a
   // skill is text, and OpenCode asks for it under the posture's own rule.
   if (!ownSkills) rules.push({ permission: "skill", pattern: "*", action: "deny" });
+  for (const rule of attachmentsFolderRules(readOnlyFolders)) {
+    rules.push({ permission: rule.action, pattern: rule.resource, action: rule.effect });
+  }
   for (const rule of openCodeProtectedReadRefusals(policy, protectedPaths)) {
     rules.push({ permission: rule.action, pattern: rule.resource, action: rule.effect });
   }
@@ -3938,6 +3953,21 @@ function outsideFolderAllows(
 }
 
 /**
+ * The thread's attachments folder: read at every level, Plan included, and
+ * written at none. These come after every other folder rule, so neither the
+ * level's outside-folder answer nor an edit allow reopens a write there.
+ */
+function attachmentsFolderRules(
+  readOnlyFolders: ReadonlyArray<string>,
+): ReadonlyArray<PermissionV2Rule> {
+  return readOnlyFolders.flatMap((folder) => [
+    { action: "external_directory", resource: folder, effect: "allow" as const },
+    { action: "external_directory", resource: `${folder}/*`, effect: "allow" as const },
+    { action: "edit", resource: `${folder}/*`, effect: "deny" as const },
+  ]);
+}
+
+/**
  * Puts the person's rules ahead of the posture's first deny, so they override
  * the level's allows and asks while every deny the posture holds still wins.
  */
@@ -3971,6 +4001,7 @@ export function betaSessionPermissionRules(
   ownSkills = false,
   own: OwnPermissions = NO_OWN_PERMISSIONS,
   protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
+  readOnlyFolders: ReadonlyArray<string> = [],
 ): PermissionV2Ruleset {
   const rules: PermissionV2Ruleset = [
     ...betaAgentPermissionRules(policy, mode, extraFolders, own.rules, protectedPaths),
@@ -3991,6 +4022,7 @@ export function betaSessionPermissionRules(
     // OpenCode's own default agent does; without this the posture's
     // catch-all would ask for permission to ask.
     { action: "question", resource: "*", effect: "allow" },
+    ...attachmentsFolderRules(readOnlyFolders),
   ];
   if (managedToolServerName !== undefined) {
     rules.push({ action: `${managedToolServerName}_*`, resource: "*", effect: "allow" });

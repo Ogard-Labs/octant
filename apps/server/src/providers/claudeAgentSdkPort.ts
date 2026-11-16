@@ -210,6 +210,11 @@ export interface ClaudeOpenQueryInput {
   /** The account keeps Claude's own memory for this launch (`providerOwnMemoryLaunches`). */
   readonly ownMemory?: true;
   /**
+   * The thread's attachments folder: a Plan launch's confinement binds it
+   * read-only, as the command sandbox reads it below Full access.
+   */
+  readonly attachmentsFolder?: string;
+  /**
    * The account's own MCP servers this Plan session starts, the person's
    * marks (`planReadOnlyToolServers`); absent or empty starts none.
    */
@@ -1435,6 +1440,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               ? {}
               : { extraFolders: input.additionalDirectories }),
             executionPolicy: input.executionPolicy,
+            ...(input.attachmentsFolder === undefined
+              ? {}
+              : { readOnlyFolders: [input.attachmentsFolder] }),
             runsCommands: input.tools.includes("Bash"),
             ...(input.network === undefined ? {} : { network: input.network }),
           });

@@ -126,7 +126,7 @@ import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import { describeTurnImages, type ImageDescriber } from "../harness/imageDescription";
 import { lookToolForThread } from "../image/lookTool";
-import { supportsConversationInput } from "./conversationInputs";
+import { providerTakesFileNatively, supportsConversationInput } from "./conversationInputs";
 import { modelLabelOf } from "./imageDescriber";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import {
@@ -1028,6 +1028,13 @@ export function wireWork(deps: WorkDependencies) {
             String(model.id) === String(thread.modelId) && model.inputModalities.includes("image"),
         );
       },
+      takesFileNatively: (thread, mediaType) =>
+        providerTakesFileNatively(
+          persistence.readProviderInstance(thread.providerInstanceId)?.driverKind,
+          providerRuntimeRegistry.observedState(thread.providerInstanceId),
+          String(thread.modelId),
+          mediaType,
+        ),
       resolveSideChatReturns: sideChatReturnContextResolver(
         () => threadMentionService,
         threadOutsideContentMarks,

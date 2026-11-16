@@ -3,6 +3,7 @@ import { readdirSync } from "node:fs";
 import {
   access,
   chmod,
+  link,
   lstat,
   mkdir,
   open,
@@ -264,6 +265,48 @@ export class ManagedAttachmentStore {
       throw new Error(`Attachment corrupt: size mismatch for ${attachmentId}`);
     }
     return attachmentBytes;
+  }
+
+  /**
+   * The folder that holds every attachment of one scope (a thread). A
+   * provider session reads it to open an attached file by path; nothing else
+   * lives in it, so granting it reveals only that thread's own attachments.
+   */
+  scopeFolder(scopeId: string): string {
+    return join(this.#root, this.#options.decodeScopeId(scopeId));
+  }
+
+  /**
+   * A path that opens a finalized attachment under its own name, so a tool
+   * that judges a file by its extension (a PDF reader, an image viewer) can
+   * open it. It is a second name for the same verified file, made beside it
+   * in the attachment's folder; the bytes are checked first, so the name only
+   * ever points at the file the journal recorded.
+   */
+  async readablePath(finalized: ManagedAttachmentFinalized): Promise<string> {
+    await this.read(finalized);
+    const scopeId = this.#options.decodeScopeId(finalized.scopeId);
+    const attachmentId = this.#options.decodeAttachmentId(finalized.attachmentId);
+    const dir = await this.#requireAttachmentDir(scopeId, attachmentId);
+    const sanitized = this.sanitizeDisplayName(finalized.displayName);
+    const name =
+      sanitized === FINALIZED_FILE || sanitized === STAGED_FILE
+        ? `attached-${sanitized}`
+        : sanitized;
+    const path = join(dir, name);
+    const finalizedPath = join(dir, FINALIZED_FILE);
+    try {
+      await link(finalizedPath, path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    // A name that already existed must be this very file, not a link or a
+    // file something else left there.
+    const [named, original] = await Promise.all([lstat(path), lstat(finalizedPath)]);
+    if (!named.isFile() || named.ino !== original.ino || named.dev !== original.dev) {
+      throw new ManagedAttachmentDirectoryError("Attachment name is not the attached file.");
+    }
+    return path;
   }
 
   /**

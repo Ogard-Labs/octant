@@ -755,6 +755,7 @@ export function claudeSandboxSettings(
   extraFolders: ReadonlyArray<string> = [],
   proxyPort?: number,
   fullAccessSandbox = false,
+  readOnlyFolders: ReadonlyArray<string> = [],
 ): ClaudeSandboxSettings | undefined {
   if (!claudeRunsSandbox(policy, fullAccessSandbox)) return undefined;
   return {
@@ -771,8 +772,9 @@ export function claudeSandboxSettings(
     allowUnsandboxedCommands: claudeSandboxLetsCommandsOut(policy),
     filesystem: {
       denyRead: ["/"],
-      // An extra folder is granted exactly what the root is.
-      allowRead: [projectRoot, ...extraFolders],
+      // An extra folder is granted exactly what the root is; the thread's
+      // attachments folder is read and never written.
+      allowRead: [projectRoot, ...extraFolders, ...readOnlyFolders],
       allowWrite: [projectRoot, ...extraFolders],
     },
     network:
@@ -1004,6 +1006,10 @@ function claudeToolPathIsInKeychainFolder(candidate: string): boolean {
   const target = canonicalClaudeAccountDirectory(candidate).path;
   return target === folder || target.startsWith(`${folder}/`);
 }
+
+/** Claude's answer to a file tool that would change a file the person attached. */
+export const CLAUDE_ATTACHMENTS_READ_ONLY =
+  "Attached files are read-only. Copy one into the Project to change it.";
 
 /** Claude's message when Chat or Plan refuses a write into its own memory. */
 export const CLAUDE_MEMORY_WRITE_REFUSAL =
@@ -2601,14 +2607,25 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
     probe: makeProbe(options, environmentFactory, factories.clock),
     contextFacts: makeClaudeContextFacts(options, environmentFactory, factories.clock),
     forkSession: (input) => forkClaudeSession(options, input),
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], workRequest }) => {
+    acquire: ({
+      instanceId,
+      projectRoot,
+      mode,
+      extraFolders = [],
+      attachmentsFolder,
+      workRequest,
+    }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
         );
       }
       if (
-        [projectRoot, ...extraFolders].some((root) => !isAbsolute(root) || resolve(root) !== root)
+        [
+          projectRoot,
+          ...extraFolders,
+          ...(attachmentsFolder === undefined ? [] : [attachmentsFolder]),
+        ].some((root) => !isAbsolute(root) || resolve(root) !== root)
       ) {
         return Effect.fail(
           failure(
@@ -2625,6 +2642,7 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
         mode,
         factories,
         workRequest === undefined ? undefined : String(workRequest.threadId),
+        attachmentsFolder,
       );
     },
   };
@@ -2639,6 +2657,8 @@ function makeConnection(
   factories: ConnectionFactories,
   /** The Work thread this connection serves, which names it to the network reviewer. */
   workThreadId?: string,
+  /** The thread's attachments folder, which the session reads and never writes. */
+  attachmentsFolder?: string,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
     const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
@@ -3576,6 +3596,7 @@ function makeConnection(
           extraFolders,
           sandboxNetwork?.endpoint.kind === "loopback" ? sandboxNetwork.endpoint.port : undefined,
           sandboxedFullAccess,
+          attachmentsFolder === undefined ? [] : [attachmentsFolder],
         );
         let callbackState: SessionState | undefined;
         const insideFolder = (root: string, candidate: string): boolean => {
@@ -3925,6 +3946,15 @@ function makeConnection(
                 })
               : undefined;
           if (memoryRefusal !== undefined) return deny(memoryRefusal);
+          // The thread's attached files are the person's, kept by Octant: a
+          // file tool reads them at every level and writes them at none.
+          const inAttachments =
+            attachmentsFolder !== undefined &&
+            typeof memoryTarget === "string" &&
+            insideFolder(attachmentsFolder, memoryTarget);
+          if (inAttachments && !CLAUDE_READ_TOOLS.has(request.toolName)) {
+            return deny(CLAUDE_ATTACHMENTS_READ_ONLY);
+          }
           // Full access with its sandbox keeps the Project's folders, where
           // the sandbox holds every command, so a worktree outside them is
           // refused there rather than held.
@@ -4080,6 +4110,9 @@ function makeConnection(
           ) {
             return deny("Claude tool request is outside the Project.");
           }
+          // A read of the thread's attached files runs unasked at every
+          // level, Plan included: the person attached them for this thread.
+          if (inAttachments && candidate === memoryTarget) return settledUnasked();
           if (!sessionHolds(activeState, candidate)) {
             // A file tool naming a folder outside the Project's folders asks
             // below Full access, as Claude Code does on its own (maintainer
@@ -4243,6 +4276,7 @@ function makeConnection(
               binaryPath: options.binaryPath,
               projectRoot,
               ...(extraFolders.length === 0 ? {} : { additionalDirectories: extraFolders }),
+              ...(attachmentsFolder === undefined ? {} : { attachmentsFolder }),
               authEnvironment: withServerAccess(
                 claudeNativeLaunchEnvironment(
                   keepsOwnMemory

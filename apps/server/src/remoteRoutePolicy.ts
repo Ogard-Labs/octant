@@ -2,6 +2,7 @@ import { AGENT_PROOF_HEADER } from "@octant/contracts/agent-access";
 import { CANVAS_DESIGN_PAGE_PATH } from "@octant/contracts/canvas";
 import {
   CODE_OWNER_UNLOCKED_MERGE_PATHS,
+  ATTACHMENT_MEDIA_TYPE_PATTERN,
   CHAT_ATTACHMENT_MEDIA_TYPES,
   CODE_ATTACHMENT_MEDIA_TYPES,
   HUB_WAKE_MAX_SPOKES,
@@ -980,11 +981,12 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   // JSON bodies within the listener's default budget.
   ...(
     [
-      ["/api/chat/attachments", "POST", "chat", CHAT_ATTACHMENT_MEDIA_TYPES],
-      ["/api/work/attachments", "PUT", "work", WORK_ATTACHMENT_MEDIA_TYPES],
-      ["/api/code/attachments", "PUT", "code", CODE_ATTACHMENT_MEDIA_TYPES],
+      ["/api/chat/attachments", "POST", "chat", CHAT_ATTACHMENT_MEDIA_TYPES, false],
+      // Work and Code take a file of any type (maintainer decision, 2026-11-16).
+      ["/api/work/attachments", "PUT", "work", WORK_ATTACHMENT_MEDIA_TYPES, true],
+      ["/api/code/attachments", "PUT", "code", CODE_ATTACHMENT_MEDIA_TYPES, true],
     ] as const
-  ).map(([path, method, mode, mediaTypes]) => ({
+  ).map(([path, method, mode, mediaTypes, anyType]) => ({
     kind: "exact" as const,
     path,
     methods: [method],
@@ -995,6 +997,7 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
       `x-octant-${mode}-display-name`,
     ],
     allowedContentTypes: mediaTypes,
+    ...(anyType ? { acceptsAnyAttachmentType: true as const } : {}),
     maxBodyBytes: REMOTE_ATTACHMENT_UPLOAD_MAX_BODY_BYTES,
     uploadsAttachment: true as const,
   })),
@@ -1281,6 +1284,9 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
       ? { maxResponseBytes: match.maxResponseBytes }
       : {}),
     ...("uploadsAttachment" in match ? { uploadsAttachment: match.uploadsAttachment } : {}),
+    ...("acceptsAnyAttachmentType" in match
+      ? { acceptsAnyAttachmentType: match.acceptsAnyAttachmentType }
+      : {}),
     // An exact route takes a query only when it says so: one naming a Project
     // there, or one that declares `allowQuery` because its own handler reads
     // and bounds the query (the load read's `?detail=vitals`, search's
@@ -1337,6 +1343,12 @@ export interface RemoteRouteDefinition {
    * still the route's own.
    */
   readonly uploadsAttachment?: true;
+  /**
+   * An attachment upload whose body may be a file of any media type, named as
+   * `type/subtype`; `allowedContentTypes` then lists only the images the mode
+   * sends natively.
+   */
+  readonly acceptsAnyAttachmentType?: true;
 }
 
 export type RemoteRouteResponse = Response | undefined;
@@ -1874,7 +1886,19 @@ function contentTypeAllowed(request: Request, route: RemoteRouteDefinition): boo
   const contentType = request.headers.get("content-type");
   if (contentType === null) return false;
   const mediaType = contentType.split(";", 1)[0]?.trim().toLowerCase();
+  if (route.acceptsAnyAttachmentType === true && mediaType !== undefined) {
+    return routeAcceptsAttachmentType(route, mediaType);
+  }
   return (route.allowedContentTypes ?? REMOTE_CONTENT_TYPES).includes(mediaType as never);
+}
+
+/** Whether an attachment upload route takes a body of this media type. */
+export function routeAcceptsAttachmentType(
+  route: Pick<RemoteRouteDefinition, "acceptsAnyAttachmentType" | "allowedContentTypes">,
+  mediaType: string,
+): boolean {
+  if (route.acceptsAnyAttachmentType === true) return ATTACHMENT_MEDIA_TYPE_PATTERN.test(mediaType);
+  return (route.allowedContentTypes ?? []).includes(mediaType);
 }
 
 function declaredBodyBytes(request: Request): number {

@@ -2238,6 +2238,7 @@ describe("CodeOperationService", () => {
           : { status: "unknown" as const, attachmentId: requested[0]! },
       release: vi.fn(),
       read: vi.fn(async () => bytes),
+      threadFolder: () => "/octant-data/code-threads/thread",
     };
     let supported = true;
     const { service, turns, events } = providerTurnFixture({
@@ -2300,6 +2301,52 @@ describe("CodeOperationService", () => {
     expect(journalled().at(-1)).toMatchObject({ attachments: [reference] });
   });
 
+  it("names an attached file of any type by its read-only path, for a model that reads no images too", async () => {
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000031",
+      displayName: "report.pdf",
+      mediaType: "application/pdf",
+      byteLength: 3,
+      digest: "e".repeat(64),
+    };
+    const folder = "/octant-data/code-threads/thread";
+    const attachments = {
+      peek: () => ({ status: "ok" as const, attachments: [reference] }),
+      release: vi.fn(),
+      read: vi.fn(async () => new Uint8Array([1, 2, 3])),
+      readablePath: vi.fn(async () => `${folder}/${reference.attachmentId}/report.pdf`),
+      threadFolder: vi.fn(() => folder),
+    };
+    const { service, turns } = providerTurnFixture({
+      attachments: attachments as never,
+      supportsAttachments: () => false,
+    });
+    await expect(
+      service.execute(ids.window, {
+        ...startProviderTurn,
+        operationId: decodeCodeOperationId("70000000-0000-4000-8000-000000000031"),
+        attachmentIds: [reference.attachmentId],
+      } as never),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    const start = turns.start.mock.calls.at(-1)?.[0] as {
+      readonly attachments?: ReadonlyArray<unknown>;
+      readonly attachmentsFolder?: string;
+      readonly context?: ReadonlyArray<{ readonly kind: string; readonly text?: string }>;
+    };
+    // Not sent as a picture: the provider takes images alone.
+    expect(start.attachments).toBeUndefined();
+    // The session is granted the thread's own attachments folder, and the
+    // turn names the file in it.
+    expect(start.attachmentsFolder).toBe(folder);
+    expect(
+      start.context?.some(
+        (block) =>
+          block.text?.includes(`${folder}/${reference.attachmentId}/report.pdf`) === true &&
+          block.text.includes("read-only"),
+      ),
+    ).toBe(true);
+  });
+
   it("describes images for a model that cannot read them before the start, and sends those words", async () => {
     const reference = {
       attachmentId: "40000000-0000-4000-8000-000000000021",
@@ -2312,6 +2359,7 @@ describe("CodeOperationService", () => {
       peek: () => ({ status: "ok" as const, attachments: [reference] }),
       release: vi.fn(),
       read: vi.fn(async () => new Uint8Array([1, 2, 3])),
+      threadFolder: () => "/octant-data/code-threads/thread",
     };
     const stored = new Map<string, string>();
     const evidence = {
@@ -2384,6 +2432,7 @@ describe("CodeOperationService", () => {
       peek: () => ({ status: "ok" as const, attachments: [reference] }),
       release: vi.fn(),
       read: vi.fn(async () => new Uint8Array([1, 2, 3])),
+      threadFolder: () => "/octant-data/code-threads/thread",
     };
     const { service, turns, events } = providerTurnFixture({
       attachments: attachments as never,

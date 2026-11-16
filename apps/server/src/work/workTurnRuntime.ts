@@ -110,6 +110,8 @@ export interface WorkTurnRuntimePort {
     readonly projectRoot: string;
     /** The Project's extra folders, granted what `projectRoot` is granted. */
     readonly extraFolders?: ReadonlyArray<string>;
+    /** The thread's attachments folder, which the session reads and never writes. */
+    readonly attachmentsFolder?: string;
     readonly driver: ProviderDriver;
     readonly signal: AbortSignal;
     /** Host-owned retained admission proof, rechecked after session startup immediately before send. */
@@ -499,6 +501,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         instanceId: input.command.authority.providerInstanceId,
         projectRoot: input.projectRoot,
         ...(input.extraFolders === undefined ? {} : { extraFolders: input.extraFolders }),
+        ...(input.attachmentsFolder === undefined
+          ? {}
+          : { attachmentsFolder: input.attachmentsFolder }),
         mode: "work",
         workRequest: {
           projectId: input.command.authority.projectId,
@@ -520,6 +525,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
               String(input.command.authority.providerInstanceId),
               input.projectRoot,
               input.extraFolders ?? [],
+              input.attachmentsFolder ?? "",
               String(input.providerSessionId),
             ]),
             acquire,

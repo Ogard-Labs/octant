@@ -1226,14 +1226,17 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             options.runtimeRegistry.setObservedState(result);
             return result;
           }),
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], attachmentsFolder }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
         );
       }
+      const readOnlyFolders = attachmentsFolder === undefined ? [] : [attachmentsFolder];
       if (
-        [projectRoot, ...extraFolders].some((root) => !isAbsolute(root) || resolve(root) !== root)
+        [projectRoot, ...extraFolders, ...readOnlyFolders].some(
+          (root) => !isAbsolute(root) || resolve(root) !== root,
+        )
       ) {
         return Effect.fail(
           failure(
@@ -1268,7 +1271,10 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       ) =>
         JSON.stringify([
           projectRoot,
-          extraFolders,
+          // The read-only folders ride with the extra folders, so a lease's
+          // shape (root, folders, mode, posture) stays what idle-lease
+          // matching reads.
+          [...extraFolders, ...readOnlyFolders.map((folder) => `read-only:${folder}`)],
           threadMode,
           `${executionPolicy}${ownSubagents ? "+own-subagents" : ""}${
             keepsOwnMemory(executionPolicy) ? "+own-memory" : ""
@@ -1288,6 +1294,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
               kind: "thread",
               root: projectRoot,
               ...(extraFolders.length === 0 ? {} : { extraFolders }),
+              ...(readOnlyFolders.length === 0 ? {} : { readOnlyFolders }),
               mode: threadMode,
               executionPolicy,
               ...(ownSubagents ? { ownSubagents: true as const } : {}),

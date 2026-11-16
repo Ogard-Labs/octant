@@ -67,6 +67,11 @@ export interface ClaudeRuntimeConfinement {
   readonly projectRoot: string;
   /** The Project's extra folders, which Plan reads as it reads the root. */
   readonly extraFolders?: ReadonlyArray<string>;
+  /**
+   * Folders a Plan launch and its commands read and never write: the
+   * thread's attachments folder.
+   */
+  readonly readOnlyFolders?: ReadonlyArray<string>;
   readonly executionPolicy: ProviderExecutionPolicy;
   /**
    * Whether this launch offers the Bash tool. A Plan launch gets the shell and
@@ -1168,6 +1173,13 @@ function confineClaudeLaunch(
         return [];
       }
     });
+    const readOnlyFolders = (confinement.readOnlyFolders ?? []).flatMap((folder) => {
+      try {
+        return [realpathSync(folder)];
+      } catch {
+        return [];
+      }
+    });
     // On Linux each command runs through a program that starts it in a capsule
     // of its own. The program sits in a folder of its own, read-only in the
     // runtime's capsule, so neither the runtime nor a command can rewrite it.
@@ -1188,7 +1200,7 @@ function confineClaudeLaunch(
         shellPrefix = writeLinuxPlanShellPrefix(shellFolder, {
           bwrapPath: DEFAULT_BWRAP_PATH,
           shell: CLAUDE_LINUX_PLAN_SHELL,
-          readRoots: [boundRoot, ...extraFolders],
+          readRoots: [boundRoot, ...extraFolders, ...readOnlyFolders],
           temporaryDirectory,
         });
       } catch (error) {
@@ -1210,6 +1222,7 @@ function confineClaudeLaunch(
         boundRoot,
         temporaryDirectory,
         ...stateRoots.readRoots,
+        ...readOnlyFolders,
         ...(shellFolder === undefined ? [] : [shellFolder]),
       ],
       privateHomeAllowPaths: [
@@ -1217,6 +1230,7 @@ function confineClaudeLaunch(
         ...extraFolders,
         temporaryDirectory,
         ...stateRoots.readRoots,
+        ...readOnlyFolders,
         ...(shellFolder === undefined ? [] : [shellFolder]),
       ],
       // The runtime calls its own control plane, so it resolves the runtime
