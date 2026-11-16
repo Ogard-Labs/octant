@@ -194,7 +194,6 @@ import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
   composerProviderCommands,
-  PLAN_PROVIDER_COMMAND_REFUSAL,
 } from "../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
@@ -487,11 +486,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       setDraft(next);
       props.controller.setPendingDraft?.(next);
     },
-    provider: composerProviderCommands(
-      props.providerGroups,
-      view?.thread.providerInstanceId,
-      view?.thread.executionPolicy === "plan" ? PLAN_PROVIDER_COMMAND_REFUSAL : undefined,
-    ),
+    provider: composerProviderCommands(props.providerGroups, view?.thread.providerInstanceId),
   });
   const activeThreadKeyRef = useRef(String(props.threadId));
   activeThreadKeyRef.current = String(props.threadId);

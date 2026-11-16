@@ -119,24 +119,6 @@ describe("composer / menu", () => {
     await user.click(screen.getByRole("option", { name: /\/review/ }));
     expect(message).toHaveValue("/review ");
   });
-
-  it("shows why Plan cannot run a provider command and leaves the message alone", async () => {
-    const user = userEvent.setup();
-    render(
-      <OctantCommandProvider commands={COMMANDS}>
-        <Harness
-          resolve={vi.fn(async () => true)}
-          provider={{ ...provider, refusal: "Not in Plan: Plan stays read-only" }}
-        />
-      </OctantCommandProvider>,
-    );
-    const message = screen.getByRole("textbox", { name: "Message" });
-    await user.type(message, "/rev");
-    const option = screen.getByRole("option", { name: /\/review/ });
-    expect(option).toHaveTextContent("Not in Plan: Plan stays read-only");
-    await user.click(option);
-    expect(message).toHaveValue("/rev");
-  });
 });
 
 describe("composer @ menu", () => {

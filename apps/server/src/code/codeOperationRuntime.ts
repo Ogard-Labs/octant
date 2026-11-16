@@ -3,11 +3,7 @@ import type { OctantInstructionsBlock } from "../octantInstructions/octantInstru
 import type { DesignSystemTurnContext } from "../designSystems/designSystemContext";
 import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecovery";
 import { withHandoverSummary } from "../agentRun/conversationHandoff";
-import {
-  projectExtraFolderRoots,
-  providerCommandRefusal,
-  validateQuestionnaireAnswer,
-} from "@octant/domain";
+import { projectExtraFolderRoots, validateQuestionnaireAnswer } from "@octant/domain";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
@@ -560,13 +556,6 @@ export interface CodeOperationRuntimeOptions {
    * say so previews a rewind as continuing with a text handoff.
    */
   readonly supportsSessionRollback?: (thread: CodeThread) => boolean;
-  /**
-   * The provider's own slash commands its runtime listed, so a turn that runs
-   * one in Plan is refused. Absent lists none.
-   */
-  readonly providerCommands?: (
-    instanceId: CodeThread["providerInstanceId"],
-  ) => ReadonlyArray<{ readonly name: string }> | undefined;
   /**
    * Whether the thread's session is being compacted. A turn is refused
    * meanwhile: it would resume the session the runtime is rewriting.
@@ -3560,13 +3549,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (command.toolCatalogHandoff === true && input.routineRun !== undefined) {
       return failStart("Only a person can choose to replace a native session's tools.");
     }
-    const commandRefusal = providerCommandRefusal({
-      prompt: input.prompt,
-      commands: this.#options.providerCommands?.(input.thread.providerInstanceId),
-      mode: "code",
-      executionPolicy: input.thread.executionPolicy,
-    });
-    if (commandRefusal !== undefined) return failStart(commandRefusal);
     const resolvedDriver = await this.#options.resolveProviderDriver(input.thread);
     if (resolvedDriver === undefined) return failStart();
     const recovered = this.#events.providerSessionForThread(input.thread.id, command.operationId);

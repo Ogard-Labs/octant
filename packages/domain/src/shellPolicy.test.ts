@@ -2667,10 +2667,20 @@ describe("panes of several Projects in one window", () => {
     };
     const missing = decodeProjectId(uuid("8006", 1));
     expect(admissionSet(workspace, "code")).toHaveLength(count + 1);
-    const rounds = 2000;
-    const started = performance.now();
+    // A single cold timing on a shared CI runner failed now and then with no
+    // code change: one pause from the scheduler or garbage collector lands in
+    // the one loop. Warm up, then take the fastest of several batches. A real
+    // regression slows every batch, so the bound still catches it.
+    const rounds = 1000;
     for (let round = 0; round < rounds; round += 1) windowAdmitsProject(workspace, "code", missing);
-    const microseconds = ((performance.now() - started) * 1000) / rounds;
-    expect(microseconds).toBeLessThan(50);
+    let fastest = Number.POSITIVE_INFINITY;
+    for (let batch = 0; batch < 5; batch += 1) {
+      const started = performance.now();
+      for (let round = 0; round < rounds; round += 1) {
+        windowAdmitsProject(workspace, "code", missing);
+      }
+      fastest = Math.min(fastest, ((performance.now() - started) * 1000) / rounds);
+    }
+    expect(fastest).toBeLessThan(50);
   });
 });
