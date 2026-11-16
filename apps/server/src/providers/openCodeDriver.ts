@@ -1,4 +1,5 @@
 import { providerCommandOf, providerCommandRefusal, providerRunsAsItself } from "@octant/domain";
+import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
 import { readBoundedResponseBody } from "../extensions/boundedResponseBody";
 import { advertisedSlashCommands } from "./providerSlashCommands";
 import { OpenCodeChildSessions } from "./openCodeChildSessions";
@@ -1493,22 +1494,20 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
             // Probe the app-owned transport with an empty, private catalogue.
             // This is a non-generating declaration check: it does not send a
             // model prompt and its bridge is closed before the probe scope
-            // returns. Linux intentionally skips it because bwrap cannot
-            // express the exact loopback-only rule required by the bridge.
-            const bridge =
-              process.platform === "darwin"
-                ? yield* Effect.acquireRelease(
-                    Effect.tryPromise({
-                      try: () =>
-                        createOpenCodeManagedToolsBridge([], async () => ({
-                          resultJson: '{"error":"probe-only"}',
-                          isError: true,
-                        })),
-                      catch: () => fail("unavailable", "OpenCode MCP probe bridge is unavailable."),
-                    }),
-                    (ownedBridge) => Effect.promise(() => ownedBridge.close()),
-                  )
-                : undefined;
+            // returns. It runs wherever the launch can reach the bridge.
+            const bridge = appToolBridgeReachesLaunchOn(process.platform)
+              ? yield* Effect.acquireRelease(
+                  Effect.tryPromise({
+                    try: () =>
+                      createOpenCodeManagedToolsBridge([], async () => ({
+                        resultJson: '{"error":"probe-only"}',
+                        isError: true,
+                      })),
+                    catch: () => fail("unavailable", "OpenCode MCP probe bridge is unavailable."),
+                  }),
+                  (ownedBridge) => Effect.promise(() => ownedBridge.close()),
+                )
+              : undefined;
             // On macOS, probe under the Chat/Plan jail, not the Code jail:
             // the git stand-in (fork plus exec of /usr/bin/false only) is
             // what makes a 2.x runtime serve a Git work tree in Chat and
@@ -1610,14 +1609,13 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               };
             }
             if (
-              process.platform === "linux" &&
+              !appToolBridgeReachesLaunchOn(process.platform) &&
               normalized.models.length > 0 &&
               normalized.capabilities.appManagedTools === "unsupported"
             ) {
               return {
                 ...normalized,
-                message:
-                  "OpenCode app-managed tools require macOS loopback confinement on this host.",
+                message: "OpenCode app-managed tools are not offered on this host.",
               };
             }
             return normalized;

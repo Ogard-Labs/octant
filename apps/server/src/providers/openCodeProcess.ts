@@ -1387,6 +1387,12 @@ function prepareOpenCodeLaunch(
         readRoots,
         privateHomeAllowPaths,
         networkEgress,
+        // A proxied Linux launch reaches the tool bridges through the
+        // forwarder's loopback relay; on the shared host network it reaches
+        // them directly, and Seatbelt opens them below.
+        ...(platform === "linux" && typeof networkEgress === "object" && loopbackPorts.length > 0
+          ? { loopbackRelayPorts: loopbackPorts }
+          : {}),
         writeBoundRoot: !(executionPolicy === "plan" || mode === "chat"),
         allowProcessExec: !jailDeniesProcess,
         // The stand-in needs fork so OpenCode can spawn the failing git; exec

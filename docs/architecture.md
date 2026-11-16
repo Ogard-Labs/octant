@@ -14429,9 +14429,12 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     OpenCode's Octant tools, an ACP probe's claims); below Full access the
     pin holds ([Provider runtimes](design/provider-runtimes.md)).
   - **Linux parity.** Octant's tools reach OpenCode and ACP agents on Linux
-    as on macOS, and an outside provider driver is admitted on Linux under
-    the same trust steps as on macOS
-    ([Outside provider drivers](design/outside-provider-drivers.md)).
+    as on macOS (built: the launch reaches the tool bridge on the shared host
+    network, or through the egress forwarder's loopback relay for the
+    bridge's port alone when Network limits proxy it;
+    [Provider runtimes](design/provider-runtimes.md)), and an outside
+    provider driver is admitted on Linux under the same trust steps as on
+    macOS ([Outside provider drivers](design/outside-provider-drivers.md)).
 
   Option names were read from the installed Agent SDK (0.3.211
   `PermissionMode`) and the Codex app-server schema (codex-cli 0.164.0
@@ -15482,8 +15485,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Plan launch is refused before it starts, naming that reason (maintainer
   decision, 2026-11-14). The Linux probe attests the Code jail at Ask first,
   and the capability report says so per mode (`turnModes`: Chat and Plan
-  unsupported, `host-confinement`). App-managed tools stay macOS only and
-  pinned to the measured releases.
+  unsupported, `host-confinement`). App-managed tools are offered on macOS
+  and Linux and stay pinned to the measured releases.
   Discovery re-allowances — a runtime asking whether a path exists and what it
   resolves to, not to read it — follow one rule. Each names an exact literal
   node, never a subpath, so entries inside it stay denied; a subpath grant is
@@ -15674,7 +15677,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     only from the 2.x release whose events and routes were read (2.2.0); an
     older 2.x release reports no file changes, and it and every 1.x release
     report compaction `unavailable` (not built yet for 1.x, whose server was
-    not read for either). It offers Octant's tools only on macOS
+    not read for either). It offers Octant's tools only on macOS and Linux
     in the verified isolated configuration, which is the release and platform
     boundary, not a gap. A 2.x runtime whose confined jail cannot serve a Git
     work tree is listing-only: models show, no turn is offered. Rationale: a
@@ -15695,10 +15698,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     ([Provider runtimes](design/provider-runtimes.md#mistral-vibe-surface)).
     A spend ceiling leaves other ACP turns out and says so. They report no file changes or diffs, ask no user
     questions on Mistral Vibe and fx, resume only when the agent offers load or
-    resume, and offer Octant's tools only on macOS when the agent serves HTTP
-    MCP (decided: on Linux too, under
+    resume, and offer Octant's tools only on macOS and Linux when the agent
+    serves HTTP MCP (Linux under
     [Provider reach Octant no longer narrows](#security-and-authority);
-    designed, not built). fx is also refused in Chat and Plan.
+    built). fx is also refused in Chat and Plan.
   - **Ollama** carries the Octant Harness agent loop over the local service on
     literal loopback, like the harness endpoints: no provider approvals,
     questions, or file changes, Octant's tools per verified model (a model

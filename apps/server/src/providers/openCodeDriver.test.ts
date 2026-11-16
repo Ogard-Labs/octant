@@ -163,26 +163,16 @@ describe("OpenCode driver", () => {
   it("proves MCP declaration support through a confined loopback probe lease", async () => {
     const fixture = driverFixture();
     const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
-    if (process.platform === "darwin") {
-      expect(probe.capabilities.appManagedTools).toBe("supported");
-      expect(fixture.processInputs[0]).toMatchObject({
-        mode: "chat",
-        executionPolicy: "plan",
-        loopbackPorts: [expect.any(Number)],
-      });
-      expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
-      expect(fixture.calls.some((call) => call.startsWith("mcp.disconnect:"))).toBe(true);
-    } else {
-      expect(probe.capabilities.appManagedTools).toBe("unsupported");
-      // Off macOS turns run only in Work and Code outside Plan, so the probe
-      // attests that jail.
-      expect(fixture.processInputs[0]).toMatchObject({
-        mode: "code",
-        executionPolicy: "approval-gated",
-      });
-      expect(fixture.processInputs[0]?.loopbackPorts).toBeUndefined();
-      expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(false);
-    }
+    // Linux reaches the bridge as macOS does. Off macOS turns run only in
+    // Work and Code outside Plan, so the probe attests that jail there.
+    expect(probe.capabilities.appManagedTools).toBe("supported");
+    expect(fixture.processInputs[0]).toMatchObject(
+      process.platform === "darwin"
+        ? { mode: "chat", executionPolicy: "plan", loopbackPorts: [expect.any(Number)] }
+        : { mode: "code", executionPolicy: "approval-gated", loopbackPorts: [expect.any(Number)] },
+    );
+    expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
+    expect(fixture.calls.some((call) => call.startsWith("mcp.disconnect:"))).toBe(true);
   });
 
   it("keeps app tools unsupported when the provider rejects the MCP declaration", async () => {

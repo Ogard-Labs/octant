@@ -1230,6 +1230,50 @@ describe("OpenCodeProcessPort", () => {
     for (const input of captured) expect(input.extraRules).toBeUndefined();
   });
 
+  it("hands a proxied Linux launch its tool bridge ports to relay, and a shared-network one none", async () => {
+    const fixture = profileRecordingWrapper("isolation-supported");
+    const launches = async (proxied: boolean) => {
+      const prepared: Parameters<ProcessConfinementPort["prepare"]>[0][] = [];
+      await Effect.runPromise(
+        Effect.scoped(
+          makeOpenCodeProcessLive({
+            confinement: {
+              prepare: (input) => {
+                prepared.push(input);
+                return { command: input.executable, args: input.args };
+              },
+            },
+            platform: "linux",
+            runtimeConfigResolver: async () => undefined,
+            startupTimeoutMs: 2_000,
+            runtimeNetwork: {
+              start: async () =>
+                proxied
+                  ? {
+                      status: "proxied",
+                      endpoint: { kind: "unix-socket", path: "/tmp/octant-egress.sock" },
+                      environment: {},
+                      release: async () => undefined,
+                    }
+                  : { status: "open" },
+            },
+          }).start({
+            binaryPath: fixture.binaryPath,
+            cwd: fixture.root,
+            mode: "code",
+            executionPolicy: "approval-gated",
+            loopbackPorts: [41_234],
+          }),
+        ),
+      );
+      return prepared.find((input) => input.args.includes("serve"));
+    };
+    expect((await launches(true))?.loopbackRelayPorts).toEqual([41_234]);
+    const shared = await launches(false);
+    expect(shared?.networkEgress).toBe("allow");
+    expect(shared?.loopbackRelayPorts).toBeUndefined();
+  });
+
   // OpenCode 2 resolves each bundled coding tool's home directory while it
   // lists providers, and a refusal there is fatal to the listing, so the
   // confined child has to resolve those paths without being able to read them.
