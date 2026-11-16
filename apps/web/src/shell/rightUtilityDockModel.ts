@@ -262,12 +262,17 @@ export function dockWidthCeiling(
   // and two: the primary minimum is the one the stylesheet's grid uses (560px
   // from 1100px up, 360px below), so the handle stops where the layout would.
   // One column also stops at half the workspace.
+  // The thread box (the thread and its Environment section) never gets
+  // narrower than `threadBoxMinimum`, whether or not the section is open.
   const left =
     workspaceWidth -
-    (options.reservedWidth ?? 0) -
-    ((options.viewportWidth ?? Number.POSITIVE_INFINITY) >= WIDE_VIEWPORT
-      ? WIDE_PRIMARY_MIN
-      : NARROW_PRIMARY_MIN);
+    Math.max(
+      threadBoxMinimum(workspaceWidth, options.viewportWidth),
+      (options.reservedWidth ?? 0) +
+        ((options.viewportWidth ?? Number.POSITIVE_INFINITY) >= WIDE_VIEWPORT
+          ? WIDE_PRIMARY_MIN
+          : NARROW_PRIMARY_MIN),
+    );
   const room = (options.tileColumns ?? 1) >= 2 ? left : Math.min(left, workspaceWidth / 2);
   return Math.min(MAX_CONTEXT_SIDEBAR_WIDTH, Math.max(MIN_CONTEXT_SIDEBAR_WIDTH, Math.floor(room)));
 }
@@ -281,6 +286,38 @@ export function dockWidthCeiling(
 export const WIDE_PRIMARY_MIN = 560;
 const NARROW_PRIMARY_MIN = 360;
 const WIDE_VIEWPORT = 1100;
+
+/**
+ * The narrowest the thread box (the thread and its Environment section, open
+ * or not) is in a workspace of this width, whatever stands in the tool region.
+ * The thread header's tool row ends on this line, 8px in, so nothing that
+ * opens, closes, stacks or moves beside the thread moves the row: the tool
+ * region takes only the room past it. It is the thread's own minimum, or what
+ * a tool region at its asked width (640px) leaves where that is more, up to
+ * the thread's minimum and the section together. The stylesheet mirrors it as
+ * `--octant-thread-box-min`. Measured before (1800px window, 2026-11-16): the
+ * row stood at x 1532 with nothing open, 960 with one tool and 996 once
+ * Environment joined it.
+ */
+export function threadBoxMinimum(
+  workspaceWidth: number,
+  viewportWidth: number | undefined = undefined,
+): number {
+  const primaryMinimum =
+    (viewportWidth ?? Number.POSITIVE_INFINITY) >= WIDE_VIEWPORT
+      ? WIDE_PRIMARY_MIN
+      : NARROW_PRIMARY_MIN;
+  // What the grid gives the thread at least: its minimum, less only where a
+  // 280px tool column would not fit beside it, never under 360px.
+  const threadMinimum = Math.max(
+    NARROW_PRIMARY_MIN,
+    Math.min(primaryMinimum, workspaceWidth - MIN_CONTEXT_SIDEBAR_WIDTH),
+  );
+  return Math.min(
+    primaryMinimum + ENVIRONMENT_STRIP_WIDTH,
+    Math.max(workspaceWidth - WORKBENCH_DOCK_WIDTH, threadMinimum),
+  );
+}
 
 export const RIGHT_UTILITY_DOCK_SURFACES = [
   {

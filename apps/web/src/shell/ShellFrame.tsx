@@ -13,6 +13,7 @@ import {
   type TranscriptTextSize,
   type TranscriptWidth,
 } from "@octant/contracts/shell";
+import { ENVIRONMENT_STRIP_WIDTH } from "./rightUtilityDockModel";
 import { ShellResizeHandle } from "./ShellResizeHandle";
 import { ThemeTypographyProvider } from "../theme/TypographyProvider";
 import { ThemeSettingsProvider } from "../theme/ThemeSettingsProvider";
@@ -186,8 +187,33 @@ function useClosingSidebarCopy(
   }, [shell, collapsed, sliding]);
 }
 
+/**
+ * Publishes the workspace's width to the stylesheet as
+ * `--octant-workspace-width`. The thread box's minimum is worked out from it
+ * (`--octant-thread-box-min`), and a pane's header, whose own width changes
+ * with whatever opens beside it, cannot measure the workspace in CSS. Written
+ * straight to the element: a window resize must not render the shell.
+ */
+function useWorkspaceWidthVariable(layer: RefObject<HTMLDivElement | null>, present: boolean) {
+  useLayoutEffect(() => {
+    const node = layer.current;
+    if (!present || node === null) return undefined;
+    const publish = () => {
+      const width = node.clientWidth;
+      if (width > 0) node.style.setProperty("--octant-workspace-width", `${width}px`);
+    };
+    publish();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(publish);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [layer, present]);
+}
+
 export function ShellFrame(props: ShellFrameProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const workspaceLayerRef = useRef<HTMLDivElement | null>(null);
+  useWorkspaceWidthVariable(workspaceLayerRef, props.standaloneSurface === undefined);
   const { sliding, settle } = useSidebarSliding(props.sidebarCollapsed === true);
   useClosingSidebarCopy(shellRef, props.sidebarCollapsed === true, sliding);
   return (
@@ -246,6 +272,7 @@ export function ShellFrame(props: ShellFrameProps) {
                     ? {}
                     : { "--octant-bottom-panel-height": `${props.bottomPanelHeight}px` }),
                   "--octant-context-sidebar-width": `${Math.round(props.contextSidebarWidth)}px`,
+                  "--octant-env-strip-width": `${ENVIRONMENT_STRIP_WIDTH}px`,
                   ...(props.contextSidebarTwoColumnWidth === undefined
                     ? {}
                     : {
@@ -307,6 +334,7 @@ export function ShellFrame(props: ShellFrameProps) {
                 props.wideContextOpen ? " workspace-layer--wide-context-open" : ""
               }${props.bottomPanelOpen ? " workspace-layer--bottom-panel-open" : ""}`}
               data-dock-tile-columns={props.dockTileColumns === 2 ? "2" : undefined}
+              ref={workspaceLayerRef}
             >
               {props.workspace}
             </div>

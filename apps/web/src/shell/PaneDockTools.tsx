@@ -76,17 +76,21 @@ export function PaneDockToolGroup(props: { readonly active: boolean; readonly pa
   // The header decides: under the width that holds a title and the row, the
   // row folds into one menu button. Measured, not a container query, so one
   // set of buttons exists at a time.
+  // The room is the header's as far as its lead runs: from the pane's edge to
+  // the line the row ends on, or to the header's own end in a narrower pane.
   useLayoutEffect(() => {
-    const header = group.current?.parentElement;
-    if (header === null || header === undefined) return;
+    const lead = group.current?.parentElement;
+    if (lead === null || lead === undefined) return;
+    const header = lead.closest<HTMLElement>(".workspace-pane__header") ?? lead;
     const measure = () => {
-      const width = header.getBoundingClientRect().width;
+      const width = lead.getBoundingClientRect().right - header.getBoundingClientRect().left;
       if (width > 0) setCollapsed(width < PANE_TOOLS_COLLAPSE_WIDTH);
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
-    observer.observe(header);
+    observer.observe(lead);
+    if (header !== lead) observer.observe(header);
     return () => observer.disconnect();
   }, [present]);
   if (tools === undefined || model === undefined || !present) return null;

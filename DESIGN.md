@@ -1552,10 +1552,13 @@ Surface (measure 880px, or wide)
     an icon cluster ends it on the search field's right edge (Issues as Pull
     requests).
   - A thread's header starts the mark 20px in, on the transcript's and the
-    composer's own edge at ordinary widths. Its tool row ends 8px in from the
-    header's end where that is a pane's or the Environment section's edge (the
-    inset a tile bar ends on), and at the window's own toggles where the
-    thread's box reaches the window's edge.
+    composer's own edge at ordinary widths. Its tool row ends on one line for a
+    window: 8px in from where the thread's box ends at its narrowest
+    (`--octant-thread-box-min` from the pane's left edge; see
+    [Workspace: How the width is shared](docs/design/workspace.md#right-dock-and-bottom-panel)).
+    Nothing that opens or closes beside the thread moves that line, so the row
+    is not at the header's end where the box is wider. A pane narrower than the
+    line ends the row 8px in from its own edge.
   - A tile's blocks keep 12px between them, including the blocks a component
     nests inside one block.
 

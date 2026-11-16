@@ -233,17 +233,21 @@ describe("the shell's edges and gaps", () => {
     expect(header).toMatch(
       /--pane-title-start:\s*calc\(var\(--oct-space-5\) - var\(--oct-space-1\) - 1px\);/,
     );
-    expect(header).toMatch(/padding-left:\s*var\(--pane-title-start\);/);
+    expect(header).toMatch(/--pane-header-start:\s*var\(--pane-title-start\);/);
     // A header with content tabs keeps the insets it had: the tabs lead it.
-    expect(rule(root, ".workspace-pane__header")).toMatch(/padding:\s*2px 0 2px 4px;/);
+    // The start is a variable so the lead can take it off its own width.
+    expect(rule(root, ".workspace-pane__header")).toMatch(/--pane-header-start:\s*4px;/);
+    expect(rule(root, ".workspace-pane__header")).toMatch(
+      /padding:\s*2px 0 2px var\(--pane-header-start\);/,
+    );
     expect(splitWorkspace).toContain(
       'data-header-kind={showTabs ? "tabs" : showHeader ? "title" : "tools"}',
     );
     expect(root).toMatch(
-      /\.shell--sidebar-collapsed \.workspace-pane__header\[data-header-kind="title"\] \{\s*padding-left: calc\(var\(--octant-window-chrome-leading-width, 148px\) \+ var\(--pane-title-start\)\);/,
+      /\.shell--sidebar-collapsed \.workspace-pane__header\[data-header-kind="title"\] \{\s*--pane-header-start: calc\(\s*var\(--octant-window-chrome-leading-width, 148px\) \+ var\(--pane-title-start\)\s*\);/,
     );
     expect(root).toMatch(
-      /\.shell--sidebar-collapsed \.workspace-pane__header \{\s*padding-left: var\(--octant-window-chrome-leading-width, 148px\);/,
+      /\.shell--sidebar-collapsed \.workspace-pane__header \{\s*--pane-header-start: var\(--octant-window-chrome-leading-width, 148px\);/,
     );
     const title = splitWorkspace.indexOf('className="oct-nav-name workspace-pane__title"');
     const afterTitle = splitWorkspace.indexOf("{gripMark}", title);

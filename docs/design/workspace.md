@@ -1342,7 +1342,7 @@ beside the start screen ([Start screen: Welcome screen](start-screen.md#welcome-
 the local window's Remote access switch, Local servers, Context, Changes,
 Outputs, Background tasks, Running now; see [Right dock and bottom panel](#right-dock-and-bottom-panel));
 its header is an empty band as tall as the title rail, and the tools are opened
-from the **tool row** at the right end of the thread pane's own header, so a
+from the **tool row** in the thread pane's own header, after the title, so a
 thread and the controls that act on it read as one box. The title band keeps the
 window's controls only: Show sidebar, Back and Forward while the sidebar is
 hidden, the Open in and Project action slots, the Code start screen's
@@ -2392,8 +2392,9 @@ Open in, bottom panel, and right dock remain window chrome. Several Browsers are
 tool: their pages sit in a row of their own at the top of the Browser, with a +
 for a new page, and closing the Browser closes every page.
 The Browser's toolbar is one row of plain icon buttons, the address field and
-trailing icons, as the Browser toolbar rules above set out. The right dock's tools are opened from a **tool row** at the right end of the
-thread pane's header: icon buttons for
+trailing icons, as the Browser toolbar rules above set out. The right dock's tools are opened from a **tool row** in the
+thread pane's header, after the title and ending on the thread box's narrowest
+line (see "How the width is shared"): icon buttons for
 Environment, Terminal, Review, Browser, Files, then a **More tools** menu of
 checkbox items for every other tool the thread can use (grouped as the launcher
 groups them), then the pull requests the thread is about under "Relevant to this
@@ -2714,7 +2715,7 @@ shell sets it as `--octant-dock-env-width`), on the thread's fill, with the
 thread's one hairline on its leading edge running from under the title band to
 the window's bottom. It has no header, close button, resize handle, expand,
 arrange or pop-out control, and draws nothing in the title band; a single
-pane's header runs on above it, the tool buttons at the header's end toggle it,
+pane's header runs on above it, the tool buttons in the header toggle it,
 and its landmark is the region named
 Environment. Closing the last tool leaves it alone at exactly 300px, and with
 only Environment open the dock is exactly its width. It is hidden in the narrow
@@ -2781,11 +2782,32 @@ columns at the flexible minimum) beside the thread's minimum and Environment;
 the dock then takes 960px (or a wider dragged width), and elsewhere it keeps
 the one-column width and the second column's tiles stack under the first's.
 When the window cannot hold even the dock's own minimum (Environment and one
-280px tool column) beside the thread's 560px, the sidebar gives first, down to
-its 220px minimum, and then the thread, never under 360px. Measured before
+280px tool column) beside the thread's 560px, the thread gives first, never
+under 360px, and only then the sidebar, down to its 220px minimum. Measured before
 (1600px window, 2026-11-15): a second tool took the thread from 560px to 440px
 and moved Environment 120px, and the two tools then stacked anyway; at 1280px
-the sidebar was drawn 88px wide.
+the sidebar was drawn 88px wide. With the sidebar giving first (1400px window,
+2026-11-16), opening Environment beside a tool moved the thread, its title and
+its tool row 60px.
+
+**The thread box and the tool row.** The thread and its Environment section,
+open or not, are one box, and that box has a narrowest width for a window
+(`threadBoxMinimum`, `--octant-thread-box-min`): the thread's own minimum, or
+what a tool region at its asked width (640px) leaves where that is more, up to
+the thread's minimum and the section together (860px, from a 1500px workspace
+up). The tool region takes only the room past that line, whether Environment is
+open or closed, in one column or two, and the resize handle stops there
+(`dockWidthCeiling`). The header's tool row ends on the line, 8px in, measured
+from the pane's left edge. So no click moves the row: not opening or closing
+Environment, not the first tool or the last, not a second tool stacking, not a
+second column. The row is at the header's end only where the box is at its
+narrowest; in a wider box it stands inside the header and the rest of the band
+moves the window. A pane narrower than the line (one of a split) ends its row
+at its own edge. Measured (2026-11-16, sidebar open): at 1800px the row's left
+edge was at x 1532 with nothing open, 960 with one tool and 996 with
+Environment beside it, and is 960 in every state; at 1400px it was 1132, 696
+and 920, and is 696 in every state; at 2400px it is 996 with nothing open, one
+tool, two stacked, two columns, and two columns beside Environment.
 
 The tool columns' handle stands on the seam between the strip and
 the tools, and with Environment closed on the dock's own edge (and the shelf stays

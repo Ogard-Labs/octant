@@ -15,6 +15,7 @@ import {
   TILED_DOCK_WIDTH,
   WIDE_PRIMARY_MIN,
   resolveTwoColumnDockWidth,
+  threadBoxMinimum,
   WORKBENCH_DOCK_WIDTH,
   type RightUtilityDockResolutionInput,
   type RightUtilityDockSurfaceAvailability,
@@ -173,7 +174,8 @@ describe("how wide the right utility dock may get", () => {
 
   it("leaves the thread's minimum and Environment out of what the tool columns may take", () => {
     const options = { tileColumns: 2, viewportWidth: 1400 };
-    expect(dockWidthCeiling(1268, options)).toBe(1268 - WIDE_PRIMARY_MIN);
+    // With Environment closed the thread box still keeps its own minimum.
+    expect(dockWidthCeiling(1268, options)).toBe(1268 - threadBoxMinimum(1268, 1400));
     expect(dockWidthCeiling(1268, { ...options, reservedWidth: ENVIRONMENT_STRIP_WIDTH })).toBe(
       1268 - ENVIRONMENT_STRIP_WIDTH - WIDE_PRIMARY_MIN,
     );
@@ -480,8 +482,10 @@ describe("how wide the dock may get with two columns of tools", () => {
   it("keeps half of the workspace for one column where the thread's minimum leaves it", () => {
     expect(dockWidthCeiling(840, { tileColumns: 1, viewportWidth: 1100 })).toBe(280);
     expect(dockWidthCeiling(1180, { tileColumns: 1, viewportWidth: 1440 })).toBe(590);
-    expect(dockWidthCeiling(1468, { tileColumns: 1, viewportWidth: 1728 })).toBe(
-      Math.min(MAX_CONTEXT_SIDEBAR_WIDTH, 734),
+    // From here up the thread box's minimum, not half the workspace, is the stop.
+    expect(dockWidthCeiling(1468, { tileColumns: 1, viewportWidth: 1728 })).toBe(640);
+    expect(dockWidthCeiling(2068, { tileColumns: 1, viewportWidth: 2400 })).toBe(
+      Math.min(MAX_CONTEXT_SIDEBAR_WIDTH, 1034),
     );
     expect(dockWidthCeiling(1180, { viewportWidth: 1440 })).toBe(590);
   });
@@ -490,10 +494,54 @@ describe("how wide the dock may get with two columns of tools", () => {
     // A second column never asks the thread for less than one column does.
     expect(dockWidthCeiling(840, { tileColumns: 2, viewportWidth: 1100 })).toBe(280);
     expect(dockWidthCeiling(1180, { tileColumns: 2, viewportWidth: 1440 })).toBe(620);
-    expect(dockWidthCeiling(1468, { tileColumns: 2, viewportWidth: 1728 })).toBe(908);
+    expect(dockWidthCeiling(1468, { tileColumns: 2, viewportWidth: 1728 })).toBe(640);
+    expect(dockWidthCeiling(2068, { tileColumns: 2, viewportWidth: 2400 })).toBe(
+      Math.min(MAX_CONTEXT_SIDEBAR_WIDTH, 2068 - WIDE_PRIMARY_MIN - ENVIRONMENT_STRIP_WIDTH),
+    );
   });
 
   it("uses the smaller thread minimum below 1100px, as the stylesheet does", () => {
     expect(dockWidthCeiling(900, { tileColumns: 2, viewportWidth: 1000 })).toBe(540);
+  });
+});
+
+describe("the narrowest the thread box gets", () => {
+  // The thread header's tool row ends on this line, so it is the one number
+  // every dock state has to respect for the row to stay where it is.
+  it("is the thread's minimum and the Environment section where a 640px tool region fits beside them", () => {
+    expect(threadBoxMinimum(1500, 1836)).toBe(WIDE_PRIMARY_MIN + ENVIRONMENT_STRIP_WIDTH);
+    expect(threadBoxMinimum(2068, 2400)).toBe(860);
+  });
+
+  it("is what a 640px tool region leaves in a workspace between 1200px and 1500px", () => {
+    expect(threadBoxMinimum(1464, 1800)).toBe(824);
+    expect(threadBoxMinimum(1200, 1536)).toBe(WIDE_PRIMARY_MIN);
+  });
+
+  it("is the thread's own minimum under that, less only where a 280px tool column would not fit", () => {
+    expect(threadBoxMinimum(1064, 1400)).toBe(WIDE_PRIMARY_MIN);
+    expect(threadBoxMinimum(764, 1100)).toBe(484);
+    expect(threadBoxMinimum(600, 1100)).toBe(360);
+    // Under 1100px the thread's minimum is the smaller one.
+    expect(threadBoxMinimum(900, 1000)).toBe(360);
+  });
+
+  it("leaves the tool region the same room whether Environment is open or closed where the window holds both", () => {
+    for (const [workspace, viewport] of [
+      [1464, 1800],
+      [2068, 2400],
+    ] as const) {
+      for (const tileColumns of [1, 2]) {
+        const closed = dockWidthCeiling(workspace, { tileColumns, viewportWidth: viewport });
+        const open = dockWidthCeiling(workspace, {
+          tileColumns,
+          viewportWidth: viewport,
+          reservedWidth: ENVIRONMENT_STRIP_WIDTH,
+        });
+        // The thread box (thread plus section) never goes under its minimum.
+        expect(workspace - closed).toBeGreaterThanOrEqual(threadBoxMinimum(workspace, viewport));
+        expect(workspace - open).toBeGreaterThanOrEqual(threadBoxMinimum(workspace, viewport));
+      }
+    }
   });
 });

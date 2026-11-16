@@ -200,17 +200,19 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 
 /* The rail beside the sidebar spends width from the same budget, so the
    clamp subtracts it too. */
-/* The sidebar gives width to the thread and the dock only down to its own
-   minimum (220px, MIN_SIDEBAR_WIDTH): past that the thread gives instead. With
-   no floor a 1280px window with Environment and a tool open drew the sidebar
-   88px wide. */
+/* The thread gives width to the dock first, down to its 360px. Only then does
+   the sidebar give, and only down to its own minimum (220px,
+   MIN_SIDEBAR_WIDTH). With no floor a 1280px window with Environment and a
+   tool open drew the sidebar 88px wide; with the sidebar giving first, opening
+   Environment beside a tool in a 1400px window moved the thread, its title and
+   its tool row 60px. */
 .shell.shell-frame.shell--wide-context-open {
   --octant-sidebar-target-width: max(
     min(var(--octant-sidebar-width, 232px), 220px),
     min(
       var(--octant-sidebar-width, 232px),
       calc(
-        100vw - var(--octant-rail-offset, 0px) - var(--octant-wide-primary-min) -
+        100vw - var(--octant-rail-offset, 0px) - var(--octant-narrow-primary-min) -
           var(--octant-context-sidebar-min)
       )
     )
@@ -2723,8 +2725,11 @@ html[data-octant-density="compact"]
   }
 }
 
+/* Set whether or not the dock is open: the thread box's minimum
+   (--octant-thread-box-min) is worked out from it, and the tool row that
+   stands on that line must not move when the dock opens. */
 @media (min-width: 1100px) {
-  .shell.shell-frame.shell--wide-context-open {
+  .shell.shell-frame {
     --octant-wide-primary-min: 560px;
   }
 }

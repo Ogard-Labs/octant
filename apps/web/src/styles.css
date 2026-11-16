@@ -1090,6 +1090,35 @@ strong {
   overflow: hidden;
 }
 
+/* The narrowest the thread box (the thread and its Environment section, open
+   or not) gets in this workspace, whatever stands in the tool region:
+   threadBoxMinimum. It is the thread's own minimum, or what a tool region at
+   its asked width (640px) leaves where that is more, up to the thread's
+   minimum and the section together. The tool region takes only the room past
+   it, and the thread header's tool row ends on it (see .workspace-pane__lead),
+   so opening or closing Environment or a tool, stacking one, or a second
+   column never moves the row. The shell publishes the workspace's width; in
+   the grid's own template the fallback is the same number. */
+.workspace-layer {
+  --octant-thread-box-min: min(
+    calc(var(--octant-wide-primary-min) + var(--octant-env-strip-width, 300px)),
+    max(
+      calc(var(--octant-workspace-width, 100%) - 640px),
+      max(
+        var(--octant-narrow-primary-min),
+        min(var(--octant-wide-primary-min), calc(var(--octant-workspace-width, 100%) - 280px))
+      )
+    )
+  );
+  /* What the thread column keeps beside the dock: its minimum, and whatever
+     more the thread box's minimum asks of it once the open section's width is
+     taken off. */
+  --octant-dock-thread-keep: max(
+    var(--octant-wide-primary-min),
+    calc(var(--octant-thread-box-min) - var(--octant-dock-env-width, 0px))
+  );
+}
+
 .workspace-layer--bottom-panel-open {
   grid-template-rows:
     minmax(320px, 1fr)
@@ -1118,7 +1147,7 @@ strong {
    handle at the same room. */
 .workspace-layer--wide-context-open[data-dock-tile-columns="2"] {
   --octant-dock-tool-room: calc(
-    100% - var(--octant-wide-primary-min) - var(--octant-dock-env-width, 0px)
+    100% - var(--octant-dock-thread-keep) - var(--octant-dock-env-width, 0px)
   );
   grid-template-columns:
     minmax(
@@ -1131,7 +1160,7 @@ strong {
     max(
       var(--octant-context-sidebar-min),
       min(
-        calc(100% - var(--octant-wide-primary-min)),
+        calc(100% - var(--octant-dock-thread-keep)),
         var(--octant-context-two-column-width, var(--octant-context-sidebar-width, 360px)),
         max(
           min(
@@ -1149,9 +1178,9 @@ strong {
   grid-row: 2;
 }
 
-/* The thread keeps its minimum (560px from 1100px up) and the dock takes what
-   is left, up to the width it asks for and, for one column of tools, half the
-   workspace. Only when the window cannot hold the dock's own minimum beside
+/* The thread box keeps its minimum (--octant-thread-box-min; the thread
+   itself 560px from 1100px up) and the dock takes what is left, up to the
+   width it asks for and, for one column of tools, half the workspace. Only when the window cannot hold the dock's own minimum beside
    that (Environment and one 280px tool column) does the thread give, never
    under 360px. */
 .workspace-layer--wide-context-open {
@@ -1168,7 +1197,7 @@ strong {
       /* dockWidthCeiling: what the primary column's minimum leaves, and for
          one column never past half the workspace. The handle stops there too. */ min(
         var(--octant-context-sidebar-width, 360px),
-        calc(100% - var(--octant-wide-primary-min)),
+        calc(100% - var(--octant-dock-thread-keep)),
         calc(50% + var(--octant-dock-env-width, 0px))
       )
     );
@@ -1396,7 +1425,10 @@ strong {
   align-items: center;
   gap: 4px;
   margin-right: var(--octant-window-chrome-reserved-width, 148px);
-  padding: 2px 0 2px 4px;
+  /* Where the header's content starts. A variable, because the lead's width
+     is measured from the pane's edge and has to take it off. */
+  --pane-header-start: 4px;
+  padding: 2px 0 2px var(--pane-header-start);
 }
 
 /* A header that shows a title (data-header-kind="title") starts its text 20px
@@ -1411,21 +1443,18 @@ strong {
    own insets: the tabs lead it, and no title is there to line up. */
 .workspace-pane__header[data-header-kind="title"] {
   --pane-title-start: calc(var(--oct-space-5) - var(--oct-space-1) - 1px);
-  padding-left: var(--pane-title-start);
+  --pane-header-start: var(--pane-title-start);
 }
 
 /* Only the top-right pane shares its edge with window controls. Reserving
    their width in every split pulled each close button away from its edge. */
 .workspace-split[data-orientation="horizontal"] > :first-child .workspace-pane__header {
-  --pane-tools-end: var(--oct-space-2);
   margin-right: 0;
 }
 .workspace-split[data-orientation="vertical"] > :last-child .workspace-pane__header {
-  --pane-tools-end: var(--oct-space-2);
   margin-right: 0;
 }
 .shell--wide-context-open .workspace-pane__header {
-  --pane-tools-end: var(--oct-space-2);
   margin-right: 0;
 }
 
@@ -1444,7 +1473,6 @@ strong {
   .workspace-root
   > .workspace-pane
   > .workspace-pane__header {
-  --pane-tools-end: 0px;
   margin-right: calc(
     var(--octant-window-chrome-reserved-width, 148px) - var(--octant-dock-env-width, 0px)
   );
@@ -1457,16 +1485,30 @@ strong {
   overflow-y: clip;
 }
 
-/* The pane's tool buttons end its header: after the title and the free run
-   that moves the window, before a split's close. They keep their own width,
-   so the title gives way first. Where the header ends at a pane's edge they
-   stand 8px in from it; where it ends before the window's controls, the
-   controls' own inset is the gap. */
+/* The header's lead: the title, the free run that moves the window, and the
+   pane's tool buttons. It ends where the thread box ends at its narrowest
+   (--octant-thread-box-min from the pane's left edge), and the buttons stand
+   8px in from that line. Nothing that opens beside the thread takes the box
+   under that width, so nothing moves the buttons: not Environment, not the
+   first tool or the last, not a second one stacking, not a second column.
+   Measured before (1800px window): x 1532 with nothing open, 960 with one
+   tool, 996 with Environment beside it. A pane narrower than the line (one of
+   a split, a small window) ends its lead at its own edge. The title gives way
+   before the buttons do. */
+.workspace-pane__lead {
+  display: flex;
+  flex: 0 1 calc(var(--octant-thread-box-min, 100%) - var(--pane-header-start));
+  min-width: 0;
+  align-items: center;
+  align-self: stretch;
+  gap: 4px;
+}
+
 .workspace-pane__tools {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  margin-right: var(--pane-tools-end, 0px);
+  margin-right: var(--oct-space-2);
 }
 
 /* A start screen has no title to show, so its header is the tool row alone,
@@ -1480,7 +1522,7 @@ strong {
   min-height: var(--oct-title-rail-h);
   pointer-events: none;
 }
-.workspace-pane__header[data-header-kind="tools"] > .workspace-pane__tools {
+.workspace-pane__header[data-header-kind="tools"] .workspace-pane__tools {
   pointer-events: auto;
 }
 
@@ -1504,10 +1546,10 @@ strong {
    exists. */
 html[data-octant-native-host="true"] .workspace-pane__header {
   z-index: 6;
-  padding-left: var(--oct-space-3);
+  --pane-header-start: var(--oct-space-3);
 }
 html[data-octant-native-host="true"] .workspace-pane__header[data-header-kind="title"] {
-  padding-left: var(--pane-title-start);
+  --pane-header-start: var(--pane-title-start);
 }
 
 /* Reader rails replace the pane rather than opening beside it. Their opaque
@@ -1535,33 +1577,37 @@ html[data-octant-native-host="true"]
    browser has no traffic-light reserve, but it still needs the Show sidebar
    and New thread cluster kept clear of the pane tab. */
 .shell--sidebar-collapsed .workspace-pane__header {
-  padding-left: var(--octant-window-chrome-leading-width, 148px);
+  --pane-header-start: var(--octant-window-chrome-leading-width, 148px);
 }
 .shell--sidebar-collapsed .workspace-pane__header[data-header-kind="title"] {
-  padding-left: calc(var(--octant-window-chrome-leading-width, 148px) + var(--pane-title-start));
+  --pane-header-start: calc(
+    var(--octant-window-chrome-leading-width, 148px) + var(--pane-title-start)
+  );
 }
 
 /* Native header padding must not cover the leading controls when navigation
    is collapsed. Only the top-left pane shares that part of the title bar. */
 html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__header {
-  padding-left: var(--octant-window-chrome-leading-width, 148px);
+  --pane-header-start: var(--octant-window-chrome-leading-width, 148px);
 }
 html[data-octant-native-host="true"]
   .shell--sidebar-collapsed
   .workspace-pane__header[data-header-kind="title"] {
-  padding-left: calc(var(--octant-window-chrome-leading-width, 148px) + var(--pane-title-start));
+  --pane-header-start: calc(
+    var(--octant-window-chrome-leading-width, 148px) + var(--pane-title-start)
+  );
 }
 .shell--sidebar-collapsed
   .workspace-split[data-orientation="horizontal"]
   > :last-child
   .workspace-pane__header {
-  padding-left: var(--oct-space-3);
+  --pane-header-start: var(--oct-space-3);
 }
 .shell--sidebar-collapsed
   .workspace-split[data-orientation="vertical"]
   > :last-child
   .workspace-pane__header {
-  padding-left: var(--oct-space-3);
+  --pane-header-start: var(--oct-space-3);
 }
 .shell--sidebar-collapsed
   .workspace-split[data-orientation="horizontal"]
@@ -1571,7 +1617,7 @@ html[data-octant-native-host="true"]
   .workspace-split[data-orientation="vertical"]
   > :last-child
   .workspace-pane__header[data-header-kind="title"] {
-  padding-left: var(--pane-title-start);
+  --pane-header-start: var(--pane-title-start);
 }
 
 /* The grip is the pane's one drag handle: the environment mark, the title,
@@ -1727,7 +1773,7 @@ html[data-octant-native-host="true"]
 /* A narrow pane, as in a split, does the same: the breadcrumb cut both parts
    to "auroradocs-… / please open w…", and neither could be read. The title
    keeps the whole room and names the Project in its tooltip. */
-.workspace-pane__header {
+.workspace-pane__lead {
   container-name: pane-header;
   container-type: inline-size;
 }

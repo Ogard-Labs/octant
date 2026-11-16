@@ -8,6 +8,12 @@ import {
 } from "@octant/contracts/shell";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { describe, expect, it, vi } from "vitest";
+import { MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
+import {
+  ENVIRONMENT_STRIP_WIDTH,
+  threadBoxMinimum,
+  WORKBENCH_DOCK_WIDTH,
+} from "./rightUtilityDockModel";
 import { ShellFrame } from "./ShellFrame";
 
 // Comments are stripped before matching: `cssRule` reads a rule's prelude as
@@ -28,6 +34,100 @@ function cssRule(selector: string): string {
   expect(match, `missing CSS rule for ${selector}`).toBeDefined();
   return match?.[2] ?? "";
 }
+
+const rootStyles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8").replace(
+  /\/\*[\s\S]*?\*\//g,
+  "",
+);
+
+function rootRule(selector: string): string {
+  // Every rule with this selector: a selector may be declared more than once.
+  const bodies = [...rootStyles.matchAll(/([^{}]+)\{([^{}]*)\}/gs)]
+    .filter((candidate) => candidate[1]?.trim() === selector)
+    .map((candidate) => candidate[2] ?? "");
+  expect(bodies.length, `missing CSS rule for ${selector}`).toBeGreaterThan(0);
+  return squash(bodies.join(" "));
+}
+
+/** CSS with its whitespace taken out, so a formatter's line breaks do not matter. */
+function squash(css: string): string {
+  return css.replace(/\s+/g, "");
+}
+
+describe("the line the thread header's tool row stands on", () => {
+  it("is the thread box's minimum, worked out in the stylesheet as the dock model works it out", () => {
+    const layer = rootRule(".workspace-layer");
+    // threadBoxMinimum: the thread's minimum and the section at most, what a
+    // tool region at its asked width leaves, and the thread's own minimum.
+    expect(layer).toContain(
+      squash(
+        "--octant-thread-box-min: min( calc(var(--octant-wide-primary-min) + var(--octant-env-strip-width, 300px)), max( " +
+          `calc(var(--octant-workspace-width, 100%) - ${WORKBENCH_DOCK_WIDTH}px), max( ` +
+          "var(--octant-narrow-primary-min), min( var(--octant-wide-primary-min), " +
+          `calc(var(--octant-workspace-width, 100%) - ${MIN_CONTEXT_SIDEBAR_WIDTH}px) ) ) ) );`,
+      ),
+    );
+    expect(threadBoxMinimum(1464, 1800)).toBe(1464 - WORKBENCH_DOCK_WIDTH);
+  });
+
+  it("ends the header's lead on that line, measured from the pane's edge, with the row 8px in", () => {
+    expect(rootRule(".workspace-pane__lead")).toContain(
+      squash("flex: 0 1 calc(var(--octant-thread-box-min, 100%) - var(--pane-header-start));"),
+    );
+    expect(rootRule(".workspace-pane__tools")).toContain(
+      squash("margin-right: var(--oct-space-2);"),
+    );
+  });
+
+  it("keeps the tool region out of the thread box's minimum, with Environment open or closed", () => {
+    expect(rootRule(".workspace-layer")).toContain(
+      squash(
+        "--octant-dock-thread-keep: max( var(--octant-wide-primary-min), calc(var(--octant-thread-box-min) - var(--octant-dock-env-width, 0px)) );",
+      ),
+    );
+    const one = rootRule(".workspace-layer--wide-context-open");
+    const two = rootRule('.workspace-layer--wide-context-open[data-dock-tile-columns="2"]');
+    expect(one).toContain(squash("calc(100% - var(--octant-dock-thread-keep))"));
+    expect(two).toContain(squash("calc(100% - var(--octant-dock-thread-keep))"));
+    expect(two).toContain(
+      squash(
+        "--octant-dock-tool-room: calc( 100% - var(--octant-dock-thread-keep) - var(--octant-dock-env-width, 0px) );",
+      ),
+    );
+  });
+
+  it("lets the thread give before the sidebar, so opening Environment beside a tool does not move the thread", () => {
+    const open = cssRule(".shell.shell-frame.shell--wide-context-open").replace(/\s+/g, " ");
+    expect(open).toContain(
+      "100vw - var(--octant-rail-offset, 0px) - var(--octant-narrow-primary-min) - var(--octant-context-sidebar-min)",
+    );
+    // The thread's 560px holds whether or not the dock is open: the line is
+    // worked out from it before anything opens.
+    expect(shellStyles.replace(/\s+/g, " ")).toContain(
+      "@media (min-width: 1100px) { .shell.shell-frame { --octant-wide-primary-min: 560px; } }",
+    );
+  });
+
+  it("publishes the Environment section's width to the stylesheet whether or not it is open", () => {
+    const { container } = render(
+      <ShellFrame
+        chrome={<header>Chrome</header>}
+        contextSidebarWidth={420}
+        material="opaque"
+        onCommitSidebarWidth={vi.fn()}
+        onPreviewSidebarWidth={vi.fn()}
+        sidebar={<aside>Sidebar</aside>}
+        sidebarResizable={false}
+        sidebarWidth={232}
+        wideContextOpen={false}
+        workspace={<main>Workspace</main>}
+      />,
+    );
+    expect(container.firstElementChild?.getAttribute("style")).toContain(
+      `--octant-env-strip-width: ${ENVIRONMENT_STRIP_WIDTH}px`,
+    );
+  });
+});
 
 describe("ShellFrame", () => {
   function frameFor(collapsed: boolean, width: number) {

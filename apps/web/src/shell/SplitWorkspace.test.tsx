@@ -799,9 +799,14 @@ describe("SplitWorkspace", () => {
     const pane = screen.getByRole("region", { name: "Workspace pane: Chat 0" });
     const header = pane.querySelector(".workspace-pane__header")!;
     const row = within(header as HTMLElement).getByRole("toolbar", { name: "Tools" });
-    // After the title, at the header's end.
+    // After the title, at the end of the header's lead: the part that ends on
+    // the thread box's narrowest line, so the row stays put whatever opens
+    // beside the thread.
     const title = within(header as HTMLElement).getByText("Chat 0");
     expect(title.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const lead = header.querySelector(":scope > .workspace-pane__lead")!;
+    expect(lead).toContainElement(title);
+    expect(lead.lastElementChild).toContainElement(row);
     const files = within(row).getByRole("button", { name: "Files" });
     expect(files).toHaveAttribute("aria-pressed", "true");
     expect(within(row).getByRole("button", { name: "More tools" })).toBeInTheDocument();
