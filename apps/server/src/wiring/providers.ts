@@ -668,7 +668,7 @@ export type ProvidersDependencies = Pick<
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<
     FoundationsWiring,
-    "providerRuntimeRegistry" | "workThreadProjection" | "resolveThreadStrict"
+    "providerRuntimeRegistry" | "workThreadProjection" | "resolveThreadStrict" | "resolveHostStrict"
   >;
 
 export function wireProviders(deps: ProvidersDependencies) {
@@ -1765,6 +1765,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         ),
       processes: outsideDriverProcesses,
       runtimeRegistry: providerRuntimeRegistry,
+      strict: () => deps.resolveHostStrict(),
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
     });
     stopOutsideDriversOf = (extensionId) => outsideDriverAdmission.stopPackage(extensionId);
@@ -2019,6 +2020,7 @@ export function wireProviders(deps: ProvidersDependencies) {
               readProject: (projectId) => persistence.readProject(projectId),
               readProviderInstance: (id) => persistence.readProviderInstance(id),
               readProviderCliTrust: providerCliProjectTrust,
+              readStrict: (threadId) => deps.resolveThreadStrict(threadId),
             },
             request,
           ),

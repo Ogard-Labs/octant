@@ -254,9 +254,14 @@ describe("the Pull requests card", () => {
       ),
     });
     expect(await screen.findByText("Pull requests last checked 3h ago.")).toBeInTheDocument();
-    act(() => {
-      vi.advanceTimersByTime(60 * 60_000);
+    // The label appears when the load settles, outside act, so its minute
+    // interval is scheduled by an effect that may not have run yet; flush it
+    // first, or the hour below passes with nothing listening (seen flaking in
+    // CI under load while passing locally).
+    await act(async () => {});
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
     });
-    expect(screen.getByText("Pull requests last checked 4h ago.")).toBeInTheDocument();
+    expect(await screen.findByText("Pull requests last checked 4h ago.")).toBeInTheDocument();
   });
 });

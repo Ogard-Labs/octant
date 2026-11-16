@@ -718,6 +718,10 @@ export function defaultFullAccessSandboxFor(input: {
   );
 }
 
+/** Why the host refuses `octant agent --full-access` for a thread Strict covers. */
+export const STRICT_REFUSES_FULL_ACCESS_RUN_FLAG =
+  "Strict is on for this thread, and Strict refuses the per-run Full access flag. Turn Strict off for the thread, its Project or in Settings to use it.";
+
 /**
  * Whether Strict is on for one launch or call: the thread's own choice, else
  * its Project's, else Settings', else off. Read at each launch and each call,

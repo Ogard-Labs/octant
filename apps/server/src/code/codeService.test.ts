@@ -1298,6 +1298,28 @@ describe("CodeService commands", () => {
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("refuses a new thread's per-run Full access flag under Strict and starts it outside Strict", async () => {
+    const created = thread({ executionPolicy: "full-access", fullAccessRunFlag: true });
+    const strictFixture = serviceFixture({ threads: [] });
+    strictFixture.persistence.readCodeSettings.mockReturnValue({
+      settings: { defaultStrict: true },
+    } as never);
+    await expect(
+      strictFixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
+    ).rejects.toMatchObject({
+      failure: { category: "invalid", message: expect.stringMatching(/Strict/) },
+    });
+    expect(strictFixture.persistence.journal.append).not.toHaveBeenCalled();
+
+    const openFixture = serviceFixture({ threads: [] });
+    await expect(
+      openFixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
+    ).resolves.toMatchObject({
+      kind: "thread-created",
+      thread: { executionPolicy: "full-access", fullAccessRunFlag: true },
+    });
+  });
+
   it("journals an authorized new thread at expected aggregate version zero", async () => {
     const created = thread({ executionPolicy: "approval-gated" });
     const fixture = serviceFixture({ threads: [] });
