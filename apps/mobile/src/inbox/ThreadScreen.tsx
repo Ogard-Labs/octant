@@ -641,7 +641,11 @@ export function ThreadScreen(props: ThreadScreenProps) {
               selected.mode === "code" &&
               transport !== undefined &&
               code.thread !== undefined ? (
-                <CoordinatorProposalsPanel thread={code.thread} transport={transport} />
+                <CoordinatorProposalsPanel
+                  actsAsHostPerson={standing.actsAsHostPerson}
+                  thread={code.thread}
+                  transport={transport}
+                />
               ) : null}
               {!offlineDemo &&
               transport !== undefined &&

@@ -1,24 +1,79 @@
 import type { CodePlannerView, CodeThread } from "@octant/contracts";
 import type { CodeClient } from "@octant/client-runtime/code-client";
+import {
+  approveCoordinatorProposal,
+  declineCoordinatorProposal,
+  type CoordinatorProposalEntry,
+} from "@octant/client-runtime/coordinator-proposal-approval";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { requestedWorkerOptions } from "../code/plannerProposalReview";
 import { OctantButton } from "../ui/base/OctantButton";
 
 /**
- * A coordinator's pending proposed workers on a paired browser, read-only
- * (docs/design/coordinator-threads.md#the-start-setting). The planner read
- * is open to the remote session; approving and declining stay with a window
- * on the host, whose proposal routes refuse every other caller, so the card
- * offers no decision.
+ * A coordinator's pending proposed workers on a paired browser
+ * (docs/design/coordinator-threads.md#the-start-setting). A browser the
+ * host's own person paired approves a worker as it was asked for, or
+ * declines it, and the host journals the browser as the actor; choosing
+ * another provider, checkout or level stays with the review at a window on
+ * the host. Every other session sees what waits and where to approve it,
+ * since the host refuses its decision.
  */
 export function RemoteCoordinatorProposals(props: {
-  readonly client: Pick<CodeClient, "readPlanner">;
+  readonly client: Pick<CodeClient, "readPlanner" | "execute" | "executePlannerProposal">;
   readonly thread: CodeThread;
+  /** What the host said of this session; absent or false shows no decision. */
+  readonly actsAsHostPerson?: boolean;
+  /** False while the session is stale: the host would not hear a decision. */
+  readonly connected?: boolean;
+  /** Sends the approved worker's first message; true once the host took it. */
+  readonly startFirstTurn?: (thread: CodeThread, prompt: string) => Promise<boolean>;
 }) {
   const { client, thread } = props;
   const [view, setView] = useState<{ readonly threadId: string; readonly view: CodePlannerView }>();
+  const [revision, setRevision] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string>();
   const threadId = String(thread.id);
   const projectId = thread.projectId;
+  const executePlannerProposal = client.executePlannerProposal;
+  const decide = async (run: () => Promise<string | undefined>) => {
+    setBusy(true);
+    setMessage(undefined);
+    try {
+      setMessage(await run());
+    } catch {
+      setMessage("The decision reply was lost. Refresh before deciding again.");
+    } finally {
+      setBusy(false);
+      setRevision((value) => value + 1);
+    }
+  };
+  const approve = (entry: CoordinatorProposalEntry) =>
+    decide(async () => {
+      if (executePlannerProposal === undefined) return "This host cannot approve workers.";
+      const approved = await approveCoordinatorProposal({
+        port: { execute: (command) => client.execute(command), executePlannerProposal },
+        entry,
+        coordinator: thread,
+      });
+      if (approved.status === "refused") return approved.message;
+      // The worker is durable whether or not its first turn starts.
+      const started =
+        (await props.startFirstTurn?.(approved.thread, entry.proposal.intent)) ?? false;
+      return started
+        ? "Worker approved and started."
+        : "The worker was created, but its first message could not be sent. Open it to retry.";
+    });
+  const decline = (entry: CoordinatorProposalEntry) =>
+    decide(async () => {
+      if (executePlannerProposal === undefined) return "This host cannot decline workers.";
+      const declined = await declineCoordinatorProposal({
+        port: { executePlannerProposal },
+        entry,
+      });
+      return declined.status === "declined" ? "Worker declined." : declined.message;
+    });
+  const decides = props.actsAsHostPerson === true && executePlannerProposal !== undefined;
   useEffect(() => {
     if (client.readPlanner === undefined) return;
     let disposed = false;
@@ -37,7 +92,7 @@ export function RemoteCoordinatorProposals(props: {
       disposed = true;
       clearTimeout(timer);
     };
-  }, [client, projectId, threadId]);
+  }, [client, projectId, threadId, revision]);
   const proposals =
     view?.threadId === threadId
       ? view.view.proposals.filter(
@@ -47,7 +102,7 @@ export function RemoteCoordinatorProposals(props: {
             String(entry.proposal.plannerThreadId) === threadId,
         )
       : [];
-  if (proposals.length === 0) return null;
+  if (proposals.length === 0 && message === undefined) return null;
   return (
     <section
       aria-label="Proposed workers"
@@ -67,9 +122,37 @@ export function RemoteCoordinatorProposals(props: {
           {entry.proposal.workerOptions === undefined ? null : (
             <p className="oct-row-detail">{requestedWorkerOptions(entry.proposal.workerOptions)}</p>
           )}
-          <p className="oct-row-detail">Approve at a window on this computer.</p>
+          {decides ? (
+            <div className="follow-up-card__actions">
+              <OctantButton
+                disabled={busy || props.connected === false}
+                onClick={() => void approve(entry)}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Approve and start
+              </OctantButton>
+              <OctantButton
+                disabled={busy || props.connected === false}
+                onClick={() => void decline(entry)}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Decline
+              </OctantButton>
+            </div>
+          ) : (
+            <p className="oct-row-detail">Approve at a window on this computer.</p>
+          )}
         </article>
       ))}
+      {message === undefined ? null : (
+        <p className="oct-row-detail" role="status">
+          {message}
+        </p>
+      )}
     </section>
   );
 }

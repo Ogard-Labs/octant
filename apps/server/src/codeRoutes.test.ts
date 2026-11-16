@@ -2451,6 +2451,78 @@ describe("Code planner routes", () => {
     expect(executePlannerProposal).not.toHaveBeenCalled();
   });
 
+  it("lets a device the person paired approve and decline a coordinator's proposal, journaled as the device", async () => {
+    const proposalId = "00000000-0000-4000-8000-000000000910";
+    const executePlannerProposal = vi.fn(async () => ({
+      status: "declined",
+      proposal: {
+        id: proposalId,
+        projectId,
+        plannerThreadId: threadId,
+        fromCoordinator: true,
+        title: "Worker",
+        intent: "Do the work.",
+        status: "declined",
+        proposedAt: "2026-11-10T00:00:00.000Z",
+        resolvedAt: "2026-11-10T00:00:01.000Z",
+      },
+    }));
+    const route = routeFixture({ executePlannerProposal });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000917";
+    const remoteRequest = request("/api/code/planner/proposals/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "decline-planner-work-proposal",
+        proposalId,
+        expectedVersion: 1,
+      }),
+    });
+    bindPrincipalRouteContext(remoteRequest, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-000000000918" as never,
+        admittedBy: "host-person",
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+
+    const response = await route(remoteRequest);
+
+    expect(response?.status).toBe(200);
+    expect(executePlannerProposal).toHaveBeenCalledWith(
+      remoteDeviceId,
+      { kind: "decline-planner-work-proposal", proposalId, expectedVersion: 1 },
+      expect.anything(),
+      { kind: "remote-device", actorId: remoteDeviceId, deviceId: remoteDeviceId },
+    );
+  });
+
+  it("refuses a coordinator proposal decision from a caller with no session", async () => {
+    const executePlannerProposal = vi.fn();
+    const route = routeFixture({ executePlannerProposal });
+
+    const response = await route(
+      new Request("http://127.0.0.1/api/code/planner/proposals/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "decline-planner-work-proposal",
+          proposalId: "00000000-0000-4000-8000-000000000910",
+          expectedVersion: 1,
+        }),
+      }),
+    );
+
+    expect(response?.status).toBe(401);
+    expect(executePlannerProposal).not.toHaveBeenCalled();
+  });
+
   it("reports the planner unavailable on a host without the planner capability", async () => {
     const store = new WindowAuthorityStore();
     store.register({ windowId, capability, now: 0 });

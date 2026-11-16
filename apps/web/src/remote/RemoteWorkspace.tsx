@@ -464,7 +464,19 @@ function RemoteCodeSurface(props: RemoteSurfaceProps) {
       {activeThreadId === undefined ? null : (
         <>
           {activeThread === undefined ? null : (
-            <RemoteCoordinatorProposals client={props.clients.code} thread={activeThread} />
+            <RemoteCoordinatorProposals
+              actsAsHostPerson={props.actsAsHostPerson}
+              client={props.clients.code}
+              connected={props.connected}
+              startFirstTurn={(worker, prompt) =>
+                controller.startThreadTurn({
+                  threadId: worker.id,
+                  checkoutId: worker.checkoutId,
+                  prompt,
+                })
+              }
+              thread={activeThread}
+            />
           )}
           <CodeThreadWorkspace
             canvasClient={props.clients.canvas}

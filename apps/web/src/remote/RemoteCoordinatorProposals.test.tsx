@@ -50,6 +50,15 @@ function proposal(id: string, overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** A Code client whose decisions a restricted session never reaches. */
+function readOnly(readPlanner: () => Promise<unknown>) {
+  return {
+    readPlanner: readPlanner as never,
+    execute: vi.fn(),
+    executePlannerProposal: vi.fn(),
+  };
+}
+
 describe("a coordinator's proposals on a paired browser", () => {
   it("shows this coordinator's pending workers with the requested level and no decision", async () => {
     const readPlanner = vi.fn(async () =>
@@ -65,7 +74,7 @@ describe("a coordinator's proposals on a paired browser", () => {
         ],
       }),
     );
-    render(<RemoteCoordinatorProposals client={{ readPlanner }} thread={coordinator} />);
+    render(<RemoteCoordinatorProposals client={readOnly(readPlanner)} thread={coordinator} />);
 
     const card = await screen.findByRole("article", { name: "Proposed worker: Worker 01" });
     expect(readPlanner).toHaveBeenCalledWith(PROJECT);
@@ -103,7 +112,7 @@ describe("a coordinator's proposals on a paired browser", () => {
         ],
       }),
     );
-    render(<RemoteCoordinatorProposals client={{ readPlanner }} thread={coordinator} />);
+    render(<RemoteCoordinatorProposals client={readOnly(readPlanner)} thread={coordinator} />);
 
     const long = await screen.findByRole("article", { name: "Proposed worker: Worker 01" });
     const toggle = within(long).getByRole("button", { name: "Show the full request" });
@@ -126,9 +135,115 @@ describe("a coordinator's proposals on a paired browser", () => {
       throw new Error("unavailable");
     });
     const { container } = render(
-      <RemoteCoordinatorProposals client={{ readPlanner }} thread={coordinator} />,
+      <RemoteCoordinatorProposals client={readOnly(readPlanner)} thread={coordinator} />,
     );
     await vi.waitFor(() => expect(readPlanner).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("approves a worker as it was asked for from a browser the person paired, then sends its request", async () => {
+    const pending = proposal("01", {
+      workerOptions: {
+        providerInstanceId: "60000000-0000-4000-8000-000000000002",
+        modelId: "model-b",
+        executionPolicy: "approval-gated",
+      },
+    });
+    const readPlanner = vi.fn(async () =>
+      decodeCodePlannerView({
+        designation: { kind: "none", projectId: PROJECT, updatedAt: now },
+        designationVersion: 0,
+        proposals: [pending],
+      }),
+    );
+    const execute = vi.fn(async () => ({
+      kind: "checkout-prepared",
+      bindingRevisionId: "70000000-0000-4000-8000-000000000002",
+      checkout: {
+        id: coordinator.checkoutId,
+        repositoryId: coordinator.repositoryId,
+        kind: "existing-worktree",
+        availability: "available",
+        head: { kind: "branch", name: "main", oid: "a".repeat(40) },
+        observedAt: now,
+      },
+    }));
+    const executePlannerProposal = vi.fn(async (command: { creation?: { threadId: string } }) => ({
+      status: "confirmed",
+      proposal: { ...pending.proposal, status: "confirmed" },
+      creation: {
+        kind: "managed-thread-created",
+        thread: { ...coordinator, id: command.creation?.threadId, coordinator: undefined },
+      },
+    }));
+    const startFirstTurn = vi.fn(async () => true);
+    render(
+      <RemoteCoordinatorProposals
+        actsAsHostPerson
+        client={{ readPlanner, execute, executePlannerProposal } as never}
+        startFirstTurn={startFirstTurn}
+        thread={coordinator}
+      />,
+    );
+
+    const card = await screen.findByRole("article", { name: "Proposed worker: Worker 01" });
+    expect(within(card).queryByText("Approve at a window on this computer.")).toBeNull();
+    fireEvent.click(within(card).getByRole("button", { name: "Approve and start" }));
+
+    await screen.findByText("Worker approved and started.");
+    expect(execute).toHaveBeenCalledWith({
+      kind: "prepare-code-project-checkout",
+      projectId: PROJECT,
+    });
+    expect(executePlannerProposal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "confirm-planner-work-proposal",
+        proposalId: pending.proposal.id,
+        expectedVersion: 1,
+        creation: expect.objectContaining({
+          kind: "create-managed-code-thread",
+          projectId: PROJECT,
+          providerInstanceId: "60000000-0000-4000-8000-000000000002",
+          modelId: "model-b",
+          executionPolicy: "approval-gated",
+          sourceBranch: "main",
+          startFromOrigin: false,
+        }),
+      }),
+    );
+    expect(startFirstTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: PROJECT }),
+      "Intent of worker 01.",
+    );
+  });
+
+  it("declines a worker from a browser the person paired and creates nothing", async () => {
+    const readPlanner = vi.fn(async () =>
+      decodeCodePlannerView({
+        designation: { kind: "none", projectId: PROJECT, updatedAt: now },
+        designationVersion: 0,
+        proposals: [proposal("01")],
+      }),
+    );
+    const execute = vi.fn();
+    const executePlannerProposal = vi.fn(async () => ({ status: "declined" }));
+    render(
+      <RemoteCoordinatorProposals
+        actsAsHostPerson
+        client={{ readPlanner, execute, executePlannerProposal } as never}
+        thread={coordinator}
+      />,
+    );
+
+    const card = await screen.findByRole("article", { name: "Proposed worker: Worker 01" });
+    fireEvent.click(within(card).getByRole("button", { name: "Decline" }));
+
+    await screen.findByText("Worker declined.");
+    expect(executePlannerProposal).toHaveBeenCalledWith({
+      kind: "decline-planner-work-proposal",
+      proposalId: "70000000-0000-4000-8000-000000000101",
+      expectedVersion: 1,
+    });
+    expect(execute).not.toHaveBeenCalled();
   });
 });

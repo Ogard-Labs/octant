@@ -11,6 +11,8 @@ import {
   CodeBootstrap,
   CodeConversationPage,
   CodeConversationWindow,
+  CodeCommandResult,
+  CodePlannerProposalOutcome,
   CodePlannerView,
   CodeEvidenceBatchResponse,
   CodeEvidenceReference,
@@ -26,6 +28,10 @@ import {
 } from "@octant/contracts";
 import { MobileInboxFailure, type MobileRemoteTransport } from "./mobileInboxClient";
 import { threadRoutineReceipts } from "./threadRoutineReceipts";
+import type {
+  CoordinatorProposalDecisionPort,
+  CoordinatorProposalEntry,
+} from "./coordinatorProposalApproval";
 import {
   sendWithOwnerUnlock,
   type OwnerMergeUnlock,
@@ -74,13 +80,14 @@ export async function loadMobileCodeThread(
   return decodeHostAnswer(CodeThread)(thread);
 }
 
-/** One pending worker a coordinator proposed, as a paired client may show it. */
-export type MobileCoordinatorProposal = CodePlannerView["proposals"][number]["proposal"];
+/** One pending worker a coordinator proposed, with the version a decision echoes. */
+export type MobileCoordinatorProposal = CoordinatorProposalEntry;
 
 /**
  * A coordinator's own pending proposals, read through the planner view the
- * remote session may read. Approving and declining stay with a window on the
- * host, whose proposal routes refuse a paired caller, so this only reads.
+ * remote session may read. A device the host's own person paired approves or
+ * declines them through `mobileCoordinatorProposalPort`; the host refuses that
+ * decision from every other device session.
  */
 export async function loadMobileCoordinatorProposals(
   transport: MobileRemoteTransport,
@@ -94,14 +101,40 @@ export async function loadMobileCoordinatorProposals(
     decodeHostAnswer(CodePlannerView),
     "Proposed workers could not be read over the remote session.",
   );
-  return view.proposals
-    .map((entry) => entry.proposal)
-    .filter(
-      (proposal) =>
-        proposal.fromCoordinator === true &&
-        proposal.status === "pending" &&
-        String(proposal.plannerThreadId) === String(thread.id),
-    );
+  return view.proposals.filter(
+    (entry) =>
+      entry.proposal.fromCoordinator === true &&
+      entry.proposal.status === "pending" &&
+      String(entry.proposal.plannerThreadId) === String(thread.id),
+  );
+}
+
+/** The host calls a proposal decision makes, over the phone's remote session. */
+export function mobileCoordinatorProposalPort(
+  transport: MobileRemoteTransport,
+): CoordinatorProposalDecisionPort {
+  return {
+    execute: async (command) =>
+      decodeJson(
+        await transport.authenticatedFetch({
+          method: "POST",
+          path: "/api/code/commands",
+          body: JSON.stringify(command),
+        }),
+        decodeHostAnswer(CodeCommandResult),
+        "The host could not prepare the worker.",
+      ),
+    executePlannerProposal: async (command) =>
+      decodeJson(
+        await transport.authenticatedFetch({
+          method: "POST",
+          path: "/api/code/planner/proposals/commands",
+          body: JSON.stringify(command),
+        }),
+        decodeHostAnswer(CodePlannerProposalOutcome),
+        "The proposal decision could not reach the host.",
+      ),
+  };
 }
 
 export async function executeMobileCodeOperation(
