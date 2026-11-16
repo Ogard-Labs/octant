@@ -60,6 +60,34 @@ export type AcpConfinementStrategy =
   /** Shared deny-default Seatbelt profile; explicit Full access runs unconfined. */
   { readonly kind: "deny-default-seatbelt" };
 
+/**
+ * The agent's own sandbox, which replaces Octant's profile below Full access
+ * outside Strict (Architecture: "Providers run in their own sandbox"). It
+ * applies only where every condition in `acpNativeSandboxApplies` holds;
+ * anywhere else the launch keeps Octant's profile, as under Strict.
+ */
+export interface AcpNativeSandbox {
+  /** Hosts on which the agent's sandbox was read from its release. */
+  readonly platforms: ReadonlyArray<NodeJS.Platform>;
+  /** The release the sandbox and its settings were read from; older ones keep Octant's profile. */
+  readonly minimumVersion: readonly [number, number, number];
+  /** The agent's sandbox can grant the Project's extra folders what the Project root gets. */
+  readonly extraFolders: boolean;
+  /** Something on the host would override or disable the settings Octant gives the agent. */
+  readonly unavailable?: (input: {
+    readonly platform: NodeJS.Platform;
+    readonly environment: NodeJS.ProcessEnv;
+  }) => boolean;
+  /** The environment and managed files that turn the agent's own sandbox on for this launch. */
+  readonly launch: (input: {
+    readonly managedHome: string;
+    readonly extraFolders: ReadonlyArray<string>;
+  }) => {
+    readonly environment: Readonly<Record<string, string>>;
+    readonly files: ReadonlyArray<AcpManagedFile>;
+  };
+}
+
 export interface AcpProcessProfile {
   /** `agentInfo.name` the ACP `initialize` response must report. */
   readonly agentName: string;
@@ -130,6 +158,8 @@ export interface AcpProcessProfile {
     readonly releasedHostEntries?: ReadonlyArray<string>;
   };
   readonly confinement: AcpConfinementStrategy;
+  /** The agent's own sandbox, where it has one Octant can turn on and configure. */
+  readonly nativeSandbox?: AcpNativeSandbox;
 }
 
 /**
@@ -1278,6 +1308,47 @@ const geminiProfile: AcpProviderProfile = {
       environment: (path) => ({ GEMINI_CLI_HOME: dirname(path) }),
     },
     confinement: { kind: "deny-default-seatbelt" },
+    // Gemini CLI 0.68.0 runs each tool command in its own sandbox when
+    // `security.toolSandboxing` is set (Seatbelt on macOS, Bubblewrap on
+    // Linux, which fails the command when `bwrap` is missing). A command
+    // that needs more raises a "sandbox_expansion" confirmation, which its
+    // ACP server sends as `session/request_permission`, so it reaches the
+    // person as an Octant approval for that one command. Octant sets it
+    // through the system settings file, the one layer the person's own
+    // settings cannot override; a host that already has one, or names its
+    // own, keeps Octant's profile rather than losing an administrator's
+    // settings.
+    nativeSandbox: {
+      platforms: ["darwin", "linux"],
+      minimumVersion: [0, 68, 0],
+      extraFolders: true,
+      unavailable: ({ platform, environment }) =>
+        environment.GEMINI_CLI_SYSTEM_SETTINGS_PATH !== undefined ||
+        existsSync(
+          platform === "darwin"
+            ? "/Library/Application Support/GeminiCli/settings.json"
+            : "/etc/gemini-cli/settings.json",
+        ),
+      launch: ({ managedHome, extraFolders }) => {
+        const path = join(managedHome, "octant-system-settings.json");
+        return {
+          environment: { GEMINI_CLI_SYSTEM_SETTINGS_PATH: path },
+          files: [
+            {
+              path,
+              content: `${JSON.stringify(
+                {
+                  security: { toolSandboxing: true },
+                  tools: { sandboxAllowedPaths: extraFolders, sandboxNetworkAccess: true },
+                },
+                null,
+                2,
+              )}\n`,
+            },
+          ],
+        };
+      },
+    },
   },
 };
 
@@ -1478,6 +1549,24 @@ const qwenProfile: AcpProviderProfile = {
       environment: (path) => ({ QWEN_HOME: path }),
     },
     confinement: { kind: "deny-default-seatbelt" },
+    // Qwen Code 0.27.4 relaunches itself, ACP included, under `sandbox-exec`
+    // with its `permissive-open` profile when `QWEN_SANDBOX` names it: reads
+    // anywhere, writes held to the folder it runs in, its own folders and
+    // temp. It has no per-command expansion, so a command that needs more
+    // fails as it does in Qwen Code on its own. On Linux its sandbox is
+    // Docker or Podman (its Bubblewrap mode was removed), which Octant does
+    // not start, and it grants only folders passed with
+    // `--include-directories`, so a Project with extra folders keeps
+    // Octant's profile.
+    nativeSandbox: {
+      platforms: ["darwin"],
+      minimumVersion: [0, 27, 4],
+      extraFolders: false,
+      launch: () => ({
+        environment: { QWEN_SANDBOX: "sandbox-exec", SEATBELT_PROFILE: "permissive-open" },
+        files: [],
+      }),
+    },
   },
 };
 

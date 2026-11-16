@@ -101,6 +101,8 @@ export interface AcpConfinementInput {
   readonly servers?: ProviderServerAccess;
   /** The person's own setup this session carries; absent keeps every deny. */
   readonly nativeSetup?: ProviderNativeSetup;
+  /** The release the version read found, which decides whether the agent's own sandbox is known. */
+  readonly version?: string;
 }
 
 export interface AcpConfinementPort {
@@ -448,6 +450,56 @@ function acpWallPolicy(input: {
     : input.executionPolicy;
 }
 
+/**
+ * Whether a launch runs in the agent's own sandbox instead of Octant's
+ * profile (Architecture: "Providers run in their own sandbox"). Every
+ * condition must hold, and each one that fails keeps Octant's profile:
+ * - outside Strict, which keeps Octant's profile by definition;
+ * - below Full access, Full access keeping no sandbox and a Full access
+ *   thread that keeps one keeping Octant's;
+ * - in Work or Code outside Plan, whose read-only and no-shell confinement
+ *   stays Octant's;
+ * - a session, not a Connection Check;
+ * - Network limits not routing the runtime through Octant's proxy, which only
+ *   Octant's profile can hold it to;
+ * - a Project the person trusted for the agent, since the agent then loads
+ *   that Project's own files as it does on its own; until then Octant's
+ *   profile keeps holding them back, as for a custom agent until trusted;
+ * - a host and release whose sandbox was read, nothing on the host overriding
+ *   the settings Octant gives it, and the Project's extra folders granted
+ *   where the agent's sandbox can grant them.
+ */
+export function acpNativeSandboxApplies(input: {
+  readonly profile: AcpProviderProfile;
+  readonly platform: NodeJS.Platform;
+  readonly version: string | undefined;
+  readonly mode: AcpSessionMode;
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly fullAccessSandbox?: boolean;
+  readonly strict?: boolean;
+  readonly purpose?: "probe" | "session";
+  readonly network?: ProviderRuntimeProxiedNetwork;
+  readonly nativeSetup?: ProviderNativeSetup;
+  readonly extraFolders?: ReadonlyArray<string>;
+  readonly environment: NodeJS.ProcessEnv;
+}): boolean {
+  const sandbox = input.profile.process.nativeSandbox;
+  if (sandbox === undefined || input.strict !== false) return false;
+  if (input.executionPolicy === "full-access" || input.executionPolicy === "plan") return false;
+  if (input.mode === "chat" || input.purpose === "probe" || input.network !== undefined)
+    return false;
+  if (input.nativeSetup?.projectCode !== true) return false;
+  if (!sandbox.platforms.includes(input.platform)) return false;
+  if (!sandbox.extraFolders && (input.extraFolders?.length ?? 0) > 0) return false;
+  const match = /^(\d+)\.(\d+)\.(\d+)$/u.exec(input.version ?? "");
+  if (
+    match === null ||
+    !versionAtLeast([Number(match[1]), Number(match[2]), Number(match[3])], sandbox.minimumVersion)
+  )
+    return false;
+  return sandbox.unavailable?.({ platform: input.platform, environment: input.environment }) !== true;
+}
+
 export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): AcpConfinementPort {
   const platform = options.platform ?? process.platform;
   const sandboxPath =
@@ -525,6 +577,38 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             args,
             cwd: root,
             environment: { ...input.environment, ...hostAuthentication.environment },
+          };
+        }
+        const nativeSandbox = profile.process.nativeSandbox;
+        if (nativeSandbox !== undefined && acpNativeSandboxApplies({ ...input, platform })) {
+          const native = nativeSandbox.launch({
+            managedHome,
+            extraFolders: input.extraFolders ?? [],
+          });
+          yield* Effect.try({
+            try: () => {
+              for (const file of native.files) {
+                mkdirSync(dirname(file.path), { recursive: true, mode: 0o700 });
+                writeFileSync(file.path, file.content, { mode: 0o600 });
+                chmodSync(file.path, 0o600);
+              }
+            },
+            catch: () =>
+              failure(
+                "invalid-configuration",
+                `${name} sandbox configuration could not be prepared.`,
+              ),
+          });
+          // The agent's own sandbox holds its commands; Octant's wall does not
+          // wrap it, since macOS refuses a Seatbelt profile inside another.
+          return {
+            command: input.binaryPath,
+            args,
+            cwd: root,
+            environment: withServerAccess(
+              { ...input.environment, ...hostAuthentication.environment, ...native.environment },
+              input.servers,
+            ),
           };
         }
         const binaryDirectory = dirname(realpathSync(input.binaryPath));
@@ -1354,6 +1438,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           ...(network === undefined ? {} : { network }),
           ...(servers === undefined ? {} : { servers }),
           ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
+          version: probe.version,
         });
         let terminate: (() => Promise<void>) | undefined;
         const managed = yield* Effect.acquireReleaseInterruptible(
