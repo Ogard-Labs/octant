@@ -945,6 +945,7 @@ export function wireHarness(deps: HarnessDependencies) {
     resolveDriver: resolveConfiguredDriver,
     tainted: (threadId) =>
       readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+    strict: (threadId) => resolveThreadStrict(threadId),
     watcherLabels: (threadId) => readShieldWatcherLabels(persistence.connection, threadId),
     personMessages: (threadId, limit) =>
       codeBoardEventStore.personPromptsForThread(threadId, limit).flatMap((prompt) => {

@@ -68,6 +68,8 @@ export interface ShieldCall {
   readonly workingDirectory: string;
   /** Octant's policy asked for a fresh confirmation of this call because of taint. */
   readonly freshConfirmation?: boolean | undefined;
+  /** The call is one a provider runtime's own tools asked about, not Octant Harness's. */
+  readonly fromProviderRuntime?: true | undefined;
 }
 
 export interface ShieldRuleInput {
@@ -103,6 +105,14 @@ export interface ShieldRuleInput {
    * names the server over ssh.
    */
   readonly rootServer?: ShieldServerRule | undefined;
+  /**
+   * Whether the forge hard lines (a merge, a force-push) send the call to the
+   * person. Absent holds them. Outside Strict a provider runtime's own `git`
+   * and `gh` follow its own permission mode, so its calls go without them;
+   * Octant Harness's own shell keeps them (Architecture: "Octant adds no
+   * restrictions of its own unless Strict is on").
+   */
+  readonly forgeHardLines?: boolean | undefined;
 }
 
 /**
@@ -395,7 +405,7 @@ export function judgeShieldCallByRules(input: ShieldRuleInput): ShieldRuleOutcom
         return decided(entry.verdict, entry.stage, entry.rule, entry.reason);
       }
     }
-    const forge = judgeForgeCommand(command);
+    const forge = input.forgeHardLines === false ? undefined : judgeForgeCommand(command);
     if (forge !== undefined) return forge;
     // A copy to or from a registered server is judged by its profile, after
     // the hard lines above.
@@ -620,7 +630,7 @@ function judgeSshCall(
       return decided(entry.verdict, entry.stage, entry.rule, entry.reason);
     }
   }
-  const forge = judgeForgeCommand(remote);
+  const forge = input.forgeHardLines === false ? undefined : judgeForgeCommand(remote);
   if (forge !== undefined) return forge;
   const { tier, words } = classifyRemoteCommand(remote, server.deployCommands);
   if (tier === "lockout") {
@@ -1195,6 +1205,7 @@ export function shieldCallFromProviderRequest(input: {
     urls: urlsOf(record),
     arguments: boundedJson(input.input ?? input.description),
     workingDirectory,
+    fromProviderRuntime: true,
   };
 }
 

@@ -3278,7 +3278,9 @@ Which path reaches the forge depends on the thread's
   writes are an ordinary ask, as they are in the runtime on its own
   (maintainer decision, 2026-11-14): at Guarded and Accept edits the person
   approves the pending command, and at Reviewed Shield decides it, its forge
-  hard lines included, or hands it to the person. Octant's structured
+  hard lines included under Strict (outside Strict a provider runtime's own
+  merge or force-push follows its own permission mode, so Shield judges it
+  without them; built), or hands it to the person. Octant's structured
   pull-request tools, with their repository, branch, revision, consent,
   required-check and live-authority checks, stay an option the agent may
   use, not a requirement. The Octant Harness, whose shell is Octant's own,
@@ -14270,7 +14272,10 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     records each one with the hard line it crossed. Octant's own
     pull-request tool and Octant Harness keep the merge rules and the
     Project's "Agents may merge" switch. Strict asks for the provider's
-    commands too, as today.
+    commands too, as today. Built: Octant Shield's forge hard lines judge a
+    provider runtime's call only under Strict, and at Full access a
+    provider's command runs unasked and is journaled
+    (`shield-forge-changes.observed@1`) with the hard line it crossed.
   - **Provider channels.** Telemetry, error reports, `/bug`, `/feedback`
     and marketplace installs follow the person's own provider settings.
     Self-update stays off, because Octant installs and updates provider
