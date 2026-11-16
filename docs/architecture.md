@@ -843,10 +843,10 @@ hard CPU/memory quotas, thermal measurements or predictions of a tool's peak RAM
 
 Repository tests, local worktree preparation, scaffolds and the Octant Harness's
 shell ports share one host budget. They reserve worker slots atomically before
-launch, bound each wait by the operation deadline and at most 30 minutes, retain
-cancellation (decided: a launch is to keep waiting past 30 minutes under
-[Octant adds no restrictions of its own unless Strict is on](#security-and-authority); designed,
-not built), and recheck ordinary authority after waiting. The queue has at most
+launch, bound each wait by the operation deadline alone, retain cancellation
+(the queue's earlier 30-minute refusal went under
+[Octant adds no restrictions of its own unless Strict is on](#security-and-authority); built),
+and recheck ordinary authority after waiting. The queue has at most
 128 entries. Worker slots are divided across the allowed command concurrency,
 so separate Projects do not each get a full worker pool. A confirmed exit releases
 the reservation; uncertain cleanup retains it until host restart/reconciliation.
@@ -3558,8 +3558,8 @@ CI or reviewers should be woken, not left polling; maintainer request,
   refused, no turn is sent.
 - **Auto-fix limits.** A failure is a check name, a review thread id, or the
   base conflict. Each started wake spends one attempt on every failure it
-  carried; at most three attempts per failure (decided: a setting with three
-  as its default, under [Octant's own limits become settings](#security-and-authority); designed, not built), after which Auto-fix stops
+  carried; at most three attempts per failure, or the number in Settings ›
+  Permissions ([Octant's own limits become settings](#security-and-authority); built), after which Auto-fix stops
   (`attempt-limit`) and opens the thread's follow-up marker. The same failures
   on the same head never start a second turn; a wake that started none (the
   thread refused it, or the outside-content mark was refused) is tried again
@@ -3607,10 +3607,9 @@ CI or reviewers should be woken, not left polling; maintainer request,
 - **Watch limits.** A watch ends when the pull request merges or closes, when
   the thread is archived, completed, or gone, when the Project no longer
   connects the repository (`authority-lost`), when the agent calls `unwatch`,
-  after ten started wakes (`wake-limit`), or three days after it began (both
-  to become settings with these defaults, under
-  [Octant's own limits become settings](#security-and-authority); designed, not built)
-  (`expired`), checked even while nothing vouches for it; the last two open the
+  after ten started wakes (`wake-limit`), or three days after it began
+  (`expired`), both settings in Settings › Permissions with those defaults
+  ([Octant's own limits become settings](#security-and-authority); built), checked even while nothing vouches for it; the last two open the
   thread's follow-up marker. Three days covers a review round across a weekend
   without leaving a forgotten watch running. Asking again turns nothing new
   on; after a stop it starts a fresh budget. Known gap: the vouching window is
@@ -3722,8 +3721,8 @@ Octant-operated hosted service stays out of scope
 
 **Coordinator threads start and direct worker threads.** A person may make a
 Code thread a coordinator: a long-lived thread whose own actions are read-only
-(decided: writable at Full access, under
-[Octant's own limits become settings](#security-and-authority); designed, not built),
+below Full access and follow the level at Full access
+([Octant's own limits become settings](#security-and-authority); built),
 which starts worker threads without asking (or proposes them, when the person
 restricts that globally or per Project), messages them, receives their state,
 and brings their requests to the person. Its wake, round and start bounds
@@ -4125,9 +4124,9 @@ the thread it came from.
   **At Full access.** A turn running at Full access creates a routine the
   agent suggested on its own at once, with no card
   (maintainer decision, 2026-11-12): it takes the same path a routine the
-  person asked for takes, so it is created paused (decided: a setting, off by
-  default, starts it active, under
-  [Octant's own limits become settings](#security-and-authority); designed, not built) in its first journaled
+  person asked for takes, so it is created paused (at Full access the setting
+  **Start agent-created routines active at Full access**, off by default,
+  starts it enabled instead; [Octant's own limits become settings](#security-and-authority); built) in its first journaled
   event, with approval-gated authority of its own, and shown in the thread by
   the receipt below, and it runs only after the person enables it. Below Full
   access the card's confirmation stays. The level read is the one the turn
@@ -4517,12 +4516,13 @@ turn is running or waiting on the person holds it until that turn ends. A
 wake-up the host could not fire on time, because the host was down or asleep
 at its due time or its timer ran more than two minutes late, is journaled as
 **missed** and never fired later on its own: the thread shows it as missed
-with **Run now** and Cancel, and only the person's Run now starts its turn.
-Bounds: at most 8 waiting wake-ups a thread, a first fire at least a minute
-away (a delayed one held to one minute to one hour, the runtime's own
-range), a recurring one at most every 5 minutes across its life (decided: as
-often as every minute, with the cap and missed-run handling as settings, under
-[Octant's own limits become settings](#security-and-authority); designed, not built), refused
+with **Run now** and Cancel, and only the person's Run now starts its turn,
+unless the person turned on **Run missed wake-ups on return** in Settings ›
+Permissions, which runs it once when the host is back.
+Bounds: at most 8 waiting wake-ups a thread, or the number in Settings ›
+Permissions, a first fire at least a minute away (a delayed one held to one
+minute to one hour, the runtime's own range), a recurring one as often as
+every minute, as cron does ([Octant's own limits become settings](#security-and-authority); built), refused
 when its first fire is past it, and ending on its own after 7 days, before
 any turn a busy thread held back past that time, and a thread archived or
 deleted ends every wake-up it had. A purge takes the thread's wake-ups with
@@ -4663,9 +4663,9 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
     wakes nothing, so two agents answering each other stop waking each other
     after ten rounds and continue only when a person runs a turn. Both numbers
     are settings, per coordinator for a coordinator and its workers
-    (maintainer request, 2026-11-12); any other thread takes the defaults
-    (decided: settings for every thread under
-    [Octant's own limits become settings](#security-and-authority); designed, not built).
+    (maintainer request, 2026-11-12); any other thread takes the bounds in
+    Settings › Permissions, 30 and 10 unless the person changed them
+    ([Octant's own limits become settings](#security-and-authority); built).
     The host
     records wake turns and each thread's latest host turn with its hop in its
     own store, so a restart keeps the hourly count and the hop count
@@ -4785,7 +4785,7 @@ it creates a worker thread, under the rules in
   window a `#thread` mention resolves (12 messages within 8,000 characters,
   truncation stated), and no tool payloads beyond that window, files, or diff.
   `wait` returns when the target leaves `working`, or after the caller's
-  timeout, 30 seconds by default and at most 120 like a child run's `wait`,
+  timeout, 30 seconds by default and at most 120,
   with the state only; `working` in its answer means the time ran out.
 - **References.** A reference is `<thread id>@<project id>`, the one form every
   operation names a thread by, `send` included: the thread part is the id
@@ -9599,13 +9599,14 @@ overview say so wherever a money budget is in force.
 
 Direct-endpoint providers (`openai-compatible`, `anthropic-compatible`,
 `azure-foundry`, and `ollama`) run under the native harness in
-`apps/server/src/harness`. Ollama stays a literal-loopback HTTP origin: its
-transport speaks Ollama's native `/api/chat` and refuses any other base URL,
-so a cloud, LAN, or tunnelled Ollama is not a harness endpoint (decided: a
-local-network or hosted address is to be allowed, private-network plain HTTP
-with a warning, under
-[Provider reach Octant no longer narrows](#security-and-authority); designed,
-not built). Ollama cuts a
+`apps/server/src/harness`. An Ollama address is an origin: HTTPS anywhere, as
+a hosted Ollama is reached, or plain HTTP on loopback or a private network
+(an RFC 1918, link-local, unique-local or overlay-network address, or an mDNS
+`.local` name), which Add endpoint marks with a warning that prompts travel
+unencrypted; a public address over plain HTTP is refused, and nothing
+resolves DNS to decide
+([Provider reach Octant no longer narrows](#security-and-authority); built).
+Its transport speaks Ollama's native `/api/chat`. Ollama cuts a
 prompt longer than the window it loaded without an error, which can drop the
 harness's instructions and tool definitions, so every Ollama request names its
 window as `options.num_ctx` and the transport measures the request against
@@ -14228,7 +14229,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   it, so no approval leaves the server's authority.
 
   **Octant adds no restrictions of its own unless Strict is on**
-  (maintainer decision, 2026-11-16; designed, not built). A person who moves
+  (maintainer decision, 2026-11-16; partly built: Project trust from Claude
+  Code and Codex, the default level, image generation and the resource queue
+  below are built; Strict and the rest are designed, not built). A person who moves
   from a provider's own CLI to Octant keeps every workflow that worked
   there, and Octant restricts a provider no more than any other agent
   workspace does. Outside Strict, the provider's own sandbox, permission
@@ -14285,10 +14288,16 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     projects) counts as trusted in Octant without a second click. Octant's
     one card stays only where the provider has no trust record, standing in
     for the prompt the provider's CLI would show. Strict requires Octant's
-    own trust for every Project.
+    own trust for every Project. Built: the host reads Claude Code's
+    `projects["<folder>"].hasTrustDialogAccepted` in `.claude.json` (the
+    Project's folder or one above it) and Codex's `trust_level = "trusted"`
+    for the Project's folder in `config.toml`, under `CLAUDE_CONFIG_DIR` and
+    `CODEX_HOME` when set, when a session starts and when the trust prompt
+    asks; `projectTrustsProvider` is where Strict will plug in.
   - **Default level.** A new thread still starts asking, as the providers'
     CLIs do, and a person may choose Full access as their default level in
-    Settings.
+    Settings (built: Settings › Code's Default mode and Settings › Work's
+    default access, behind the one-time warning).
   - **Plan in Work.** Work threads get the Plan level, so the provider's
     own plan mode, `EnterPlanMode` and `ExitPlanMode` work there as in Code.
   - **Project terminal.** The person's own Project terminal runs unconfined
@@ -14308,11 +14317,13 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     and no kept choice, the card is skipped and the image is made on a default
     profile (the one the person names in Settings, else the first ready one)
     on its default model. "Ask again" in Project Overview still brings the
-    card back. Strict keeps today's card.
+    card back. Strict keeps today's card. Built: Settings › Voice & images ›
+    At Full access names the profile.
   - **Resource queue.** A launch waiting on the host's
     [local work resource limits](#local-work-resource-limits) keeps waiting,
     cancellable and shown as waiting, instead of being refused after 30
-    minutes; the operation's own deadline and the queue's 128 entries stay.
+    minutes; the operation's own deadline and the queue's 128 entries stay
+    (built).
   - **Browser page scripts in Work.** Below Full access a Work thread gets
     Code's one-use, exact-source script permission under the same rules
     ([Browser for agents: Bounded page scripts](design/browser-agent-tool.md#bounded-page-scripts));
@@ -14350,7 +14361,10 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   journaling every ask either way.
 
   **Octant's own limits become settings** (maintainer decision, 2026-11-16;
-  designed, not built). Under the
+  partly built: each limit below but the routine window is a host setting in
+  Settings › Permissions, journaled with the host's other settings, changed
+  at a local window or a device the host's own person paired, and read by the
+  server where it applies). Under the
   [unattended-work rule](#security-and-authority) a fixed constant needs a
   reason beside it; these have none that protects a hard line, so each
   becomes a setting with today's value as its default, and each owner keeps
@@ -14366,16 +14380,22 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   - **Coordinators.** How many coordinators a Code Project may hold becomes a
     setting, default 4, and at Full access a coordinator's own file, shell
     and Git actions follow the level instead of Plan's read-only gate
-    ([Coordinator threads](design/coordinator-threads.md)).
+    ([Coordinator threads](design/coordinator-threads.md)). The one place
+    that decides a coordinator turn's posture, `coordinatorTurnPosture` in
+    `@octant/domain`, is where Strict will keep Plan's gate at every level.
   - **Pull requests.** A pull-request watch's end after ten started wakes or
     three days, and Auto-fix's three attempts per failure.
   - **Agent messages and children.** A turn's three thread messages, and a
-    child run's `wait` limit (at most 120 seconds).
-  - **Browser.** A wait's 10 minutes.
+    child run's `wait` limit (120 seconds by default, up to an hour).
+  - **Browser.** A wait's 10 minutes (up to an hour; the host refuses a wait
+    past the setting, and a Claude Code thread still ends one tool call at
+    eleven minutes).
   - **Routines.** A file routine's 64-run activity window can be cleared or
     raised, and a setting, off by default, **Start agent-created routines
     active at Full access** lets a routine an agent creates at Full access
-    start enabled instead of paused.
+    start enabled instead of paused. Not built yet: the routine window keeps
+    its fixed 64 runs, because a raised or cleared window has to be journaled
+    with the routine so replay rebuilds the same overflow.
 
   Rationale: a limit the person cannot change stops the workflow it was
   meant to bound; the journal, spend ceilings and the person's Stop still
@@ -14394,7 +14414,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   built. A device the host knows only through the hub's roster is unchanged.
 
   **Provider reach Octant no longer narrows** (maintainer decision,
-  2026-11-16; designed, not built):
+  2026-11-16; partly built: Ollama off loopback is built, the rest is
+  designed, not built):
   - **Ollama off loopback.** An Ollama address on the local network or a
     hosted Ollama is allowed, and plain HTTP to a private-network address is
     allowed with a warning; a public address still needs HTTPS
