@@ -56,18 +56,13 @@ const codeTabs: ReadonlyArray<
 > = [
   ["code-overview", "Overview", undefined, { role: "region", name: "Code thread" }],
   ["code-terminal", "Terminal", "xterm", { role: "heading", name: "No terminal attached" }],
-  [
-    "code-test",
-    "Tests",
-    undefined,
-    { role: "heading", name: "Repository test approval unavailable" },
-  ],
-  ["code-git", "Git", undefined, { role: "heading", name: "Git mutation approval unavailable" }],
+  ["code-test", "Tests", undefined, { role: "text", name: "Repository test approval unavailable" }],
+  ["code-git", "Git", undefined, { role: "text", name: "Git mutation approval unavailable" }],
   [
     "code-pr",
     "Pull request",
     undefined,
-    { role: "heading", name: "Pull request approval unavailable" },
+    { role: "text", name: "Pull request approval unavailable" },
   ],
   [
     "code-local-review",
@@ -504,8 +499,12 @@ describe("WorkspaceView Code tab registration", () => {
       // the surface appears only after the deferred chunk resolves. Keep a
       // generous wait budget for loaded CI runners; the assertion itself is
       // unchanged — the exact surface must render and be visible.
+      // A state drawn as the panes' one empty state (a mark and two lines) is a
+      // status with no heading, so it is found by its words.
       expect(
-        await screen.findByRole(expected.role, { name: expected.name }, { timeout: 5_000 }),
+        await (expected.role === "text"
+          ? screen.findByText(expected.name, undefined, { timeout: 5_000 })
+          : screen.findByRole(expected.role, { name: expected.name }, { timeout: 5_000 })),
       ).toBeVisible();
       expect(
         screen.queryByRole("heading", { name: "No Code Project open" }),

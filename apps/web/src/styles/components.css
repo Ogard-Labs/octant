@@ -693,6 +693,9 @@ html[data-octant-reduced-motion="true"]
   font: inherit;
   font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-medium);
+  /* The menu row's line: inherited, the line was 21px and 4px of padding made
+     the Project picker's rows 29px beside every other menu's 28. */
+  line-height: var(--oct-line-chrome);
   text-align: start;
   white-space: nowrap;
   cursor: default;

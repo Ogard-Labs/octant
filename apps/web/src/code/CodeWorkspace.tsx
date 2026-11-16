@@ -26,7 +26,7 @@ import {
   presentAppleSimulatorLiveFrame,
   type AppleSimulatorLiveFrameAttach,
 } from "@octant/domain";
-import { FolderGit2, LoaderCircle } from "../ui/icons";
+import { FolderGit2, LoaderCircle, TriangleAlert } from "../ui/icons";
 import { documentIsVisible } from "../polling/documentVisibility";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTabActivatedThisSession } from "../shell/TabActivation";
@@ -1612,9 +1612,9 @@ function terminalRecoveryFailureCategory(error: unknown): string | undefined {
 function ApprovalUnavailable(props: { readonly surface: string }) {
   return (
     <OctantEmpty
-      eyebrow="Ask for approvals"
-      message="Approvals are unavailable in this window. Reopen the task in the desktop app to continue."
-      state="warning"
+      detail="Approvals are unavailable in this window. Reopen the task in the desktop app to continue."
+      icon={<TriangleAlert size={16} />}
+      layout="line"
       title={`${props.surface} approval unavailable`}
     />
   );
@@ -1623,9 +1623,9 @@ function ApprovalUnavailable(props: { readonly surface: string }) {
 function UnavailableProjection(props: { readonly message: string; readonly title: string }) {
   return (
     <OctantEmpty
-      eyebrow="Code workspace recovery"
-      message={props.message}
-      state="warning"
+      detail={props.message}
+      icon={<TriangleAlert size={16} />}
+      layout="line"
       title={props.title}
     />
   );

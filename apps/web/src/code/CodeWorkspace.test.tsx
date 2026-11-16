@@ -688,7 +688,8 @@ describe("CodeWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "README.md is unavailable" })).toBeVisible();
+    // The panes' one state: a mark and two lines, found by its words.
+    expect(screen.getByText("README.md is unavailable")).toBeVisible();
     expect(screen.getByText(/authoritative file projection/i)).toBeVisible();
   });
 

@@ -11,6 +11,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { ArtifactListRow } from "../artifacts/ArtifactListRow";
 import { createThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
+import { Compass } from "../ui/icons";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { OctantButton } from "../ui/base/OctantButton";
 
@@ -85,7 +86,12 @@ export default function ArtifactsModule(props: Props) {
   if (state.status === "loading") return <OctantEmpty state="loading" title="Loading artifacts" />;
   if (state.status === "unavailable") {
     return (
-      <OctantEmpty message={state.message} state="neutral" title="Artifacts are unavailable" />
+      <OctantEmpty
+        detail={state.message}
+        icon={<Compass size={16} />}
+        layout="line"
+        title="Artifacts are unavailable"
+      />
     );
   }
 
@@ -116,8 +122,9 @@ export default function ArtifactsModule(props: Props) {
           </Suspense>
         ) : (
           <OctantEmpty
-            message="This artifact could not be opened in the dock."
-            state="neutral"
+            detail="This artifact could not be opened in the dock."
+            icon={<Compass size={16} />}
+            layout="line"
             title="Artifact is unavailable"
           />
         )}
@@ -141,8 +148,9 @@ export default function ArtifactsModule(props: Props) {
       <div className="dock-artifacts__body">
         {entries.length === 0 ? (
           <OctantEmpty
-            message="Canvas documents made in this Project appear here."
-            state="neutral"
+            detail="Canvas documents made in this Project appear here."
+            icon={<Compass size={16} />}
+            layout="line"
             title="No artifacts yet"
           />
         ) : (

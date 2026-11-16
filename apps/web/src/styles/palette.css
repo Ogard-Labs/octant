@@ -68,6 +68,11 @@
   border-bottom: 1px solid var(--oct-border-soft);
 }
 
+/* The glyph keeps its 14px: left to shrink beside the field it measured 13.4px. */
+.command-palette__field > svg {
+  flex: none;
+}
+
 .command-palette__field > input {
   height: auto;
   padding: 0;

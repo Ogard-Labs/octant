@@ -122,7 +122,13 @@
   border-radius: 0;
 }
 
+/* One cell as tall as the preview. Its height comes from the ratio, which a
+   child's `height: 100%` does not resolve against: seen in the desktop app, a
+   page with no picture drew its icon and name at the preview's top edge
+   instead of its middle. */
 .dock-env-strip .dock-mini-card__preview {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   height: auto;
   aspect-ratio: 16 / 10;
   border-radius: var(--oct-radius-md);
@@ -644,14 +650,6 @@
   padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
   border-bottom: 0;
   box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
-}
-
-.right-utility-dock__tool
-  [data-bar-hosted="true"]
-  > .code-file-explorer__head
-  .code-file-explorer__search
-  input {
-  height: 24px;
 }
 
 /* The Browser's row takes the tile bar's insets, not the rail's: its first
@@ -1197,9 +1195,31 @@
   position: relative;
 }
 
-/* The name gives way last: the status text beside it shrinks ten times as fast. */
+/* The name gives way last: the status text and the folded view control beside
+   it give way first. Measured at 1440 wide with Environment
+   open, a 280px Review tile at the window's corner (88px trailing inset) left
+   the view control 90px of words in 81px; the name shrank with it ("Revi…")
+   while the control read "W…"; a share of even 0.3px was enough to cut the
+   name. A tool that leads with tabs keeps the slower tenth so its pages still
+   give way. */
 .dock-tile__bar[data-has-controls="true"] > .dock-tile__lead {
   flex: 0 0.1 auto;
+}
+
+/* A name-led lead shrinks like any item, and the controls after it ten
+   thousand times as fast: the name's share of a squeeze rounds to nothing
+   until the controls have no width left, and then the name yields, so the
+   bar's own Close is never pushed past the tile's edge. Fixed at its full
+   width, a long name in a 280px corner tile would have done that. */
+.dock-tile__bar[data-has-controls="true"]
+  > .dock-tile__lead:not(:has(> .dock-tile__lead-slot:not(:empty))) {
+  flex: 0 1 auto;
+}
+
+.dock-tile__bar[data-has-controls="true"]
+  > .dock-tile__lead:not(:has(> .dock-tile__lead-slot:not(:empty)))
+  ~ .dock-tile__tool-controls {
+  flex-shrink: 10000;
 }
 
 .dock-tile__tool-controls {
@@ -1308,6 +1328,12 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* The chevron keeps its 12px while the label is cut: in a narrow tile it was
+   squeezed to 4px wide and the label to "W…". */
+.dock-bar-named > svg {
+  flex: none;
 }
 
 .dock-bar-named:hover,
@@ -2305,6 +2331,13 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
   min-height: 0;
   overflow: auto;
   padding: var(--oct-space-2);
+}
+
+/* With nothing to list the state stands in the pane's middle, as every tool's
+   does (the shared state centres itself with auto margins). */
+.dock-artifacts__body:has(> .surface-empty) {
+  display: grid;
+  align-content: center;
 }
 
 /* A row is read by its title, so it starts at the leading edge; the shared
