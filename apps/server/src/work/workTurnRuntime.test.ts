@@ -2006,8 +2006,9 @@ describe("WorkTurnRuntime", () => {
     });
   });
 
-  it("starts the provider auto-accepting edits only for a thread whose access allows it", async () => {
-    const started: Array<{ readonly executionPolicy?: string }> = [];
+  it("starts the provider at the thread's level, Plan's read-only profile included, and lets the agent ask to change it", async () => {
+    const started: Array<{ readonly executionPolicy?: string; readonly levelChanges?: boolean }> =
+      [];
     const events: ProviderRuntimeEvent[] = [
       {
         instanceId: ids.provider,
@@ -2024,7 +2025,10 @@ describe("WorkTurnRuntime", () => {
       acquire: () =>
         Effect.succeed({
           subscribe: Effect.succeed(Stream.fromIterable(events)),
-          start: (input: { readonly executionPolicy?: string }) => {
+          start: (input: {
+            readonly executionPolicy?: string;
+            readonly levelChanges?: boolean;
+          }) => {
             started.push(input);
             return Effect.void;
           },
@@ -2037,7 +2041,7 @@ describe("WorkTurnRuntime", () => {
           answerTool: () => Effect.void,
         } as never),
     };
-    const turn = (access?: "ask-first" | "auto-accept-edits") =>
+    const turn = (access?: "ask-first" | "auto-accept-edits" | "plan") =>
       new WorkTurnRuntime().run({
         command: decodeStartWorkThreadTurnCommand({
           kind: "start-work-thread-turn",
@@ -2065,11 +2069,14 @@ describe("WorkTurnRuntime", () => {
     await turn();
     await turn("ask-first");
     await turn("auto-accept-edits");
+    await turn("plan");
     expect(started.map((input) => input.executionPolicy)).toEqual([
       "approval-gated",
       "approval-gated",
       "auto-accept-edits",
+      "plan",
     ]);
+    expect(started.every((input) => input.levelChanges === true)).toBe(true);
   });
 
   it("hands the provider the prior Work transcript as follow-up context", async () => {

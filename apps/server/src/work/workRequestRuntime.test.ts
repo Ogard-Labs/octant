@@ -705,6 +705,8 @@ describe("WorkRequestRuntime", () => {
       readonly review: ShieldReviewPort["review"] | undefined;
       readonly answerFails?: boolean;
       readonly extraFolders?: ReadonlyArray<string>;
+      readonly event?: ProviderRuntimeEvent;
+      readonly readThread?: () => { readonly access: "plan"; readonly planReturnAccess: "auto" };
     }) {
       const record = vi.fn((_input: unknown) => ({ status: "ok" as const, request: {} as never }));
       const answerApproval = vi.fn((_answer: unknown) =>
@@ -717,9 +719,10 @@ describe("WorkRequestRuntime", () => {
         requests: { record, interruptSession: vi.fn(() => []) } as never,
         uuid: () => "00000000-0000-4000-8000-000000000905",
         shield: () => (input.review === undefined ? undefined : { review: input.review }),
+        ...(input.readThread === undefined ? {} : { readThread: input.readThread }),
       });
       const connection = {
-        subscribe: Effect.succeed(Stream.succeed(approval)),
+        subscribe: Effect.succeed(Stream.succeed(input.event ?? approval)),
         answerApproval,
         answerUserInput: () => Effect.void,
         interrupt: () => Effect.void,
@@ -791,6 +794,33 @@ describe("WorkRequestRuntime", () => {
         );
       });
     }
+
+    it("puts the agent's ask to leave Plan to the person whatever Shield would say, with its plan whole", async () => {
+      const review = vi.fn(async () => decision("allow"));
+      const turn = await runTurn({
+        tool: "ExitPlanMode",
+        input: "{}",
+        review,
+        readThread: () => ({ access: "plan", planReturnAccess: "auto" }),
+        event: {
+          ...approval,
+          action: "ExitPlanMode",
+          description: "Claude finished planning and asks to leave Plan.",
+          levelChange: { kind: "exit-plan", plan: "1. Edit src/main.ts\n2. Run the tests" },
+        },
+      });
+
+      expect(review).not.toHaveBeenCalled();
+      expect(turn.answerApproval).not.toHaveBeenCalled();
+      expect(turn.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          detail: expect.objectContaining({
+            kind: "approval",
+            levelChange: { to: "auto", plan: "1. Edit src/main.ts\n2. Run the tests" },
+          }),
+        }),
+      );
+    });
 
     it("judges a call in the Project's extra folders as it judges one in the root", async () => {
       const review = vi.fn(async () => decision("allow"));

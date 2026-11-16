@@ -570,6 +570,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         ...(input.nativeArtifacts === true ? { nativeArtifacts: true } : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         ...(input.wakeups === undefined ? {} : { wakeups: input.wakeups }),
+        // The agent's own asks to plan first or to leave Plan reach the person
+        // as level-change requests, which the Work request service carries out.
+        levelChanges: true,
       };
       const handle = yield* input.resumeCursor === undefined
         ? connection.start({ ...options, modelId: input.command.authority.modelId })
