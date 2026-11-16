@@ -551,6 +551,62 @@ describe("bounded authenticated extension routes", () => {
     await expect(call).resolves.toBe(true);
   });
 
+  it("lets a device the host's own person paired answer and remember a local window's MCP prompt, which grows the grant as that device", async () => {
+    const approvals = new ExtensionToolApprovalService({
+      uuid: () => "44000000-0000-4000-8000-000000000010",
+      now: () => now,
+      isPairedDeviceScope: (scope) => String(scope) === pairedDeviceId,
+      threadAuthorityIsCurrent: () => true,
+      windowCanReachThread: () => false,
+    });
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: new WindowAuthorityStore(),
+      toolApprovals: approvals,
+      now: () => now,
+    });
+    const remember = vi.fn(() => true);
+    const call = approvals.request({
+      windowId: windowId as never,
+      threadId: "44000000-0000-4000-8000-000000000011",
+      projectId: "44000000-0000-4000-8000-000000000012",
+      extensionId,
+      packageId,
+      componentId: "server",
+      serverName: "server",
+      providerToolName: "plugin__server__read",
+      mcpToolName: "read",
+      inputJson: "{}",
+      remember,
+    });
+    const answer = {
+      kind: "decide",
+      approvalId: "44000000-0000-4000-8000-000000000010",
+      decision: "approved",
+      remember: true,
+      rememberScope: "server",
+    };
+    // A device the hub's roster introduced neither sees nor answers it.
+    const hidden = await handler(
+      pairedDeviceRequest("/api/extensions/tool-approvals", { kind: "list" }, "hub-roster"),
+    );
+    expect(await hidden?.json()).toEqual([]);
+    expect(
+      (await handler(pairedDeviceRequest("/api/extensions/tool-approvals", answer, "hub-roster")))
+        ?.status,
+    ).toBe(409);
+    const listed = await handler(
+      pairedDeviceRequest("/api/extensions/tool-approvals", { kind: "list" }, "host-person"),
+    );
+    expect(await listed?.json()).toHaveLength(1);
+    const remembered = await handler(
+      pairedDeviceRequest("/api/extensions/tool-approvals", answer, "host-person"),
+    );
+    expect(remembered?.status).toBe(200);
+    expect(remember).toHaveBeenCalledWith("server", pairedDevice);
+    await expect(call).resolves.toBe(true);
+  });
+
   it("refuses a paired device another scope's MCP prompt", async () => {
     const approvals = new ExtensionToolApprovalService({
       uuid: () => "44000000-0000-4000-8000-000000000010",
@@ -790,7 +846,7 @@ describe("bounded authenticated extension routes", () => {
     ).toBe(400);
   });
 
-  it("refuses a paired device the inspection of an outside provider driver folder", async () => {
+  it("refuses the inspection of an outside provider driver folder to a hub-introduced device, and admits a device the host's own person paired", async () => {
     const execute = vi.fn(
       async (): Promise<ExtensionCommandResult> => ({
         kind: "extension-command-failed",
@@ -841,7 +897,18 @@ describe("bounded authenticated extension routes", () => {
         )
       )?.status,
     ).toBe(200);
-    expect(execute).toHaveBeenCalledTimes(2);
+    expect(
+      (
+        await handler(
+          pairedDeviceRequest(
+            "/api/extensions/inspect",
+            { kind: "inspect-package", source: driver },
+            "host-person",
+          ),
+        )
+      )?.status,
+    ).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(3);
   });
 
   it("rejects local-folder import from a remote device before reading the host path", async () => {

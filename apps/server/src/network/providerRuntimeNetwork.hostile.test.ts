@@ -831,7 +831,60 @@ describe("provider runtime network", () => {
     expect(host.events(SAFE_NETWORKS_AGGREGATE)).toEqual([]);
   });
 
-  it("serves the Safe networks view and refuses a paired device's change over the route", async () => {
+  it("lets a device the host's own person paired change Safe networks and Network limits, journaled with the device as actor", async () => {
+    const host = runtimeHost({ limitsOn: "store" });
+    const deviceId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const handler = createSafeNetworkRouteHandler({
+      windowAuthorityStore: new WindowAuthorityStore(),
+      store: host.store,
+      network: host.network,
+      projectExists: (id) => id === projectId,
+      now: () => 1,
+    });
+    const send = async (command: unknown) => {
+      const request = new Request("http://127.0.0.1/api/access/safe-networks", {
+        method: "POST",
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(request, {
+        principal: {
+          kind: "remote-device",
+          hostId: "11111111-1111-4111-8111-111111111111",
+          deviceId,
+          credentialGeneration: 1,
+          origin: "https://remote.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "eeeeeeee-eeee-4eee-8eee-0000000000aa",
+          admittedBy: "host-person",
+        } as never,
+        scopeId: deviceId as never,
+      });
+      return await handler(request);
+    };
+    expect(
+      (
+        await send({
+          kind: "set-places",
+          scope: { kind: "account" },
+          places: [{ kind: "private-network", tag: "local-network" }],
+        })
+      )?.status,
+    ).toBe(200);
+    expect((await send({ kind: "set-limits", enabled: true }))?.status).toBe(200);
+    expect(host.store.limitsOn()).toBe(true);
+    const events = host.events(SAFE_NETWORKS_AGGREGATE);
+    expect(events.map((event) => event.eventName)).toEqual([
+      "safe-networks.places-set@1",
+      "safe-networks.limits-set@1",
+    ]);
+    for (const event of events) {
+      expect(event.actor).toEqual({ kind: "remote-device", actorId: deviceId, deviceId });
+      expect(event.payload).toMatchObject({ principal: { kind: "person-paired-device" } });
+    }
+  });
+
+  it("serves the Safe networks view and refuses a change from a device the hub's roster introduced over the route", async () => {
     const host = runtimeHost();
     const windowId = decodeWindowId("00000000-0000-4000-8000-000000000468");
     const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
