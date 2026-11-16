@@ -37,6 +37,8 @@ import type {
   ClaudeSessionMetadata,
 } from "./claudeAgentSdkPort";
 import {
+  CLAUDE_MEMORY_WRITE_REFUSAL,
+  claudeMemoryWriteRefusal,
   CLAUDE_PLAN_CAPTURED_MESSAGE,
   claudeExecutionOptions,
   claudeSandboxSettings,
@@ -1307,6 +1309,89 @@ describe("Claude execution policy", () => {
       });
     } finally {
       await Effect.runPromise(Scope.close(scope, Exit.void));
+    }
+  });
+
+  it("refuses a Chat write into Claude's memory instead of asking the person", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const open = f.opens[0]!;
+      const signal = new AbortController().signal;
+      const call = (toolName: string, input: object, toolUseId: string) =>
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName,
+          input,
+          toolUseId,
+          signal,
+        });
+      const memory = "/provider-native/projects/-chat/memory";
+      for (const [toolName, input, toolUseId] of [
+        ["Write", { file_path: `${memory}/MEMORY.md`, content: "remember" }, "memory-write"],
+        [
+          "Edit",
+          { file_path: `${memory}/user.md`, old_string: "a", new_string: "b" },
+          "memory-edit",
+        ],
+        ["Write", { file_path: "/provider-native/CLAUDE.md", content: "x" }, "account-memory"],
+        // A path that climbs back into the folder is the folder.
+        ["Write", { file_path: `${memory}/../memory/./MEMORY.md`, content: "x" }, "climbing-write"],
+      ] as const) {
+        await expect(call(toolName, input, toolUseId)).resolves.toEqual({
+          behavior: "deny",
+          message: CLAUDE_MEMORY_WRITE_REFUSAL,
+        });
+      }
+      // Reading the memory stays allowed: it is loaded, read-only.
+      await expect(
+        call("Read", { file_path: `${memory}/MEMORY.md` }, "memory-read"),
+      ).resolves.not.toMatchObject({ behavior: "deny" });
+    } finally {
+      await acquired.close();
+    }
+  });
+
+  it("refuses a Chat write into Claude's memory when the instructions file or a memory folder is itself a link", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "octant-claude-memory-")));
+    try {
+      const configurationDirectory = join(root, "account");
+      const elsewhere = join(root, "elsewhere");
+      await mkdir(join(configurationDirectory, "projects", "-chat"), { recursive: true });
+      await mkdir(join(elsewhere, "memory"), { recursive: true });
+      await writeFile(join(configurationDirectory, "instructions.md"), "x");
+      await symlink(
+        join(configurationDirectory, "instructions.md"),
+        join(configurationDirectory, "CLAUDE.md"),
+      );
+      await symlink(
+        join(elsewhere, "memory"),
+        join(configurationDirectory, "projects", "-chat", "memory"),
+      );
+      const refusal = (target: string) =>
+        claudeMemoryWriteRefusal({
+          mode: "chat",
+          executionPolicy: "approval-gated",
+          toolName: "Write",
+          target,
+          workingDirectory: root,
+          configurationDirectory,
+        });
+      expect(refusal(join(configurationDirectory, "CLAUDE.md"))).toBe(CLAUDE_MEMORY_WRITE_REFUSAL);
+      expect(refusal(join(configurationDirectory, "instructions.md"))).toBe(
+        CLAUDE_MEMORY_WRITE_REFUSAL,
+      );
+      expect(
+        refusal(join(configurationDirectory, "projects", "-chat", "memory", "MEMORY.md")),
+      ).toBe(CLAUDE_MEMORY_WRITE_REFUSAL);
+      expect(refusal(join(elsewhere, "memory", "MEMORY.md"))).toBe(CLAUDE_MEMORY_WRITE_REFUSAL);
+      expect(refusal(join(elsewhere, "notes.md"))).toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 
@@ -4489,7 +4574,7 @@ describe("Claude artifact delivery", () => {
     expectEveryGuard(other.environment);
   });
 
-  it("lifts only the auto-memory guard for a Work or Code launch outside Plan on an account whose person turned its memory on", async () => {
+  it("lifts only the auto-memory guard on an account whose person turned its memory on, in Plan and Chat too", async () => {
     const memoryGuard = "CLAUDE_CODE_DISABLE_AUTO_MEMORY";
     const everyOtherGuard = Object.fromEntries(
       Object.entries(REQUIRED_GUARDS).filter(([name]) => name !== memoryGuard),
@@ -4501,18 +4586,19 @@ describe("Claude artifact delivery", () => {
       undefined,
       () => on,
     );
+    // Plan and Chat load the memory read-only: Plan holds no write tool and
+    // its sandbox binds the account folder read-only, and Chat's gate refuses
+    // a write into the memory folder.
     for (const [mode, policy] of [
       ["work", "approval-gated"],
       ["code", "full-access"],
+      ["code", "plan"],
+      ["chat", "approval-gated"],
     ] as const) {
       const launched = await launch(f, mode, policy, false);
       expect(launched.environment, `${mode} ${policy}`).not.toHaveProperty(memoryGuard);
       expect(launched.environment).toMatchObject(everyOtherGuard);
     }
-    // Plan may write nothing a later session would load, and Chat is confined
-    // the same way, so both keep the guard with the setting on.
-    expectEveryGuard((await launch(f, "code", "plan", false)).environment);
-    expectEveryGuard((await launch(f, "chat", "approval-gated", false)).environment);
     // The next launch after the person turns it off is guarded again, and
     // Full access alone never lifts it.
     on = false;
