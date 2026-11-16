@@ -57,12 +57,19 @@ import type { TodoChangeOutcome, TodoList } from "./useTodoList";
 
 /** A thread started from a to-do whose link the list host has not recorded. */
 export interface TodoUnlinkedStart {
+  readonly hostId?: StableHostId;
   readonly threadId: string;
   readonly mode: OctantMode;
 }
 
 /** Start and the thread state on each row; absent where this window cannot start threads. */
 export interface TodoStartProps {
+  readonly otherProjects?: ReadonlyArray<{
+    readonly hostId: string;
+    readonly hostName: string;
+    readonly projectId: string;
+    readonly name: string;
+  }>;
   readonly threadStates: ReadonlyMap<string, TodoThreadState>;
   readonly onStart: (todo: Todo, target: TodoStartTarget) => void;
   readonly onOpenThread: (link: TodoThreadLink, title: string) => void;
@@ -588,6 +595,7 @@ function TodoRow(props: TodoRowProps) {
                 hostId={props.hostId}
                 onStart={(target) => props.start?.onStart(todo, target)}
                 projects={props.projects}
+                otherProjects={props.start.otherProjects ?? []}
                 todo={todo}
               />
             )}
@@ -838,35 +846,40 @@ function TodoEditor(props: {
  * person picks one; with none, Chat or any Project.
  */
 function TodoStartControl(props: {
+  readonly otherProjects: NonNullable<TodoStartProps["otherProjects"]>;
   readonly todo: Todo;
   readonly hostId: StableHostId;
   readonly projects: ReadonlyArray<TodoProjectSource>;
   readonly onStart: (target: TodoStartTarget) => void;
 }) {
-  const linked = props.projects.filter((project) =>
-    props.todo.projects.some(
-      (link) =>
-        String(link.hostId) === String(props.hostId) &&
-        String(link.projectId) === String(project.id),
+  const all: ReadonlyArray<TodoStartTarget> = [
+    ...props.projects.map(
+      (project): TodoStartTarget => ({
+        kind: "project",
+        projectId: String(project.id),
+        name: project.name,
+      }),
     ),
+    ...props.otherProjects.map(
+      (project): TodoStartTarget => ({
+        kind: "project",
+        hostId: project.hostId,
+        projectId: project.projectId,
+        name: `${project.name} · ${project.hostName}`,
+      }),
+    ),
+  ];
+  const linked = all.filter(
+    (target) =>
+      target.kind === "project" &&
+      props.todo.projects.some(
+        (link) =>
+          String(link.hostId) === (target.hostId ?? String(props.hostId)) &&
+          String(link.projectId) === target.projectId,
+      ),
   );
   const targets: ReadonlyArray<TodoStartTarget> =
-    linked.length > 0
-      ? linked.map((project) => ({
-          kind: "project",
-          projectId: String(project.id),
-          name: project.name,
-        }))
-      : [
-          { kind: "chat" },
-          ...props.projects.map(
-            (project): TodoStartTarget => ({
-              kind: "project",
-              projectId: String(project.id),
-              name: project.name,
-            }),
-          ),
-        ];
+    linked.length > 0 ? linked : [{ kind: "chat" }, ...all];
   const only = targets.length === 1 ? targets[0] : undefined;
   if (only !== undefined) {
     return (
@@ -882,7 +895,9 @@ function TodoStartControl(props: {
     );
   }
   const valueOf = (target: TodoStartTarget) =>
-    target.kind === "chat" ? "chat" : `project:${target.projectId}`;
+    target.kind === "chat"
+      ? "chat"
+      : `project:${target.hostId ?? String(props.hostId)}:${target.projectId}`;
   return (
     <OctantMenu
       items={targets.map((target) => ({
@@ -920,7 +935,14 @@ function TodoThreadLine(props: {
   return (
     <div className="todo-row__thread">
       {link === undefined ? null : state === undefined ? (
-        <span className="oct-meta">Started</span>
+        <OctantButton
+          variant="ghost"
+          size="sm"
+          type="button"
+          onClick={() => start.onOpenThread(link, todo.title)}
+        >
+          Started
+        </OctantButton>
       ) : (
         <OctantButton
           aria-label={`${state.label}: open ${state.title}`}

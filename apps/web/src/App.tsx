@@ -395,6 +395,9 @@ interface TodoStartInProgress {
   readonly draft?: string;
 }
 import { useTodoList } from "./todos/useTodoList";
+import { useRemoteTodoProjects, type RemoteTodoProject } from "./todos/useRemoteTodoProjects";
+import { RemoteTodoDraft } from "./todos/RemoteTodoDraft";
+import { OctantDialog } from "./ui/base/OctantDialog";
 import { useTodoListHost } from "./todos/useTodoListHost";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
 import { TodoListHostSettingsContext } from "./todos/TodoListHostSettings";
@@ -2876,6 +2879,15 @@ function LaunchedShell(
     todoList.read.status === "loading" || todoList.read.view === undefined
       ? 0
       : countTodos(todoList.read.view.todos).waiting;
+  const remoteTodoProjects = useRemoteTodoProjects(hostFederationTransports, federationRevision);
+  const [remoteTodo, setRemoteTodo] = useState<{
+    readonly hostId: string;
+    readonly destination?: RemoteTodoProject;
+    readonly todo?: Todo;
+    readonly thread?: TodoThreadLink;
+  }>();
+  const remoteTodoSlot =
+    remoteTodo === undefined ? undefined : hostFederationTransports?.get(remoteTodo.hostId);
   const todoProjects = useMemo(
     () =>
       projectController.allProjects
@@ -2908,6 +2920,12 @@ function LaunchedShell(
     projects: todoProjects,
     onClose: () => setTodosOpen(false),
     start: {
+      otherProjects: remoteTodoProjects.map((destination) => ({
+        hostId: destination.hostId,
+        hostName: destination.hostName,
+        projectId: String(destination.project.id),
+        name: destination.project.name,
+      })),
       threadStates: todoThreadRows,
       onStart: (todo, target) => void startTodo(todo, target),
       onOpenThread: (link, title) => void openTodoThread(link, title),
@@ -6857,6 +6875,15 @@ function LaunchedShell(
    * starts until the person sends; the host that owns the Project decides.
    */
   async function startTodo(todo: Todo, target: TodoStartTarget): Promise<void> {
+    if (target.kind === "project" && target.hostId !== undefined) {
+      const destination = remoteTodoProjects.find(
+        (candidate) =>
+          candidate.hostId === target.hostId && String(candidate.project.id) === target.projectId,
+      );
+      if (destination === undefined) return;
+      setRemoteTodo({ hostId: destination.hostId, destination, todo });
+      return;
+    }
     const project =
       target.kind === "chat"
         ? undefined
@@ -6907,7 +6934,7 @@ function LaunchedShell(
   async function recordTodoLink(todoId: string, started: TodoUnlinkedStart): Promise<void> {
     // The list as it is now, not as it was when the create started.
     // A thread is linked by the host that owns it: this one.
-    const hostId = todoThisHostIdRef.current;
+    const hostId = started.hostId ?? todoThisHostIdRef.current;
     let saved = false;
     if (hostId !== undefined) {
       try {
@@ -6932,6 +6959,10 @@ function LaunchedShell(
   }
 
   async function openTodoThread(link: TodoThreadLink, title: string): Promise<void> {
+    if (String(link.hostId) !== String(todoThisHostIdRef.current)) {
+      setRemoteTodo({ hostId: String(link.hostId), thread: link });
+      return;
+    }
     closeWorkspaceReaders();
     const threadId = String(link.threadId);
     if (link.mode === "chat") await controller.openChatThread(decodeChatThreadId(threadId), title);
@@ -8981,6 +9012,41 @@ function LaunchedShell(
                   <TodoListHostSettingsContext.Provider value={todoListHostSettings}>
                     <OctantCommandProvider commands={octantCommands}>
                       <OctantDialogPresence>
+                        {remoteTodo === undefined ? null : (
+                          <OctantDialog
+                            label={
+                              remoteTodo.destination?.project.name ?? "Thread on paired computer"
+                            }
+                            open
+                            onClose={() => setRemoteTodo(undefined)}
+                          >
+                            {remoteTodoSlot?.bridge === undefined ? (
+                              <p>Pair with this computer to open its thread.</p>
+                            ) : (
+                              <RemoteTodoDraft
+                                key={`${remoteTodo.hostId}:${remoteTodo.todo?.id ?? remoteTodo.thread?.threadId}`}
+                                bridge={remoteTodoSlot.bridge}
+                                hostId={remoteTodo.hostId}
+                                hostName={remoteTodoSlot.displayName}
+                                connected={remoteTodoSlot.state.kind === "ready"}
+                                {...(remoteTodo.destination === undefined
+                                  ? {}
+                                  : { project: remoteTodo.destination.project })}
+                                {...(remoteTodo.todo === undefined
+                                  ? {}
+                                  : { todo: remoteTodo.todo })}
+                                {...(remoteTodo.thread === undefined
+                                  ? {}
+                                  : { thread: remoteTodo.thread })}
+                                onCreated={async (link) => {
+                                  if (remoteTodo.todo !== undefined)
+                                    await recordTodoLink(String(remoteTodo.todo.id), link);
+                                }}
+                                onClose={() => setRemoteTodo(undefined)}
+                              />
+                            )}
+                          </OctantDialog>
+                        )}
                         {todoQuickAddOpen ? (
                           <TodoQuickAddDialog
                             list={todoList}

@@ -73,4 +73,9 @@ export function newestTodoThread(todo: Todo): TodoThreadLink | undefined {
 /** Where Start can take a to-do: Chat, or one of this host's active Projects. */
 export type TodoStartTarget =
   | { readonly kind: "chat" }
-  | { readonly kind: "project"; readonly projectId: string; readonly name: string };
+  | {
+      readonly kind: "project";
+      readonly projectId: string;
+      readonly name: string;
+      readonly hostId?: string;
+    };

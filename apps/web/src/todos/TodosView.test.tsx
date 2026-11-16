@@ -285,6 +285,31 @@ describe("starting from a to-do", () => {
     );
   });
 
+  it("starts on the linked computer when both computers have a Project with the same id", async () => {
+    const user = userEvent.setup();
+    const host = fakeHost();
+    const other = "22222222-2222-4222-8222-222222222222";
+    host.apply({
+      kind: "add-todo",
+      todoId: crypto.randomUUID(),
+      title: "Remote fix",
+      projects: [{ hostId: other, projectId: WEB, name: "Octant web" }],
+    });
+    const start = startProps({
+      otherProjects: [
+        { hostId: other, hostName: "Laptop", projectId: String(WEB), name: "Octant web" },
+      ],
+    });
+    render(<Page client={host.client} start={start} />);
+    await user.click(await screen.findByRole("button", { name: "Start Remote fix" }));
+    expect(start.onStart).toHaveBeenCalledWith(expect.objectContaining({ title: "Remote fix" }), {
+      kind: "project",
+      hostId: other,
+      projectId: String(WEB),
+      name: "Octant web · Laptop",
+    });
+  });
+
   it("shows the newest thread's state, opens it, and offers Tick off once it is done", async () => {
     const user = userEvent.setup();
     const host = fakeHost();

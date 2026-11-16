@@ -38,14 +38,14 @@ export const PAIRED_COMPUTER_REQUEST_LIMITS = {
  * (the query is free): the host hello, pairing, and the session and
  * device-service routes the client runtime calls; the one dev-server grant
  * route; and the product calls the main window makes of a paired computer:
- * its resources, its running servers, and the person's to-do list when that
+ * its resources, its running servers, Project drafts and threads, and the person's to-do list when that
  * computer keeps it (the to-do routes refuse any device but the person's
  * own). Anything else, including
  * the relay under `/api/server-proxy/<grant>/`, which the desktop's own
  * forwarder drives, is refused.
  */
 export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
-  readonly method: "GET" | "POST";
+  readonly method: "GET" | "POST" | "PUT" | "DELETE";
   readonly path: string;
 }> = [
   { method: "GET", path: "/api/remote/hello" },
@@ -62,6 +62,37 @@ export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
   { method: "POST", path: "/api/server-proxy/grants" },
   { method: "GET", path: "/api/host/resources" },
   { method: "POST", path: "/api/code/local-servers/commands" },
+  ...[
+    "/api/projects/bootstrap",
+    "/api/providers/bootstrap",
+    "/api/chat/bootstrap",
+    "/api/chat/navigation",
+    "/api/code/bootstrap",
+    "/api/code/navigation",
+    "/api/work/threads/bootstrap",
+    "/api/work/navigation",
+    "/api/reply-detail",
+    "/api/conversation-inputs",
+    "/api/work/requests",
+    "/api/code/attachments",
+    "/api/work/attachments",
+  ].map((path) => ({ method: "GET" as const, path })),
+  ...[
+    "/api/chat/commands",
+    "/api/code/commands",
+    "/api/work/threads/commands",
+    "/api/work/turns",
+    "/api/work/turns/cancel",
+    "/api/work/turns/rewind",
+    "/api/work/mutations",
+    "/api/work/requests/commands",
+    "/api/code/evidence/batch",
+  ].map((path) => ({ method: "POST" as const, path })),
+  { method: "POST", path: "/api/chat/attachments" },
+  { method: "PUT", path: "/api/code/attachments" },
+  { method: "PUT", path: "/api/work/attachments" },
+  { method: "DELETE", path: "/api/code/attachments" },
+  { method: "DELETE", path: "/api/work/attachments" },
   { method: "GET", path: "/api/todos" },
   { method: "GET", path: "/api/todos/changes" },
   { method: "POST", path: "/api/todos/commands" },
@@ -157,7 +188,10 @@ export async function requestPairedComputer(input: {
     }
     return { status: "unreachable", message: "Octant couldn't reach that computer." };
   }
-  const read = await readBounded(response, signal);
+  const eventBatch =
+    path.split("?", 1)[0]?.endsWith("/events") === true ||
+    path.startsWith("/api/work/turns/stream/");
+  const read = await readBounded(response, signal, eventBatch);
   // A computer forgotten (or re-paired under another key) while this request
   // was out answers nothing, whatever it sent back.
   const currentTrust = input.pins.trustFor(origin, pairing);
@@ -212,7 +246,7 @@ function decodeRequest(value: unknown, pins: PairedComputerPins): DecodedRequest
   ) {
     return refuse(NOT_PAIRED);
   }
-  const decodedHeaders = decodeHeaders(headers, origin);
+  const decodedHeaders = decodeHeaders(headers, origin, new URL(path as string, origin).pathname);
   if (decodedHeaders === undefined) return refuse("Octant refused that request's headers.");
   let bytes: Uint8Array<ArrayBuffer> | undefined;
   if (body !== undefined && body !== null) {
@@ -255,8 +289,18 @@ function isAllowedRequest(origin: string, path: unknown, method: string): boolea
     return false;
   }
   if (url.origin !== origin || `${url.pathname}${url.search}` !== path) return false;
-  return PAIRED_COMPUTER_ALLOWED_REQUESTS.some(
-    (allowed) => allowed.method === method && allowed.path === url.pathname,
+  const thread = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
+  const threadRead = new RegExp(
+    `^/api/(?:chat/threads/${thread}(?:/window|/events)?|code/threads/${thread}(?:/events|/conversation(?:/window)?|/follow-up|/operations/${thread}/(?:events|evidence/${thread}))?|work/turns/(?:transcript|window|stream)/${thread}|code/content/${thread}|chat/attachments/${thread})$`,
+  );
+  return (
+    (method === "GET" && threadRead.test(url.pathname)) ||
+    (method === "POST" &&
+      new RegExp(`^/api/code/threads/${thread}/follow-up$`).test(url.pathname)) ||
+    (method === "DELETE" && new RegExp(`^/api/chat/attachments/${thread}$`).test(url.pathname)) ||
+    PAIRED_COMPUTER_ALLOWED_REQUESTS.some(
+      (allowed) => allowed.method === method && allowed.path === url.pathname,
+    )
   );
 }
 
@@ -272,6 +316,7 @@ function hasControlOrSpace(text: string, allowSpace = false): boolean {
 function decodeHeaders(
   value: unknown,
   origin: string,
+  path: string,
 ): Readonly<Record<string, string>> | undefined {
   if (value === undefined || value === null) return {};
   if (typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -285,7 +330,12 @@ function decodeHeaders(
     ) {
       return undefined;
     }
-    if (!ALLOWED_REQUEST_HEADERS.has(name) || name in headers) return undefined;
+    const attachment = /^\/api\/(chat|code|work)\/attachments(?:\/[^/]+)?$/.exec(path)?.[1];
+    const attachmentHeader =
+      attachment !== undefined &&
+      new RegExp(`^x-octant-${attachment}-(?:thread-id|attachment-id|display-name)$`).test(name);
+    if ((!ALLOWED_REQUEST_HEADERS.has(name) && !attachmentHeader) || name in headers)
+      return undefined;
     if (name === "cookie" && !SESSION_COOKIE_PATTERN.test(rawValue)) return undefined;
     if (name === "origin" && rawValue !== origin) return undefined;
     if (name === "sec-fetch-site" && rawValue !== "same-origin") return undefined;
@@ -298,6 +348,7 @@ function decodeHeaders(
 async function readBounded(
   response: Response,
   signal: AbortSignal,
+  eventBatch: boolean,
 ): Promise<Uint8Array | undefined> {
   const limit = PAIRED_COMPUTER_REQUEST_LIMITS.responseBodyBytes;
   const declared = Number(response.headers.get("content-length"));
@@ -309,10 +360,14 @@ async function readBounded(
   const reader = response.body.getReader();
   // The request's timer stops mattering to the transport once the reply
   // starts, so a reply that stalls mid-body is cut off here.
+  let expire: (() => void) | undefined;
   const expired = new Promise<never>((_resolve, reject) => {
-    if (signal.aborted) reject(signal.reason);
-    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    expire = () => reject(signal.reason);
+    if (signal.aborted) expire();
+    else signal.addEventListener("abort", expire, { once: true });
   });
+  const ndjson =
+    eventBatch && response.headers.get("content-type")?.split(";", 1)[0] === "application/x-ndjson";
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
@@ -325,10 +380,25 @@ async function readBounded(
         return undefined;
       }
       chunks.push(value);
+      if (ndjson && value.includes(10)) {
+        // IPC replies are whole bodies. End on a complete frame; the ordinary
+        // client reconnects with its last cursor, so an unfinished tail is replayed.
+        const batch = new Uint8Array(total);
+        let offset = 0;
+        for (const chunk of chunks) {
+          batch.set(chunk, offset);
+          offset += chunk.byteLength;
+        }
+        const end = batch.lastIndexOf(10) + 1;
+        void reader.cancel().catch(() => undefined);
+        return batch.slice(0, end);
+      }
     }
   } catch {
     void reader.cancel().catch(() => undefined);
     return undefined;
+  } finally {
+    if (expire !== undefined) signal.removeEventListener("abort", expire);
   }
   const body = new Uint8Array(total);
   let offset = 0;
