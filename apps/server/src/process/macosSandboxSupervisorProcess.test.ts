@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -44,10 +44,7 @@ describe.skipIf(process.platform !== "darwin")("native sandbox scope supervisor"
           "-o",
           executable,
           fileURLToPath(
-            new URL(
-              "../../../desktop/native/sandbox-scope/OctantSandboxScope.c",
-              import.meta.url,
-            ),
+            new URL("../../../desktop/native/sandbox-scope/OctantSandboxScope.c", import.meta.url),
           ),
         ],
         { timeout: 20000 },
@@ -115,6 +112,67 @@ time.sleep(12)
       const after = heartbeat(beat);
       await new Promise((resolve) => setTimeout(resolve, 150));
       expect(heartbeat(beat)).toBe(after);
+      const normal = spawnSync(
+        executable,
+        [
+          "--run",
+          root,
+          epoch,
+          "--",
+          "/usr/bin/sandbox-exec",
+          "-p",
+          "(version 1)(allow default)",
+          "/bin/sh",
+          "-c",
+          "printf completed; exit 7",
+        ],
+        { cwd: root, encoding: "utf8", timeout: 10000 },
+      );
+      expect(normal.status, normal.stderr).toBe(7);
+      expect(normal.stdout).toBe("completed");
+      expect(readdirSync(root).some((name) => name.endsWith(".scope"))).toBe(false);
+
+      const previous = heartbeat(beat);
+      const hostScript = `const {spawn}=require("node:child_process"); const fs=require("node:fs");
+const child=spawn(process.argv[1],["--run",process.argv[2],"host-death:epoch","--","/usr/bin/sandbox-exec","-p","(version 1)(allow default)","/usr/bin/python3",process.argv[3]],{cwd:process.argv[2],stdio:"ignore"});
+const deadline=setTimeout(()=>{child.kill("SIGKILL");process.exit(2)},12000);
+const timer=setInterval(()=>{try {if(fs.readFileSync(process.argv[4],"utf8")!==process.argv[5]){clearTimeout(deadline);clearInterval(timer);process.exit(0)}}catch{}},20);`;
+      const host = spawn(
+        process.execPath,
+        ["-e", hostScript, executable, root, script, beat, previous],
+        { stdio: "ignore" },
+      );
+      const hostExit = await new Promise<number | null>((resolve) => host.once("exit", resolve));
+      expect(hostExit).toBe(0);
+      await expect
+        .poll(
+          () => {
+            const before = heartbeat(beat);
+            return new Promise<boolean>((resolve) =>
+              setTimeout(() => resolve(heartbeat(beat) === before), 100),
+            );
+          },
+          { timeout: 6000 },
+        )
+        .toBe(true);
+      execFileSync(executable, ["--reap", root, "--stale"], { timeout: 10000 });
+      expect(readdirSync(root).some((name) => name.endsWith(".scope"))).toBe(false);
+
+      const terminal = spawnSync(
+        "/usr/bin/python3",
+        [
+          "-c",
+          `import os, pty, signal
+signal.alarm(12)
+args=["${executable}","--run","${root}","terminal:epoch","--","/usr/bin/sandbox-exec","-p","(version 1)(allow default)","/bin/sh","-c","test -t 0 && test -t 1 && test -t 2 && printf terminal-ready"]
+status=pty.spawn(args)
+raise SystemExit(os.waitstatus_to_exitcode(status))
+`,
+        ],
+        { encoding: "utf8", timeout: 15000 },
+      );
+      expect(terminal.status, terminal.stderr).toBe(0);
+      expect(terminal.stdout).toContain("terminal-ready");
     } finally {
       child?.kill("SIGKILL");
       if (existsSync(executable)) {

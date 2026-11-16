@@ -16,6 +16,8 @@
 #include <string.h>
 #include <limits.h>
 #include <sys/event.h>
+#include <sys/ioctl.h>
+#include <termios.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
@@ -211,6 +213,12 @@ static int serve(const char *path) {
   if (child < 0) return 125;
   if (!child) {
     for (int i = 0; i < 3; ++i) if (dup2(stdio[i], i) < 0) _exit(125);
+    if (isatty(0)) {
+      if (setsid() < 0 || ioctl(0, TIOCSCTTY, 0) < 0) _exit(125);
+      signal(SIGTTOU, SIG_IGN);
+      if (tcsetpgrp(0, getpgrp())) _exit(125);
+      signal(SIGTTOU, SIG_DFL);
+    }
     int maximum_fd = getdtablesize();
     if (maximum_fd < 3) _exit(125);
     for (int fd = 3; fd < maximum_fd; ++fd) close(fd);
@@ -312,6 +320,10 @@ static int run(const char *root, const char *epoch, char **args) {
   close(receipt_fd);
   if (receipt_error || fsync(directory)) goto cleanup;
   receipt_written = 1;
+  if (isatty(0) && tcgetsid(0) == getsid(0)) {
+    signal(SIGHUP, SIG_IGN);
+    if (ioctl(0, TIOCNOTTY, 0) < 0) goto cleanup;
+  }
   int stdio[] = {0,1,2};
   char cwd[PATH_MAX];
   if (!getcwd(cwd, sizeof(cwd))) goto cleanup;
