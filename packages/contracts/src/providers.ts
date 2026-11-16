@@ -2149,6 +2149,11 @@ export const OutsideProviderDriverListing = Schema.Struct({
   installed: Schema.Boolean,
   trusted: Schema.Boolean,
   publisherKey: Schema.optional(ExtensionPublisherKeyFingerprint),
+  /**
+   * Present when this host has no confinement for the driver's process, so it
+   * runs without one (Linux). Absent where the host confines it (macOS).
+   */
+  hostConfinement: Schema.optional(Schema.Literal("unconfined")),
 }).annotations(strict);
 export type OutsideProviderDriverListing = typeof OutsideProviderDriverListing.Type;
 

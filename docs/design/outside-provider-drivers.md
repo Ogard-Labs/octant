@@ -25,8 +25,8 @@ the ceiling clamp, and closed reasons (see
 process) is built: one supervised process per instance under the driver
 profile from the shared confinement builder, a fixed environment, the
 process's stdio as the proxy's channel, the crash limit with its journaled
-hold, and `host-prohibited`
-on Linux (see [Driver process rules](#driver-process-rules)); its acceptance,
+hold, and, on Linux, the same launch without confinement, labelled
+(see [Driver process rules](#driver-process-rules)); its acceptance,
 the escape tests on macOS, runs in the `macos-15` CI job and passed there on
 2026-10-27 ([job][macos-escape-2026-10-27]). Slice 5 (admission end
 to end) is built: trusting the source admits the selected digest, a provider
@@ -36,8 +36,9 @@ every record binds the digest, disable and uninstall stop the process and
 keep the provider blocked, and the provider catalog lists effective outside
 drivers in their own group (see [Admission rules](#admission-rules)). Its
 product acceptance, the live loopback smoke on macOS with a local model
-server, is the maintainer's to run; on Linux every outside driver stays
-`host-prohibited`. Slice 6 (provenance) is built: an instance moves to a
+server, is the maintainer's to run; on Linux an outside driver is admitted
+under the same steps and runs without confinement, which its provider row
+says. Slice 6 (provenance) is built: an instance moves to a
 newly trusted digest of its driver, and only then, with its records cleared
 (see [Rebind rules](#rebind-rules)); and publisher signatures are verified at
 inspection, the publisher key is pinned at first trust and journaled, a
@@ -98,19 +99,19 @@ Why this shape first:
 
 ## What exists today
 
-| Fact                                                                                                                                                                                  | Where                                                                                                                                                                                                                   |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Driver kinds are a closed literal enum, and each instance is a union arm keyed by it                                                                                                  | `ProviderDriverKind`, `ProviderInstance` in `packages/contracts/src/providers.ts`                                                                                                                                       |
-| Only bundled drivers pass the activation ladder into discovery, wiring, and the provider service                                                                                      | `admittedBundledProviderDriverKinds()` in `packages/plugin-host/src/bundledProviderDrivers.ts`; callers in `apps/server/src/providers/providerService.ts`, `discoveryService.ts`, `apps/server/src/wiring/providers.ts` |
-| The public catalog schema refuses any source other than `bundled`, declared capabilities, contributions, a second component, and any entry point but `builtin:provider-driver/<kind>` | `ProviderDriverCatalogEntry` in `packages/contracts/src/providerDriverCatalog.ts`, re-exported by `@octant/plugin-api`                                                                                                  |
-| Host runtime per kind: `acp-host-profile`, `managed-process`, `direct-endpoint`                                                                                                       | `providerDriverHostRuntime` in `packages/provider-sdk/src/driverPlugins.ts`                                                                                                                                             |
-| The harness endpoint port and its four-property conformance kit; Ollama is its first driver                                                                                           | `packages/provider-sdk/src/harnessEndpoint.ts`, `harnessEndpointConformance.ts`; `apps/server/src/providers/ollamaDriver.ts`                                                                                            |
-| The host refuses tools to a model with no Verify tools record before the driver is asked                                                                                              | `refusesUnverifiedTools` in `apps/server/src/harness/nativeHarnessEndpointDriver.ts`                                                                                                                                    |
-| Package lifecycle commands: inspect (with expected digest), install, update, rollback, uninstall, source trust, plugin and component switches                                         | `ExtensionCommand` in `packages/contracts/src/extensionRpc.ts`; `apps/server/src/extensions/extensionLifecycleService.ts`                                                                                               |
-| Supervised executable components: deny-default Seatbelt, ready handshake, bounded output, receipts, crash limit then quarantine; no Linux confinement, so no Linux launch             | `apps/server/src/extensions/extensionSupervisor.ts`, `nodeExtensionProcessPort.ts`                                                                                                                                      |
-| Host-authenticated provider call: the adapter names only the header, the host leases the key and refuses any URL outside declared hosts or the configured base URL origin             | Image seam `ImageGenerationPorts.request` in `packages/provider-sdk/src/imageGeneration.ts`; key pool in `apps/server/src/providers/credentialBrokerClient.ts`                                                          |
-| Marketplace ingestion produces only `skill-instructions` and `mcp-server` components                                                                                                  | `apps/server/src/extensions/agentPluginIngestion.ts`, `codexPluginIngestion.ts`                                                                                                                                         |
-| Every non-image driver kind sits in exactly one capability-matrix column                                                                                                              | `providerFeatureMatrix.test.ts`; `providerCatalogCapabilities` in `@octant/domain`                                                                                                                                      |
+| Fact                                                                                                                                                                                     | Where                                                                                                                                                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Driver kinds are a closed literal enum, and each instance is a union arm keyed by it                                                                                                     | `ProviderDriverKind`, `ProviderInstance` in `packages/contracts/src/providers.ts`                                                                                                                                       |
+| Only bundled drivers pass the activation ladder into discovery, wiring, and the provider service                                                                                         | `admittedBundledProviderDriverKinds()` in `packages/plugin-host/src/bundledProviderDrivers.ts`; callers in `apps/server/src/providers/providerService.ts`, `discoveryService.ts`, `apps/server/src/wiring/providers.ts` |
+| The public catalog schema refuses any source other than `bundled`, declared capabilities, contributions, a second component, and any entry point but `builtin:provider-driver/<kind>`    | `ProviderDriverCatalogEntry` in `packages/contracts/src/providerDriverCatalog.ts`, re-exported by `@octant/plugin-api`                                                                                                  |
+| Host runtime per kind: `acp-host-profile`, `managed-process`, `direct-endpoint`                                                                                                          | `providerDriverHostRuntime` in `packages/provider-sdk/src/driverPlugins.ts`                                                                                                                                             |
+| The harness endpoint port and its four-property conformance kit; Ollama is its first driver                                                                                              | `packages/provider-sdk/src/harnessEndpoint.ts`, `harnessEndpointConformance.ts`; `apps/server/src/providers/ollamaDriver.ts`                                                                                            |
+| The host refuses tools to a model with no Verify tools record before the driver is asked                                                                                                 | `refusesUnverifiedTools` in `apps/server/src/harness/nativeHarnessEndpointDriver.ts`                                                                                                                                    |
+| Package lifecycle commands: inspect (with expected digest), install, update, rollback, uninstall, source trust, plugin and component switches                                            | `ExtensionCommand` in `packages/contracts/src/extensionRpc.ts`; `apps/server/src/extensions/extensionLifecycleService.ts`                                                                                               |
+| Supervised executable components: deny-default Seatbelt, ready handshake, bounded output, receipts, crash limit then quarantine; no Linux confinement, so a Linux driver runs unconfined | `apps/server/src/extensions/extensionSupervisor.ts`, `nodeExtensionProcessPort.ts`                                                                                                                                      |
+| Host-authenticated provider call: the adapter names only the header, the host leases the key and refuses any URL outside declared hosts or the configured base URL origin                | Image seam `ImageGenerationPorts.request` in `packages/provider-sdk/src/imageGeneration.ts`; key pool in `apps/server/src/providers/credentialBrokerClient.ts`                                                          |
+| Marketplace ingestion produces only `skill-instructions` and `mcp-server` components                                                                                                     | `apps/server/src/extensions/agentPluginIngestion.ts`, `codexPluginIngestion.ts`                                                                                                                                         |
+| Every non-image driver kind sits in exactly one capability-matrix column                                                                                                                 | `providerFeatureMatrix.test.ts`; `providerCatalogCapabilities` in `@octant/domain`                                                                                                                                      |
 
 ## Design
 
@@ -248,8 +249,10 @@ confirmation.
   Node). No inherited variables, no provider or cloud keys, no broker
   coordinates, no Project or checkout path.
 - **Platforms.** Extension processes have no Linux confinement, so a Linux host
-  never starts an outside driver: the component reports `host-prohibited` there.
-  Windows is out of scope with Windows Work/Code.
+  starts an outside driver without one, under the same fixed environment and
+  its own temporary folder, and says so on its provider row (maintainer
+  decision, 2026-11-16). Windows is out of scope with Windows Work/Code: the
+  component reports `host-prohibited` there.
 - **Bounds.** The supervisor's ready handshake, startup deadline, bounded
   stderr, crash limit (two restarts per minute, then `quarantined`), and a
   per-message size cap. The host owns every request deadline.
@@ -394,11 +397,21 @@ the fail-closed option.
   the host's own runtime, by path and kind, with the entry module as its one
   argument, in the package root, under the `outside-driver` sandbox bound to
   that root, for an entry the receipt records as not executable.
-- **Platforms.** On any host but macOS the component is `host-prohibited` on
+- **Platforms.** `outsideDriverHostLaunch` (`@octant/plugin-host/activation`)
+  decides it once: macOS `confined`, Linux `unconfined`, any other host
+  `prohibited`. On a prohibited host the component is `host-prohibited` on
   the activation ladder, which the ladder reports before quarantine or trust,
   and both the process owner and the process port refuse before a folder or
-  process exists. No Bubblewrap launch is made for a driver: that would be a
-  Linux confinement design of its own.
+  process exists. On Linux the ladder admits the driver under the same
+  installation, trust and enablement steps, and the process port starts the
+  runtime directly from the package root with the driver's fixed environment
+  and its own private temporary folder, checked as on macOS; the provider
+  catalog listing carries `hostConfinement: "unconfined"`, so its row reads
+  "Outside driver · Runs without confinement" and its package facts say what
+  that means (maintainer decision, 2026-11-16; built). No Bubblewrap launch is
+  made for a driver: that would be a Linux confinement design of its own. A
+  Canvas export target, which shares the launch, stays macOS only. Not built
+  yet: Strict, once built, keeps a driver `host-prohibited` on Linux.
 - **One process per instance.** The supervisor keys a driver's runtime by its
   instance, so two instances of one driver never share a process. A second
   start for an instance whose process is running is refused as
@@ -1116,20 +1129,20 @@ The attacker is the driver package (malicious or compromised) or whoever can
 put a package in front of the person. Controls marked new are this design's;
 "built" marks one a landed slice has made real.
 
-| Threat                                                              | Control                                                                                                                                                              |
-| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Exfiltrates prompts, code, or files                                 | New, built (escape tests pass on macOS): no network, read only its package, no Project path; only egress is the brokered call to the configured origin               |
-| Steals or replays a credential                                      | New, built for the brokered call: never holds one; host injects the header per request and strips it from responses; broker coordinates absent from the environment  |
-| Uses another instance's or provider's credential                    | New, built: one process and one request channel per instance; the lease is keyed by that instance                                                                    |
-| Escapes to the host (files, processes, other extensions)            | New, built (escape tests pass on macOS): deny-default Seatbelt without exec or fork; no read under `/System`; of `/etc`, only the zone link; Linux refuses to launch |
-| Over-claims capabilities (tools, approvals, resume)                 | New, built: host ceiling clamp; `admitTurn` computed by the host; host-run Verify tools                                                                              |
-| Fabricates tool calls or injects instructions in output             | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply                                          |
-| Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                              |
-| Swaps code under a trusted name (update, mirror, typosquat)         | New, built: digest-bound trust and records; held updates and rollbacks that move an instance only on trust and clear its verification; publisher key pin             |
-| Points the key at an internal service or attacker host              | Existing endpoint rule, built for the brokered call: HTTPS or loopback HTTP, origin-checked before the key is read; no redirect                                      |
-| Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit and journaled hold                   |
-| An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle, add-provider, and Verify tools only from a local window; structured references stay inert; install stays held until trusted      |
-| Impersonates a bundled provider                                     | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect                                   |
+| Threat                                                              | Control                                                                                                                                                                         |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Exfiltrates prompts, code, or files                                 | New, built (escape tests pass on macOS): no network, read only its package, no Project path; only egress is the brokered call to the configured origin                          |
+| Steals or replays a credential                                      | New, built for the brokered call: never holds one; host injects the header per request and strips it from responses; broker coordinates absent from the environment             |
+| Uses another instance's or provider's credential                    | New, built: one process and one request channel per instance; the lease is keyed by that instance                                                                               |
+| Escapes to the host (files, processes, other extensions)            | New, built (escape tests pass on macOS): deny-default Seatbelt without exec or fork; no read under `/System`; of `/etc`, only the zone link; Linux runs it unconfined, labelled |
+| Over-claims capabilities (tools, approvals, resume)                 | New, built: host ceiling clamp; `admitTurn` computed by the host; host-run Verify tools                                                                                         |
+| Fabricates tool calls or injects instructions in output             | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply                                                     |
+| Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                                         |
+| Swaps code under a trusted name (update, mirror, typosquat)         | New, built: digest-bound trust and records; held updates and rollbacks that move an instance only on trust and clear its verification; publisher key pin                        |
+| Points the key at an internal service or attacker host              | Existing endpoint rule, built for the brokered call: HTTPS or loopback HTTP, origin-checked before the key is read; no redirect                                                 |
+| Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit and journaled hold                              |
+| An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle, add-provider, and Verify tools only from a local window; structured references stay inert; install stays held until trusted                 |
+| Impersonates a bundled provider                                     | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect                                              |
 
 Residual risk: the configured endpoint receives what the person sends it, as
 for any endpoint; a trusted driver can mistranslate (send a different model id,
@@ -1177,12 +1190,12 @@ alternatives considered and the reason for the choice follow it.
    Deferred: a curated driver catalog.
 5. **Platforms.** macOS only. Linux follows a Linux extension-process
    confinement design; until then Linux reports `host-prohibited`.
-   Revised (maintainer decision, 2026-11-16; designed, not built; see
+   Revised (maintainer decision, 2026-11-16; built except Strict; see
    [Provider reach Octant no longer narrows](../architecture.md#security-and-authority)):
-   an outside driver is to be admitted on Linux under the same installation,
+   an outside driver is admitted on Linux under the same installation,
    trust and enablement steps as on macOS. Until a Linux extension-process
    confinement exists its process runs without one, and its Settings row says
-   so; Strict keeps it `host-prohibited` on Linux.
+   so; Strict, once built, keeps it `host-prohibited` on Linux.
 6. **Driver runtime.** One `.mjs` ES module entry on the runtime that runs the
    server, with no executables: Bun in development, and in the packaged app
    the separately identified, same-version bundled Electron worker executable,
@@ -1222,7 +1235,7 @@ and verify it without macOS, accounts, or hardware.
 | 1   | Outside family identity                | `outside-harness-endpoint` kind, instance arm with driver reference, `outside-endpoint` host runtime, matrix column; nothing admits it yet, so an instance of it reports a structured block and no models                                            | Contract tests; `providerFeatureMatrix.test.ts`; replay of an existing journal; typecheck consumers           | Yes                                                                          |
 | 2   | Outside driver manifest and quarantine | Public outside entry schema; local-folder inspection accepts it and refuses capabilities, contributions, executables, install scripts, bundled-kind claims; install leaves it quarantined; remote and structured-reference lifecycle actions refused | Schema tests; inspector tests; route permission negatives                                                     | Yes                                                                          |
 | 3   | Wire protocol and host proxy           | Protocol schemas; proxy implementing `HarnessEndpointDriver` over an in-memory channel; brokered `http/request` with per-instance lease and origin check; ceiling clamp; closed reasons                                                              | `runHarnessEndpointConformance` against the proxy with a misbehaving fixture; credential and origin negatives | Yes                                                                          |
-| 4   | Confined driver process                | Supervisor launch with the driver profile and minimal environment; one process per instance; Linux reports `host-prohibited`                                                                                                                         | Escape tests on macOS: network, files outside the package, exec, environment; crash-limit test                | Code and Linux refusal yes; acceptance runs in the `macos-15` CI job         |
+| 4   | Confined driver process                | Supervisor launch with the driver profile and minimal environment; one process per instance; Linux runs it unconfined and labelled (revised 2026-11-16)                                                                                              | Escape tests on macOS: network, files outside the package, exec, environment; crash-limit test                | Code and Linux refusal yes; acceptance runs in the `macos-15` CI job         |
 | 5   | Admission end to end                   | Trust, enable, add provider, connection check, host-run Verify tools, digest-bound records, disable and uninstall behaviour; Settings catalog group                                                                                                  | Server integration test with the fixture driver; rendered Settings QA; live loopback smoke on macOS           | Server and rendered QA yes; live smoke needs macOS with a local model server |
 | 6   | Provenance                             | Publisher signature verification, key pin at first trust, quarantined updates that clear verification, rollback                                                                                                                                      | Signature and update tests; journal replay                                                                    | Yes (decision 3)                                                             |
 | 7   | Author kit and example driver          | Out-of-process conformance kit and serve helper; the example loopback driver passes it                                                                                                                                                               | Kit tests; example driver in CI                                                                               | Yes; npm publication is a maintainer action (decision 8)                     |

@@ -1551,7 +1551,8 @@ Status: Designed, not built. Since: 2026-11-16. Detail: [Architecture: Security 
 Octant's tools reach OpenCode and ACP agents on Linux as on macOS, and outside provider drivers run on Linux (maintainer decision, 2026-11-16).
 
 - Built: app-managed tools are reported for OpenCode and ACP agents on Linux as on macOS. A Linux launch reaches the tool bridge on the shared host network a provider launch has by default, or through the egress forwarder's loopback relay, for the bridge's port alone, when Network limits proxy it; Windows is not offered them.
-- Not built yet: an outside driver is admitted on Linux under the same installation, trust and enablement steps; until a Linux extension-process confinement exists it runs without one, its Settings row says so, and Strict keeps it `host-prohibited`.
+- Built: an outside driver is admitted on Linux under the same installation, trust and enablement steps; until a Linux extension-process confinement exists it runs without one, with the same fixed environment, and its provider row reads "Runs without confinement". Windows stays `host-prohibited`.
+- Not built yet: Strict keeps an outside driver `host-prohibited` on Linux; Strict itself is not built.
 
 Status: Partly built. Since: 2026-11-16. Detail: [Provider runtimes: What an ACP agent cannot do](provider-runtimes.md#what-an-acp-agent-cannot-do), [Provider runtimes: Codex](provider-runtimes.md#codex) and [Outside provider drivers: Maintainer decisions](outside-provider-drivers.md#maintainer-decisions).
 
@@ -3464,7 +3465,7 @@ An outside driver is a harness-endpoint transport only, installed from outside O
 - One "Install and trust" flow covers inspect, install, trust and enable, as for any plugin or connector; digest-bound trust and confinement are unchanged, and add provider, connection check and Verify tools stay separate actions (maintainer request, 2026-11-12). Built for a package that holds a provider driver: the package review is the one confirmation, the host runs the steps in order through the separate actions' own lifecycle methods, and a refused step stops the flow with the earlier steps standing and is named to the person. Each step stays available on its own. Not built yet: today the host refuses the flow for a package that holds no provider driver. Structured references, tool calls, routines, hubs, peer hosts and agent grants cannot perform them; a paired device can, as a local window does (maintainer decision, 2026-11-12; not built yet: today no remote client can).
 - A driver is a single ES module on the server's runtime, with no executables, native addons or install scripts.
 - Outside harness endpoints work in Chat, Work and Code with verified-model tools, like bundled endpoints.
-- The live loopback smoke on macOS is owed by the maintainer; on Linux every outside driver stays host-prohibited (to be admitted outside Strict under [Linux parity for provider tools](#linux-parity-for-provider-tools); designed, not built).
+- The live loopback smoke on macOS is owed by the maintainer; on Linux an outside driver is admitted under the same steps and runs without confinement, labelled ([Linux parity for provider tools](#linux-parity-for-provider-tools); built).
 
 Status: Partly built. Since: 2026-10-26. Detail: [Outside provider drivers: admission lifecycle](outside-provider-drivers.md#admission-lifecycle) and [first use case](outside-provider-drivers.md#first-use-case-an-outside-harness-endpoint).
 

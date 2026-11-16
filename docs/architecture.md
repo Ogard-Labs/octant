@@ -11670,7 +11670,11 @@ that is not yet effective for the thread is refused and never reaches the model.
   app, whose app bundle is then the runtime's install) and takes a stricter
   profile from the shared confinement builder (no network, no exec but its
   runtime, no fork, a read-only package, one temporary folder, of the system
-  only what a runtime reads to start, and a fixed environment), and on any host but macOS its component is `host-prohibited`
+  only what a runtime reads to start, and a fixed environment). Linux has no
+  extension-process confinement, so a driver the person installed, trusted
+  and enabled runs there without one, with the same fixed environment, and
+  its provider row says so (maintainer decision, 2026-11-16); on any other
+  host its component is `host-prohibited`
   ([Outside provider drivers](design/outside-provider-drivers.md#driver-process-rules)).
 
 - Skills are discovered only from valid `.agents/skills/` and `.claude/skills/`
@@ -14434,7 +14438,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     bridge's port alone when Network limits proxy it;
     [Provider runtimes](design/provider-runtimes.md)), and an outside
     provider driver is admitted on Linux under the same trust steps as on
-    macOS ([Outside provider drivers](design/outside-provider-drivers.md)).
+    macOS (built: it runs without confinement and its provider row says so;
+    Strict, once built, keeps it `host-prohibited` there;
+    [Outside provider drivers](design/outside-provider-drivers.md)).
 
   Option names were read from the installed Agent SDK (0.3.211
   `PermissionMode`) and the Codex app-server schema (codex-cli 0.164.0
