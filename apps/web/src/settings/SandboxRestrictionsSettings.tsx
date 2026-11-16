@@ -301,8 +301,9 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
               </SettingRow>
               {snapshot.running ? (
                 <p className="oct-meta">
-                  A turn is running. Its admitted policy stays in effect. Stop the turn and start a
-                  new run to apply changes; changing settings cannot alter its running processes.
+                  Running work keeps its admitted policy. Stop the affected turn or terminal and
+                  start a new run to apply changes; changing settings cannot alter a running
+                  process.
                 </p>
               ) : null}
               <SettingRow

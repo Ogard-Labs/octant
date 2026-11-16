@@ -120,7 +120,7 @@ describe("sandbox restrictions settings", () => {
         initialScope={{ kind: "session", threadId }}
       />,
     );
-    expect(await screen.findByText(/A turn is running/)).toBeVisible();
+    expect(await screen.findByText(/Stop the affected turn or terminal/)).toBeVisible();
     expect(client.settings).toHaveBeenCalledWith(
       { kind: "session", threadId },
       expect.any(AbortSignal),
