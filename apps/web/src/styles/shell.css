@@ -1042,6 +1042,15 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   min-width: 0;
 }
 
+/* In the desktop window the row holds the mode tray, Search and New task with
+   room to spare, so its first and last glyphs stand on the rows' icon column
+   and right edge: a 16px glyph sits 6px inside its button, and seen in the
+   real window both stood that 6px outside the grid. The browser client's row
+   is full (the tray and five buttons take all 264px), and there it stays. */
+html[data-octant-native-host="true"] .sidebar__chrome {
+  padding-inline: calc(var(--oct-nav-inset) - (var(--oct-rail-button-h) - var(--oct-icon-md)) / 2);
+}
+
 /* The header names the app on the same 12px inset every row icon keeps, so
    "Octant" heads the icon column. The system trigger keeps its compact 4px
    padding for the narrowest sidebar; this row has the room. */
