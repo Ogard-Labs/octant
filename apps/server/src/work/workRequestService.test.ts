@@ -1735,7 +1735,7 @@ describe("an agent's ask to plan first or to leave Plan", () => {
     const result = await service.resolve({
       kind: "resolve-work-request",
       requestId: request.requestId,
-      expectedVersion: request.version + 1,
+      expectedVersion: (request.version + 1) as typeof request.version,
       resolution: { kind: "approval", approved: true },
     });
 
@@ -1762,7 +1762,7 @@ describe("an agent's ask to plan first or to leave Plan", () => {
       },
     });
     const request = recordLevelChange(service);
-    const answer = (expectedVersion: number) =>
+    const answer = (expectedVersion: typeof request.version) =>
       service.resolve({
         kind: "resolve-work-request",
         requestId: request.requestId,
