@@ -1,5 +1,7 @@
+import { prepareMacosSandboxScope } from "./macosSandboxScope";
 import {
   recordSandboxLaunch,
+  sandboxAuthorityDirectory,
   sandboxSelectionIsCurrent,
   sandboxNetworkSnapshot,
   sandboxToolPolicy,
@@ -958,6 +960,8 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     '(allow file-write-data (literal "/dev/null"))',
     ...(input.extraRules ?? []),
     ...secretGuardPersonRules(guardEntries),
+    `(deny network-outbound (remote unix-socket (path-regex #"^(/private)?/tmp/octant-sandbox-control-")))`,
+    `(deny file-read* file-write* (regex #"^(/private)?/tmp/octant-sandbox-control-"))`,
     ...SEATBELT_DENY_SERVER_CONTROL_SOCKETS,
     ...(input.policyReadOnlyRoots ?? []).map((path) => seatbeltDenyRule("file-write*", path)),
     ...(input.policyBlockHostServices === true
@@ -1130,6 +1134,20 @@ export function makeProcessConfinementLive(
                     size: backend.size,
                     modifiedAt: backend.mtimeMs,
                   },
+                  nativeScope:
+                    platform === "darwin" && launch.command !== sandboxPath
+                      ? (() => {
+                          const path = realpathSync(launch.command);
+                          const identity = statSync(path);
+                          return {
+                            path,
+                            device: identity.dev,
+                            inode: identity.ino,
+                            size: identity.size,
+                            modifiedAt: identity.mtimeMs,
+                          };
+                        })()
+                      : undefined,
                   osVersion: release(),
                   architecture: process.arch,
                 }),
@@ -1139,7 +1157,19 @@ export function makeProcessConfinementLive(
         };
       };
       if (platform === "darwin") {
-        return withReceipt(prepareSeatbeltLaunch(prepared, { ...options, sandboxPath }));
+        const launch = prepareSeatbeltLaunch(prepared, { ...options, sandboxPath });
+        const authorityDirectory = sandboxAuthorityDirectory();
+        // Pure native profile probes have no host authority. Enrolled policy
+        // launches always have private storage and receive a kernel scope.
+        if (selectedPolicy !== undefined && authorityDirectory !== undefined) {
+          const scope = prepareMacosSandboxScope(authorityDirectory, selectedPolicy);
+          return withReceipt({
+            ...launch,
+            command: scope.executable,
+            args: ["--run", scope.directory, scope.epoch, "--", launch.command, ...launch.args],
+          });
+        }
+        return withReceipt(launch);
       }
       if (platform === "linux") {
         return withReceipt(buildBubblewrapLaunch(prepared, { bwrapPath: sandboxPath }));

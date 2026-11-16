@@ -1,3 +1,4 @@
+import { macosSandboxScopeExecutable } from "./macosSandboxScope";
 import { basename, dirname, join } from "node:path";
 import {
   sandboxAuthorityDirectory,
@@ -138,6 +139,21 @@ export function compileSandboxLaunchPolicy(
     }
     const readOnly = selection.policy.filesystem.readOnlyRoots.map(directory);
     const readWrite = selection.policy.filesystem.readWriteRoots.map(directory);
+    const scopeExecutable = platform === "darwin" ? macosSandboxScopeExecutable() : undefined;
+    if (
+      scopeExecutable !== undefined &&
+      [
+        launch.boundRoot,
+        ...(launch.extraBoundRoots ?? []),
+        ...readWrite.map((root) => root.path),
+      ].some((root) => scopeExecutable.startsWith(`${realpathSync(root)}/`))
+    ) {
+      return {
+        status: "refused",
+        code: "sandbox-policy-conflict",
+        rules: ["filesystem.nativeRuntime"],
+      };
+    }
     const authorityDirectory = sandboxAuthorityDirectory();
     if (authorityDirectory !== undefined) {
       const authorityRoot = realpathSync(authorityDirectory);
@@ -257,7 +273,7 @@ export function compileSandboxLaunchPolicy(
       };
     }
     if (
-      platform === "linux" &&
+      (platform === "linux" || sandboxAuthorityDirectory() !== undefined) &&
       readOnly.some((read) =>
         [...writable, ...readWrite].some((write) => read.device === write.device),
       )

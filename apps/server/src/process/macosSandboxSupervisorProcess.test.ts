@@ -3,6 +3,7 @@ import {
   chmodSync,
   existsSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   realpathSync,
   readdirSync,
@@ -13,7 +14,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { buildDenyDefaultSeatbeltProfile } from "./seatbeltProfile";
+import { configureSandboxRestrictionsAuthority } from "./sandboxRuntimePolicy";
+import { decodeSandboxPolicySelection } from "@octant/contracts/sandbox-policy";
+import { makeProcessConfinementLive, buildDenyDefaultSeatbeltProfile } from "./seatbeltProfile";
 
 function heartbeat(path: string): string {
   try {
@@ -243,7 +246,7 @@ const timer=setInterval(()=>{try {if(fs.readFileSync(process.argv[4],"utf8")!==p
             profile,
             "/bin/sh",
             "-c",
-            `if /bin/launchctl bootstrap gui/$(id -u) '${escapePlist}'; then exit 31; fi; if /usr/bin/sudo -n /usr/bin/true; then exit 32; fi; if '${executable}' --run '${root}' nested:epoch -- /usr/bin/sandbox-exec -p '(version 1)(allow default)' /usr/bin/touch '${escapeCanary}'; then exit 33; fi; printf escape-refused`,
+            `if /bin/launchctl bootstrap gui/${process.getuid?.()} '${escapePlist}'; then exit 31; fi; if /usr/bin/sudo -n /usr/bin/true; then exit 32; fi; if '${executable}' --run '${root}' nested:epoch -- /usr/bin/sandbox-exec -p '(version 1)(allow default)' /usr/bin/touch '${escapeCanary}'; then exit 33; fi; printf escape-refused`,
           ],
           { cwd: root, encoding: "utf8", timeout: 15000 },
         );
@@ -255,6 +258,68 @@ const timer=setInterval(()=>{try {if(fs.readFileSync(process.argv[4],"utf8")!==p
           timeout: 5000,
           stdio: "ignore",
         });
+      }
+
+      const project = join(root, "project");
+      const authority = join(root, "authority");
+      const scratch = join(root, "scratch");
+      for (const directory of [project, authority, scratch]) mkdirSync(directory, { mode: 0o700 });
+      const selection = decodeSandboxPolicySelection({
+        policy: {
+          schemaVersion: 1,
+          revision: 1,
+          filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
+          network: "deny",
+          credentials: "existing-policy",
+          hostServices: "blocked",
+        },
+        context: {
+          root: project,
+          hostId: "host",
+          projectId: "20000000-0000-4000-8000-000000000001",
+          checkoutId: "checkout",
+          sessionId: "native-compiler:epoch",
+          provider: "native-harness",
+        },
+      });
+      const previousScopePath = process.env.OCTANT_SANDBOX_SCOPE_PATH;
+      process.env.OCTANT_SANDBOX_SCOPE_PATH = executable;
+      configureSandboxRestrictionsAuthority({
+        validateSelection: () => true,
+        registerCleanup: () => () => undefined,
+        storageDirectory: () => authority,
+        beginTurn: () => ({ status: "refused", message: "unused" }),
+        active: () => selection,
+        deny: () => undefined,
+      });
+      try {
+        const launch = makeProcessConfinementLive().prepare({
+          executable: "/bin/sh",
+          args: [
+            "-c",
+            `printf allowed > allowed; if printf escaped > '${join(root, "outside-project")}'; then exit 31; fi`,
+          ],
+          boundRoot: project,
+          temporaryDirectory: scratch,
+          networkEgress: "none",
+          sandboxPolicy: selection,
+          allowFileReadStar: true,
+        });
+        expect(launch.command).toBe(executable);
+        expect(launch.policyReceipt?.backend).toBe("seatbelt-v1");
+        const run = spawnSync(launch.command, [...launch.args], {
+          cwd: project,
+          encoding: "utf8",
+          timeout: 15000,
+        });
+        expect(run.status, run.stderr).toBe(0);
+        expect(readFileSync(join(project, "allowed"), "utf8")).toBe("allowed");
+        expect(existsSync(join(root, "outside-project"))).toBe(false);
+        expect(readdirSync(join(authority, "sandbox-scopes"))).toEqual([]);
+      } finally {
+        configureSandboxRestrictionsAuthority(undefined);
+        if (previousScopePath === undefined) delete process.env.OCTANT_SANDBOX_SCOPE_PATH;
+        else process.env.OCTANT_SANDBOX_SCOPE_PATH = previousScopePath;
       }
 
       const terminal = spawnSync(

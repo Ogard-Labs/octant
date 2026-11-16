@@ -143,6 +143,19 @@ static int revoke_scope(uint64_t scope, pid_t except) {
   }
   return -1;
 }
+static int exclusive_scope(uint64_t scope, pid_t service) {
+  int count = proc_listallpids(NULL, 0);
+  if (!scope || count <= 0 || count > 1000000) return 0;
+  size_t capacity = (size_t)count + 256;
+  pid_t *pids = calloc(capacity, sizeof(pid_t));
+  if (!pids) return 0;
+  count = proc_listallpids(pids, (int)(capacity * sizeof(pid_t)));
+  int exclusive = count > 0 && (size_t)count < capacity;
+  for (int i = 0; i < count && exclusive; ++i)
+    if (pids[i] > 0 && pids[i] != service && coalition(pids[i]) == scope) exclusive = 0;
+  free(pids);
+  return exclusive;
+}
 static int send_vector(int fd, char *const *values) {
   uint32_t count = 0, total = 0;
   while (values[count]) if (++count >= MAX_VECTOR) return -1;
@@ -420,7 +433,9 @@ static int run(const char *root, const char *epoch, char **args) {
   pid_t service_pid;
   if (control_fd < 0 || peer_pid(control_fd, &service_pid)) goto cleanup;
   record.magic = RECEIPT_MAGIC;
-  record.coalition = coalition(service_pid);
+  uint64_t candidate_scope = coalition(service_pid);
+  if (!candidate_scope || candidate_scope == coalition(getpid()) || !exclusive_scope(candidate_scope, service_pid)) goto cleanup;
+  record.coalition = candidate_scope;
   record.owner = getppid(); record.owner_unique = unique(record.owner);
   strlcpy(record.epoch, epoch, sizeof(record.epoch));
   strlcpy(record.label, label, sizeof(record.label));
@@ -491,6 +506,19 @@ static int reap(const char *root, const char *epoch, pid_t client) {
   if (boot_id(boot)) return 125;
   while ((entry = readdir(entries))) {
     size_t n = strlen(entry->d_name);
+    if (n > 14 && !strcmp(entry->d_name+n-14, ".scope.pending")) {
+      int pending_client; uint64_t identity;
+      char expected[160];
+      if (sscanf(entry->d_name, "%d-%" SCNu64, &pending_client, &identity) != 2 || pending_client <= 1 || !identity) { result = 125; continue; }
+      snprintf(expected, sizeof(expected), "%d-%" PRIu64 ".scope.pending", pending_client, identity);
+      if (strcmp(expected, entry->d_name)) { result = 125; continue; }
+      if (unique(pending_client) == identity) continue;
+      struct stat pending_stat;
+      if (fstatat(directory, entry->d_name, &pending_stat, AT_SYMLINK_NOFOLLOW)) { if (errno != ENOENT) result = 125; continue; }
+      if (!S_ISREG(pending_stat.st_mode) || pending_stat.st_uid != getuid() || (pending_stat.st_mode & 077) || pending_stat.st_nlink != 1) { result = 125; continue; }
+      if (unlinkat(directory, entry->d_name, 0) && errno != ENOENT) result = 125;
+      continue;
+    }
     if (n < 6 || strcmp(entry->d_name+n-6, ".scope")) continue;
     if (++count > 4096) { result = 125; break; }
     int fd = openat(directory, entry->d_name, O_RDONLY|O_NOFOLLOW|O_CLOEXEC);
@@ -523,8 +551,16 @@ static int reap(const char *root, const char *epoch, pid_t client) {
   return result;
 }
 int main(int argc, char **argv) {
+  if (getuid() == 0 || getuid() != geteuid() || getgid() != getegid()) return 125;
   signal(SIGPIPE, SIG_IGN);
   umask(0077);
+  if (argc == 2 && !strcmp(argv[1], "--check")) {
+    char boot[64], domain[64];
+    if (!coalition(getpid()) || !unique(getpid()) || boot_id(boot)) return 125;
+    snprintf(domain, sizeof(domain), "gui/%u", getuid());
+    char *args[] = {"launchctl", "print", domain, NULL};
+    return launchctl(args) ? 125 : 0;
+  }
   if (argc == 3 && !strcmp(argv[1], "--service")) return serve(argv[2]);
   if (argc == 4 && !strcmp(argv[1], "--reap")) return reap(argv[2], argv[3], 0);
   if (argc == 5 && !strcmp(argv[1], "--reap-owner")) {

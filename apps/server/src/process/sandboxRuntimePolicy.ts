@@ -1,3 +1,4 @@
+import { macosSandboxScopeIdentity, revokeMacosSandboxScope } from "./macosSandboxScope";
 import type { SandboxPolicyLaunchDetails } from "@octant/contracts/sandbox-policy";
 import type { SafeNetworkPlace } from "@octant/contracts";
 import type { ToolEgressRule } from "@octant/domain/tool-egress-policy";
@@ -14,6 +15,7 @@ export interface SandboxTurnRequest {
   readonly parentThreadId?: string;
 }
 export interface SandboxTurnPolicy {
+  readonly strict?: boolean;
   readonly selection?: SandboxPolicySelection;
   readonly summary: string;
   readonly current: () => boolean;
@@ -89,7 +91,7 @@ export function recordSandboxDenial(
 
 export function sandboxPolicySummary(selection: SandboxPolicySelection): string {
   const policy = selection.policy;
-  return `Full autonomy within your sandbox limits. Writes: Project${policy.filesystem.readWriteRoots.length ? ` + ${policy.filesystem.readWriteRoots.length} allowed folders` : ""}. Reads: Project${policy.filesystem.readOnlyRoots.length ? ` + ${policy.filesystem.readOnlyRoots.length} read-only folders` : ""}. Network: ${policy.network === "deny" ? "blocked (provider connection separate)" : policy.network === "unrestricted" ? "unrestricted" : "existing Safe networks settings"}. Host services: ${policy.hostServices === "blocked" ? "blocked" : "existing sandbox rules"}.`;
+  return `Strict protections apply; permitted work follows your access level and required approvals. Writes: Project${policy.filesystem.readWriteRoots.length ? ` + ${policy.filesystem.readWriteRoots.length} allowed folders` : ""}. Reads: Project${policy.filesystem.readOnlyRoots.length ? ` + ${policy.filesystem.readOnlyRoots.length} read-only folders` : ""}. Network: ${policy.network === "deny" ? "blocked (provider connection separate)" : policy.network === "unrestricted" ? "unrestricted" : "existing Safe networks settings"}. Host services: ${policy.hostServices === "blocked" ? "blocked" : "existing sandbox rules"}.`;
 }
 
 export function sandboxAuthorityDirectory(): string | undefined {
@@ -216,26 +218,42 @@ export function trackSandboxChild(
   child: import("node:child_process").ChildProcess,
 ): void {
   if (selection === undefined) return;
+  const directory = sandboxAuthorityDirectory();
+  const scope =
+    process.platform === "darwin" && directory !== undefined
+      ? macosSandboxScopeIdentity(directory, selection)
+      : undefined;
+  let cleanup: Promise<void> | undefined;
+  const revoke = () =>
+    (cleanup ??= (async () => {
+      if (child.pid === undefined) return;
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = new Promise<void>((resolve) => {
+          child.once("exit", () => resolve());
+          child.once("error", () => resolve());
+        });
+        child.kill("SIGKILL");
+        await exited;
+      }
+      if (scope !== undefined) await revokeMacosSandboxScope(scope, child.pid);
+    })());
   let remove: () => void;
   try {
-    remove = registerSandboxCleanup(selection, async () => {
-      if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
-      const exited = new Promise<void>((resolve) => {
-        child.once("exit", () => resolve());
-        child.once("error", () => resolve());
-      });
-      // A Linux policy launch is a PID namespace: terminating its owned leader
-      // also terminates detached descendants. Other backends need their own
-      // proven tree-revocation capability before enrolling a selected policy.
-      child.kill("SIGKILL");
-      await exited;
-    });
+    remove = registerSandboxCleanup(selection, revoke);
   } catch (error) {
     child.kill("SIGKILL");
     throw error;
   }
-  child.once("exit", remove);
-  child.once("error", remove);
+  const completed = () => {
+    if (scope === undefined) {
+      remove();
+      return;
+    }
+    // Keep a failed cleanup registered so turn expiry reports uncertainty.
+    void revoke().then(remove, () => undefined);
+  };
+  child.once("exit", completed);
+  child.once("error", completed);
 }
 
 export function authorizeSandboxHostRequest(url: URL): void {
