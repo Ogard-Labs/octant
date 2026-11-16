@@ -4,14 +4,10 @@
  * itself; nothing here reads a clock or a file, so the host passes `now`.
  */
 
-/** How many wake-ups one thread may have waiting at once, missed ones included. */
-export const MAX_PENDING_THREAD_WAKEUPS = 8;
 /** The soonest a wake-up may fire after it is asked for. */
 export const MIN_WAKEUP_DELAY_SECONDS = 60;
 /** The latest a delayed wake-up may fire, the runtime's own clamp for it. */
 export const MAX_WAKEUP_DELAY_SECONDS = 3_600;
-/** The shortest gap between two fires of a recurring wake-up. */
-export const MIN_RECURRING_WAKEUP_INTERVAL_MINUTES = 5;
 /** How long a recurring wake-up keeps firing before it ends on its own. */
 export const RECURRING_WAKEUP_LIFETIME_DAYS = 7;
 /**
@@ -184,8 +180,11 @@ export function planDelayedWakeup(input: {
 }
 
 /**
- * A wake-up on a cron expression: its first fire at least a minute away, and
- * a recurring one never firing more often than every five minutes.
+ * A wake-up on a cron expression: its first fire at least a minute away. A
+ * recurring one may fire on every match, as often as every minute, as cron
+ * does: the earlier five-minute floor protected no hard line, since each fire
+ * is a journaled turn the thread's level, spend ceiling and the person's Stop
+ * still bound (maintainer decision, 2026-11-16).
  */
 export function planCronWakeup(input: {
   readonly cron: string;
@@ -203,48 +202,29 @@ export function planCronWakeup(input: {
       reason: `"${parsed.cron.expression}" matches no time in the next year.`,
     };
   }
-  return planCronFrom(parsed.cron, first, input);
-}
-
-function planCronFrom(
-  cron: WakeupCron,
-  first: Date,
-  input: { readonly recurring: boolean; readonly now: Date },
-): PlannedWakeup | WakeupRefusal {
   if (!input.recurring) return { status: "planned", fireAt: first };
   const expiresAt = new Date(input.now.getTime() + RECURRING_WAKEUP_LIFETIME_DAYS * DAY_MS);
   if (first.getTime() > expiresAt.getTime()) {
     return {
       status: "refused",
-      reason: `"${cron.expression}" first matches after a recurring wake-up's ${RECURRING_WAKEUP_LIFETIME_DAYS} days.`,
+      reason: `"${parsed.cron.expression}" first matches after a recurring wake-up's ${RECURRING_WAKEUP_LIFETIME_DAYS} days.`,
     };
-  }
-  // Every gap within the lifetime is checked: a few early ones can pass while
-  // a later pair (`0,10,20,30,40,41 * * * *`) fires a minute apart. Five
-  // minutes apart over seven days is at most 2,016 fires.
-  let previous = first;
-  for (;;) {
-    const next = nextWakeupCronFire(cron, previous);
-    if (next === undefined || next.getTime() > expiresAt.getTime()) break;
-    if (next.getTime() - previous.getTime() < MIN_RECURRING_WAKEUP_INTERVAL_MINUTES * MINUTE_MS) {
-      return {
-        status: "refused",
-        reason: `A recurring wake-up may fire at most every ${MIN_RECURRING_WAKEUP_INTERVAL_MINUTES} minutes.`,
-      };
-    }
-    previous = next;
   }
   return { status: "planned", fireAt: first, expiresAt };
 }
 
-/** Whether a thread may take one more wake-up. */
+/**
+ * Whether a thread may take one more wake-up, given how many it has waiting
+ * (missed ones included) and the limit in Settings.
+ */
 export function admitThreadWakeup(input: {
   readonly waitingCount: number;
+  readonly waitingLimit: number;
 }): { readonly status: "admitted" } | WakeupRefusal {
-  return input.waitingCount >= MAX_PENDING_THREAD_WAKEUPS
+  return input.waitingCount >= input.waitingLimit
     ? {
         status: "refused",
-        reason: `This thread already has ${MAX_PENDING_THREAD_WAKEUPS} wake-ups waiting; cancel one first.`,
+        reason: `This thread already has ${input.waitingLimit} wake-ups waiting, the limit set in Settings; cancel one first.`,
       }
     : { status: "admitted" };
 }

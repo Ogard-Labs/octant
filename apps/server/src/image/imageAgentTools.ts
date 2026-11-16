@@ -69,9 +69,9 @@ export interface ImageAgentToolPort {
   readonly listJobs: ImageJobService["listByScope"];
   /**
    * Asks the person in the thread whether to generate, and with which profile
-   * and model. A call asks unless a kept choice or Full access with one ready
-   * profile already settles it, because a generation spends money on the
-   * person's image provider.
+   * and model. A call asks unless a kept choice or Full access already
+   * settles it, because a generation spends money on the person's image
+   * provider.
    */
   readonly ask: (input: {
     readonly offer: ImageOfferAsk;
@@ -79,9 +79,13 @@ export interface ImageAgentToolPort {
   }) => Promise<ImageGenerationOfferOutcome>;
   /** The choice the person said to keep using without asking, for the thread's Project. */
   readonly remembered: () => ImageGenerationChoice | undefined;
+  /** The person chose Ask again, so Full access asks too. */
+  readonly asksAgain?: () => boolean;
   readonly forget: () => void | Promise<void>;
   /** Whether the turn's thread runs at Full access now; absent in Chat, which has no such level. */
   readonly fullAccess?: () => boolean;
+  /** The image profile Settings names for Full access, read at each call; absent is none. */
+  readonly defaultProfileInstanceId?: () => string | undefined;
   /**
    * The host runs this turn as itself (a routine, a goal loop), so nobody is
    * at a window to answer a card: a call that would ask starts nothing.
@@ -141,16 +145,16 @@ interface ImageSaveInput {
 }
 
 const DESCRIPTION =
-  "Generate or revise a picture (a photo, illustration, or rendered scene) with an image model the person set up in Octant. Call it when the person asks for an image instead of drawing one yourself as SVG, HTML, or CSS: a real image model gives a far better result. Keep SVG for logos, icons, and diagrams, or when the person asks for it. Octant shows the person a card in this thread where they pick the model and confirm, because each generation is billed to their image provider; nothing runs until they answer, unless they already said not to ask again or the thread runs at Full access with a single image profile set up. Describe the image in prompt; profileInstanceId and modelId only suggest what the card preselects. To revise, pass parentAttachmentId from a completed image on this thread. Never pass credentials, endpoints, headers, or filesystem paths. The result says what happened: completed with each image's attachmentId (the images are shown in this thread, and to you when you can read images; use an attachmentId to revise one, to place it in a Canvas design as a generated-image asset, or to save it), failed with the reason, generating with a jobId when it takes longer than the call waits (it appears in this thread when done; do not start another), agent-draws (the person wants you to make the visual yourself), or cancelled (do not ask again unless they do). In a Work or Code thread, operation save with an attachmentId from this thread and a relativePath stores that image as a new file in the folder you work in: it never overwrites a file, Plan refuses it, and at Ask first the person confirms the path. Never invent an image URL.";
+  "Generate or revise a picture (a photo, illustration, or rendered scene) with an image model the person set up in Octant. Call it when the person asks for an image instead of drawing one yourself as SVG, HTML, or CSS: a real image model gives a far better result. Keep SVG for logos, icons, and diagrams, or when the person asks for it. Octant shows the person a card in this thread where they pick the model and confirm, because each generation is billed to their image provider; nothing runs until they answer, unless they already said not to ask again or the thread runs at Full access, where it uses the profile the person named in Settings (else the first one set up) on its default model. Describe the image in prompt; profileInstanceId and modelId only suggest what the card preselects. To revise, pass parentAttachmentId from a completed image on this thread. Never pass credentials, endpoints, headers, or filesystem paths. The result says what happened: completed with each image's attachmentId (the images are shown in this thread, and to you when you can read images; use an attachmentId to revise one, to place it in a Canvas design as a generated-image asset, or to save it), failed with the reason, generating with a jobId when it takes longer than the call waits (it appears in this thread when done; do not start another), agent-draws (the person wants you to make the visual yourself), or cancelled (do not ask again unless they do). In a Work or Code thread, operation save with an attachmentId from this thread and a relativePath stores that image as a new file in the folder you work in: it never overwrites a file, Plan refuses it, and at Ask first the person confirms the path. Never invent an image URL.";
 
 /**
  * App-managed image generation for a Chat, Work, or Code thread.
  *
  * Present only while Settings has an enabled image profile. A call asks the
  * person, in the thread, before a job is queued, unless they said not to ask
- * again or the thread is at Full access with exactly one profile ready
- * (`imageGenerationWithoutAsking`); the job runs on the profile and model
- * that settles.
+ * again or the thread is at Full access, which uses the profile Settings names
+ * or the first ready one (`imageGenerationWithoutAsking`); the job runs on the
+ * profile and model that settles.
  * The tool still refuses credentials, endpoints, and filesystem paths.
  */
 export function createImageAgentTools(options: {
@@ -201,6 +205,8 @@ export function createImageAgentTools(options: {
         profiles,
         kept: options.port.remembered(),
         fullAccess: options.port.fullAccess?.() === true,
+        askAgain: options.port.asksAgain?.() === true,
+        defaultProfileInstanceId: options.port.defaultProfileInstanceId?.(),
       });
       let choice: ImageGenerationChoice | undefined;
       if (unasked.kind === "generate") {
@@ -500,11 +506,13 @@ export function createThreadImageAgentTools(input: {
   readonly threadKind: "chat-thread" | "work-thread" | "code-thread";
   readonly scopeId: ImageGenerationScopeId;
   readonly offers: Pick<ImageGenerationOfferService, "offer">;
-  readonly kept: Pick<KeptImageGenerationChoices, "remembered" | "forget">;
+  readonly kept: Pick<KeptImageGenerationChoices, "remembered" | "forget" | "asksAgain">;
   /** The host runs this turn as itself: a routine, a goal loop, a resume. */
   readonly unattended?: boolean;
   /** Whether the turn's thread runs at Full access now; Work and Code only. */
   readonly fullAccess?: () => boolean;
+  /** The image profile Settings names for Full access; Work and Code only. */
+  readonly defaultProfileInstanceId?: () => string | undefined;
   readonly jobs: Pick<ImageJobService, "enqueue" | "listByScope" | "whenTerminal" | "readArtifact">;
   readonly listInstances: () => ReadonlyArray<ProviderInstance>;
   readonly readImageGenerationCustomSources: () => ReadonlyArray<ImageGenerationCustomSource>;
@@ -542,8 +550,12 @@ export function createThreadImageAgentTools(input: {
         });
       },
       remembered: () => input.kept.remembered(scope),
+      asksAgain: () => input.kept.asksAgain(scope),
       forget: () => input.kept.forget(scope),
       ...(input.fullAccess === undefined ? {} : { fullAccess: input.fullAccess }),
+      ...(input.defaultProfileInstanceId === undefined
+        ? {}
+        : { defaultProfileInstanceId: input.defaultProfileInstanceId }),
       ...(input.unattended === true ? { unattended: true } : {}),
       whenTerminal: (jobId) => input.jobs.whenTerminal(jobId),
       readArtifact: (jobId, attachmentId) => input.jobs.readArtifact(jobId, attachmentId),

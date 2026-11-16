@@ -42,17 +42,19 @@ read-only gate is a maintainer live check.
   anything but a local window or a device the host's own person paired. A new
   thread's creation command may not carry the role, lineage, switches, bounds,
   or workers' level.
-- **Several per Project.** A Code Project may have up to four coordinators at
-  once, for separate lines of work (one for the backlog, one for a dependency
-  audit). Each coordinator has its own workers. Decided (maintainer decision,
-  2026-11-16; designed, not built): the count becomes a setting, default 4,
-  under [Octant's own limits become settings](../architecture.md#security-and-authority).
+- **Several per Project.** A Code Project may have as many coordinators at
+  once as Settings › Permissions › Coordinators per Project allows (default 4,
+  1 to 32), for separate lines of work (one for the backlog, one for a
+  dependency audit). Each coordinator has its own workers. The host reads the
+  setting when a person makes a coordinator or designates a planner; lowering
+  it stops none that exist (maintainer decision, 2026-11-16; built, under
+  [Octant's own limits become settings](../architecture.md#security-and-authority)).
 - **It replaces the planner role.** The Project's designated planner reads as a
   coordinator whose starts always need approval, derived from the designation
   with no journal change: it takes the read-only gate and the roster, its
   `start` always proposes whatever the start setting, its pending proposals
-  stay pending, and it counts toward the four per Project. Designating a worker
-  or a fifth coordinator is refused (`thread-is-worker`,
+  stay pending, and it counts toward that number. Designating a worker or a
+  coordinator past the number is refused (`thread-is-worker`,
   `coordinator-limit-reached`). Its role follows the designation, so **Make
   coordinator** and **Stop coordinating** are not offered on it; removing the
   designation ends it. Designation does not turn on its **Wake when a message
@@ -81,15 +83,16 @@ An ordinary thread does one task and finishes. A coordinator stays open for as
 long as its line of work lasts, and its job is to direct workers rather than to
 make changes itself.
 
-- **It reads; its workers write.** A coordinator's own file, shell, and Git
-  actions go through the same read-only gate Plan mode applies, whatever its
-  guardrail level. Reading the checkout, GitHub reads, Canvas, `ask-user`,
-  Project memory, and the coordinator operations below stay offered, and child
-  runs it delegates take the same read-only gate. Decided (maintainer
-  decision, 2026-11-16; designed, not built): at Full access its own file,
-  shell and Git actions follow the level instead, under
-  [Octant's own limits become settings](../architecture.md#security-and-authority). Its guardrail level does not govern its own actions; it is the
-  ceiling for the workers it starts. It opens no pull request of its own
+- **It reads; its workers write.** Below Full access a coordinator's own
+  file, shell, and Git actions go through the same read-only gate Plan mode
+  applies. Reading the checkout, GitHub reads, Canvas, `ask-user`, Project
+  memory, and the coordinator operations below stay offered, and child runs it
+  delegates take the same read-only gate. At Full access its own turn runs at
+  that level instead (maintainer decision, 2026-11-16; built, under
+  [Octant's own limits become settings](../architecture.md#security-and-authority)):
+  the person chose to let the thread act without asking. Below Full access
+  its guardrail level does not govern its own actions; at every level it is
+  the ceiling for the workers it starts. It opens no pull request of its own
   (`octant_pull_request` is not offered).
 - **No delivery target and no Done.** A coordinator has no delivery target,
   never appears as a board card, and is never Done. A person stops it with
