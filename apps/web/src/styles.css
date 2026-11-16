@@ -1417,13 +1417,71 @@ strong {
 /* Only the top-right pane shares its edge with window controls. Reserving
    their width in every split pulled each close button away from its edge. */
 .workspace-split[data-orientation="horizontal"] > :first-child .workspace-pane__header {
+  --pane-tools-end: var(--oct-space-2);
   margin-right: 0;
 }
 .workspace-split[data-orientation="vertical"] > :last-child .workspace-pane__header {
+  --pane-tools-end: var(--oct-space-2);
   margin-right: 0;
 }
 .shell--wide-context-open .workspace-pane__header {
+  --pane-tools-end: var(--oct-space-2);
   margin-right: 0;
+}
+
+/* One pane and its Environment section are one box under one header. The
+   section stands beside the pane and starts under the band, so the pane's
+   header runs on over it: the tool buttons at its end stand above the section,
+   and stay where they are when the section opens or closes. With nothing after
+   the section the box ends at the window's edge, where the window's own
+   controls are, and the header stops before them as it does with no dock at
+   all. A split keeps every header inside its own pane: the section shows the
+   focused pane's thread, which need not be the pane it stands beside. */
+.shell[data-thread-environment] .workspace-root > .workspace-pane > .workspace-pane__header {
+  margin-right: calc(-1 * var(--octant-dock-env-width, 0px));
+}
+.shell[data-thread-environment="alone"]
+  .workspace-root
+  > .workspace-pane
+  > .workspace-pane__header {
+  --pane-tools-end: 0px;
+  margin-right: calc(
+    var(--octant-window-chrome-reserved-width, 148px) - var(--octant-dock-env-width, 0px)
+  );
+}
+/* The pane's column clips what it holds; in this one state its header is let
+   out sideways over the section, and nothing is let out up or down. */
+.shell[data-thread-environment]
+  :is(.primary-workspace-layer, .workspace):not(:has(.workspace-split)) {
+  overflow-x: visible;
+  overflow-y: clip;
+}
+
+/* The pane's tool buttons end its header: after the title and the free run
+   that moves the window, before a split's close. They keep their own width,
+   so the title gives way first. Where the header ends at a pane's edge they
+   stand 8px in from it; where it ends before the window's controls, the
+   controls' own inset is the gap. */
+.workspace-pane__tools {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  margin-right: var(--pane-tools-end, 0px);
+}
+
+/* A start screen has no title to show, so its header is the tool row alone,
+   laid over the band where the row has always stood. It takes no row of the
+   pane and only the buttons take the pointer. */
+.workspace-pane__header[data-header-kind="tools"] {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  min-height: var(--oct-title-rail-h);
+  pointer-events: none;
+}
+.workspace-pane__header[data-header-kind="tools"] > .workspace-pane__tools {
+  pointer-events: auto;
 }
 
 /* The request rides inside the grip with the title, so it keeps the title's

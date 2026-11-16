@@ -34,18 +34,26 @@ export interface DockToolButtonsProps {
    * The one-tool drawer has none.
    */
   readonly dragSource?: boolean;
+  /**
+   * The row has no room for a button per tool (a narrow pane's header): one
+   * menu button lists every tool instead.
+   */
+  readonly collapsed?: boolean;
 }
 
 const ITEM_SELECTOR = "[data-dock-tool-item]";
 
 /**
- * One icon button per tool at the right of the title band. Pressing opens the
- * tool as a pane and pressing again closes it; a pressed button is a tool that
- * is on screen. The row is a toolbar with one Tab stop and arrow-key movement,
- * and a press never moves focus off the button.
+ * One icon button per tool at the right end of a thread pane's header (and in
+ * the drawer's own head). Pressing opens the tool as a pane and pressing again
+ * closes it; a pressed button is a tool that is on screen. The row is a toolbar
+ * with one Tab stop and arrow-key movement, and a press never moves focus off
+ * the button.
  */
 export function DockToolButtons(props: DockToolButtonsProps) {
-  const { buttons, more } = props.model;
+  const collapsed = props.collapsed === true;
+  const buttons = collapsed ? [] : props.model.buttons;
+  const more = collapsed ? [...props.model.buttons, ...props.model.more] : props.model.more;
   const references = props.references ?? [];
   const toolbar = useRef<HTMLDivElement>(null);
   const [current, setCurrent] = useState(0);
@@ -101,6 +109,7 @@ export function DockToolButtons(props: DockToolButtonsProps) {
       ))}
       {hasMore ? (
         <MoreTools
+          label={collapsed ? "Tools" : "More tools"}
           onPress={props.onPress}
           references={references}
           tabStop={buttons.length === stop}
@@ -193,6 +202,7 @@ function ToolButton(props: {
 }
 
 function MoreTools(props: {
+  readonly label: string;
   readonly onPress: DockToolButtonsProps["onPress"];
   readonly references: ReadonlyArray<DockUtilityLauncherReference>;
   readonly tabStop: boolean;
@@ -203,7 +213,7 @@ function MoreTools(props: {
   const groups = groupDockTools(props.tools);
   return (
     <OctantMenuRoot>
-      <OctantTooltip label="More tools">
+      <OctantTooltip label={props.label}>
         <OctantMenuTrigger
           render={
             <IconButton
@@ -211,7 +221,7 @@ function MoreTools(props: {
               data-dock-tool-item=""
               data-dock-tools-shown={shown ? "true" : undefined}
               icon={Ellipsis}
-              label="More tools"
+              label={props.label}
               ref={trigger}
               tabIndex={props.tabStop ? 0 : -1}
               title=""
@@ -222,7 +232,7 @@ function MoreTools(props: {
       </OctantTooltip>
       <OctantMenuPortal>
         <OctantMenuPositioner align="end">
-          <OctantMenuPopup aria-label="More tools">
+          <OctantMenuPopup aria-label={props.label}>
             {groups.map((group, index) => (
               <Fragment key={group.label}>
                 {index === 0 ? null : <OctantMenuSeparator />}

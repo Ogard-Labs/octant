@@ -987,33 +987,12 @@ describe("WindowChrome", () => {
     expect(screen.queryByRole("button", { name: /Right sidebar/i })).not.toBeInTheDocument();
   });
 
-  it("draws the tool buttons before the bottom panel and dock toggles, and not at narrow widths", () => {
-    const dockTools = {
-      buttons: [
-        {
-          id: "files" as const,
-          label: "Files",
-          pressed: true,
-          open: false,
-          press: { kind: "close" as const, tabIds: ["files"] },
-          tabIds: ["files"],
-          menu: [],
-        },
-      ],
-      more: [],
-    };
-    const { props, rerender } = renderChrome({
-      dockAvailable: true,
-      dockTools,
-      onToggleDockTool: vi.fn(),
-    });
-    const tools = screen.getByRole("toolbar", { name: "Tools" });
+  it("keeps the window's own toggles and carries no tool buttons", () => {
+    renderChrome({ dockAvailable: true });
     const bottom = screen.getByRole("button", { name: "Open bottom panel" });
     const dock = screen.getByRole("button", { name: "Open Right sidebar" });
-    expect(tools.compareDocumentPosition(bottom) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(bottom.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-
-    rerender(<WindowChrome {...props} isNarrow />);
+    // A thread's tools stand in its pane's header, beside the thread.
     expect(screen.queryByRole("toolbar", { name: "Tools" })).not.toBeInTheDocument();
   });
 

@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import { splitCallbacks, splitLayout } from "../App.test-fixtures";
 import { ThreadCoordinatorMenuItems } from "../projects/ThreadRowMenu";
 import { SplitWorkspace } from "./SplitWorkspace";
+import { PaneDockToolsContext, type PaneDockTools } from "./PaneDockTools";
 import { useWorkspaceSurfaceDrag, type WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import type {
   WorkspaceSurfaceDragSource,
@@ -29,6 +30,28 @@ function chatTab(index: number) {
     mode: "chat" as const,
     title: `Chat ${String(index)}`,
   };
+}
+
+function paneTools() {
+  const tool = (id: "files" | "terminal" | "vitals", label: string, pressed: boolean) => ({
+    id,
+    label,
+    pressed,
+    open: false,
+    press: pressed
+      ? ({ kind: "close", tabIds: [id] } as const)
+      : ({ kind: "open-beside" } as const),
+    tabIds: pressed ? [id] : [],
+    menu: [],
+  });
+  return {
+    model: {
+      buttons: [tool("terminal", "Terminal", false), tool("files", "Files", true)],
+      more: [tool("vitals", "Vitals", false)],
+    },
+    onMenuAction: vi.fn<PaneDockTools["onMenuAction"]>(),
+    onPress: vi.fn<PaneDockTools["onPress"]>(),
+  } satisfies PaneDockTools;
 }
 
 function threeChatTabs() {
@@ -752,6 +775,107 @@ describe("SplitWorkspace", () => {
     );
     expect(screen.getAllByText("Worker of Backlog")).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Back to coordinator" })).toHaveLength(1);
+  });
+
+  it("ends a thread pane's header with its tool buttons, which act on that pane", async () => {
+    const user = userEvent.setup();
+    const tools = paneTools();
+    render(
+      <PaneDockToolsContext.Provider value={tools}>
+        <SplitWorkspace
+          {...splitCallbacks()}
+          activePaneId={firstPaneId}
+          layout={decodeWorkspaceLayoutNode({
+            kind: "pane",
+            nodeId: "00000000-0000-4000-8000-000000000611",
+            paneId: String(firstPaneId),
+            surface: chatTab(0),
+          })}
+          mode="chat"
+          renderSurface={(surface) => surface.title}
+        />
+      </PaneDockToolsContext.Provider>,
+    );
+    const pane = screen.getByRole("region", { name: "Workspace pane: Chat 0" });
+    const header = pane.querySelector(".workspace-pane__header")!;
+    const row = within(header as HTMLElement).getByRole("toolbar", { name: "Tools" });
+    // After the title, at the header's end.
+    const title = within(header as HTMLElement).getByText("Chat 0");
+    expect(title.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const files = within(row).getByRole("button", { name: "Files" });
+    expect(files).toHaveAttribute("aria-pressed", "true");
+    expect(within(row).getByRole("button", { name: "More tools" })).toBeInTheDocument();
+
+    await user.click(files);
+    expect(tools.onPress).toHaveBeenCalledWith(firstPaneId, "files", files, false);
+  });
+
+  it("gives each thread of a split its own tool buttons: the focused one's show what is open, the other's rest and address their own pane", async () => {
+    const user = userEvent.setup();
+    const tools = paneTools();
+    render(
+      <PaneDockToolsContext.Provider value={tools}>
+        <SplitWorkspace
+          {...splitCallbacks()}
+          activePaneId={firstPaneId}
+          layout={decodeWorkspaceLayoutNode({
+            kind: "split",
+            nodeId: splitNodeId,
+            orientation: "horizontal",
+            ratio: 0.5,
+            first: {
+              kind: "pane",
+              nodeId: "00000000-0000-4000-8000-000000000611",
+              paneId: String(firstPaneId),
+              surface: chatTab(0),
+            },
+            second: {
+              kind: "pane",
+              nodeId: "00000000-0000-4000-8000-000000000621",
+              paneId: String(secondPaneId),
+              surface: chatTab(1),
+            },
+          })}
+          mode="chat"
+          renderSurface={(surface) => surface.title}
+        />
+      </PaneDockToolsContext.Provider>,
+    );
+    const rowOf = (title: string) =>
+      within(screen.getByRole("region", { name: `Workspace pane: ${title}` })).getByRole(
+        "toolbar",
+        { name: "Tools" },
+      );
+    expect(screen.getAllByRole("toolbar", { name: "Tools" })).toHaveLength(2);
+    expect(within(rowOf("Chat 0")).getByRole("button", { name: "Files" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    // Nothing of the other thread's is on screen: the dock holds the focused one's.
+    const resting = within(rowOf("Chat 1")).getByRole("button", { name: "Files" });
+    expect(resting).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(resting);
+    expect(tools.onPress).toHaveBeenCalledWith(secondPaneId, "files", resting, true);
+  });
+
+  it("draws tool buttons in the focused pane only when the other pane shows no thread", () => {
+    render(
+      <PaneDockToolsContext.Provider value={paneTools()}>
+        <SplitWorkspace
+          {...splitCallbacks()}
+          activePaneId={firstPaneId}
+          layout={splitLayout()}
+          renderSurface={(surface) => surface.title}
+        />
+      </PaneDockToolsContext.Provider>,
+    );
+    expect(screen.getAllByRole("toolbar", { name: "Tools" })).toHaveLength(1);
+    expect(
+      within(screen.getByRole("region", { name: "Workspace pane: First" })).getByRole("toolbar", {
+        name: "Tools",
+      }),
+    ).toBeInTheDocument();
   });
 
   it("adds a thread's coordinator items to its pane's header menu, and nothing to other panes", async () => {

@@ -153,9 +153,10 @@ export interface RightUtilityDockSurfaceProps {
    */
   readonly toolResizeHandle?: ReactNode;
   /**
-   * The row of tool buttons, given only where the dock is a drawer: the title
-   * band is inert behind it, so the row stands in the drawer's header. Docked,
-   * the row lives in the title band and the header is an empty spacer.
+   * The row of tool buttons, given only where the dock is a drawer: the window
+   * is inert behind it, so the row stands in the drawer's header. Docked, the
+   * row lives in the thread pane's header and the dock has no head of its own
+   * over its panes.
    */
   readonly toolRow?: DockToolButtonsProps;
   /**
@@ -248,7 +249,13 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     const buttonOf = (surface: RightUtilityDockSurfaceId | undefined) =>
       surface === undefined
         ? undefined
-        : (document.querySelector<HTMLElement>(`[data-dock-tool="${surface}"]`) ?? undefined);
+        : // Every thread pane of a split has the tool's button: the focused
+          // pane's is the one the dock belongs to.
+          (document.querySelector<HTMLElement>(
+            `.workspace-pane[data-active="true"] [data-dock-tool="${surface}"]`,
+          ) ??
+          document.querySelector<HTMLElement>(`[data-dock-tool="${surface}"]`) ??
+          undefined);
     // The tool's own button, else the dock toggle that opened the dock.
     const target =
       buttonOf(refocus.surface) ??
@@ -613,6 +620,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     return (
       <div
         className="right-utility-dock__surface right-utility-dock__surface--strip"
+        data-dock-lead="tiles"
         data-dock-surface={activeSurface?.id ?? "empty"}
         ref={root}
       >
@@ -638,9 +646,10 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           </div>
         </section>
         {split.toolTabIds.length === 0 ? null : (
+          // No spacer over the tiles: a pane's bar is as tall as the title
+          // band and stands in it, on the thread header's line.
           <div className="dock-tool-column">
             {props.toolResizeHandle}
-            {toolbar}
             <div className="dock-body right-utility-dock__content">
               {tilesNode}
               {dragShield}
@@ -651,13 +660,25 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     );
   }
 
+  // Docked, a pane's bar stands in the title band, on the thread header's
+  // line, so the tiles start at the dock's top. Everything else the dock shows
+  // (its overview, a start screen's quick tools, a notice) starts under the
+  // band, and the drawer keeps its own head with the tool row and Close.
+  const tilesLead =
+    tiles !== undefined &&
+    !tiles.narrow &&
+    !(props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface") &&
+    props.resolution.kind !== "closed" &&
+    !(!tiled && props.resolution.kind === "unavailable") &&
+    activeTab !== undefined;
   return (
     <div
       className="right-utility-dock__surface"
+      data-dock-lead={tilesLead ? "tiles" : undefined}
       data-dock-surface={activeSurface?.id ?? "empty"}
       ref={root}
     >
-      {toolbar}
+      {tilesLead ? null : toolbar}
       <div
         className="dock-body right-utility-dock__content"
         data-shelf={shelfEntries.length === 0 ? undefined : "true"}

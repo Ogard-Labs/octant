@@ -102,6 +102,7 @@ import type { ShellActions } from "./app/shellActions";
 import { SidebarContainer } from "./app/SidebarContainer";
 import { ThreadPaneContainer } from "./app/ThreadPaneContainer";
 import { useStableActions } from "./app/useStableActions";
+import { PaneDockToolsContext, type PaneDockTools } from "./shell/PaneDockTools";
 import { WindowChromeContainer } from "./app/WindowChromeContainer";
 import { ZenContainer } from "./app/ZenContainer";
 import {
@@ -1310,6 +1311,10 @@ function LaunchedShell(
   // choice directly: routed here it would have opened the draft's dock and
   // left the thread it was meant for closed.
   const draftDockKeyRef = useRef<string | undefined>(undefined);
+  const closedDockTabsThisTick = useRef(new Set<string>());
+  // Set when the last open tool is closed: the empty dock then stays away
+  // until the dock toggle asks for it.
+  const [emptyDockDismissed, setEmptyDockDismissed] = useState(false);
   // Kept per draft: with two new tasks open, opening the dock on one must not
   // close it on the other.
   const [draftDocksShown, setDraftDocksShown] = useState<ReadonlySet<string>>(() => new Set());
@@ -3765,7 +3770,8 @@ function LaunchedShell(
       dockTabs.length > 0 ||
       launchableDockSurfaces.length > 0 ||
       dockHoldsForCodeDraft);
-  const dockOpen = dockShown && dockAvailable;
+  const dockOpen =
+    dockShown && dockAvailable && !(emptyDockDismissed && dockState.tabs.length === 0);
   // A Browser tab bound to one host-opened context (a link or a local server)
   // is not the thread's shared Browser, so it does not stand in for the agent's
   // session: only a tab with no context of its own counts as that view.
@@ -4706,6 +4712,18 @@ function LaunchedShell(
   function closeDockTab(tabId: string) {
     const closedTab = dockState.tabs.find((tab) => tab.id === tabId);
     changeDockTiles((state) => closeUtilityTabState(state, tabId));
+    // The last tool to close takes the tool region with it, so the thread has
+    // the window again and its header (and the tool buttons at its end) stands
+    // where it stood before anything was opened. Left open and empty, the
+    // region kept a column for one card and moved the buttons a second time.
+    // The window's own choice stays "open": another thread's tools still show
+    // when it takes the focus. A Browser closes page by page in one press, so
+    // the closes of one tick are counted together.
+    closedDockTabsThisTick.current.add(tabId);
+    queueMicrotask(() => closedDockTabsThisTick.current.clear());
+    if (dockState.tabs.every((tab) => closedDockTabsThisTick.current.has(tab.id))) {
+      setEmptyDockDismissed(true);
+    }
     // A dock Browser tab bound to a context owns it: closing the tab is the
     // only close path a dedicated context has, so the context stops here.
     // The shared tab binds the thread's context the same way once it exists,
@@ -5060,6 +5078,11 @@ function LaunchedShell(
   }
   function toggleDock(opener: HTMLElement) {
     dockOpener.current = { element: opener, logicalTarget: "dock" };
+    // The toggle asks for the dock as it is, empty or not.
+    if (emptyDockDismissed) {
+      setEmptyDockDismissed(false);
+      if (dockShown && dockState.tabs.length === 0) return;
+    }
     // With a reader up the dock is stepped aside, not closed: the toggle
     // leaves the reader so the dock shows again, and opens it if it was
     // closed. Closing it here instead lost the dock the reader had hidden.
@@ -5855,6 +5878,8 @@ function LaunchedShell(
       toggleBottomPanel,
       toggleDock,
       toggleDockTool,
+      pressPaneDockTool,
+      showDockToolFromRest,
       runDockToolMenu,
       touchMemoryRevision: projectController.touchMemoryRevision,
       tryWorkRestCommand,
@@ -6027,6 +6052,62 @@ function LaunchedShell(
   const dockToolButtons = useMemo(
     () => JSON.parse(dockToolButtonsKey) as DockToolButtonsModel,
     [dockToolButtonsKey],
+  );
+  // A tool button in a pane's header. In the focused pane it is the dock's own
+  // button. From another pane of a split the press first focuses that pane and
+  // the tool is then shown for its thread; it never closes one, because nothing
+  // of that thread's was on screen to close. Focusing a pane is a host command,
+  // so the tool waits for the pane to become the active one.
+  const pendingPaneTool = useRef<{
+    readonly paneId: string;
+    readonly surface: RightUtilityDockSurfaceId;
+    readonly opener: HTMLElement;
+    readonly at: number;
+  }>(undefined);
+  const [pendingPaneToolRevision, setPendingPaneToolRevision] = useState(0);
+  function showDockToolFromRest(surface: RightUtilityDockSurfaceId, opener: HTMLElement) {
+    const button = [...dockToolButtons.buttons, ...dockToolButtons.more].find(
+      (candidate) => candidate.id === surface,
+    );
+    if (button === undefined || button.pressed) return;
+    toggleDockTool(surface, opener);
+  }
+  function pressPaneDockTool(
+    paneId: PaneId,
+    surface: RightUtilityDockSurfaceId,
+    opener: HTMLElement,
+    fromRest: boolean,
+  ) {
+    if (String(activePaneId) === String(paneId)) {
+      if (fromRest) showDockToolFromRest(surface, opener);
+      else toggleDockTool(surface, opener);
+      return;
+    }
+    pendingPaneTool.current = { paneId: String(paneId), surface, opener, at: performance.now() };
+    setPendingPaneToolRevision((revision) => revision + 1);
+    void controller.activatePane(paneId);
+  }
+  useEffect(() => {
+    const pending = pendingPaneTool.current;
+    if (pending === undefined || String(activePaneId) !== pending.paneId) return;
+    pendingPaneTool.current = undefined;
+    // A pane that took seconds to focus was focused for another reason.
+    if (performance.now() - pending.at > 2000) return;
+    actions.showDockToolFromRest(pending.surface, pending.opener);
+  }, [actions, activePaneId, dockToolButtonsKey, pendingPaneToolRevision]);
+  // A wide window draws each thread's tool buttons in its pane's header. The
+  // drawer of a narrow one carries the row itself.
+  const paneDockTools = useMemo<PaneDockTools | undefined>(
+    () =>
+      isNarrow
+        ? undefined
+        : {
+            model: dockToolButtons,
+            references: dockReferences,
+            onPress: actions.pressPaneDockTool,
+            onMenuAction: actions.runDockToolMenu,
+          },
+    [actions, dockReferences, dockToolButtons, isNarrow],
   );
   const homeActive =
     !readerOpen &&
@@ -8426,8 +8507,6 @@ function LaunchedShell(
             dockAvailable={dockAvailable}
             dockBrowserActive={dockBrowserActive}
             dockPresentedOpen={dockPresentedOpen}
-            dockReferences={dockReferences}
-            dockTools={dockToolButtons}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             hostReservesTitlebarInset={hostReservesTitlebarInset}
             isNarrow={isNarrow}
@@ -9327,7 +9406,11 @@ function LaunchedShell(
                                                             serverUrl={props.launch.serverUrl}
                                                             windowId={props.launch.windowId}
                                                           >
-                                                            {shell}
+                                                            <PaneDockToolsContext.Provider
+                                                              value={paneDockTools}
+                                                            >
+                                                              {shell}
+                                                            </PaneDockToolsContext.Provider>
                                                           </QuestionnaireDraftsProvider>
                                                         </CodeDebugWindowProvider>
                                                       </ServerCodeProjectsContext.Provider>

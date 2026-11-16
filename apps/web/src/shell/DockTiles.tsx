@@ -1,4 +1,4 @@
-import { LayoutGrid, PictureInPicture2, X } from "../ui/icons";
+import { PictureInPicture2, X } from "../ui/icons";
 import {
   useEffect,
   useLayoutEffect,
@@ -25,6 +25,13 @@ import {
   type DockDragPoint,
 } from "./dockToolDrag";
 import { IconButton } from "./IconButton";
+import {
+  OctantContextMenuContent,
+  OctantContextMenuItem,
+  OctantContextMenuRoot,
+  OctantContextMenuSeparator,
+  OctantContextMenuTrigger,
+} from "../ui/base/OctantContextMenu";
 import {
   OctantMenuItem,
   OctantMenuPopup,
@@ -710,6 +717,10 @@ function Tile(props: {
       className="dock-tile"
       data-dock-tile={content.surface}
       data-dock-tile-edge={box.top === 0 ? "top" : undefined}
+      // The last column's top pane ends under the window's own toggles.
+      data-dock-tile-corner={
+        box.top === 0 && box.left + box.width > 1 - EDGE ? "trailing" : undefined
+      }
       data-focused={props.focused ? "true" : undefined}
       data-moving={props.moving ? "true" : undefined}
       ref={(node) => {
@@ -723,40 +734,61 @@ function Tile(props: {
     >
       {/* One bar per pane, the tool's own header: its name (or its tabs: the
           Browser's pages, a shell's sessions, Files' open files) leads, the
-          tool's own controls follow, Arrange and Close trail. */}
-      <div
-        className="dock-tile__bar"
-        data-fold={folded}
-        data-has-controls={barItems !== undefined && barItems.length > 0 ? "true" : undefined}
-        // The whole bar picks the pane up: its name, a tab's label or its
-        // empty run. A press that began on a control (an action, Arrange,
-        // Close, a tab's close, a field) is that control's, never a drag.
-        data-pane-drag={props.draggable ? "true" : undefined}
-        onPointerDown={(event) => {
-          if (!props.draggable) return;
-          const from = event.target instanceof Element ? event.target : null;
-          if (
-            from?.closest('button:not([role="tab"]), input, select, textarea, [role="menu"]') !==
-            null
-          )
-            return;
-          pressDockToolDrag(event, {
-            tabId: props.tabId,
-            source: "bar",
-            label: content.label,
-          });
-        }}
-        ref={bar}
-      >
-        <div className="dock-tile__lead">
-          <div className="dock-tile__title">{content.barLeading}</div>
-          <div className="dock-tile__lead-slot" ref={leadRef} />
-        </div>
-        <DockBarRow fold={folded} items={barItems ?? []} toolLabel={content.label} />
-        <>
+          tool's own controls follow, Minimise (a Browser, a Terminal) and
+          Close trail. A pane is arranged by dragging its bar; the same moves
+          are the bar's context menu, and the keyboard's route to them is the
+          tool's button in the thread's header. */}
+      <OctantContextMenuRoot>
+        <OctantContextMenuTrigger
+          className="dock-tile__bar"
+          data-fold={folded}
+          data-has-controls={barItems !== undefined && barItems.length > 0 ? "true" : undefined}
+          // The whole bar picks the pane up: its name, a tab's label or its
+          // empty run. A press that began on a control (an action, Close, a
+          // tab's close, a field) is that control's, never a drag.
+          data-pane-drag={props.draggable ? "true" : undefined}
+          onPointerDown={(event: ReactPointerEvent<HTMLDivElement>) => {
+            if (!props.draggable || event.button !== 0) return;
+            const from = event.target instanceof Element ? event.target : null;
+            if (
+              from?.closest('button:not([role="tab"]), input, select, textarea, [role="menu"]') !==
+              null
+            )
+              return;
+            pressDockToolDrag(event, {
+              tabId: props.tabId,
+              source: "bar",
+              label: content.label,
+            });
+          }}
+          // The menu key is the only keyboard route the browser turns into a
+          // context menu, and a Mac has none: Shift+F10 on any control of the
+          // bar asks for the pane's menu too.
+          onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+            if (event.key !== "F10" || !event.shiftKey || !arrangeable) return;
+            event.preventDefault();
+            const from = event.target instanceof Element ? event.target : event.currentTarget;
+            const bounds = from.getBoundingClientRect();
+            event.currentTarget.dispatchEvent(
+              new MouseEvent("contextmenu", {
+                bubbles: true,
+                cancelable: true,
+                clientX: bounds.left,
+                clientY: bounds.bottom,
+              }),
+            );
+          }}
+          ref={bar}
+          render={<div />}
+        >
+          <div className="dock-tile__lead">
+            <div className="dock-tile__title">{content.barLeading}</div>
+            <div className="dock-tile__lead-slot" ref={leadRef} />
+          </div>
+          <DockBarRow fold={folded} items={barItems ?? []} toolLabel={content.label} />
           {/* One press turns a Browser or a Terminal into its card in the
               Environment section; the card's Show brings it back where it was.
-              It stands before Arrange and Close, which every pane ends with. */}
+              It stands before Close, which every pane ends with. */}
           {props.onMinimise === undefined ? null : (
             <IconButton
               className="dock-tile__control text-muted-foreground"
@@ -765,96 +797,70 @@ function Tile(props: {
               onClick={props.onMinimise}
             />
           )}
-          {arrangeable ? (
-            <OctantMenuRoot>
-              <OctantMenuTrigger
-                aria-label={`Arrange ${content.label}`}
-                className="shell-icon-button dock-tile__control window-no-drag"
-                title={`Arrange ${content.label}`}
-              >
-                <LayoutGrid aria-hidden="true" size={16} />
-              </OctantMenuTrigger>
-              <OctantMenuPortal>
-                <OctantMenuPositioner>
-                  <OctantMenuPopup aria-label={`Arrange ${content.label}`}>
-                    {(
-                      [
-                        ["left", "Move left"],
-                        ["right", "Move right"],
-                        ["up", "Move up"],
-                        ["down", "Move down"],
-                      ] as const
-                    ).map(([direction, label]) =>
-                      content.moves[direction] &&
-                      (props.sideways || direction === "up" || direction === "down") ? (
-                        <OctantMenuItem
-                          className="workspace-disclosure__action window-no-drag"
-                          key={direction}
-                          onClick={() => props.onMove(direction)}
-                        >
-                          <span>{label}</span>
-                        </OctantMenuItem>
-                      ) : null,
-                    )}
-                    {props.places.length === 0 ? null : (
-                      <>
-                        <OctantMenuSeparator />
-                        {props.places.map((place) => (
-                          <OctantMenuItem
-                            className="workspace-disclosure__action window-no-drag"
-                            key={`${place.edge}:${place.label}`}
-                            onClick={place.place}
-                          >
-                            <span>{`Move ${place.label.charAt(0).toLowerCase()}${place.label.slice(1)}`}</span>
-                          </OctantMenuItem>
-                        ))}
-                      </>
-                    )}
-                    {props.single ? null : (
-                      <>
-                        <OctantMenuSeparator />
-                        <OctantMenuItem
-                          className="workspace-disclosure__action window-no-drag"
-                          onClick={props.onShowAlone}
-                        >
-                          <span>Show alone</span>
-                        </OctantMenuItem>
-                        <OctantMenuItem
-                          className="workspace-disclosure__action window-no-drag"
-                          onClick={props.onHide}
-                        >
-                          <span>Hide from view</span>
-                        </OctantMenuItem>
-                      </>
-                    )}
-                    {props.onMinimise === undefined ? null : (
-                      <OctantMenuItem
-                        className="workspace-disclosure__action window-no-drag"
-                        onClick={props.onMinimise}
-                      >
-                        <span>Minimise to card</span>
-                      </OctantMenuItem>
-                    )}
-                  </OctantMenuPopup>
-                </OctantMenuPositioner>
-              </OctantMenuPortal>
-            </OctantMenuRoot>
-          ) : (
-            <IconButton
-              className="dock-tile__control text-muted-foreground"
-              disabled
-              icon={LayoutGrid}
-              label={`Arrange ${content.label}`}
-            />
-          )}
           <IconButton
             className="dock-tile__control text-muted-foreground"
             icon={X}
             label={`Close ${content.label}`}
             onClick={props.onClose}
           />
-        </>
-      </div>
+        </OctantContextMenuTrigger>
+        {arrangeable ? (
+          <OctantContextMenuContent aria-label={`Arrange ${content.label}`}>
+            {(
+              [
+                ["left", "Move left"],
+                ["right", "Move right"],
+                ["up", "Move up"],
+                ["down", "Move down"],
+              ] as const
+            ).map(([direction, label]) =>
+              content.moves[direction] &&
+              (props.sideways || direction === "up" || direction === "down") ? (
+                <OctantContextMenuItem
+                  key={direction}
+                  label={label}
+                  onClick={() => props.onMove(direction)}
+                >
+                  {label}
+                </OctantContextMenuItem>
+              ) : null,
+            )}
+            {props.places.length === 0 ? null : (
+              <>
+                <OctantContextMenuSeparator />
+                {props.places.map((place) => {
+                  const label = `Move ${place.label.charAt(0).toLowerCase()}${place.label.slice(1)}`;
+                  return (
+                    <OctantContextMenuItem
+                      key={`${place.edge}:${place.label}`}
+                      label={label}
+                      onClick={place.place}
+                    >
+                      {label}
+                    </OctantContextMenuItem>
+                  );
+                })}
+              </>
+            )}
+            {props.single ? null : (
+              <>
+                <OctantContextMenuSeparator />
+                <OctantContextMenuItem label="Show alone" onClick={props.onShowAlone}>
+                  Show alone
+                </OctantContextMenuItem>
+                <OctantContextMenuItem label="Hide from view" onClick={props.onHide}>
+                  Hide from view
+                </OctantContextMenuItem>
+              </>
+            )}
+            {props.onMinimise === undefined ? null : (
+              <OctantContextMenuItem label="Minimise to card" onClick={props.onMinimise}>
+                Minimise to card
+              </OctantContextMenuItem>
+            )}
+          </OctantContextMenuContent>
+        ) : null}
+      </OctantContextMenuRoot>
       <DockBarContext.Provider value={barHost}>
         <div className={content.bodyClassName} data-dock-inset={content.inset ? "true" : undefined}>
           {content.children}

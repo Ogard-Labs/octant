@@ -197,20 +197,40 @@ async function showRightUtilityDock(user: ReturnType<typeof userEvent.setup>): P
   await user.click(await screen.findByRole("button", { name: "Open Right sidebar" }));
 }
 
-/** A tool's button in the title band's row. */
+/**
+ * The focused pane's tool row. Every thread pane of a split has a row in its
+ * header; the dock shows the focused pane's tools, so that row is the one a
+ * test about the dock means.
+ */
+function toolRow(): HTMLElement {
+  const rows = screen.getAllByRole("toolbar", { name: "Tools" });
+  const focused = rows.find(
+    (row) => row.closest(".workspace-pane")?.getAttribute("data-active") === "true",
+  );
+  const row = focused ?? rows[0];
+  if (row === undefined) throw new Error("No tool row is on screen");
+  return row;
+}
+
+async function findToolRow(): Promise<HTMLElement> {
+  await screen.findAllByRole("toolbar", { name: "Tools" });
+  return toolRow();
+}
+
+/** A tool's button in the focused pane's tool row. */
 function bandTool(tool: string): HTMLElement {
-  return within(screen.getByRole("toolbar", { name: "Tools" })).getByRole("button", {
+  return within(toolRow()).getByRole("button", {
     name: tool,
   });
 }
 
-/** A tool with a button of its own in the title band's tool row. */
+/** A tool with a button of its own in the pane header's tool row. */
 async function openQuickDockTool(
   user: ReturnType<typeof userEvent.setup>,
   _dock: HTMLElement,
   tool: string,
 ): Promise<void> {
-  const row = await screen.findByRole("toolbar", { name: "Tools" });
+  const row = await findToolRow();
   await user.click(within(row).getByRole("button", { name: tool }));
 }
 
@@ -219,7 +239,7 @@ async function openAddToolMenu(
   user: ReturnType<typeof userEvent.setup>,
   _dock: HTMLElement,
 ): Promise<HTMLElement> {
-  const row = await screen.findByRole("toolbar", { name: "Tools" });
+  const row = await findToolRow();
   await user.click(within(row).getByRole("button", { name: "More tools" }));
   return screen.findByRole("menu", { name: "More tools" });
 }
@@ -6576,7 +6596,7 @@ describe("App", () => {
     });
     const second = screen.getByRole("region", { name: "Workspace pane: Another Code thread" });
     await user.click(first);
-    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    await screen.findByRole("complementary", { name: "Right Utility Dock" });
     // The explicit gesture is opening a terminal from its button: pressing the
     // restored one minimises it, so it is closed from the button's menu, and
     // pressing again opens a fresh one.
@@ -6584,7 +6604,9 @@ describe("App", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Close Terminal" }));
     await user.click(bandTool("Terminal"));
     await user.click(second);
-    expect(await within(dock).findByRole("button", { name: "Start terminal" })).toBeVisible();
+    // Closing the thread's last tool took the dock away; it is back with the
+    // terminal, so the page is asked rather than the element held from before.
+    expect(await screen.findByRole("button", { name: "Start terminal" })).toBeVisible();
     const starts = () =>
       vi.mocked(codeApi.executeOperation).mock.calls.filter(([c]) => c.kind === "start-terminal");
     expect(starts()).toHaveLength(0);
@@ -6678,7 +6700,7 @@ describe("App", () => {
     );
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
-    const tools = await screen.findByRole("toolbar", { name: "Tools" });
+    const tools = await findToolRow();
     const files = within(tools).getByRole("button", { name: "Files" });
     expect(files).toHaveAttribute("aria-pressed", "false");
 
@@ -6712,10 +6734,7 @@ describe("App", () => {
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
     await user.click(screen.getByRole("button", { name: "Open bottom panel" }));
     await screen.findByRole("region", { name: "Bottom panel" });
-    const terminal = within(await screen.findByRole("toolbar", { name: "Tools" })).getByRole(
-      "button",
-      { name: "Terminal" },
-    );
+    const terminal = within(await findToolRow()).getByRole("button", { name: "Terminal" });
     await waitFor(() => expect(terminal).toHaveAttribute("aria-pressed", "true"));
 
     terminal.focus();
@@ -6744,7 +6763,7 @@ describe("App", () => {
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
     await user.click(
-      await within(await screen.findByRole("toolbar", { name: "Tools" })).findByRole("button", {
+      await within(await findToolRow()).findByRole("button", {
         name: "Files",
       }),
     );
@@ -6791,7 +6810,7 @@ describe("App", () => {
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
     await user.click(
-      await within(await screen.findByRole("toolbar", { name: "Tools" })).findByRole("button", {
+      await within(await findToolRow()).findByRole("button", {
         name: "Files",
       }),
     );
@@ -6828,7 +6847,7 @@ describe("App", () => {
     );
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
-    await screen.findByRole("toolbar", { name: "Tools" });
+    await findToolRow();
     // Environment does not count toward the tiles, so three tools and the
     // section leave room for a fourth tool, and nothing is replaced.
     for (const tool of ["Files", "Browser", "Environment", "Terminal"]) {
@@ -7135,18 +7154,15 @@ describe("App", () => {
     const projectTools = within(dock).getByRole("complementary", { name: "Project tools" });
     expect(within(projectTools).getByRole("button", { name: "Terminal" })).toBeEnabled();
     expect(within(projectTools).getByText("Other tools open once the task starts")).toBeVisible();
-    // The title band's own Terminal button waits for the thread; the one in
-    // the stage is the dock's, so only that one is counted here.
-    const bandTerminal = within(screen.getByRole("toolbar", { name: "Tools" })).getByRole(
-      "button",
-      { name: "Terminal" },
-    );
+    // A header's own Terminal button waits for the thread; the one in the
+    // stage is the dock's, so only that one is counted here.
+    const bandTerminal = within(toolRow()).getByRole("button", { name: "Terminal" });
     expect(bandTerminal).toHaveAttribute("aria-disabled", "true");
     expect(bandTerminal).toHaveAttribute("aria-description", "Available once the task starts");
     expect(
       screen
         .getAllByRole("button", { name: "Terminal" })
-        .filter((button) => button !== bandTerminal),
+        .filter((button) => button.closest('[role="toolbar"][aria-label="Tools"]') === null),
     ).toHaveLength(1);
 
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Start here");
@@ -7345,14 +7361,15 @@ describe("App", () => {
     // Document has no button of its own: unchecking it in More tools closes it.
     const more = await openAddToolMenu(user, dock);
     await user.click(within(more).getByRole("menuitemcheckbox", { name: "Document" }));
-    expect(within(dock).queryByRole("region", { name: "Document" })).toBeNull();
+    // The last tool to close takes the dock with it, so the page is asked.
+    expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
 
     // The next turn rewrites the same file: the tab the person closed stays closed.
     change = "modified";
     await user.type(composer, "rewrite it{Enter}");
     await waitFor(() => expect(operations).toHaveLength(2));
     await screen.findAllByText("Written.");
-    expect(within(dock).queryByRole("region", { name: "Document" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Document" })).toBeNull();
   }, 15_000);
 
   it("stops offering a written document after the turn deletes it", async () => {

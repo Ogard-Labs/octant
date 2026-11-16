@@ -30,9 +30,9 @@ const CONTROL = 24;
 const GAP = 4;
 /** The bar's own inset: 12 leading, 8 trailing. */
 const INSETS = 20;
-/** Arrange and Close with the gaps around them. */
-export const TILE_CONTROLS = 2 * CONTROL + 2 * GAP;
-/** A pane that can become a card has one more: Minimise, before Arrange. */
+/** Close with the gap before it. */
+export const TILE_CONTROLS = CONTROL + GAP;
+/** A pane that can become a card has one more: Minimise, before Close. */
 export const TILE_MINIMISE_CONTROL = CONTROL + GAP;
 
 /**

@@ -533,7 +533,7 @@ were split:
 - Linear issues: bulleted list (`ListTodo`), apart from the plan's tick list.
 - File tree toggle: indented tree list (`ListTree`, filled while the tree
   shows), apart from the panel glyphs beside it.
-- Arrange (a tool's tile layout): four squares (`LayoutGrid`), not a panel.
+- Arrange (a tool's tile layout) has no icon: it is a pane bar's context menu.
 - Goal: crosshair (`Target`), apart from the concentric issue dot.
 - Environment dock tool: a tower (`HostTower`, the computer the thread runs
   on), apart from the sliders of Settings and the composer's options.
@@ -1405,14 +1405,20 @@ in [Workspace: Shell grid and tool row](docs/design/workspace.md#shell-grid-and-
 
 ### One tile bar
 
-Every pane in the dock has one 36px bar, the same whether the tool is shown
-alone or among tiles: its name (a 16px icon and a 14px medium label) or its own
-tabs, its controls, then Arrange and Close, on insets of 12px leading and 8px
-trailing, 4px between controls, on the bar surface (the sidebar's fill, a step
-off the pane) with its hairline drawn inside the 36px. Controls are 24px with
-16px glyphs; a view choice is a 28px word tray of 24px segments; an action
-everyone knows is an icon button with a tooltip. Arrange keeps its slot,
-disabled, while there is nothing to arrange. At most one 32px secondary row
+Every pane in the dock has one bar as tall as the title band and the thread's
+header (44px, `--oct-title-rail-h`), the same whether the tool is shown alone or
+among tiles: its name (a 16px icon and a 14px medium label) or its own tabs, its
+controls, then Minimise (a Browser, a Terminal) and Close, on insets of 12px
+leading and 8px trailing, 4px between controls, on the bar surface (the
+sidebar's fill, a step off the pane) with its hairline drawn inside it. The
+dock has no head of its own over its panes: a top pane's bar stands in the
+title band, on the thread header's line, on the band's ground with no fill or
+rule of its own, and the pane's fill starts under it; the last column's top bar
+ends before the window's toggles. Controls are 24px with 16px glyphs; a view
+choice is a 28px word tray of 24px segments; an action everyone knows is an icon
+button with a tooltip. A bar carries no Arrange button: a pane is arranged by
+dragging its bar, and the same moves are the bar's context menu (right click,
+the menu key, or Shift+F10 on any control of the bar). At most one 32px secondary row
 holds content (a filter, a status line) on the bar's insets, and a pane's
 content starts on the same 12px. When the controls do not fit, word switches
 fold to a named control, then actions into one More menu; status text and
@@ -1543,8 +1549,11 @@ Surface (measure 880px, or wide)
     Inbox and To-dos open to the same width, and a list page whose header holds
     an icon cluster ends it on the search field's right edge (Issues as Pull
     requests).
-  - A thread's title band starts the mark 20px in and ends its actions 20px in,
-    the transcript's and the composer's own edges at ordinary widths.
+  - A thread's header starts the mark 20px in, on the transcript's and the
+    composer's own edge at ordinary widths. Its tool row ends 8px in from the
+    header's end where that is a pane's or the Environment section's edge (the
+    inset a tile bar ends on), and at the window's own toggles where the
+    thread's box reaches the window's edge.
   - A tile's blocks keep 12px between them, including the blocks a component
     nests inside one block.
 

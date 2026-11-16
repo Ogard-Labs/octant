@@ -225,6 +225,15 @@ export function ShellFrame(props: ShellFrameProps) {
         data-dock-tile-columns={
           props.standaloneSurface === undefined && props.dockTileColumns === 2 ? "2" : undefined
         }
+        // The Environment section is open beside the thread: alone, or with
+        // tool panes after it. A single pane's header then runs on over it.
+        data-thread-environment={
+          props.standaloneSurface !== undefined || props.dockEnvironmentWidth === undefined
+            ? undefined
+            : props.dockToolsShown === true
+              ? "tools"
+              : "alone"
+        }
         data-octant-sidebar-vibrancy={props.sidebarVibrancyMode ?? "off"}
         data-thread-provider-icons={props.showThreadProviderIcons === false ? "false" : "true"}
         data-transcript-text-size={props.transcriptTextSize ?? "small"}

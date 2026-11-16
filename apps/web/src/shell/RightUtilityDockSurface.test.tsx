@@ -237,13 +237,16 @@ describe("tool tiles in the right sidebar", () => {
     return <p>{`Live ${props.id}`}</p>;
   }
 
+  /** Opens a pane's Arrange menu: the context menu of its bar. */
+  function openArrange(tool: string) {
+    const bar = screen.getByRole("region", { name: tool }).querySelector(".dock-tile__bar");
+    if (bar === null) throw new Error(`${tool} has no bar`);
+    fireEvent.contextMenu(bar);
+  }
+
   /** A tile's menu: Arrange <tool>, then the item. */
   async function arrange(user: ReturnType<typeof userEvent.setup>, tool: string, item: string) {
-    await user.click(
-      within(screen.getByRole("region", { name: tool })).getByRole("button", {
-        name: `Arrange ${tool}`,
-      }),
-    );
+    openArrange(tool);
     await user.click(await screen.findByRole("menuitem", { name: item }));
   }
 
@@ -602,11 +605,11 @@ describe("tool tiles in the right sidebar", () => {
     expect(screen.getByText("Live ios-simulator")).toBeVisible();
   });
 
-  it("leaves the dock's header empty when the row lives in the title band", () => {
+  it("draws no head over its panes when the row lives in the thread's header", () => {
     render(<TiledDock initial={rowState()} />);
-    const header = document.querySelector(".dock-tool-column > .right-utility-dock__toolbar");
-    expect(header).not.toBeNull();
-    expect(within(header as HTMLElement).queryAllByRole("button")).toHaveLength(0);
+    // A pane's bar is the top row, on the thread header's line.
+    expect(document.querySelector(".right-utility-dock__toolbar")).toBeNull();
+    expect(document.querySelector('[data-dock-lead="tiles"] .dock-tile__bar')).not.toBeNull();
     expect(screen.queryByRole("tablist", { name: "Open tools" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Add tool" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Show another tool" })).toBeNull();
@@ -824,7 +827,7 @@ describe("tool tiles in the right sidebar", () => {
     let state = openUtilityTabState({ tabs: [] }, "files");
     state = openUtilityTabBesideState(state, "canvas", "canvas", "stacked");
     render(<TiledDock columnsFit={false} initial={state} />);
-    await user.click(screen.getByRole("button", { name: "Arrange Canvas" }));
+    openArrange("Canvas");
     expect(await screen.findByRole("menuitem", { name: /above Files/ })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Move right" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: /right of Files/ })).toBeNull();
@@ -862,14 +865,10 @@ describe("tool tiles in the right sidebar", () => {
     }
   });
 
-  it("offers the same placement from a tile's Arrange menu for the keyboard", async () => {
+  it("offers the same placement from the menu of a tile's bar", async () => {
     const user = userEvent.setup();
     render(<TiledDock initial={tiledState()} />);
-    await user.click(
-      within(screen.getByRole("region", { name: "Files" })).getByRole("button", {
-        name: "Arrange Files",
-      }),
-    );
+    openArrange("Files");
     await user.click(await screen.findByRole("menuitem", { name: "Move right of iOS Simulator" }));
     expect(
       await screen.findByRole("separator", { name: "Resize iOS Simulator and Files" }),
@@ -885,11 +884,7 @@ describe("tool tiles in the right sidebar", () => {
     const user = userEvent.setup();
     render(<TiledDock initial={tiledState()} />);
     const items = async (tool: string) => {
-      await user.click(
-        within(screen.getByRole("region", { name: tool })).getByRole("button", {
-          name: `Arrange ${tool}`,
-        }),
-      );
+      openArrange(tool);
       const found = (await screen.findAllByRole("menuitem")).map((item) => item.textContent);
       await user.keyboard("{Escape}");
       return found;
@@ -1488,12 +1483,14 @@ describe("tool tiles in the right sidebar", () => {
       const browser = screen.getByRole("region", { name: "Browser" });
       const files = screen.getByRole("region", { name: "Files" });
       expect(within(files).queryByRole("button", { name: /^Minimise/ })).toBeNull();
-      // Minimise stands before Arrange and Close, which every pane ends with.
+      // Minimise stands before Close, which every pane ends with; no pane
+      // carries an Arrange button.
       const trailing = within(browser)
         .getAllByRole("button")
         .map((button) => button.getAttribute("aria-label"))
         .filter((name) => /^(Minimise|Arrange|Close) Browser$/.test(name ?? ""));
-      expect(trailing.slice(-3)).toEqual(["Minimise Browser", "Arrange Browser", "Close Browser"]);
+      expect(trailing.slice(-2)).toEqual(["Minimise Browser", "Close Browser"]);
+      expect(trailing).not.toContain("Arrange Browser");
       await user.click(within(browser).getByRole("button", { name: "Minimise Browser" }));
       expect(screen.queryByRole("region", { name: "Browser" })).not.toBeInTheDocument();
       expect(within(shelf()!).getByRole("region", { name: "Minimised Browser" })).toBeVisible();
@@ -1503,18 +1500,10 @@ describe("tool tiles in the right sidebar", () => {
     it("offers Minimise to card only for the Browser and the Terminal, in the tile's Arrange menu and the button's context menu", async () => {
       const user = userEvent.setup();
       render(<TiledDock initial={showUtilityTabBeside(opened("browser", "files"), "browser")} />);
-      await user.click(
-        within(screen.getByRole("region", { name: "Browser" })).getByRole("button", {
-          name: "Arrange Browser",
-        }),
-      );
+      openArrange("Browser");
       expect(await screen.findByRole("menuitem", { name: "Minimise to card" })).toBeVisible();
       await user.keyboard("{Escape}");
-      await user.click(
-        within(screen.getByRole("region", { name: "Files" })).getByRole("button", {
-          name: "Arrange Files",
-        }),
-      );
+      openArrange("Files");
       const menu = await screen.findByRole("menu", { name: "Arrange Files" });
       expect(
         within(menu).queryByRole("menuitem", { name: "Minimise to card" }),
@@ -1522,6 +1511,17 @@ describe("tool tiles in the right sidebar", () => {
       await user.keyboard("{Escape}");
       expect(await menuOf("Browser")).toContain("Minimise to card");
       expect(await menuOf("Files")).not.toContain("Minimise to card");
+    });
+
+    it("opens a pane's Arrange menu from the keyboard with Shift+F10 on a control of its bar", async () => {
+      const user = userEvent.setup();
+      render(<TiledDock initial={showUtilityTabBeside(opened("browser", "files"), "browser")} />);
+      within(screen.getByRole("region", { name: "Files" }))
+        .getByRole("button", { name: "Close Files" })
+        .focus();
+      await user.keyboard("{Shift>}{F10}{/Shift}");
+      const menu = await screen.findByRole("menu", { name: "Arrange Files" });
+      expect(within(menu).getByRole("menuitem", { name: "Show alone" })).toBeVisible();
     });
 
     it("opens the button's context menu with Minimise to card from the keyboard with Shift+F10", async () => {

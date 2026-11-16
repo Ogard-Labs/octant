@@ -236,7 +236,9 @@ describe("the shell's edges and gaps", () => {
     expect(header).toMatch(/padding-left:\s*var\(--pane-title-start\);/);
     // A header with content tabs keeps the insets it had: the tabs lead it.
     expect(rule(root, ".workspace-pane__header")).toMatch(/padding:\s*2px 0 2px 4px;/);
-    expect(splitWorkspace).toContain('data-header-kind={showTabs ? "tabs" : "title"}');
+    expect(splitWorkspace).toContain(
+      'data-header-kind={showTabs ? "tabs" : showHeader ? "title" : "tools"}',
+    );
     expect(root).toMatch(
       /\.shell--sidebar-collapsed \.workspace-pane__header\[data-header-kind="title"\] \{\s*padding-left: calc\(var\(--octant-window-chrome-leading-width, 148px\) \+ var\(--pane-title-start\)\);/,
     );

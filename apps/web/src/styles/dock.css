@@ -66,6 +66,11 @@
   grid-template-rows: none;
 }
 
+/* No head over the panes: their bars are the top row. */
+.right-utility-dock__surface[data-dock-lead="tiles"] {
+  grid-template-rows: minmax(0, 1fr);
+}
+
 .dock-env-strip {
   display: flex;
   min-width: 0;
@@ -131,7 +136,7 @@
   min-width: 0;
   min-height: 0;
   flex: 1 1 0;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .dock-tool-column > .right-utility-dock__resize {
@@ -1062,15 +1067,18 @@
 }
 
 /* One bar per pane: the tool's own header, the same for a tool alone and for
-   one among tiles. 36px on its own surface (a step off the pane, the sidebar's
-   fill) with the hairline inside it; the name or the tabs lead from the 12px
-   inset, and the last control ends 8px from the edge, on the title band's end
-   inset. Measured before: a tool alone had a 36px tab row inset 8px, a 32px
-   control row or no bar at all, and a tiled one a 32px bar inset 12px, so
-   opening a second tool moved every tab and control in the first. */
+   one among tiles. As tall as the title band and the thread's header (44px),
+   so the top pane's bar and the thread's header are one line across the
+   window; on its own surface (a step off the pane, the sidebar's fill) with
+   the hairline inside it; the name or the tabs lead from the 12px inset, and
+   the last control ends 8px from the edge, on the title band's end inset.
+   Measured before: a tool alone had a 36px tab row inset 8px, a 32px control
+   row or no bar at all, and a tiled one a 32px bar inset 12px, so opening a
+   second tool moved every tab and control in the first; then every bar was
+   36px under a 44px band that held nothing over the panes but two toggles. */
 .dock-tile__bar {
   display: flex;
-  height: 36px;
+  height: var(--oct-title-rail-h);
   flex: none;
   align-items: center;
   gap: var(--oct-space-1);
@@ -1085,6 +1093,26 @@
 
 .dock-tile[data-focused="true"] > .dock-tile__bar {
   color: var(--oct-fg);
+}
+
+/* Docked, the tiles start at the window's top: a top pane's bar stands in the
+   title band. The band is the frame's ground, so that bar takes no fill and no
+   rule of its own and the pane's fill starts under it, as the thread's does
+   under its header. The drawer keeps its own head over its one pane. */
+[data-dock-lead="tiles"] .dock-tile[data-dock-tile-edge="top"] {
+  background-repeat: no-repeat;
+  background-position: 0 var(--oct-title-rail-h);
+}
+
+[data-dock-lead="tiles"] .dock-tile[data-dock-tile-edge="top"] > .dock-tile__bar {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* The window's own toggles stand over the end of the band: the last column's
+   top bar ends before them, by the width the chrome measures. */
+[data-dock-lead="tiles"] .dock-tile[data-dock-tile-corner="trailing"] > .dock-tile__bar {
+  padding-right: var(--octant-window-chrome-reserved-width, 76px);
 }
 
 .dock-tile__lead {

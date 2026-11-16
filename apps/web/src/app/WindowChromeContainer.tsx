@@ -6,21 +6,13 @@ import type { OctantHostBridge, ResolvedSidebarMaterial } from "../shell/hostBri
 import { WindowChrome } from "../shell/WindowChrome";
 import type { TitleBandChangesFacts } from "../shell/TitleBandChanges";
 import type { WindowHistory } from "../shell/windowHistory";
-import type { DockToolButtonsModel } from "../shell/dockToolButtonsModel";
-import type { DockUtilityLauncherReference } from "../shell/DockUtilityLauncher";
 import { useProjectCheckoutChanges } from "../shell/useProjectCheckoutChanges";
 import type { ShellActions } from "./shellActions";
 
 export interface WindowChromeContainerProps {
   readonly actions: Pick<
     ShellActions,
-    | "addDockTab"
-    | "recoverZen"
-    | "startNewThreadDraft"
-    | "toggleBottomPanel"
-    | "toggleDock"
-    | "toggleDockTool"
-    | "runDockToolMenu"
+    "addDockTab" | "recoverZen" | "startNewThreadDraft" | "toggleBottomPanel" | "toggleDock"
   >;
   readonly activeMode: OctantMode;
   readonly activeSurface: string;
@@ -45,10 +37,6 @@ export interface WindowChromeContainerProps {
   /** The agent's Browser is live and has a card the closed dock is holding. */
   readonly dockBrowserActive: boolean;
   readonly dockPresentedOpen: boolean;
-  /** Value-stable between renders; see the model in App. */
-  readonly dockTools?: DockToolButtonsModel;
-  /** The pull requests listed in More tools; stable between renders. */
-  readonly dockReferences?: ReadonlyArray<DockUtilityLauncherReference>;
   readonly hostBridge?: OctantHostBridge;
   readonly hostReservesTitlebarInset: boolean;
   readonly isNarrow: boolean;
@@ -62,9 +50,10 @@ export interface WindowChromeContainerProps {
 }
 
 /**
- * The window's top chrome: the active surface's title and the sidebar, dock
- * and bottom panel disclosures. Every input is a primitive or a stable
- * action, so a shell render that changed none of them leaves it alone.
+ * The window's top chrome: the sidebar, dock and bottom panel disclosures. A
+ * thread's tool buttons are not here; they stand in its pane's header. Every
+ * input is a primitive or a stable action, so a shell render that changed none
+ * of them leaves it alone.
  */
 export const WindowChromeContainer = memo(function WindowChromeContainer(
   props: WindowChromeContainerProps,
@@ -139,14 +128,6 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
       dockBrowserActive={dockBrowserActive && !dockPresentedOpen && !isNarrow}
       dockExpanded={dockPresentedOpen}
       dockLabel="Right sidebar"
-      {...(props.dockTools === undefined
-        ? {}
-        : {
-            dockTools: props.dockTools,
-            onToggleDockTool: actions.toggleDockTool,
-            onDockToolMenuAction: actions.runDockToolMenu,
-            ...(props.dockReferences === undefined ? {} : { dockReferences: props.dockReferences }),
-          })}
       {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
       isNarrow={isNarrow}
       material={material}

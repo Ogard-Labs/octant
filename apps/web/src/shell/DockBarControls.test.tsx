@@ -152,20 +152,13 @@ afterEach(() => {
 });
 
 describe("a tool's controls in its tile's bar", () => {
-  it("stands the tool's words and status, then its actions, between its name and Arrange and Close, in that order", () => {
+  it("stands the tool's words and status, then its actions, between its name and Close, in that order", () => {
     render(<Dock layout={two} />);
     const region = screen.getByRole("region", { name: "one" });
     const names = within(region)
       .getAllByRole("button")
       .map((button) => button.getAttribute("aria-label") ?? button.textContent);
-    expect(names).toEqual([
-      "View A",
-      "View B",
-      "Refresh things",
-      "Thing actions",
-      "Arrange one",
-      "Close one",
-    ]);
+    expect(names).toEqual(["View A", "View B", "Refresh things", "Thing actions", "Close one"]);
     expect(within(region).getAllByText("3 things").length).toBeGreaterThan(0);
     expect(region.querySelectorAll(".dock-tile__bar")).toHaveLength(1);
     expect(screen.getByText("tiled, view a")).toBeInTheDocument();
@@ -248,7 +241,7 @@ describe("a tool's controls in its tile's bar", () => {
 });
 
 describe("a tool shown alone", () => {
-  it("draws the same one bar a tiled tool has: its name, its controls, Arrange and Close", () => {
+  it("draws the same one bar a tiled tool has: its name, its controls and Close", () => {
     render(<Dock layout={alone} />);
     const bars = document.querySelectorAll(".dock-tile__bar");
     expect(bars).toHaveLength(1);
@@ -259,11 +252,11 @@ describe("a tool shown alone", () => {
     expect(screen.getByRole("button", { name: "Close one" })).toBeInTheDocument();
   });
 
-  it("keeps Arrange in its place, disabled, while there is nothing to arrange", () => {
+  it("ends a bar with Close alone: arranging is a drag or the bar's menu, never a button", () => {
     render(<Dock layout={aloneWithoutControls} />);
     expect(document.querySelectorAll(".dock-tile__bar")).toHaveLength(1);
     expect(screen.getByText("plain tiled")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Arrange / })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /^Arrange / })).toBeNull();
   });
 
   it("folds its controls by the same steps as a tiled bar's", () => {
@@ -303,8 +296,8 @@ describe("a tool in the bottom panel", () => {
 });
 
 describe("the bar's sizes", () => {
-  it("holds every pane's bar to 36px on the 12px and 8px insets, with 4px between controls", () => {
-    expect(rule(".dock-tile__bar")).toMatch(/height:\s*36px/);
+  it("holds every pane's bar to the title band's height on the 12px and 8px insets, with 4px between controls", () => {
+    expect(rule(".dock-tile__bar")).toMatch(/height:\s*var\(--oct-title-rail-h\)/);
     expect(rule(".dock-tile__bar")).toMatch(
       /padding:\s*0 var\(--oct-space-2\) 0 var\(--oct-space-3\)/,
     );
@@ -433,8 +426,8 @@ describe("a bar that holds status text and a tool's name", () => {
     if (text === undefined) throw new Error("The status text is not drawn.");
     expect(text).toBeVisible();
     // Counted at its measured width: the bar's room (300 less insets, the name
-    // and Arrange and Close) holds it and the one More button.
-    expect(120 + 4 + 28).toBeLessThanOrEqual(300 - 20 - (14 + 4 + 40) - 60);
+    // and Close) holds it and the one More button.
+    expect(120 + 4 + 28).toBeLessThanOrEqual(300 - 20 - (14 + 4 + 40) - 28);
     expect(screen.getByText("one", { selector: ".dock-tile__name" })).toBeInTheDocument();
   });
 
@@ -619,7 +612,6 @@ describe("controls a tool draws itself", () => {
         name: "Versions",
       }),
     ).toBe(versions);
-    expect(screen.getByRole("button", { name: "Arrange one" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Close one" })).toBeInTheDocument();
   });
 

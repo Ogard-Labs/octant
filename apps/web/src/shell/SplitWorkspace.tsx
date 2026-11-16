@@ -1,7 +1,7 @@
 import { useAgentThreadName } from "../agentAccess/agentThreadAttribution";
 import { ProjectMark } from "../projects/ProjectMark";
 import type { ReactNode } from "react";
-import { useMemo } from "react";
+import { useContext, useMemo } from "react";
 import type { WorkspaceContentTabs } from "./workspaceContentTabs";
 import { WorkspaceContentViewContext } from "./WorkspaceContentView";
 import { OctantTabs, OctantTabsList, OctantTabsTab } from "../ui/base/OctantTabs";
@@ -40,6 +40,14 @@ import { PullRequestChip } from "../code/PullRequestChip";
 import type { ThreadProviderIdentity } from "./navigationModel";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { EnvironmentMark, type EnvironmentMarkProps } from "./EnvironmentMark";
+import { PaneDockToolGroup, PaneDockToolsContext } from "./PaneDockTools";
+
+/** The surfaces that show a thread itself: what a resting pane's tool buttons open their tools for. */
+const TOOL_OWNER_SURFACE_KINDS: ReadonlySet<string> = new Set([
+  "chat-thread",
+  "work-thread",
+  "code-overview",
+]);
 
 const splitContainerStyle = { height: "100%", minHeight: 0, minWidth: 0, width: "100%" };
 
@@ -608,6 +616,15 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     surface.threadId !== undefined &&
     props.waitingThreadIds?.has(String(surface.threadId)) === true;
   const showHeader = props.layout.kind !== "pane" || props.showSinglePaneHeader !== false;
+  // The pane's tool buttons stand at the right end of its header. The focused
+  // pane draws the dock's own row, whatever it shows (a start screen included,
+  // whose header is then that row alone); another pane of a split draws them
+  // only for a thread, the thing a tool opens for.
+  const paneTools = useContext(PaneDockToolsContext);
+  const showTools =
+    paneTools !== undefined &&
+    paneTools.model.buttons.length + paneTools.model.more.length > 0 &&
+    (active || TOOL_OWNER_SURFACE_KINDS.has(surface.kind));
   const title = workspaceSurfaceTitle(surface, props.liveThreadTitles);
   const startedBy = useAgentThreadName(
     "threadId" in surface && surface.threadId !== undefined ? String(surface.threadId) : undefined,
@@ -662,93 +679,95 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
         onKeyDownCapture={(event) => activateUnlessClosing(event.target)}
         onPointerDownCapture={(event) => activateUnlessClosing(event.target)}
       >
-        {showHeader || showTabs ? (
+        {showHeader || showTabs || showTools ? (
           <OctantContextMenuRoot onOpenChange={setMenuOpen}>
             <OctantContextMenuTrigger
               aria-expanded={menuOpen}
               className="workspace-pane__header"
-              data-header-kind={showTabs ? "tabs" : "title"}
+              data-header-kind={showTabs ? "tabs" : showHeader ? "title" : "tools"}
               data-mixed-projects={mixedProjects ? "true" : undefined}
               render={<div />}
             >
-              <span
-                className="workspace-pane__grip window-no-drag"
-                onPointerCancel={props.drag.onPointerCancel}
-                onPointerDown={(event) =>
-                  props.drag.onPointerDown(event, {
-                    dragKey,
-                    paneId: pane.paneId,
-                    surface,
-                    title,
-                  })
-                }
-                onPointerMove={props.drag.onPointerMove}
-                onPointerUp={props.drag.onPointerUp}
-                // With tabs open the bar holds only tabs; the Project the pane
-                // runs in moves to this tooltip (the composer strip names it too).
-                title={
-                  showTabs && projectName !== undefined
-                    ? `${projectName} · Drag to move or split`
-                    : "Drag to move or split"
-                }
-              >
-                {showTabs ? (
-                  <>
-                    {gripMark}
-                    {pullRequestChip}
-                  </>
-                ) : null}
-                {/* A breadcrumb: the Project the pane runs in, then what it
+              {showHeader || showTabs ? (
+                <span
+                  className="workspace-pane__grip window-no-drag"
+                  onPointerCancel={props.drag.onPointerCancel}
+                  onPointerDown={(event) =>
+                    props.drag.onPointerDown(event, {
+                      dragKey,
+                      paneId: pane.paneId,
+                      surface,
+                      title,
+                    })
+                  }
+                  onPointerMove={props.drag.onPointerMove}
+                  onPointerUp={props.drag.onPointerUp}
+                  // With tabs open the bar holds only tabs; the Project the pane
+                  // runs in moves to this tooltip (the composer strip names it too).
+                  title={
+                    showTabs && projectName !== undefined
+                      ? `${projectName} · Drag to move or split`
+                      : "Drag to move or split"
+                  }
+                >
+                  {showTabs ? (
+                    <>
+                      {gripMark}
+                      {pullRequestChip}
+                    </>
+                  ) : null}
+                  {/* A breadcrumb: the Project the pane runs in, then what it
                     shows. With tabs open the bar is tabs alone: a Project name
                     ahead of them read as a tab of its own, so it moves to the
                     handle's tooltip. The branch lives in the composer's strip,
                     beside the thread it runs. */}
-                {(showTabs && !mixedProjects) || projectName === undefined ? null : (
-                  <span className="workspace-pane__context" title={projectName}>
-                    <ProjectMark
-                      name={projectName}
-                      {...(projectId === undefined ? {} : { projectId })}
-                    />
-                    <span className="workspace-pane__context-name">{projectName}</span>
-                  </span>
-                )}
-                {showTabs ? null : (
-                  <>
-                    {projectName === undefined ? null : (
-                      <span aria-hidden="true" className="workspace-pane__crumb">
-                        /
-                      </span>
-                    )}
-                    <span
-                      className="oct-nav-name workspace-pane__title"
-                      title={projectName === undefined ? title : `${projectName} / ${title}`}
-                    >
-                      {title}
+                  {(showTabs && !mixedProjects) || projectName === undefined ? null : (
+                    <span className="workspace-pane__context" title={projectName}>
+                      <ProjectMark
+                        name={projectName}
+                        {...(projectId === undefined ? {} : { projectId })}
+                      />
+                      <span className="workspace-pane__context-name">{projectName}</span>
                     </span>
-                    {startedBy === undefined ? null : (
+                  )}
+                  {showTabs ? null : (
+                    <>
+                      {projectName === undefined ? null : (
+                        <span aria-hidden="true" className="workspace-pane__crumb">
+                          /
+                        </span>
+                      )}
                       <span
-                        className="workspace-pane__started-by"
-                        title={`Started by ${startedBy}`}
+                        className="oct-nav-name workspace-pane__title"
+                        title={projectName === undefined ? title : `${projectName} / ${title}`}
                       >
-                        {`Started by ${startedBy}`}
+                        {title}
                       </span>
-                    )}
-                    {gripMark}
-                    {pullRequestChip}
-                  </>
-                )}
-                {showTabs ? null : running ? (
-                  // The host reports that a turn is executing, not when it
-                  // began, so the chip names the state and no elapsed time.
-                  // With tabs open, each tab carries its own thread's state.
-                  <span className="workspace-pane__status">
-                    <span aria-hidden="true" className="spinner spinner-sm" />
-                    Running
-                  </span>
-                ) : waiting ? (
-                  <span className="workspace-pane__status">Needs you</span>
-                ) : null}
-              </span>
+                      {startedBy === undefined ? null : (
+                        <span
+                          className="workspace-pane__started-by"
+                          title={`Started by ${startedBy}`}
+                        >
+                          {`Started by ${startedBy}`}
+                        </span>
+                      )}
+                      {gripMark}
+                      {pullRequestChip}
+                    </>
+                  )}
+                  {showTabs ? null : running ? (
+                    // The host reports that a turn is executing, not when it
+                    // began, so the chip names the state and no elapsed time.
+                    // With tabs open, each tab carries its own thread's state.
+                    <span className="workspace-pane__status">
+                      <span aria-hidden="true" className="spinner spinner-sm" />
+                      Running
+                    </span>
+                  ) : waiting ? (
+                    <span className="workspace-pane__status">Needs you</span>
+                  ) : null}
+                </span>
+              ) : null}
               {showTabs ? (
                 <OctantTabs
                   className="workspace-content-tabs"
@@ -867,6 +886,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
               ) : null}
               {props.threadHeader?.(surface)}
               <span aria-hidden="true" className="workspace-pane__window-drag-space" />
+              {showTools ? <PaneDockToolGroup active={active} paneId={pane.paneId} /> : null}
               {/* Alone in the window there is nothing to close into; the × is a
                 split's control, for giving one pane's room back to the other. */}
               {props.layout.kind === "pane" ? null : (

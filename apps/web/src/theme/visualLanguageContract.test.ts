@@ -1761,7 +1761,7 @@ describe("the public-block visual language", () => {
     });
 
     it("gives every pane bar one height and surface, alone or tiled", () => {
-      expect(body(".dock-tile__bar")).toMatch(/height:\s*36px/);
+      expect(body(".dock-tile__bar")).toMatch(/height:\s*var\(--oct-title-rail-h\)/);
       expect(body(".dock-tile__bar")).toMatch(/background:\s*var\(--octant-sidebar-fill\)/);
       expect(dock).not.toContain("dock-tile__row");
       expect(dock).not.toContain("dock-tile__caption");

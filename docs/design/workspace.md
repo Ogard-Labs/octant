@@ -1125,10 +1125,10 @@ local storage: it grants nothing, starts nothing, and the bottom panel never
 has one. Each tile has one bar, 32px: the tool's name (the Browser's and the Terminal's bar is their row of pages or sessions, one tab each even for a single page, then "+"; a tool alone has no bar, so the same row stands at the top of its body, and the row is never dropped in any layout),
 then the tool's own controls (navigation as words, actions as icons, status as
 text; they fold into a named view menu and then a More menu before the name is
-cut), with an Arrange menu (Move left, right, up and down where the caps allow, Move
+cut), with an Arrange menu on the bar's context menu (right click, the menu key, or Shift+F10 on a control of the bar; never a button on the bar: Move left, right, up and down where the caps allow, Move
 left of, right of, above or below each other tile where the caps allow it and it changes
 something, Show alone, Hide from view, and for the Browser and Terminal Minimise to card) and Close at its
-trailing edge; a tool that is open but not shown is marked on its button in the title band's
+trailing edge; a tool that is open but not shown is marked on its button in the thread header's
 tool row (a minimised tool is not a tile: its card stands for it, and its button says so).
 Stacked, a page showed four bars and named the tool
 three times. Every tile is a flat pane that shares its edges with its neighbours and
@@ -1333,7 +1333,7 @@ are owned by
 The top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. A new Code task's pane, before its thread exists, keeps
 the control but starts with the dock closed, whatever the window's saved choice;
-opened there, its title band shows the common tools disabled ("Available once the
+opened there, its tool row shows the common tools disabled ("Available once the
 task starts") and its body says so. That show or hide belongs to the draft and is
 never saved as the window's choice. Once that start screen has a Project, the dock's body holds the
 Project's quick tools (Terminal and Browser; a server Project's are its
@@ -1342,8 +1342,25 @@ beside the start screen ([Start screen: Welcome screen](start-screen.md#welcome-
 the local window's Remote access switch, Local servers, Context, Changes,
 Outputs, Background tasks, Running now; see [Right dock and bottom panel](#right-dock-and-bottom-panel));
 its header is an empty band as tall as the title rail, and the tools are opened
-from the title band's **tool row**. At 961px and wider the row sits before the
-bottom-panel and dock toggles: one
+from the **tool row** at the right end of the thread pane's own header, so a
+thread and the controls that act on it read as one box. The title band keeps the
+window's controls only: Show sidebar, Back and Forward while the sidebar is
+hidden, the Open in and Project action slots, the Code start screen's
+uncommitted-changes count, and the bottom-panel and dock toggles. At 961px and
+wider the focused pane has the row, and so does every other pane of a split that
+shows a thread. A single pane and its Environment section are one box under one
+header: the header runs on over the section, so the row stands above the section
+and does not move when the section opens or closes. Where the box ends at the
+window's edge the header stops before the window's toggles; where tool panes
+follow, it ends at their edge. In a split each row stays inside its own pane.
+The dock shows the focused thread's tools, so only the focused pane's row shows
+what is pressed or open; the rows of the other panes stand at rest, and a press
+there focuses that pane and shows the tool for its thread, never closing one.
+Under a header 440px wide the row folds into one **Tools** menu button that
+lists every tool. A start screen has no title, so its header is the row alone,
+laid over the band. Closing the last open tool closes the dock, so the thread
+takes the window back and the row returns to where it stood before anything
+opened; the dock toggle still opens the empty dock. The row is one
 icon button for each of Environment, Terminal, Review, Browser, and Files, in that order,
 then **More tools**, a menu of every other tool the thread can use, grouped as the
 launcher groups them, each a checked item while that tool is shown, and after the
@@ -1362,7 +1379,7 @@ is not refused: its press shows it in the focused tile's place, the replaced too
 open but hidden, and the button says "Shows in place of <the focused tool>". On a new Code task
 before its thread exists the buttons are disabled with "Available once the task starts". A press leaves focus
 on the button. The row is one toolbar named "Tools" with one Tab stop and arrow-key
-movement, and its width is part of the trailing cluster the pane header reserves.
+movement, and it keeps its own width in the header: the title gives way first.
 The five tools with a button of their own (Environment, Terminal, Review, Browser,
 Files) have a context menu on that button (right click, the menu key or Shift+F10): Show
 below for an open tool that is not on screen, Show alone, Hide from view and the
@@ -1486,10 +1503,10 @@ place each minimised tool stood in, is window-local presentation stored with the
 thread's open tools; the bottom panel never has one.
 
 - **Ways in.** A Browser or Terminal pane's bar has a **Minimise <tool>**
-  button (a picture-in-picture glyph) before Arrange and Close: one press turns
+  button (a picture-in-picture glyph) before Close: one press turns
   the pane into its card. A tile's **Arrange <tool>** menu offers **Minimise to
   card** for the same two tools, after **Hide from view**. The Browser and
-  Terminal buttons in the title band's tool row offer the same item on their
+  Terminal buttons in the thread header's tool row offer the same item on their
   context menu (right click, the menu key or Shift+F10), after the placements
   and before New Terminal or New Browser page. Pressing a pressed Browser or
   Terminal button minimises it instead of closing it, so the page or shell keeps
@@ -1816,7 +1833,7 @@ Needs attention and Did not succeed; the latest-run line carries the outcome.
 ### Subagents
 
 Environment belongs to a
-thread as a context-aware dock tab opened from the title band's tool row. Its
+thread as a context-aware dock tab opened from the thread header's tool row. Its
 Subagents row counts the active thread's server-authored child AgentRuns
 (working, to review, done) and opens into the full list, working and finished;
 a row opens that subagent in the Agents dock, where reading, steering, and every
@@ -2375,8 +2392,8 @@ Open in, bottom panel, and right dock remain window chrome. Several Browsers are
 tool: their pages sit in a row of their own at the top of the Browser, with a +
 for a new page, and closing the Browser closes every page.
 The Browser's toolbar is one row of plain icon buttons, the address field and
-trailing icons, as the Browser toolbar rules above set out. The right dock's tools are opened from a **tool row** at the right of the
-title band, before the bottom-panel and dock toggles: icon buttons for
+trailing icons, as the Browser toolbar rules above set out. The right dock's tools are opened from a **tool row** at the right end of the
+thread pane's header: icon buttons for
 Environment, Terminal, Review, Browser, Files, then a **More tools** menu of
 checkbox items for every other tool the thread can use (grouped as the launcher
 groups them), then the pull requests the thread is about under "Relevant to this
@@ -2696,8 +2713,9 @@ own surface continued to the right: 300px wide (`ENVIRONMENT_STRIP_WIDTH`; the
 shell sets it as `--octant-dock-env-width`), on the thread's fill, with the
 thread's one hairline on its leading edge running from under the title band to
 the window's bottom. It has no header, close button, resize handle, expand,
-arrange or pop-out control, and draws nothing in the title band; the band's
-tool buttons above it toggle it, and its landmark is the region named
+arrange or pop-out control, and draws nothing in the title band; a single
+pane's header runs on above it, the tool buttons at the header's end toggle it,
+and its landmark is the region named
 Environment. Closing the last tool leaves it alone at exactly 300px, and with
 only Environment open the dock is exactly its width. It is hidden in the narrow
 layout (`isNarrow`: windows 960px wide or less, where the dock becomes a sheet), where the
@@ -2836,7 +2854,7 @@ one "N finished" row; a row opens that run in Agents.
 **Running now** lists the other threads the window knows are working (any
 mode, at most five, newest first, never the thread on screen), each a spinner,
 title, Project, and age, and opens that thread. Model and access are not
-repeated here: they are on the composer. Tools open from the title band's tool row. More tools opens a menu in a
+repeated here: they are on the composer. Tools open from the thread header's tool row. More tools opens a menu in a
 portal anchored to its button, aligned to its end edge and kept inside the
 window by collision handling; it takes focus on its first item, closes on a pick,
 on Escape or on an outside press, and returns focus to its button. The bottom
@@ -2869,7 +2887,7 @@ launchable tool keeps the dock closed and omits its toggle. A new Code task's
 pane before its thread exists keeps the toggle but starts closed, whatever the
 window's saved choice: it has nothing of a thread's to show, and opened by
 default it covered a third of a blank start screen to say its tools were not
-available yet. Opened there by the person, its title band shows the common
+available yet. Opened there by the person, its tool row shows the common
 tools disabled ("Available once the task starts") and its body says so (or,
 once the start screen has a Project, holds that Project's quick tools). That
 show or hide belongs to the draft and is never saved as the window's choice;
@@ -2886,16 +2904,23 @@ them, so open tools can also be shown together as tiles, each one live, beside
 the one tool row. At most two columns of at most three tiles are shown; a
 request past either cap is refused, except that "beside" with two columns present
 puts the tool below in the last column. A tile is a region named for its tool
-with **one bar**, the tool's own header, 36px high in every pane (a tool alone
-has the same bar as a tiled one), so neighbouring bars line up and nothing in a
-pane moves when a neighbour opens or closes. Its leading edge names the tool once (the icon and name; for the
+with **one bar**, the tool's own header, as tall as the title band and the
+thread's header (44px) in every pane (a tool alone has the same bar as a tiled
+one), so neighbouring bars line up, the top pane's bar and the thread's header
+are one line across the window, and nothing in a pane moves when a neighbour
+opens or closes. Docked, the dock has no head over its panes: they start at the
+window's top, a top pane's bar stands in the title band on the band's ground,
+and the last column's top bar ends before the window's bottom-panel and dock
+toggles. Its leading edge names the tool once (the icon and name; for the
 Browser the bar is its row of pages, each named for what it shows, with its close, and the new-page
 control; a shell's sessions and Files' open files lead their bars the same way) and its trailing edge
-holds the tile's controls: an **Arrange <tool>** menu button and a **Close
+holds the tile's controls: **Minimise <tool>** on a Browser or Terminal and a **Close
 <tool>** button that closes the tool as pressing its button again does (every
-page for the Browser). Stacked, a page showed four bars (a strip, a "Browser"
+page for the Browser). The bar has no Arrange button: a pane is arranged by
+dragging its bar, and **Arrange <tool>** is the bar's context menu (right
+click, the menu key, or Shift+F10 on any control of the bar). Stacked, a page showed four bars (a strip, a "Browser"
 caption, the Browser's own page row and its toolbar) and named the tool three
-times, so the dock has no strip and a tile has no caption over its bar. Alone, a tool's Arrange holds only **Minimise to card** (Browser and Terminal) and is otherwise disabled in its slot. The Arrange menu holds **Move
+times, so the dock has no strip and a tile has no caption over its bar. Alone, a tool's Arrange menu holds only **Minimise to card** (Browser and Terminal) and otherwise does not open. The Arrange menu holds **Move
 left**, **Move right**, **Move up** and **Move down**, each present only when
 that move is possible within the caps (a one-column layout moved sideways makes the
 second column, and a column left empty goes), then **Show alone**, **Hide
@@ -3006,7 +3031,7 @@ output" for a shell that printed while nobody looked, an expand icon button
 (**Show Browser**, **Show Terminal**) and one more icon button: **Close Browser** on
 the Browser card, which closes the page it shows, and **Hide Terminal card** on the
 Terminal card, which removes the card and stops nothing: the shell stays open and
-its button in the title band's tool row reads open but not shown; every button a 24px target), then a preview that is itself the expand button (named
+its button in the thread header's tool row reads open but not shown; every button a 24px target), then a preview that is itself the expand button (named
 "Show Browser, live preview"; its corner is the card's 12px minus the 8px inset, 4px). The name truncates with an ellipsis
 before a detail word or a button moves. The Browser's picture is cropped to the preview from its top left, never stretched, a neutral skeleton while stale or missing; the
 Terminal shows its last lines in the smallest terminal type, read-only, or "No
@@ -3028,7 +3053,7 @@ rules, reads and limits are in [Workspace](#tool-lifecycles).
 
 ### Environment tool
 
-Environment is a right-dock tool, opened from the title band's tool row and
+Environment is a right-dock tool, opened from the thread header's tool row and
 nowhere else. It reads
 top to bottom as cards in the Settings kit's grouped-card look: one header card,
 then two captioned cards of rows. A card is a faint wash of the ink over the
@@ -3452,7 +3477,7 @@ through it.
 | ---- | ------------------------------------------------------- | ----------------------------------------------------------------------- |
 | 1    | New chat or New task                                    | Start work in Chat, Work or Code; pick the agent and model              |
 | 2    | The Projects list in the sidebar (or the rail's button) | Each Project keeps its threads, files and settings together             |
-| 3    | The Tools buttons in the title band                     | Environment, Terminal, Review, Browser and Files open beside the thread |
+| 3    | The Tools buttons in the thread's header                | Environment, Terminal, Review, Browser and Files open beside the thread |
 | 4    | The composer                                            | Attach files, choose the mode, see what the agent may do                |
 | 5    | Settings (the rail's button, else the account menu)     | Providers, look and feel, and permissions                               |
 

@@ -356,6 +356,15 @@ export type ShellActions = {
   readonly toggleDock: (opener: HTMLElement) => void;
   readonly runDockToolMenu: (surface: RightUtilityDockSurfaceId, value: string) => void;
   readonly toggleDockTool: (surface: RightUtilityDockSurfaceId, opener: HTMLElement) => void;
+  /** A tool button in a pane's header; see `PaneDockTools`. */
+  readonly pressPaneDockTool: (
+    paneId: PaneId,
+    surface: RightUtilityDockSurfaceId,
+    opener: HTMLElement,
+    fromRest: boolean,
+  ) => void;
+  /** Shows a tool that is not on screen, and leaves one that is. */
+  readonly showDockToolFromRest: (surface: RightUtilityDockSurfaceId, opener: HTMLElement) => void;
   readonly touchMemoryRevision: ProjectController["touchMemoryRevision"];
   readonly tryWorkRestCommand: (
     threadId: string,
