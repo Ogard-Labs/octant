@@ -12,7 +12,7 @@ import {
   type CodeProjectPullRequestSwitchesView,
   type CodeThreadId,
 } from "@octant/contracts";
-import { Activity, GitBranch, GitPullRequest, MessageSquare, RefreshCw } from "../ui/icons";
+import { Activity, GitBranch, MessageSquare, RefreshCw } from "../ui/icons";
 import { useEffect, useRef, useState } from "react";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -103,6 +103,8 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
     props.freshness.status === "fresh" &&
     !waiting;
   const githubUrl = safeGithubUrl(detail.url);
+  const additions = detail.files.reduce((sum, file) => sum + file.additions, 0);
+  const deletions = detail.files.reduce((sum, file) => sum + file.deletions, 0);
 
   useEffect(() => {
     if (mergePending) return;
@@ -168,22 +170,31 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
     <section aria-label="Pull request review" className="code-pr-review">
       <header className="code-pr-review__header">
         <div>
-          <div className="code-pr-review__eyebrow">
-            <GitPullRequest aria-hidden="true" size={14} />
-            <span>Pull request #{detail.number}</span>
-          </div>
           <h1 ref={reviewHeading} tabIndex={-1}>
-            {detail.title.length === 0 ? `Pull request #${detail.number}` : detail.title}
+            {detail.title.length === 0 ? "Pull request" : detail.title}{" "}
+            <span className="code-pr-review__number">#{detail.number}</span>
           </h1>
           <p className="code-pr-review__meta">
-            <PullRequestStatePill state={detail.pullRequestState} />
+            <PullRequestStatePill solid state={detail.pullRequestState} />
             <span className="code-pr-review__meta-item">
               <GitBranch aria-hidden="true" size={14} />
-              {detail.headBranch} → {detail.baseRepository}:{detail.baseBranch}
+              <code className="code-pr-review__branch">{detail.headBranch}</code>
+              <span aria-hidden="true">→</span>
+              <span className="sr-only">into</span>
+              <code className="code-pr-review__branch">
+                {detail.baseRepository}:{detail.baseBranch}
+              </code>
             </span>
             {detail.author.length === 0 ? null : (
               <span className="code-pr-review__meta-item">by {detail.author}</span>
             )}
+            <span className="code-pr-review__meta-item code-pr-review__tally">
+              <span className="code-pr-review__added">+{additions}</span>
+              <span className="code-pr-review__removed">−{deletions}</span>
+              <span>
+                {detail.files.length} {detail.files.length === 1 ? "file" : "files"}
+              </span>
+            </span>
           </p>
           <p className="code-project-pull-requests__status code-pr-review__freshness" role="status">
             <Activity aria-hidden="true" size={14} />
@@ -234,7 +245,7 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
                     : "Merge is available after a fresh, mergeable pull-request observation."
                 }
                 type="button"
-                variant="secondary"
+                variant="default"
               >
                 {mergePending ? "Merging…" : "Merge"}
               </OctantButton>
@@ -337,20 +348,6 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
         />
       )}
 
-      {props.onLoadActionContext === undefined || props.onAct === undefined ? null : (
-        <ProjectPullRequestActions
-          loadContext={props.onLoadActionContext}
-          onAct={props.onAct}
-          pullRequestState={detail.pullRequestState}
-          headSha={detail.headSha}
-          {...(props.onRefresh === undefined ? {} : { onChanged: props.onRefresh })}
-        />
-      )}
-
-      <p className="code-pr-review__guardrail">
-        Review data is read-only; merging and your own actions are explicit.
-      </p>
-
       {waiting ? (
         <OctantAlert className="code-pr-review__waiting" tone="warning">
           <strong>Waiting on a fresh GitHub observation.</strong>
@@ -417,7 +414,7 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
           <ul className="code-pr-review__commits">
             {detail.commits.map((commit) => (
               <li key={commit.oid}>
-                <code>{commit.oid.slice(0, 12)}</code>
+                <code className="code-pr-review__sha">{commit.oid.slice(0, 7)}</code>
                 <span>{commit.messageHeadline}</span>
                 {commit.author.length === 0 ? null : (
                   <span className="code-pr-review__muted">{commit.author}</span>
@@ -439,9 +436,10 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
           <ul className="code-pr-review__files">
             {detail.files.map((file) => (
               <li key={file.path}>
-                <span>{file.path}</span>
-                <span className="code-pr-review__muted">
-                  +{file.additions} −{file.deletions}
+                <span className="code-pr-review__path">{file.path}</span>
+                <span className="code-pr-review__tally">
+                  <span className="code-pr-review__added">+{file.additions}</span>
+                  <span className="code-pr-review__removed">−{file.deletions}</span>
                 </span>
               </li>
             ))}
@@ -495,6 +493,20 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
         staleComments={stale("comments")}
         staleReviews={stale("reviews")}
       />
+
+      {props.onLoadActionContext === undefined || props.onAct === undefined ? null : (
+        <ProjectPullRequestActions
+          loadContext={props.onLoadActionContext}
+          onAct={props.onAct}
+          pullRequestState={detail.pullRequestState}
+          headSha={detail.headSha}
+          {...(props.onRefresh === undefined ? {} : { onChanged: props.onRefresh })}
+        />
+      )}
+
+      <p className="code-pr-review__guardrail">
+        Review data is read-only; merging and your own actions are explicit.
+      </p>
     </section>
   );
 }

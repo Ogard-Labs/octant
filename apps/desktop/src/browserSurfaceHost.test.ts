@@ -2267,6 +2267,91 @@ describe("BrowserSurfaceHost", () => {
     expect(created.webContents.capturePage).not.toHaveBeenCalled();
   });
 
+  describe("the minimised Browser card's picture", () => {
+    const owner = { windowId: "window-a", threadId };
+    const previewHost = async (created: BrowserSurfaceViewPort) => {
+      const host = createBrowserSurfaceHost({ createView: () => created });
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      return host;
+    };
+
+    it("gives the owning window a picture scaled to the card, without reading the page's fields", async () => {
+      const created = view();
+      const resize = vi.fn(() => ({
+        isEmpty: () => false,
+        toJPEG: () => Uint8Array.from([1, 2, 3]),
+        getSize: () => ({ width: 640, height: 400 }),
+      }));
+      vi.mocked(created.webContents.capturePage).mockResolvedValue({
+        isEmpty: () => false,
+        toJPEG: () => Uint8Array.from([9]),
+        getSize: () => ({ width: 2_560, height: 1_600 }),
+        resize,
+      });
+      const host = await previewHost(created);
+
+      await expect(host.previewPicture(contextId, owner)).resolves.toBe(
+        "data:image/jpeg;base64,AQID",
+      );
+      expect(resize).toHaveBeenCalledWith({ width: 640 });
+      // The credential-field check is what withheld every picture on a busy
+      // page; the card's picture never enters an observation, so it skips it.
+      expect(created.webContents.executeJavaScriptInIsolatedWorld).not.toHaveBeenCalled();
+    });
+
+    it("refuses a picture to a window or thread that does not own the context", async () => {
+      const created = view();
+      const host = await previewHost(created);
+
+      await expect(
+        host.previewPicture(contextId, { windowId: "window-b", threadId }),
+      ).rejects.toThrow(/does not own this context/);
+      await expect(
+        host.previewPicture(contextId, {
+          windowId: "window-a",
+          threadId: "10000000-0000-4000-8000-000000000002",
+        }),
+      ).rejects.toThrow(/does not own this context/);
+      expect(created.webContents.capturePage).not.toHaveBeenCalled();
+    });
+
+    it("takes at most one picture of a context every two seconds", async () => {
+      const created = view();
+      const host = await previewHost(created);
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+      try {
+        await expect(host.previewPicture(contextId, owner)).resolves.toBeDefined();
+        now.mockReturnValue(1_001_500);
+        await expect(host.previewPicture(contextId, owner)).resolves.toBeUndefined();
+        expect(created.webContents.capturePage).toHaveBeenCalledOnce();
+        now.mockReturnValue(1_002_000);
+        await expect(host.previewPicture(contextId, owner)).resolves.toBeDefined();
+        expect(created.webContents.capturePage).toHaveBeenCalledTimes(2);
+      } finally {
+        now.mockRestore();
+      }
+    });
+
+    it("returns no picture for a context whose page has not committed a document", async () => {
+      const created = view();
+      vi.mocked(created.webContents.getURL).mockReturnValue("");
+      const host = await previewHost(created);
+
+      await expect(host.previewPicture(contextId, owner)).resolves.toBeUndefined();
+      expect(created.webContents.capturePage).not.toHaveBeenCalled();
+    });
+  });
+
   describe("a page with a frame sandboxed without scripts", () => {
     // Ad frames on news pages are sandboxed without scripts, so the probe's
     // script never runs there; the page is checked through the debugger's DOM.

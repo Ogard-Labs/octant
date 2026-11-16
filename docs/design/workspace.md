@@ -1559,7 +1559,7 @@ thread's open tools; the bottom panel never has one.
   snapshot the Browser pane reads (a page that lives in a Browser context of its
   own is read by that context, as the pane reads it, never through the thread's
   current context, which leaves such pages out; a context that is gone or stopped
-  makes the preview say "Page not available" instead of holding a skeleton; the host takes a fresh picture for that read of a native page too, because a minimised page's surface is detached and the card is the only place it is seen), and asks for a fresh picture only while the
+  makes the preview say "Page not available" instead of holding a skeleton; the host takes a fresh picture for that read of a native page too, because a minimised page's surface is detached and the card is the only place it is seen); in the desktop app the card first asks its own window for a display-only picture of the page (at most one every 2 seconds, scaled to the card, refused to a window or thread that does not own the page), which never passes through the host or an observation and so is not withheld by the credential-field check that kept almost every real page's card empty; with no picture at all the card shows the page's icon and title, never an empty box, and asks for a fresh picture only while the
   card is on screen: no card, no request for one. It polls every second while a
   session is live and every five otherwise, backs off while the page does not
   change, and pauses with the window. A stale or missing picture is a neutral
@@ -2216,7 +2216,7 @@ inline and the rest under More, and entries in the command palette's Actions
 group. More is the header's one menu for this group: it also holds where the
 actions run ("Run in") and the task's Worktrees setup, which used to be text
 controls of their own in the title bar. Where to run is offered only when there
-is an action to run; with none, the header shows Worktrees alone; the Project overview's Actions section edits them and offers suggestions
+is an action to run; with none, the header shows no control here (Worktrees setup is also a row of Environment's Changes group, the one place it is always found); the Project overview's Actions section edits them and offers suggestions
 the person confirms. Choosing one previews its actual folder and branch,
 then starts a dedicated run beside the task. A Code thread defaults to its
 active checkout; the Project folder and approved extra folders remain explicit
@@ -2319,8 +2319,8 @@ authenticated, thread-scoped answer routes and one-use request identity.
 Provider-native question formats keep their existing adapter contracts; the
 questionnaire capability uses the provider-neutral app tool boundary.
 
-A Code task's **Worktrees** control (in the header's More menu, or alone in the
-header when the Project has no saved action) opens its Setup tab beside
+A Code task's **Worktrees** control (a row of Environment's Changes group, and
+an entry of the header's More menu when the Project has saved actions) opens its Setup tab beside
 that task, including a selector for its child checkouts. It shows the reviewed
 command and relative folder, bounded output, exit result, Retry, Cancel and
 explicit Skip. The Project overview's Actions list lets the person review and
@@ -3237,8 +3237,15 @@ glyph, words and token) used by the review panes, the lists, the chips and the
 Inbox's GitHub rows. Open is green (`--oct-pr-open`) with the pull-request
 glyph, merged purple (`--oct-pr-merged`) with the merge glyph, closed red
 (`--oct-pr-closed`) with the closed glyph, draft grey (`--oct-pr-draft`) with
-the draft glyph; links are blue (`--oct-link`); additions and passing checks use
-the success ink, deletions and failing checks the danger ink, pending checks the
+the draft glyph; links are blue (`--oct-link`). At the head of a request's own
+page or pane the state is a filled badge in the state's fill with white text,
+the title is the largest text with its number after it in meta ink, the two
+branches are mono chips, and the lines added and removed stand in the open and
+closed inks with tabular figures; Merge is the one filled button. The description, checks, changed files, commits, diff and conversation
+come first and the person's own actions (labels, comment, review) last; the
+labels a repository offers stay folded under "Add a label" until asked for,
+because thirty of them in the open buried the request's text. Passing checks
+use the success ink, failing checks the danger ink, pending checks the
 warning ink. In the Mono style open, merged and links fall back to greys and keep
 their glyphs; closed and failures keep red. The snapshot holds no label, so no
 surface draws one.

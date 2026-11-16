@@ -4,6 +4,7 @@ import type {
 } from "@octant/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 
 /** The person's own actions on a pull request, before the pane names its target. */
@@ -153,45 +154,63 @@ export function ProjectPullRequestActions(props: ProjectPullRequestActionsProps)
         ) : context.labels.length === 0 && available.length === 0 ? (
           <p className="code-pr-actions__note">This repository has no labels yet.</p>
         ) : (
-          <ul className="code-pr-actions__labels">
-            {context.labels.map((label) => (
-              <li key={`on-${label}`}>
-                <OctantButton
-                  aria-label={`Remove label ${label}`}
-                  aria-pressed="true"
-                  disabled={pending || merged}
-                  onClick={() =>
-                    void run(
-                      { kind: "labels", add: [], remove: [label] },
-                      `Removed label ${label}.`,
-                    )
-                  }
-                  size="sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  {label} ×
-                </OctantButton>
-              </li>
-            ))}
-            {available.map((label) => (
-              <li key={`off-${label}`}>
-                <OctantButton
-                  aria-label={`Add label ${label}`}
-                  aria-pressed="false"
-                  disabled={pending || merged}
-                  onClick={() =>
-                    void run({ kind: "labels", add: [label], remove: [] }, `Added label ${label}.`)
-                  }
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  + {label}
-                </OctantButton>
-              </li>
-            ))}
-          </ul>
+          <>
+            {context.labels.length === 0 ? (
+              <p className="code-pr-actions__note">No labels on this pull request.</p>
+            ) : (
+              <ul className="code-pr-actions__labels">
+                {context.labels.map((label) => (
+                  <li key={`on-${label}`}>
+                    <OctantButton
+                      aria-label={`Remove label ${label}`}
+                      aria-pressed="true"
+                      disabled={pending || merged}
+                      onClick={() =>
+                        void run(
+                          { kind: "labels", add: [], remove: [label] },
+                          `Removed label ${label}.`,
+                        )
+                      }
+                      size="sm"
+                      type="button"
+                      variant="secondary"
+                    >
+                      {label} ×
+                    </OctantButton>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {available.length === 0 ? null : (
+              <OctantCollapsible
+                className="code-pr-actions__more-labels"
+                summary={`Add a label (${available.length})`}
+              >
+                <ul className="code-pr-actions__labels">
+                  {available.map((label) => (
+                    <li key={`off-${label}`}>
+                      <OctantButton
+                        aria-label={`Add label ${label}`}
+                        aria-pressed="false"
+                        disabled={pending || merged}
+                        onClick={() =>
+                          void run(
+                            { kind: "labels", add: [label], remove: [] },
+                            `Added label ${label}.`,
+                          )
+                        }
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        + {label}
+                      </OctantButton>
+                    </li>
+                  ))}
+                </ul>
+              </OctantCollapsible>
+            )}
+          </>
         )}
       </div>
 

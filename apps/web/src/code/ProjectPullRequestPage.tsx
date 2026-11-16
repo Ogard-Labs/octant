@@ -427,7 +427,7 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
         <div className="pr-detail__body" data-tab={tab}>
           <header className="pr-detail__head">
             <p className="pr-detail__kicker">
-              <PullRequestStatePill state={detail.pullRequestState} />
+              <PullRequestStatePill solid state={detail.pullRequestState} />
               <span className="oct-meta">
                 {detail.baseRepository} #{detail.number}
               </span>

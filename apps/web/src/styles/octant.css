@@ -60,14 +60,23 @@
   --oct-danger-fg: light-dark(#a8102f, color-mix(in oklab, var(--oct-danger), white 38%));
 
   /* ── pull requests ──
-     The familiar roles: open green, merged purple, closed red, draft grey,
-     links blue. They point at the semantic and palette roles above, so a
-     theme moves them with its own hues; Mono (below) greys all but closed. */
-  --oct-pr-open: var(--oct-success-fg);
-  --oct-pr-merged: var(--octant-palette-purple, var(--oct-accent-fg));
-  --oct-pr-closed: var(--oct-danger-fg);
-  --oct-pr-draft: var(--oct-meta);
-  --oct-link: var(--octant-palette-blue, var(--oct-accent-fg));
+     The host's own colours: open green, merged purple, closed red, draft grey,
+     links blue, each as an ink for a mark or a count and as a fill for the
+     state badge at the head of a request, which carries white text. They were
+     the theme's success and danger inks first, and those are tuned to sit
+     quietly in a sentence: a state and a +/− count read weak in them beside
+     the same request on the host (maintainer request, 2026-11-16). Mono
+     (below) greys all but closed. */
+  --oct-pr-open: light-dark(#1a7f37, #3fb950);
+  --oct-pr-merged: light-dark(#8250df, #a371f7);
+  --oct-pr-closed: light-dark(#cf222e, #f85149);
+  --oct-pr-draft: light-dark(#59636e, #9198a1);
+  --oct-pr-open-fill: light-dark(#1f883d, #238636);
+  --oct-pr-merged-fill: light-dark(#8250df, #8957e5);
+  --oct-pr-closed-fill: light-dark(#cf222e, #da3633);
+  --oct-pr-draft-fill: light-dark(#59636e, #6e7681);
+  --oct-pr-on-fill: #ffffff;
+  --oct-link: light-dark(#0969da, #4493f8);
 
   /* ── tints ──
      Light grounds need a stronger mix to register at all. */
@@ -852,6 +861,10 @@ html {
 :root[data-octant-style="mono"] {
   --oct-pr-open: var(--oct-fg-2);
   --oct-pr-merged: var(--oct-fg-2);
+  --oct-pr-open-fill: var(--oct-fill-2);
+  --oct-pr-merged-fill: var(--oct-fill-2);
+  --oct-pr-draft-fill: var(--oct-fill-2);
+  --oct-pr-on-fill: var(--oct-fg);
   --oct-link: var(--oct-fg);
 }
 

@@ -4561,6 +4561,28 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   white-space: nowrap;
 }
 
+/* At the head of a request the state is a filled badge, as on the host. */
+.pr-state-pill[data-pr-solid="true"] {
+  padding: 0 var(--oct-space-2);
+  border-radius: var(--oct-radius-sm);
+  line-height: var(--oct-space-5);
+  background: var(--oct-pr-draft-fill);
+  color: var(--oct-pr-on-fill);
+  font-weight: var(--oct-weight-strong, 600);
+}
+
+.pr-state-pill[data-pr-solid="true"][data-pr-state="open"] {
+  background: var(--oct-pr-open-fill);
+}
+
+.pr-state-pill[data-pr-solid="true"][data-pr-state="merged"] {
+  background: var(--oct-pr-merged-fill);
+}
+
+.pr-state-pill[data-pr-solid="true"][data-pr-state="closed"] {
+  background: var(--oct-pr-closed-fill);
+}
+
 .pr-detail__prose a,
 .code-pr-review__prose a,
 .code-pr-review__github-link {

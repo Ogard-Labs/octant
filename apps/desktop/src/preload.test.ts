@@ -736,6 +736,7 @@ describe("desktop preload bridge", () => {
       "approveRemotePairingRequest",
       "attachBrowserSurface",
       "cancelCodeOperationApproval",
+      "captureBrowserSurfacePreview",
       "captureWindow",
       "changeBackgroundHost",
       "checkComputerUseUpdates",

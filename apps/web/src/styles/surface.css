@@ -807,86 +807,39 @@
   background: transparent;
 }
 
-/* Only the start stage stays open on the ground. A pane that holds text (a
-   tool tile or the overview in the dock, the Environment strip, the bottom
-   panel) is the text surface even while a start screen shows the ground: with
-   the stage's clearing above, the panes' own fill was clear under Glass and the
-   ground, running to the window's edge, lay straight under a pull request's
-   title, labels and comment box. Over an opaque window the fill is the pane
-   colour; under Glass it is the workspace colour, because the coat is too
-   clear to calm the ground. Reduced transparency and increased contrast keep
-   their opaque panes. */
-@media (prefers-reduced-transparency: no-preference) {
-  html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
-    .shell-frame:has(main.workspace[data-octant-start-only]:not([hidden])) {
-    --octant-panel-surface: color-mix(
-      in srgb,
-      var(--octant-panel-opaque) var(--octant-reading-surface-keep, 94%),
-      transparent
-    );
-  }
-
-  html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
-    .shell-frame.shell--material-translucent:has(
-      main.workspace[data-octant-start-only]:not([hidden])
-    ) {
-    --octant-panel-surface: color-mix(
-      in srgb,
-      var(--octant-workspace) var(--octant-reading-surface-keep, 94%),
-      transparent
-    );
-  }
+/* Only the stage shows the ground. A pane that holds a tool (a tile or the
+   overview in the dock, the Environment section, the bottom panel) is solid
+   wherever a ground is on, beside a start screen and beside a thread alike:
+   the pane colour, opaque, in either material. Three lighter surfaces were
+   tried first (the pane colour at 94%, the sidebar's colour at 72% under a
+   veil, and a blur of the ground behind it) and each left the ground's cells
+   and streaks standing behind a pull request's title, the Environment rows
+   and a tool's bar: the desktop window draws no backdrop blur, and a few per
+   cent of a bright cell is still a pattern behind 12px text. The variables
+   are set on the pane itself because the shell resolves its own pane fill
+   where it is declared. */
+.shell--app-backdrop.shell-frame :is(.right-utility-dock, .bottom-utility-panel),
+.shell-frame:has(main.workspace[data-octant-start-only]:not([hidden]))
+  :is(.right-utility-dock, .bottom-utility-panel) {
+  --octant-panel-surface: color-mix(
+    in srgb,
+    var(--octant-workspace) 98%,
+    var(--octant-text-primary)
+  );
+  --octant-pane-fill: linear-gradient(var(--octant-panel-surface), var(--octant-panel-surface));
 }
 
-/* The dock beside a start screen is one surface of its own, like the thread
-   list: the sidebar's colour, see-through enough for the ground to show as a
-   blur, under a veil of the ground's own colour. The ground runs to the
-   window's edge there, and a pane on the panes' ordinary fill let its glyphs
-   and cells stand at full strength behind a terminal's head, a tool's rows or
-   a pull request's text. Blurred and dimmed, the ground is a tone, not a
-   pattern, so text keeps its contrast. The tiles and the Environment section
-   inside draw no fill of their own there: the dock's is the one surface. */
+/* A lone tool beside a start screen has no pane under it (the stage's fill is
+   cleared above), so the dock lays the same solid fill under its tiles. */
 @media (min-width: 681px) {
   .shell-frame:has(main.workspace[data-octant-start-only]:not([hidden]))
     .right-utility-dock::before {
     position: absolute;
     z-index: -1;
     inset: var(--oct-title-rail-h) 0 0;
-    background:
-      linear-gradient(var(--octant-start-pane-veil), var(--octant-start-pane-veil)),
-      var(--octant-start-pane-fill);
-    backdrop-filter: blur(var(--octant-glass-blur)) saturate(120%);
+    background: var(--octant-pane-fill);
     content: "";
     pointer-events: none;
-  }
-
-  .shell-frame:has(main.workspace[data-octant-start-only]:not([hidden])) {
-    --octant-start-pane-fill: color-mix(
-      in srgb,
-      color-mix(in srgb, var(--octant-panel-opaque) 90%, var(--octant-ground-opaque)) 72%,
-      transparent
-    );
-    --octant-start-pane-veil: color-mix(in srgb, var(--octant-ground-opaque) 30%, transparent);
-  }
-
-  .shell-frame:has(main.workspace[data-octant-start-only]:not([hidden]))
-    .right-utility-dock
-    :is(.dock-tile, .dock-env-strip) {
-    background: transparent;
-  }
-
-  /* No see-through surface where the person, or the system, asked for none. */
-  html:is([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
-    .shell-frame:has(main.workspace[data-octant-start-only]:not([hidden])) {
-    --octant-start-pane-fill: var(--octant-panel-opaque);
-    --octant-start-pane-veil: transparent;
-  }
-}
-
-@media (min-width: 681px) and (prefers-reduced-transparency: reduce) {
-  .shell-frame:has(main.workspace[data-octant-start-only]:not([hidden])) {
-    --octant-start-pane-fill: var(--octant-panel-opaque);
-    --octant-start-pane-veil: transparent;
   }
 }
 

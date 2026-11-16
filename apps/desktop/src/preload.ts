@@ -262,6 +262,10 @@ export interface OctantHostBridge {
   readonly attachBrowserSurface: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
   readonly updateBrowserSurfaceBounds: (request: BrowserSurfaceRequest) => Promise<void>;
   readonly detachBrowserSurface: (request: Omit<BrowserSurfaceRequest, "bounds">) => Promise<void>;
+  /** A small display-only picture of this window's own Browser page, or nothing. */
+  readonly captureBrowserSurfacePreview: (
+    request: Omit<BrowserSurfaceRequest, "bounds">,
+  ) => Promise<string | undefined>;
   readonly commandBrowserSurface: (
     request: Omit<BrowserSurfaceRequest, "bounds"> & {
       readonly command: "back" | "forward" | "reload" | "stop";
@@ -667,6 +671,13 @@ export function createHostBridge(
     detachBrowserSurface: (request: Omit<BrowserSurfaceRequest, "bounds">) => {
       validateBrowserSurfaceIdentity(request);
       return invoke(IPC_CHANNELS.browserSurfaceDetach, request);
+    },
+    captureBrowserSurfacePreview: async (request: Omit<BrowserSurfaceRequest, "bounds">) => {
+      validateBrowserSurfaceIdentity(request);
+      const picture: unknown = await ipc.invoke(IPC_CHANNELS.browserSurfacePreview, request);
+      return typeof picture === "string" && picture.startsWith("data:image/jpeg;base64,")
+        ? picture
+        : undefined;
     },
     commandBrowserSurface: (
       request: Omit<BrowserSurfaceRequest, "bounds"> & {

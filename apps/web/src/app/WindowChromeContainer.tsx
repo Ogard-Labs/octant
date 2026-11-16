@@ -9,14 +9,12 @@ import type { WindowHistory } from "../shell/windowHistory";
 import type { DockToolButtonsModel } from "../shell/dockToolButtonsModel";
 import type { DockUtilityLauncherReference } from "../shell/DockUtilityLauncher";
 import { useProjectCheckoutChanges } from "../shell/useProjectCheckoutChanges";
-import { useThreadBoardCard } from "../shell/useThreadBoardCard";
 import type { ShellActions } from "./shellActions";
 
 export interface WindowChromeContainerProps {
   readonly actions: Pick<
     ShellActions,
     | "addDockTab"
-    | "loadCodeBoard"
     | "recoverZen"
     | "startNewThreadDraft"
     | "toggleBottomPanel"
@@ -90,13 +88,6 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
   } = props;
   const codeThreadId = props.activeCodeThreadId;
   const codeProjectId = props.activeProjectId;
-  const card = useThreadBoardCard({
-    loadBoard: actions.loadCodeBoard,
-    projectId: codeProjectId,
-    threadId: codeThreadId ?? "",
-    enabled: codeThreadId !== undefined && codeProjectId !== undefined,
-    changeRevision: props.codeBoardRevision,
-  });
   const draftChanges = props.codeDraft === true && codeThreadId === undefined;
   const projectClient = useMemo(
     () =>
@@ -116,26 +107,16 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
     enabled: draftChanges && activeMode === "code" && props.activeProjectIsCode === true,
     revision: props.codeBoardRevision,
   });
-  const observed = card?.changedFiles;
   const onOpenChanges = useCallback(() => actions.addDockTab("review"), [actions]);
-  // A stale observation stays on screen in meta ink rather than vanishing, and
-  // a checkout not read yet holds its place with a dash, so the band never
-  // gains, loses or resizes a control as the reading arrives. A thread whose
-  // checkout cannot be observed keeps the dash, so the band does not drop out
-  // from under the pointer once the board answers; only a Project with no Git
+  // The count stands in the band on a Code start screen only. In a thread it is
+  // a row of Environment ("Uncommitted changes"), beside the actions that act on
+  // it, and the band repeated it a few pixels above (maintainer request,
+  // 2026-11-16). On the start screen a stale reading stays in meta ink and a
+  // checkout not read yet holds its place with a dash, so the band never gains,
+  // loses or resizes a control as the reading arrives; a Project with no Git
   // checkout shows nothing.
   const changes = useMemo((): TitleBandChangesFacts | undefined => {
     if (activeMode !== "code") return undefined;
-    if (codeThreadId !== undefined && codeProjectId !== undefined) {
-      if (observed === undefined) return { updating: true, onOpen: onOpenChanges };
-      if (observed.kind !== "observed") return { updating: false, onOpen: onOpenChanges };
-      return {
-        insertions: observed.insertions,
-        deletions: observed.deletions,
-        updating: observed.freshness !== "fresh",
-        onOpen: onOpenChanges,
-      };
-    }
     if (!draftChanges || props.activeProjectIsCode !== true) return undefined;
     if (projectChanges.status === "none") return undefined;
     if (projectChanges.status === "reading") return { updating: true, onOpen: onOpenChanges };
@@ -145,16 +126,7 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
       updating: projectChanges.updating,
       onOpen: onOpenChanges,
     };
-  }, [
-    activeMode,
-    codeThreadId,
-    codeProjectId,
-    observed,
-    draftChanges,
-    props.activeProjectIsCode,
-    projectChanges,
-    onOpenChanges,
-  ]);
+  }, [activeMode, draftChanges, props.activeProjectIsCode, projectChanges, onOpenChanges]);
   return (
     <WindowChrome
       {...(changes === undefined ? {} : { changes })}

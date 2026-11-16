@@ -487,6 +487,15 @@ export interface OctantHostBridge
   readonly attachBrowserSurface?: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
   readonly updateBrowserSurfaceBounds?: (request: BrowserSurfaceRequest) => Promise<void>;
   readonly detachBrowserSurface?: (request: Omit<BrowserSurfaceRequest, "bounds">) => Promise<void>;
+  /**
+   * A small picture of this window's own Browser page for its minimised card,
+   * or nothing when there is no page yet or one was taken moments ago. It is
+   * for display only and never passes through the server. Absent outside the
+   * desktop app.
+   */
+  readonly captureBrowserSurfacePreview?: (
+    request: Omit<BrowserSurfaceRequest, "bounds">,
+  ) => Promise<string | undefined>;
   /** Shows an extension's popup or options page beside the Browser toolbar's extensions button. */
   readonly openBrowserExtensionPopup?: (request: {
     readonly profile:

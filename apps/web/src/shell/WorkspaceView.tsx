@@ -1,3 +1,4 @@
+import type { PreparationTarget } from "../projects/WorktreePreparationDialog";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import { requestThreadControl } from "../composer/threadControlNavigation";
@@ -248,6 +249,8 @@ export interface WorkspaceViewProps {
   readonly automationClient?: AutomationClient;
   /** Opens the Automation Center on one routine. */
   readonly onOpenRoutine?: (automationId: string) => void;
+  /** Opens worktree setup for one Code thread's checkout. */
+  readonly onOpenWorktrees?: (target: PreparationTarget) => void;
   readonly workPromotionController: WorkPromotionController;
   readonly workMutationClient?: WorkMutationClient;
   readonly workThreadClient?: WorkThreadClient;
@@ -1685,6 +1688,7 @@ function renderCodeTab(
               ? {}
               : { automationClient: props.automationClient })}
             {...(props.onOpenRoutine === undefined ? {} : { onOpenRoutine: props.onOpenRoutine })}
+            {...worktreeSetupFor(props.onOpenWorktrees, codeController.activeView, tab.threadId)}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             {...(props.openInApplications === undefined
               ? {}
@@ -3029,6 +3033,37 @@ function threadBrowserPreview(
   return {
     browserVisible,
     ...(open === undefined ? {} : { onShowBrowser: () => open({ paneId, threadId }) }),
+  };
+}
+
+/**
+ * Worktree setup for the thread a pane shows, as the Environment row's action.
+ * Absent while the thread's view has not loaded, for a view of another thread,
+ * and for a remote checkout, which has no worktrees to prepare here.
+ */
+function worktreeSetupFor(
+  open: ((target: PreparationTarget) => void) | undefined,
+  view: CodeController["activeView"],
+  threadId: unknown,
+): { readonly onOpenWorktrees?: () => void } {
+  if (
+    open === undefined ||
+    view === undefined ||
+    String(view.thread.id) !== String(threadId) ||
+    view.checkout.kind === "remote-root"
+  ) {
+    return {};
+  }
+  return {
+    onOpenWorktrees: () =>
+      open({
+        projectId: view.thread.projectId,
+        thread: {
+          threadId: view.thread.id,
+          checkoutId: view.checkout.id,
+          ...(view.checkout.head.kind === "none" ? {} : { head: view.checkout.head.oid }),
+        },
+      }),
   };
 }
 

@@ -128,12 +128,14 @@ fourth.
 | Selection              | `--octant-selection`         | `#2c2c2c` | `#ebebea` | Chosen row in a scrolling picker (opaque so it never shifts) |
 | Scrim                  | `--octant-scrim`             | `#000000` | `#000000` | Opaque by contract; mixed to a wash where used               |
 
-**Pull-request roles.** `--oct-pr-open` (the success ink), `--oct-pr-merged`
-(the purple palette role), `--oct-pr-closed` (the danger ink), `--oct-pr-draft`
-(the muted ink) and `--oct-link` (the blue palette role) are defined once in
-`octant.css` from the semantic and palette roles, so they follow the theme in
-dark and light. Mono greys open, merged and links; closed keeps its red. Feature
-CSS names these tokens and never a hue.
+**Pull-request roles.** `--oct-pr-open`, `--oct-pr-merged`, `--oct-pr-closed`,
+`--oct-pr-draft` and `--oct-link` are defined once in `octant.css` as the
+host's own green, purple, red, grey and blue, a dark and a light value each, so
+a state reads as it does on the host; the theme's success and danger inks are
+tuned to sit quietly in a sentence and read weak as a state. Each state also
+has a fill (`--oct-pr-open-fill` and its siblings, with `--oct-pr-on-fill` for
+the text on it), used by the filled state badge at the head of a request. Mono greys open, merged and links; closed keeps its red. Feature CSS
+names these tokens and never a hue.
 
 _Why the muted change._ Meta ink at `#949494` on the opaque dark float
 (`#333333`) is 4.17:1, under the 4.5:1 text floor, and the float is what every
@@ -761,9 +763,10 @@ hiddenInset` and no custom `trafficLightPosition` (it would grow the native
   `window-no-drag`, and nothing after the layer is a drag region over the
   band: either left the band's empty stretches undraggable. Test title-bar
   controls in the packaged app.
-- **Changes in the band**: whenever the window is on a Code Project with a
-  Git checkout, in an open Code thread (that thread's checkout) and on the Code
-  start screen or draft (the Project's own checkout), the band's trailing
+- **Changes in the band**: on the Code start screen or draft of a Project
+  with a Git checkout (the Project's own checkout; in an open thread the count
+  is Environment's Uncommitted changes row, and the band does not repeat it),
+  the band's trailing
   cluster starts with its uncommitted line changes, "+added −removed" at the
   meta size with tabular numbers, as a button that opens the dock's changes
   view. A count above zero is in the success or danger ink; a zero ("+0 −0"
@@ -1727,9 +1730,9 @@ application ground; every other page covers it with the reading veil.
   hidden or it is off screen, caps its backing store at twice the display ratio
   and 5 million pixels, waits for idle time and fades in over
   `--oct-motion-ground-in`. Text never sits on it bare: the composer box is
-  opaque on an opaque window, Home masks or dims behind its text, a dock opened
-  beside a start screen is the sidebar's colour over the ground blurred and
-  dimmed, every other
+  opaque on an opaque window, Home masks or dims behind its text, a tool's pane (a
+  dock tile, the Environment section, the bottom panel) is solid wherever a
+  ground is on, every other
   page lies under the veil. The Home ground fades to the stage colour over the lower 45% in both modes. Reduced
   motion holds a still frame. Increased contrast turns the ground off. Under
   glass the ground lies on the coat, the composer keeps its wash, and the

@@ -163,24 +163,27 @@ describe("window glass", () => {
     );
   });
 
-  it("gives a dock pane the text surface while a start screen shows the ground, and clears only the stage", () => {
+  it("keeps a tool's pane solid wherever a ground is on, and clears only the stage", () => {
     const surface = read("styles/surface.css");
     const start = ".shell-frame:has(main.workspace[data-octant-start-only]:not([hidden]))";
     // The stage's own fill is the one thing a start screen clears.
     expect(surface).toContain(`${start} > .workspace-layer::before {\n  background: transparent;`);
-    // Every pane that holds text reads the shell's pane fill, which a start
-    // screen lays at 94% of its colour (the workspace colour under Glass).
-    const opaque = new RegExp(
-      `${start.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{\\s*--octant-panel-surface: color-mix\\(\\s*in srgb,\\s*var\\(--octant-panel-opaque\\) var\\(--octant-reading-surface-keep, 94%\\),\\s*transparent`,
+    // The dock and the bottom panel carry an opaque pane colour of their own,
+    // beside a start screen and under a ground that runs behind everything.
+    const solid =
+      /\.shell--app-backdrop\.shell-frame :is\(\.right-utility-dock, \.bottom-utility-panel\),\s*\.shell-frame:has\(main\.workspace\[data-octant-start-only\]:not\(\[hidden\]\)\)\s*:is\(\.right-utility-dock, \.bottom-utility-panel\) \{([^}]*)\}/.exec(
+        surface,
+      )?.[1];
+    expect(solid).toBeDefined();
+    expect(solid).toMatch(
+      /--octant-panel-surface: color-mix\(\s*in srgb,\s*var\(--octant-workspace\) 98%,\s*var\(--octant-text-primary\)\s*\);/,
     );
-    expect(surface).toMatch(opaque);
-    expect(surface).toMatch(
-      /\.shell--material-translucent:has\([\s\S]{0,120}?\)\s*\{\s*--octant-panel-surface: color-mix\(\s*in srgb,\s*var\(--octant-workspace\) var\(--octant-reading-surface-keep, 94%\),\s*transparent/,
+    expect(solid).toMatch(
+      /--octant-pane-fill: linear-gradient\(var\(--octant-panel-surface\), var\(--octant-panel-surface\)\);/,
     );
-    // Reduced transparency and increased contrast are left to their opaque panes.
-    expect(surface).toMatch(
-      /@media \(prefers-reduced-transparency: no-preference\) \{\s*html:not\(\[data-octant-reduced-transparency="true"\], \[data-octant-increased-contrast="true"\]\)/,
-    );
+    // No see-through fill and no blur stands in for it.
+    expect(solid).not.toMatch(/transparent|backdrop-filter/);
+    expect(surface).not.toMatch(/--octant-start-pane-(fill|veil)/);
     const dock = read("styles/dock.css");
     expect(dock).toMatch(/\.dock-tile \{[^}]*background: var\(--octant-pane-fill\);/);
     expect(dock).toMatch(
@@ -191,27 +194,14 @@ describe("window glass", () => {
     );
   });
 
-  it("lays the dock beside a start screen on the sidebar's colour with the ground blurred and dimmed behind it", () => {
-    const surface = read("styles/surface.css");
+  it("lays one solid fill under a lone tool beside a start screen", () => {
     const rule =
       /\.shell-frame:has\(main\.workspace\[data-octant-start-only\]:not\(\[hidden\]\)\)\s*\.right-utility-dock::before \{([^}]*)\}/.exec(
-        surface,
+        read("styles/surface.css"),
       )?.[1];
     expect(rule).toBeDefined();
-    expect(rule).toMatch(/backdrop-filter:\s*blur\(var\(--octant-glass-blur\)\)/);
-    expect(rule).toMatch(/var\(--octant-start-pane-veil\)/);
-    expect(rule).toMatch(/var\(--octant-start-pane-fill\)/);
-    // The fill is the sidebar's colour, and reduced transparency keeps it whole.
-    expect(surface).toMatch(
-      /--octant-start-pane-fill: color-mix\(\s*in srgb,\s*color-mix\(in srgb, var\(--octant-panel-opaque\) 90%, var\(--octant-ground-opaque\)\) 72%,/,
-    );
-    expect(surface).toMatch(
-      /data-octant-increased-contrast="true"\]\)\s*\.shell-frame:has\([^{]*\{\s*--octant-start-pane-fill: var\(--octant-panel-opaque\);/,
-    );
-    // The panes inside draw no second fill over it.
-    expect(surface).toMatch(
-      /\.right-utility-dock\s*:is\(\.dock-tile, \.dock-env-strip\) \{\s*background: transparent;/,
-    );
+    expect(rule).toMatch(/background: var\(--octant-pane-fill\);/);
+    expect(rule).not.toMatch(/backdrop-filter/);
   });
 
   it("runs a start screen's one ground under the sidebar only where the sidebar's fill is translucent", () => {

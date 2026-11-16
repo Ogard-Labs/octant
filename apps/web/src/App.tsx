@@ -8615,6 +8615,7 @@ function LaunchedShell(
                     />
                     <ThreadPaneContainer
                       actions={actions}
+                      onOpenWorktrees={setPreparationTarget}
                       activeCodeThreadUsageFallback={activeCodeThreadUsageFallback}
                       activeMode={activeMode}
                       {...(activeThreadUsageReporting === undefined

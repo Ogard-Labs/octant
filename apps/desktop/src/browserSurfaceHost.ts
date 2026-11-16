@@ -537,6 +537,9 @@ interface OwnedSurface {
    */
   extensionLoads: number;
   actionTail: Promise<void>;
+  /** When the owning window's card last asked for a picture, and whether one is being taken. */
+  previewTakenAt: number;
+  previewPending: boolean;
   /**
    * The person's embedded input in arrival order. It is separate from the
    * agent's action queue so the person's keys and releases never wait behind
@@ -3463,6 +3466,44 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         };
       });
     },
+    /**
+     * A small picture of the page for the owning window's own minimised
+     * Browser card, or nothing when the page has not committed a document or
+     * a picture was taken too recently.
+     *
+     * Unlike `peek`, this skips the credential-field check: on a news front
+     * page that check almost always withholds the picture (hidden token inputs,
+     * dozens of ad frames it cannot read), which left the card an empty box.
+     * The picture is display-only: it goes to the window that already shows
+     * this page to this person and is never part of an observation.
+     */
+    previewPicture: async (
+      contextId: BrowserContextId | string,
+      owner: BrowserSurfaceOwner,
+    ): Promise<string | undefined> => {
+      const owned = surface(contextId);
+      if (owned.owner.windowId !== owner.windowId || owned.owner.threadId !== owner.threadId) {
+        throw new Error("Octant Browser preview does not own this context.");
+      }
+      const now = Date.now();
+      if (owned.previewPending || now - owned.previewTakenAt < PREVIEW_INTERVAL_MS)
+        return undefined;
+      owned.previewPending = true;
+      owned.previewTakenAt = now;
+      try {
+        // Queued: a detached view is captured through the debugger, which
+        // must not attach in the middle of an agent action or another read.
+        return await queueSurfaceAction(owned, () =>
+          awake(contextId, owned, async () => {
+            const view = contentsView(owned);
+            if (view.webContents.getURL() === "") return undefined;
+            return captureScreenshot(view, PREVIEW_PICTURE);
+          }),
+        );
+      } finally {
+        owned.previewPending = false;
+      }
+    },
     command: async (
       contextId: BrowserContextId | string,
       owner: BrowserSurfaceOwner,
@@ -3834,6 +3875,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       lastUsedAt: Date.now(),
       hibernated: undefined,
       waking: undefined,
+      previewTakenAt: 0,
+      previewPending: false,
     };
     openTabView(input.contextId, owned, firstTabId);
     surfaces.set(input.contextId, owned);
@@ -5852,6 +5895,11 @@ async function waitForSelector(
 
 /** What the observation contract carries for a picture, data URL included. */
 const MAX_SCREENSHOT_DATA_URL = 54 * 1_024;
+/** The widths a picture steps down through, unscaled when absent, and its size limit. */
+interface PictureSize {
+  readonly widths: ReadonlyArray<number | undefined>;
+  readonly maxDataUrl: number;
+}
 /**
  * The steps a picture is shrunk through to fit. A full Retina frame of a busy
  * page (a news front page) was several times the limit at quality 70, and the
@@ -5859,38 +5907,53 @@ const MAX_SCREENSHOT_DATA_URL = 54 * 1_024;
  * title over an empty frame. A preview needs a recognisable page, not every
  * pixel, so the frame steps down in width and quality until it fits.
  */
-const SCREENSHOT_WIDTHS = [undefined, 1_280, 960, 720, 480] as const;
 const SCREENSHOT_QUALITIES = [70, 55] as const;
+const OBSERVATION_PICTURE: PictureSize = {
+  widths: [undefined, 1_280, 960, 720, 480],
+  maxDataUrl: MAX_SCREENSHOT_DATA_URL,
+};
+
+/**
+ * The minimised Browser card's picture. The card is under 300px wide, so a
+ * 640px frame stays sharp on a Retina screen without sending a full page.
+ */
+const PREVIEW_PICTURE: PictureSize = { widths: [640, 480, 320], maxDataUrl: 96 * 1_024 };
+/** The card polls; a picture more often than this would cost the page for nothing. */
+const PREVIEW_INTERVAL_MS = 2_000;
 
 function jpegDataUrl(bytes: Uint8Array | string): string {
   const base64 = typeof bytes === "string" ? bytes : Buffer.from(bytes).toString("base64");
   return `data:image/jpeg;base64,${base64}`;
 }
 
-function fitImage(image: BrowserSurfaceImage): string | undefined {
+function fitImage(image: BrowserSurfaceImage, size: PictureSize): string | undefined {
   const width = image.getSize?.().width;
-  for (const target of SCREENSHOT_WIDTHS) {
-    if (
-      target !== undefined &&
-      (image.resize === undefined || width === undefined || width <= target)
-    ) {
-      continue;
+  // A frame already no wider than a step is encoded unscaled, once.
+  let triedUnscaled = false;
+  for (const target of size.widths) {
+    const shrinks =
+      target !== undefined && image.resize !== undefined && width !== undefined && width > target;
+    if (!shrinks) {
+      if (triedUnscaled) continue;
+      triedUnscaled = true;
     }
-    const sized =
-      target === undefined || image.resize === undefined ? image : image.resize({ width: target });
+    const sized = shrinks && image.resize !== undefined ? image.resize({ width: target }) : image;
     for (const quality of SCREENSHOT_QUALITIES) {
       const dataUrl = jpegDataUrl(sized.toJPEG(quality));
-      if (dataUrl.length <= MAX_SCREENSHOT_DATA_URL) return dataUrl;
+      if (dataUrl.length <= size.maxDataUrl) return dataUrl;
     }
   }
   return undefined;
 }
 
-async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string | undefined> {
+async function captureScreenshot(
+  view: BrowserSurfaceViewPort,
+  size: PictureSize = OBSERVATION_PICTURE,
+): Promise<string | undefined> {
   const image = await view.webContents.capturePage();
   // A detached surface paints nothing, and Chromium reports that as an empty
   // image rather than an error; an empty JPEG is not a page snapshot.
-  if (!image.isEmpty()) return fitImage(image);
+  if (!image.isEmpty()) return fitImage(image, size);
   // A surface that is not in a window still has a live renderer: the debugger
   // captures its view directly instead of a compositor surface it does not
   // have.
@@ -5909,12 +5972,16 @@ async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string |
       | undefined;
     const viewportWidth = metrics?.cssLayoutViewport?.clientWidth;
     const viewportHeight = metrics?.cssLayoutViewport?.clientHeight;
-    for (const target of SCREENSHOT_WIDTHS) {
+    let triedUnscaled = false;
+    for (const target of size.widths) {
       const scale =
         target === undefined || viewportWidth === undefined || viewportWidth <= target
           ? undefined
           : target / viewportWidth;
-      if (target !== undefined && scale === undefined) continue;
+      if (scale === undefined) {
+        if (triedUnscaled) continue;
+        triedUnscaled = true;
+      }
       for (const quality of SCREENSHOT_QUALITIES) {
         const result = (await client.sendCommand("Page.captureScreenshot", {
           format: "jpeg",
@@ -5927,7 +5994,7 @@ async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string |
         const data = typeof result.data === "string" ? result.data : "";
         if (data === "") return undefined;
         const dataUrl = jpegDataUrl(data);
-        if (dataUrl.length <= MAX_SCREENSHOT_DATA_URL) return dataUrl;
+        if (dataUrl.length <= size.maxDataUrl) return dataUrl;
       }
     }
     return undefined;

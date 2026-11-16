@@ -1,3 +1,4 @@
+import type { PreparationTarget } from "../projects/WorktreePreparationDialog";
 import type { HostId } from "@octant/contracts/host";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -218,6 +219,8 @@ export interface ThreadPaneContainerProps {
   readonly hidden: boolean;
   readonly homeStart?: DraftThreadWorkspaceProps["homeStart"];
   readonly hostBridge?: OctantHostBridge;
+  /** Opens worktree setup for one Code thread's checkout. */
+  readonly onOpenWorktrees?: (target: PreparationTarget) => void;
   readonly hosts: NonNullable<WorkspaceViewProps["hosts"]>;
   readonly imageGenerationProfiles?: ReturnType<typeof listEligibleImageProfiles>;
   readonly isNarrow: boolean;
@@ -709,6 +712,9 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   extensionClient={extensionClient}
                   automationClient={automationClient}
                   onOpenRoutine={openRoutine}
+                  {...(props.onOpenWorktrees === undefined
+                    ? {}
+                    : { onOpenWorktrees: props.onOpenWorktrees })}
                   workPromotionController={workPromotionController}
                   codeProviderChoices={codeProviderChoices}
                   openInApplications={settings.openInApplications}

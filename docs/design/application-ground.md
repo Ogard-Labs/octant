@@ -138,14 +138,14 @@ request 2026-11-15), so the ground is a whisper and agent replies remain bare pr
 (a Project's page, Settings, a file, a preview), and every destination page
 (Inbox, Board, Archive, Review, Projects, Agents, Automations, Artifacts, Image
 generator). A start screen (a welcome or a new thread) is the one exception and
-stays open on the ground, but only its stage: the Environment
-section and the bottom panel opened beside it take the text surface at 94%
-(`surface.css`, keyed on the start-only workspace), and the dock beside it is
-one surface of its own, like the thread list: the sidebar's colour kept at 72%
-under a 30% veil of the ground's colour, with the ground behind it blurred
-(`--octant-glass-blur`), so the ground reads there as a tone and never as glyphs
-or cells behind a tool's text; its tiles draw no fill of their own. Reduced
-transparency and increased contrast make that surface opaque. The veil is one rule in `surface.css` keyed on the
+stays open on the ground, but only its stage. A tool's pane is never on the
+ground: a dock tile, the dock's overview, the Environment section and the bottom
+panel are the pane colour, opaque, wherever a ground is on (beside a start
+screen and beside a thread, on an opaque window and under Glass; `surface.css`).
+A fill at 94%, the sidebar's colour at 72% under a veil, and a blur of the
+ground were each tried there, and the desktop window, which draws no backdrop
+blur, showed the ground's cells and streaks behind a pull request's title and
+the Environment rows (maintainer requests 2026-11-15 and 2026-11-16). The veil is one rule in `surface.css` keyed on the
 pane kind and the destination layers, never a colour per screen; a page drawn
 over the panes clears their veil so the two never stack. Increased contrast turns the ground off; reduced motion
 shows an animated picture's still frame. It is chosen in Settings ›

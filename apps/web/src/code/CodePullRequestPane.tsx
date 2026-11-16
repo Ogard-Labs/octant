@@ -153,7 +153,7 @@ function ReviewWindow(
           <span>Pull request #{review.number}</span>
           <h1>{review.title.length === 0 ? `Pull request #${review.number}` : review.title}</h1>
           <p className="code-pr-review__meta">
-            <PullRequestStatePill state={review.pullRequestState} />
+            <PullRequestStatePill solid state={review.pullRequestState} />
             <span>
               {review.headBranch} → {review.baseRepository}:{review.baseBranch}
             </span>

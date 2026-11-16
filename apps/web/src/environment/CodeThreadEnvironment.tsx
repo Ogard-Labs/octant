@@ -26,6 +26,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   FolderOpen,
   GitCommitHorizontal,
+  GitFork,
   GitPullRequest,
   Paperclip,
   Server,
@@ -137,6 +138,8 @@ export interface CodeThreadEnvironmentProps {
   readonly onOpenRoutine?: (automationId: string) => void;
   readonly environmentOpen?: boolean;
   readonly onOpenGit?: () => void;
+  /** Opens worktree setup for this thread's checkout. */
+  readonly onOpenWorktrees?: () => void;
   readonly onCreatePullRequest?: () => void;
   readonly sources?: ReadonlyArray<CodeAttachmentReference>;
   readonly sourceClient?: CodeAttachmentReader;
@@ -275,6 +278,9 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                 label="Create pull request"
                 onClick={props.onCreatePullRequest}
               />
+            )}
+            {props.onOpenWorktrees === undefined ? null : (
+              <EnvironmentRow icon={GitFork} label="Worktrees" onClick={props.onOpenWorktrees} />
             )}
           </section>
         }

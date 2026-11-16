@@ -768,6 +768,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
                     <DockBrowserCard
                       client={browserAutomationClient}
                       {...(contextId === undefined ? {} : { contextId })}
+                      {...(hostBridge === undefined ? {} : { hostBridge })}
                       key={`browser:${dockThread.threadId}:${contextId ?? ""}`}
                       onClose={controls.onClose}
                       onExpand={controls.onShow}

@@ -1,45 +1,17 @@
-import type { CodeBoardCard, ProjectId } from "@octant/contracts";
+import type { ProjectId } from "@octant/contracts";
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useThreadBoardCard } from "../shell/useThreadBoardCard";
+import { describe, expect, it, vi } from "vitest";
 import { WindowChromeContainer } from "./WindowChromeContainer";
-
-vi.mock("../shell/useThreadBoardCard", () => ({ useThreadBoardCard: vi.fn() }));
-
-beforeEach(() => {
-  vi.mocked(useThreadBoardCard).mockReturnValue(undefined);
-});
 
 const codeThread = {
   activeCodeThreadId: "00000000-0000-4000-8000-000000000001",
   activeProjectId: "00000000-0000-4000-8000-000000000002" as ProjectId,
 };
 
-function cardWithChanges(
-  changedFiles: Extract<CodeBoardCard["changedFiles"], { readonly kind: "observed" }>,
-): CodeBoardCard {
-  return { changedFiles } as CodeBoardCard;
-}
-
-function observed(insertions: number, deletions: number, freshness: "fresh" | "stale" = "fresh") {
-  return cardWithChanges({
-    kind: "observed",
-    freshness,
-    changedPathCount: insertions + deletions === 0 ? 0 : 2,
-    stagedCount: 0,
-    committedAhead: 0,
-    workingTreeClean: insertions + deletions === 0,
-    insertions,
-    deletions,
-  });
-}
-
 function chrome(overrides: Partial<React.ComponentProps<typeof WindowChromeContainer>> = {}) {
   const props: React.ComponentProps<typeof WindowChromeContainer> = {
     actions: {
       addDockTab: vi.fn(),
-      loadCodeBoard: vi.fn(),
       recoverZen: vi.fn(),
       startNewThreadDraft: vi.fn(),
       toggleBottomPanel: vi.fn(),
@@ -97,68 +69,14 @@ describe("the window chrome's dock toggle dot", () => {
 });
 
 describe("the window chrome's uncommitted changes", () => {
-  it("names the open Code thread's added and removed lines and opens the changes view", async () => {
-    vi.mocked(useThreadBoardCard).mockReturnValue(observed(12, 3));
-    const { props } = chrome(codeThread);
-
-    const button = screen.getByRole("button", {
-      name: "Uncommitted changes: 12 lines added, 3 removed",
-    });
-    expect(button).toHaveTextContent("+12−3");
-    await userEvent.setup().click(button);
-    expect(props.actions.addDockTab).toHaveBeenCalledWith("review");
-  });
-
-  it("shows +0 −0 for a clean checkout", () => {
-    vi.mocked(useThreadBoardCard).mockReturnValue(observed(0, 0));
+  it("leaves the count to Environment while a Code thread is open", () => {
     chrome(codeThread);
-    expect(
-      screen.getByRole("button", { name: "Uncommitted changes: 0 lines added, 0 removed" }),
-    ).toHaveTextContent("+0−0");
+    expect(screen.queryByRole("button", { name: /Uncommitted changes/ })).toBeNull();
   });
 
   it("shows nothing outside Code", () => {
     chrome();
     expect(screen.queryByRole("button", { name: /Uncommitted changes/ })).toBeNull();
-  });
-
-  it("keeps the dash for a thread whose checkout cannot be observed, so the band does not drop out when the board answers", () => {
-    vi.mocked(useThreadBoardCard).mockReturnValue({
-      changedFiles: { kind: "unavailable" },
-    } as unknown as CodeBoardCard);
-    chrome(codeThread);
-    const button = screen.getByRole("button", { name: "Uncommitted changes: not read" });
-    expect(button).toHaveTextContent("—");
-    expect(button).toHaveAttribute("title", "No changes could be read");
-  });
-
-  it("holds its place with a dash until the thread's checkout has been read", () => {
-    chrome(codeThread);
-    const button = screen.getByRole("button", { name: "Uncommitted changes: not read" });
-    expect(button).toHaveTextContent("—");
-    expect(button).toHaveAttribute("title", "Updating…");
-  });
-
-  it("keeps a stale count on screen in meta ink with Updating… as its tooltip", () => {
-    vi.mocked(useThreadBoardCard).mockReturnValue(observed(12, 3, "stale"));
-    chrome(codeThread);
-    const button = screen.getByRole("button", {
-      name: "Uncommitted changes: 12 lines added, 3 removed",
-    });
-    expect(button).toHaveTextContent("+12−3");
-    expect(button).toHaveAttribute("title", "Updating…");
-    expect(button).toHaveAttribute("data-updating", "true");
-  });
-
-  it("marks a zero count so it is drawn in meta ink rather than green or red", () => {
-    vi.mocked(useThreadBoardCard).mockReturnValue(observed(5, 0));
-    chrome(codeThread);
-    const button = screen.getByRole("button", { name: /Uncommitted changes/ });
-    expect(button.querySelector(".window-chrome__changes-added")).not.toHaveAttribute("data-zero");
-    expect(button.querySelector(".window-chrome__changes-removed")).toHaveAttribute(
-      "data-zero",
-      "true",
-    );
   });
 });
 

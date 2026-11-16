@@ -170,17 +170,105 @@ describe("DockBrowserCard", () => {
   });
 
   it("asks for nothing without a Browser client", async () => {
-    renderCard(undefined);
+    const { container } = renderCard(undefined);
     expect(await screen.findByRole("region", { name: "Minimised Browser" })).toBeVisible();
-    expect(screen.getByText("Browser")).toBeVisible();
+    expect(
+      within(container.querySelector(".dock-mini-card__head") as HTMLElement).getByText("Browser"),
+    ).toBeVisible();
   });
 
-  it("holds a neutral skeleton, with no status words, while the picture is stale or missing", async () => {
-    const { container } = renderCard(clientOf(() => snapshot({ stale: true })));
-    await screen.findByText("Your account");
-    expect(container.querySelector("img")).toBeNull();
+  it("holds a neutral skeleton until the first answer, then the page's name instead of an empty box", async () => {
+    let answer: (value: BrowserAutomationSnapshot) => void = () => {};
+    const client = {
+      inspectThread: vi.fn(
+        () =>
+          new Promise<BrowserAutomationSnapshot>((done) => {
+            answer = done;
+          }),
+      ),
+    } as unknown as BrowserAutomationClient;
+    const { container } = renderCard(client);
+    await waitFor(() => expect(client.inspectThread).toHaveBeenCalled());
     expect(container.querySelector(".skeleton")).not.toBeNull();
+
+    answer(snapshot({ stale: true }));
+    const preview = await waitFor(() => {
+      const note = container.querySelector(".dock-mini-card__note");
+      expect(note).not.toBeNull();
+      return note as HTMLElement;
+    });
+    expect(container.querySelector(".dock-mini-card__picture")).toBeNull();
+    expect(container.querySelector(".skeleton")).toBeNull();
+    expect(within(preview).getByText("Your account")).toBeVisible();
     expect(screen.queryByText(/waiting|snapshot|stale/i)).not.toBeInTheDocument();
+  });
+
+  describe("in the desktop app", () => {
+    const desktopPicture = "data:image/jpeg;base64,ZGVza3RvcA==";
+    const serverPicture = "data:image/jpeg;base64,AQID";
+    const renderDesktop = (
+      capture: (request: { contextId: string; threadId: string }) => Promise<string | undefined>,
+      client: BrowserAutomationClient = clientOf(() => snapshot()),
+    ) => {
+      const hostBridge = { captureBrowserSurfacePreview: vi.fn(capture) };
+      const view = render(
+        <DockBrowserCard
+          client={client}
+          hostBridge={hostBridge}
+          onClose={vi.fn()}
+          onExpand={vi.fn()}
+          pollIntervalMs={60_000}
+          previewIntervalMs={20}
+          threadId={threadId as never}
+        />,
+      );
+      return { ...view, hostBridge };
+    };
+    const shownPicture = (container: HTMLElement) =>
+      container.querySelector(".dock-mini-card__picture")?.getAttribute("src");
+
+    it("shows the window's own picture of the page over the server's", async () => {
+      const { container, hostBridge } = renderDesktop(async () => desktopPicture);
+      await waitFor(() => expect(shownPicture(container)).toBe(desktopPicture));
+      expect(hostBridge.captureBrowserSurfacePreview).toHaveBeenCalledWith({
+        contextId,
+        threadId,
+      });
+    });
+
+    it("keeps the last picture while a refresh brings nothing new", async () => {
+      let calls = 0;
+      const { container, hostBridge } = renderDesktop(async () =>
+        calls++ === 0 ? desktopPicture : undefined,
+      );
+      await waitFor(() => expect(shownPicture(container)).toBe(desktopPicture));
+      await waitFor(() =>
+        expect(hostBridge.captureBrowserSurfacePreview.mock.calls.length).toBeGreaterThan(2),
+      );
+      expect(shownPicture(container)).toBe(desktopPicture);
+    });
+
+    it("falls back to the server's picture when the desktop app refuses, and stops asking", async () => {
+      const { container, hostBridge } = renderDesktop(async () => {
+        throw new Error("Octant Browser preview does not own this context.");
+      });
+      await waitFor(() => expect(shownPicture(container)).toBe(serverPicture));
+      // One refusal is not final (a card can mount before the window knows its
+      // page); after three in a row it stops.
+      await waitFor(() => expect(hostBridge.captureBrowserSurfacePreview).toHaveBeenCalledTimes(3));
+      await new Promise((done) => setTimeout(done, 80));
+      expect(hostBridge.captureBrowserSurfacePreview).toHaveBeenCalledTimes(3);
+    });
+
+    it("takes no picture while the window is hidden", async () => {
+      const hidden = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+      const { hostBridge } = renderDesktop(async () => desktopPicture);
+      await new Promise((done) => setTimeout(done, 80));
+      expect(hostBridge.captureBrowserSurfacePreview).not.toHaveBeenCalled();
+      hidden.mockReturnValue("visible");
+      document.dispatchEvent(new Event("visibilitychange"));
+      await waitFor(() => expect(hostBridge.captureBrowserSurfacePreview).toHaveBeenCalled());
+    });
   });
 
   it("names the profile of a signed-in page beside the page, and a Project profile as a Project", async () => {

@@ -3873,6 +3873,20 @@ function installIpcHandlers(): void {
       threadId: request.threadId,
     });
   });
+  ipcMain.handle(IPC_CHANNELS.browserSurfacePreview, async (event, value: unknown) => {
+    const context = ownedTopLevelWindowContext(event);
+    const request = validateBrowserSurfaceIdentity(value);
+    // The minimised Browser card's picture skips the credential-field check
+    // that guards observations. That is safe because the pane already shows
+    // this live page to this person on this screen: the picture goes only to
+    // this window's renderer for display, is never journaled or stored by the
+    // server, and never reaches an agent. The host checks that this window and
+    // thread own the context.
+    return await browserSurfaceHost?.previewPicture(request.contextId, {
+      windowId: context.windowId,
+      threadId: request.threadId,
+    });
+  });
   ipcMain.handle(IPC_CHANNELS.browserSurfaceCommand, async (event, value: unknown) => {
     const context = ownedTopLevelWindowContext(event);
     const request = validateBrowserSurfaceCommand(value);
