@@ -633,6 +633,52 @@ describe("Code routes", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
+  it("refuses the per-run Full access flag from any caller but a window on this host", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-created" }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000952";
+    const body = JSON.stringify({
+      kind: "create-code-thread",
+      thread: { ...thread, executionPolicy: "full-access", fullAccessRunFlag: true },
+    });
+    const fromDevice = (origin: string) => {
+      const remote = request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin,
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000953" as never,
+          admittedBy: "host-person",
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    for (const origin of [AGENT_ACCESS_ORIGIN, "https://octant.invalid"]) {
+      const refused = await route(fromDevice(origin));
+      expect(refused?.status).toBe(403);
+      expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+    }
+    expect(execute).not.toHaveBeenCalled();
+    const local = await route(
+      request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      }),
+    );
+    expect(local?.status).toBe(200);
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it("never lets a paired device ask for a terminal Browser grant as the person", async () => {
     // The host mints a grant only for the person at a local window; a request
     // that reaches it as anything else is refused and starts no terminal.

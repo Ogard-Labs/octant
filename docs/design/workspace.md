@@ -253,9 +253,12 @@ each extra folder as an Extra folder row with Remove; then one line saying
 extra folders get the main folder's access while checkouts and Git stay in
 the main folder (a terminal or saved action can start in any folder), and **Add folder…**, which opens the native folder
 picker on desktop and the host folder browser elsewhere; then what the
-binding grants), then labelled groups. A refused folder (the home folder or
-above it, a system or credential folder, one inside or around another folder
-of the Project) shows the host's reason on the card. A thread's environment
+binding grants), then labelled groups. A refused folder (one above home, a
+system or credential folder, one inside or around another folder of the
+Project) shows the host's reason on the card. The home folder itself shows the
+host's warning, naming that threads may read and change every file in it while
+its credential folders stay protected, with **Confirm** and **Cancel**;
+Confirm adds it. A thread's environment
 panel lists the Project's extra folders read-only, under the main folder, and
 shows nothing when there are none. The Files tool lists the extra folders'
 files after the main folder's, each file by its own name with its folder's

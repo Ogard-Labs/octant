@@ -397,6 +397,8 @@ export function guardAgentRequest(input: {
       };
     }
     if (kind === "change-work-thread-access") {
+      if (body["fullAccessRunFlag"] !== undefined)
+        return refused("The per-run Full access flag stays with the person.");
       if (!workAccessAllowed(grant.scope.highestLevel, body["access"])) {
         return refused(`This agent's grant allows at most ${grant.scope.highestLevel}.`);
       }
@@ -418,6 +420,8 @@ export function guardAgentRequest(input: {
     }
     if (kind === "create-code-thread") {
       const created = (body["thread"] ?? {}) as Readonly<Record<string, unknown>>;
+      if (created["fullAccessRunFlag"] !== undefined)
+        return refused("The per-run Full access flag stays with the person.");
       if (!scope.modes.includes("code")) return refused("This agent's grant has no Code.");
       if (!projectAllowed(grant, created["projectId"])) {
         return refused("That Project is not in this agent's grant.");

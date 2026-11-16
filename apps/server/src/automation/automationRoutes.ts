@@ -515,6 +515,21 @@ async function handleCommand(
       origin,
     );
   }
+  // A file routine's activity window is part of its setup, which only the
+  // host's own person changes, as with the input folder itself.
+  if (
+    body.kind === "change-file-automation-activity-window" &&
+    !principalActsAsHostPerson(context.principal)
+  ) {
+    return jsonResponse(
+      commandFailure(
+        "unauthorized",
+        "Change a file routine's activity history from an Octant window on this host or a device you paired there.",
+      ),
+      200,
+      origin,
+    );
+  }
   const accessible = await accessibleProjects(dependencies, context);
   const denial = authorizeCommandProject(dependencies, body, accessible);
   if (denial !== undefined) {

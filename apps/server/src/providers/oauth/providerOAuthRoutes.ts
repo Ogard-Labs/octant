@@ -168,8 +168,9 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
     const actor = eventActorForPrincipal(readPrincipalRouteContext(request)?.principal);
     const command = readCommand(body);
     if (command === undefined) return json({ kind: "refused", reason: "invalid" }, 400, origin);
-    // A cloud sign-in begins only from the host's terminal; Settings reads
-    // whether one is held and signs it out.
+    // A cloud portal sign-in begins only from the host's terminal; Settings
+    // reads whether one is held, signs it out, and connects the person's own
+    // AWS profile or key pair at a window on this host.
     if (command.descriptorId === AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.descriptorId) {
       try {
         return json(
@@ -179,6 +180,9 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
             kind: command.kind,
             principal,
             actor,
+            ...(command.awsProfile === undefined ? {} : { awsProfile: command.awsProfile }),
+            ...(command.accessKeys === undefined ? {} : { accessKeys: command.accessKeys }),
+            actorId: windowId,
           }),
           200,
           origin,
@@ -551,10 +555,22 @@ async function readPointer(
 }
 
 export interface ProviderOAuthCommand {
-  readonly kind: "status" | "acknowledge" | "begin" | "poll" | "sign-out" | "sign-out-locally";
+  readonly kind:
+    | "status"
+    | "acknowledge"
+    | "begin"
+    | "poll"
+    | "sign-out"
+    | "sign-out-locally"
+    | "connect-aws-profile"
+    | "connect-access-keys";
   readonly instanceId: ProviderInstanceId;
   readonly descriptorId: string;
   readonly attemptId: string;
+  /** For `connect-aws-profile`: the person's profile name, read by the broker in place. */
+  readonly awsProfile?: string;
+  /** For `connect-access-keys`: a long-lived key pair, handed to the broker and never stored here. */
+  readonly accessKeys?: { readonly accessKeyId: string; readonly secretAccessKey: string };
   /**
    * An organization sign-in begun with a device code. Only the host-local
    * `octant provider sign-in` route sets it; this route's commands never do.
@@ -571,7 +587,9 @@ function readCommand(value: unknown): ProviderOAuthCommand | undefined {
     kind !== "begin" &&
     kind !== "poll" &&
     kind !== "sign-out" &&
-    kind !== "sign-out-locally"
+    kind !== "sign-out-locally" &&
+    kind !== "connect-aws-profile" &&
+    kind !== "connect-access-keys"
   ) {
     return undefined;
   }
@@ -584,6 +602,32 @@ function readCommand(value: unknown): ProviderOAuthCommand | undefined {
   }
   const attemptId = typeof value.attemptId === "string" ? value.attemptId : "";
   if (kind === "poll" && attemptId.length === 0) return undefined;
+  if (kind === "connect-aws-profile") {
+    if (typeof value.awsProfile !== "string") return undefined;
+    return {
+      kind,
+      instanceId,
+      descriptorId: value.descriptorId,
+      attemptId,
+      awsProfile: value.awsProfile,
+    };
+  }
+  if (kind === "connect-access-keys") {
+    const keys = value.accessKeys;
+    if (
+      !isRecord(keys) ||
+      typeof keys.accessKeyId !== "string" ||
+      typeof keys.secretAccessKey !== "string"
+    )
+      return undefined;
+    return {
+      kind,
+      instanceId,
+      descriptorId: value.descriptorId,
+      attemptId,
+      accessKeys: { accessKeyId: keys.accessKeyId, secretAccessKey: keys.secretAccessKey },
+    };
+  }
   return { kind, instanceId, descriptorId: value.descriptorId, attemptId };
 }
 

@@ -1,4 +1,5 @@
 import {
+  AutomationFileActivityWindowLimit,
   AutomationFileArrivalTrigger,
   AutomationFileArrivalReceipt,
   AutomationFileSourceCheckpoint,
@@ -1159,6 +1160,22 @@ export const AutomationCommand = Schema.Union(
     batchDigest: AutomationSourceDigest,
     disposition: Schema.Literal("skip", "run-once"),
   }).annotations(strict),
+  /**
+   * Raise a file routine's activity window (`activityWindowLimit`) or clear
+   * the runs it holds (`clear`). Clearing is the person vouching that those
+   * runs' work is finished; it is refused while any of them still runs.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("change-file-automation-activity-window"),
+    ...AutomationCommandFields,
+    change: Schema.Union(
+      Schema.Struct({
+        kind: Schema.Literal("raise"),
+        activityWindowLimit: AutomationFileActivityWindowLimit,
+      }).annotations(strict),
+      Schema.Struct({ kind: Schema.Literal("clear") }).annotations(strict),
+    ),
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("create-automation"),
     ...AutomationCommandFields,
@@ -1580,6 +1597,26 @@ export const AutomationFileSourceObserved = Schema.Struct({
 }).annotations(strict);
 export type AutomationFileSourceObserved = typeof AutomationFileSourceObserved.Type;
 
+/**
+ * The person raised a file routine's activity window or cleared it. The event
+ * carries the whole resulting checkpoint, so replay rebuilds the same window
+ * and the same overflow as the live host saw.
+ */
+export const AutomationFileSourceWindowChanged = Schema.Struct({
+  automationId: AutomationId,
+  definitionRevision: AutomationDefinitionRevision,
+  change: Schema.Literal("raised", "cleared"),
+  checkpoint: AutomationFileSourceCheckpoint,
+  recordedAt: UtcTimestamp,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (event) => event.change === "raised" || event.checkpoint.activityWindow.length === 0,
+    ),
+  );
+export type AutomationFileSourceWindowChanged = typeof AutomationFileSourceWindowChanged.Type;
+
 export const AutomationEventSourceObserved = Schema.Struct({
   automationId: AutomationId,
   definitionRevision: AutomationDefinitionRevision,
@@ -1711,6 +1748,7 @@ export type AutomationRunResultReported = typeof AutomationRunResultReported.Typ
 export const AUTOMATION_EVENT_NAMES = [
   "automation-event-source-observed@1",
   "automation-file-source-observed@1",
+  "automation-file-source-window-changed@1",
   "automation-definition-created@1",
   "automation-definition-updated@1",
   "automation-definition-lifecycle-changed@1",
@@ -1737,6 +1775,10 @@ export const AutomationEvent = Schema.Union(
   Schema.Struct({
     eventName: Schema.Literal("automation-file-source-observed@1"),
     payload: AutomationFileSourceObserved,
+  }).annotations(strict),
+  Schema.Struct({
+    eventName: Schema.Literal("automation-file-source-window-changed@1"),
+    payload: AutomationFileSourceWindowChanged,
   }).annotations(strict),
   Schema.Struct({
     eventName: Schema.Literal("automation-definition-created@1"),

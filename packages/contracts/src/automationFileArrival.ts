@@ -8,6 +8,17 @@ export const MAX_AUTOMATION_SOURCE_SCAN_BYTES = 64 * 1024 * 1024;
 export const MAX_AUTOMATION_SOURCE_DIRECTORY_ENTRIES = 4096;
 export const DEFAULT_AUTOMATION_FILE_START_LIMIT = 8;
 export const MAX_AUTOMATION_FILE_START_LIMIT = 32;
+/**
+ * A file routine's activity window: the runs it started since its input was
+ * last seen quiet. 64 is the default; the person may raise it per routine up
+ * to the maximum, journaled with the routine so replay rebuilds the same
+ * overflow ([Octant's own limits become settings]).
+ */
+export const DEFAULT_AUTOMATION_FILE_ACTIVITY_WINDOW = 64;
+export const MAX_AUTOMATION_FILE_ACTIVITY_WINDOW = 1024;
+export const AutomationFileActivityWindowLimit = Schema.Int.pipe(
+  Schema.between(DEFAULT_AUTOMATION_FILE_ACTIVITY_WINDOW, MAX_AUTOMATION_FILE_ACTIVITY_WINDOW),
+);
 const counter = Schema.Int.pipe(Schema.between(0, Number.MAX_SAFE_INTEGER));
 const positiveCounter = Schema.Int.pipe(Schema.between(1, Number.MAX_SAFE_INTEGER));
 
@@ -105,7 +116,11 @@ export const AutomationFileSourceCheckpoint = Schema.Struct({
   phase: AutomationFileSourcePhase,
   reason: Schema.optional(AutomationFileSourceReason),
   coverageGap: Schema.Boolean,
-  activityWindow: Schema.Array(Schema.UUID).pipe(Schema.maxItems(64)),
+  activityWindow: Schema.Array(Schema.UUID).pipe(
+    Schema.maxItems(MAX_AUTOMATION_FILE_ACTIVITY_WINDOW),
+  ),
+  /** Absent is the default window; set only by the person's journaled raise. */
+  activityWindowLimit: Schema.optional(AutomationFileActivityWindowLimit),
   busyChangeObserved: Schema.Boolean,
   held: Schema.optional(AutomationFileHeldBatch),
 })
@@ -114,6 +129,7 @@ export const AutomationFileSourceCheckpoint = Schema.Struct({
     Schema.filter(
       (checkpoint) =>
         new Set(checkpoint.activityWindow).size === checkpoint.activityWindow.length &&
+        checkpoint.activityWindow.length <= automationFileActivityWindowLimit(checkpoint) &&
         (checkpoint.phase !== "watching" || checkpoint.baselineReady) &&
         (checkpoint.phase !== "held" || checkpoint.held !== undefined) &&
         (checkpoint.baselineReady ||
@@ -121,6 +137,13 @@ export const AutomationFileSourceCheckpoint = Schema.Struct({
     ),
   );
 export type AutomationFileSourceCheckpoint = typeof AutomationFileSourceCheckpoint.Type;
+
+/** How many runs this routine's activity window holds before it overflows. */
+export function automationFileActivityWindowLimit(checkpoint: {
+  readonly activityWindowLimit?: number | undefined;
+}): number {
+  return checkpoint.activityWindowLimit ?? DEFAULT_AUTOMATION_FILE_ACTIVITY_WINDOW;
+}
 
 export const AutomationFileSourceReview = Schema.Struct({
   expectedDefinitionVersion: positiveCounter,
@@ -174,6 +197,10 @@ export const AutomationFileSourceSummary = Schema.Struct({
   heldDigest: Schema.optional(AutomationSourceDigest),
   sourceIdentity: Schema.optional(AutomationSourceDigest),
   reviewDigest: Schema.optional(AutomationSourceDigest),
+  activityWindowRuns: Schema.optional(
+    Schema.Int.pipe(Schema.between(0, MAX_AUTOMATION_FILE_ACTIVITY_WINDOW)),
+  ),
+  activityWindowLimit: Schema.optional(AutomationFileActivityWindowLimit),
 }).annotations(strict);
 export type AutomationFileSourceSummary = typeof AutomationFileSourceSummary.Type;
 export const decodeAutomationFileSourceCheckpoint = Schema.decodeUnknownSync(
