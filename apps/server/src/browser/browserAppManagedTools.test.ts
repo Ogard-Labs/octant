@@ -2334,6 +2334,8 @@ describe("a Work thread's bounded page script", () => {
       readonly approvals?: Record<string, unknown>;
       readonly profileCaller?: "terminal-grant";
       readonly mode?: "work" | "chat";
+      readonly oneUsePermission?: boolean;
+      readonly approvedPage?: boolean;
     } = {},
   ) {
     const run = vi.fn(
@@ -2352,7 +2354,11 @@ describe("a Work thread's bounded page script", () => {
       mode: overrides.mode ?? "work",
       modelId,
       resolveModelId: () => modelId,
-      modelBindings: new Map(),
+      modelBindings: new Map(
+        overrides.approvedPage === true
+          ? [[String(context.contextId), { modelId, authority: workAuthority }]]
+          : [],
+      ),
       executionPolicy: "approval-gated",
       resolveAuthority: () => workAuthority,
       browser: {
@@ -2368,7 +2374,13 @@ describe("a Work thread's bounded page script", () => {
       },
       ...(overrides.lent === false
         ? {}
-        : { pageScript: { level: overrides.level ?? (() => "full-access" as const), run } }),
+        : {
+            pageScript: {
+              level: overrides.level ?? (() => "full-access" as const),
+              oneUsePermission: () => overrides.oneUsePermission ?? true,
+              run,
+            },
+          }),
       approvals: { request, ...overrides.approvals } as never,
       ...(overrides.profileCaller === undefined ? {} : { profileCaller: overrides.profileCaller }),
       uuid: () => "80000000-0000-4000-8000-000000000001",
@@ -2393,16 +2405,68 @@ describe("a Work thread's bounded page script", () => {
         turnExecutionPolicy: "full-access",
       }),
     );
-    // No scoped permission exists for Work, so none is claimed.
+    // Full access asks nothing, so no one-use permission is claimed.
     expect(run.mock.calls[0]?.[0].scriptPermissionIsCurrent).toBeUndefined();
   });
 
+  it("asks the person's one-use permission for the exact source below Full access, then runs it", async () => {
+    const { tools, run, request } = scriptTools({
+      level: () => "approval-gated" as const,
+      approvedPage: true,
+    });
+    expect(await tools.execute(call)).toMatchObject({
+      isError: false,
+      result: { script: { status: "completed", valueJson: '"Shop"' } },
+    });
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        origin: "https://example.com",
+        script: { source: "document.title" },
+      }),
+    );
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({ turnExecutionPolicy: "approval-gated" }),
+    );
+    expect(run.mock.calls[0]?.[0].scriptPermissionIsCurrent?.()).toBe(true);
+  });
+
+  it("runs nothing below Full access when the person declines the script", async () => {
+    const { tools, run, request } = scriptTools({
+      level: () => "approval-gated" as const,
+      approvedPage: true,
+    });
+    request.mockImplementation(async () => "denied" as never);
+    expect(await tools.execute(call)).toEqual({
+      isError: true,
+      result: { error: "browser-approval-denied" },
+    });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it.each([
-    ["below Full access", { level: () => "approval-gated" as const }, "script-needs-full-access"],
+    [
+      "below Full access before the page itself was approved",
+      { level: () => "approval-gated" as const },
+      "browser-approval-required",
+    ],
+    [
+      "below Full access where the one-use permission is withheld",
+      { level: () => "approval-gated" as const, approvedPage: true, oneUsePermission: false },
+      "script-needs-full-access",
+    ],
     [
       "when the level changed since the turn began",
       { level: () => undefined },
-      "script-needs-full-access",
+      "browser-authority-stale",
+    ],
+    [
+      "below Full access on a paired device",
+      {
+        level: () => "approval-gated" as const,
+        approvedPage: true,
+        approvals: { isPairedDevice: () => true },
+      },
+      "script-needs-a-local-person",
     ],
     [
       "on a paired device",

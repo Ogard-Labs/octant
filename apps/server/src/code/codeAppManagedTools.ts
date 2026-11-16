@@ -1,3 +1,4 @@
+import { askOneUsePageScriptPermission } from "../browser/browserPageScriptPermission";
 import { browserAgentAvailability, browserProfileFromChoice } from "@octant/domain";
 import { browserProfileKey, storedBrowserProfile } from "@octant/domain";
 import type { StoredBrowserProfile, BrowserDownloadSource } from "@octant/contracts";
@@ -1438,38 +1439,23 @@ async function browserToolOne(
     };
     let scriptPermissionIsCurrent: (() => boolean) | undefined;
     if (posture !== "full-access") {
-      const approvals = options.browserProfiles?.approvals;
-      const origin = expectedUrl === undefined ? undefined : allowedOrigin(expectedUrl);
       if (posture === "plan") return failure("plan-mode-read-only");
-      if (
-        approvals === undefined ||
-        origin === undefined ||
-        !origin.startsWith("https://") ||
-        approvals.isUnattendedScope?.(options.windowId) === true ||
-        approvals.isPairedDevice?.(options.windowId) === true
-      )
-        return failure("script-needs-a-local-person");
-      if (!scriptBindingIsCurrent()) return failure("browser-approval-required");
-      const decision = await askWhilePageLives(pageHold, signal, (askSignal) =>
-        approvals.request({
-          windowId: options.windowId,
-          threadId: String(threadId),
-          authority,
-          origin,
-          ...(profile === undefined ? {} : { profile }),
-          script: { source: input.source },
-          ...(askSignal === undefined ? {} : { signal: askSignal }),
-        }),
-      );
-      if (decision !== "approved") return failure(`browser-approval-${decision}`);
-      const reviewed = options.browser.inspectThread(options.windowId, threadId).observation;
-      if (
-        !callerIsCurrent() ||
-        signal?.aborted ||
-        reviewed?.url !== expectedUrl ||
-        reviewed?.revision !== input.expectedObservationRevision
-      )
-        return failure("browser-authority-stale");
+      const permission = await askOneUsePageScriptPermission({
+        approvals: options.browserProfiles?.approvals,
+        windowId: options.windowId,
+        threadId: String(threadId),
+        authority,
+        profile,
+        expectedUrl,
+        source: input.source,
+        expectedObservationRevision: input.expectedObservationRevision,
+        bindingIsCurrent: scriptBindingIsCurrent,
+        callerIsCurrent,
+        observe: () => options.browser?.inspectThread(options.windowId, threadId).observation,
+        pageHold,
+        signal,
+      });
+      if (permission.status === "refused") return failure(permission.reason);
       // The service checks the exact observation before dispatch, then deliberately
       // invalidates it after an effect; result publication still checks authority.
       scriptPermissionIsCurrent = callerIsCurrent;
