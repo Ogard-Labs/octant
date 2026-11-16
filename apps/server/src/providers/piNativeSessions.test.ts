@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -7,8 +8,32 @@ import {
   type ProviderModelId,
 } from "@octant/contracts";
 import { Effect, Exit } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { makePiNativeSessions, piSessionFolderName } from "./piNativeSessions";
+
+// The copy's write is the only write to an open descriptor in this suite; a
+// test makes the next one fail as a full disk would.
+const failNextDescriptorWrite = { armed: false };
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  const failing = () => {
+    if (!failNextDescriptorWrite.armed) return false;
+    failNextDescriptorWrite.armed = false;
+    return true;
+  };
+  return {
+    ...actual,
+    writeSync: (...args: Parameters<typeof actual.writeSync>) => {
+      if (failing()) throw Object.assign(new Error("ENOSPC"), { code: "ENOSPC" });
+      return actual.writeSync(...args);
+    },
+    writeFileSync: (...args: Parameters<typeof actual.writeFileSync>) => {
+      if (typeof args[0] === "number" && failing())
+        throw Object.assign(new Error("ENOSPC"), { code: "ENOSPC" });
+      return actual.writeFileSync(...args);
+    },
+  };
+});
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000901");
 const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000902");
@@ -139,5 +164,30 @@ describe("Pi native sessions", () => {
         (session) => session.nativeSessionId,
       ),
     ).toEqual(["mine"]);
+  });
+
+  it("leaves no copy behind when writing it fails, so taking the session up again succeeds", async () => {
+    const fixture = piSessions();
+    fixture.write(projectRoot, "mine", undefined, "2026-11-01T10:00:00.000Z");
+    const adopt = () =>
+      fixture.sessions.adopt({
+        instanceId,
+        projectRoot,
+        mode: "code",
+        sessionId,
+        nativeSessionId: "mine",
+        modelId,
+      });
+    failNextDescriptorWrite.armed = true;
+    const failed = await Effect.runPromiseExit(adopt());
+    expect(Exit.isFailure(failed)).toBe(true);
+    expect(fs.readdirSync(fixture.octant)).toEqual([]);
+    expect(
+      (await Effect.runPromise(fixture.sessions.list({ instanceId, projectRoot }))).map(
+        (session) => session.nativeSessionId,
+      ),
+    ).toEqual(["mine"]);
+    await Effect.runPromise(adopt());
+    expect(readdirSync(fixture.octant)).toHaveLength(1);
   });
 });

@@ -1830,53 +1830,30 @@ command such as `update-config` may do. The earlier refusal everywhere was
 Octant's default, not a protocol limit: ACP carries the command as prompt
 text.
 
-### Gemini CLI and Qwen Code
-
-Under [Providers run in their own sandbox](../architecture.md#security-and-authority),
-Gemini CLI and Qwen Code run in their own sandbox instead of Octant's
-profile where every condition of `acpNativeSandboxApplies`
-(`acpProcess.ts`) holds: outside Strict; below Full access; in Work or Code
-outside Plan; a session, not a Connection Check; Network limits not routing
-the runtime through Octant's proxy, which only Octant's profile can hold it
-to; a Project the person trusted for the agent; and a host, release and
-setup the agent's sandbox was read for. Anywhere else the launch keeps
-Octant's profile, exactly as under Strict. Octant's wall does not wrap the
-agent's sandbox, since macOS refuses a Seatbelt profile inside another.
-
-The trusted-Project condition is a rationale worth keeping: both agents load
-a Project's own skill folders by themselves (`forbiddenRootEntries`), which
-Octant's profile holds back until the person trusts the Project for the
-agent. With their own sandbox in its place nothing would hold them back, so
-an untrusted Project keeps Octant's profile; a trusted one loads them as the
-agent does on its own.
-
-- **Gemini CLI**, from 0.68.0 (read from its published bundle), on macOS and
-  Linux: `security.toolSandboxing` runs each tool command in its own
-  sandbox, Seatbelt on macOS and Bubblewrap on Linux, where a missing `bwrap`
-  fails the command rather than running it open. Octant writes the setting,
-  with the Project's extra folders as `tools.sandboxAllowedPaths` and
-  `tools.sandboxNetworkAccess` on (Network limits are off when this
-  applies), into `octant-system-settings.json` in the managed home and points
-  `GEMINI_CLI_SYSTEM_SETTINGS_PATH` at it: system settings are the layer the
-  person's own settings cannot override. A host that already has a system
-  settings file (`/Library/Application Support/GeminiCli/settings.json`,
-  `/etc/gemini-cli/settings.json`), or names its own, keeps Octant's profile
-  rather than lose an administrator's settings. A command that needs more
-  than its sandbox allows raises Gemini's `sandbox_expansion` confirmation,
-  which its ACP server sends as `session/request_permission`: the person sees
-  an Octant approval, and Octant answers `allow_once`, so nothing is
-  remembered for a later command.
-- **Qwen Code**, from 0.27.4, on macOS only: `QWEN_SANDBOX=sandbox-exec`
-  with `SEATBELT_PROFILE=permissive-open` relaunches it, ACP included, under
-  its own Seatbelt profile, which reads anywhere and writes the folder it
-  runs in, its own folders and temp. It has no per-command expansion, so a
-  command that needs more fails, as in Qwen Code on its own. Its Linux
-  sandbox is Docker or Podman (its Bubblewrap mode was removed), which
-  Octant does not start, and its profile grants only folders named with
-  `--include-directories`, so Linux and a Project with extra folders keep
-  Octant's profile.
-
 ### Own sandboxes checked and not switched
+
+Under [Providers run in their own sandbox](../architecture.md#security-and-authority)
+an agent's own sandbox replaces Octant's profile only where it keeps other
+providers' sign-ins unreadable: one provider never reads another's
+credentials, Strict or not, as OpenCode's launch outside Strict keeps the
+Provider sign-ins group refused (`protectedFiles: "provider-sign-ins"`).
+Each agent below keeps Octant's profile below Full access, and Strict and
+Full access are as they were.
+
+- **Gemini CLI** 0.68.0 runs each tool command in its own sandbox when
+  `security.toolSandboxing` is set (Seatbelt on macOS, Bubblewrap on Linux),
+  and a command that needs more raises a `sandbox_expansion` confirmation
+  its ACP server sends as `session/request_permission`. Its sandbox reads
+  every file but the Project's `.geminiignore` entries: no setting takes a
+  deny list Octant could write (`tools.sandboxAllowedPaths` only widens),
+  and an expansion can widen reads to any path, so `~/.codex/auth.json` or
+  another provider's managed home would be readable.
+- **Qwen Code** 0.27.4 relaunches itself, ACP included, under `sandbox-exec`
+  when `QWEN_SANDBOX` names it, but every built-in Seatbelt profile it ships
+  allows all reads (`permissive-*` allow everything, `restrictive-*` keep
+  `(allow file-read*)`), and a custom profile is read only from the
+  Project's `.qwen` folder, which Octant does not write. On Linux its sandbox
+  is Docker or Podman, which Octant does not start.
 
 - **Copilot CLI** 1.0.112 has a command sandbox (its MXC layer: Seatbelt on
   macOS; Bubblewrap with a private network namespace on Linux, needing

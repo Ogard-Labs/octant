@@ -28,7 +28,7 @@ import {
   readSync,
   readdirSync,
   rmSync,
-  writeSync,
+  writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -301,10 +301,17 @@ export function makePiNativeSessions(options: {
               constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
               0o600,
             );
+            // `writeFileSync` on a descriptor writes until the whole copy is
+            // down, where one `writeSync` may stop short. A copy that fails
+            // part way is removed: its header would otherwise mark the
+            // session as held and refuse every retry.
+            let written = false;
             try {
-              writeSync(descriptor, [JSON.stringify(header), ...entries].join("\n"));
+              writeFileSync(descriptor, [JSON.stringify(header), ...entries].join("\n"));
+              written = true;
             } finally {
               closeSync(descriptor);
+              if (!written) rmSync(target, { force: true });
             }
             return {
               driverKind: "pi",

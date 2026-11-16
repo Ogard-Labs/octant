@@ -20,7 +20,6 @@ import type {
 import { Effect, Either } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
-  acpNativeSandboxApplies,
   makeAcpConfinementLive,
   makeAcpProcessLive,
   probeAcpBinary,
@@ -2521,96 +2520,48 @@ describe("ACP agents running as themselves", () => {
   });
 });
 
-describe("ACP agents' own sandboxes", () => {
-  const untrusted = {
+describe("ACP agents whose own sandbox cannot refuse other providers' sign-ins", () => {
+  const trustedProject = {
     subagents: false,
     webTools: false,
     skills: false,
     toolServers: false,
     hooks: false,
-    projectCode: false,
+    projectCode: true,
   } as const;
-  const trusted = { ...untrusted, projectCode: true } as const;
-  const base = {
-    platform: "darwin" as const,
-    version: "0.68.0",
-    mode: "code" as const,
-    executionPolicy: "approval-gated" as const,
-    strict: false,
-    nativeSetup: trusted,
-    environment: {},
-  };
 
-  it("runs Gemini CLI in its own sandbox only outside Strict, below Full access, in a trusted Project", () => {
-    expect(acpNativeSandboxApplies({ ...base, profile: gemini })).toBe(true);
-    // Strict, and a launch that never resolved Strict, keep Octant's profile.
-    expect(acpNativeSandboxApplies({ ...base, profile: gemini, strict: true })).toBe(false);
-    const { strict: _strict, ...unresolved } = base;
-    expect(acpNativeSandboxApplies({ ...unresolved, profile: gemini })).toBe(false);
-    for (const executionPolicy of ["plan", "full-access"] as const) {
-      expect(acpNativeSandboxApplies({ ...base, profile: gemini, executionPolicy })).toBe(false);
-    }
-    expect(acpNativeSandboxApplies({ ...base, profile: gemini, mode: "chat" })).toBe(false);
-    expect(acpNativeSandboxApplies({ ...base, profile: gemini, nativeSetup: untrusted })).toBe(
-      false,
-    );
-    expect(acpNativeSandboxApplies({ ...base, profile: gemini, version: "0.67.9" })).toBe(false);
-    expect(acpNativeSandboxApplies({ ...base, profile: gemini, purpose: "probe" })).toBe(false);
-    expect(
-      acpNativeSandboxApplies({
-        ...base,
-        profile: gemini,
-        environment: { GEMINI_CLI_SYSTEM_SETTINGS_PATH: "/etc/admin.json" },
-      }),
-    ).toBe(false);
-  });
-
-  it("keeps Octant's profile for Qwen Code on Linux and in a Project with extra folders", () => {
-    const qwenBase = { ...base, profile: qwen, version: "0.27.4" };
-    expect(acpNativeSandboxApplies(qwenBase)).toBe(true);
-    expect(acpNativeSandboxApplies({ ...qwenBase, platform: "linux" })).toBe(false);
-    expect(acpNativeSandboxApplies({ ...qwenBase, extraFolders: ["/work/notes"] })).toBe(false);
-  });
-
-  it("keeps Octant's profile for the agents whose own sandbox Octant has not turned on", () => {
-    for (const profile of [copilot, grok, vibe, kilo, goose, cline, devin, glm, fx, kimi]) {
-      expect(acpNativeSandboxApplies({ ...base, profile, version: "99.0.0" })).toBe(false);
-    }
-  });
-
-  it("launches Gemini CLI unwrapped with its tool sandbox on outside Strict and wrapped in Octant's profile under Strict", async () => {
-    const target = fixture(gemini);
-    const managedHome = join(target.canonicalRoot, "managed-home");
-    const confinement = makeAcpConfinementLive({
-      platform: "darwin",
-      sandboxPath: target.sandboxPath,
-      temporaryDirectory: join(target.canonicalRoot, "tmp"),
-      hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
-    });
-    const launch = (strict: boolean) =>
-      Effect.runPromise(
+  it.each([
+    ["Gemini CLI", gemini],
+    ["Qwen Code", qwen],
+  ] as const)(
+    "keeps %s inside Octant's profile outside Strict, so another provider's sign-in stays unreadable",
+    async (_name, profile) => {
+      const target = fixture(profile);
+      const managedHome = join(target.canonicalRoot, "managed-home");
+      const confinement = makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+      });
+      const launch = await Effect.runPromise(
         confinement.prepare({
-          profile: gemini,
+          profile,
           binaryPath: target.binaryPath,
           root: target.canonicalRoot,
           managedHome,
           mode: "code",
           executionPolicy: "approval-gated",
-          strict,
-          nativeSetup: trusted,
-          version: "0.68.0",
+          strict: false,
+          nativeSetup: trustedProject,
           environment: { PATH: "/usr/bin" },
         }),
       );
-    const native = await launch(false);
-    expect(native.command).toBe(target.binaryPath);
-    const settingsPath = native.environment.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
-    expect(settingsPath).toBe(join(realpathSync(managedHome), "octant-system-settings.json"));
-    expect(JSON.parse(readFileSync(settingsPath!, "utf8"))).toMatchObject({
-      security: { toolSandboxing: true },
-    });
-    const strict = await launch(true);
-    expect(strict.command).toBe(target.sandboxPath);
-    expect(strict.environment.GEMINI_CLI_SYSTEM_SETTINGS_PATH).toBeUndefined();
-  });
+      expect(launch.command).toBe(target.sandboxPath);
+      const seatbelt = launch.args[1]!;
+      expect(seatbelt).toContain(`(deny file-read* (subpath "${realpathSync(homedir())}"))`);
+      expect(launch.environment.GEMINI_CLI_SYSTEM_SETTINGS_PATH).toBeUndefined();
+      expect(launch.environment.QWEN_SANDBOX).toBeUndefined();
+    },
+  );
 });

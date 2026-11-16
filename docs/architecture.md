@@ -15320,10 +15320,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
     its Project and Settings as they are now; a launch that does not carry
     the resolved value is Strict. A device the host's own person paired
     turns it on or off as a local window does; a hub-introduced device and
-    an agent grant may turn it on, never off. Built outside Strict for
-    Gemini CLI and Qwen Code (below); not built yet for Codex and Claude
-    Code, which still run in the sandbox the table below shows whether
-    Strict is on or off.
+    an agent grant may turn it on, never off. Not built yet: the
+    provider's own sandbox outside Strict, so every provider still runs in
+    the sandbox the table below shows whether Strict is on or off.
   - **Octant's sandbox stays the default** for providers with no sandbox of
     their own: OpenCode, Mistral Vibe and Pi.
   - **Per provider.** Codex runs its native workspace-write sandbox and its
@@ -15346,18 +15345,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
     native sandboxes. Copilot CLI and Cursor follow once their ACP releases
     are checked for a sandbox Octant can configure, and Grok Build once it is
     known why its launch sets `GROK_SANDBOX=off`; until then each keeps
-    Octant's profile. Built: Gemini CLI and Qwen Code run in their own
-    sandboxes outside Strict, below Full access, in Work or Code outside
-    Plan, in a Project the person trusted for the agent, and with Network
-    limits not routing the runtime through Octant's proxy; any other launch
-    keeps Octant's profile (`acpNativeSandboxApplies`, detail in
-    [Provider runtimes: Gemini CLI and Qwen Code](design/provider-runtimes.md#gemini-cli-and-qwen-code)).
-    The trusted-Project condition keeps an untrusted Project's own skill and
-    configuration files held back by Octant's profile, as they are today,
-    since the agents load them by themselves once their wall is gone. Checked
-    and kept on Octant's profile, with the reasons in
-    [Provider runtimes](design/provider-runtimes.md#own-sandboxes-checked-and-not-switched):
-    Copilot CLI, Cursor and Grok Build.
+    Octant's profile. A provider's own sandbox replaces Octant's profile
+    only where it can keep other providers' sign-ins unreadable, since one
+    provider never reads another's credentials, Strict or not. Checked, and
+    kept on Octant's profile below Full access for that reason or the ones
+    [Provider runtimes](design/provider-runtimes.md#own-sandboxes-checked-and-not-switched)
+    records: Gemini CLI, Qwen Code, Copilot CLI, Cursor and Grok Build.
   - **Unchanged.** Server-side approval authority and journaling; Plan's
     read-only enforcement and no shell in Chat; the paired-device and
     routine rules; never handing one provider another's credentials;
@@ -15377,9 +15370,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Code settings for the same reason. Octant's profile cannot hold a native sandbox inside
   it on macOS, which refuses nested Seatbelt, so keeping the wall means
   giving the native sandbox up. The accepted trade-off: below Full access a
-  provider's native sandbox may allow reads outside the Project, other
-  credentials included, as the provider on its own does; a person who wants
-  those reads closed turns Strict on.
+  provider's native sandbox may allow reads outside the Project, the
+  person's other credentials included, as the provider on its own does; a
+  person who wants those reads closed turns Strict on. Another provider's
+  sign-in is never among them: a native sandbox that cannot refuse those
+  keeps Octant's profile.
 
   | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                  | Plan's read-only enforced by                                                                                                                                                                                                               |
   | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
