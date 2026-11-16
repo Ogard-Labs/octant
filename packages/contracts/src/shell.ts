@@ -14,12 +14,34 @@ import {
   MAX_BROWSER_UPLOAD_FILES,
   MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT,
   MAX_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES,
+  DEFAULT_BROWSER_WAIT_LIMIT_MINUTES,
+  MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING,
 } from "./browserAutomation";
 import {
   DEFAULT_BROWSER_CAPTURES_PER_THREAD,
   MAX_BROWSER_CAPTURES_PER_THREAD,
 } from "./browserCapture";
 import { StoredBrowserProfile } from "./browserProfiles";
+import {
+  CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS,
+  CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_DAYS,
+  CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES,
+  DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS,
+  DEFAULT_COORDINATOR_ROUNDS,
+  DEFAULT_COORDINATOR_WAKES_PER_HOUR,
+  DEFAULT_THREAD_MESSAGES_PER_TURN,
+  DEFAULT_THREAD_WAKEUPS_WAITING,
+  MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING,
+  MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_ATTEMPTS_SETTING,
+  MAX_CODE_PROJECT_PULL_REQUEST_WATCH_DAYS_SETTING,
+  MAX_CODE_PROJECT_PULL_REQUEST_WATCH_WAKES_SETTING,
+  MAX_COORDINATOR_ROUNDS,
+  MAX_COORDINATOR_WAKES_PER_HOUR,
+  MAX_COORDINATORS_PER_PROJECT,
+  MAX_COORDINATORS_PER_PROJECT_SETTING,
+  MAX_THREAD_MESSAGES_PER_TURN_SETTING,
+  MAX_THREAD_WAKEUPS_WAITING_SETTING,
+} from "./octantLimits";
 import {
   DEFAULT_RUNTIME_TURNS_PER_TURN,
   DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
@@ -583,6 +605,12 @@ export const BackgroundSessionIdleLimitMinutes = Schema.Int.pipe(
 export type BackgroundSessionIdleLimitMinutes = typeof BackgroundSessionIdleLimitMinutes.Type;
 export const DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES: BackgroundSessionIdleLimitMinutes = 120;
 export const DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT: AutoCompactWindowPercent = 85;
+export {
+  DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS,
+  DEFAULT_THREAD_MESSAGES_PER_TURN,
+  MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING,
+  MAX_THREAD_MESSAGES_PER_TURN_SETTING,
+};
 
 /**
  * An absolute folder path as the host canonicalized it. Same shape the
@@ -874,6 +902,78 @@ export const ShellSettings = Schema.Struct({
     Schema.NullOr(BackgroundSessionIdleLimitMinutes),
     { default: () => DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES },
   ),
+  /**
+   * How many wake-ups one thread may have waiting, missed ones included. A
+   * store persisted before the setting existed decodes to the former fixed 8.
+   */
+  threadWakeupsWaitingLimit: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_THREAD_WAKEUPS_WAITING_SETTING)),
+    { default: () => DEFAULT_THREAD_WAKEUPS_WAITING },
+  ),
+  /**
+   * Whether a wake-up that came due while the host was down or asleep runs
+   * once when the host is back. Off, the default, journals it as missed and
+   * waits for the person's Run now, as before the setting existed.
+   */
+  threadWakeupsRunMissedOnReturn: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * How many wake turns a message may start on one thread in any hour, and
+   * the hop count past which a message is carried but wakes nothing, for a
+   * thread whose coordinator set no bounds of its own. Default to the former
+   * fixed values.
+   */
+  messageWakesPerHour: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_COORDINATOR_WAKES_PER_HOUR)),
+    { default: () => DEFAULT_COORDINATOR_WAKES_PER_HOUR },
+  ),
+  messageWakeRounds: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_COORDINATOR_ROUNDS)),
+    { default: () => DEFAULT_COORDINATOR_ROUNDS },
+  ),
+  /** How many coordinators one Code Project may hold, the planner included. */
+  coordinatorsPerProject: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_COORDINATORS_PER_PROJECT_SETTING)),
+    { default: () => MAX_COORDINATORS_PER_PROJECT },
+  ),
+  /** Started wakes after which a pull-request watch ends. */
+  pullRequestWatchWakeLimit: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_WATCH_WAKES_SETTING)),
+    { default: () => CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES },
+  ),
+  /** Days after which a pull-request watch ends, counted from when it began. */
+  pullRequestWatchDays: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_WATCH_DAYS_SETTING)),
+    { default: () => CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_DAYS },
+  ),
+  /** Auto-fix's automatic attempts on one failure before it hands back. */
+  autoFixAttemptsPerFailure: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_ATTEMPTS_SETTING)),
+    { default: () => CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS },
+  ),
+  /** Thread messages one turn may send to other threads. */
+  threadMessagesPerTurn: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_THREAD_MESSAGES_PER_TURN_SETTING)),
+    { default: () => DEFAULT_THREAD_MESSAGES_PER_TURN },
+  ),
+  /** The longest one Browser wait may last, in minutes. */
+  browserWaitLimitMinutes: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING)),
+    { default: () => DEFAULT_BROWSER_WAIT_LIMIT_MINUTES },
+  ),
+  /** The longest one `wait` on a child run may block, in seconds. */
+  childRunWaitLimitSeconds: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING)),
+    { default: () => DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS },
+  ),
+  /**
+   * "Start agent-created routines active at Full access": a routine an agent
+   * creates while its turn runs at Full access starts enabled instead of
+   * paused. Off by default, which keeps every agent-created routine paused
+   * until the person enables it.
+   */
+  agentRoutinesStartActiveAtFullAccess: Schema.optionalWith(Schema.Boolean, {
+    default: () => false,
+  }),
   /**
    * The release ring to follow, once someone has chosen one.
    *

@@ -3,7 +3,7 @@ import {
   decodeAgentMessageSent,
   type EventEnvelope,
 } from "@octant/contracts";
-import { decideMessageWake } from "@octant/domain";
+import { decideMessageWake, type MessageWakeDefaults } from "@octant/domain";
 import type { CoordinatorCounts } from "../coordinator/coordinatorCountStore";
 
 const HOUR_MS = 60 * 60_000;
@@ -40,6 +40,8 @@ export interface WorkMessageWakePorts {
     "recordWake" | "wakesSince" | "recordHostTurn" | "hostTurn"
   >;
   readonly now: () => number;
+  /** Settings' message-wake bounds, read at each wake; absent is 30 an hour and 10 rounds. */
+  readonly messageWakeDefaults?: () => MessageWakeDefaults;
   readonly onError?: (message: string, error: unknown) => void;
 }
 
@@ -47,9 +49,9 @@ export interface WorkMessageWakePorts {
  * A message waking a Work thread, as it wakes a Code thread
  * (docs/design/coordinator-threads.md#talking-to-workers).
  *
- * The decision is Code's own (`decideMessageWake`) under the default bounds:
+ * The decision is Code's own (`decideMessageWake`) under Settings' bounds:
  * the thread's Wake when a message arrives switch, 30 wakes in any hour, and
- * 10 rounds counted by hop. The turn goes through ordinary Work admission as
+ * 10 rounds counted by hop, unless the person changed either. The turn goes through ordinary Work admission as
  * the host, at the thread's own level, so capacity, spend ceilings and every
  * approval apply and wait for a person. Delivery itself is unchanged: the
  * message service already refused anything but Work to Work in one Project
@@ -100,6 +102,7 @@ export class WorkMessageWake {
       hop,
       wakeTurnRunning: false,
       wakeTurnsInLastHour: this.#ports.counts.wakesSince(recipientId, now - HOUR_MS),
+      defaults: this.#ports.messageWakeDefaults?.(),
     });
     if (decision.status !== "wake") return;
     this.#ports.counts.recordWake(recipientId, now);
