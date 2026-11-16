@@ -64,6 +64,7 @@ export interface AgentThreadTurn {
   readonly replyAt: string;
   readonly outcome: AgentTurnOutcome;
   readonly inputTokens?: number;
+  readonly failure?: string;
 }
 
 /**
@@ -517,6 +518,7 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
                 ? "streaming"
                 : turn.status,
           ...(turn.usage?.inputTokens === undefined ? {} : { inputTokens: turn.usage.inputTokens }),
+          ...(turn.failure === undefined ? {} : { failure: turn.failure.message }),
         })),
         workItems: [],
       };

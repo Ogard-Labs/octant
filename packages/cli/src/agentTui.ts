@@ -1244,6 +1244,14 @@ class AgentScreen {
       }),
     );
     if (entry.text.length > 0) box.add(this.#body(entry.text, true, entry.outcome === "streaming"));
+    if (entry.failure !== undefined)
+      box.add(
+        new TextRenderable(this.#renderer, {
+          content: `Provider failure: ${entry.failure}`,
+          fg: p.danger,
+          wrapMode: "word",
+        }),
+      );
     if (entry.actions !== undefined) {
       const a = entry.actions;
       const routeNote = a.route === "primary" ? "" : ` · ${a.route}`;

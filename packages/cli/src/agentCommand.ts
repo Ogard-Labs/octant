@@ -1532,13 +1532,17 @@ async function followTurn(
         `${JSON.stringify({
           kind: "outcome",
           outcome: turn.outcome,
+          ...(turn.failure === undefined ? {} : { failure: turn.failure }),
           text,
           ...(turn.inputTokens === undefined ? {} : { usage: { inputTokens: turn.inputTokens } }),
         })}\n`,
       );
     } else {
       if (!printed.endsWith("\n")) input.stdout.write("\n");
-      if (turn.outcome !== "completed") input.stderr.write(`Turn ended: ${turn.outcome}.\n`);
+      if (turn.outcome !== "completed")
+        input.stderr.write(
+          `Turn ended: ${turn.outcome}.${turn.failure === undefined ? "" : ` ${turn.failure}`}\n`,
+        );
     }
     return turn.outcome === "completed";
   }

@@ -177,6 +177,7 @@ export type TuiTranscriptEntry =
       readonly at: string;
       readonly text: string;
       readonly outcome: string;
+      readonly failure?: string;
       readonly actions?: TuiLeadActions;
       /** Calls of a turn still running, newest last. */
       readonly live?: ReadonlyArray<TuiToolLine>;
@@ -231,6 +232,7 @@ export function transcriptFrom(
       // are in the app, so the block that carries them is not part of the text.
       text: withoutFollowUpBlocks(turn.reply, { streaming: !isDone(turn.outcome) }),
       outcome: turn.outcome,
+      ...(turn.failure === undefined ? {} : { failure: turn.failure }),
       ...(record === undefined
         ? {}
         : {

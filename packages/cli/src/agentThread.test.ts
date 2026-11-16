@@ -8,7 +8,7 @@ import {
   openAgentThreadById,
 } from "./agentThread";
 import { changeAgentThreadModel } from "./agentHost";
-import { statusLineFrom } from "./agentTuiModel";
+import { statusLineFrom, transcriptFrom } from "./agentTuiModel";
 import type { LocalControlRequest, OpenedLocalControlSession } from "./localControl";
 
 const now = "2026-10-09T09:00:00.000Z";
@@ -1027,6 +1027,44 @@ describe("Code threads in the terminal", () => {
     };
     return { session, paths };
   }
+
+  it("carries a failed provider's host message to the transcript without inventing a reply", async () => {
+    const base = longThreadHost(() => 1, true).session;
+    const session = {
+      ...base,
+      send: async (request: LocalControlRequest) =>
+        request.path.includes("/conversation/window")
+          ? {
+              status: 200,
+              body: {
+                version: 1,
+                threadId,
+                turns: [
+                  {
+                    ...turn(1),
+                    status: "failed",
+                    failure: {
+                      category: "failed",
+                      message: "Provider authentication was refused (401).",
+                    },
+                  },
+                ],
+                hasEarlier: false,
+                hasLater: false,
+              },
+            }
+          : base.send(request),
+    };
+    const snapshot = await agentThreadPort(session, "code", threadId).read();
+    expect(snapshot?.turns[0]).toMatchObject({
+      reply: "",
+      failure: "Provider authentication was refused (401).",
+    });
+    expect(transcriptFrom(snapshot, null)[1]).toMatchObject({
+      kind: "lead",
+      failure: "Provider authentication was refused (401).",
+    });
+  });
 
   const expectedPrompts = (total: number) =>
     Array.from(
