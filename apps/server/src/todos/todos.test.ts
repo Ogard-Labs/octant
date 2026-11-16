@@ -21,6 +21,7 @@ import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { createRemoteRoutePolicy } from "../remoteRoutePolicy";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { MachineChangeFeed } from "../machineChangeFeed";
+import { createTodoClient, createTodoChangeClient } from "@octant/client-runtime/todo-client";
 import { createTodoRouteHandler } from "./todoRoutes";
 import { registerTodoEvents, TodoStore } from "./todoStore";
 
@@ -403,6 +404,61 @@ describe("the person's to-do list", () => {
     );
     expect(await restarted?.json()).toMatchObject({ changed: true });
     expect((await h.fromDevice("hub-roster", "/api/todos/changes"))?.status).toBe(403);
+  });
+
+  it("shares adds, edits and ticks through the remote client's change cursor", async () => {
+    const h = host();
+    const fetch = Object.assign(
+      async (
+        input: Parameters<typeof globalThis.fetch>[0],
+        init?: Parameters<typeof globalThis.fetch>[1],
+      ) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        const body =
+          typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : undefined;
+        return (
+          (await h.fromDevice("host-person", `${url.pathname}${url.search}`, body)) ??
+          new Response(null, { status: 404 })
+        );
+      },
+      { preconnect: globalThis.fetch.preconnect },
+    );
+    const options = { baseUrl: "http://127.0.0.1", fetch, windowCapability: "" };
+    const remote = createTodoClient(options);
+    const waitForChange = createTodoChangeClient(options);
+    const signal = new AbortController().signal;
+    let cursor = await waitForChange(undefined, signal);
+    let waiting = waitForChange(cursor, signal);
+    await h.fromWindow("/api/todos/commands", {
+      kind: "add-todo",
+      todoId: TODO_1,
+      title: "Across computers",
+    });
+    cursor = await waiting;
+    expect(cursor.changed).toBe(true);
+    const added = (await remote.read()).todos[0];
+    expect(added?.title).toBe("Across computers");
+    waiting = waitForChange(cursor, signal);
+    await remote.change(
+      decodeTodoCommand({
+        kind: "edit-todo",
+        todoId: TODO_1,
+        expectedVersion: added?.version,
+        title: "Edited elsewhere",
+        notes: "",
+      }),
+    );
+    cursor = await waiting;
+    expect(cursor.changed).toBe(true);
+    expect(h.store.view().todos[0]?.title).toBe("Edited elsewhere");
+    waiting = waitForChange(cursor, signal);
+    await h.fromWindow("/api/todos/commands", {
+      kind: "set-todo-state",
+      todoId: TODO_1,
+      state: "done",
+    });
+    expect((await waiting).changed).toBe(true);
+    expect((await remote.read()).todos[0]?.state).toBe("done");
   });
 
   it("uses the hub by default without hiding an existing list or overriding an explicit choice", async () => {

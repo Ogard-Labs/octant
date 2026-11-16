@@ -6894,14 +6894,14 @@ function LaunchedShell(
   }
 
   /** Called by each create path once the host answered with its thread. */
-  function linkStartedTodo(
+  async function linkStartedTodo(
     start: TodoStartInProgress | undefined,
     mode: OctantMode,
     threadId: string,
-  ): void {
+  ): Promise<void> {
     if (start === undefined || start.mode !== mode) return;
     if (todoStartRef.current === start) setTodoStart(undefined);
-    void recordTodoLink(start.todoId, { threadId, mode });
+    await recordTodoLink(start.todoId, { threadId, mode });
   }
 
   async function recordTodoLink(todoId: string, started: TodoUnlinkedStart): Promise<void> {
@@ -7302,7 +7302,7 @@ function LaunchedShell(
         );
         return false;
       }
-      linkStartedTodo(sentFromTodo, "code", String(created.thread.id));
+      await linkStartedTodo(sentFromTodo, "code", String(created.thread.id));
       // The branch Start a fix handed in now belongs to this thread; the next
       // draft must not open on it.
       setPendingDraftBranch(undefined);
@@ -7488,7 +7488,7 @@ function LaunchedShell(
           setDraftError(chatController.errorMessage ?? "The chat thread could not be created.");
           return;
         }
-        linkStartedTodo(sentFromTodo, "chat", String(result.thread.id));
+        await linkStartedTodo(sentFromTodo, "chat", String(result.thread.id));
         // Clear the pane that submitted this create. Welcome panes cannot
         // become active, and another Chat pane can be current by the time
         // create finishes, so the caller passes the submitting pane.
@@ -7696,7 +7696,7 @@ function LaunchedShell(
           setDraftError("The Code thread could not be created.");
           return;
         }
-        linkStartedTodo(sentFromTodo, "code", String(created.thread.id));
+        await linkStartedTodo(sentFromTodo, "code", String(created.thread.id));
         firstPromptAnnouncedFor = created.thread.id;
         codeThreadControllers.announceFirstPrompt(created.thread.id, prompt);
         await controller.openCodeThread(
@@ -7788,7 +7788,7 @@ function LaunchedShell(
           setDraftError("The task could not be created.");
           return false;
         }
-        linkStartedTodo(sentFromTodo, "work", String(created.thread.id));
+        await linkStartedTodo(sentFromTodo, "work", String(created.thread.id));
         await controller.openWorkThread(
           created.thread.id,
           created.thread.title,
