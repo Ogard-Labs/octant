@@ -683,6 +683,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         "code defaults access approvals plan read-only full access permission persistence current session external editor executable arguments new threads open in applications vscode cursor zed finder terminal ghostty xcode detected installed diff layout unified side by side review language services type errors go to definition",
       settings: [
         {
+          id: settingId("code-default-model"),
+          label: "Default model",
+          scope: "host",
+          keywords: "code default provider model new threads terminal",
+        },
+        {
           id: settingId("code-require-git"),
           label: "Code needs a Git repository",
           scope: "mode",

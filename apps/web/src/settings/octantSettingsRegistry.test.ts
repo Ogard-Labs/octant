@@ -272,6 +272,7 @@ describe("octantSettingsRegistry", () => {
     ]);
     const code = octantSettingsRegistry.sections.find((section) => section.id === "code");
     expect(code?.settings.map((setting) => setting.id)).toEqual([
+      "code-default-model",
       "code-require-git",
       "code-default-diff-layout",
       "code-restart-continuation",

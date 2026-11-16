@@ -1133,6 +1133,7 @@ function ActiveSectionContent({
         <div className="settings-code-stack" id="settings-code">
           {props.codeController?.bootstrap === undefined ? null : (
             <CodeSettingsView
+              providerSnapshot={props.providerController?.snapshot}
               focusedSetting={focusedSetting}
               onUpdate={props.codeController.updateSettings}
               settings={props.codeController.bootstrap.settings}

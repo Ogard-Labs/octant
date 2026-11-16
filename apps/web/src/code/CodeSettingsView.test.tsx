@@ -13,6 +13,57 @@ const settings = {
 } as const;
 
 describe("CodeSettingsView", () => {
+  it("saves the Code default model for the app and terminal through the shared settings update", async () => {
+    const providerId = "80000000-0000-4000-8000-0000000000a1";
+    const snapshot = {
+      instances: [
+        {
+          id: providerId,
+          displayName: "Code account",
+          driverKind: "codex",
+          configuration: { kind: "codex-cli", binaryPath: "codex" },
+          enabled: true,
+        },
+      ],
+      observedStates: [
+        {
+          instanceId: providerId,
+          readiness: "ready",
+          processState: "running",
+          capabilities: { appManagedTools: "supported", modelSwitch: "supported" },
+          models: [
+            {
+              id: "model-a",
+              displayName: "Model A",
+              source: "discovered",
+              verification: "verified",
+              reasoning: "unavailable",
+              inputModalities: ["text"],
+              options: [],
+            },
+          ],
+        },
+      ],
+    };
+    const update = vi.fn(async (_input: CodeSettingsUpdate) => true);
+    render(
+      <CodeSettingsView
+        onUpdate={update}
+        settings={settings as never}
+        providerSnapshot={snapshot as never}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Default Code provider and model" }));
+    await user.click(await screen.findByRole("option", { name: "Code account" }));
+    await user.click(await screen.findByRole("option", { name: "Model A" }));
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultModel: { providerInstanceId: providerId, modelId: "model-a" },
+      }),
+    );
+  });
+
   it("offers the terminal shell on a Windows host, Windows PowerShell first, and saves the choice", async () => {
     const update = vi.fn(async (_input: CodeSettingsUpdate) => true);
     render(
