@@ -54,7 +54,7 @@ import {
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
 import { Cause, Effect, Exit, Fiber, Option, PubSub, Scope, Stream } from "effect";
-import { claudeOffersTool, isSanitizedFailure } from "./claudeAgentSdkDecoder";
+import { claudeOffersTool, isSanitizedFailure, permissionMode } from "./claudeAgentSdkDecoder";
 
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { claudeAuthorityInputDigest, waitForClaudeAuthorityValue } from "./claudeAuthority";
@@ -247,6 +247,12 @@ const CLAUDE_PLAN_TOOLS = ["Read", "Glob", "Grep"] as const;
  * service admits (read from the bundled binary, 2026-10-27).
  */
 export const CLAUDE_ARTIFACT_TOOL = "Artifact";
+/**
+ * The Artifact actions that change nothing on claude.ai: `read` and `list`
+ * return a page or the account's gallery, and `quickstart` returns the
+ * guidance for making one. Chat and Plan hold only these.
+ */
+const CLAUDE_ARTIFACT_READ_ACTIONS = new Set<string>(["read", "list", "quickstart"]);
 /** Claude's claude.ai Projects tool, whose upload names a local file in `local_path`. */
 const CLAUDE_PROJECTS_TOOL = "Projects";
 const CLAUDE_READ_TOOLS = new Set<string>(CLAUDE_PLAN_TOOLS);
@@ -281,6 +287,12 @@ const CLAUDE_SESSION_TOOLS = new Set<string>([
  * Octant's thread stays in Plan until the person moves it, so the call is
  * refused and the model is told the plan reached the person.
  */
+/** Why a mode switch is refused where the host does not put it to the person. */
+export const CLAUDE_LEVEL_CHANGE_REFUSAL =
+  "This thread's level is the person's to change; keep working at the current level.";
+/** Why a wake-up tool is refused in a session the host keeps no schedule for. */
+export const CLAUDE_WAKEUP_UNAVAILABLE =
+  "This session cannot schedule a later wake-up; finish the work in this turn.";
 export const CLAUDE_PLAN_CAPTURED_MESSAGE =
   "The plan was captured and shown to the person; wait for the person. Plan stays read-only until they move the thread out of Plan.";
 const CLAUDE_INCOMPATIBLE_FALLBACK = "Claude runtime policy is incompatible with Octant.";
@@ -414,10 +426,15 @@ export function claudeExecutionOptions(
   autoApprove?: boolean,
   mode?: ProviderAcquireInput["mode"],
   platform: NodeJS.Platform = process.platform,
+  strict = true,
 ): ClaudeExecutionOptions {
   // Work and Code share one capability set at the thread's level, so a Work
   // session starts with Bash exactly as a Code session at that level does.
-  const policyOptions = claudePolicyOptions(policy, autoApprove);
+  const policyOptions = claudePolicyOptions(
+    policy,
+    autoApprove,
+    claudeOwnPermissions({ strict, mode, executionPolicy: policy }),
+  );
   // Only Work and Code hold Claude Code's whole built-in set. Chat withholds
   // the filesystem and shell at every level, so it keeps the earlier list of
   // tools Octant names one by one rather than every tool a new runtime adds.
@@ -458,7 +475,20 @@ export function claudeWithheldTools(
   offersArtifacts: boolean,
   schedulesWakeups = false,
   levelChanges = false,
+  strict = true,
 ): readonly string[] {
+  // Outside Strict the session holds Claude Code's full preset with no list
+  // of Octant's (maintainer decision, 2026-11-15): a mode switch, a wake-up
+  // with no schedule and an artifact call with the switch off are refused
+  // at the call with a reason the model reads. Only the features the person
+  // turned off in their own Claude setup stay out, because they chose it.
+  if (!strict) {
+    return [
+      ...(setup?.subagents === true ? [] : [CLAUDE_SUBAGENT_TOOL, CLAUDE_WORKFLOW_TOOL]),
+      ...(setup?.webTools === true ? [] : [...CLAUDE_WEB_TOOLS]),
+      ...(setup?.skills === true ? [] : ["Skill"]),
+    ];
+  }
   return [
     // The thread's mode is the server's: Claude never switches its own
     // permission mode. Where the host answers level changes, the agent outside
@@ -547,7 +577,16 @@ export function claudeOffersArtifacts(input: {
   readonly hostTrafficDisabled: boolean;
   readonly mode: ProviderAcquireInput["mode"];
   readonly executionPolicy: ProviderExecutionPolicy;
+  /** Absent is Strict. */
+  readonly strict?: boolean;
 }): boolean {
+  // Outside Strict the account's switch alone decides (maintainer decision,
+  // 2026-11-16): the thread's Canvas or artifacts choice only points Octant's
+  // delivery instructions. Chat and Plan hold the tool for its read-only
+  // actions; `claudeArtifactCallRefusal` refuses their publishing.
+  if (input.strict === false) {
+    return !input.hostTrafficDisabled && claudeArtifactsAvailable(input);
+  }
   return (
     input.threadChoseArtifacts &&
     !input.hostTrafficDisabled &&
@@ -576,8 +615,27 @@ export function claudeArtifactCallRefusal(input: {
   readonly input: Readonly<Record<string, unknown>>;
   readonly projectRoot: string;
   readonly isProjectConfinedPath: (projectRoot: string, absolutePath: string) => boolean;
+  /** Absent is Strict. */
+  readonly strict?: boolean;
+  /** A Chat or Plan session, which reads Claude artifacts and publishes none. */
+  readonly readOnly?: boolean;
 }): string | undefined {
   if (!input.stillOn) return "Claude artifacts are turned off in Settings.";
+  if (input.strict === false) {
+    // Every action works as in Claude Code: `quickstart`, a publish from a
+    // type with no local file, `read`, `list` and updates. A local file a
+    // publish names meets the thread's file rules at the gate, as a `Write`
+    // would; only the login keychain folder is never the model's to name.
+    const action = typeof input.input.action === "string" ? input.input.action : "publish";
+    if (input.readOnly === true && !CLAUDE_ARTIFACT_READ_ACTIONS.has(action)) {
+      return "Chat and Plan only read Claude artifacts; publishing one needs a Work or Code thread outside Plan.";
+    }
+    const filePath = input.input.file_path;
+    if (typeof filePath === "string" && claudeToolPathIsInKeychainFolder(filePath)) {
+      return "Claude tool request is outside the Project.";
+    }
+    return undefined;
+  }
   const action = input.input.action;
   if (action !== undefined && action !== "publish") {
     return "Octant offers Claude's Artifact tool only to publish a page from the Project.";
@@ -623,11 +681,10 @@ function claudeConfinedTarget(
   // held to the Project's folders as an Artifact publish is; a call that
   // uploads nothing is judged at the Project root.
   if (toolName === CLAUDE_PROJECTS_TOOL) return input.local_path ?? projectRoot;
-  if (
-    CLAUDE_READ_TOOLS.has(toolName) ||
-    CLAUDE_EDIT_TOOLS.has(toolName) ||
-    toolName === CLAUDE_ARTIFACT_TOOL
-  ) {
+  // An Artifact call that names no local file (`quickstart`, `read`,
+  // `list`, a publish from a type) is judged at the Project root.
+  if (toolName === CLAUDE_ARTIFACT_TOOL) return input.file_path ?? projectRoot;
+  if (CLAUDE_READ_TOOLS.has(toolName) || CLAUDE_EDIT_TOOLS.has(toolName)) {
     return input.file_path;
   }
   return projectRoot;
@@ -661,11 +718,19 @@ const CLAUDE_OCTANT_ASKED_TOOLS = new Set<string>([
  * in Claude Code on its own (maintainer decision, 2026-11-14). Plan keeps
  * Octant's ask for everything it asks about.
  */
-export function claudeOwnRulesDecide(policy: ProviderExecutionPolicy, toolName: string): boolean {
-  return (
-    (policy === "approval-gated" || policy === "auto-accept-edits") &&
-    !CLAUDE_OCTANT_ASKED_TOOLS.has(toolName)
-  );
+export function claudeOwnRulesDecide(
+  policy: ProviderExecutionPolicy,
+  toolName: string,
+  strict = true,
+): boolean {
+  if (policy !== "approval-gated" && policy !== "auto-accept-edits") return false;
+  // Outside Strict Claude's own engine decides a workflow start and an
+  // artifact call as in Claude Code; a question, a wake-up and a level change
+  // still need Octant, which answers them itself.
+  if (!strict && (toolName === CLAUDE_WORKFLOW_TOOL || toolName === CLAUDE_ARTIFACT_TOOL)) {
+    return true;
+  }
+  return !CLAUDE_OCTANT_ASKED_TOOLS.has(toolName);
 }
 
 /** Whether this call is a Plan turn's shell command, which its sandbox confines. */
@@ -677,9 +742,47 @@ function isPlanShellCommand(
   return policy === "plan" && toolName === "Bash" && tools.includes("Bash");
 }
 
+/**
+ * Whether Claude Code's own permission modes and sandbox decide a session's
+ * calls, as on its own: outside Strict, in Work and Code, outside Plan
+ * (Architecture: "The provider's own permission system decides"). Ask first
+ * runs `default`, Accept edits `acceptEdits`, Auto `auto`, Full access
+ * `bypassPermissions`; Octant answers only the calls Claude asks about and
+ * sends no sandbox settings. Plan stays read-only and Chat keeps its list
+ * with no shell, so both keep Octant's gate, as Strict does everywhere.
+ */
+export function claudeOwnPermissions(input: {
+  readonly strict: boolean;
+  readonly mode: ProviderAcquireInput["mode"] | undefined;
+  readonly executionPolicy: ProviderExecutionPolicy;
+}): boolean {
+  return (
+    !input.strict &&
+    (input.mode === "work" || input.mode === "code") &&
+    input.executionPolicy !== "plan"
+  );
+}
+
+/**
+ * Whether Octant configures Claude's command sandbox for a session. Under
+ * Strict it is today's configuration (the Project's folders, Network limits,
+ * no unasked sandboxed commands); outside Strict Octant leaves Claude's
+ * sandbox to the person's own Claude settings and passes it nothing. A Full
+ * access thread that kept its sandbox keeps Octant's at every setting.
+ */
+export function claudeOctantConfiguresSandbox(input: {
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly fullAccessSandbox: boolean;
+  readonly ownPermissions: boolean;
+}): boolean {
+  if (input.executionPolicy === "full-access" && input.fullAccessSandbox) return true;
+  return claudeRunsSandbox(input.executionPolicy) && !input.ownPermissions;
+}
+
 function claudePolicyOptions(
   policy: ProviderExecutionPolicy,
   autoApprove?: boolean,
+  ownPermissions = false,
 ): ClaudeExecutionOptions {
   switch (policy) {
     case "full-access":
@@ -698,7 +801,7 @@ function claudePolicyOptions(
       // answers prompts Octant would otherwise surface; `canUseTool` and
       // `PreToolUse` stay registered regardless.
       return {
-        permissionMode: autoApprove === true ? "auto" : "default",
+        permissionMode: permissionMode(policy, autoApprove, ownPermissions),
         allowDangerouslySkipPermissions: false,
         tools: [...CLAUDE_TOOLS],
         fullToolSet: true,
@@ -1339,6 +1442,12 @@ interface SessionState {
   readonly approvalReuse: Set<string>;
   /** What each approved publish sent, by tool use, until its result arrives. */
   readonly publishedSnapshots: Map<string, ThreadPublishedSnapshot>;
+  /**
+   * Each Artifact call's action and type, by tool use, read at its
+   * `PreToolUse` (which every call passes) until its result arrives: only a
+   * publish journals a page, with the type it named.
+   */
+  readonly artifactCalls: Map<string, ClaudeArtifactCall>;
   /**
    * Worktrees outside the Project's folders this session was let into: the
    * switch was allowed, so calls in them are judged as the Project's are.
@@ -3225,7 +3334,10 @@ function makeConnection(
           : [];
       for (const mapped of [
         ...storedTaskList,
-        ...mapClaudeMessage(state.context, withPublishedSnapshots(state, message)),
+        ...mapClaudeMessage(
+          state.context,
+          withPublishedSnapshots(state, message, String(options.instanceId)),
+        ),
       ]) {
         if (mapped.kind === "ignored") continue;
         if (mapped.kind === "failure") {
@@ -3463,6 +3575,18 @@ function makeConnection(
         const ownClaudeAccountPaths = claudeOwnAccountPaths(environment.environment);
         const sandboxedFullAccess =
           input.executionPolicy === "full-access" && input.fullAccessSandbox === true;
+        // Read at each launch with Strict: outside it, in Work and Code
+        // outside Plan, Claude's own permission modes and sandbox decide.
+        const ownPermissions = claudeOwnPermissions({
+          strict,
+          mode,
+          executionPolicy: input.executionPolicy,
+        });
+        const octantSandbox = claudeOctantConfiguresSandbox({
+          executionPolicy: input.executionPolicy,
+          fullAccessSandbox: sandboxedFullAccess,
+          ownPermissions,
+        });
         const networkPolicy = sandboxedFullAccess ? "auto-accept-edits" : input.executionPolicy;
         // Claude's own process: its inference and in-process web fetch. It
         // runs at Auto under the same reviewer as its command sandbox.
@@ -3530,6 +3654,8 @@ function makeConnection(
           input.executionPolicy,
           input.autoApprove,
           mode,
+          process.platform,
+          strict,
         );
         const baseExecutionOptions: ClaudeExecutionOptions = {
           ...policyExecutionOptions,
@@ -3545,6 +3671,7 @@ function makeConnection(
           hostTrafficDisabled: disablesNonessentialTraffic(environment.environment, strict),
           mode,
           executionPolicy: input.executionPolicy,
+          strict,
         });
         // A session whose host answers level changes puts Claude's own
         // `EnterPlanMode` and, from Plan, `ExitPlanMode` to the person as level
@@ -3563,7 +3690,13 @@ function makeConnection(
         // A single-use session starts no later turn, so it schedules none.
         const wakeups = input.singleUse === true ? undefined : input.wakeups;
         const withheldTools = executionOptions.fullToolSet
-          ? claudeWithheldTools(nativeSetup, offersArtifacts, wakeups !== undefined, levelChanges)
+          ? claudeWithheldTools(
+              nativeSetup,
+              offersArtifacts,
+              wakeups !== undefined,
+              levelChanges,
+              !ownPermissions,
+            )
           : undefined;
         // The switch is read again at every call: a session opened while it
         // was on keeps the tool in its list after the person turns it off.
@@ -3573,8 +3706,10 @@ function makeConnection(
             input: toolInput,
             projectRoot,
             isProjectConfinedPath: options.isProjectConfinedPath,
+            strict,
+            readOnly: mode === "chat" || input.executionPolicy === "plan",
           });
-        const sandboxNetwork = claudeRunsSandbox(input.executionPolicy, sandboxedFullAccess)
+        const sandboxNetwork = octantSandbox
           ? await runSetupEffect(
               acquireProviderRuntimeNetwork(options.runtimeNetwork, {
                 runtime: "claude-sandbox",
@@ -3594,13 +3729,17 @@ function makeConnection(
         if (sandboxNetwork !== undefined && sandboxNetwork.endpoint.kind !== "loopback") {
           throw failure("incompatible", "Claude's sandbox needs its egress proxy on loopback.");
         }
-        const sandbox = claudeSandboxSettings(
-          input.executionPolicy,
-          projectRoot,
-          extraFolders,
-          sandboxNetwork?.endpoint.kind === "loopback" ? sandboxNetwork.endpoint.port : undefined,
-          sandboxedFullAccess,
-        );
+        const sandbox = octantSandbox
+          ? claudeSandboxSettings(
+              input.executionPolicy,
+              projectRoot,
+              extraFolders,
+              sandboxNetwork?.endpoint.kind === "loopback"
+                ? sandboxNetwork.endpoint.port
+                : undefined,
+              sandboxedFullAccess,
+            )
+          : undefined;
         let callbackState: SessionState | undefined;
         const insideFolder = (root: string, candidate: string): boolean => {
           try {
@@ -3659,20 +3798,28 @@ function makeConnection(
             const refusal = artifactCallRefusal(request.input);
             if (refusal !== undefined) return deny(refusal);
           }
+          // Outside Strict this runs only for a call Claude Code's own engine
+          // asked about (or one Octant keeps asking), so Octant waives
+          // nothing here: the ask reaches the person, or Reviewed's reviewer.
           if (
             (input.executionPolicy === "full-access" &&
               request.toolName !== "AskUserQuestion" &&
               !CLAUDE_LEVEL_CHANGE_TOOLS.has(request.toolName)) ||
-            // Auto-accept edits covers exactly the file writes the gate above
-            // already proved to be inside the Project. Shell, network, and
-            // every other tool still ask, and so does a read or an edit
-            // outside the Project's folders.
-            (grant.outsideProject !== true &&
-              input.executionPolicy === "auto-accept-edits" &&
-              CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
-            (grant.outsideProject !== true && CLAUDE_READ_TOOLS.has(request.toolName)) ||
-            CLAUDE_SESSION_TOOLS.has(request.toolName) ||
-            isPlanShellCommand(input.executionPolicy, request.toolName, executionOptions.tools)
+            (!ownPermissions &&
+              // Auto-accept edits covers exactly the file writes the gate above
+              // already proved to be inside the Project. Shell, network, and
+              // every other tool still ask, and so does a read or an edit
+              // outside the Project's folders.
+              ((grant.outsideProject !== true &&
+                input.executionPolicy === "auto-accept-edits" &&
+                CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
+                (grant.outsideProject !== true && CLAUDE_READ_TOOLS.has(request.toolName)) ||
+                CLAUDE_SESSION_TOOLS.has(request.toolName) ||
+                isPlanShellCommand(
+                  input.executionPolicy,
+                  request.toolName,
+                  executionOptions.tools,
+                )))
           ) {
             holdWorktree(activeState, request.toolName, request.input, grant.workingDirectory);
             activeState.settledToolUseIds.add(request.toolUseId);
@@ -3879,13 +4026,35 @@ function makeConnection(
           if (requestInput === undefined) {
             return deny("Claude tool request has invalid input.");
           }
+          if (request.toolName === CLAUDE_ARTIFACT_TOOL) {
+            activeState.artifactCalls.set(request.toolUseId, claudeArtifactCall(requestInput));
+          }
           // The plan already reached the thread as the reply's text from the
           // call's transcript block. Granting the call would let Claude Code
           // leave plan mode for one that edits, so it is always refused; where
           // the host answers level changes, the person is asked first whether
           // to leave Plan, and the call is refused with their answer below.
           if (request.toolName === CLAUDE_PLAN_EXIT_TOOL && !levelChanges) {
-            return deny(CLAUDE_PLAN_CAPTURED_MESSAGE);
+            return deny(
+              input.executionPolicy === "plan"
+                ? CLAUDE_PLAN_CAPTURED_MESSAGE
+                : CLAUDE_LEVEL_CHANGE_REFUSAL,
+            );
+          }
+          // Outside Strict the full preset holds the mode switches and the
+          // wake-up tools in every session, so the server's rules answer them
+          // here instead of a withheld list: the thread's level is the
+          // person's, leaving Plan is asked only from Plan, and a wake-up
+          // never runs in the runtime.
+          if (
+            CLAUDE_LEVEL_CHANGE_TOOLS.has(request.toolName) &&
+            (!levelChanges ||
+              (request.toolName === CLAUDE_EXIT_PLAN_TOOL && input.executionPolicy !== "plan"))
+          ) {
+            return deny(CLAUDE_LEVEL_CHANGE_REFUSAL);
+          }
+          if (CLAUDE_WAKEUP_TOOLS.has(request.toolName) && wakeups === undefined) {
+            return deny(CLAUDE_WAKEUP_UNAVAILABLE);
           }
           // Checked here, before any posture: Full access answers "allow" in
           // this hook and Claude Code then never calls `canUseTool`.
@@ -4022,7 +4191,7 @@ function makeConnection(
                 : undefined;
             const entersUnheldWorktree =
               worktreeTarget !== undefined && !sessionHolds(activeState, worktreeTarget);
-            return claudeOwnRulesDecide(input.executionPolicy, request.toolName) &&
+            return claudeOwnRulesDecide(input.executionPolicy, request.toolName, !ownPermissions) &&
               !asksUnsandboxed &&
               !outsideProject &&
               !entersUnheldWorktree
@@ -4034,27 +4203,37 @@ function makeConnection(
           // A level change is the person's at every level, Full access and
           // Plan included; the call reaches `canUseTool` and is put to them.
           if (CLAUDE_LEVEL_CHANGE_TOOLS.has(request.toolName)) return askThroughGrant();
-          const decide = (): ClaudePreToolDecision | Promise<ClaudePreToolDecision> =>
-            (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
-            (input.executionPolicy === "auto-accept-edits" &&
+          const decide = (): ClaudePreToolDecision | Promise<ClaudePreToolDecision> => {
+            if (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") {
+              return settledUnasked();
+            }
+            // Outside Strict Claude's own engine and the person's rules decide
+            // every call Octant does not keep (`askThroughGrant` answers
+            // "own-rules"), reads and edits included, so a person's `deny`
+            // rule still refuses an in-Project read.
+            if (ownPermissions) return askThroughGrant();
+            return (input.executionPolicy === "auto-accept-edits" &&
               CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
-            (request.toolName !== "AskUserQuestion" && CLAUDE_READ_TOOLS.has(request.toolName)) ||
-            CLAUDE_SESSION_TOOLS.has(request.toolName) ||
-            isPlanShellCommand(input.executionPolicy, request.toolName, executionOptions.tools)
+              (request.toolName !== "AskUserQuestion" && CLAUDE_READ_TOOLS.has(request.toolName)) ||
+              CLAUDE_SESSION_TOOLS.has(request.toolName) ||
+              isPlanShellCommand(input.executionPolicy, request.toolName, executionOptions.tools)
               ? settledUnasked()
               : askThroughGrant();
+          };
           // The person's own Claude tools name no file to confine: a subagent
           // start and a skill read act inside the session, and a web read or
           // an MCP server call asks below Full access.
           const nativeAnswer = claudeNativeToolAnswer(request.toolName, nativeSetup);
           if (nativeAnswer !== undefined) {
-            return nativeAnswer === "unasked" || input.executionPolicy === "full-access"
-              ? settledUnasked()
-              : askThroughGrant();
+            if (input.executionPolicy === "full-access") return settledUnasked();
+            if (ownPermissions) return askThroughGrant();
+            return nativeAnswer === "unasked" ? settledUnasked() : askThroughGrant();
           }
-          if (input.executionPolicy === "full-access") {
-            // Nothing asks here, so nothing reads the snapshot at approval:
-            // the host keeps what was sent from this hook instead.
+          if (input.executionPolicy === "full-access" || ownPermissions) {
+            // Nothing may ask here (Full access, or Claude's own rules allow
+            // the publish), so nothing would read the snapshot at approval:
+            // the host keeps what was sent from this hook instead. An approval
+            // reads it again when the person allows the publish.
             if (
               request.toolName === CLAUDE_ARTIFACT_TOOL &&
               typeof requestInput.file_path === "string"
@@ -4064,7 +4243,7 @@ function makeConnection(
                 activeState.publishedSnapshots.set(request.toolUseId, snapshot);
               }
             }
-            if (!sandboxedFullAccess) return decide();
+            if (input.executionPolicy === "full-access" && !sandboxedFullAccess) return decide();
           }
           // A shell call carries no cwd of its own: Claude Code runs it in the
           // session's working directory, which is the Project root, and the
@@ -4098,11 +4277,13 @@ function makeConnection(
             // command's folder is held by the command sandbox, a publish stays
             // held to the Project, and a sandboxed Full access keeps the
             // Project's folders, so each of those is still refused.
+            // Outside Strict a publish naming a local file follows the
+            // thread's file rules, as a `Write` does, so it asks too.
             if (
               input.executionPolicy === "plan" ||
               sandboxedFullAccess ||
               CLAUDE_SHELL_TOOLS.has(request.toolName) ||
-              request.toolName === CLAUDE_ARTIFACT_TOOL
+              (request.toolName === CLAUDE_ARTIFACT_TOOL && !ownPermissions)
             ) {
               return deny("Claude tool request is outside the Project.");
             }
@@ -4281,6 +4462,7 @@ function makeConnection(
               ...(instructions === undefined ? {} : { instructions }),
               ...claudeAutoCompactWindow(input.compactionPoint),
               ...(sandbox === undefined ? {} : { sandbox }),
+              ...(ownPermissions ? { ownPermissions: true as const } : {}),
               canUseTool,
               preToolUse,
             })
@@ -4322,6 +4504,7 @@ function makeConnection(
           authorityWaiters: [],
           approvalReuse: new Set(),
           publishedSnapshots: new Map(),
+          artifactCalls: new Map(),
           worktrees: new Set(),
           observedToolUseIds: new Set(),
           settledToolUseIds: new Set(),
@@ -5103,19 +5286,72 @@ function promiseWithTimeout<A>(
 function withPublishedSnapshots(
   state: SessionState,
   message: ClaudeDecodedMessage,
+  account: string,
 ): ClaudeDecodedMessage {
-  if (message.kind !== "tool-results" || state.publishedSnapshots.size === 0) return message;
+  if (message.kind !== "tool-results") return message;
+  if (state.publishedSnapshots.size === 0 && state.artifactCalls.size === 0) return message;
   return {
     ...message,
     results: message.results.map((result) => {
       const snapshot = state.publishedSnapshots.get(result.toolUseId);
-      if (snapshot === undefined) return result;
       state.publishedSnapshots.delete(result.toolUseId);
-      return result.publishedPage === undefined
-        ? result
-        : { ...result, publishedPage: { ...result.publishedPage, snapshot } };
+      const call = state.artifactCalls.get(result.toolUseId);
+      state.artifactCalls.delete(result.toolUseId);
+      if (result.publishedPage === undefined) return result;
+      // A `read` or `list` answer can carry a page's address too; only a
+      // publish journals a page the thread made.
+      if (call !== undefined && !call.publishes) {
+        const { publishedPage: _read, ...rest } = result;
+        return rest;
+      }
+      return {
+        ...result,
+        publishedPage: {
+          ...result.publishedPage,
+          ...(snapshot === undefined ? {} : { snapshot }),
+          account,
+          ...(call?.artifactType === undefined ? {} : { artifactType: call.artifactType }),
+        },
+      };
     }),
   };
+}
+
+interface ClaudeArtifactCall {
+  readonly publishes: boolean;
+  readonly artifactType?: string;
+}
+
+/**
+ * What one Artifact call is, read from its input: a publish (the default
+ * action) or another action, and the Claude artifact type a publish from a
+ * type names. claude.ai sets the types per account, so the type is read as
+ * the last segment of the call's `type_url` (`.../types/design` is Design);
+ * a call with none is a plain page.
+ */
+export function claudeArtifactCall(input: Readonly<Record<string, unknown>>): ClaudeArtifactCall {
+  const action = typeof input.action === "string" ? input.action : "publish";
+  const publishes = action === "publish";
+  if (!publishes || typeof input.type_url !== "string") return { publishes };
+  let segment = "";
+  try {
+    const last = new URL(input.type_url).pathname
+      .split("/")
+      .filter((part) => part !== "")
+      .at(-1);
+    segment = last === undefined ? "" : decodeURIComponent(last);
+  } catch {
+    segment = "";
+  }
+  const words = segment
+    .replace(/[-_]+/g, " ")
+    .replace(/[^\p{L}\p{N} ]+/gu, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 64)
+    .trim();
+  if (words === "") return { publishes };
+  return { publishes, artifactType: words.charAt(0).toUpperCase() + words.slice(1) };
 }
 
 /**

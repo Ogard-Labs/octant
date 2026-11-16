@@ -926,10 +926,14 @@ export function decodeContextBreakdown(value: unknown): ProviderContextBreakdown
 export function permissionMode(
   policy: ProviderExecutionPolicy,
   autoApprove?: boolean,
+  ownPermissions = false,
 ): ClaudePermissionMode {
   if (policy === "full-access") return "bypassPermissions";
   if (policy === "plan") return "plan";
   if (autoApprove === true) return "auto";
+  // Outside Strict, Accept edits is Claude Code's own `acceptEdits`, so its
+  // engine accepts the edits; under Strict Octant's gate waives them itself.
+  if (policy === "auto-accept-edits" && ownPermissions) return "acceptEdits";
   return "default";
 }
 
@@ -979,7 +983,11 @@ function decodeInitializedMessage(
   const mcpServers = Array.isArray(message.mcp_servers) ? message.mcp_servers : undefined;
   const tools = stringArray(message.tools);
   const capabilities = message.capabilities === undefined ? [] : stringArray(message.capabilities);
-  const expectedPermissionMode = permissionMode(input.executionPolicy, input.autoApprove);
+  const expectedPermissionMode = permissionMode(
+    input.executionPolicy,
+    input.autoApprove,
+    input.ownPermissions === true,
+  );
   if (
     mcpServers === undefined ||
     tools === undefined ||
@@ -1258,8 +1266,17 @@ function decodeStatus(
       message.status !== "compacting" &&
       message.status !== "requesting") ||
     (mode !== undefined &&
-      ((mode !== "default" && mode !== "bypassPermissions" && mode !== "plan" && mode !== "auto") ||
-        mode !== permissionMode(input.executionPolicy, input.autoApprove))) ||
+      ((mode !== "default" &&
+        mode !== "acceptEdits" &&
+        mode !== "bypassPermissions" &&
+        mode !== "plan" &&
+        mode !== "auto") ||
+        mode !==
+          permissionMode(
+            input.executionPolicy,
+            input.autoApprove,
+            input.ownPermissions === true,
+          ))) ||
     (message.compact_result !== undefined &&
       message.compact_result !== "success" &&
       message.compact_result !== "failed") ||
@@ -1270,7 +1287,11 @@ function decodeStatus(
     kind: "status",
     sessionId: message.session_id,
     status: message.status,
-    ...(mode === "default" || mode === "bypassPermissions" || mode === "plan" || mode === "auto"
+    ...(mode === "default" ||
+    mode === "acceptEdits" ||
+    mode === "bypassPermissions" ||
+    mode === "plan" ||
+    mode === "auto"
       ? { permissionMode: mode }
       : {}),
     ...(message.compact_result === "success" || message.compact_result === "failed"

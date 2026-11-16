@@ -45,7 +45,12 @@ import type { ClaudeProcessPort, SpawnClaudeCodeProcess } from "./claudeProcess"
 import type { ClaudeTaskToolOutput } from "./claudeTaskList";
 import type { ProviderRuntimeProxiedNetwork } from "../network/providerRuntimeNetwork";
 
-export type ClaudePermissionMode = "default" | "bypassPermissions" | "plan" | "auto";
+export type ClaudePermissionMode =
+  | "default"
+  | "acceptEdits"
+  | "bypassPermissions"
+  | "plan"
+  | "auto";
 
 export type ClaudeToolDecision =
   | { readonly behavior: "allow"; readonly updatedInput?: Readonly<Record<string, unknown>> }
@@ -217,6 +222,13 @@ export interface ClaudeOpenQueryInput {
   /** Decoder attestation for the one in-process server owned by this adapter. */
   readonly managedToolServer?: boolean;
   readonly sandbox?: ClaudeSandboxSettings;
+  /**
+   * Outside Strict in Work and Code outside Plan: Claude Code's own permission
+   * modes and sandbox decide, as on its own. Accept edits runs `acceptEdits`,
+   * and Octant sends no sandbox settings (unless a Full access thread kept
+   * its sandbox), so the person's own Claude settings configure it.
+   */
+  readonly ownPermissions?: true;
   readonly canUseTool: (request: ClaudeToolRequest) => Promise<ClaudeToolDecision>;
   readonly preToolUse: (request: ClaudePreToolRequest) => Promise<ClaudePreToolDecision>;
 }
@@ -1104,10 +1116,14 @@ function isValidSandboxNetwork(network: unknown): boolean {
 
 function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
   try {
+    const sandboxedFullAccess =
+      input.executionPolicy === "full-access" && input.fullAccessSandbox === true;
     if (
-      input.executionPolicy !== "approval-gated" &&
-      input.executionPolicy !== "auto-accept-edits" &&
-      !(input.executionPolicy === "full-access" && input.fullAccessSandbox === true)
+      (input.executionPolicy !== "approval-gated" &&
+        input.executionPolicy !== "auto-accept-edits" &&
+        !sandboxedFullAccess) ||
+      // Claude's own sandbox, as the person's settings configure it.
+      (input.ownPermissions === true && !sandboxedFullAccess)
     ) {
       return input.sandbox === undefined;
     }
@@ -1353,7 +1369,11 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
           failure("invalid-configuration", "Claude sandbox configuration is invalid."),
         );
       }
-      const expectedMode = permissionMode(input.executionPolicy, input.autoApprove);
+      const expectedMode = permissionMode(
+        input.executionPolicy,
+        input.autoApprove,
+        input.ownPermissions === true,
+      );
       const acquire = Effect.tryPromise({
         try: async () => {
           const prompt = new BoundedAsyncInput<ClaudeAgentSdkInputMessage>(inputCapacity);
