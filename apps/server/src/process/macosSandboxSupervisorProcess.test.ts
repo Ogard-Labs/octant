@@ -44,7 +44,7 @@ describe.skipIf(process.platform !== "darwin")("native sandbox scope supervisor"
           executable,
           fileURLToPath(
             new URL(
-              "../../../../desktop/native/sandbox-scope/OctantSandboxScope.c",
+              "../../../desktop/native/sandbox-scope/OctantSandboxScope.c",
               import.meta.url,
             ),
           ),
