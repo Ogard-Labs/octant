@@ -395,7 +395,11 @@ export function AgentRunHierarchy(props: {
     return (
       <>
         {error}
-        <ObservedChildDetail child={selectedObservation} onBack={leaveSelectedRun} />
+        <ObservedChildDetail
+          child={selectedObservation}
+          client={props.client}
+          onBack={leaveSelectedRun}
+        />
       </>
     );
   }

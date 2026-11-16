@@ -2412,6 +2412,7 @@ describe("CodeTurnRunner", () => {
               liveTurn: {
                 begin: (startedAt) => seen.push(`begin ${startedAt}`),
                 observe: (observed) => seen.push(JSON.stringify(observed)),
+                connect: () => undefined,
                 end: () => seen.push("end"),
               },
             }),

@@ -2767,6 +2767,18 @@ const ProviderRuntimeEventFields = {
   occurredAt: UtcTimestamp,
 } as const;
 
+/**
+ * Token counts a runtime reported for one of its own subagents. Each count is
+ * present only when the runtime reported it: some runtimes report only a total.
+ */
+export const ProviderChildUsage = Schema.Struct({
+  inputTokens: Schema.optional(Schema.NonNegativeInt),
+  outputTokens: Schema.optional(Schema.NonNegativeInt),
+  totalTokens: Schema.optional(Schema.NonNegativeInt),
+}).annotations(strict);
+export type ProviderChildUsage = typeof ProviderChildUsage.Type;
+export const MAX_PROVIDER_CHILD_FINAL_SUMMARY = 2048;
+
 /** A provider report is observation only; it carries no execution authority. */
 export const ProviderChildActivityEvent = Schema.Struct({
   ...ProviderRuntimeEventFields,
@@ -2777,6 +2789,14 @@ export const ProviderChildActivityEvent = Schema.Struct({
   task: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
   status: Schema.Literal("starting", "running", "waiting", "completed", "failed"),
   summary: Schema.NonEmptyTrimmedString,
+  /**
+   * The subagent's own closing report, as the runtime relayed it. It is
+   * outside content: it is shown to the person and never sent to a model.
+   */
+  finalSummary: Schema.optional(
+    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_PROVIDER_CHILD_FINAL_SUMMARY)),
+  ),
+  usage: Schema.optional(ProviderChildUsage),
 }).annotations(strict);
 export type ProviderChildActivityEvent = typeof ProviderChildActivityEvent.Type;
 
@@ -2798,6 +2818,8 @@ export const ProviderChildObservation = Schema.Struct({
     "unknown",
   ),
   latestSummary: Schema.String.pipe(Schema.maxLength(512)),
+  finalSummary: ProviderChildActivityEvent.fields.finalSummary,
+  usage: ProviderChildActivityEvent.fields.usage,
   firstObservedAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
   historyStatus: Schema.Literal("partial", "truncated", "conflicted"),

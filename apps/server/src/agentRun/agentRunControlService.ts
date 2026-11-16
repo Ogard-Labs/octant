@@ -244,6 +244,9 @@ export function buildControlCreationRequest(input: {
     parentThreadId: input.control.parentThreadId,
     ...(input.control.parentRunId === undefined ? {} : { parentRunId: input.control.parentRunId }),
     ...(input.control.dependsOn === undefined ? {} : { dependsOn: input.control.dependsOn }),
+    ...(input.control.compareGroup === undefined
+      ? {}
+      : { compareGroup: input.control.compareGroup }),
     role: input.control.role,
     task: input.control.task,
     mode: input.facts.mode,

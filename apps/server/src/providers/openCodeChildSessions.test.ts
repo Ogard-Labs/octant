@@ -26,6 +26,20 @@ describe("OpenCodeChildSessions", () => {
     });
   });
 
+  it("lets a stop reach only a running child of the session that asks", () => {
+    const children = new OpenCodeChildSessions();
+    const isEitherRoot = (source: string) => source === "root" || source === "other-root";
+    children.route(created("child", "root"), "child", isEitherRoot);
+    children.route(created("grandchild", "child"), "grandchild", isEitherRoot);
+    children.route(created("foreign", "other-root"), "foreign", isEitherRoot);
+    expect(children.runsUnder("child", "root")).toBe(true);
+    expect(children.runsUnder("grandchild", "root")).toBe(true);
+    expect(children.runsUnder("foreign", "root")).toBe(false);
+    expect(children.runsUnder("root", "root")).toBe(false);
+    children.route(event("session.idle", { sessionID: "child" }), "child", isEitherRoot);
+    expect(children.runsUnder("child", "root")).toBe(false);
+  });
+
   it("does not claim a session whose parent is not one it started", () => {
     const children = new OpenCodeChildSessions();
     expect(
@@ -76,6 +90,58 @@ describe("OpenCodeChildSessions", () => {
       rootSource: "root",
       activity: { status: "running" },
     });
+  });
+
+  it("reports the model a child answered with, then its closing text and summed tokens when it finishes", () => {
+    const children = new OpenCodeChildSessions();
+    children.route(created("child", "root"), "child", isRoot);
+    const assistant = (id: string, input: number, output: number) =>
+      event("message.updated", {
+        sessionID: "child",
+        info: {
+          id,
+          sessionID: "child",
+          role: "assistant",
+          providerID: "anthropic",
+          modelID: "claude-haiku",
+          tokens: { input, output, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+      });
+    expect(children.route(assistant("m1", 100, 20), "child", isRoot)).toMatchObject({
+      activity: { status: "starting", modelId: "anthropic/claude-haiku" },
+    });
+    expect(children.route(assistant("m1", 120, 30), "child", isRoot)).not.toHaveProperty(
+      "activity",
+    );
+    children.route(assistant("m2", 200, 40), "child", isRoot);
+    children.route(
+      event("message.part.updated", {
+        sessionID: "child",
+        part: { id: "p1", messageID: "m2", type: "text", text: "The build passes." },
+      }),
+      "child",
+      isRoot,
+    );
+    expect(
+      children.route(event("session.idle", { sessionID: "child" }), "child", isRoot),
+    ).toMatchObject({
+      activity: {
+        status: "completed",
+        finalSummary: "The build passes.",
+        usage: { inputTokens: 320, outputTokens: 70 },
+      },
+    });
+  });
+
+  it("leaves model, closing text and usage unknown when a child reports none", () => {
+    const children = new OpenCodeChildSessions();
+    children.route(created("child", "root"), "child", isRoot);
+    const route = children.route(event("session.idle", { sessionID: "child" }), "child", isRoot);
+    if (route.kind !== "child") throw new Error("Expected the child's route");
+    expect(route.activity).toMatchObject({ status: "completed" });
+    expect(route.activity).not.toHaveProperty("modelId");
+    expect(route.activity).not.toHaveProperty("finalSummary");
+    expect(route.activity).not.toHaveProperty("usage");
   });
 
   it("reports a child that errored as failed", () => {

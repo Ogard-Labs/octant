@@ -96,6 +96,8 @@ function tool(
     authorizeCancel?: (run: AgentRun) => boolean;
     remote?: RemoteDelegationPort;
     ingestion?: "recorded" | "refused";
+    resultTexts?: Readonly<Record<string, string>>;
+    sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
   } = {},
 ) {
   const calls: string[] = [];
@@ -163,7 +165,9 @@ function tool(
           runs[index] = run;
           return { kind: "run-updated", run };
         },
-        resultText: (runId) => (String(runId) === ids.run ? "child reply" : undefined),
+        resultText: (runId) =>
+          options.resultTexts?.[String(runId)] ??
+          (String(runId) === ids.run ? "child reply" : undefined),
       },
       mode: "chat",
       windowId: ids.window,
@@ -201,7 +205,7 @@ function tool(
         return true;
       },
       uuid: () => "00000000-0000-4000-8000-0000000000ee",
-      sleep: () => Promise.resolve(),
+      sleep: options.sleep ?? (() => Promise.resolve()),
     }),
   };
 }
@@ -428,6 +432,28 @@ describe("agents managed tools", () => {
       runId: ids.run,
       lifecycleStatus: "running",
     });
+  });
+
+  it("carries a delegation's trimmed compare group into the admitted child and refuses an overlong one", async () => {
+    const admitted: unknown[] = [];
+    const { set } = tool({
+      admitted: {
+        admit: (command) => {
+          admitted.push(command);
+          return { kind: "run-accepted", run: queuedRun() } as never;
+        },
+      },
+    });
+    await call(set, { operation: "delegate", task: "Summarize the diff", compareGroup: " plans " });
+    expect(admitted[0]).toMatchObject({ kind: "request-agent-run", compareGroup: "plans" });
+
+    const overlong = await call(set, {
+      operation: "delegate",
+      task: "Summarize the diff",
+      compareGroup: "x".repeat(65),
+    });
+    expect(overlong.result).toMatchObject({ status: "error", error: "invalid-agents-input" });
+    expect(admitted).toHaveLength(1);
   });
 
   it("refuses an unavailable role route instead of silently inheriting the parent", async () => {
@@ -717,6 +743,103 @@ describe("agents managed tools", () => {
       expect(reason).not.toContain("/Users/someone");
       expect(reason).not.toContain("abc123");
       expect(reason.length).toBeLessThanOrEqual(512);
+    }
+  });
+
+  it("waits on children on different providers together, returning the first to settle or all of them", async () => {
+    const second = "00000000-0000-4000-8000-0000000000a2";
+    const runs = [
+      queuedRun({ lifecycleStatus: "completed", result: { text: "x" } as never }),
+      queuedRun({ id: second as never, lifecycleStatus: "running" }),
+    ];
+    const any = await call(tool({ runs }).set, {
+      operation: "wait",
+      runIds: [ids.run, second],
+      waitFor: "any",
+      timeoutMs: 10,
+    });
+    expect(any.result).toMatchObject({
+      status: "settled",
+      waitFor: "any",
+      settled: [{ runId: ids.run, status: "completed", text: "child reply" }],
+      pending: [second],
+    });
+    const all = await call(tool({ runs }).set, {
+      operation: "wait",
+      runIds: [ids.run, second],
+      timeoutMs: 0,
+    });
+    expect(all.result).toMatchObject({
+      status: "still-running",
+      waitFor: "all",
+      settled: [{ runId: ids.run, status: "completed" }],
+      pending: [second],
+    });
+  });
+
+  it("leaves a finished reply owed when it would not fit a several-child answer", async () => {
+    const second = "00000000-0000-4000-8000-0000000000a2";
+    const done = (id: string) =>
+      queuedRun({ id: id as never, lifecycleStatus: "completed", result: { text: "x" } as never });
+    const { set, settlements } = tool({
+      runs: [done(ids.run), done(second)],
+      resultTexts: { [ids.run]: "a".repeat(40_000), [second]: "b".repeat(40_000) },
+    });
+    const outcome = await call(set, {
+      operation: "wait",
+      runIds: [ids.run, second],
+      timeoutMs: 0,
+    });
+    expect(outcome.isError).toBeUndefined();
+    expect(outcome.result).toMatchObject({
+      status: "settled",
+      settled: [{ runId: ids.run, status: "completed" }],
+      withheld: [second],
+      pending: [],
+    });
+    expect(Buffer.byteLength(JSON.stringify(outcome.result), "utf8")).toBeLessThanOrEqual(65_536);
+    // Only the carried reply is settled as handed back; the other stays owed.
+    expect(settlements.map((command) => ("runId" in command ? String(command.runId) : ""))).toEqual(
+      [ids.run],
+    );
+  });
+
+  it("leaves every finished reply owed when the turn is interrupted while it waits for the rest", async () => {
+    const second = "00000000-0000-4000-8000-0000000000a2";
+    const controller = new AbortController();
+    const { set, settlements, ingested } = tool({
+      runs: [
+        queuedRun({ lifecycleStatus: "completed", result: { text: "x" } as never }),
+        queuedRun({ id: second as never, lifecycleStatus: "running" }),
+      ],
+      // The person stops the turn while the second child is still running.
+      sleep: () => {
+        controller.abort();
+        return Promise.reject(new Error("aborted"));
+      },
+    });
+    const outcome = await set.execute({
+      name: "octant_agents",
+      inputJson: JSON.stringify({
+        operation: "wait",
+        runIds: [ids.run, second],
+        timeoutMs: 60_000,
+      }),
+      signal: controller.signal,
+    });
+    expect(outcome.result).toMatchObject({ error: "tool-interrupted" });
+    expect(settlements).toEqual([]);
+    expect(ingested).toEqual([]);
+  });
+
+  it("refuses a wait that names both runId and runIds, or repeats a child", async () => {
+    const { set } = tool();
+    for (const input of [
+      { operation: "wait", runId: ids.run, runIds: [ids.run] },
+      { operation: "wait", runIds: [ids.run, ids.run] },
+      { operation: "status", runIds: [ids.run] },
+    ]) {
+      expect((await call(set, input)).result).toMatchObject({ error: "invalid-agents-input" });
     }
   });
 

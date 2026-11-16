@@ -86,7 +86,17 @@ interface AgentResultDeliveryServiceOptions {
    * taint was recorded; a delivery whose taint could not be recorded waits.
    */
   readonly recordResultIngestion?: (run: AgentRun) => boolean;
+  /**
+   * Hands the results to the parent's running turn instead of a turn of
+   * their own. Asked only after the taint is recorded; `not-steered` when no
+   * turn is running, its runtime cannot take a note, or the results do not
+   * fit one, and the delivery then waits for a turn as before.
+   */
+  readonly steer?: (runs: ReadonlyArray<AgentRun>) => Promise<"steered" | "not-steered">;
 }
+
+/** The settle detail of a result that entered a running turn rather than its own. */
+export const AGENT_RESULT_STEERED_DETAIL = "Steered into the parent's running turn.";
 
 const DEFER_RETRY_AFTER_MS = 30_000;
 
@@ -338,6 +348,18 @@ export class AgentResultDeliveryService {
         this.#armTimer(pending);
         return;
       }
+      if ((await this.#options.steer?.(runs)) === "steered") {
+        if (this.#pending.get(key) !== pending) return;
+        for (const run of runs)
+          this.#settle(
+            pending,
+            { runId: run.id, generation: agentRunResultGeneration(run) },
+            "delivered",
+            AGENT_RESULT_STEERED_DETAIL,
+          );
+        return;
+      }
+      if (this.#pending.get(key) !== pending) return;
       const result = await port.dispatch(runs);
       if (this.#pending.get(key) !== pending) return;
       if (result.kind === "dispatched") {

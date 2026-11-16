@@ -2441,6 +2441,7 @@ describe("WorkTurnRuntime", () => {
       const tracker = {
         begin: (startedAt: string) => calls.push(`begin ${startedAt}`),
         observe: (observed: { readonly kind: string }) => calls.push(observed.kind),
+        connect: () => calls.push("connect"),
         end: () => calls.push("end"),
       };
 
@@ -2458,7 +2459,14 @@ describe("WorkTurnRuntime", () => {
         liveTurn: tracker,
       });
 
-      expect(calls).toEqual([`begin ${at(0)}`, "tool-start", "text-delta", "completed", "end"]);
+      expect(calls).toEqual([
+        `begin ${at(0)}`,
+        "connect",
+        "tool-start",
+        "text-delta",
+        "completed",
+        "end",
+      ]);
     });
 
     it("hands each command a runtime starts to the forge-change record, with the thread's level", async () => {
@@ -2503,6 +2511,7 @@ describe("WorkTurnRuntime", () => {
         liveTurn: {
           begin: () => calls.push("begin"),
           observe: () => calls.push("observe"),
+          connect: () => undefined,
           end: () => calls.push("end"),
         },
       });

@@ -93,7 +93,7 @@ import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverP
 import { serverCodeThreadProviderGroups } from "./composer/serverCodeComposer";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
-import { ChildResultCards } from "../agents/ChildResultCards";
+import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
 import { isChildResultDelivery } from "../agents/childResultDelivery";
 import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { ScheduledFollowUpMark } from "../automation/ScheduledFollowUpMark";
@@ -2395,6 +2395,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         )}
                       </TurnActionMenu>
                     </article>
+                    <SteeredChildResults
+                      providerGroups={providerGroups}
+                      steered={message.steeredResults}
+                    />
                     {message.role === "assistant" && message.operationId !== undefined ? (
                       <SideTaskInline
                         last={message === lastReply}

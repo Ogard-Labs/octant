@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { AgentHierarchyPanel, type SubagentWorker } from "./AgentHierarchyPanel";
 import type { AgentHierarchyInputEntry } from "./buildAgentHierarchyModel";
+import { decodeAgentRunId } from "@octant/contracts/agent-run";
+import { observedChildFixture } from "./agentActivityFixtures";
 
 const entries: ReadonlyArray<AgentHierarchyInputEntry> = [
   {
@@ -53,7 +55,7 @@ describe("AgentHierarchyPanel", () => {
 
     const working = screen.getByRole("region", { name: "Working" });
     expect(within(working).getByRole("button", { name: /Active research/ })).toHaveTextContent(
-      "Working · Research · gpt-6-astra",
+      "Working · Research · provider-a · gpt-6-astra",
     );
     const finished = screen.getByRole("region", { name: "Finished" });
     const rows = within(finished).getAllByRole("button");
@@ -181,6 +183,92 @@ describe("AgentHierarchyPanel", () => {
     await user.click(verify);
 
     expect(onOpen).toHaveBeenCalledWith("verify");
+  });
+
+  it("nests a provider-started subagent under the run that started it, with no separate section", () => {
+    const parent = "22222222-2222-4222-8222-222222222222";
+    render(
+      <AgentHierarchyPanel
+        entries={[{ ...entries[0], runId: parent } as AgentHierarchyInputEntry]}
+        observations={[
+          observedChildFixture({ parentRunId: decodeAgentRunId(parent) }),
+          observedChildFixture({
+            observationId: "grandchild",
+            childAgentId: "child-two",
+            parentChildAgentId: "child-one",
+            task: "Read tests",
+          }),
+        ]}
+        providers={
+          new Map([
+            ["55555555-5555-4555-8555-555555555555", { driverKind: "codex", displayName: "Codex" }],
+          ])
+        }
+      />,
+    );
+    expect(screen.queryByRole("region", { name: "Observed children" })).not.toBeInTheDocument();
+    const working = screen.getByRole("region", { name: "Working" });
+    expect(working).toHaveTextContent("Working · 3");
+    const rows = within(working).getAllByRole("listitem");
+    expect(
+      rows.map((row) => [row.textContent?.slice(0, 10), row.style.paddingInlineStart]),
+    ).toEqual([
+      ["Active res", "0px"],
+      ["Inspect pa", "16px"],
+      ["Read tests", "32px"],
+    ]);
+    expect(rows[1]).toHaveTextContent("Started by Codex");
+  });
+
+  it("draws provider-started subagents as leaf cards, so a thread with only those offers the graph", () => {
+    render(
+      <AgentHierarchyPanel
+        entries={[]}
+        observations={[observedChildFixture()]}
+        onViewChange={vi.fn()}
+        view="graph"
+      />,
+    );
+    const graph = screen.getByRole("group", { name: "Subagent graph" });
+    const card = within(graph).getByRole("button", { name: /Inspect parser/ });
+    expect(card).toHaveTextContent("Started by 55555555-5555-4555-8555-555555555555");
+    expect(graph.querySelectorAll('path[data-kind="after"]')).toHaveLength(0);
+  });
+
+  it("shows siblings in one compare group side by side with their facts and no ranking", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    const live = entries[0] as AgentHierarchyInputEntry;
+    render(
+      <AgentHierarchyPanel
+        entries={[
+          { ...live, runId: "a", task: "Plan A", compareGroup: "plans" },
+          {
+            ...live,
+            runId: "b",
+            task: "Plan B",
+            compareGroup: "plans",
+            lifecycleStatus: "completed",
+            createdAt: "2026-08-01T15:00:00.000Z",
+          },
+        ]}
+        onOpen={onOpen}
+      />,
+    );
+    const group = screen.getByRole("region", { name: "Compare plans" });
+    // The group stays whole in Working while any member still works.
+    expect(screen.getByRole("region", { name: "Working" })).toContainElement(group);
+    const members = within(group).getAllByRole("button");
+    expect(members.map((member) => member.textContent)).toEqual([
+      expect.stringContaining("Plan A"),
+      expect.stringContaining("Plan B"),
+    ]);
+    expect(members[1]).toHaveTextContent("provider-a");
+    expect(members[1]).toHaveTextContent("gpt-6-astra");
+    expect(members[1]).toHaveTextContent("Done");
+    expect(members[1]).toHaveTextContent("Ran 1m");
+    await user.click(members[1] as HTMLElement);
+    expect(onOpen).toHaveBeenCalledWith("b");
   });
 
   describe("on a coordinator", () => {

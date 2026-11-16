@@ -12,6 +12,7 @@ import type { ProviderModel } from "@octant/contracts/providers";
 import type { ProviderCapabilitySupport } from "@octant/contracts/providers";
 import type { ProviderObservedState } from "@octant/contracts/providers";
 import type { ProviderReadiness } from "@octant/contracts/providers";
+import { threadAppToolSupport, type AppToolThreadLevel } from "./browserAgentAvailability";
 import {
   hasVerifiedToolAuthority,
   hasWorkToolAuthority,
@@ -694,30 +695,45 @@ export function modelCarriesAppManagedTools(
 
 /**
  * Can a delegated child run on `model`? One rule for advertising a target and
- * for admitting a child on it, so the two cannot disagree. An agent runtime
- * must be `ready` and list the model. A direct endpoint runs a child through
- * Octant's own tools, so its model must also carry them (provider-wide support
- * or a person's Verify tools); such an endpoint may be `degraded`, because a
- * Foundry deployment that `/models` does not list still serves its manual
- * deployments (`providerCanServeModel`).
+ * for admitting a child on it, so the two cannot disagree. Every child carries
+ * Octant's tools (its `octant_*` set and the child-run report), so the model
+ * must carry them on every runtime: provider-wide support, a person's Verify
+ * tools, or, for a runtime that reports `mixed` at Full access, a child that
+ * runs at Full access (`level`). An agent runtime must also be `ready` and list
+ * the model. A direct endpoint may be `degraded`, because a Foundry deployment
+ * that `/models` does not list still serves its manual deployments
+ * (`providerCanServeModel`).
+ *
+ * Rationale: an ACP agent that never negotiated tools, or an OpenCode runtime
+ * below Full access, was advertised by `capabilities` and then refused at
+ * start with `tools-unsupported`, so the model chose a target that could not run.
  */
 export function modelCanTakeDelegatedWork(
   driverKind: ProviderDriverKind,
   observed: Pick<ProviderObservedState, "readiness" | "models"> &
-    Partial<Pick<ProviderObservedState, "capabilities" | "verifiedToolModelIds">>,
+    Partial<Pick<ProviderObservedState, "verifiedToolModelIds">> & {
+      readonly capabilities?: Pick<
+        ProviderObservedState["capabilities"],
+        "appManagedTools" | "appManagedToolsAtFullAccess"
+      >;
+    },
   modelId: ProviderModelId,
+  level?: AppToolThreadLevel,
 ): boolean {
+  const carriesTools =
+    observed.capabilities?.appManagedTools === "supported" ||
+    (observed.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false) ||
+    (level !== undefined &&
+      observed.capabilities !== undefined &&
+      threadAppToolSupport(observed.capabilities, level) === "mixed");
+  if (!carriesTools) return false;
   if (!isNativeHarnessDriverKind(driverKind)) {
     return (
       observed.readiness === "ready" &&
       observed.models.some((model) => String(model.id) === String(modelId))
     );
   }
-  return (
-    providerCanServeModel(observed, modelId) &&
-    (observed.capabilities?.appManagedTools === "supported" ||
-      (observed.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false))
-  );
+  return providerCanServeModel(observed, modelId);
 }
 
 /**

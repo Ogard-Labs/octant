@@ -486,6 +486,12 @@ export class CodeTurnRunner {
           permissionPersistence: input.thread.permissionPersistence,
         })
         .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
+      input.liveTurn?.connect({
+        connection,
+        sessionId: input.sessionId,
+        providerInstanceId: input.thread.providerInstanceId,
+        takesSteeredResults: input.harnessAutoReviewEnabled !== true,
+      });
 
       const cleanup = { stopped: false };
       yield* Effect.addFinalizer(() =>

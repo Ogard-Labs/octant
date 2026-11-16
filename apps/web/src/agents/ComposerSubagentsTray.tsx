@@ -2,7 +2,7 @@ import type { AgentObservedChild } from "@octant/contracts";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import { ChevronDown, X } from "../ui/icons";
-import { useContext, useEffect, useId, useState } from "react";
+import { useContext, useEffect, useId, useMemo, useState } from "react";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import {
@@ -10,14 +10,18 @@ import {
   subagentNeedsReview,
   type AgentHierarchyInputEntry,
 } from "./buildAgentHierarchyModel";
-import {
-  SubagentStatusIcon,
-  subagentElapsedLabel,
-  subagentModel,
-  subagentStatusWord,
-} from "./subagentStatus";
+import { SubagentStatusIcon, subagentElapsedLabel, subagentStatusWord } from "./subagentStatus";
 import { AgentResultPreview, latestResultPacket } from "./AgentRunResults";
 import { ObservedChildRow } from "./ObservedChildActivity";
+import type { SubagentProviderIdentity } from "./AgentRunDependencyGraph";
+import { ProviderGlyph } from "../providers/ProviderGlyph";
+import {
+  buildSubagentRows,
+  groupSubagentRows,
+  isActiveSubagentRow,
+  type SubagentListItem,
+  type SubagentRow,
+} from "./subagentRows";
 import { useChildRunStatus } from "./useChildRunStatus";
 import "./agent-hierarchy.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -37,6 +41,12 @@ export function ThreadSubagentsTray(props: {
   readonly interactionsClient?: ChildRunInteractionsClient;
   /** Opens the Agents tool; with a run id, on that subagent's conversation. */
   readonly onOpenSubagent?: (runId?: string) => void;
+  /** The configured provider instances, so each row names what ran it. */
+  readonly providerInstances?: ReadonlyArray<{
+    readonly id: string;
+    readonly driverKind: string;
+    readonly displayName: string;
+  }>;
 }) {
   // The thread already says its host connection is lost; the tray dims and
   // disables its controls rather than saying so a second time.
@@ -45,6 +55,19 @@ export function ThreadSubagentsTray(props: {
     client: props.client,
     parentThreadId: decodeAgentRunParentThreadId(props.threadId),
   });
+  const instances = props.providerInstances;
+  const providers = useMemo(
+    () =>
+      instances === undefined
+        ? undefined
+        : new Map(
+            instances.map((instance) => [
+              String(instance.id),
+              { driverKind: instance.driverKind, displayName: instance.displayName },
+            ]),
+          ),
+    [instances],
+  );
   if (subagents.status !== "ready") return null;
   return (
     <>
@@ -65,10 +88,12 @@ export function ThreadSubagentsTray(props: {
         entries={subagents.entries}
         observations={subagents.observations}
         observationsTruncated={subagents.observationsTruncated}
+        {...(providers === undefined ? {} : { providers })}
         {...(subagents.errorMessage === undefined ? {} : { errorMessage: subagents.errorMessage })}
         {...(props.onOpenSubagent === undefined ? {} : { onOpenSubagent: props.onOpenSubagent })}
         onStop={(runId) => void subagents.cancelRun(runId)}
         onStopAll={() => void subagents.stopAll()}
+        stopClient={props.client}
         reconnecting={subagents.reconnecting || connectionLost}
       />
     </>
@@ -79,11 +104,15 @@ export interface SubagentsTrayProps {
   readonly observations?: ReadonlyArray<AgentObservedChild>;
   readonly observationsTruncated?: boolean;
   readonly entries: ReadonlyArray<AgentHierarchyInputEntry>;
+  /** Provider instances by id, so a row can name and draw what ran it. */
+  readonly providers?: ReadonlyMap<string, SubagentProviderIdentity>;
   readonly onOpenSubagent?: (runId?: string) => void;
   /** Cancels one named subagent; it names its target, so it needs no confirmation. */
   readonly onStop: (runId: string) => void;
   /** Cancels every active subagent on the thread. Already confirmed when called. */
   readonly onStopAll: () => void;
+  /** Stops one provider-native subagent where the host offers it. */
+  readonly stopClient?: Pick<AgentRunClient, "stopObserved">;
   readonly busy?: boolean;
   /**
    * What is shown is the last status the host reported. The tray dims and stops
@@ -97,6 +126,7 @@ export interface SubagentsTrayProps {
 }
 
 const OPEN_KEY = "octant.composer-subagents.open";
+const NO_OBSERVATIONS: ReadonlyArray<AgentObservedChild> = [];
 
 /**
  * Keep attention and result counts visible even when folded. Preview only
@@ -114,21 +144,17 @@ export function SubagentsTray(props: SubagentsTrayProps) {
       entry.executionKind === "octant-managed" &&
       isActiveAgentHierarchyStatus(entry.lifecycleStatus),
   );
-  const outstanding = props.entries.filter(
-    (entry) =>
-      isActiveAgentHierarchyStatus(entry.lifecycleStatus) ||
-      // A child the head counts as failed or interrupted is listed too, with the
-      // reason the host recorded, so no count names a child the person cannot find.
-      entry.lifecycleStatus === "failed" ||
-      entry.lifecycleStatus === "interrupted" ||
-      subagentNeedsReview(entry),
+  const observations = props.observations ?? NO_OBSERVATIONS;
+  const rows = useMemo(
+    () =>
+      buildSubagentRows({
+        entries: props.entries,
+        observations,
+        ...(props.providers === undefined ? {} : { providers: props.providers }),
+      }),
+    [props.entries, observations, props.providers],
   );
-  const observations = props.observations ?? [];
-  const observedOutstanding = observations.filter((child) => child.lifecycleStatus !== "completed");
-  const candidates = [
-    ...outstanding.map((entry) => ({ kind: "managed" as const, entry })),
-    ...observedOutstanding.map((child) => ({ kind: "observed" as const, child })),
-  ];
+  const candidates = trayCandidates(rows);
   const preview = candidates.slice(0, 3);
   const stale = props.reconnecting === true;
   const total = props.entries.length + observations.length;
@@ -234,11 +260,19 @@ export function SubagentsTray(props: SubagentsTrayProps) {
           {preview.length > 0 ? (
             <ul className="composer-subagents__list">
               {preview.map((item) =>
-                item.kind === "managed" ? (
+                item.kind === "group" ? (
+                  <CompareGroupTrayRow
+                    item={item}
+                    key={`group:${item.label}`}
+                    {...(props.onOpenSubagent === undefined
+                      ? {}
+                      : { onOpenSubagent: props.onOpenSubagent })}
+                  />
+                ) : item.row.kind === "octant-started" ? (
                   <SubagentTrayRow
                     busy={props.busy === true || stale}
-                    entry={item.entry}
-                    key={item.entry.runId}
+                    row={item.row}
+                    key={item.row.id}
                     now={now}
                     {...(props.onOpenSubagent === undefined
                       ? {}
@@ -246,17 +280,21 @@ export function SubagentsTray(props: SubagentsTrayProps) {
                     onStop={props.onStop}
                   />
                 ) : (
-                  <li
-                    key={`observed:${item.child.observationId}`}
-                    className="composer-subagents__row"
-                  >
+                  <li key={item.row.id} className="composer-subagents__row">
                     <ObservedChildRow
-                      child={item.child}
+                      child={item.row.child}
+                      {...(props.stopClient === undefined ? {} : { client: props.stopClient })}
                       now={now}
+                      providerName={item.row.providerName}
+                      {...(item.row.driverKind === undefined
+                        ? {}
+                        : { driverKind: item.row.driverKind })}
                       {...(props.onOpenSubagent === undefined
                         ? {}
                         : { onOpen: props.onOpenSubagent })}
                     />
+                    {/* A provider-started subagent offers no managed controls;
+                        a stop the runtime itself supports belongs here. */}
                   </li>
                 ),
               )}
@@ -287,19 +325,21 @@ export function SubagentsTray(props: SubagentsTrayProps) {
 }
 
 function SubagentTrayRow(props: {
-  readonly entry: AgentHierarchyInputEntry;
+  readonly row: Extract<SubagentRow, { kind: "octant-started" }>;
   readonly now: number;
   readonly busy: boolean;
   readonly onOpenSubagent?: (runId?: string) => void;
   readonly onStop: (runId: string) => void;
 }) {
-  const entry = props.entry;
+  const { row } = props;
+  const entry = row.entry;
   const word = subagentStatusWord(entry.lifecycleStatus);
   const elapsed = subagentElapsedLabel(entry.updatedAt, props.now);
   const meta = [
     word,
     subagentNeedsReview(entry) ? "Needs review" : undefined,
-    subagentModel(entry),
+    row.providerName,
+    row.model,
     elapsed === "" ? undefined : `Updated ${elapsed} ago`,
   ]
     .filter((part) => part !== undefined)
@@ -318,6 +358,9 @@ function SubagentTrayRow(props: {
         variant="ghost"
       >
         <SubagentStatusIcon lifecycleStatus={entry.lifecycleStatus} />
+        {row.driverKind === undefined ? null : (
+          <ProviderGlyph displayName={row.providerName} driverKind={row.driverKind} size={12} />
+        )}
         <span className="composer-subagents__content">
           <span className="composer-subagents__task">{entry.task}</span>
           <span className="composer-subagents__meta">{meta}</span>
@@ -342,6 +385,62 @@ function SubagentTrayRow(props: {
       ) : null}
     </li>
   );
+}
+
+/**
+ * A compare group is one line here: its label and how many members are in
+ * each state. Comparing them side by side is the Agents tool's job.
+ */
+function CompareGroupTrayRow(props: {
+  readonly item: Extract<SubagentListItem, { kind: "group" }>;
+  readonly onOpenSubagent?: (runId?: string) => void;
+}) {
+  const { item } = props;
+  const meta = [`${item.members.length} subagents`, ...stateCounts(item.members)].join(" · ");
+  return (
+    <li className="composer-subagents__row">
+      <OctantButton
+        aria-label={`Compare ${item.label}. ${meta}. Opens them side by side in Agents.`}
+        className="composer-subagents__open"
+        onClick={() => props.onOpenSubagent?.()}
+        size="xs"
+        title={item.label}
+        type="button"
+        variant="ghost"
+      >
+        <span className="composer-subagents__content">
+          <span className="composer-subagents__task">Compare · {item.label}</span>
+          <span className="composer-subagents__meta">{meta}</span>
+        </span>
+      </OctantButton>
+    </li>
+  );
+}
+
+/** "1 working", "2 done": each state that has members, in the order of the head's line. */
+function stateCounts(rows: ReadonlyArray<SubagentRow>): ReadonlyArray<string> {
+  const words = new Map<string, number>();
+  for (const row of rows) {
+    const word = subagentStatusWord(row.lifecycleStatus).toLowerCase();
+    words.set(word, (words.get(word) ?? 0) + 1);
+  }
+  return [...words].map(([word, count]) => `${count} ${word}`);
+}
+
+/**
+ * What the open tray previews: every subagent still working or asking for the
+ * person, whoever started it, with the ones asking for something first. A
+ * compare group is listed once, where its first member would be.
+ */
+function trayCandidates(rows: ReadonlyArray<SubagentRow>): ReadonlyArray<SubagentListItem> {
+  const outstanding = (row: SubagentRow) =>
+    isActiveSubagentRow(row) || row.needsAttention || row.lifecycleStatus === "unknown";
+  const attention = (item: SubagentListItem) =>
+    item.kind === "row" ? item.row.needsAttention : item.members.some((row) => row.needsAttention);
+  const items = groupSubagentRows(rows).filter((item) =>
+    item.kind === "row" ? outstanding(item.row) : item.members.some(outstanding),
+  );
+  return [...items.filter(attention), ...items.filter((item) => !attention(item))];
 }
 
 /**

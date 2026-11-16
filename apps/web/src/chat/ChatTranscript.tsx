@@ -49,7 +49,7 @@ import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import { followSelectionWithin } from "../transcript/selectionOwner";
-import { ChildResultCards } from "../agents/ChildResultCards";
+import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import {
   LoadEarlierMessages,
@@ -652,6 +652,10 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                 />
               ))}
             </TurnActionMenu>
+            <SteeredChildResults
+              providerGroups={props.providerGroups}
+              steered={turn.steeredResults}
+            />
             <SideTaskInline
               last={detached === undefined && String(turn.id) === String(turns.at(-1)?.id)}
               loadedTurnIds={loadedTurnIds}

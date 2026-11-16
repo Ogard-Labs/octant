@@ -17,6 +17,11 @@ export function observedChildren(input: {
   readonly states?: ReadonlyArray<ProviderChildObservationState>;
   readonly events?: ReadonlyArray<ProviderChildActivityEvent>;
   readonly truncated?: boolean;
+  /**
+   * Whether the thread's running turn can stop this child alone. Asked only
+   * for a child that has not finished; absent, every child is read-only.
+   */
+  readonly stoppable?: (child: ProviderChildObservation) => boolean;
 }): {
   readonly observations: ReadonlyArray<AgentObservedChild>;
   readonly observationsTruncated: boolean;
@@ -36,6 +41,10 @@ export function observedChildren(input: {
             : { parentChildAgentId: child.parentChildAgentId }),
           ...(child.modelId === undefined ? {} : { modelId: child.modelId }),
           ...(child.task === undefined ? {} : { task: child.task }),
+          // A snapshot keeps only the latest closing report and usage, so each
+          // replayed entry carries them; the fold keeps the newest it sees.
+          ...(child.finalSummary === undefined ? {} : { finalSummary: child.finalSummary }),
+          ...(child.usage === undefined ? {} : { usage: child.usage }),
         });
       }
       if (child.historyStatus !== "partial") {
@@ -84,7 +93,13 @@ export function observedChildren(input: {
     observations.push({
       ...child,
       kind: "observed",
-      control: "unavailable",
+      control:
+        child.lifecycleStatus !== "completed" &&
+        child.lifecycleStatus !== "failed" &&
+        child.historyStatus !== "conflicted" &&
+        input.stoppable?.(child) === true
+          ? "stop"
+          : "unavailable",
       mode: input.mode,
       parentThreadId: input.parentThreadId,
       ...(input.parentRunId === undefined ? {} : { parentRunId: input.parentRunId }),

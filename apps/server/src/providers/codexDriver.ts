@@ -26,7 +26,9 @@ import {
   type ProviderTurnInput,
   type UtcTimestamp,
   type ProviderApprovalCall,
+  type ProviderChildUsage,
 } from "@octant/contracts";
+import { reportedChildUsage } from "@octant/provider-sdk/child-observations";
 import type {
   ProviderAcquireInput,
   ProviderCompactionPoint,
@@ -1148,6 +1150,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
   const clientFactory = options.clientFactory ?? makeCodexClient;
   // Codex's own subagent threads outlive the turn and connection that started them.
   const subagentLineage = new Map<string, string>();
+  const subagentUsage = new Map<string, ProviderChildUsage>();
   const clock = options.clock ?? (() => new Date().toISOString());
   const makeCorrelation = options.correlationId ?? (() => crypto.randomUUID());
   const contextFacts = makeCodexContextFacts(options, clientFactory, clock);
@@ -1307,6 +1310,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             makeTaskId,
             makeToolCallId,
             subagentLineage,
+            subagentUsage,
           },
         );
       });
@@ -1582,6 +1586,8 @@ interface ConnectionFactories {
   readonly makeToolCallId: () => string;
   /** Each of Codex's own subagent threads, by the thread that started it; shared by the driver's connections. */
   readonly subagentLineage: Map<string, string>;
+  /** The latest usage Codex reported on each of its own subagent threads, bounded like the lineage. */
+  readonly subagentUsage: Map<string, ProviderChildUsage>;
 }
 
 /** How far a subagent's subagents are followed back to the thread that owns them. */
@@ -1841,6 +1847,22 @@ function makeConnection(
     const observeSubagentThread = (message: CodexServerMessage) => {
       if (message.kind === "request") {
         answerSubagentRequest(message);
+        return;
+      }
+      if (
+        message.kind === "notification" &&
+        message.method === "thread/tokenUsage/updated" &&
+        subagentOwner(message.params.threadId) !== undefined
+      ) {
+        // The thread's running total; read when the agent is seen finishing.
+        const usage = reportedChildUsage(message.params.tokenUsage.total);
+        if (usage === undefined) return;
+        factories.subagentUsage.delete(message.params.threadId);
+        factories.subagentUsage.set(message.params.threadId, usage);
+        if (factories.subagentUsage.size > MAX_CODEX_SUBAGENT_LINEAGE) {
+          const oldest = factories.subagentUsage.keys().next().value;
+          if (oldest !== undefined) factories.subagentUsage.delete(oldest);
+        }
         return;
       }
       if (
@@ -2932,6 +2954,7 @@ function makeEventContext(state: SessionState, factories: ConnectionFactories): 
     agentMessages: new Map(),
     taskIds: new Map(),
     toolStates: new Map(),
+    subagentUsage: factories.subagentUsage,
     makeRequestId: factories.makeRequestId,
     makeTaskId: factories.makeTaskId,
     makeToolCallId: factories.makeToolCallId,
