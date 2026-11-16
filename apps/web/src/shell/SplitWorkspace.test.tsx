@@ -12,6 +12,7 @@ import { splitCallbacks, splitLayout } from "../App.test-fixtures";
 import { ThreadCoordinatorMenuItems } from "../projects/ThreadRowMenu";
 import { SplitWorkspace } from "./SplitWorkspace";
 import { PaneDockToolsContext, type PaneDockTools } from "./PaneDockTools";
+import { setPaneToolsHost } from "./paneToolsHost";
 import { useWorkspaceSurfaceDrag, type WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import type {
   WorkspaceSurfaceDragSource,
@@ -809,7 +810,7 @@ describe("SplitWorkspace", () => {
     expect(screen.getAllByRole("button", { name: "Back to coordinator" })).toHaveLength(1);
   });
 
-  it("ends a thread pane's header with its tool buttons, which act on that pane", async () => {
+  it("keeps a thread pane's tool buttons at the end of its own header where the window has no title bar slot for them", async () => {
     const user = userEvent.setup();
     const tools = paneTools();
     render(
@@ -831,9 +832,8 @@ describe("SplitWorkspace", () => {
     const pane = screen.getByRole("region", { name: "Workspace pane: Chat 0" });
     const header = pane.querySelector(".workspace-pane__header")!;
     const row = within(header as HTMLElement).getByRole("toolbar", { name: "Tools" });
-    // After the title, at the end of the header's lead: the part that ends on
-    // the thread box's narrowest line, so the row stays put whatever opens
-    // beside the thread.
+    // After the title, at the end of the header's lead: a narrow window, or a
+    // pane drawn by itself, has no title bar to hold the row.
     const title = within(header as HTMLElement).getByText("Chat 0");
     expect(title.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const lead = header.querySelector(":scope > .workspace-pane__lead")!;
@@ -845,6 +845,87 @@ describe("SplitWorkspace", () => {
 
     await user.click(files);
     expect(tools.onPress).toHaveBeenCalledWith(firstPaneId, "files", files, false);
+  });
+
+  it("draws the focused thread's tool buttons at the end of the title bar, and none in the panes, when the bar offers its slot", async () => {
+    const user = userEvent.setup();
+    const tools = paneTools();
+    render(
+      <>
+        <span data-testid="title-bar-slot" ref={setPaneToolsHost} />
+        <PaneDockToolsContext.Provider value={tools}>
+          <SplitWorkspace
+            {...splitCallbacks()}
+            activePaneId={firstPaneId}
+            layout={restingSplit(codeThreadTab())}
+            mode="chat"
+            renderSurface={(surface) => surface.title}
+          />
+        </PaneDockToolsContext.Provider>
+      </>,
+    );
+    // One row for the window: the focused pane's, in the bar. The resting
+    // thread's pane draws none, so focusing it moves no row from place to place.
+    const rows = await screen.findAllByRole("toolbar", { name: "Tools" });
+    expect(rows).toHaveLength(1);
+    expect(screen.getByTestId("title-bar-slot")).toContainElement(rows[0] ?? null);
+    for (const title of ["Chat 0", "Code task"]) {
+      expect(
+        within(screen.getByRole("region", { name: `Workspace pane: ${title}` })).queryByRole(
+          "toolbar",
+          { name: "Tools" },
+        ),
+      ).toBeNull();
+    }
+    const files = screen.getByRole("button", { name: "Files" });
+    expect(files).toHaveAttribute("aria-pressed", "true");
+    await user.click(files);
+    expect(tools.onPress).toHaveBeenCalledWith(firstPaneId, "files", files, false);
+  });
+
+  it("folds the title bar's tool buttons into one Tools menu when the bar is narrower than 640px, whatever the pane's own width", async () => {
+    const bar = document.createElement("div");
+    bar.className = "window-chrome";
+    const slot = document.createElement("span");
+    bar.append(slot);
+    document.body.append(bar);
+    let barWidth = 600;
+    vi.spyOn(bar, "getBoundingClientRect").mockImplementation(
+      () =>
+        ({ width: barWidth, height: 44, left: 0, right: barWidth, top: 0, bottom: 44 }) as DOMRect,
+    );
+    setPaneToolsHost(slot);
+    try {
+      const view = () => (
+        <PaneDockToolsContext.Provider value={paneTools()}>
+          <SplitWorkspace
+            {...splitCallbacks()}
+            activePaneId={firstPaneId}
+            layout={decodeWorkspaceLayoutNode({
+              kind: "pane",
+              nodeId: "00000000-0000-4000-8000-000000000612",
+              paneId: String(firstPaneId),
+              surface: chatTab(0),
+            })}
+            mode="chat"
+            renderSurface={(surface) => surface.title}
+          />
+        </PaneDockToolsContext.Provider>
+      );
+      const narrow = render(view());
+      const folded = within(slot).getByRole("toolbar", { name: "Tools" });
+      expect(folded.closest(".workspace-pane__tools")).toHaveAttribute("data-collapsed", "true");
+      narrow.unmount();
+
+      barWidth = 900;
+      render(view());
+      const open = within(slot).getByRole("toolbar", { name: "Tools" });
+      expect(open.closest(".workspace-pane__tools")).not.toHaveAttribute("data-collapsed");
+      expect(within(open).getByRole("button", { name: "Files" })).toBeInTheDocument();
+    } finally {
+      setPaneToolsHost(null);
+      bar.remove();
+    }
   });
 
   it("gives each thread of a split its own tool buttons: the focused one's show what is open, the other's rest and address their own pane", async () => {

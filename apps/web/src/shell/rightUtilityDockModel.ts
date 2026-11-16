@@ -361,6 +361,14 @@ export function threadBoxMinimum(
  */
 export const PANE_TOOLS_COLLAPSE_WIDTH = 440;
 
+/**
+ * The title bar width under which the tool buttons at its end fold into one
+ * Tools menu: below it the bar cannot hold a pane's title, a button per tool
+ * and the window's own controls. Read from the bar, never from the pane's
+ * header, whose width the row itself changes.
+ */
+export const TITLE_BAR_TOOLS_COLLAPSE_WIDTH = 640;
+
 /** The divider between two panes of a split (`.workspace-split__resize`). */
 const SPLIT_DIVIDER_WIDTH = 7;
 

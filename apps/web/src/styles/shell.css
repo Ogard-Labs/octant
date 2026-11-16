@@ -630,6 +630,22 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   pointer-events: auto;
 }
 
+/* The focused pane's tool buttons, drawn into the bar's end by the pane. The
+   row's own end margin belongs to a pane header, where nothing follows it. */
+.window-chrome__pane-tools {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.window-chrome__pane-tools:empty {
+  display: none;
+}
+
+.window-chrome__pane-tools > .workspace-pane__tools {
+  margin-right: 0;
+}
+
 .window-chrome__open-in-action {
   position: relative;
   display: inline-flex;

@@ -9,6 +9,7 @@ import { TitleBandChanges, type TitleBandChangesFacts } from "./TitleBandChanges
 import { ApplicationIdentity } from "./ApplicationIdentity";
 import type { WindowHistory } from "./windowHistory";
 import { WindowHistoryButtons } from "./WindowHistoryButtons";
+import { setPaneToolsHost } from "./paneToolsHost";
 
 export interface WindowChromeProps {
   readonly activeSurface: string;
@@ -148,6 +149,14 @@ export function WindowChrome(props: WindowChromeProps) {
           />
         ) : props.changes === undefined ? null : (
           <TitleBandChanges changes={props.changes} />
+        )}
+        {/* The focused pane's tool buttons, outermost at the bar's end in a
+            wide window: the pane draws them into this slot. Last, so a change
+            count or a Project action that comes and goes beside them never
+            moves them. A narrow window keeps them in the pane's own header,
+            so it has no slot. */}
+        {props.isNarrow ? null : (
+          <span className="window-chrome__pane-tools" ref={setPaneToolsHost} />
         )}
       </div>
     </header>

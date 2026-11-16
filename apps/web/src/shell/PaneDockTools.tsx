@@ -1,13 +1,16 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import type { PaneId } from "@octant/contracts/shell";
 import { createContext, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { DockToolButtons } from "./DockToolButtons";
 import type { DockUtilityLauncherReference } from "./DockUtilityLauncher";
 import { isDockToolLaunchable, type DockToolCapabilities } from "./dockToolAvailability";
 import { DOCK_TOOL_BUTTON_ORDER, type DockToolButtonsModel } from "./dockToolButtonsModel";
+import { usePaneToolsHost } from "./paneToolsHost";
 import {
   PANE_TOOLS_COLLAPSE_WIDTH,
   RIGHT_UTILITY_DOCK_SURFACES,
+  TITLE_BAR_TOOLS_COLLAPSE_WIDTH,
   type RightUtilityDockSurfaceId,
 } from "./rightUtilityDockModel";
 
@@ -102,9 +105,18 @@ const PANE_HEADER_GAP = 4;
 const REST_PRESS_WINDOW_MS = 1_000;
 
 /**
- * A thread pane's tool buttons, at the end of its header's lead. In the focused
- * pane they are the dock's own row. In another pane of a split they stand at
- * rest, and a press focuses that pane and opens the tool for its thread.
+ * A thread pane's tool buttons. In a wide window the focused pane's row stands
+ * at the end of the title bar (the bar's slot, `usePaneToolsHost`), above the
+ * Environment section, and stays there whatever opens beside the thread; a
+ * pane that is not the focused one draws no row, because the bar holds one.
+ * Until 2026-11-16 the row stood in the pane's header on a line worked out
+ * from the thread's narrowest width, which left it in the middle of the bar
+ * with nothing open (maintainer request).
+ *
+ * With no slot (a narrow window, a pane by itself) the row is in the pane's
+ * own header as before: the focused pane's is the dock's own row, and another
+ * pane of a split stands at rest, where a press focuses that pane and opens
+ * the tool for its thread.
  */
 export function PaneDockToolGroup(props: {
   readonly active: boolean;
@@ -113,6 +125,7 @@ export function PaneDockToolGroup(props: {
   readonly thread?: { readonly mode: OctantMode; readonly threadId: string } | undefined;
 }) {
   const tools = useContext(PaneDockToolsContext);
+  const barSlot = usePaneToolsHost();
   const group = useRef<HTMLDivElement>(null);
   // When the last press on the row began in a pane at rest, or 0.
   const restPressAt = useRef(0);
@@ -140,6 +153,23 @@ export function PaneDockToolGroup(props: {
   // after it, is a pane narrower than that line, and the header's width counts
   // as it always has.
   useLayoutEffect(() => {
+    if (barSlot !== null) {
+      // In the title bar the bar's own width decides. The pane's header cannot:
+      // it gives up the row's width at its end, so folding the row would widen
+      // the header and unfold it again.
+      const bar = barSlot.closest<HTMLElement>(".window-chrome");
+      // Only the focused pane draws the row there, so only it measures.
+      if (bar === null || !present || !props.active) return;
+      const measureBar = () => {
+        const width = bar.getBoundingClientRect().width;
+        if (width > 0) setCollapsed(width < TITLE_BAR_TOOLS_COLLAPSE_WIDTH);
+      };
+      measureBar();
+      if (typeof ResizeObserver === "undefined") return;
+      const barObserver = new ResizeObserver(measureBar);
+      barObserver.observe(bar);
+      return () => barObserver.disconnect();
+    }
     const lead = group.current?.parentElement;
     if (lead === null || lead === undefined) return;
     const header = lead.closest<HTMLElement>(".workspace-pane__header") ?? lead;
@@ -156,10 +186,12 @@ export function PaneDockToolGroup(props: {
     observer.observe(lead);
     if (header !== lead) observer.observe(header);
     return () => observer.disconnect();
-  }, [present]);
+  }, [present, barSlot, props.active]);
   if (tools === undefined || model === undefined || !present) return null;
+  // The bar holds one row, the focused pane's.
+  if (barSlot !== null && !props.active) return null;
   const paneId = props.paneId;
-  return (
+  const row = (
     <div
       className="workspace-pane__tools window-no-drag"
       data-collapsed={collapsed ? "true" : undefined}
@@ -196,4 +228,5 @@ export function PaneDockToolGroup(props: {
       />
     </div>
   );
+  return barSlot === null ? row : createPortal(row, barSlot);
 }

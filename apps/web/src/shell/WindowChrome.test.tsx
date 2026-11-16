@@ -45,6 +45,19 @@ it("moves the Nightly identity into the collapsed window's measured leading cont
   expect(screen.queryByLabelText("Octant Nightly")).not.toBeInTheDocument();
 });
 
+it("offers a slot for the focused pane's tool buttons at its end in a wide window, and none in a narrow one", () => {
+  const wide = renderChrome();
+  const slot = wide.container.querySelector(".window-chrome__pane-tools");
+  expect(slot).not.toBeNull();
+  // Last in the trailing cluster: nothing that comes and goes beside the row
+  // stands between it and the bar's end, so nothing moves it.
+  expect(wide.container.querySelector(".window-chrome__trailing")?.lastElementChild).toBe(slot);
+  wide.unmount();
+
+  const narrow = renderChrome({ isNarrow: true });
+  expect(narrow.container.querySelector(".window-chrome__pane-tools")).toBeNull();
+});
+
 function renderChrome(overrides: Partial<React.ComponentProps<typeof WindowChrome>> = {}) {
   const props: React.ComponentProps<typeof WindowChrome> = {
     activeSurface: "Welcome to Code",
