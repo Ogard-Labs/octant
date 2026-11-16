@@ -47,7 +47,12 @@ import type { ClaudeProcessPort, SpawnClaudeCodeProcess } from "./claudeProcess"
 import type { ClaudeTaskToolOutput } from "./claudeTaskList";
 import type { ProviderRuntimeProxiedNetwork } from "../network/providerRuntimeNetwork";
 
-export type ClaudePermissionMode = "default" | "bypassPermissions" | "plan" | "auto";
+export type ClaudePermissionMode =
+  | "default"
+  | "acceptEdits"
+  | "bypassPermissions"
+  | "plan"
+  | "auto";
 
 export type ClaudeToolDecision =
   | { readonly behavior: "allow"; readonly updatedInput?: Readonly<Record<string, unknown>> }
@@ -91,6 +96,8 @@ export interface ClaudePreToolRequest {
   readonly input: unknown;
   readonly toolUseId: string;
   readonly signal: AbortSignal;
+  /** The subagent that made the call, by the runtime's agent id; absent for the session's own. */
+  readonly agentId?: string;
 }
 
 export interface ClaudeSandboxSettings {
@@ -249,8 +256,21 @@ export interface ClaudeOpenQueryInput {
   /** Decoder attestation for the one in-process server owned by this adapter. */
   readonly managedToolServer?: boolean;
   readonly sandbox?: ClaudeSandboxSettings;
+  /**
+   * Outside Strict in Work and Code outside Plan: Claude Code's own permission
+   * modes and sandbox decide, as on its own. Accept edits runs `acceptEdits`,
+   * and Octant sends no sandbox settings (unless a Full access thread kept
+   * its sandbox), so the person's own Claude settings configure it.
+   */
+  readonly ownPermissions?: true;
   readonly canUseTool: (request: ClaudeToolRequest) => Promise<ClaudeToolDecision>;
   readonly preToolUse: (request: ClaudePreToolRequest) => Promise<ClaudePreToolDecision>;
+  /**
+   * The person's messages waiting for a subagent, taken once its next tool
+   * call reaches the hook, by the runtime's agent id. They reach the
+   * subagent as the hook's added context, beside whatever the hook decided.
+   */
+  readonly subagentMessages?: (agentId: string) => string | undefined;
 }
 
 export interface ClaudeModelInfo {
@@ -669,6 +689,15 @@ export interface ClaudeQueryPort {
     taskId: string,
   ) => Effect.Effect<"requested" | "unsupported", ProviderFailure>;
   /**
+   * Sends the one foreground task a tool call started (a subagent or a
+   * command) to the background, by that call's tool-use id; the call returns
+   * at once and the turn goes on. `not-found` when no foreground task
+   * matches, `unsupported` when the runtime offers no background control.
+   */
+  readonly backgroundTask: (
+    toolUseId: string,
+  ) => Effect.Effect<"backgrounded" | "not-found" | "unsupported", ProviderFailure>;
+  /**
    * Kills this query's runtime process tree outright, without asking it to
    * stop first. Only this query's own process is signalled.
    */
@@ -759,9 +788,12 @@ interface ClaudeAgentSdkHookOptions {
 interface ClaudeAgentSdkHookOutput {
   readonly hookSpecificOutput?: {
     readonly hookEventName: "PreToolUse";
-    readonly permissionDecision: "allow" | "deny" | "ask";
+    /** Absent decides nothing, so Claude Code's own rules decide. */
+    readonly permissionDecision?: "allow" | "deny" | "ask";
     readonly permissionDecisionReason?: string;
     readonly updatedInput?: Readonly<Record<string, unknown>>;
+    /** Text the model reads with the call: a person's message for a subagent. */
+    readonly additionalContext?: string;
   };
 }
 
@@ -859,6 +891,15 @@ export interface ClaudeNativeQueryOptions {
  * is on. Claude's own memory stays off by flag as well as by its environment
  * switch, unless the account keeps its own memory.
  */
+/**
+ * Whether a session reads the person's own Claude settings file, where their
+ * sandbox and permission rules live. Claude's own permission modes decide
+ * only in such a session (`claudeOwnPermissions`).
+ */
+export function claudeReadsPersonSettings(setup: ProviderNativeSetup | undefined): boolean {
+  return claudeNativeQueryOptions(setup).settingSources.includes("user");
+}
+
 export function claudeNativeQueryOptions(
   setup: ProviderNativeSetup | undefined,
   ownMemory = false,
@@ -983,6 +1024,7 @@ export interface ClaudeAgentSdkQueryLike extends AsyncIterable<unknown> {
   readonly interrupt: () => Promise<unknown>;
   /** Older runtimes cannot stop one task without interrupting the turn. */
   readonly stopTask?: (taskId: string) => Promise<void>;
+  readonly backgroundTasks?: (toolUseId?: string) => Promise<boolean>;
   readonly setPermissionMode: (mode: ClaudePermissionMode) => Promise<void>;
   readonly initializationResult: () => Promise<unknown>;
   /** The runtime's own account of its window; older runtimes do not answer. */
@@ -1188,12 +1230,9 @@ function isValidSandboxNetwork(network: unknown, blocked = false): boolean {
 
 function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
   try {
-    if (
-      input.strict === false &&
-      input.sandboxPolicy === undefined &&
-      input.fullAccessSandbox !== true
-    )
-      return input.sandbox === undefined;
+    const sandboxedFullAccess =
+      input.executionPolicy === "full-access" &&
+      (input.fullAccessSandbox === true || input.strict === true);
     if (
       process.platform === "win32" &&
       input.strict !== true &&
@@ -1202,12 +1241,13 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
     )
       return input.sandbox === undefined;
     if (
-      input.executionPolicy !== "approval-gated" &&
-      input.executionPolicy !== "auto-accept-edits" &&
-      !(
-        input.executionPolicy === "full-access" &&
-        (input.fullAccessSandbox === true || input.strict === true)
-      )
+      (input.executionPolicy !== "approval-gated" &&
+        input.executionPolicy !== "auto-accept-edits" &&
+        !sandboxedFullAccess) ||
+      (input.ownPermissions === true &&
+        input.strict !== true &&
+        input.sandboxPolicy === undefined &&
+        !sandboxedFullAccess)
     ) {
       return input.sandbox === undefined;
     }
@@ -1243,6 +1283,7 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
     const matchesRoots = (paths: ReadonlyArray<string>, read: boolean) => {
       const expected = [
         ...roots,
+        ...(read && input.attachmentsFolder !== undefined ? [input.attachmentsFolder] : []),
         ...(read ? (configured?.readOnlyRoots ?? []) : []),
         ...(configured?.readWriteRoots ?? []),
         ...(read && input.strict === true ? claudeSandboxToolchainReads() : []),
@@ -1471,12 +1512,37 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
           failure("invalid-configuration", "Claude input capacity must be a positive integer."),
         );
       }
+      // Octant leaves its sandbox and gate only to the person's own settings,
+      // so a launch that would read none of them fails closed.
+      if (input.ownPermissions === true && !claudeReadsPersonSettings(input.nativeSetup)) {
+        return Effect.fail(
+          failure(
+            "invalid-configuration",
+            "Claude's own permissions need the person's Claude settings.",
+          ),
+        );
+      }
+      if (
+        input.ownPermissions === true &&
+        (input.strict === true || input.sandboxPolicy !== undefined)
+      ) {
+        return Effect.fail(
+          failure(
+            "invalid-configuration",
+            "Strict cannot delegate its boundary to native permission rules.",
+          ),
+        );
+      }
       if (!hasValidSandbox(input)) {
         return Effect.fail(
           failure("invalid-configuration", "Claude sandbox configuration is invalid."),
         );
       }
-      const expectedMode = permissionMode(input.executionPolicy, input.autoApprove);
+      const expectedMode = permissionMode(
+        input.executionPolicy,
+        input.autoApprove,
+        input.ownPermissions === true,
+      );
       const acquire = Effect.tryPromise({
         try: async () => {
           const prompt = new BoundedAsyncInput<ClaudeAgentSdkInputMessage>(inputCapacity);
@@ -1692,6 +1758,10 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     },
                   };
                 }
+                const agentId =
+                  typeof hookInput.agent_id === "string" && hookInput.agent_id !== ""
+                    ? hookInput.agent_id
+                    : undefined;
                 const decision = await input.preToolUse({
                   sessionId: hookInput.session_id,
                   projectRoot: hookInput.cwd,
@@ -1699,11 +1769,19 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   input: hookInput.tool_input,
                   toolUseId,
                   signal: callback.signal,
+                  ...(agentId === undefined ? {} : { agentId }),
                 });
-                if (decision.behavior === "own-rules") return {};
+                const note = agentId === undefined ? undefined : input.subagentMessages?.(agentId);
+                const additionalContext = note === undefined ? {} : { additionalContext: note };
+                if (decision.behavior === "own-rules") {
+                  return note === undefined
+                    ? {}
+                    : { hookSpecificOutput: { hookEventName: "PreToolUse", ...additionalContext } };
+                }
                 return {
                   hookSpecificOutput: {
                     hookEventName: "PreToolUse",
+                    ...additionalContext,
                     permissionDecision: decision.behavior,
                     ...(decision.behavior === "deny"
                       ? { permissionDecisionReason: decision.message }
@@ -2198,6 +2276,16 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   await stop.call(query, taskId);
                   return "requested" as const;
                 }, "task stop"),
+              backgroundTask: (toolUseId) =>
+                request(async () => {
+                  const background = query?.backgroundTasks;
+                  if (background === undefined) return "unsupported" as const;
+                  // Always with the one call's id: without it the runtime
+                  // backgrounds every foreground task, as Ctrl+B does.
+                  return (await background.call(query, toolUseId))
+                    ? ("backgrounded" as const)
+                    : ("not-found" as const);
+                }, "task background"),
               setPermissionMode: (mode) =>
                 request(() => query!.setPermissionMode(mode), "permission update"),
               supportedModels: () =>

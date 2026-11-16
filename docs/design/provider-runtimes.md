@@ -589,7 +589,14 @@ refuse publishing. The telemetry guard follows the person's own provider
 settings outside Strict, so the switch no longer lifts it (built: outside
 Strict the launch carries no telemetry guard of Octant's, the switch only
 opts the runtime in with `CLAUDE_CODE_ARTIFACT`, and a host's own telemetry
-opt-out keeps the tool off; the rest of this paragraph is not built yet).
+opt-out keeps the tool off). Built too (`claudeOffersArtifacts` and
+`claudeArtifactCallRefusal` with Strict off): the offer on the switch alone in
+every mode, every action in Work and Code, a publish naming a local file asking
+outside the session's folders below Full access as a `Write` would (the login
+keychain folder always refused), and Chat and Plan holding only `read`, `list`
+and `quickstart`. A publish from a type with no local file is judged at the
+Project root and its approval says it sends a page Claude made. Under Strict
+the thread's choice still decides and the tool publishes one Project file only.
 
 **Several Claude accounts.** Each Claude account is its own provider
 instance with its own `CLAUDE_CONFIG_DIR` and secure-storage folder, its own
@@ -597,7 +604,12 @@ claude.ai sign-in and its own artifacts switch. A thread runs on one
 account at a time, and its `Artifact` calls publish to, read from and list
 that account's claude.ai gallery and design systems only; Octant never
 lends one account's sign-in to another's session. The published page's
-address and the account that published it are journaled on the call. When
+address and the account that published it are journaled on the call
+(`ThreadPublishedPage.account`, the provider instance id), with the Claude
+artifact type the call named (`artifactType`, read from the last segment of its
+`type_url`; absent for a plain page). A `read` or `list` answer carries a page
+address too and journals no page: the driver reads each Artifact call's action
+at its `PreToolUse`, which every call passes. When
 a thread later runs on a different account, it may still update a page an
 earlier account published only where claude.ai gives the new account
 access, and claude.ai's refusal reaches the model as the call's result.
@@ -635,7 +647,7 @@ allow), so a launch that lacks a requested tool still runs.
 ### Full built-in tool set
 
 Decided under [the provider's own permission system decides](../architecture.md#security-and-authority)
-(maintainer decision, 2026-11-15; designed, not built): outside Plan and Chat
+(maintainer decision, 2026-11-15; built outside Strict): outside Plan and Chat
 Octant offers Claude Code's full built-in tool preset with no Octant deny
 list, and maps its levels onto Claude Code's own permission modes (Ask first
 `default`, Accept edits `acceptEdits`, Auto `auto`, Full access
@@ -645,7 +657,29 @@ second-guesses a call those rules allow, and an ask Claude Code raises
 reaches the person as an Octant approval, decided and journaled on the
 server. Plan stays read-only and Chat has no shell. The withheld list and the
 gate's own rules described in this section, and Octant's in-root edit waiver
-at Accept edits, are today's build.
+at Accept edits, are Strict's, and Plan's and Chat's at every setting. Outside
+Strict the withheld list holds only what the person's own setup turned off
+(`Agent` and `Workflow`, the web tools, `Skill`); the mode switches, the
+wake-up tools and `Artifact` are offered and the gate refuses a mode switch or
+a wake-up the host does not answer with a reason the model reads
+(`CLAUDE_LEVEL_CHANGE_REFUSAL`, `CLAUDE_WAKEUP_UNAVAILABLE`). The hook leaves
+every other call to Claude's engine and the person's rules, Octant keeping its
+own ask only for a command leaving Claude's sandbox and a path outside the
+session's folders; Octant sends Claude no sandbox settings, so Claude's own
+sandbox runs as the person's settings configure it.
+
+That hand-over needs the person's settings loaded. Their sandbox and their
+`permissions.allow`, `ask` and `deny` rules live in the account's home
+settings, which Claude Code reads only with the `user` setting source, and
+that source cannot be read for those alone: it also brings the plugins,
+agents and commands the person's own Octant switches keep out. So a launch
+outside Strict whose setup reads no home settings (none of skills, hooks,
+tool servers or the Project's code on; subagents and web tools alone read
+none) keeps Octant's gate and Octant's configured sandbox, as under Strict,
+rather than running with neither protection (`claudeOwnPermissions`, which
+`claudeReadsPersonSettings` gates). The SDK port refuses a launch asking for
+Claude's own permissions that would read no person's settings, so the rule
+fails closed at both ends.
 
 A Work or Code session outside Plan launches with Claude Code's own tool
 preset (`tools: { type: "preset", preset: "claude_code" }`) rather than a
@@ -782,9 +816,10 @@ command sandbox keeps its own folders, so below Full access a sandboxed shell
 command cannot reach an outside folder. Redaction of logs, the journal, and
 exports applies at every level.
 
-With an explicit **Strict off** choice, Octant passes Claude no command-sandbox
-settings. Claude follows the person's native home sandbox settings; loading
-that file does not enable account hooks or memory that the person disabled.
+Outside Strict, when Claude loads the person's settings, Octant passes no
+command-sandbox settings and Claude follows the person's native configuration.
+When those setting sources are all off, the configured sandbox and gate remain
+as the fallback described above. Disabled account hooks and memory stay off.
 Legacy sessions retain their previous behavior until explicitly migrated.
 Strict configures Claude's native command sandbox, since macOS cannot nest
 Seatbelt: Project and granted folders, recorded Network limits and
@@ -1063,6 +1098,21 @@ the next turn as it does for any running turn. A `Monitor` call that asks for a 
 runtime process, outside the command sandbox and its network rules) or a
 watch for the whole session is refused before the gate. Plan keeps its
 read-only commands in the foreground: `run_in_background` is refused there.
+
+#### Subagents sent to the background or messaged
+
+A running Claude subagent's child run row offers Background and a message
+beside Stop, at every Strict setting (maintainer request, 2026-11-16; built).
+Background calls the SDK's `backgroundTasks(toolUseId)` with the id of the one
+`Agent` call that started it, never without one (which would background every
+foreground task); the call returns at once and the parent's turn goes on while
+the subagent keeps running as a background task. A message is queued on the
+session by the runtime's task id and delivered once, framed as the person's,
+as the `additionalContext` of that subagent's next `PreToolUse` hook, matched by
+the hook's `agent_id`; a subagent that makes no further tool call before it
+finishes never reads it, and the row says so when the message is sent. Both
+reach only the running turn's own session, under Stop's authority
+([Architecture: provider-started subagents](../architecture.md#person-memory)).
 
 #### Workflows
 

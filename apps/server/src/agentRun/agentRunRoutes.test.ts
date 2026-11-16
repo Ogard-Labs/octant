@@ -1060,6 +1060,79 @@ describe("agentRunRoutes", () => {
       expect(await response?.json()).toEqual({ status: "refused", reason: "not-found" });
       expect(stopChildAgent).not.toHaveBeenCalled();
     });
+
+    const post = (token: string, path: string, body: object) =>
+      new Request(`http://127.0.0.1/api/agent-runs/observed/${path}`, {
+        method: "POST",
+        headers: { "x-octant-window-capability": token, "content-type": "application/json" },
+        body: JSON.stringify({
+          parentThreadId: ids.thread,
+          observationId: "observation-1",
+          ...body,
+        }),
+      });
+    const steeringLive = (connection: Partial<ProviderConnection>) => ({
+      connection: connection as unknown as ProviderConnection,
+      sessionId: "session-live" as never,
+      providerInstanceId: ids.provider as never,
+      takesSteeredResults: true,
+    });
+
+    it("sends the running turn's child to the background and queues a person's message for it", async () => {
+      const backgroundChildAgent = vi.fn(() => Effect.succeed("backgrounded" as const));
+      const messageChildAgent = vi.fn(() => Effect.succeed("queued" as const));
+      const { handler, token } = createHandler({
+        readObservations,
+        liveTurnConnection: () => steeringLive({ backgroundChildAgent, messageChildAgent }),
+      });
+      const backgrounded = await handler(post(token, "background", {}));
+      expect(await backgrounded?.json()).toEqual({ status: "backgrounded" });
+      expect(backgroundChildAgent).toHaveBeenCalledWith({
+        sessionId: "session-live",
+        childAgentId: "child-1",
+      });
+      const queued = await handler(post(token, "message", { message: "  Skip the tests " }));
+      expect(await queued?.json()).toEqual({ status: "queued" });
+      expect(messageChildAgent).toHaveBeenCalledWith({
+        sessionId: "session-live",
+        childAgentId: "child-1",
+        message: "Skip the tests",
+      });
+    });
+
+    it("refuses another window, a blank message, and a runtime without the control before reaching the provider", async () => {
+      const backgroundChildAgent = vi.fn(() => Effect.succeed("backgrounded" as const));
+      const messageChildAgent = vi.fn(() => Effect.succeed("queued" as const));
+      const outsider = createHandler({
+        readObservations,
+        authorizeParentThread: () => false,
+        liveTurnConnection: () => steeringLive({ backgroundChildAgent, messageChildAgent }),
+      });
+      const refused = await outsider.handler(post(outsider.token, "message", { message: "Hi" }));
+      expect(refused?.status).toBe(403);
+      expect(await refused?.json()).toEqual({ status: "refused", reason: "unauthorized" });
+      expect((await outsider.handler(post(outsider.token, "background", {})))?.status).toBe(403);
+      const blank = createHandler({
+        readObservations,
+        liveTurnConnection: () => steeringLive({ messageChildAgent }),
+      });
+      expect((await blank.handler(post(blank.token, "message", { message: "   " })))?.status).toBe(
+        400,
+      );
+      expect(messageChildAgent).not.toHaveBeenCalled();
+      expect(backgroundChildAgent).not.toHaveBeenCalled();
+      const unsupported = createHandler({
+        readObservations,
+        liveTurnConnection: () => steeringLive({}),
+      });
+      expect(
+        await (await unsupported.handler(post(unsupported.token, "background", {})))?.json(),
+      ).toEqual({ status: "refused", reason: "unsupported" });
+      const notLive = createHandler({ readObservations, liveTurnConnection: () => undefined });
+      expect(
+        await (await notLive.handler(post(notLive.token, "message", { message: "Hi" })))?.json(),
+      ).toEqual({ status: "refused", reason: "not-live" });
+    });
   });
 
   it("returns parent summary for an authenticated window", async () => {

@@ -556,7 +556,20 @@ describe("Claude Agent SDK port", () => {
     const { sandbox: _sandbox, ...native } = openInput;
     await Effect.runPromise(
       Effect.scoped(
-        harness.port.openQuery({ ...native, strict: false, tools: [...native.tools, "Bash"] }),
+        harness.port.openQuery({
+          ...native,
+          strict: false,
+          ownPermissions: true,
+          nativeSetup: {
+            skills: true,
+            hooks: false,
+            toolServers: false,
+            projectCode: false,
+            subagents: false,
+            webTools: false,
+          },
+          tools: [...native.tools, "Bash"],
+        }),
       ),
     );
     expect(harness.invocation?.options).not.toHaveProperty("sandbox");
@@ -693,6 +706,79 @@ describe("Claude Agent SDK port", () => {
     });
     expect(harness.invocation).toBeUndefined();
   });
+
+  test("refuses to leave the decision to Claude's own permissions in a launch that reads none of the person's settings", async () => {
+    const harness = makeHarness();
+    const { sandbox: _sandbox, ...withoutSandbox } = openInput;
+    const failed = await failureOf(
+      Effect.scoped(
+        harness.port.openQuery({
+          ...withoutSandbox,
+          ownPermissions: true,
+        } as unknown as typeof openInput),
+      ),
+    );
+    expect(failed).toEqual({
+      category: "invalid-configuration",
+      message: "Claude's own permissions need the person's Claude settings.",
+    });
+    expect(harness.invocation).toBeUndefined();
+  });
+
+  test("refuses native permission delegation when Strict owns the boundary", async () => {
+    const harness = makeHarness();
+    const failed = await failureOf(
+      Effect.scoped(
+        harness.port.openQuery({
+          ...openInput,
+          strict: true,
+          ownPermissions: true,
+          nativeSetup: {
+            skills: true,
+            hooks: false,
+            toolServers: false,
+            projectCode: false,
+            subagents: false,
+            webTools: false,
+          },
+        }),
+      ),
+    );
+    expect(failed).toMatchObject({ category: "invalid-configuration" });
+    expect(harness.invocation).toBeUndefined();
+  });
+
+  test.each([false, true])(
+    "keeps attached folders read-only when extra writes are requested: %s",
+    async (writesAttachments) => {
+      const harness = makeHarness();
+      const candidate = {
+        ...openInput,
+        attachmentsFolder: "/attached-files",
+        sandbox: {
+          ...openInput.sandbox,
+          filesystem: {
+            ...openInput.sandbox.filesystem,
+            allowRead: ["/repo", "/attached-files"] as const,
+            allowWrite: writesAttachments
+              ? (["/repo", "/attached-files"] as const)
+              : (["/repo"] as const),
+          },
+        },
+      };
+      if (writesAttachments) {
+        expect(await failureOf(Effect.scoped(harness.port.openQuery(candidate)))).toMatchObject({
+          category: "invalid-configuration",
+        });
+        expect(harness.invocation).toBeUndefined();
+      } else {
+        await Effect.runPromise(Effect.scoped(harness.port.openQuery(candidate)));
+        expect(harness.invocation?.options.sandbox).toMatchObject({
+          filesystem: { allowWrite: ["/repo"] },
+        });
+      }
+    },
+  );
 
   test("uses the pinned permission mapping and allows controlled mode changes", async () => {
     const fullAccess = makeHarness([

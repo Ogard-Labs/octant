@@ -22,6 +22,12 @@ export function observedChildren(input: {
    * for a child that has not finished; absent, every child is read-only.
    */
   readonly stoppable?: (child: ProviderChildObservation) => boolean;
+  /**
+   * The further controls the running turn offers for this child (send it to
+   * the background, message it). Asked only for a child that has not
+   * finished; absent, none.
+   */
+  readonly steering?: (child: ProviderChildObservation) => ReadonlyArray<"background" | "message">;
 }): {
   readonly observations: ReadonlyArray<AgentObservedChild>;
   readonly observationsTruncated: boolean;
@@ -90,16 +96,16 @@ export function observedChildren(input: {
       parent = ancestor.parentChildAgentId;
     }
     if (!lineageKnown) continue;
+    const running =
+      child.lifecycleStatus !== "completed" &&
+      child.lifecycleStatus !== "failed" &&
+      child.historyStatus !== "conflicted";
+    const steering = running ? (input.steering?.(child) ?? []) : [];
     observations.push({
       ...child,
       kind: "observed",
-      control:
-        child.lifecycleStatus !== "completed" &&
-        child.lifecycleStatus !== "failed" &&
-        child.historyStatus !== "conflicted" &&
-        input.stoppable?.(child) === true
-          ? "stop"
-          : "unavailable",
+      control: running && input.stoppable?.(child) === true ? "stop" : "unavailable",
+      ...(steering.length === 0 ? {} : { steering: [...steering] }),
       mode: input.mode,
       parentThreadId: input.parentThreadId,
       ...(input.parentRunId === undefined ? {} : { parentRunId: input.parentRunId }),
