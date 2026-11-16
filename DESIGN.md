@@ -1700,14 +1700,20 @@ one row at the trailing edge (the dismissing answer outlined first, the acting
   above the composer. A 17/500 heading (the thread's title, else "Start this
   thread") has the one-line hint in the meta ink beneath it. Below is one quiet
   surface: the card fill, `--oct-radius-md`, one hairline, no shadow. It holds
-  two groups separated by a hairline, "Set up this workspace" and "Start from a
-  template", each headed by the section label (`oct-section-label`). The groups
-  are list rows, not nested boxes: a 16px muted glyph on one shared icon column,
-  the name at 14/500 in primary ink, a 13px description in the meta ink cut to one
-  line, and a hairline between rows. A two-line row is 52px. A template row is
-  one button with a trailing chevron and the `--oct-wash-hover` fill under the
-  pointer; a template this machine cannot run says "Needs ..., which is not on
-  this machine" as its description in `--oct-warn-fg`. A preset row ends with a
+  two groups separated by a hairline: "Set up this workspace", headed by the
+  section label (`oct-section-label`), and one row, "Start from a template".
+  The groups are list rows, not nested boxes: a 16px muted glyph on one shared
+  icon column, the name at 14/500 in primary ink, a 13px description in the meta
+  ink cut to one line, and a hairline between rows. A two-line row is 52px. The
+  template row is one button with a trailing chevron and the `--oct-wash-hover`
+  fill under the pointer. Its description names the templates on offer, and it
+  opens a menu of them: each a glyph, a name and its one-line summary, and a
+  template this machine cannot run disabled with "Needs ..., which is not on
+  this machine" as its description. Choosing one names it on the row and opens
+  the directory field under it; the same choice takes it back. Until
+  2026-11-16 each template had a row of its own, so three rows, often two of
+  them only saying what the machine lacks, were most of an empty thread's page
+  (maintainer request). A preset row ends with a
   secondary (outline) Apply aligned to its first line, and what it opens is a
   quiet 12px meta line of tool glyphs and words (Overview, Browser, Side chat),
   never ids, which makes that row 72px. There is no accent, no tinted tile and no

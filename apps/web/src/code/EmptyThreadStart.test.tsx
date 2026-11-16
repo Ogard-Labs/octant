@@ -1,6 +1,7 @@
 import { decodeScaffoldEntry } from "@octant/contracts/scaffolds";
 import { decodeWorkspacePreset } from "@octant/contracts/workspace-presets";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ScaffoldPicker } from "../scaffolds/ScaffoldPicker";
 import { WorkspacePresetPicker } from "../workspacePresets/WorkspacePresetPicker";
@@ -56,9 +57,15 @@ describe("an empty thread's start block", () => {
       "Set up this workspace",
       "Start from a template",
     ]);
-    expect(within(surface).getByRole("heading", { name: "Start from a template" })).toHaveClass(
+    // The presets keep their section label; the templates are one row whose
+    // own name says what it is, so they have none.
+    expect(within(surface).getByRole("heading", { name: "Set up this workspace" })).toHaveClass(
       "oct-section-label",
     );
+    expect(within(surface).queryByRole("heading", { name: "Start from a template" })).toBeNull();
+    expect(
+      within(surface).getByRole("button", { name: "Start from a template" }),
+    ).toHaveTextContent("Native Swift package");
   });
 
   it("names a thread without a title as one to start", () => {
@@ -67,11 +74,13 @@ describe("an empty thread's start block", () => {
     expect(screen.getByRole("heading", { name: "Start this thread" })).toBeVisible();
   });
 
-  it("carries the reason a template cannot run on its own row", () => {
+  it("carries the reason a template cannot run on that template's row in the menu", async () => {
+    const user = userEvent.setup();
     block("A thread");
 
-    expect(screen.getByRole("button", { name: /Native Swift package/ })).toHaveTextContent(
-      "Needs swift, which is not on this machine.",
-    );
+    await user.click(screen.getByRole("button", { name: "Start from a template" }));
+    expect(
+      await screen.findByRole("menuitem", { name: "Native Swift package" }),
+    ).toHaveAccessibleDescription("Needs swift, which is not on this machine.");
   });
 });
