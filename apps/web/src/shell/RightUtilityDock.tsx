@@ -15,7 +15,7 @@ import {
   dockWidthCeiling,
   flexibleDockMinimum,
   ENVIRONMENT_STRIP_WIDTH,
-  TILED_DOCK_WIDTH,
+  TILED_DOCK_MIN_WIDTH,
   type RightUtilityDockResolution,
   type RightUtilityDockSurfaceDescriptor,
   type RightUtilityDockSurfaceId,
@@ -131,14 +131,14 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
   }, [props.isNarrow, props.open]);
 
   // Two columns stand side by side only where the thread's minimum and
-  // Environment leave them the room; elsewhere no place beside is offered.
+  // Environment leave each its floor; elsewhere no place beside is offered.
   const columnsFit =
     dockWidthCeiling(workspaceWidth, {
       reservedWidth: reserved,
       tileColumns: 2,
       viewportWidth: typeof window === "undefined" ? undefined : window.innerWidth,
       primaryMinimum: props.primaryMinimum,
-    }) >= TILED_DOCK_WIDTH;
+    }) >= TILED_DOCK_MIN_WIDTH;
 
   if (!props.open && !props.isNarrow) return null;
 

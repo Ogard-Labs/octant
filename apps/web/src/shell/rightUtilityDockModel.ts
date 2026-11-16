@@ -183,14 +183,35 @@ export function flexibleDockMinimum(ceiling: number): number {
 }
 
 /**
- * Two columns of tools side by side need two usable widths: each column the
- * narrowest a flexible tool is resized to. Tool columns narrower than this
- * stack, and a layout with two columns widens to it only where the window
- * holds the thread's minimum and Environment beside it (the stylesheet decides,
- * since it knows the room). At 840px two columns of 420px squeezed the thread
- * to 440px and then stacked anyway whenever the window was under 1700px.
+ * The width two columns of tools ask for where the window has it: each column
+ * the narrowest a flexible tool is resized to. A layout with two columns widens
+ * to it only where the window holds the thread's minimum and Environment beside
+ * it (the stylesheet decides, since it knows the room); with less room than
+ * this the two columns share what there is, down to `TILED_DOCK_MIN_WIDTH`.
  */
 export const TILED_DOCK_WIDTH = 960;
+
+/** A tool column is never drawn narrower than this beside another: tools are built for it. */
+export const DOCK_COLUMN_MIN_WIDTH = 280;
+
+/**
+ * What the dock keeps of its tool room for itself: its resize handle is a 7px
+ * column of its own while Environment is closed, and a pixel goes to rounding.
+ * Counted in the floor below so a place beside is never offered in a room
+ * whose tile area then measures under two columns and stacks them.
+ */
+const DOCK_EDGE_ALLOWANCE = 8;
+
+/**
+ * The least tool room in which two columns stand side by side; under it they
+ * stack and no place beside is offered. A tool reaches a second column only
+ * when a person puts it there (a drop on a tile's side, or its menu), so the
+ * floor is the columns' own. Asking for the whole 960px refused the drop on a
+ * 1920px screen with the sidebar and Environment open, where 716px of tool
+ * room holds two 358px columns, and left no way to stand a tool up as a narrow
+ * column beside another.
+ */
+export const TILED_DOCK_MIN_WIDTH = 2 * DOCK_COLUMN_MIN_WIDTH + DOCK_EDGE_ALLOWANCE;
 
 /**
  * The Environment strip: a thin, static column at the dock's leading edge. It

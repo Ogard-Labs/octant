@@ -47,7 +47,7 @@ import {
   type DockTileLayout,
   type DockTileMove,
 } from "./rightUtilityDockSelection";
-import { TILED_DOCK_WIDTH, type RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
+import { DOCK_COLUMN_MIN_WIDTH, type RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 
 /** A tile is never shorter than this while the dock has the room. */
 const MIN_TILE_HEIGHT = 140;
@@ -56,14 +56,17 @@ const MIN_TILE_HEIGHT = 140;
  * own minimum is 280px, and tools are built for that: Review's header
  * overlapped and its History tab clipped at 243px.
  */
-const MIN_COLUMN_WIDTH = 280;
+const MIN_COLUMN_WIDTH = DOCK_COLUMN_MIN_WIDTH;
 /**
- * Columns stand side by side only when the tile area holds two usable columns
- * (the dock's two-column width, less a pixel or two of rounding and the tile
- * area's own edge); narrower, their tiles stack. At two times the 280px floor
- * a Browser and a Files pane stood side by side at 300px each.
+ * Columns stand side by side when the tile area holds each at its floor (less
+ * a pixel or two of rounding and the tile area's own edge); narrower, their
+ * tiles stack. A second column exists only where a person placed a tool
+ * beside another, so the floor is the test, not the roomier width the dock
+ * asks for when the window has it. A place beside is offered from a little
+ * more room than this (`TILED_DOCK_MIN_WIDTH`), so an offered place never
+ * lands under this line.
  */
-const SIDE_BY_SIDE_WIDTH = TILED_DOCK_WIDTH - 2;
+const SIDE_BY_SIDE_WIDTH = 2 * MIN_COLUMN_WIDTH - 2;
 /** How much of the thread's foot takes a pane dragged to the bottom panel. */
 const BOTTOM_ZONE_HEIGHT = 160;
 const KEY_STEP = 0.02;

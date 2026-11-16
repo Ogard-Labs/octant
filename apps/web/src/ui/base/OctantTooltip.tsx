@@ -102,7 +102,11 @@ export function OctantTooltip(props: OctantTooltipProps) {
       }}
       open={open}
     >
-      <TooltipTrigger closeOnClick delay={150} render={props.children} />
+      {/* Half a second: a pointer crossing a row of icon buttons on its way
+          somewhere else names none of them. At 150ms every button it passed
+          flashed its label, which is how a web page behaves and not a
+          desktop app. */}
+      <TooltipTrigger closeOnClick delay={500} render={props.children} />
       <TooltipPortal>
         <TooltipPositioner
           align={props.align ?? "center"}

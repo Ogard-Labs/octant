@@ -17,6 +17,8 @@ import {
   flexibleDockMinimum,
   resolveDockPresentationWidth,
   resolveRightUtilityDockSurface,
+  DOCK_COLUMN_MIN_WIDTH,
+  TILED_DOCK_MIN_WIDTH,
   TILED_DOCK_WIDTH,
   WIDE_PRIMARY_MIN,
   resolveTwoColumnDockWidth,
@@ -144,6 +146,24 @@ describe("how wide the right utility dock is", () => {
       TILED_DOCK_WIDTH,
     );
     expect(resolveTwoColumnDockWidth({ storedWidth: 1100, widthChosen: true })).toBe(1100);
+  });
+
+  it("lets two columns stand side by side where the room holds each at its floor", () => {
+    // Two columns at their floor, and the few pixels the dock keeps for its
+    // own handle, so an offered place is never drawn stacked.
+    expect(TILED_DOCK_MIN_WIDTH).toBeGreaterThanOrEqual(2 * DOCK_COLUMN_MIN_WIDTH + 7);
+    expect(TILED_DOCK_MIN_WIDTH).toBeLessThan(600);
+    // A 1920px screen with the sidebar and Environment open: 1576px of
+    // workspace leaves 716px of tool room, under the 960px the dock asks for
+    // and over the two columns' floor.
+    const room = dockWidthCeiling(1576, {
+      reservedWidth: ENVIRONMENT_STRIP_WIDTH,
+      tileColumns: 2,
+      viewportWidth: 1920,
+    });
+    expect(room).toBe(716);
+    expect(room).toBeLessThan(TILED_DOCK_WIDTH);
+    expect(room).toBeGreaterThanOrEqual(TILED_DOCK_MIN_WIDTH);
   });
 });
 

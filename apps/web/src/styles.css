@@ -1144,12 +1144,14 @@ strong {
 }
 
 /* Two columns of tools stand side by side only where the window holds the
-   thread's minimum, Environment and two usable columns (960px of tools). The
-   step term is 0 below that room and past any width above it, so the dock
-   takes the two-column width when the room is there and keeps the one-column
-   width, with its tiles stacked, when it is not: a second tool never takes
-   width from the thread or moves Environment. dockWidthCeiling stops the
-   handle at the same room. */
+   thread's minimum, Environment and two columns at their floor (568px of
+   tools, TILED_DOCK_MIN_WIDTH: two 280px columns and the dock's own handle).
+   The step term is 0 below that room and past
+   any width above it, so the dock takes the two-column width, or all the room
+   there is when that is less, and keeps the one-column width, with its tiles
+   stacked, under the floor: a second column never takes the thread under its
+   minimum or moves Environment. dockWidthCeiling stops the handle at the same
+   room. */
 .workspace-layer--wide-context-open[data-dock-tile-columns="2"] {
   --octant-dock-tool-room: calc(
     100% - var(--octant-dock-thread-keep) - var(--octant-dock-env-width, 0px)
@@ -1172,7 +1174,7 @@ strong {
             var(--octant-context-sidebar-width, 360px),
             calc(50% + var(--octant-dock-env-width, 0px))
           ),
-          calc((var(--octant-dock-tool-room) - 959px) * 9999)
+          calc((var(--octant-dock-tool-room) - 567px) * 9999)
         )
       )
     );
