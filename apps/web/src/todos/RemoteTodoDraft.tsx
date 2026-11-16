@@ -1,4 +1,9 @@
-import type { RemoteSessionBridge } from "@octant/client-runtime";
+import {
+  readRemoteSessionStanding,
+  RESTRICTED_REMOTE_SESSION,
+  type RemoteSessionBridge,
+  type RemoteSessionStanding,
+} from "@octant/client-runtime";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
 import {
   LOCAL_HOST_ID,
@@ -17,7 +22,7 @@ import type { ProjectSummary } from "@octant/contracts/projects";
 import type { Todo, TodoThreadLink } from "@octant/contracts/todos";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import { buildModelPickerGroups, defaultPermissionModeFor } from "@octant/domain";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useProviderController } from "../providers/useProviderController";
 import { firstSelectableProviderSelection } from "../providers/firstSelectableProviderSelection";
 import { useProjectController } from "../projects/useProjectController";
@@ -28,7 +33,10 @@ import {
   DraftThreadWorkspace,
   type DraftThreadWorkspaceProps,
 } from "../shell/DraftThreadWorkspace";
-import { createRemoteProductClients } from "../remote/remoteProductClients";
+import {
+  createRemoteExtensionClient,
+  createRemoteProductClients,
+} from "../remote/remoteProductClients";
 import { RemoteWorkspace } from "../remote/RemoteWorkspace";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -46,6 +54,23 @@ export function RemoteTodoDraft(props: {
   readonly onClose: () => void;
 }) {
   const clients = useMemo(() => createRemoteProductClients(props.bridge), [props.bridge]);
+  const [standing, setStanding] = useState<RemoteSessionStanding>(RESTRICTED_REMOTE_SESSION);
+  useEffect(() => {
+    setStanding(RESTRICTED_REMOTE_SESSION);
+    const connection = props.connected ? props.bridge.connection() : undefined;
+    if (connection === undefined) return;
+    let current = true;
+    void readRemoteSessionStanding(connection).then((answer) => {
+      if (current) setStanding(answer);
+    });
+    return () => {
+      current = false;
+    };
+  }, [props.bridge, props.connected]);
+  const extensionClient = useMemo(
+    () => createRemoteExtensionClient(props.bridge, standing),
+    [props.bridge, standing],
+  );
   const mode = props.project?.type ?? props.thread?.mode ?? "chat";
   const providers = useProviderController({ client: clients.provider });
   const projects = useProjectController({ activeMode: mode, client: clients.project });
@@ -82,7 +107,7 @@ export function RemoteTodoDraft(props: {
   const keepUnsentPrompt = (prompt: string): void => {
     setUnsentPrompt(prompt);
     setTurnError(
-      "The thread was created, but its first message could not be sent. Copy the message below into the thread to retry.",
+      "The thread was created, but its first message could not be confirmed. Check the thread before copying the message below to retry.",
     );
   };
   const link = async (threadId: string) => {
@@ -92,8 +117,11 @@ export function RemoteTodoDraft(props: {
       mode,
     };
     setSource(undefined);
-    setThread(value);
-    if (source !== undefined) await props.onCreated(value);
+    try {
+      if (source !== undefined) await props.onCreated(value);
+    } finally {
+      setThread(value);
+    }
   };
   const createCode = async (input: CodeComposerSubmitInput): Promise<boolean> => {
     if (project?.type !== "code" || model === undefined || !props.connected) return false;
@@ -307,7 +335,7 @@ export function RemoteTodoDraft(props: {
       setBusy(false);
     }
   };
-  if (thread !== undefined && !busy)
+  if (thread !== undefined)
     return (
       <>
         {turnError === undefined ? null : <OctantAlert tone="warning">{turnError}</OctantAlert>}
@@ -318,7 +346,8 @@ export function RemoteTodoDraft(props: {
           clients={clients}
           mode={thread.mode}
           connected={props.connected}
-          actsAsHostPerson
+          actsAsHostPerson={standing.actsAsHostPerson}
+          extensionClient={extensionClient}
           initialThread={thread}
         />
       </>

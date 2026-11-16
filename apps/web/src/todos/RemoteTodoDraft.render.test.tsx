@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { chats, codes, projects, providersWithToolModel } from "../App.test-fixtures";
 import { RemoteTodoDraft } from "./RemoteTodoDraft";
 const ports = vi.hoisted(() => ({ clients: {} }));
-vi.mock("../remote/remoteProductClients", () => ({
+vi.mock("../remote/remoteProductClients", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../remote/remoteProductClients")>()),
   createRemoteProductClients: () => ports.clients,
 }));
 afterEach(cleanup);
@@ -66,7 +67,7 @@ describe("the ordinary composer on a paired computer", () => {
       ports.clients = { chat, code, project: projectClient, provider: providersWithToolModel() };
       render(
         <RemoteTodoDraft
-          bridge={{} as RemoteSessionBridge}
+          bridge={{ connection: () => undefined } as RemoteSessionBridge}
           hostId={hostId}
           hostName="Laptop"
           connected

@@ -4,6 +4,8 @@ import { decodeTodoListView, type TodoThreadLink } from "@octant/contracts/todos
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
+import type { RemoteWorkspaceProps } from "../remote/RemoteWorkspace";
 import type { DraftThreadWorkspaceProps } from "../shell/DraftThreadWorkspace";
 import { RemoteTodoDraft } from "./RemoteTodoDraft";
 
@@ -14,7 +16,8 @@ const api = vi.hoisted(() => ({
   executeCode: vi.fn(),
   startCode: vi.fn(),
 }));
-vi.mock("../remote/remoteProductClients", () => ({
+vi.mock("../remote/remoteProductClients", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../remote/remoteProductClients")>()),
   createRemoteProductClients: () => ({
     chat: api,
     workThread: { execute: api.executeWork },
@@ -45,7 +48,17 @@ vi.mock("../providers/firstSelectableProviderSelection", () => ({
   }),
 }));
 vi.mock("../remote/RemoteWorkspace", () => ({
-  RemoteWorkspace: () => <p>Created remote thread</p>,
+  RemoteWorkspace: (props: RemoteWorkspaceProps) => (
+    <>
+      <p>Created remote thread</p>
+      <ExtensionToolApprovalPrompt
+        client={props.extensionClient}
+        threadId={props.initialThread?.threadId}
+        turnActive={false}
+        className="thread-column"
+      />
+    </>
+  ),
 }));
 vi.mock("../shell/DraftThreadWorkspace", () => ({
   DraftThreadWorkspace: (props: DraftThreadWorkspaceProps) => (
@@ -142,7 +155,7 @@ describe("a to-do draft on its Project's paired computer", () => {
     });
     render(
       <RemoteTodoDraft
-        bridge={{} as RemoteSessionBridge}
+        bridge={{ connection: () => undefined } as RemoteSessionBridge}
         hostId={hostId}
         connected
         project={project}
@@ -176,7 +189,7 @@ describe("a to-do draft on its Project's paired computer", () => {
     const onCreated = vi.fn();
     render(
       <RemoteTodoDraft
-        bridge={{} as RemoteSessionBridge}
+        bridge={{ connection: () => undefined } as RemoteSessionBridge}
         hostId={hostId}
         connected
         project={project}
@@ -241,7 +254,7 @@ describe("a to-do draft on its Project's paired computer", () => {
       });
       render(
         <RemoteTodoDraft
-          bridge={{} as RemoteSessionBridge}
+          bridge={{ connection: () => undefined } as RemoteSessionBridge}
           hostId={hostId}
           connected
           project={destination}
@@ -258,4 +271,126 @@ describe("a to-do draft on its Project's paired computer", () => {
       expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
     },
   );
+  it("shows and answers the destination's tool approval inside the linked thread dialog", async () => {
+    const approvalId = "88888888-8888-4888-8888-888888888888";
+    let pending = true;
+    const authenticatedFetch = vi.fn(
+      async (input: {
+        readonly method: string;
+        readonly path: string;
+        readonly body?: string | Uint8Array;
+        readonly headers?: Readonly<Record<string, string>>;
+      }) => {
+        if (input.path === "/api/extensions/tool-approvals") {
+          const body = JSON.parse(String(input.body));
+          if (body.kind === "decide") {
+            pending = false;
+            return Response.json({ accepted: true });
+          }
+          return Response.json(
+            pending
+              ? [
+                  {
+                    approvalId,
+                    threadId,
+                    extensionId: "99999999-9999-4999-8999-999999999999",
+                    packageId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    componentId: "files-server",
+                    serverName: "files",
+                    providerToolName: "plugin__files__read",
+                    mcpToolName: "read_file",
+                    inputJson: '{"path":"README.md"}',
+                    requestedAt: "2026-11-16T10:00:00.000Z",
+                    rememberable: false,
+                    answerCovers: "call",
+                  },
+                ]
+              : [],
+          );
+        }
+        return Response.json({ message: "Unavailable" }, { status: 403 });
+      },
+    );
+    const unexpected = (): never => {
+      throw new Error("Unexpected connection operation.");
+    };
+    const connection: NonNullable<ReturnType<RemoteSessionBridge["connection"]>> = {
+      state: unexpected,
+      onStateChange: unexpected,
+      connect: unexpected,
+      reconnect: unexpected,
+      disconnect: unexpected,
+      refresh: unexpected,
+      renewIfSpent: unexpected,
+      deviceIdentity: unexpected,
+      updateFetch: unexpected,
+      issueServerProxySession: unexpected,
+      session: () => ({
+        hostId,
+        deviceId: "device",
+        sessionId: "session",
+        credentialGeneration: 1,
+        origin: "https://paired.example",
+        protocolVersion: 1,
+        authenticationVersion: 1,
+        capabilityDigest: "digest",
+        csrfToken: "csrf",
+        issuedAt: "2026-11-16T10:00:00.000Z",
+        idleExpiresAt: "2026-11-16T11:00:00.000Z",
+        absoluteExpiresAt: "2026-11-16T12:00:00.000Z",
+      }),
+      authenticatedFetch,
+    };
+    const bridge: RemoteSessionBridge = {
+      getState: unexpected,
+      subscribe: unexpected,
+      connect: unexpected,
+      resume: unexpected,
+      forgetDeviceKey: unexpected,
+      stageDeviceKeyRotation: unexpected,
+      reconnect: unexpected,
+      disconnect: unexpected,
+      connection: () => connection,
+    };
+    let finishTurn: ((result: { kind: string }) => void) | undefined;
+    api.execute.mockImplementation(async (command) => {
+      if (command.kind === "send-chat-turn")
+        return new Promise((resolve) => {
+          finishTurn = resolve;
+        });
+      return {
+        kind: command.kind === "create-chat-thread" ? "thread-created" : "thread-updated",
+        thread: { id: threadId, version: 1 },
+      };
+    });
+    render(
+      <RemoteTodoDraft
+        bridge={bridge}
+        hostId={hostId}
+        connected
+        project={project}
+        todo={todo}
+        onCreated={async () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Approve once" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("group", { name: "Extension tool approval" })).toBeNull(),
+    );
+    const decide = authenticatedFetch.mock.calls
+      .map(([input]) => input)
+      .find((input) => typeof input.body === "string" && input.body.includes('"kind":"decide"'));
+    expect(decide).toMatchObject({ method: "POST", path: "/api/extensions/tool-approvals" });
+    expect(JSON.parse(String(decide?.body))).toEqual({
+      kind: "decide",
+      approvalId,
+      decision: "approved",
+    });
+    expect(decide?.headers ?? {}).not.toHaveProperty("x-octant-window-capability");
+    await act(async () => {
+      finishTurn?.({ kind: "turn-created" });
+    });
+  });
 });
