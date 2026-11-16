@@ -1040,7 +1040,9 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
             input.piHome,
             input.executionPolicy === "full-access" ? "disabled" : "enabled",
             input.modelProvider,
-            input.strict !== false,
+            input.strict !== false ||
+              input.fullAccessSandbox === true ||
+              input.sandboxPolicy !== undefined,
           );
           const wall = piWallPolicy(input);
           const network =

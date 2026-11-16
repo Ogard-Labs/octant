@@ -1334,7 +1334,11 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           mode: input.mode,
           ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
           ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
-          ...(input.strict === false ? { strict: false } : {}),
+          ...(input.strict === false &&
+          input.fullAccessSandbox !== true &&
+          input.sandboxPolicy === undefined
+            ? { strict: false }
+            : {}),
         });
         const wall = acpWallPolicy(input);
         const network =
