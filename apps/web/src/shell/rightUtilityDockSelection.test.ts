@@ -28,6 +28,7 @@ import {
   resizeUtilityTileColumn,
   resizeUtilityTileColumns,
   retainAvailableUtilityTabs,
+  withoutVanishedBrowserPages,
   selectThreadUtilityTab,
   selectUtilityTabState,
   shownUtilityTabIds,
@@ -87,6 +88,35 @@ describe("thread-owned right utility dock tabs", () => {
       tabs: [{ id: tabId, surface: "browser", browserContextId: contextId }],
       active: tabId,
     });
+  });
+
+  it("comes back from a restart with one blank Browser tab, not one per vanished page", () => {
+    const one = "10000000-0000-4000-8000-000000000001";
+    const two = "10000000-0000-4000-8000-000000000002";
+    let state: Parameters<typeof addUtilityTabState>[0] = { tabs: [] };
+    state = addUtilityTabState(state, "browser", one, "60000000-0000-4000-8000-000000000001");
+    state = addUtilityTabState(state, "browser", two, "60000000-0000-4000-8000-000000000002");
+
+    const restored = withoutVanishedBrowserPages(state, new Set());
+
+    expect(bare(restored).tabs).toEqual([{ id: one, surface: "browser" }]);
+    expect(restored.active).toBe(one);
+  });
+
+  it("keeps a page the host still holds and drops only the vanished one", () => {
+    const one = "10000000-0000-4000-8000-000000000001";
+    const two = "10000000-0000-4000-8000-000000000002";
+    const alive = "60000000-0000-4000-8000-000000000001";
+    let state: Parameters<typeof addUtilityTabState>[0] = { tabs: [] };
+    state = addUtilityTabState(state, "browser", one, alive);
+    state = addUtilityTabState(state, "browser", two, "60000000-0000-4000-8000-000000000002");
+
+    expect(bare(withoutVanishedBrowserPages(state, new Set([alive]))).tabs).toEqual([
+      { id: one, surface: "browser", browserContextId: alive },
+    ]);
+    expect(
+      withoutVanishedBrowserPages(state, new Set([alive, "60000000-0000-4000-8000-000000000002"])),
+    ).toBe(state);
   });
 
   it("opens the shared Browser tab rather than a dedicated instance", () => {

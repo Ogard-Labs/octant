@@ -53,6 +53,13 @@ const isWords = (item: DockBarItem) => item.kind === "button" && item.words === 
 /** What moves to the secondary row, whole, when the bar cannot hold it: never cut. */
 const isRowable = (item: DockBarItem): boolean =>
   item.kind === "node" || isWords(item) || (item.kind === "text" && item.cue === true);
+/**
+ * In the last step the view switch moves too: folded to a named button it is
+ * the one control that is still cut ("W⌄" in a 280px Review tile), so it goes
+ * to the row beside the other things that must stay whole.
+ */
+const movesToRow = (item: DockBarItem, fold: DockBarFold): boolean =>
+  isRowable(item) || (fold === "row" && item.kind === "choice");
 const isSwitch = (item: DockBarItem): item is DockBarChoice =>
   item.kind === "choice" && item.compact !== true;
 
@@ -65,7 +72,7 @@ function widthOf(items: ReadonlyArray<DockBarItem>, fold: DockBarFold, rulers: R
     moreWidth +
     items.reduce((sum, item) => {
       if (isAction(item)) return fold === "menu" || fold === "row" ? sum : sum + GAP + CONTROL;
-      if (isRowable(item) && fold === "row") return sum;
+      if (fold === "row" && movesToRow(item, fold)) return sum;
       if (item.kind === "node") return sum + GAP + (rulers.get(`node:${item.id}`) || item.width);
       if (item.kind === "choice") {
         const named = fold !== "full" || item.compact === true;
@@ -129,7 +136,9 @@ export function useFoldedControls(
       const lead = name === null ? 0 : 16 + 2 * GAP + name.scrollWidth;
       const room = node.clientWidth - insets - lead - trailing;
       // The row exists only for something that must move to it.
-      const steps = items.some(isRowable) ? FOLDS : FOLDS.filter((step) => step !== "row");
+      const steps = items.some((item) => movesToRow(item, "row"))
+        ? FOLDS
+        : FOLDS.filter((step) => step !== "row");
       const fits = steps.find((step) => widthOf(items, step, rulers) <= room);
       setFold(fits ?? steps.at(-1) ?? "menu");
     };
@@ -430,8 +439,8 @@ export function DockBarRow(props: {
 }) {
   if (props.items.length === 0) return null;
   const actions = props.items.filter(isAction);
-  const lead = props.items.filter((item) => !isAction(item) && !isRowable(item));
-  const rowable = props.items.filter(isRowable);
+  const lead = props.items.filter((item) => !isAction(item) && !movesToRow(item, props.fold));
+  const rowable = props.items.filter((item) => movesToRow(item, props.fold));
   const drawItem = (item: DockBarItem) => {
     if (item.kind === "text")
       return (
