@@ -2519,3 +2519,49 @@ describe("ACP agents running as themselves", () => {
     expect(deniesHome(plan, "mcp.json")).toBe(true);
   });
 });
+
+describe("ACP agents whose own sandbox cannot refuse other providers' sign-ins", () => {
+  const trustedProject = {
+    subagents: false,
+    webTools: false,
+    skills: false,
+    toolServers: false,
+    hooks: false,
+    projectCode: true,
+  } as const;
+
+  it.each([
+    ["Gemini CLI", gemini],
+    ["Qwen Code", qwen],
+  ] as const)(
+    "keeps %s inside Octant's profile outside Strict, so another provider's sign-in stays unreadable",
+    async (_name, profile) => {
+      const target = fixture(profile);
+      const managedHome = join(target.canonicalRoot, "managed-home");
+      const confinement = makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+      });
+      const launch = await Effect.runPromise(
+        confinement.prepare({
+          profile,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome,
+          mode: "code",
+          executionPolicy: "approval-gated",
+          strict: false,
+          nativeSetup: trustedProject,
+          environment: { PATH: "/usr/bin" },
+        }),
+      );
+      expect(launch.command).toBe(target.sandboxPath);
+      const seatbelt = launch.args[1]!;
+      expect(seatbelt).toContain(`(deny file-read* (subpath "${realpathSync(homedir())}"))`);
+      expect(launch.environment.GEMINI_CLI_SYSTEM_SETTINGS_PATH).toBeUndefined();
+      expect(launch.environment.QWEN_SANDBOX).toBeUndefined();
+    },
+  );
+});
