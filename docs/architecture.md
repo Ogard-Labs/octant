@@ -19668,7 +19668,9 @@ deliverable and keeps every gate above:
      pid and creation time, read through System32's Windows PowerShell with
      an exact argument list and no shell
      (`(Get-Process -Id <pid>).StartTime.ToFileTimeUtc()`), so a reused pid
-     never matches. Provider runtimes and terminals keep their receipts there
+     never matches. The read may take 60 seconds, because Windows
+     PowerShell's first start on a fresh machine is slow and a failed read
+     fails the receipt, which stops a live harness command. Provider runtimes and terminals keep their receipts there
      as elsewhere, and so do the harness shell's Windows commands (supervisor
      `windows-harness-shell`, beside the other harness receipts). A host
      restart finds and stops what it left behind, through the tree stop, and
