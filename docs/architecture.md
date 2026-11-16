@@ -844,7 +844,9 @@ hard CPU/memory quotas, thermal measurements or predictions of a tool's peak RAM
 Repository tests, local worktree preparation, scaffolds and the Octant Harness's
 shell ports share one host budget. They reserve worker slots atomically before
 launch, bound each wait by the operation deadline and at most 30 minutes, retain
-cancellation, and recheck ordinary authority after waiting. The queue has at most
+cancellation (decided: a launch is to keep waiting past 30 minutes under
+[Octant adds no restrictions of its own unless Strict is on](#security-and-authority); designed,
+not built), and recheck ordinary authority after waiting. The queue has at most
 128 entries. Worker slots are divided across the allowed command concurrency,
 so separate Projects do not each get a full worker pool. A confirmed exit releases
 the reservation; uncertain cleanup retains it until host restart/reconciliation.
@@ -2720,7 +2722,10 @@ timeout reads a finished reply without blocking, and `wait` over several
 default), collecting each reply once as its child settles. `delegate` may give
 siblings one `compareGroup` label (at most 64 characters, journaled on the run)
 so the Agents dock shows them side by side; the host groups and never ranks. Either parent harness can
-target either child harness; provider-owned hidden subagents remain disabled.
+target either child harness. A provider's own native subagents are not
+`octant_agents` children: they run where
+[Key providers run as themselves](design/provider-runtimes.md#key-providers)
+says, each shown as a child run of its thread.
 Every child appears in the Agents surface, where the person can watch, stop,
 or resume it, and `cancel` is the agent's way to stop one it started.
 
@@ -3181,7 +3186,10 @@ hold for every action in it:
   does not ask. Below Full access the Project switch "Agents may comment on
   pull requests" stands in for the per-post ask on a thread that has read no
   outside content; a thread that has read outside content still asks before
-  posting, switch on or off (maintainer decision, 2026-11-12); with the switch off the agent
+  posting, switch on or off (maintainer decision, 2026-11-12; outside Strict
+  the mark is to stop adding this ask under
+  [Octant adds no restrictions of its own unless Strict is on](#security-and-authority),
+  designed, not built); with the switch off the agent
   drafts the post by asking, and the approval shows the whole text
   (maintainer request, 2026-11-12). The level is the one the turn runs at, and
   a host that cannot tell whether the thread is marked asks. Built: the switch is `agentPullRequestComments`
@@ -3550,7 +3558,8 @@ CI or reviewers should be woken, not left polling; maintainer request,
   refused, no turn is sent.
 - **Auto-fix limits.** A failure is a check name, a review thread id, or the
   base conflict. Each started wake spends one attempt on every failure it
-  carried; at most three attempts per failure, after which Auto-fix stops
+  carried; at most three attempts per failure (decided: a setting with three
+  as its default, under [Octant's own limits become settings](#security-and-authority); designed, not built), after which Auto-fix stops
   (`attempt-limit`) and opens the thread's follow-up marker. The same failures
   on the same head never start a second turn; a wake that started none (the
   thread refused it, or the outside-content mark was refused) is tried again
@@ -3598,7 +3607,9 @@ CI or reviewers should be woken, not left polling; maintainer request,
 - **Watch limits.** A watch ends when the pull request merges or closes, when
   the thread is archived, completed, or gone, when the Project no longer
   connects the repository (`authority-lost`), when the agent calls `unwatch`,
-  after ten started wakes (`wake-limit`), or three days after it began
+  after ten started wakes (`wake-limit`), or three days after it began (both
+  to become settings with these defaults, under
+  [Octant's own limits become settings](#security-and-authority); designed, not built)
   (`expired`), checked even while nothing vouches for it; the last two open the
   thread's follow-up marker. Three days covers a review round across a weekend
   without leaving a forgotten watch running. Asking again turns nothing new
@@ -3710,7 +3721,9 @@ Octant-operated hosted service stays out of scope
 ([Current Release Boundary](#current-release-boundary)).
 
 **Coordinator threads start and direct worker threads.** A person may make a
-Code thread a coordinator: a long-lived thread whose own actions are read-only,
+Code thread a coordinator: a long-lived thread whose own actions are read-only
+(decided: writable at Full access, under
+[Octant's own limits become settings](#security-and-authority); designed, not built),
 which starts worker threads without asking (or proposes them, when the person
 restricts that globally or per Project), messages them, receives their state,
 and brings their requests to the person. Its wake, round and start bounds
@@ -3970,7 +3983,9 @@ the thread it came from.
   Events arriving while a run is active, and CI from the routine's reserved
   `automation/` branches, are held for review. This conservative attribution
   and the finite allowance bound feedback without claiming to identify every
-  outside writer. The activity check retains at most 64 owned runs, including
+  outside writer. The activity check retains at most 64 owned runs (decided:
+  the person may clear or raise it, under
+  [Octant's own limits become settings](#security-and-authority); designed, not built), including
   cancelled runs whose ordinary turn or children remain active. Missing or
   overflowing evidence is unknown and blocks automatic admission and re-arm;
   finish and review tasks and children, then archive and explicitly configure a
@@ -4110,7 +4125,9 @@ the thread it came from.
   **At Full access.** A turn running at Full access creates a routine the
   agent suggested on its own at once, with no card
   (maintainer decision, 2026-11-12): it takes the same path a routine the
-  person asked for takes, so it is created paused in its first journaled
+  person asked for takes, so it is created paused (decided: a setting, off by
+  default, starts it active, under
+  [Octant's own limits become settings](#security-and-authority); designed, not built) in its first journaled
   event, with approval-gated authority of its own, and shown in the thread by
   the receipt below, and it runs only after the person enables it. Below Full
   access the card's confirmation stays. The level read is the one the turn
@@ -4503,7 +4520,9 @@ at its due time or its timer ran more than two minutes late, is journaled as
 with **Run now** and Cancel, and only the person's Run now starts its turn.
 Bounds: at most 8 waiting wake-ups a thread, a first fire at least a minute
 away (a delayed one held to one minute to one hour, the runtime's own
-range), a recurring one at most every 5 minutes across its life, refused
+range), a recurring one at most every 5 minutes across its life (decided: as
+often as every minute, with the cap and missed-run handling as settings, under
+[Octant's own limits become settings](#security-and-authority); designed, not built), refused
 when its first fire is past it, and ending on its own after 7 days, before
 any turn a busy thread held back past that time, and a thread archived or
 deleted ends every wake-up it had. A purge takes the thread's wake-ups with
@@ -4644,7 +4663,9 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
     wakes nothing, so two agents answering each other stop waking each other
     after ten rounds and continue only when a person runs a turn. Both numbers
     are settings, per coordinator for a coordinator and its workers
-    (maintainer request, 2026-11-12); any other thread takes the defaults.
+    (maintainer request, 2026-11-12); any other thread takes the defaults
+    (decided: settings for every thread under
+    [Octant's own limits become settings](#security-and-authority); designed, not built).
     The host
     records wake turns and each thread's latest host turn with its hop in its
     own store, so a restart keeps the hourly count and the hop count
@@ -4874,8 +4895,10 @@ thread's [guardrail level](#security-and-authority). New tasks may choose an app
   An extra working folder is shared, including for a child worktree. Code Git,
   PRs, changed-file receipts and Review still describe that thread's primary
   checkout only; the UI states that limit.
-- **What can be a folder.** The domain policy refuses the home folder and
-  any folder above it, a system folder (`/`, `/System`, `/Library`, `/usr`,
+- **What can be a folder.** The domain policy refuses the home folder (decided:
+  allowed behind a warning outside Strict, credential folders still protected,
+  under [Octant adds no restrictions of its own unless Strict is on](#security-and-authority);
+  designed, not built) and any folder above it, a system folder (`/`, `/System`, `/Library`, `/usr`,
   `/etc`, `/private`, `/Volumes` itself and their peers) or a folder inside
   a system-owned tree, a credential folder in home (`.ssh`, `.aws`,
   `.azure`, `.gnupg`, `.kube`, `.docker`, `.password-store`,
@@ -6820,7 +6843,11 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
     and `.opencode/opencode.json` (maintainer decision, 2026-11-14). Codex
     lists none, because Octant's trust loads none of its Project
     configuration (Codex's own folder trust decides it), and any other
-    provider answers none.
+    provider answers none. Decided (maintainer decision, 2026-11-16; designed,
+    not built): in a Project trusted for Codex, outside Plan and Strict, Codex
+    loads its own Project configuration as it does on its own, and Codex then
+    lists its entries here
+    ([Provider runtimes: Codex](design/provider-runtimes.md#codex)).
     Untrusted Project code shows one quiet notice card above the thread's
     composer ([Thread view](design/thread-view.md#project-trust-prompt)):
     **Trust for <provider>** sends the same `change-project-native-providers`
@@ -7337,6 +7364,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   discovery descriptor, the bundled plugin and its identity, picker and
   Settings labels, and the Settings create and configuration forms. A new
   agent adds its row, its runtime profile, its logo, and conformance evidence.
+  Decided (maintainer decision, 2026-11-16; designed, not built): a person may
+  also add an agent from the public ACP registry or their own local command
+  through the plugin model, so a reviewed row is no longer the only way an ACP
+  agent runs ([Provider runtimes: Any ACP agent](design/provider-runtimes.md#any-acp-agent)).
   The row never widens the vocabulary to `string`: an unlisted kind fails to
   decode, a configuration must name the same agent as its instance or command
   and a posture its row lists, and every capability is still the one the
@@ -9570,7 +9601,11 @@ Direct-endpoint providers (`openai-compatible`, `anthropic-compatible`,
 `azure-foundry`, and `ollama`) run under the native harness in
 `apps/server/src/harness`. Ollama stays a literal-loopback HTTP origin: its
 transport speaks Ollama's native `/api/chat` and refuses any other base URL,
-so a cloud, LAN, or tunnelled Ollama is not a harness endpoint. Ollama cuts a
+so a cloud, LAN, or tunnelled Ollama is not a harness endpoint (decided: a
+local-network or hosted address is to be allowed, private-network plain HTTP
+with a warning, under
+[Provider reach Octant no longer narrows](#security-and-authority); designed,
+not built). Ollama cuts a
 prompt longer than the window it loaded without an error, which can drop the
 harness's instructions and tool definitions, so every Ollama request names its
 window as `options.num_ctx` and the transport measures the request against
@@ -10437,7 +10472,10 @@ the model at another size.
   person, so the server keeps three rules of its own: it never answers an
   approval or any other request listed for the person (only a harness
   question or a Chat turn's question, through the routes line mode uses);
-  it refuses `full-access`, which would save Full access on the Project, so
+  it refuses `full-access` (decided: the CLI is to take a per-run Full access
+  flag the person sets, under
+  [Octant adds no restrictions of its own unless Strict is on](#security-and-authority); designed, not built),
+  which would save Full access on the Project, so
   a thread starts at Full access only where the person already set it (the
   same tools served to an agent grant accept it when the person chose Full
   access for that grant, and give it to the thread alone, never the Project;
@@ -14253,6 +14291,49 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     Settings.
   - **Plan in Work.** Work threads get the Plan level, so the provider's
     own plan mode, `EnterPlanMode` and `ExitPlanMode` work there as in Code.
+  - **Project terminal.** The person's own Project terminal runs unconfined
+    by default, as the person's shell does outside Octant, and a Work
+    Project's terminal no longer runs at the approval-gated posture. Octant's
+    sandbox applies to it only under Strict. Today it runs under a Code
+    thread terminal's confinement
+    ([Project terminals](#security-and-authority)).
+  - **After outside content.** Below Full access a thread that has read
+    outside content is still marked, but the mark no longer makes a network
+    MCP server ask again, every Computer action ask again, delegation ask
+    once, or a pull-request comment or review reply ask whatever the Project's
+    "Agents may comment on pull requests" switch says; the remembered grants,
+    the switch and the level decide as they did before the mark. Strict keeps
+    each of those asks, as today.
+  - **Image generation.** At Full access, with several image profiles ready
+    and no kept choice, the card is skipped and the image is made on a default
+    profile (the one the person names in Settings, else the first ready one)
+    on its default model. "Ask again" in Project Overview still brings the
+    card back. Strict keeps today's card.
+  - **Resource queue.** A launch waiting on the host's
+    [local work resource limits](#local-work-resource-limits) keeps waiting,
+    cancellable and shown as waiting, instead of being refused after 30
+    minutes; the operation's own deadline and the queue's 128 entries stay.
+  - **Browser page scripts in Work.** Below Full access a Work thread gets
+    Code's one-use, exact-source script permission under the same rules
+    ([Browser for agents: Bounded page scripts](design/browser-agent-tool.md#bounded-page-scripts));
+    today Work below Full access is refused. Strict keeps Work refused.
+  - **Local CLI at Full access.** `octant agent` takes an explicit per-run
+    Full access flag the person sets on the command line: that run's thread
+    starts at Full access alone, journaled with the flag, never saving Full
+    access on the Project. A tool call another agent makes through
+    `octant agent mcp` still cannot choose it, outside an agent grant the
+    person set to Full access. Today the CLI refuses `full-access`
+    ([Native harness: scripted callers](#native-harness)). Strict refuses
+    the flag.
+  - **Home folder as an extra folder.** A Project's extra folder may be the
+    home folder, behind a warning naming what it opens; the credential
+    folders inside it (`.ssh`, `.aws`, `.gnupg`, `Library/Keychains` and the
+    rest) stay protected, a folder above home and the system folders stay
+    refused ([Projects with several folders](#projects-with-several-folders)). Strict
+    refuses the home folder, as today.
+  - **Stalled-turn limit.** At Full access the stalled-turn limit defaults
+    to Off; below Full access it stays 30 minutes, and the person may set
+    either. Strict keeps 30 minutes at every level.
   - **Opt-in extras.** A per-person list of provider tools to block, and in
     Strict a notice saying what Strict withheld.
 
@@ -14267,6 +14348,70 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   to lose what the provider already does. Protection stays available to
   anyone who turns Strict on, and the server keeps answering and
   journaling every ask either way.
+
+  **Octant's own limits become settings** (maintainer decision, 2026-11-16;
+  designed, not built). Under the
+  [unattended-work rule](#security-and-authority) a fixed constant needs a
+  reason beside it; these have none that protects a hard line, so each
+  becomes a setting with today's value as its default, and each owner keeps
+  today's text with a pointer here:
+  - **Agent wake-ups.** A recurring wake-up may fire as often as every
+    minute, as cron does, instead of every 5 minutes; the cap of 8 waiting a
+    thread and what happens to a missed run (today journaled as missed and
+    run only by the person's **Run now**; the setting may run it once on
+    return) become settings ([Scheduled wake-ups](#person-memory)).
+  - **Message wakes.** The wake bounds a thread outside a coordinator takes
+    (one wake turn at a time, 30 an hour, a hop count of ten) become settings
+    for every thread, as they already are per coordinator.
+  - **Coordinators.** How many coordinators a Code Project may hold becomes a
+    setting, default 4, and at Full access a coordinator's own file, shell
+    and Git actions follow the level instead of Plan's read-only gate
+    ([Coordinator threads](design/coordinator-threads.md)).
+  - **Pull requests.** A pull-request watch's end after ten started wakes or
+    three days, and Auto-fix's three attempts per failure.
+  - **Agent messages and children.** A turn's three thread messages, and a
+    child run's `wait` limit (at most 120 seconds).
+  - **Browser.** A wait's 10 minutes.
+  - **Routines.** A file routine's 64-run activity window can be cleared or
+    raised, and a setting, off by default, **Start agent-created routines
+    active at Full access** lets a routine an agent creates at Full access
+    start enabled instead of paused.
+
+  Rationale: a limit the person cannot change stops the workflow it was
+  meant to bound; the journal, spend ceilings and the person's Stop still
+  bound what an agent does.
+
+  **Paired devices act as the person** (maintainer decision, 2026-11-16;
+  designed, not built). "An authenticated paired device is the person" (the
+  [Full access rule](#security-and-authority)) is to be built for each place
+  that still refuses a device the host's own person paired, stopping computer
+  use first: a Project terminal and Project browser, the Browser's Take over
+  and Hand back, `sign-in`, profile pages and saved flows, connector sign-in,
+  growing an MCP grant, Safe networks and Network limits, creating an agent
+  grant, approving a coordinator proposal, Canvas HTML import, provider cloud
+  sessions, server Projects, local work resource limits and extension
+  install. Each owning section keeps its own "not built yet" line until it is
+  built. A device the host knows only through the hub's roster is unchanged.
+
+  **Provider reach Octant no longer narrows** (maintainer decision,
+  2026-11-16; designed, not built):
+  - **Ollama off loopback.** An Ollama address on the local network or a
+    hosted Ollama is allowed, and plain HTTP to a private-network address is
+    allowed with a warning; a public address still needs HTTPS
+    ([Native harness](#native-harness)).
+  - **Bedrock request signing.** The designed "Use my AWS profile" is built,
+    and long-lived access keys are allowed with a warning
+    ([Providers and model endpoints: Amazon Bedrock](design/model-endpoints.md#organization-sign-in-amazon-bedrock)).
+  - **Unreviewed releases.** At Full access a provider release newer than
+    the one a version pin was reviewed against is offered as "unverified"
+    instead of losing the pinned features (Kimi Code's command inventory,
+    OpenCode's Octant tools, an ACP probe's claims); below Full access the
+    pin holds ([Provider runtimes](design/provider-runtimes.md)).
+  - **Linux parity.** Octant's tools reach OpenCode and ACP agents on Linux
+    as on macOS, and an outside provider driver is admitted on Linux under
+    the same trust steps as on macOS
+    ([Outside provider drivers](design/outside-provider-drivers.md)).
+
   Option names were read from the installed Agent SDK (0.3.211
   `PermissionMode`) and the Codex app-server schema (codex-cli 0.164.0
   `SandboxMode`, `AskForApproval`, `ApprovalsReviewer`). Auto is offered
@@ -15530,7 +15675,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
     A spend ceiling leaves other ACP turns out and says so. They report no file changes or diffs, ask no user
     questions on Mistral Vibe and fx, resume only when the agent offers load or
     resume, and offer Octant's tools only on macOS when the agent serves HTTP
-    MCP. fx is also refused in Chat and Plan.
+    MCP (decided: on Linux too, under
+    [Provider reach Octant no longer narrows](#security-and-authority);
+    designed, not built). fx is also refused in Chat and Plan.
   - **Ollama** carries the Octant Harness agent loop over the local service on
     literal loopback, like the harness endpoints: no provider approvals,
     questions, or file changes, Octant's tools per verified model (a model
@@ -15743,7 +15890,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   device is refused outright: a remote Code terminal is gated as an agent,
   and a Project terminal has no thread to hold that approval. The shell runs under the posture a new thread
   in the Project starts with, approval-gated or Full access where a Code
-  Project remembers it (a Work Project's terminal is approval-gated); Plan never applies, because nothing plans in it. The owning
+  Project remembers it (a Work Project's terminal is approval-gated); Plan never applies, because nothing plans in it. Decided: the terminal is to run unconfined outside Strict, a Work Project's included ([Octant adds no restrictions of its own unless Strict is on](#security-and-authority); designed, not built). The owning
   window, Project, and binding revision are checked before every command, and
   another window cannot attach. Its lifecycle is journaled on its own
   `project-terminal` aggregate (`code.project-terminal-started@1`,
@@ -18808,7 +18955,9 @@ Work and Code run on Windows at Full access with the sandbox off (step 3 of
 the [Windows sequence](#current-release-boundary) below; maintainer request,
 2026-11-15); every guarded level, and Full access with the sandbox kept, stays
 refused there until the Windows confinement launcher has run a real provider
-on a person's Windows machine. Finding and removing worktrees on this computer is
+on a person's Windows machine (decided otherwise
+under [Windows below Full access](#current-release-boundary) below; designed,
+not built). Finding and removing worktrees on this computer is
 authorized on Windows hosts too (maintainer request, 2026-11-11): it runs
 host-side Git and file operations a person confirms, starts no agent, and so
 does not lift that confinement gate. Everything on the work board is in scope for the first
@@ -18823,6 +18972,20 @@ Public store distribution, the Windows sequence below, and the full
 LSP / extension host / debugger companion are release-scope choices the
 maintainers schedule, not safety rules; none of them protects an invariant by
 itself.
+
+**Windows below Full access** (maintainer decision, 2026-11-16; designed, not
+built; this widens the release boundary above). On Windows the levels below
+Full access are allowed using each provider's own approvals and, where it has
+one, its own sandbox, with no Octant sandbox claimed: the mode picker and the
+thread say that Octant's sandbox does not run there, and Strict, which needs
+it, stays unavailable on Windows until the confinement launcher has run a
+real provider. The Claude, OpenCode, Pi and ACP agent families are to be
+built on Windows, and Project actions are allowed there, run in the terminal
+shell Settings › Code names. Plan stays read-only through the provider's own
+plan mode, and an Octant tool keeps its own refusals. Rationale: a person on
+Windows gets the same provider behaviour the provider's own CLI gives there;
+claiming a sandbox Octant cannot enforce would be the dishonest part, so the
+picker names what is missing instead of refusing the level.
 
 Also in scope, each design-first (build it only once its owning specification
 documents its authority, privacy, and release boundaries):
@@ -18937,7 +19100,9 @@ This unsigned QA archive is not an installer, a usable Windows release, or an
 enabled signed-update channel, and no workflow publishes it to a release;
 native host admission and credentials remain separate prerequisites. The
 release form is the signed per-user installer of step 5 below. Windows Work and
-Code below Full access stay unavailable: the confinement port refuses Windows
+Code below Full access stay unavailable today (decided: allowed with the
+provider's own approvals and no Octant sandbox claimed, under
+[Windows below Full access](#current-release-boundary); designed, not built): the confinement port refuses Windows
 unless its caller opts into the dormant launcher, which no production caller
 does, so the guarded levels fail closed there. Full access uses no confinement,
 so Work and Code run there on Windows (step 3 below). Simulator, the Apple workbench, and vibrancy stay
@@ -18962,8 +19127,10 @@ deliverable and keeps every gate above:
    2026-11-15: build it now, without waiting for the launcher):
    - **The level gate.** A Work turn, a Code turn and every Code operation on
      a thread (terminal, tests, and the rest) on a Windows host run only at
-     Full access with the sandbox off. Anything else is refused on the server
-     before it is journaled or starts a process, with the reason that Windows
+     Full access with the sandbox off (decided: the guarded levels are to run
+     there too, under [Windows below Full access](#current-release-boundary); designed, not built).
+     Anything else is refused on the server before it is journaled or starts a
+     process, with the reason that Windows
      has no Octant process sandbox yet (`hostSandboxRefusal` in the domain's
      `guardrailPolicy.ts`). The gate reads the level the work runs at: a Work
      turn's level clamped to its caller's ceiling, a Code turn's composer
@@ -18984,7 +19151,8 @@ deliverable and keeps every gate above:
      inherited environment names a Windows shell needs (`SYSTEMROOT`,
      `USERPROFILE`, `PSMODULEPATH` and their kin) added to the terminal's
      allowlist. A Project action is written for a POSIX shell and is refused
-     on Windows. Close confirms the stop by the shell's pid, because ConPTY
+     on Windows (decided: allowed, under
+     [Windows below Full access](#current-release-boundary)). Close confirms the stop by the shell's pid, because ConPTY
      reports a shell's exit about 25 seconds after the process ends
      (measured on `windows-2025`).
    - **Ownership receipts.** An owned process's identity on Windows is its
@@ -19059,10 +19227,12 @@ deliverable and keeps every gate above:
      are unavailable on Windows: the Claude, OpenCode, Pi and ACP agent
      families, whose version read, catalog and launch preparation have not
      been given the Windows form Codex has (their confined reads refuse there,
-     so each reports itself unavailable); the
+     so each reports itself unavailable; decided: to be built, under
+     [Windows below Full access](#current-release-boundary); designed, not built); the
      [agent debug tool](design/language-services.md#agent-debug-tool-rules);
      a Project's [own toolchain copy](design/language-services.md#user-added-servers);
-     and Project actions. A provider that starts no local process before its
+     and Project actions (decided: allowed, under [Windows below Full access](#current-release-boundary)).
+     A provider that starts no local process before its
      turn (an Octant Harness model over an endpoint) runs Full access turns
      there with Octant's own file tools and the harness shell.
    - **Evidence.** The level gate, the picker, the settings and the launch

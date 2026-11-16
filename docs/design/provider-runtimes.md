@@ -1299,6 +1299,22 @@ from today's profile:
   (Codex offers the form to the root thread only) is answered empty. The
   capability is reported `supported`.
 
+**Codex's own review** (maintainer decision, 2026-11-16; designed, not
+built). Codex's built-in `/review` works in Octant: in Work and Code, at the
+thread's level, Octant starts Codex's review run (`review/start` on the
+app-server) on the thread's checkout. The run is read-only whatever the
+level, as Codex's own review is, and its findings show in the thread as a
+review result, not as edits or a plan. Plan and Chat do not start one.
+
+**Codex's own Project configuration** (maintainer decision, 2026-11-16;
+designed, not built). In a Project the person trusted for Codex, outside Plan
+and Strict, Codex loads its own Project configuration as it does on its own
+(the project-local configuration codex-rs's loader reads for a project Codex
+trusts, less the keys codex-rs refuses from a Project, `PROJECT_LOCAL_CONFIG_DENYLIST`
+in `config/src/loader/mod.rs`, rust-v0.162.1), and the trust prompt lists its
+entries. Today Octant reports `projectCode` unsupported for Codex and its trust
+loads none of Codex's Project configuration; Plan and Strict keep that.
+
 The installed OpenCode binary's
 version selects its routes: 1.x keeps the legacy session API and its
 per-session permission ruleset. 2.x accepts no per-session ruleset, so each
@@ -1355,7 +1371,9 @@ the 2.x releases the hostile-configuration check was repeated against (2.0.27
 passed the same check and the same app-tool round trip through a real launch
 as 2.0.22, with no change to routes or events), and
 only on macOS, where the probe registers an empty bridge and OpenCode lists
-its tools. Project resolution
+its tools. Decided under [Provider reach Octant no longer narrows](../architecture.md#security-and-authority) (designed, not built):
+at Full access a newer 2.x release is offered the tools as "unverified"
+instead of losing them, and Linux reports them as macOS does. Project resolution
 starts Git, which the Chat, Plan, and Work jail refuses; on macOS those
 launches get the failing `git` stand-in described under
 [Security and authority](../architecture.md#security-and-authority), so 2.x offers turns in
@@ -1706,7 +1724,9 @@ as running, because nothing reports its end.
 
 Kimi Code's own slash commands run in Work and Code outside Plan, as in its
 own app (maintainer decision, 2026-11-14); the probe still pins the reviewed
-command inventory, so a release with a new command fails closed. Plan and
+command inventory, so a release with a new command fails closed (decided: at
+Full access such a release is offered as "unverified" instead, under
+[Provider reach Octant no longer narrows](../architecture.md#security-and-authority); designed, not built). Plan and
 Chat refuse a prompt starting with `/`, since a command such as
 `update-config` writes. The earlier refusal everywhere was Octant's default,
 not a protocol limit: ACP carries the command as prompt text.
@@ -1749,7 +1769,9 @@ infers them from the driver kind.
 Octant's tools reach an ACP session only through the session MCP bridge, and
 only when the agent's `initialize` result advertises `mcpCapabilities.http`
 (or the profile names an exact release that accepts it unadvertised) and the
-host is macOS. Otherwise the session reports app-managed tools `unsupported`,
+host is macOS (decided: Linux as macOS, under
+[Provider reach Octant no longer narrows](../architecture.md#security-and-authority); designed, not built).
+Otherwise the session reports app-managed tools `unsupported`,
 and a session that is offered tools is refused before `session/new` rather
 than started without them.
 
@@ -1818,6 +1840,13 @@ distribution.
 | `qoder`                   | Qoder CLI          | `npx @qoder-ai/qodercli --acp`                         | Blocked: registry quarantine (initialize fails)                                                     |
 | `vtcode`                  | VT Code            | `vtcode acp` (binary)                                  | Blocked: registry quarantine (missing Windows builds) until it is lifted                            |
 
+Decided (maintainer decision, 2026-11-16; designed, not built): the probe
+next agents Google Antigravity, Factory Droid, Junie, Amp and Auggie, and
+Kiro, Trae and Muse (not in the snapshot above), are to become first-class
+profiles, each through the probe below; Cursor's block is to be rechecked
+against the current release and lifted if its reason no longer holds. Every
+other agent can be added as [any ACP agent](#any-acp-agent).
+
 fx ships as an ACP profile (`fx`) but is not in the registry.
 
 fx is offered. Measured 2026-10-28 on fx 0.0.15, under the deny-default
@@ -1837,7 +1866,29 @@ secret. `WITHHELD_BUNDLED_PROVIDER_DRIVERS` in
 there keeps a driver out of the activation ladder while stored instances and
 threads stay.
 
+### Any ACP agent
+
+Decided (maintainer decision, 2026-11-16; designed, not built; this replaces
+the rule that only a reviewed profile runs): a person may add an agent from
+the public ACP registry, or their own local command, through the plugin
+model ([Architecture: extensions and skills](../architecture.md#extensions-and-skills)).
+Installation, trust and enablement stay separate steps, and discovering an
+agent in the registry grants it nothing. A custom agent runs on the shared
+stack above with no runtime profile of its own: every capability is what its
+own `initialize` reports, and nothing is claimed that a probe would have to
+show. Until the person trusts it, it starts in Octant's sandbox at the
+thread's level, nothing about it is remembered (no remembered approvals, no
+Project trust for it), and Octant's tools reach it only as the transport rules
+above allow. Trusting it lifts the sandbox outside Strict, as for a shipped
+profile. A reviewed profile stays the way an agent gets Octant's deeper fit
+(mode mapping, managed home, usage and the probe's evidence).
+
 ### Probe before a profile ships
+
+At Full access an installed release newer than the one a profile's probe
+pinned is offered as "unverified" instead of refused, under
+[Provider reach Octant no longer narrows](../architecture.md#security-and-authority) (designed, not built); below
+Full access the pin holds.
 
 A profile ships only after a live probe against a signed-in install on Apple
 Silicon shows each of the following, recorded as a smoke test beside
