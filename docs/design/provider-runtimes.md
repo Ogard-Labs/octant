@@ -242,9 +242,14 @@ level. The provider's own memory is on by default in Work and Code outside
 Plan, as in the provider's own app, and the person turns it off per
 provider account (maintainer decision, 2026-11-14; the account stores only
 the off, as `ownMemory: false`, and an older stored `true` reads as on).
-Plan and Chat keep it off. With it on, Claude Code launches
-without `CLAUDE_CODE_DISABLE_AUTO_MEMORY` and Codex's app-server starts
-without the `features.memories=false` override, on a process of its own;
+With it on, Claude Code launches without `CLAUDE_CODE_DISABLE_AUTO_MEMORY`,
+in Plan and Chat too with its memory read-only (Octant's gate refuses a file
+write into the account's `CLAUDE.md` or a `projects/<folder>/memory/` folder
+there, since Claude Code's own check allows one unasked), and Codex's
+app-server starts without the `features.memories=false` override, on a
+process of its own, in Work and Code outside Plan only, because Codex writes
+`~/.codex/memories` by itself after a turn (maintainer decision, 2026-11-16;
+[architecture](../architecture.md#security-and-authority));
 OpenCode and Mistral Vibe have no such memory and no setting
 ([architecture](../architecture.md#modes-chat-work-and-code)). Work and Code share one capability set, so each runtime starts a Work
 session with its shell at the thread's level exactly as it starts a Code
@@ -1415,15 +1420,16 @@ instead of losing them, and Linux reports them as macOS does. Project resolution
 starts Git, which the Chat, Plan, and Work jail refuses; on macOS those
 launches get the failing `git` stand-in described under
 [Security and authority](../architecture.md#security-and-authority), so 2.x offers turns in
-every mode there. On Linux (maintainer decision, 2026-11-14) 2.x runs turns
-in Work and Code outside Plan, at Ask first, Auto, Accept edits and Full
-access, where the launch already allows a shell; a Chat or Plan launch is
-refused before it starts with a sentence naming why, and the probe attests
-the Code jail at Ask first and reports `turnModes` with Chat and Plan
-unsupported (`host-confinement`), which the provider's Settings page shows
-as where it runs turns. Rationale: Linux confinement can only deny
-fork outright, so it cannot give Chat and Plan the one `git` exec the
-stand-in needs, while Work and Code outside Plan launch with a shell anyway. 2.0.22 names its turn events without the `session.next.`
+every mode there. On Linux 2.x runs turns in every mode too (maintainer
+decision, 2026-11-16, replacing the 2026-11-14 refusal of Chat and Plan): its
+Chat and Plan launches start processes inside a read-only capsule with the
+same stand-in first on `PATH`, and the probe attests that capsule
+([Plan and Chat tool parity](../architecture.md#security-and-authority)). A
+host that is neither macOS nor Linux refuses a 2.x Chat or Plan launch before
+it starts with a sentence naming why and reports `turnModes` with Chat and
+Plan unsupported (`host-confinement`), which the provider's Settings page
+shows as where it runs turns. Rationale: there the jail Chat and Plan need can
+start no process, so it cannot give them the `git` the runtime starts. 2.0.22 names its turn events without the `session.next.`
 prefix earlier 2.x builds used (`session.text.*`, `session.reasoning.*`,
 `session.tool.*`, `session.step.*`, `session.execution.*`), identifies a
 tool call by `id`, and names the tool only on `session.tool.input.started`;
