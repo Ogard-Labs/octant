@@ -645,7 +645,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             localFailureRevision.current = undefined;
           }
           setStatus(next.status);
-          setMessage(next.failure?.message);
+          setMessage(snapshotFailureNotice(next.failure));
         }
       } catch (error) {
         if (!active || controller.signal.aborted) return;
@@ -762,8 +762,11 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           ...(prepared?.acceptsLocalCertificate === true ? { acceptsLocalCertificate: true } : {}),
         },
         // A tab bound to one context is replaced by a context of its own, never by
-        // whatever shared context the thread already holds.
-        ...(switchingProfile.current ? { dedicated: true } : {}),
+        // whatever shared context the thread already holds. A repeated Browser
+        // tab asks for its own too: an ordinary Open answers with the thread's
+        // shared page, so a second tab showed the first tab's page and was
+        // refused the site it had been asked to open.
+        ...(switchingProfile.current || props.startFresh === true ? { dedicated: true } : {}),
       });
       setScope(resolved);
       update(next);
@@ -1044,7 +1047,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     unchangedPolls.current = 0;
     setSnapshot(next);
     setStatus(next.status);
-    setMessage(next.failure?.message);
+    setMessage(snapshotFailureNotice(next.failure));
   }
 
   function queueRemoteAction(
@@ -1911,14 +1914,12 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             </section>
           ) : null}
           {serverSuggestions.length > 0 || recentSuggestions.length > 0 ? (
-            <p className="browser-workspace__local-note">
-              A page opens isolated to this thread and shared with its agent.
-            </p>
+            <p className="browser-workspace__local-note">{startNote(props.startFresh === true)}</p>
           ) : (
             <div className="browser-workspace__empty">
               <ShieldCheck aria-hidden="true" size={20} />
               <h2>Open a private Browser session</h2>
-              <p>The page is isolated to this thread and shared with its agent.</p>
+              <p>{startNote(props.startFresh === true)}</p>
               <OctantButton
                 aria-label="Start browser"
                 disabled={starting || url.trim() === ""}
@@ -2208,6 +2209,45 @@ function captureNotKeptNotice(
       : `There is nothing to draw on: the screenshot could not be kept, because ${why[reason]}.`;
   }
   return `This screenshot could not be kept: ${why[reason]}.`;
+}
+
+/**
+ * Who a page opened here is for. A repeated Browser tab opens a page of its
+ * own, which the agent's Browser tool never reaches: that tool works on the
+ * thread's first Browser page.
+ */
+function startNote(ownPage: boolean): string {
+  return ownPage
+    ? "A page opens isolated to this thread and is yours alone. The agent uses the thread's first Browser page."
+    : "A page opens isolated to this thread and shared with its agent.";
+}
+
+/**
+ * The host words a site refusal for the agent that has to recover from it
+ * ("Call stop, then navigate…"), and that text was shown in the window as it
+ * stood. The person reads what happened and what they can do; the agent keeps
+ * its own text in the tool result.
+ */
+function snapshotFailureNotice(
+  failure: BrowserAutomationSnapshot["failure"] | undefined,
+): string | undefined {
+  if (failure === undefined) return undefined;
+  if (failure.category !== "policy-denied" || failure.reason !== "origin-not-approved") {
+    return failure.message;
+  }
+  const site = siteOf(failure.refusedOrigin);
+  return site === undefined
+    ? "This page is open for one site only, so a request for another site was refused. To browse another site here, type its address in the address bar."
+    : `This address leads to ${site}, a different site, so it was not opened. To go there, type ${site} in the address bar.`;
+}
+
+function siteOf(origin: string | undefined): string | undefined {
+  if (origin === undefined) return undefined;
+  try {
+    return new URL(origin).host;
+  } catch {
+    return undefined;
+  }
 }
 
 function applyFailure(
