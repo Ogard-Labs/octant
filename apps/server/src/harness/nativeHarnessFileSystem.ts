@@ -326,7 +326,7 @@ export class NativeHarnessFileSystem {
     if (guarded !== undefined) return guarded;
     let info;
     try {
-      info = await stat(resolved);
+      info = await stat(resolved, { bigint: true });
     } catch {
       return { kind: "refused", reason: "path-not-found" };
     }
@@ -356,7 +356,7 @@ export class NativeHarnessFileSystem {
     const content = Buffer.from(raw);
     const result = readFileContent(display, content, input);
     if (input.marksRead !== false && countsAsTextRead(result)) {
-      this.#readMarks.set(resolved, info.mtime.toISOString());
+      this.#readMarks.set(resolved, String(info.mtimeNs));
     }
     return result;
   }
@@ -403,8 +403,8 @@ export class NativeHarnessFileSystem {
           bytes,
         });
     if (!wrote) return movedWhileWriting();
-    const info = await stat(target);
-    this.#readMarks.set(target, info.mtime.toISOString());
+    const info = await stat(target, { bigint: true });
+    this.#readMarks.set(target, String(info.mtimeNs));
     return {
       kind: "written",
       path: this.#display(target),
@@ -455,7 +455,7 @@ export class NativeHarnessFileSystem {
       return { kind: "refused", reason: "path-not-found" };
     }
     if (!info.isFile()) return { kind: "refused", reason: "not-a-file" };
-    if (info.mtime.toISOString() !== mark) {
+    if (String(info.mtimeNs) !== mark) {
       return { kind: "refused", reason: "file-changed-since-read" };
     }
     const raw = await this.#readBytes(resolved, this.#maxFileBytes);
@@ -483,8 +483,8 @@ export class NativeHarnessFileSystem {
       bytes: Buffer.from(text, "utf8"),
     });
     if (!wrote) return movedWhileWriting();
-    const after = await stat(key);
-    this.#readMarks.set(key, after.mtime.toISOString());
+    const after = await stat(key, { bigint: true });
+    this.#readMarks.set(key, String(after.mtimeNs));
     return undefined;
   }
 
