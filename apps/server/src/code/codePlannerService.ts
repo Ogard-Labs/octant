@@ -78,6 +78,8 @@ export type CodePlannerProposeOutcome =
 
 export interface CodePlannerServiceOptions {
   readonly persistence: PersistenceService;
+  /** How many coordinators a Code Project may hold, read from Settings; absent is 4. */
+  readonly coordinatorsPerProject?: () => number;
   readonly uuid: () => string;
   readonly clock: () => string;
   /**
@@ -140,6 +142,7 @@ export class CodePlannerServiceError extends Error {
  */
 export class CodePlannerService {
   readonly #persistence: PersistenceService;
+  readonly #coordinatorsPerProject: (() => number) | undefined;
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #createThread: CodePlannerServiceOptions["createThread"];
@@ -150,6 +153,7 @@ export class CodePlannerService {
 
   constructor(options: CodePlannerServiceOptions) {
     this.#persistence = options.persistence;
+    this.#coordinatorsPerProject = options.coordinatorsPerProject;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#createThread = options.createThread;
@@ -233,6 +237,9 @@ export class CodePlannerService {
                       thread.coordinator === true &&
                       thread.lifecycle !== "archived",
                   ).length,
+                ...(this.#coordinatorsPerProject === undefined
+                  ? {}
+                  : { coordinatorLimit: this.#coordinatorsPerProject() }),
               },
             }),
       });

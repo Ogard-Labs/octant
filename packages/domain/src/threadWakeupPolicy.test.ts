@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   admitThreadWakeup,
-  MAX_PENDING_THREAD_WAKEUPS,
   nextThreadWakeupFire,
   nextWakeupCronFire,
   parseWakeupCron,
@@ -76,10 +75,12 @@ describe("thread wake-up policy", () => {
     expect(parseWakeupCron("61 * * * *")).toMatchObject({ status: "refused" });
   });
 
-  it("refuses a recurring wake-up that would fire more often than every five minutes", () => {
+  it("lets a recurring wake-up fire as often as every minute, as cron does", () => {
     const now = local(2026, 11, 14, 10, 0);
-    expect(planCronWakeup({ cron: "* * * * *", recurring: true, now })).toMatchObject({
-      status: "refused",
+    expect(planCronWakeup({ cron: "* * * * *", recurring: true, now })).toEqual({
+      status: "planned",
+      fireAt: local(2026, 11, 14, 10, 1),
+      expiresAt: local(2026, 11, 21, 10, 0),
     });
     expect(planCronWakeup({ cron: "*/5 * * * *", recurring: true, now })).toMatchObject({
       status: "planned",
@@ -96,12 +97,11 @@ describe("thread wake-up policy", () => {
     });
   });
 
-  it("refuses a recurring wake-up whose later fires come closer than five minutes apart", () => {
+  it("keeps a recurring wake-up whose later fires come a minute apart", () => {
     const now = local(2026, 11, 14, 9, 55);
-    // The first four gaps are ten minutes; 10:40 and 10:41 are one apart.
     expect(
       planCronWakeup({ cron: "0,10,20,30,40,41 * * * *", recurring: true, now }),
-    ).toMatchObject({ status: "refused" });
+    ).toMatchObject({ status: "planned", fireAt: local(2026, 11, 14, 10, 0) });
   });
 
   it("refuses a recurring wake-up that first fires after its seven days", () => {
@@ -115,12 +115,15 @@ describe("thread wake-up policy", () => {
     });
   });
 
-  it("caps how many wake-ups a thread may have waiting", () => {
-    expect(admitThreadWakeup({ waitingCount: MAX_PENDING_THREAD_WAKEUPS - 1 })).toEqual({
+  it("caps how many wake-ups a thread may have waiting at the limit set in Settings", () => {
+    expect(admitThreadWakeup({ waitingCount: 7, waitingLimit: 8 })).toEqual({
       status: "admitted",
     });
-    expect(admitThreadWakeup({ waitingCount: MAX_PENDING_THREAD_WAKEUPS })).toMatchObject({
+    expect(admitThreadWakeup({ waitingCount: 8, waitingLimit: 8 })).toMatchObject({
       status: "refused",
+    });
+    expect(admitThreadWakeup({ waitingCount: 8, waitingLimit: 12 })).toEqual({
+      status: "admitted",
     });
   });
 

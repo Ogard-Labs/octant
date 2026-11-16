@@ -111,7 +111,7 @@ import {
   MAX_BROWSER_DIAGNOSTIC_ENTRIES,
   MAX_BROWSER_RECORDING_EDGE,
   MAX_BROWSER_RECORDING_MS,
-  MAX_BROWSER_WAIT_MS,
+  MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING,
   MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS,
   type BrowserActionRequest,
   type BrowserContextId,
@@ -5331,7 +5331,10 @@ async function waitForConditions(
   signal: AbortSignal | undefined,
 ): Promise<void> {
   const conditions = browserPageConditions(waitFor);
-  const timeoutMs = Math.min(waitFor.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS, MAX_BROWSER_WAIT_MS);
+  const timeoutMs = Math.min(
+    waitFor.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS,
+    MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING * 60_000,
+  );
   const deadline = Date.now() + timeoutMs;
   let met: ReadonlyArray<boolean> = conditions.map(() => false);
   while (true) {

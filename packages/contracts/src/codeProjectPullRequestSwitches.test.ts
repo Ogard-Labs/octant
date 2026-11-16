@@ -58,7 +58,7 @@ describe("pull-request switch contracts", () => {
     expect(() => decodeCodeProjectPullRequestAutoFixCommand({ kind: "enable", target })).toThrow();
   });
 
-  it("journals a wake by failure identity and attempt, within the attempt limit", () => {
+  it("journals a wake by failure identity and attempt, within the most Settings may allow", () => {
     const wake = {
       target,
       threadId,
@@ -74,7 +74,7 @@ describe("pull-request switch contracts", () => {
     expect(() =>
       decodeCodeProjectPullRequestAutoFixRecorded({
         ...wake,
-        change: { ...wake.change, attempt: 4 },
+        change: { ...wake.change, attempt: 21 },
       }),
     ).toThrow();
     expect(() =>
@@ -91,7 +91,7 @@ describe("pull-request switch contracts", () => {
     ).toThrow();
   });
 
-  it("journals a watch wake by signal identity within the wake limit, and never forge text", () => {
+  it("journals a watch wake by signal identity within the most Settings may allow, and never forge text", () => {
     const wake = {
       target,
       threadId,
@@ -108,7 +108,7 @@ describe("pull-request switch contracts", () => {
     };
     expect(decodeCodeProjectPullRequestWatchRecorded(wake)).toEqual(wake);
     expect(() =>
-      decodeCodeProjectPullRequestWatchRecorded({ ...wake, change: { ...wake.change, wake: 11 } }),
+      decodeCodeProjectPullRequestWatchRecorded({ ...wake, change: { ...wake.change, wake: 101 } }),
     ).toThrow();
     expect(() =>
       decodeCodeProjectPullRequestWatchRecorded({

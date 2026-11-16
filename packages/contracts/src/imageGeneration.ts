@@ -213,6 +213,12 @@ export const ImageGenerationSettings = Schema.Struct({
   customSources: Schema.Array(ImageGenerationCustomSource).pipe(
     Schema.maxItems(IMAGE_GENERATION_MAX_CUSTOM_SOURCES),
   ),
+  /**
+   * The image profile a thread at Full access generates on when several are
+   * ready and its Project keeps no choice. Absent, or naming a profile that is
+   * not ready, means the first ready profile.
+   */
+  defaultProfileInstanceId: Schema.optional(ProviderInstanceId),
 }).annotations(strict);
 export type ImageGenerationSettings = typeof ImageGenerationSettings.Type;
 

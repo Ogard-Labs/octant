@@ -1254,14 +1254,26 @@ export const classifyRunNow = classifyAutomationRunNow;
  * nothing prompts, and a paused routine is shown in the thread and does
  * nothing until they turn it on. A turn in Plan changes nothing, so it asks,
  * and a follow-up asks at every level because a paused one would never fire.
+ *
+ * `create-active` is the person's own choice in Settings (off by default):
+ * at Full access a routine an agent creates starts enabled, since that level
+ * already lets the agent act without asking.
  */
 export function decideRoutineFromAgent(input: {
   readonly requestedByPerson: boolean;
   readonly followUp: boolean;
   /** The posture the turn runs at when the call is made, not the thread's stored level. */
   readonly posture: "full-access" | "auto-accept-edits" | "approval-gated" | "plan" | undefined;
-}): "create-paused" | "ask-on-card" {
+  /**
+   * Settings' "Start agent-created routines active at Full access". On, a
+   * routine created while the turn runs at Full access starts enabled.
+   */
+  readonly startActiveAtFullAccess?: boolean;
+}): "create-active" | "create-paused" | "ask-on-card" {
   if (input.followUp || input.posture === "plan") return "ask-on-card";
+  if (input.posture === "full-access" && input.startActiveAtFullAccess === true) {
+    return "create-active";
+  }
   return input.requestedByPerson || input.posture === "full-access"
     ? "create-paused"
     : "ask-on-card";

@@ -7,12 +7,15 @@ import {
   THREAD_WAKEUP_CHANGED,
   THREAD_WAKEUP_TURN_HEADING,
 } from "@octant/contracts";
-import { MAX_PENDING_THREAD_WAKEUPS } from "@octant/domain/thread-wakeup-policy";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
-import { ThreadWakeupService, type ThreadWakeupModePort } from "./threadWakeupService";
+import {
+  ThreadWakeupService,
+  type ThreadWakeupLimits,
+  type ThreadWakeupModePort,
+} from "./threadWakeupService";
 
 const START = Date.parse("2026-11-14T12:00:00.000Z");
 const threadId = "83000000-0000-4000-8000-000000000001";
@@ -90,8 +93,10 @@ function service(
   journal: Journal,
   code: ThreadWakeupModePort,
   hostStartedAt = new Date(time.now()),
+  limits?: ThreadWakeupLimits,
 ) {
   return new ThreadWakeupService({
+    ...(limits === undefined ? {} : { limits: () => limits }),
     journal,
     clock: () => new Date(time.now()),
     uuid: () => crypto.randomUUID(),
@@ -216,6 +221,32 @@ describe("thread wake-ups", () => {
     expect(journaledChanges(journal)).toEqual(["scheduled", "missed", "run-requested", "fired"]);
   });
 
+  it("runs a wake-up that came due while the host was down once on return when Settings asks", async () => {
+    const time = fakeTime();
+    const { journal } = openJournal(time.now);
+    const before = service(time, journal, port());
+    before.start();
+    await before.forSession("code", threadId).schedule({
+      kind: "delay",
+      providerToolName: "ScheduleWakeup",
+      delaySeconds: 600,
+      prompt: "Resume the migration.",
+    });
+    before.stop();
+
+    const later = fakeTime(START + 60 * 60_000);
+    const code = port();
+    const after = service(later, journal, code, new Date(later.now()), {
+      waitingPerThread: 8,
+      runMissedOnReturn: true,
+    });
+    after.start();
+    await flush();
+    expect(code.startTurn).toHaveBeenCalledOnce();
+    expect(after.list("code", threadId)).toEqual([]);
+    expect(journaledChanges(journal)).toEqual(["scheduled", "fired"]);
+  });
+
   it("keeps a due wake-up waiting while its thread is busy and fires it after the thread's turn", async () => {
     const time = fakeTime();
     const { journal } = openJournal(time.now);
@@ -301,10 +332,13 @@ describe("thread wake-ups", () => {
     ]);
   });
 
-  it("refuses a wake-up past the thread's cap, too soon, or too frequent", async () => {
+  it("refuses a wake-up past the thread's cap from Settings, and holds one asked too soon", async () => {
     const time = fakeTime();
     const { journal } = openJournal(time.now);
-    const wakeups = service(time, journal, port());
+    const wakeups = service(time, journal, port(), new Date(time.now()), {
+      waitingPerThread: 3,
+      runMissedOnReturn: false,
+    });
     wakeups.start();
     const schedule = wakeups.forSession("code", threadId);
     await expect(
@@ -315,7 +349,7 @@ describe("thread wake-ups", () => {
         recurring: true,
         prompt: "Every minute.",
       }),
-    ).resolves.toMatchObject({ status: "refused" });
+    ).resolves.toMatchObject({ status: "scheduled" });
     // A delay under a minute is held to one minute, as the runtime's tool says.
     await expect(
       schedule.schedule({
@@ -325,14 +359,12 @@ describe("thread wake-ups", () => {
         prompt: "Now.",
       }),
     ).resolves.toMatchObject({ status: "scheduled", clampedDelaySeconds: 60, wasClamped: true });
-    for (let index = 1; index < MAX_PENDING_THREAD_WAKEUPS; index += 1) {
-      await schedule.schedule({
-        kind: "delay",
-        providerToolName: "ScheduleWakeup",
-        delaySeconds: 600,
-        prompt: `Check ${index}.`,
-      });
-    }
+    await schedule.schedule({
+      kind: "delay",
+      providerToolName: "ScheduleWakeup",
+      delaySeconds: 600,
+      prompt: "Check again.",
+    });
     await expect(
       schedule.schedule({
         kind: "delay",
@@ -341,7 +373,7 @@ describe("thread wake-ups", () => {
         prompt: "One too many.",
       }),
     ).resolves.toMatchObject({ status: "refused" });
-    expect(wakeups.list("code", threadId)).toHaveLength(MAX_PENDING_THREAD_WAKEUPS);
+    expect(wakeups.list("code", threadId)).toHaveLength(3);
     // Another thread has its own cap.
     await expect(
       wakeups.forSession("code", "83000000-0000-4000-8000-000000000002").schedule({
