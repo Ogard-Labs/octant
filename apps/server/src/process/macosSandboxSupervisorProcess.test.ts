@@ -137,11 +137,56 @@ time.sleep(12)
       expect(normal.stdout).toBe("completed");
       expect(readdirSync(root).some((name) => name.endsWith(".scope"))).toBe(false);
 
-      const native = spawnSync(executable, ["--run-native", root, "native-provider:epoch", "--", "/bin/sh", "-c", "printf native-provider; exit 9"],
-        { cwd: root, encoding: "utf8", timeout: 10000 });
+      const native = spawnSync(
+        executable,
+        [
+          "--run-native",
+          root,
+          "native-provider:epoch",
+          "--",
+          "/bin/sh",
+          "-c",
+          "printf native-provider; exit 9",
+        ],
+        { cwd: root, encoding: "utf8", timeout: 10000 },
+      );
       expect(native.status, native.stderr).toBe(9);
       expect(native.stdout).toBe("native-provider");
       expect(readdirSync(root).some((name) => name.endsWith(".scope"))).toBe(false);
+
+      // Recover even if both trusted control processes die before revocation.
+      // The durable receipt binds the kernel coalition across orphaning.
+      rmSync(beat, { force: true });
+      const lost = spawn(
+        executable,
+        ["--run-native", root, "lost-owners:epoch", "--", "/usr/bin/python3", script],
+        { cwd: root },
+      );
+      child = lost;
+      lost.stdout?.resume();
+      lost.stderr?.resume();
+      lost.stdin?.end("restart recovery\n");
+      const lostExit = new Promise<void>((resolve) => lost.once("exit", () => resolve()));
+      await expect
+        .poll(() => readdirSync(root).filter((name) => name.endsWith(".scope")).length, {
+          timeout: 10000,
+        })
+        .toBe(1);
+      await expect.poll(() => heartbeat(beat), { timeout: 10000 }).not.toBe("");
+      const receiptName = readdirSync(root).find((name) => name.endsWith(".scope"));
+      if (receiptName === undefined) throw new Error("Missing durable scope receipt");
+      const receipt = readFileSync(join(root, receiptName));
+      const owner = receipt.readInt32LE(24);
+      expect(owner).toBeGreaterThan(1);
+      expect(owner).not.toBe(process.pid);
+      process.kill(owner, "SIGKILL");
+      lost.kill("SIGKILL");
+      await lostExit;
+      execFileSync(executable, ["--reap", root, "--stale"], { timeout: 10000 });
+      expect(readdirSync(root).some((name) => name.endsWith(".scope"))).toBe(false);
+      const recoveredHeartbeat = heartbeat(beat);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(heartbeat(beat)).toBe(recoveredHeartbeat);
 
       const librarySource = join(root, "loader.c");
       const library = join(root, "loader.dylib");

@@ -12,6 +12,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -272,6 +273,91 @@ server.serve_forever()
       } finally {
         configureSandboxRestrictionsAuthority(undefined);
         await new Promise<void>((resolve) => egress.close(() => resolve()));
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== "linux").each(["symlink", "directory"])(
+    "refuses a prepared launch after its Project path is replaced by another %s",
+    (replacement) => {
+      const f = fixture();
+      const authority = join(f.base, "authority");
+      mkdirSync(authority, { mode: 0o700 });
+      configureSandboxRestrictionsAuthority({
+        validateSelection: () => true,
+        registerCleanup: () => () => undefined,
+        storageDirectory: () => authority,
+        active: () => f.sandboxPolicy,
+        beginTurn: () => ({ status: "refused", message: "unused" }),
+        deny: () => undefined,
+      });
+      try {
+        const prepared = f.launch("printf escaped > marker");
+        const victim = join(f.base, "victim");
+        mkdirSync(victim);
+        writeFileSync(join(victim, "marker"), "unchanged");
+        renameSync(f.project, join(f.base, "original-project"));
+        if (replacement === "symlink") symlinkSync(victim, f.project);
+        else {
+          mkdirSync(f.project);
+          writeFileSync(join(f.project, "marker"), "replacement");
+        }
+        const run = spawnSync(prepared.command, [...prepared.args], {
+          cwd: f.project,
+          encoding: "utf8",
+          timeout: 10000,
+          env: { PATH: "/usr/bin:/bin", HOME: f.scratch },
+        });
+        expect(readFileSync(join(victim, "marker"), "utf8"), run.stderr).toBe("unchanged");
+        expect(run.status).not.toBe(0);
+      } finally {
+        configureSandboxRestrictionsAuthority(undefined);
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== "linux")(
+    "pins native mount sources without leaking descriptors or running injected loader code before confinement",
+    () => {
+      const f = fixture();
+      const authority = join(f.base, "authority");
+      mkdirSync(authority, { mode: 0o700 });
+      const source = join(f.base, "injected.c");
+      const library = join(f.base, "injected.so");
+      const canary = join(f.base, "injected-canary");
+      writeFileSync(
+        source,
+        '#include <fcntl.h>\n#include <unistd.h>\n__attribute__((constructor)) static void injected(void) { int fd=open("' +
+          canary +
+          '",O_WRONLY|O_CREAT,0600); if(fd>=0)close(fd); }',
+      );
+      execFileSync("cc", ["-shared", "-fPIC", "-o", library, source]);
+      expect(spawnSync("/bin/true", [], { env: { LD_PRELOAD: library } }).status).toBe(0);
+      expect(existsSync(canary)).toBe(true);
+      rmSync(canary);
+      configureSandboxRestrictionsAuthority({
+        validateSelection: () => true,
+        registerCleanup: () => () => undefined,
+        storageDirectory: () => authority,
+        active: () => f.sandboxPolicy,
+        beginTurn: () => ({ status: "refused", message: "unused" }),
+        deny: () => undefined,
+      });
+      try {
+        const launch = f.launch(
+          'printf live > durable; for fd in /proc/self/fd/*; do target=$(readlink "$fd" || true); case "$target" in *authority*|*octant-policy-native*|/) printf "leaked %s=%s\n" "$fd" "$target" >&2; exit 31;; esac; done',
+        );
+        const result = spawnSync(launch.command, [...launch.args], {
+          cwd: f.project,
+          env: { PATH: "/usr/bin:/bin", HOME: f.scratch, LD_PRELOAD: library },
+          encoding: "utf8",
+          timeout: 10000,
+        });
+        expect(result.status, result.stderr).toBe(0);
+        expect(existsSync(canary)).toBe(false);
+        expect(readFileSync(join(f.project, "durable"), "utf8")).toBe("live");
+      } finally {
+        configureSandboxRestrictionsAuthority(undefined);
       }
     },
   );

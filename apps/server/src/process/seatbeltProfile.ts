@@ -1,3 +1,4 @@
+import { pinLinuxLaunch } from "./linuxPinnedLaunch";
 import { prepareMacosSandboxScope } from "./macosSandboxScope";
 import {
   recordSandboxLaunch,
@@ -1172,7 +1173,13 @@ export function makeProcessConfinementLive(
         return withReceipt(launch);
       }
       if (platform === "linux") {
-        return withReceipt(buildBubblewrapLaunch(prepared, { bwrapPath: sandboxPath }));
+        const launch = buildBubblewrapLaunch(prepared, { bwrapPath: sandboxPath });
+        const authority = sandboxAuthorityDirectory();
+        return withReceipt(
+          selectedPolicy !== undefined && authority !== undefined
+            ? pinLinuxLaunch(launch, authority)
+            : launch,
+        );
       }
       // Windows stays refused until its confinement has run on real Windows
       // with a real provider; only a caller that names the unverified option

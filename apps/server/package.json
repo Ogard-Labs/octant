@@ -5,7 +5,7 @@
   "scripts": {
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "build": "tsdown",
+    "build": "tsdown && bun ../../scripts/build-linux-sandbox-launch.ts",
     "browser:uploads:smoke": "bun src/browser/browserUploadFiles.smoke.ts",
     "browser:smoke": "bun src/browser/browserRuntime.smoke.ts",
     "desktop:cloud:smoke": "bun src/computerUse/cloudDesktop.smoke.ts",
@@ -24,7 +24,7 @@
     "sqlite:smoke:bun": "bun src/persistence/sqlitePort.smoke.ts",
     "sqlite:smoke:node": "node src/persistence/sqlitePort.smoke.ts",
     "start": "bun src/main.ts",
-    "test": "vitest run --project unit --project process --testTimeout=30000",
+    "test": "bun ../../scripts/build-linux-sandbox-launch.ts && vitest run --project unit --project process --testTimeout=30000",
     "test:evidence": "vitest run --project evidence --testTimeout=300000",
     "egress-proxy:benchmark": "OCTANT_RUN_EGRESS_PROXY_BENCHMARK=1 vitest run --project evidence --testTimeout=600000 src/harness/nativeHarnessEgressProxy.benchmark.test.ts",
     "typecheck": "tsc -p tsconfig.json",
