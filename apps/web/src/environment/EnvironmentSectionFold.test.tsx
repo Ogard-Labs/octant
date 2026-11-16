@@ -168,9 +168,7 @@ describe("the Context section", () => {
       </Context>,
     );
     const figure = `${compactTokenCount(68_000)} of ${compactTokenCount(200_000)} (34%)`;
-    expect(
-      screen.getByRole("button", { name: new RegExp(figure.replace(/[()]/g, "\\$&")) }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: (name) => name.includes(figure) })).toBeVisible();
     expect(screen.getByText("34% used")).toBeVisible();
     expect(screen.getByText("68K / 200K")).toBeVisible();
   });
