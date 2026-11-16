@@ -1,10 +1,13 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
+import { makeOpenCodeProcessLive } from "../providers/openCodeProcess";
+import { startLinuxControlRelay } from "./linuxControlRelay";
 import { ToolEgressLaunch, ToolEgressRuleId } from "@octant/contracts";
 import { startToolEgressProxy } from "../harness/nativeHarnessEgressProxy";
 import { configureSandboxRestrictionsAuthority, trackSandboxChild } from "./sandboxRuntimePolicy";
 import { execFileSync, spawnSync, spawn } from "node:child_process";
 import { createServer, connect as netConnect } from "node:net";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -86,6 +89,193 @@ describe.skipIf(
       process.env["OCTANT_REQUIRE_LINUX_ISOLATION"] !== "1") ||
     (process.platform === "darwin" && !existsSync("/usr/bin/sandbox-exec")),
 )("native sandbox policy launch", () => {
+  it.skipIf(process.platform !== "linux")(
+    "reaches a confined provider server while its process cannot reach host services",
+    async () => {
+      const f = fixture();
+      const authorityRoot = join(f.base, "authority");
+      mkdirSync(authorityRoot);
+      const socketPath = join(f.scratch, "control.sock");
+      const egressPath = join(f.base, "egress.sock");
+      const egress = createServer((socket) => socket.destroy());
+      await new Promise<void>((resolve) => egress.listen(egressPath, resolve));
+      const selected = {
+        ...f.sandboxPolicy,
+        policy: { ...f.sandboxPolicy.policy, hostServices: "blocked" as const },
+      };
+      configureSandboxRestrictionsAuthority({
+        validateSelection: () => true,
+        registerCleanup: () => () => undefined,
+        active: () => selected,
+        beginTurn: () => ({ status: "refused", message: "unused" }),
+        storageDirectory: () => authorityRoot,
+        deny: () => undefined,
+      });
+      const port = 18264;
+      writeFileSync(
+        join(f.project, "server.py"),
+        `import http.server, socket, signal
+signal.alarm(20)
+try:
+ s=socket.socket(socket.AF_UNIX); s.connect("${egressPath}")
+except OSError:
+ pass
+else:
+ raise RuntimeError("ambient Unix service escaped")
+class Handler(http.server.BaseHTTPRequestHandler):
+ def do_GET(self):
+  self.send_response(200 if self.headers.get("Authorization") == "Basic secret" else 401)
+  self.end_headers(); self.wfile.write(b"confined")
+ def log_message(self, *args): pass
+server=http.server.HTTPServer(("127.0.0.1", ${port}), Handler)
+print("ready", flush=True)
+server.serve_forever()
+`,
+      );
+      let child: ReturnType<typeof spawn> | undefined;
+      let relay: ReturnType<typeof startLinuxControlRelay> | undefined;
+      try {
+        const launch = makeProcessConfinementLive().prepare({
+          executable: "/usr/bin/python3",
+          args: [join(f.project, "server.py")],
+          boundRoot: f.project,
+          temporaryDirectory: f.scratch,
+          networkEgress: { kind: "proxied", endpoint: { kind: "unix-socket", path: egressPath } },
+          inboundRelay: { socketPath, port },
+          sandboxProviderChannel: true,
+          sandboxPolicy: selected,
+          allowFileReadStar: true,
+        });
+        child = spawn(launch.command, [...launch.args], {
+          cwd: f.project,
+          env: { PATH: "/usr/bin:/bin", HOME: f.scratch },
+        });
+        let stderr = "";
+        child.stderr?.on("data", (chunk) => {
+          stderr += String(chunk);
+        });
+        const exited = new Promise<void>((resolve) => child?.once("exit", () => resolve()));
+        const ready = new Promise<void>((resolve, reject) => {
+          child?.stdout?.on("data", (chunk) => {
+            if (String(chunk).includes("ready")) resolve();
+          });
+          child?.once("error", reject);
+          child?.once("exit", () => reject(new Error(stderr)));
+        });
+        relay = startLinuxControlRelay({
+          socketPath,
+          ownerDirectory: join(authorityRoot, "sandbox-control"),
+          exited,
+          launchReady: Promise.resolve(),
+          timeoutMs: 5000,
+          onLost: () => {
+            child?.kill("SIGKILL");
+          },
+        });
+        const url = await relay.ready;
+        await ready;
+        expect((await fetch(url)).status).toBe(401);
+        const response = await fetch(url, { headers: { Authorization: "Basic secret" } });
+        expect(response.status, stderr).toBe(200);
+        expect(await response.text()).toBe("confined");
+        child.kill("SIGKILL");
+        await exited;
+        await relay.close();
+        await expect(fetch(url)).rejects.toThrow();
+      } finally {
+        child?.kill("SIGKILL");
+        await relay?.close();
+        await new Promise<void>((resolve) => egress.close(() => resolve()));
+        configureSandboxRestrictionsAuthority(undefined);
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== "linux")(
+    "starts a selected OpenCode policy with authenticated control and revokes it on scope exit",
+    async () => {
+      const f = fixture();
+      const authorityRoot = join(f.base, "authority");
+      mkdirSync(authorityRoot);
+      const selected = {
+        ...f.sandboxPolicy,
+        policy: { ...f.sandboxPolicy.policy, hostServices: "blocked" as const },
+      };
+      configureSandboxRestrictionsAuthority({
+        validateSelection: () => true,
+        registerCleanup: () => () => undefined,
+        active: () => selected,
+        beginTurn: () => ({ status: "refused", message: "unused" }),
+        storageDirectory: () => authorityRoot,
+        deny: () => undefined,
+      });
+      const binaryPath = join(f.project, "opencode");
+      writeFileSync(
+        binaryPath,
+        `#!/usr/bin/python3
+import sys, os, signal, http.server, base64
+signal.alarm(20)
+if sys.argv[1:] == ["--version"]:
+ print("1.18.21"); sys.exit(0)
+port=int(sys.argv[-1])
+expected="Basic " + base64.b64encode((os.environ["OPENCODE_SERVER_USERNAME"] + ":" + os.environ["OPENCODE_SERVER_PASSWORD"]).encode()).decode()
+class Handler(http.server.BaseHTTPRequestHandler):
+ def do_GET(self):
+  self.send_response(200 if self.headers.get("Authorization") == expected else 401)
+  self.end_headers(); self.wfile.write(b"ready")
+ def log_message(self, *args): pass
+server=http.server.HTTPServer(("127.0.0.1", port), Handler)
+print("opencode server listening on http://127.0.0.1:%d" % port, flush=True)
+server.serve_forever()
+`,
+      );
+      chmodSync(binaryPath, 0o755);
+      const egressPath = join(f.base, "egress.sock");
+      const egress = createServer((socket) => socket.destroy());
+      await new Promise<void>((resolve) => egress.listen(egressPath, resolve));
+      let endpoint: URL | undefined;
+      try {
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* makeOpenCodeProcessLive({
+                startupTimeoutMs: 5000,
+                runtimeConfigResolver: async () => undefined,
+                runtimeNetwork: {
+                  start: async () => ({
+                    status: "proxied",
+                    endpoint: { kind: "unix-socket", path: egressPath },
+                    environment: {},
+                    release: async () => undefined,
+                  }),
+                },
+              }).start({
+                binaryPath,
+                cwd: f.project,
+                executionPolicy: "full-access",
+                sandboxPolicy: selected,
+              });
+              endpoint = connection.url;
+              yield* Effect.promise(async () => {
+                expect((await fetch(connection.url)).status).toBe(401);
+                const response = await fetch(connection.url, {
+                  headers: { Authorization: connection.authorization },
+                });
+                expect(response.status).toBe(200);
+                expect(await response.text()).toBe("ready");
+              });
+            }),
+          ),
+        );
+        if (endpoint === undefined) throw new Error("No provider control connection");
+        await expect(fetch(endpoint)).rejects.toThrow();
+      } finally {
+        configureSandboxRestrictionsAuthority(undefined);
+        await new Promise<void>((resolve) => egress.close(() => resolve()));
+      }
+    },
+  );
+
   it("permits scoped writes and tests while confining child processes", () => {
     const { base, project, shared, cache, run } = fixture();
     writeFileSync(join(shared, "input"), "shared input");

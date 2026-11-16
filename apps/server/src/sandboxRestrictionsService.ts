@@ -229,7 +229,7 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
           ]
         : []),
       "Protected project paths require a proven backend and are unavailable on this host.",
-      "Exact credential and host-service grants are not supported; protected-file rules remain enforced. OpenCode on Linux cannot yet enroll because its host control transport requires a confined bridge.",
+      "Exact credential and host-service grants are not supported; protected-file rules remain enforced.",
     ];
     try {
       if (effective !== undefined) this.#validate(effective);
@@ -479,10 +479,6 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
             `Unsupported sandbox restrictions: ${admission.rules.join(", ")}. Review the unsupported rows in Sandbox restrictions.`,
           );
         const kind = Schema.decodeUnknownSync(ProviderDriverKind)(request.provider);
-        if (kind === "opencode")
-          throw new Error(
-            "OpenCode on Linux cannot confine its host control transport under the selected policy. Choose a supported provider.",
-          );
         if (
           refusesFullAccessSandbox({
             access: { executionPolicy: "full-access", fullAccessSandbox: true },
@@ -538,9 +534,12 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
             if (
               canonical === privateRoot ||
               privateRoot.startsWith(`${canonical}/`) ||
-              canonical === join(privateRoot, "sandbox-filters") ||
-              canonical.startsWith(`${join(privateRoot, "sandbox-filters")}/`) ||
-              join(privateRoot, "sandbox-filters").startsWith(`${canonical}/`)
+              ["sandbox-filters", "sandbox-control", "sandbox-scopes"].some(
+                (name) =>
+                  canonical === join(privateRoot, name) ||
+                  canonical.startsWith(`${join(privateRoot, name)}/`) ||
+                  join(privateRoot, name).startsWith(`${canonical}/`),
+              )
             )
               throw new Error(
                 "This folder would expose the host's private policy store. Choose a narrower Project or allowed folder.",

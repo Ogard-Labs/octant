@@ -13945,13 +13945,13 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     Broker loss never opens direct networking. Protected-file rules remain;
     provider sign-in uses its existing scoped channel, not a folder exemption.
 
-    | Backend/route                                      | Enrollment and enforced boundary                                                                                                                                                                 |
-    | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-    | Linux Bubblewrap                                   | Opt-in preview: PID/network namespaces, capability isolation, writable roots, separate-filesystem read-only grants, enforced proxy, Unix-socket/io_uring restrictions and descendant revocation. |
-    | Codex, Pi, ACP, Claude and Octant Harness on Linux | Carry selection through existing provider/shell and direct-tool paths; unsupported routes refuse. Real-provider/packaged claims require their native matrix evidence.                            |
-    | OpenCode on Linux                                  | Refused before launch: host HTTP control transport requires a confined bridge.                                                                                                                   |
-    | macOS                                              | Compiler/native file probes exist; new enrollment refuses until detached-descendant revocation is proven. Existing Keep the sandbox is unchanged.                                                |
-    | Windows                                            | New enrollment/launches refuse; no new Windows confinement.                                                                                                                                      |
+    | Backend/route                                      | Enrollment and enforced boundary                                                                                                                                                                  |
+    | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+    | Linux Bubblewrap                                   | Opt-in preview: PID/network namespaces, capability isolation, writable roots, separate-filesystem read-only grants, enforced proxy, Unix-socket/io_uring restrictions and descendant revocation.  |
+    | Codex, Pi, ACP, Claude and Octant Harness on Linux | Carry selection through existing provider/shell and direct-tool paths; unsupported routes refuse. Real-provider/packaged claims require their native matrix evidence.                             |
+    | OpenCode on Linux                                  | Authenticated host control uses a pinned Unix-socket relay to one fixed port in its private network namespace; the workload starts only after its ownership receipt and socket identity are held. |
+    | macOS                                              | Compiler/native file probes exist; new enrollment refuses until detached-descendant revocation is proven. Existing Keep the sandbox is unchanged.                                                 |
+    | Windows                                            | New enrollment/launches refuse; no new Windows confinement.                                                                                                                                       |
 
     Linux refuses read-only roots on the same filesystem as any writable root:
     a read-only mount cannot protect a writable hard-link alias. Overlapping

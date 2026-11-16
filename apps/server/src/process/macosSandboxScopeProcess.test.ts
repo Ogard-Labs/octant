@@ -26,6 +26,8 @@ describe.skipIf(process.platform !== "darwin")("native sandbox process ownership
     const plist = join(root, "scope.plist");
     let child: ReturnType<typeof decodeIdentity> | undefined;
     let registered = false;
+    let siblingRegistered = false;
+    let sibling: ReturnType<typeof decodeIdentity> | undefined;
     try {
       execFileSync(
         "/usr/bin/xcrun",
@@ -90,6 +92,41 @@ describe.skipIf(process.platform !== "darwin")("native sandbox process ownership
         JSON.parse(execFileSync(executable, ["inspect", String(child.pid)], { encoding: "utf8" })),
       );
       expect(orphan.resource).toBe(parent.resource);
+      const siblingPlist = join(root, "sibling.plist");
+      writeFileSync(
+        siblingPlist,
+        readFileSync(plist, "utf8")
+          .replaceAll(label, `${label}.sibling`)
+          .replaceAll(xml(join(root, "beat")), xml(join(root, "sibling-beat")))
+          .replaceAll(xml(output), xml(join(root, "sibling-output"))),
+        { mode: 0o600 },
+      );
+      execFileSync("/bin/launchctl", ["bootstrap", domain, siblingPlist], { timeout: 5000 });
+      siblingRegistered = true;
+      await expect
+        .poll(
+          () => {
+            try {
+              const records = readFileSync(join(root, "sibling-output"), "utf8").trim().split("\n");
+              const line = records[1];
+              if (line === undefined) return false;
+              sibling = decodeIdentity(JSON.parse(line));
+              return true;
+            } catch {
+              return false;
+            }
+          },
+          { timeout: 5000 },
+        )
+        .toBe(true);
+      if (sibling === undefined) throw new Error("Missing sibling scope");
+      expect(sibling.resource).not.toBe(parent.resource);
+      expect(sibling.resource).not.toBe(host.resource);
+      process.kill(child.pid, "SIGKILL");
+      const siblingBefore = readFileSync(join(root, "sibling-beat"), "utf8");
+      await expect
+        .poll(() => readFileSync(join(root, "sibling-beat"), "utf8"))
+        .not.toBe(siblingBefore);
     } finally {
       if (child !== undefined) {
         try {
@@ -103,6 +140,20 @@ describe.skipIf(process.platform !== "darwin")("native sandbox process ownership
           /* The bounded native fixture may already have exited. */
         }
       }
+      if (sibling !== undefined) {
+        try {
+          const current = decodeIdentity(
+            JSON.parse(
+              execFileSync(executable, ["inspect", String(sibling.pid)], { encoding: "utf8" }),
+            ),
+          );
+          if (current.resource === sibling.resource) process.kill(sibling.pid, "SIGKILL");
+        } catch {
+          /* Bounded fixture may have exited. */
+        }
+      }
+      if (siblingRegistered)
+        execFileSync("/bin/launchctl", ["bootout", `${service}.sibling`], { timeout: 5000 });
       if (registered) execFileSync("/bin/launchctl", ["bootout", service], { timeout: 5000 });
       rmSync(root, { recursive: true, force: true });
     }

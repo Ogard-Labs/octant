@@ -1,4 +1,5 @@
-import { trackSandboxChild } from "../process/sandboxRuntimePolicy";
+import { sandboxAuthorityDirectory, trackSandboxChild } from "../process/sandboxRuntimePolicy";
+import { startLinuxControlRelay, type LinuxControlRelay } from "../process/linuxControlRelay";
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { stopWindowsProcessTree } from "../process/windowsProcessTree";
@@ -1244,7 +1245,8 @@ function prepareGitStandinDirectory(profile: PrivateOpenCodeProfile): string {
  */
 function openCodeWallPolicy(input: OpenCodeProcessStartInput): ProviderExecutionPolicy {
   const executionPolicy = input.executionPolicy ?? "approval-gated";
-  return executionPolicy === "full-access" && input.fullAccessSandbox === true
+  return executionPolicy === "full-access" &&
+    (input.fullAccessSandbox === true || input.sandboxPolicy !== undefined)
     ? "auto-accept-edits"
     : executionPolicy;
 }
@@ -1258,17 +1260,10 @@ function prepareOpenCodeLaunch(
   platform: NodeJS.Platform,
   /** The person's global `AGENTS.md`, linked into the private config folder. */
   globalAgentsInstructions: string | undefined,
+  controlSocket?: string,
 ): Effect.Effect<OpenCodeLaunch, ProviderFailure> {
   const mode = input.mode ?? "code";
   const executionPolicy = openCodeWallPolicy(input);
-  if (input.sandboxPolicy !== undefined && platform === "linux")
-    return Effect.fail(
-      failure(
-        "incompatible",
-        "OpenCode on Linux cannot yet confine its host control transport under this policy. Choose a supported provider; the runtime was not started.",
-      ),
-    );
-
   // OpenCode 2 removed the legacy `--pure` serve flag. Keep the runtime
   // protocol selected by the version probe aligned with its CLI contract.
   const args = openCodeServerArgs(runtime, port);
@@ -1387,6 +1382,9 @@ function prepareOpenCodeLaunch(
         input.servers,
       );
       const launch = confinement.prepare({
+        ...(controlSocket === undefined
+          ? {}
+          : { inboundRelay: { socketPath: controlSocket, port } }),
         executable: input.binaryPath,
         args,
         boundRoot: root,
@@ -1625,8 +1623,12 @@ function acquireOpenCodeServer(
     // OpenCode 2 rejects port 0, unlike the legacy server. Reserve an
     // ephemeral loopback port before launch so every v2 connection remains
     // isolated without relying on the provider's fixed default port.
+    const isolatedControl =
+      input.sandboxPolicy !== undefined &&
+      options.platform === "linux" &&
+      input.network?.endpoint.kind === "unix-socket";
     const port =
-      runtime === "beta"
+      runtime === "beta" || isolatedControl
         ? yield* Effect.tryPromise({
             try: options.reserveLoopbackPort,
             catch: () => failure("unavailable", "OpenCode loopback port could not be reserved."),
@@ -1678,6 +1680,9 @@ function acquireOpenCodeServer(
           port,
           options.platform,
           globalAgentsInstructions,
+          isolatedControl && profile.environment.TMPDIR !== undefined
+            ? join(profile.environment.TMPDIR, "control.sock")
+            : undefined,
         ),
       );
       if (Exit.isFailure(prepared)) {
@@ -1725,6 +1730,30 @@ function acquireOpenCodeServer(
         options.shutdownTimeoutMs,
         options.terminateProcessGroup,
       );
+      let controlRelay: LinuxControlRelay | undefined;
+      let relayStartupFailed = false;
+      if (isolatedControl) {
+        const authorityDirectory = sandboxAuthorityDirectory();
+        const scratch = profile.environment.TMPDIR;
+        if (authorityDirectory === undefined || scratch === undefined) {
+          relayStartupFailed = true;
+        } else {
+          try {
+            controlRelay = startLinuxControlRelay({
+              socketPath: join(scratch, "control.sock"),
+              ownerDirectory: join(authorityDirectory, "sandbox-control"),
+              exited: childExited,
+              launchReady: ownershipReady,
+              timeoutMs: options.startupTimeoutMs,
+              onLost: () => {
+                child.kill("SIGKILL");
+              },
+            });
+          } catch {
+            relayStartupFailed = true;
+          }
+        }
+      }
       let settled = false;
       let stdout = "";
       let stderr = "";
@@ -1744,7 +1773,11 @@ function acquireOpenCodeServer(
           // Profile cleanup is best effort after the owned process is gone.
         }
       };
-      const terminateOwned = () => terminate().finally(cleanupProfile);
+      const terminateOwned = () =>
+        terminate().finally(async () => {
+          await controlRelay?.close();
+          cleanupProfile();
+        });
       const finishFailure = (providerFailure: ProviderFailure) => {
         if (settled) return;
         settled = true;
@@ -1788,10 +1821,16 @@ function acquireOpenCodeServer(
           return;
         }
         if (settled || child.pid === undefined) return;
+        if (isolatedControl && Number(url.port) !== port) {
+          finishFailure(
+            failure("protocol", "OpenCode reported a different confined control port."),
+          );
+          return;
+        }
         settled = true;
         cleanup();
-        void ownershipReady.then(
-          () =>
+        void Promise.all([ownershipReady, controlRelay?.ready]).then(
+          ([, controlUrl]) =>
             resume(
               Effect.succeed({
                 connection: {
@@ -1805,7 +1844,7 @@ function acquireOpenCodeServer(
                   ...(profile.environment.TMPDIR === undefined
                     ? {}
                     : { temporaryDirectory: profile.environment.TMPDIR }),
-                  url,
+                  url: controlUrl ?? url,
                 },
                 terminate: terminateOwned,
               }),
@@ -1880,6 +1919,13 @@ function acquireOpenCodeServer(
       child.stderr.on("data", onStderr);
       child.once("error", onError);
       child.once("exit", onExit);
+      if (relayStartupFailed) {
+        finishFailure(failure("unavailable", "Sandbox control relay could not start."));
+      } else {
+        void controlRelay?.ready.catch(() => {
+          finishFailure(failure("unavailable", "Sandbox control relay could not become ready."));
+        });
+      }
 
       return cleanupDefect(async () => {
         if (!settled) settled = true;

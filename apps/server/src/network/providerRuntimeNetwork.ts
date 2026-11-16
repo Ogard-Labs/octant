@@ -298,7 +298,8 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
         input.sandboxPolicy.policy.hostServices !== "blocked") ||
       (input.sandboxPolicy === undefined && input.executionPolicy === "full-access") ||
       !this.#options.enforced ||
-      this.#options.openRuntimes?.has(input.runtime) === true ||
+      (input.sandboxPolicy === undefined &&
+        this.#options.openRuntimes?.has(input.runtime) === true) ||
       (input.sandboxPolicy?.policy.network !== "deny" &&
         input.sandboxPolicy?.policy.hostServices !== "blocked" &&
         !(snapshot?.limitsOn ?? this.#options.safeNetworks.limitsOn()))
