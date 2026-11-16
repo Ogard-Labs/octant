@@ -3308,8 +3308,11 @@ describe("WorkspaceView Chat thread Environment", () => {
 
     expect(await screen.findByRole("region", { name: "Environment details" })).toBeVisible();
     expect(screen.getByText(/Planning · Virtual Project/)).toBeVisible();
-    expect(screen.getAllByText("Attachments").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Sources").length).toBeGreaterThan(0);
+    // The Chat's own facts: its memory scope always, and a count only when
+    // there is something to count (this thread has no attachment or source).
+    expect(screen.getByText("Project-scoped")).toBeVisible();
+    expect(screen.queryByText("Attachments")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sources")).not.toBeInTheDocument();
     expect(screen.queryByText("Git")).not.toBeInTheDocument();
     expect(screen.queryByText("Approvals")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Thread actions" }));
