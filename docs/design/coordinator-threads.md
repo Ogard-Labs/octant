@@ -21,7 +21,8 @@ the proposal card in the coordinator thread, workers' requests in the
 coordinator's composer and as rows in its thread view, the coordinator named on
 Needs you rows, the owner
 device's routes and screens for the wake switches, the proposal review
-prefilled from the request, the read-only proposal card on paired clients, and
+prefilled from the request, the proposal card on paired clients (approve as
+asked or decline from a device the person paired, read-only elsewhere), and
 counts that survive a restart are built. None of it has run against a real
 provider or on the desktop app; whether each runtime's own tools honour the
 read-only gate is a maintainer live check.
@@ -381,7 +382,7 @@ restrict that can do it for the whole host or for one Project.
   on the requested provider and model when the window can select them, starts
   its mode at the requested level, and offers no mode above it. A paired browser
   or phone reviews and answers the same proposals as a window does (maintainer
-  decision, 2026-11-12). Built on the server: the proposal routes take an answer from a local window or a device the host's own person paired. Not built yet: a paired browser or phone still shows them read-only (title, intent, requested level) with "Approve at a window on this computer", through the planner read the remote session already has.
+  decision, 2026-11-12). Built: the proposal routes take an answer from a local window or a device the host's own person paired, and the paired browser's coordinator thread and the phone's thread screen show each pending worker (title, intent, requested level) with **Approve and start** and **Decline**. A paired client has no creation review, so approving makes the worker as the coordinator's own start would have (a new managed worktree from the coordinator's base branch, on the provider and model the proposal names or else the coordinator's, at the requested level) and then sends the proposal's request as its first message; choosing another provider, checkout or lower level stays with the review at a window. A session the host's person did not pair still sees them read-only with "Approve at a window on this computer".
 
 Rationale: the person who enables a coordinator asked for work to happen without
 a click per thread, and a worker can do nothing a person could not have started
