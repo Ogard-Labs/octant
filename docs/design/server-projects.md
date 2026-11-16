@@ -256,9 +256,13 @@ checks never change registry/configuration or journal state.
   and refuse one outside the folder, judged on this host. A search uses the
   server's `find` and `grep -E`, so its pattern is a POSIX extended expression
   there.
-- **Protected paths.** The file tools, the Files panel and file editor, `@` path
-  mentions, and search refuse the secret guard's list at every level, Full
-  access included, as the guard's tools refuse it locally. It is one list
+- **Protected paths.** The Files panel and file editor, `@` path mentions, and
+  search refuse the secret guard's list at every level. A thread's file tools
+  refuse it below Full access, and at Full access only the Provider sign-ins
+  group, as Octant's own file tools do locally (maintainer decision,
+  2026-11-15): the level is read on every call, and the server's script and
+  this host's check both use that level's form of the pattern, the list with
+  every other group and every added path left out. It is one list
   (`serverProtectedPathPattern` in the secret guard policy), so the two cannot
   drift, and the person's own changes in Settings › Permissions › Protected
   files apply: an added `~/x` or absolute path, and a removed group. The server

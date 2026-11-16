@@ -45,7 +45,7 @@ export const MOBILE_THREAD_LEVEL_LABELS: Readonly<Record<PermissionMode, string>
 
 /** Said before the first Full access pick, in the words the desktop warning uses. */
 export const MOBILE_FULL_ACCESS_WARNING =
-  "Agents can change any file and run any command without asking, with no sandbox. Protected files, such as SSH and cloud keys, are guarded by Octant's own tools and redaction only, and a shell command can read them.";
+  "Agents can change any file and run any command without asking, with no sandbox, and can read protected files such as SSH and cloud keys. Secret values are redacted from what Octant records.";
 
 const CODE_LEVELS: ReadonlyArray<PermissionMode> = [
   "auto",

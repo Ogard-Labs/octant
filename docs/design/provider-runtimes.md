@@ -82,10 +82,22 @@ servers gate `.claude` skills on either switch, which the skills switch
 still covers, and 2.0.22 reads neither switch. The 1.x
 server reads the Project's instruction files only without
 `OPENCODE_DISABLE_PROJECT_CONFIG`, so in Plan, Chat and an untrusted Project
-it reads the global file alone. Its global configuration folder is the
-launch's private one, so the person's own global `AGENTS.md` is not found
-there and `~/.claude/CLAUDE.md` is (not built yet: linking that `AGENTS.md`
-in, which OpenCode on its own would prefer). Below Full access the 1.x
+it reads the global file alone. 1.x reads the first of
+`<global config>/AGENTS.md` and `~/.claude/CLAUDE.md` that exists, where the
+global config folder is `$OPENCODE_CONFIG_DIR`, else
+`$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode` (opencode 1.18.21,
+`src/session/instruction.ts` and core `global.ts`). A launch sets
+`OPENCODE_CONFIG_DIR` to its private folder, so with the person's own setup
+on (OpenCode runs as itself) a 1.x launch links the person's global
+`AGENTS.md`, found where their own environment names that folder, into the
+private one, and OpenCode then prefers it over `CLAUDE.md` as it does on its
+own. With the setup off no `AGENTS.md` is linked and 1.x reads
+`~/.claude/CLAUDE.md`. Below Full access the 1.x launch's wall opens that
+one `AGENTS.md` for reading and nothing else in its folder (the person's
+`opencode.json`, plugins and agents stay out): a literal Seatbelt rule on
+macOS and a read-only bind on Linux, as for `CLAUDE.md`. A protected file, a
+link, or a file reached through a linked folder is not linked or opened. A
+2.x launch links nothing. Below Full access the 1.x
 launch's wall opens that one file for reading and nothing else in
 `~/.claude`: a literal Seatbelt rule on macOS, under the `~/.claude` denial
 that stays whole, and a read-only bind on Linux. The file is found at
@@ -118,7 +130,14 @@ switch. Codex starts
 with no `skills.config` rules, no per-name `mcp_servers` switch-off,
 plugins and apps on in Chat, and an app-server that has no subagent
 switches, at every level; a subagent's requests come back on its own thread
-id and are answered through the parent's session. Each runtime's own web
+id and are answered through the parent's session. With Run as itself off for
+the account, the resolved setup has `subagents` off in Chat, in Plan, and at
+Guarded, Accept edits, and Reviewed, unless the thread chose On or the Project
+trusts Codex; Full access in Work and Code still turns it on, and a thread's
+Off keeps it off everywhere. Where `subagents` is off, Codex's app-server is
+leased with `features.multi_agent=false`, `features.multi_agent_v2=false`, and,
+from 0.145.0, `agents.enabled=false` (`codexAppServerArgs`), so Codex's own
+subagents never start. Each runtime's own web
 search and fetch run only where the setup has `webTools` on: Claude Code gains
 `WebSearch` and `WebFetch`, Codex starts without `web_search = "disabled"`,
 OpenCode stops denying `websearch` and `webfetch`, and Mistral Vibe launches
@@ -1164,21 +1183,38 @@ profile allows and why. The wire mapping that follows from it:
   `sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" }`.
   macOS refuses Codex's own Seatbelt inside Octant's, so Codex is told the
   sandbox is outside it.
-- Approval-gated and auto-accept-edits send `approvalPolicy: "untrusted"`.
-  Under an external sandbox `on-request` runs every command without asking
-  (codex-rs `exec_policy.rs`, rust-v0.164.0); `untrusted` asks for each command
-  Codex does not know to be read-only and for every patch. On an
+- Auto (approval-gated with `autoApprove`) runs as Codex's own Auto:
+  `approvalPolicy: "on-request"` with `approvalsReviewer: "auto_review"`
+  (maintainer decision, 2026-11-14). Codex's own Auto pairs that with its
+  workspace-write sandbox; here the sandbox is Octant's profile, named
+  external. Under an external sandbox `on-request` runs a command without
+  asking unless Codex flags it as dangerous, and applies an in-root patch
+  without asking (codex-rs `exec_policy.rs`
+  `render_decision_for_unmatched_command_for_platform` and `safety.rs`
+  `assess_patch_safety`, rust-v0.169.0); whatever still prompts goes to the
+  reviewer. So a command runs unasked inside Octant's wall, as it runs
+  unasked inside Codex's own sandbox in Codex's own Auto. When delegation is
+  withdrawn (outside content, capability), the turn runs as Ask first.
+- Not built yet: a command that needs to leave Octant's wall asking for it,
+  as Claude's sandbox escape does. Codex cannot raise that ask under an
+  external sandbox: `exec_policy.rs` prompts for a `require_escalated`
+  command only under a restricted sandbox and allows it unasked under an
+  external one, its sandbox bypass removes only Codex's own sandbox, which is
+  not running, and `orchestrator.rs` never retries a denied command without
+  the sandbox under `on-request` (rust-v0.169.0, unchanged on the main
+  branch read 2026-11-15). Such a command fails at the wall. Carrying the ask
+  needs Codex to escalate under an external sandbox, or a launch where Codex
+  sees a restricted sandbox without starting its own Seatbelt.
+- Ask first (approval-gated without the reviewer) and Accept edits
+  (auto-accept-edits) send `approvalPolicy: "untrusted"`, the strictest mode
+  Codex has, matching the strictest mode elsewhere. Under an external sandbox
+  `on-request` would run every command without asking; `untrusted` asks for
+  each command Codex does not know to be read-only and for every patch. On an
   auto-accept-edits thread the driver answers each file-change request itself,
-  so the person is asked for commands and not for patches. Plan and Chat keep
-  `never`, so a write fails at the profile rather than at a prompt.
-- Ask first stays `untrusted`, the strictest mode Codex has, matching the
-  strictest mode elsewhere. Auto is decided to run `on-request` with Codex's
-  own reviewer, as Codex's own automatic mode does (maintainer decision,
-  2026-11-14); not built yet: Auto still sends `untrusted` with
-  `approvalsReviewer: "auto_review"`, because under the external sandbox
-  Octant names, `on-request` runs every command without asking and so would
-  never reach the reviewer. Building it needs a launch where `on-request`
-  still escalates to the reviewer.
+  so the person is asked for commands and not for patches; one that also
+  carries `autoApprove` still reads as Accept edits, keeps `untrusted`, and
+  hands its prompts to the reviewer. Plan and Chat keep `never`, so a write
+  fails at the profile rather than at a prompt.
 - Full access keeps `danger-full-access` and an unwrapped process.
 - A Plan session runs in Codex's own Plan mode: every `turn/start` carries the
   experimental `collaborationMode` with `mode: "plan"` and settings naming the
@@ -1234,8 +1270,17 @@ cannot approve anything (maintainer decision, 2026-11-14). Refusals come last
 so nothing reopens them: OpenCode's own `.env` refusal (its default agent's
 rules come before Octant's, so the read allow would otherwise lift it), and,
 for `read` and `list`, each entry of Octant's protected-file list in force
-(`openCodeReadRefusals`), a name pattern refused as its whole folder since
-OpenCode's wildcards cannot say a regular expression. Plan also allows
+(`openCodeProtectedReadRefusals`), a name pattern refused as its whole folder
+since OpenCode's wildcards cannot say a regular expression. At Full access
+the secret-path refusals do not apply, as for Octant's own file tools: only
+the Provider sign-ins group stays refused there, on 1.x and 2.x alike, still
+last, and the person's added paths and every other group are readable
+(maintainer decision, 2026-11-15). The host narrows the list
+(`protectedAtLevel`) and passes the driver both lists, below and at Full
+access, as plain paths; the driver only picks one by level and imports no
+host policy. A Full access launch
+runs outside Octant's sandbox, so no OS rule narrows with it; one that kept
+its sandbox keeps the Accept edits wall and its whole OS deny list. Plan also allows
 OpenCode's other read-only tools without asking: `todowrite`, `todoread`,
 `codesearch`, `lsp`, `webfetch`, and `websearch` (maintainer decision,
 2026-11-14). A web read or code search still marks the thread as outside

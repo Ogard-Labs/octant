@@ -1838,8 +1838,8 @@ The setting is **Use <provider>'s own memory** in Settings › Providers, beside
 Run as itself (built for Claude Code and Codex). It is `ownMemory` on the
 provider account: absent is on, `false` is the person's off, and a `true`
 an older record carries reads as on. It is changed only by `set-provider-own-memory` from a local
-window or a paired device (maintainer decision, 2026-11-12; not built yet:
-today a paired device is refused) and journaled as
+window or a device the host's own person paired (maintainer decision,
+2026-11-12) and journaled as
 `provider.instance-own-memory-changed@1`. Run as itself, a trusted Project,
 and Full access never turn it back on once the person turned it off. Before
 this default, turning the setting off left no stored value, so on upgrade
@@ -6691,9 +6691,9 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   | Provider     | With the setup off                                                                                                                                                                            | Rule                                                                                                                                                                                                     | Built                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
   | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
   | Claude Code  | Own subagents off; `WebSearch` and `WebFetch` kept only in Work and Code outside Plan, asking below Full access; Project skills off; no setting sources, so home config and skills never read | All on by default: native subagents, web search and fetch, Project and home skills, home settings and a trusted Project's hooks, MCP servers, and plugins; automatic mode as Reviewed's default reviewer | Reviewed with its own reviewer, in Work and Code; subagents (shown as child runs), web search and fetch, home skills, home settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers, and plugins. The account's own MCP servers, claude.ai connectors, and installed plugins start in every Project at every level but Plan; a Project's `.mcp.json` waits for that Project's trust (maintainer decision, 2026-11-14; [detail](design/provider-runtimes.md#key-providers)). `EnterWorktree`, `ExitWorktree`, and `REPL` are offered outside Plan and take the shell's approval rules. In Work and Code outside Plan, Claude Code's whole built-in tool set less a short withheld list, with any tool Octant has no rule of its own for asking below Full access (the account's claude.ai service tools included) and session-internal tools such as `ToolSearch` and the task tools running unasked, and no cap on tool calls in a turn ([detail](design/provider-runtimes.md#full-built-in-tool-set)); background commands and `Monitor` command watches, which in Code keep running as live tasks after the person's turn completes, each turn the runtime then starts opened as a runtime-started turn, and in Work are held inside the person's turn ([detail](design/provider-runtimes.md#background-commands-and-runtime-started-turns)); `Workflow` with subagents on, its agents shown as child runs under the call and its run held inside the person's turn ([detail](design/provider-runtimes.md#workflows)); `ScheduleWakeup`, `CronCreate`, `CronList`, and `CronDelete`, answered from the thread's Octant-owned wake-ups ([detail](design/provider-runtimes.md#wake-ups-the-model-schedules)); Claude Code's own `EnterPlanMode` and `ExitPlanMode` in Code as level changes the person approves, applied from the next session ([detail](design/provider-runtimes.md#plan-mode-as-level-changes)); an empty Code thread started from a session of the same account and folder begun outside Octant, adopted only by the person, journaled, and marked as carrying outside content ([detail](design/provider-runtimes.md#sessions-started-outside-octant)) |
-  | Codex        | Its own subagents still run, since its app-server has no switch for them; Project skills disabled by path; in Chat every person-added tool server switched off by name                        | Own subagents, Project skills, and the person's tool servers on, Chat included; its own approval review as Reviewed's default reviewer                                                                   | Reviewed with its own reviewer, in Work and Code; with the setup on, Project skills on, the person's tool servers on in Chat, and its own subagents at every level, each shown as a child run with its approvals and app-tool calls answered through the parent's approval path                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+  | Codex        | Own subagents off (the app-server leased with its subagent switches false); Project skills disabled by path; in Chat every person-added tool server switched off by name                      | Own subagents, Project skills, and the person's tool servers on, Chat included; its own approval review as Reviewed's default reviewer                                                                   | Reviewed with its own reviewer, in Work and Code; with the setup on, Project skills on, the person's tool servers on in Chat, and its own subagents at every level, each shown as a child run with its approvals and app-tool calls answered through the parent's approval path; with the account's setup off, its own subagents stay off (the app-server leased with its subagent switches false) unless the thread chose On, the Project trusts Codex, or a Work or Code thread runs at Full access                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
   | Mistral Vibe | Project and home skills off; Project context off. It runs through the ACP bridge either way                                                                                                   | Its own skills, a trusted Project's tools and MCP servers, and its auto-approve mode as Reviewed's default reviewer; first-class with the same promise                                                   | Reviewed with its auto-approve mode, in Work and Code; with the setup on, its skills (registry skills included where the person's configuration opts in), Project context, the account's MCP servers, connectors, and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins, and agents; its own subagents in Work and Code outside Plan, shown as child runs; a subagent's request names no tool (3.0.3 source, read 2026-11-14), so its approval says "A Mistral Vibe subagent asks to run a tool. Vibe doesn't say which." with Allow and Deny under the thread's level; a subagent runs as one of the person's own custom or installed agents at every level there, and may approve its own tools as in Vibe itself; Octant cannot see those calls, so each child run names the agent and says so, and a run as any agent but Vibe's read-only `explore` marks the thread as having read outside content (maintainer decisions, 2026-11-14); its `accept-edits` mode at Accept edits in Work and Code; its questions on 3.0.3 through the shared questionnaire (maintainer decision, 2026-11-14). Stays on the ACP bridge by choice ([why](design/provider-runtimes.md#mistral-vibe-surface))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-  | OpenCode     | Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`. Shell and delegation follow the level in Work as in Code either way                | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on; Reviewed through Octant Shield                                                                     | With the setup on: its skills on, and a remembered 2.x approval answered `always` and saying the grant lives in OpenCode's own store. its delegation followed as child runs, the MCP servers and permission rules in the person's own OpenCode configuration, and a tool the person's rules allow running without a card; Reviewed through Octant Shield at Auto. At every level, Plan included, it reads, finds, searches and lists inside the Project and its extra folders without asking, as Octant's Claude Code file gate allows, with `.env` files and Octant's protected files refused; any other outside folder asks below Full access and is refused in Plan (maintainer decision, 2026-11-14). At Full access it reaches outside folders, and in a trusted Project outside Plan it loads the Project's own `opencode.json(c)` and `.opencode` agents, commands, plugins, and tools as on its own, `OPENCODE_DISABLE_PROJECT_CONFIG` unset, accepting that their rules can override Octant's in that Project ([why](design/provider-runtimes.md#key-providers); maintainer decision, 2026-11-14). In Plan on both runtimes, its other read-only tools (task list, code search, language server, web fetch and search) run without asking, web reads still marking the thread; edits, shell, delegation and outside folders stay denied (maintainer decision, 2026-11-14)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+  | OpenCode     | Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`. Shell and delegation follow the level in Work as in Code either way                | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on; Reviewed through Octant Shield                                                                     | With the setup on: its skills on, and a remembered 2.x approval answered `always` and saying the grant lives in OpenCode's own store. its delegation followed as child runs, the MCP servers and permission rules in the person's own OpenCode configuration, and a tool the person's rules allow running without a card; Reviewed through Octant Shield at Auto. At every level, Plan included, it reads, finds, searches and lists inside the Project and its extra folders without asking, as Octant's Claude Code file gate allows, with `.env` files and Octant's protected files refused (at Full access only the provider sign-ins, as Octant's own file tools; maintainer decision, 2026-11-15); any other outside folder asks below Full access and is refused in Plan (maintainer decision, 2026-11-14). At Full access it reaches outside folders, and in a trusted Project outside Plan it loads the Project's own `opencode.json(c)` and `.opencode` agents, commands, plugins, and tools as on its own, `OPENCODE_DISABLE_PROJECT_CONFIG` unset, accepting that their rules can override Octant's in that Project ([why](design/provider-runtimes.md#key-providers); maintainer decision, 2026-11-14). In Plan on both runtimes, its other read-only tools (task list, code search, language server, web fetch and search) run without asking, web reads still marking the thread; edits, shell, delegation and outside folders stay denied (maintainer decision, 2026-11-14)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
   A turn has an origin. A person's send starts one; a runtime may also
   start one by itself when background work it ran finishes or reports.
@@ -11770,7 +11770,9 @@ that is not yet effective for the thread is refused and never reaches the model.
   confined launch reaches only the Project's skills. No launch sets
   `OPENCODE_DISABLE_CLAUDE_CODE` or `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT`, so
   OpenCode reads `CLAUDE.md` where it finds no `AGENTS.md`, as it does on its
-  own: instruction files are text with no authority (built;
+  own, and running as itself OpenCode 1.x also finds the person's global
+  `AGENTS.md`, linked into its private config folder: instruction files are
+  text with no authority (built;
   [detail](design/provider-runtimes.md#key-providers)). Built for
   Mistral Vibe: the launch leaves `VIBE_SKILL_PATHS` and
   `VIBE_DISABLED_SKILLS` unset, and any of the person's setup also unsets
@@ -13664,12 +13666,12 @@ mechanisms are:
   exception to the wider one. Full access shows a one-time warning the first
   time a machine or a Project picks it.
 
-  | Level                                    | Who approves tool calls                                                                                                | Prompt-injection gate                                       | Sandbox                                                                                                               | Git and pull requests                                                                                      | Default for                                                               |
-  | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-  | Guarded (Ask first)                      | The person, for anything with effects                                                                                  | On: fresh confirmation after reading outside content        | Octant's OS confinement plus the provider's                                                                           | Opens and updates pull requests after asking; merges only when the person asked                            | Ask first in the first-run picker; the fallback where no reviewer can run |
-  | Guarded with edits waived (Accept edits) | The person, except file edits inside the folder                                                                        | On                                                          | Octant's plus the provider's                                                                                          | As Guarded                                                                                                 | Accept edits in the first-run picker                                      |
-  | Reviewed (Auto)                          | A reviewer the person chooses: the provider's own or [Octant Shield](#octant-shield); the person for what it escalates | On                                                          | Octant's plus the provider's                                                                                          | As Guarded, with the reviewer standing in for the person's click                                           | Auto in the first-run picker, pre-selected                                |
-  | Full access                              | Nobody: no prompts, every approval answered allow                                                                      | Off: outside content is recorded and marked, never a prompt | None: no Octant sandbox and no provider sandbox; protected files are guarded by Octant's own tools and redaction only | Opens, updates, merges, and force-pushes the pull requests and branches the person asked for in the thread | Full access in the first-run picker, never pre-selected                   |
+  | Level                                    | Who approves tool calls                                                                                                | Prompt-injection gate                                       | Sandbox                                                                                                                                         | Git and pull requests                                                                                      | Default for                                                               |
+  | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+  | Guarded (Ask first)                      | The person, for anything with effects                                                                                  | On: fresh confirmation after reading outside content        | Octant's OS confinement plus the provider's                                                                                                     | Opens and updates pull requests after asking; merges only when the person asked                            | Ask first in the first-run picker; the fallback where no reviewer can run |
+  | Guarded with edits waived (Accept edits) | The person, except file edits inside the folder                                                                        | On                                                          | Octant's plus the provider's                                                                                                                    | As Guarded                                                                                                 | Accept edits in the first-run picker                                      |
+  | Reviewed (Auto)                          | A reviewer the person chooses: the provider's own or [Octant Shield](#octant-shield); the person for what it escalates | On                                                          | Octant's plus the provider's                                                                                                                    | As Guarded, with the reviewer standing in for the person's click                                           | Auto in the first-run picker, pre-selected                                |
+  | Full access                              | Nobody: no prompts, every approval answered allow                                                                      | Off: outside content is recorded and marked, never a prompt | None: no Octant sandbox and no provider sandbox; protected files are guarded by redaction, and Octant's own tools refuse only provider sign-ins | Opens, updates, merges, and force-pushes the pull requests and branches the person asked for in the thread | Full access in the first-run picker, never pre-selected                   |
   - **Full access means no sandbox and no prompts,** as in the providers'
     own apps (maintainer decision, 2026-10-31). Per runtime: Claude Code
     runs `permissionMode: "bypassPermissions"`; Codex runs
@@ -13869,12 +13871,24 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     decision, 2026-10-31: "softer guard — full access is full access").
     No runtime or command runs under an OS wall at this level, and a shell
     command can read a protected file. The [secret guard](#secret-guard) is
-    soft there: Octant's own file tools (the Octant Harness's and the ACP
-    client's host-side file operations) still refuse a protected path with
-    the same plain message. Claude Code's own file tools are Claude's, not
-    Octant's: at Full access its gate allows any path, outside the Project's
-    folders and protected files included, as Claude Code does on its own
-    (maintainer decision, 2026-11-14). Below Full access it keeps every
+    soft there. Claude Code's own file tools are Claude's, not Octant's: at
+    Full access its gate allows any path, outside the Project's folders and
+    protected files included, as Claude Code does on its own (maintainer
+    decision, 2026-11-14). Octant's own file tools (the Octant Harness's and
+    the ACP client's host-side file operations) follow the same rule
+    (maintainer decision, 2026-11-15): at Full access they read and write a
+    protected path, and refuse only the protected provider-account
+    credentials, the Provider sign-ins group (each provider's stored sign-in
+    and Octant's managed account homes), with the same plain message, as the
+    account's sign-in stays out of the instruction files Octant reads for
+    Claude at every level. Below Full access they refuse every protected path.
+    OpenCode's own file tools are held to the same narrowing: at Full access
+    its read and list refusals, on 1.x and 2.x, name only the Provider
+    sign-ins group ([detail](design/provider-runtimes.md#key-providers)).
+    A server Project's file tools follow it too: the list they match on the
+    server in a shell script, and again on this host, names only that group
+    at Full access ([detail](design/server-projects.md#threads)). Below Full
+    access it keeps every
     secret-path refusal, and a path outside the Project's folders asks
     through the gate (Reviewed's reviewer decides it) rather than being
     refused; Plan refuses it (maintainer decision, 2026-11-14;
@@ -13891,13 +13905,13 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     and export. It never prompts and never blocks
     ([Octant Shield's Watcher](#octant-shield) does this tagging).
   - **The one-time warning** reads: agents can change any file and run any
-    command without asking, with no sandbox. Protected files, such as SSH and
-    cloud keys, are guarded by Octant's own tools and redaction only, and a
-    shell command can read them.
+    command without asking, with no sandbox, and can read protected files such
+    as SSH and cloud keys. Secret values are redacted from what Octant records.
   - **Every level keeps the hard lines** in
     [Overview and principles](#overview-and-principles): no telemetry and the
     provider telemetry guards, the journal of every tool call and level
-    change, the secret guard's refusal in Octant's own file tools and its redaction in tool
+    change, the secret guard's refusal of provider sign-ins in Octant's own
+    file tools and its redaction in tool
     output, transcripts, logs, the journal, and exports, spend
     ceilings, remote clients never exceeding the host, an agent never
     marking a thread Done, credentials reaching providers only through the
@@ -14116,13 +14130,13 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   top to bottom, are Guarded (Ask first, Accept edits), Reviewed
   (Auto), and Full access; Plan is a read-only overlay:
 
-  | Mode         | Stored posture                   | Level              | Claude Code                                             | Codex                                                              |
-  | ------------ | -------------------------------- | ------------------ | ------------------------------------------------------- | ------------------------------------------------------------------ |
-  | Auto         | `approval-gated` + `autoApprove` | Reviewed           | `permissionMode: "auto"`, its sandbox                   | `untrusted` + external sandbox, `approvalsReviewer: "auto_review"` |
-  | Ask first    | `approval-gated`                 | Guarded            | `default`, its sandbox; Octant's gate decides each call | `untrusted` + external sandbox, reviewer `user`                    |
-  | Accept edits | `auto-accept-edits`              | Guarded            | `default`, its sandbox; in-root edits waived            | `untrusted` + external sandbox, in-root patch edits accepted       |
-  | Plan         | `plan`                           | Guarded, read-only | `plan`                                                  | `read-only` + `never`                                              |
-  | Full access  | `full-access`                    | Full access        | `bypassPermissions`, no sandbox                         | `danger-full-access` + `never`                                     |
+  | Mode         | Stored posture                   | Level              | Claude Code                                             | Codex                                                               |
+  | ------------ | -------------------------------- | ------------------ | ------------------------------------------------------- | ------------------------------------------------------------------- |
+  | Auto         | `approval-gated` + `autoApprove` | Reviewed           | `permissionMode: "auto"`, its sandbox                   | `on-request` + external sandbox, `approvalsReviewer: "auto_review"` |
+  | Ask first    | `approval-gated`                 | Guarded            | `default`, its sandbox; Octant's gate decides each call | `untrusted` + external sandbox, reviewer `user`                     |
+  | Accept edits | `auto-accept-edits`              | Guarded            | `default`, its sandbox; in-root edits waived            | `untrusted` + external sandbox, in-root patch edits accepted        |
+  | Plan         | `plan`                           | Guarded, read-only | `plan`                                                  | `read-only` + `never`                                               |
+  | Full access  | `full-access`                    | Full access        | `bypassPermissions`, no sandbox                         | `danger-full-access` + `never`                                      |
 
   Option names were read from the installed Agent SDK (0.3.211
   `PermissionMode`) and the Codex app-server schema (codex-cli 0.164.0
@@ -14141,8 +14155,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   and the Octant harness launch outside Octant's OS sandbox with the network
   open, and Octant answers every approval allow; an ACP agent also launches
   unconfined with no sandbox denials, because Full access means what it means
-  in the provider's own app; Octant's own file tools still refuse protected
-  paths. No call asks at Full access in Code, irreversible actions and
+  in the provider's own app; Octant's own file tools read protected paths
+  there and still refuse provider sign-ins. No call asks at Full access in Code, irreversible actions and
   publish-to-target included (`resolveToolCall`): the agent pushes, merges or
   publishes because the person asked in the thread, and the journal records
   the call. Outside content is recorded only: the thread keeps its taint for
@@ -14725,10 +14739,13 @@ approval-gated` command that undoes it. The terminal shows no one-time
   resident and starts under the profile in 130 to 260 ms. macOS refuses a
   Seatbelt profile inside another (`sandbox_apply: Operation not permitted`),
   so Codex's own sandbox cannot run inside Octant's. Each turn tells Codex the
-  sandbox is external (`externalSandbox`, network `restricted`), and both
-  prompting postures run `untrusted`, because under an external sandbox
-  `on-request` runs every command without asking (Auto running `on-request`
-  with Codex's reviewer is decided and not built yet; see
+  sandbox is external (`externalSandbox`, network `restricted`). Under an
+  external sandbox `on-request` runs every command Codex does not flag as
+  dangerous without asking, so Auto runs `on-request` with Codex's reviewer,
+  as Codex's own Auto does, and its commands run unasked inside Octant's
+  wall; Ask first and Accept edits run `untrusted` and keep asking. Codex
+  cannot ask to leave Octant's wall under an external sandbox, so a command
+  that needs to fails there (not built yet: carrying that ask; see
   [Provider runtimes: Codex](design/provider-runtimes.md#codex)). Approving a command no
   longer lifts any sandbox: it runs inside Octant's profile. Under that
   profile a Codex command cannot read `HOME` outside the root and the account
@@ -15832,18 +15849,27 @@ approval-gated` command that undoes it. The terminal shows no one-time
   connected client, so the child asks exactly where the parent would and
   the request reaches Octant. A request sent while no connection of the
   owner's is listening waits until Codex closes that agent; it is never
-  approved. Built for
+  approved. With the account's setup off, the resolved setup has subagents
+  off unless the thread chose On, the Work or Code Project trusts Codex, or
+  a Work or Code thread runs at Full access, and a thread's Off turns them
+  off everywhere; there the app-server is leased with those switches set
+  false, so Codex's own subagents never start. Built for
   OpenCode: each session its `task` tool delegates to is shown as a child run,
   and a permission or question request from it reaches the person through the
   parent's own approval path and is answered in the child's session; its web
-  reads mark the thread. Built for Mistral Vibe at Full access in Work and
-  Code only, with the person's setup on: below that `VIBE_ENABLE_SUBAGENTS`
-  stays `false`, and a call whose `_meta.child_session_id` names a child is
-  shown as a child run. Rationale, read from the 3.0.3 source: Vibe offers
-  subagents by default and forwards a child's permission request to the
+  reads mark the thread. Built for Mistral Vibe in Work and Code outside
+  Plan, at every level there, with the person's setup on: the launch unsets
+  `VIBE_ENABLE_SUBAGENTS`, and with it `VIBE_AGENT_PATHS`,
+  `VIBE_INSTALLED_AGENTS`, and `VIBE_ENABLED_AGENTS`, so a subagent may run
+  as one of the person's own custom or installed agents; Plan and Chat keep
+  `VIBE_ENABLE_SUBAGENTS` `false` and the agent allowlist. A call whose
+  `_meta.child_session_id` names a child is shown as a child run. Read from
+  the 3.0.3 source: Vibe forwards a child's permission request to the
   parent's `session/request_permission` naming only the child's own history
-  entry, which the parent's updates never announced, so Octant could
-  neither show what it asks nor apply a tool kind's rule.
+  entry, which the parent's updates never announced, so the approval says
+  Vibe names no tool and the thread's level decides it, and a custom agent
+  may approve its own tools as in Vibe itself (maintainer decisions,
+  2026-11-14; [detail](design/provider-runtimes.md#key-providers)).
 - **Canvas design images.** A design frame never loads anything itself. The
   server resolves the images a design declares on every read, through the
   authorized Canvas read and under the version's mode, Project, and thread: a
@@ -17843,12 +17869,15 @@ cards; general Azure CLI credentials remain unavailable by design.
     every redirect instead of giving a command a credential lease.
 - **A refused read names its rule and channel.** Octant's own file tools
   (the Octant Harness's read, write, edit, and grep; the ACP client's file
-  read and write) answer a protected path at every level, Full access
-  included, and Claude Code's file tools, through Octant's tool gate, at
-  every level below Full access (at Full access Claude reads and writes any
-  file, as it does on its own; maintainer decision, 2026-11-14), with the
-  group, the path, and the channel to use instead (`protectedFileRefusal`). The Octant Harness's
-  search across a folder skips protected files without opening them.
+  read and write) and Claude Code's file tools, through Octant's tool gate,
+  answer a protected path at every level below Full access, with the group,
+  the path, and the channel to use instead (`protectedFileRefusal`). At Full
+  access Claude reads and writes any file, as it does on its own (maintainer
+  decision, 2026-11-14), and Octant's own file tools read and write any
+  protected path except a provider sign-in, which they refuse the same way
+  at every level (`secretGuardRefusal` with `fullAccess`; maintainer
+  decision, 2026-11-15). The Octant Harness's search across a folder skips
+  the files it would refuse without opening them.
   Claude Code's Grep, Glob, and LS take no exclusion and, at the postures
   where the runtime runs outside Octant's profile below Full access
   (approval-gated and auto-accept-edits), run in its unwrapped process, so a search rooted at or
@@ -17933,8 +17962,9 @@ cards; general Azure CLI credentials remain unavailable by design.
   for an SSH remote. Not measured: a push over SSH or HTTPS to a real server,
   a real publish, and a container pull.
 - **Known gaps.** At Full access a shell command, or any program the agent
-  starts, can read a protected file: only Octant's own file tools and
-  redaction stand in the way, by decision. On Linux a protected file absent
+  starts, can read a protected file, and so can Octant's own file tools,
+  which refuse only provider sign-ins there: redaction stands in the way, by
+  decision. On Linux a protected file absent
   when a confined runtime starts is not covered, because Bubblewrap would
   have to create a placeholder in the person's home folder first; a file
   created mid-session is covered from the next launch. Below Full access

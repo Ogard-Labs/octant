@@ -86,7 +86,7 @@ describe("Run a key provider as itself", () => {
     );
   });
 
-  it("says Mistral Vibe's subagent approvals name no tool, and says it only for Vibe", () => {
+  it("says where Mistral Vibe's subagents run and that their approvals name no tool, only for Vibe", () => {
     const vibe = { ...codex, displayName: "Vibe", driverKind: "mistral-vibe" } as const;
     const { unmount } = render(
       <ProviderNativeSetupSetting
@@ -97,6 +97,9 @@ describe("Run a key provider as itself", () => {
     );
     expect(screen.getByRole("switch", { name: "Run Vibe as itself" })).toHaveAccessibleDescription(
       /Vibe doesn’t say which tool its subagents ask to run/,
+    );
+    expect(screen.getByRole("switch", { name: "Run Vibe as itself" })).toHaveAccessibleDescription(
+      /work in Work and Code outside Plan, at every level there/,
     );
     expect(
       screen.getByRole("switch", { name: "Run Vibe as itself" }),

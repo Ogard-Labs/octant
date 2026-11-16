@@ -818,15 +818,42 @@ export function codexExecutionSettings(
       approvalsReviewer: "user",
     };
   }
+  if (policy === "approval-gated" && autoApprove === true) {
+    // Auto runs as Codex's own Auto does: `on-request` with Codex's reviewer.
+    // Codex's own Auto pairs that with its workspace-write sandbox; here the
+    // sandbox is Octant's profile, named to Codex as external, because macOS
+    // refuses a second Seatbelt inside the first (see below). Under an
+    // external sandbox `on-request` runs a command without asking unless
+    // Codex flags it as dangerous (codex-rs `exec_policy.rs`,
+    // `render_decision_for_unmatched_command_for_platform`, rust-v0.169.0),
+    // and applies an in-root patch without asking (`safety.rs`,
+    // `assess_patch_safety`); whatever still prompts goes to the reviewer. So
+    // a command runs unasked inside Octant's wall, as it runs unasked inside
+    // Codex's own sandbox in Codex's own Auto (maintainer decision,
+    // 2026-11-14).
+    //
+    // Codex raises no escalation here: the same function asks for a
+    // `require_escalated` command only under a restricted sandbox and allows
+    // it unasked under an external one, its bypass removes only Codex's own
+    // sandbox, which is not running, and `orchestrator.rs` never retries a
+    // denied command unsandboxed under `on-request`. A command that needs to
+    // leave Octant's wall fails at the wall instead of asking; carrying that
+    // ask is not built yet.
+    //
+    // Delegation is clamped off by taint and capability before it reaches
+    // here (`harnessAutoReviewEffective`), so a withdrawn reviewer falls
+    // through to Ask first's `untrusted` below.
+    return { approvalPolicy: "on-request", sandbox: "read-only", approvalsReviewer: "auto_review" };
+  }
   if (policy === "approval-gated" || policy === "auto-accept-edits") {
-    // Every posture below Full access runs inside Octant's profile, and macOS
+    // Ask first and Accept edits run inside Octant's profile, and macOS
     // refuses a second Seatbelt inside the first (`sandbox_apply: Operation not
     // permitted`, measured on macOS 27.0.1), so each turn tells Codex the
     // sandbox is external (`codexTurnExecutionSettings`). Under an external
     // sandbox `on-request` runs every command without asking (codex-rs
     // `exec_policy.rs`, rust-v0.164.0), which would waive the `shell-commands`
-    // class the sandbox rules keep independent and the edit waiver keeps prompting under both of these
-    // postures. `untrusted` asks for every command Codex does not itself know
+    // class the sandbox rules keep independent and the edit waiver keeps
+    // prompting under both of these postures. `untrusted` asks for every command Codex does not itself know
     // to be read-only, and for every patch: a patch edit arrives as
     // `file-change` (auto-accept edits answers those itself) and a command as
     // `command`, which neither posture waives. What a command may touch once
@@ -836,11 +863,14 @@ export function codexExecutionSettings(
     // `commandActions` as `unknown` for a plain `> file` redirect, so "this
     // command only writes in-root" is not something either side can prove.
     //
-    // The reviewer answers both prompting postures (maintainer decision,
-    // 2026-10-31, ending the approval-gated-only exception). Codex's reviewer
-    // is thread-wide, so on auto-accept-edits it also answers the escalation
-    // an in-root patch edit raises, and may deny one: the person asked for
-    // its review there. `user` is sent rather than nothing whenever
+    // Auto is `approval-gated` with `autoApprove` (`threadAccessOf`). A
+    // posture that carries `auto-accept-edits` with `autoApprove` still reads
+    // as Accept edits (`permissionModeOf`), so it keeps Accept edits'
+    // `untrusted` and only hands its prompts to the reviewer (maintainer
+    // decision, 2026-10-31, ending the approval-gated-only exception). Codex's
+    // reviewer is thread-wide, so there it also answers the escalation an
+    // in-root patch edit raises, and may deny one: the person asked for its
+    // review there. `user` is sent rather than nothing whenever
     // delegation is off: omitting the field leaves a thread that once
     // delegated still routing to the reviewer after taint, after the user
     // turns it off, or on a resume under this posture.
@@ -871,8 +901,11 @@ export function codexTurnExecutionSettings(
 ): Pick<CodexTurnStartInput, "approvalPolicy" | "sandboxPolicy" | "approvalsReviewer"> {
   const { sandbox, ...rest } = codexExecutionSettings(policy, autoApprove, fullAccessSandbox);
   // Below Full access the process already runs in Octant's profile, which is
-  // the boundary; Codex's own Seatbelt cannot start inside it. A sandboxed
-  // Full access thread takes the same external sandbox, with `never`. The
+  // the boundary; Codex's own Seatbelt cannot start inside it. Auto's
+  // `on-request` is what makes Codex run commands unasked inside it, and Ask
+  // first's and Accept edits' `untrusted` is what keeps them asking. A
+  // sandboxed Full access thread takes the same external sandbox, with
+  // `never`. The
   // network claim follows the launch: `enabled` when the process launched
   // without Octant's egress proxy (Network limits off, the default), so
   // Codex tells the model what it really has; `restricted` behind the proxy.

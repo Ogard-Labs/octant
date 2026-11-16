@@ -11,7 +11,10 @@ import { decodeBindingRevisionId, type BindingRevisionId } from "@octant/contrac
 import type { ServerProject } from "@octant/contracts/server-projects";
 import type { WindowId } from "@octant/contracts/shell";
 import type { CodeCheckoutObservationPort } from "../code/codeService";
-import type { NativeHarnessComposition } from "../harness/nativeHarnessComposition";
+import type {
+  NativeHarnessComposition,
+  ServerFileTools,
+} from "../harness/nativeHarnessComposition";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { ServerConnection } from "./serverConnection";
 import { ServerFileSystem } from "./serverFiles";
@@ -253,11 +256,13 @@ export function bindServerCodeTurn(
     const now = options.store.addressOf(projectId);
     return now.kind === "address" ? now.server : undefined;
   };
-  const filesystem = new ServerFileSystem({
-    connection: options.connection,
-    server: address,
-    root: place.folder,
-  });
+  const filesystem: ServerFileTools = ({ fullAccess }) =>
+    new ServerFileSystem({
+      connection: options.connection,
+      server: address,
+      root: place.folder,
+      fullAccess,
+    });
   const shell = createServerShell({
     connection: options.connection,
     server: () => {
