@@ -24,7 +24,7 @@ import {
   WorkThreadTranscript,
   decodeHostAnswer,
 } from "@octant/contracts";
-import { threadAccessOf, workAccessOfPermissionMode } from "@octant/domain";
+import { threadAccessOf, workThreadAccessOfMode } from "@octant/domain";
 import {
   answerAgentTurnQuestion,
   changeAgentModel,
@@ -739,16 +739,9 @@ export async function createAgentThread(
   });
   if (projectOpened.kind === "refused") return projectOpened;
   if (mode === "work") {
-    // Checked before anything is created, so a refused request leaves no
-    // thread behind.
+    // A Work thread takes every level a Code thread does, Plan included.
     const workAccess =
-      input.access === undefined ? undefined : workAccessOfPermissionMode(input.access);
-    if (input.access !== undefined && workAccess === undefined) {
-      return {
-        kind: "refused",
-        message: "--access plan is not a Work mode; Work has no Plan overlay.",
-      };
-    }
+      input.access === undefined ? undefined : workThreadAccessOfMode(input.access);
     const threadId = randomUUID();
     const response = await session.send({
       path: "/api/work/threads/commands",

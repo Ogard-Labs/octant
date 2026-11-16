@@ -2661,6 +2661,18 @@ export class WorkTurnService {
     });
   }
 
+  /**
+   * Ends the thread's running turn after the person approved its agent's ask
+   * to plan first or to leave Plan, as Code does: Plan's read-only rule rests
+   * on the tool set and sandbox profile a session launches with, so the new
+   * level applies from the next turn and never inside the one that asked.
+   * The turn is recorded as stopped, keeping the reply it gave.
+   */
+  endTurnForLevelChange(threadId: WorkThreadId): void {
+    const running = this.#runningAccess.get(String(threadId));
+    if (running !== undefined) this.#controllers.get(running.requestId)?.abort();
+  }
+
   /** The access the thread's running turn holds; undefined when none runs. */
   runningTurnAccess(threadId: string): WorkAccess | undefined {
     return this.#runningAccess.get(threadId)?.access;

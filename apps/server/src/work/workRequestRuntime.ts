@@ -3,6 +3,9 @@ import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecove
 import {
   decodeWorkRequestId,
   decodeWorkRequestRecordInput,
+  type ProviderLevelChangeRequest,
+  type WorkLevelChangeRequest,
+  type WorkThread,
   type WorkThreadId,
   type Questionnaire,
   type ProjectId,
@@ -13,6 +16,8 @@ import {
   type ShieldDecision,
 } from "@octant/contracts";
 import { shieldCallFromProviderRequest } from "@octant/domain/shield-judge-policy";
+import { workLevelChangeTarget } from "@octant/domain/guardrail-policy";
+import { redactHostSecrets } from "../process/secretRedaction";
 import type {
   ProviderConnection,
   ProviderDriver,
@@ -31,9 +36,18 @@ export interface WorkRequestRuntimeOptions {
   readonly requests: Pick<WorkRequestService, "record" | "interruptSession">;
   readonly uuid: () => string;
   /**
+   * The thread's level now, read when the agent asks to leave Plan so the
+   * card names the level the thread would return to. Absent reads as Ask
+   * first; the level the approval sets is worked out again when it is answered.
+   */
+  readonly readThread?: (
+    threadId: WorkThreadId,
+  ) => Pick<WorkThread, "access" | "planReturnAccess"> | undefined;
+  /**
    * Octant Shield, read when a provider asks for approval: it answers a Work
    * thread's prompts at Auto as it answers a Code thread's, whatever the
-   * runtime. Absent, or answering nothing, every prompt goes to the person.
+   * runtime, except a level change, which always goes to the person. Absent,
+   * or answering nothing, every prompt goes to the person.
    */
   readonly shield?: () => ShieldReviewPort | undefined;
 }
@@ -67,6 +81,7 @@ export class WorkRequestRuntime {
   readonly #requests: Pick<WorkRequestService, "record" | "interruptSession">;
   readonly #uuid: () => string;
   readonly #shield: (() => ShieldReviewPort | undefined) | undefined;
+  readonly #readThread: WorkRequestRuntimeOptions["readThread"];
   readonly #connections = new Map<string, RequestConnection>();
   readonly #ownerRequests = new Map<
     string,
@@ -77,6 +92,7 @@ export class WorkRequestRuntime {
     this.#requests = options.requests;
     this.#uuid = options.uuid;
     this.#shield = options.shield;
+    this.#readThread = options.readThread;
   }
 
   subscribe(input: WorkRequestSubscriptionInput): Effect.Effect<void, unknown> {
@@ -149,6 +165,9 @@ export class WorkRequestRuntime {
       connection === undefined ||
       input.projectRoot === undefined ||
       event.kind !== "approval-request" ||
+      // A level change is the person's to answer: Shield, like a provider's
+      // own reviewer, never moves a thread into or out of Plan.
+      event.levelChange !== undefined ||
       event.sessionId !== input.sessionId
     ) {
       return Effect.succeed(false);
@@ -362,6 +381,14 @@ export class WorkRequestRuntime {
                 kind: "approval",
                 action: sanitizeRequestText(event.action, "Approval requested"),
                 description: sanitizeRequestText(event.description, "Provider approval required"),
+                ...(event.levelChange === undefined
+                  ? {}
+                  : {
+                      levelChange: workLevelChangeRequest(
+                        event.levelChange,
+                        this.#readThread?.(input.threadId),
+                      ),
+                    }),
               }
             : {
                 kind: "user-input",
@@ -514,6 +541,31 @@ export function sanitizeRequestText(value: string, fallback: string): string {
     .replace(/\s+/g, " ")
     .trim();
   return (withoutPathOrUrl.length === 0 ? fallback : withoutPathOrUrl).slice(0, 2_000).trim();
+}
+
+/**
+ * The card's level change: Plan for an ask to plan first, else the guarded
+ * level the thread would return to, with the plan whole (secrets redacted,
+ * stray control characters dropped) since the person approves exactly it.
+ */
+function workLevelChangeRequest(
+  asked: ProviderLevelChangeRequest,
+  thread: Pick<WorkThread, "access" | "planReturnAccess"> | undefined,
+): WorkLevelChangeRequest {
+  if (asked.kind === "enter-plan") return { to: "plan" };
+  const to = workLevelChangeTarget(thread ?? { access: "plan" }, "exit-plan").to;
+  const plan = Array.from(redactHostSecrets(asked.plan ?? ""), (character) =>
+    isPlanLayoutOrPrintable(character) ? character : " ",
+  )
+    .join("")
+    .trim();
+  return plan.length === 0 ? { to } : { to, plan };
+}
+
+// Tabs and line breaks lay a plan out; every other control character is dropped.
+function isPlanLayoutOrPrintable(character: string): boolean {
+  const code = character.codePointAt(0) ?? 0;
+  return (code >= 0x20 && code !== 0x7f) || code === 0x09 || code === 0x0a || code === 0x0d;
 }
 
 function requestOptions(options: ReadonlyArray<{ readonly label: string }>): {

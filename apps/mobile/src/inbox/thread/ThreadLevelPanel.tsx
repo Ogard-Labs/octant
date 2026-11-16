@@ -136,7 +136,7 @@ export function ThreadLevelPanel(props: ThreadLevelPanelProps) {
   const { subject, transport } = props;
   return (
     <LevelChoices
-      choices={mobileThreadLevelChoices(subject.mode)}
+      choices={mobileThreadLevelChoices()}
       current={mobileThreadLevel(subject)}
       hostId={transport.hostId}
       onChanged={props.onChanged}
