@@ -1729,7 +1729,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         isRuntimeStartedTurn: (operationId) => runtimeStartedCodeTurns.delete(operationId),
         resolveProviderNativeSetup: (thread) =>
           sessionNativeSetup(
-            { ...persistence, readProviderCliTrust: providerCliProjectTrust },
+            {
+              ...persistence,
+              readProviderCliTrust: providerCliProjectTrust,
+              readStrict: (threadId) => resolveThreadStrict(threadId),
+            },
             {
               providerInstanceId: thread.providerInstanceId,
               projectId: thread.projectId,

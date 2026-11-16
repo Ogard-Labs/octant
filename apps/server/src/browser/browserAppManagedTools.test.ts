@@ -2334,7 +2334,7 @@ describe("a Work thread's bounded page script", () => {
       readonly approvals?: Record<string, unknown>;
       readonly profileCaller?: "terminal-grant";
       readonly mode?: "work" | "chat";
-      readonly oneUsePermission?: boolean;
+      readonly strict?: boolean;
       readonly approvedPage?: boolean;
     } = {},
   ) {
@@ -2377,7 +2377,7 @@ describe("a Work thread's bounded page script", () => {
         : {
             pageScript: {
               level: overrides.level ?? (() => "full-access" as const),
-              oneUsePermission: () => overrides.oneUsePermission ?? true,
+              strict: () => overrides.strict ?? false,
               run,
             },
           }),
@@ -2450,8 +2450,8 @@ describe("a Work thread's bounded page script", () => {
       "browser-approval-required",
     ],
     [
-      "below Full access where the one-use permission is withheld",
-      { level: () => "approval-gated" as const, approvedPage: true, oneUsePermission: false },
+      "below Full access under Strict, without asking the one-use permission",
+      { level: () => "approval-gated" as const, approvedPage: true, strict: true },
       "script-needs-full-access",
     ],
     [

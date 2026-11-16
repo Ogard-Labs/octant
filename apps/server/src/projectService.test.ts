@@ -1432,6 +1432,40 @@ describe("ProjectService", () => {
     });
   });
 
+  it("refuses the home folder under Strict without a warning, confirmed or not, and adds a folder inside it", async () => {
+    let seed = 30;
+    const receipts = new BindingReceiptStore(() => Buffer.alloc(32, seed++));
+    const fixture = fixtureService({
+      projects: [workProject()],
+      receipts,
+      nowMs: 1,
+      homeDirectory: "/Users/example",
+      strict: true,
+    });
+    const send = (canonicalRoot: string, confirm: boolean) =>
+      fixture.service.executeProject(windowId, {
+        kind: "add-project-extra-folder",
+        projectId: workId,
+        expectedVersion: 1,
+        receiptId: receipts.issue({
+          windowId,
+          projectType: "work",
+          canonicalBinding: { canonicalRoot },
+          now: 0,
+        }).receiptId,
+        ...(confirm ? { confirmHomeFolder: true as const } : {}),
+      });
+    for (const confirm of [false, true]) {
+      await expect(send("/Users/example", confirm)).rejects.toMatchObject({
+        failure: { category: "invalid", message: expect.stringMatching(/Strict/) },
+      });
+    }
+    expect(fixture.append).not.toHaveBeenCalled();
+    await expect(send("/Users/example/Notes", false)).resolves.toMatchObject({
+      kind: "project-extra-folder-added",
+    });
+  });
+
   it("refuses an extra folder that overlaps the main folder or names a secret folder", async () => {
     for (const canonicalRoot of ["/canonical/work/docs", "/canonical", "/Users/example/.ssh"]) {
       const receipts = new BindingReceiptStore(() => Buffer.alloc(32, 4));
@@ -2168,6 +2202,7 @@ function fixtureService(
     ) => Promise<void>;
     offeredDesktopProviders?: () => ReadonlyArray<LeasableDesktopProvider>;
     homeDirectory?: string;
+    strict?: boolean;
   } = {},
 ) {
   const projects = [...(options.projects ?? [])];
@@ -2263,6 +2298,7 @@ function fixtureService(
       ...(options.homeDirectory === undefined
         ? {}
         : { homeDirectory: () => options.homeDirectory ?? "" }),
+      resolveProjectStrict: () => options.strict ?? false,
     }),
   };
 }

@@ -2953,14 +2953,20 @@ export class WorkTurnService {
         strict: this.#resolveStrict?.(String(input.command.threadId)) ?? true,
         ...(artifactToolName === undefined ? {} : { nativeArtifacts: true }),
         ...nativeSetupOption(
-          sessionNativeSetup(this.#persistence, {
-            providerInstanceId: input.command.authority.providerInstanceId,
-            projectId: input.command.authority.projectId,
-            threadId: String(input.command.threadId),
-            mode: "work",
-            executionPolicy:
-              input.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
-          }),
+          sessionNativeSetup(
+            {
+              ...this.#persistence,
+              readStrict: (threadId) => this.#resolveStrict?.(threadId) ?? true,
+            },
+            {
+              providerInstanceId: input.command.authority.providerInstanceId,
+              projectId: input.command.authority.projectId,
+              threadId: String(input.command.threadId),
+              mode: "work",
+              executionPolicy:
+                input.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
+            },
+          ),
         ),
         ...wakeupsOption(this.#wakeupsForThread?.(String(input.command.threadId))),
         ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),

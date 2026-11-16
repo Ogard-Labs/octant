@@ -174,6 +174,8 @@ async function host(
     readonly handlers?: Readonly<Record<string, FixtureDriverHandler>>;
     /** Start drivers through the host's process owner, each crashing as it starts. */
     readonly crashingDriver?: boolean;
+    /** The host's Strict, read at each admission; off unless a test turns it on. */
+    readonly strict?: () => boolean;
   } = {},
 ) {
   const dataDirectory = await mkdtemp(join(tmpdir(), "octant-outside-admission-"));
@@ -281,6 +283,7 @@ async function host(
     runtimeRegistry: registry,
     limits: { callTimeoutMs: 2_000, sendTimeoutMs: 2_000 },
     clock: () => now,
+    strict: options.strict ?? (() => false),
   });
   stopPackage = (extensionId) => admission.stopPackage(extensionId);
   const providers = new ProviderService({
@@ -913,6 +916,25 @@ describe("outside driver admission end to end", () => {
         (instance) => instance.driverKind === "outside-harness-endpoint",
       ),
     ).toBe(true);
+  });
+
+  it("keeps a Linux driver host-prohibited under Strict, and refuses a driver already running once Strict turns on", async () => {
+    let strict = true;
+    const context = await host({ platform: "linux", strict: () => strict });
+    const entry = await context.install();
+    await context.admit(entry.extensionId);
+    expect((await context.providers.bootstrap(windowId)).outsideDrivers).toBeUndefined();
+    await expect(context.addProvider(entry)).rejects.toThrow(/not available/);
+
+    strict = false;
+    await context.addProvider(entry);
+    await context.turnOn();
+    await context.providers.probe(windowId, instanceId);
+    expect(context.starts).toHaveLength(1);
+
+    strict = true;
+    await expect(context.providers.probe(windowId, instanceId)).rejects.toThrow(/not available/);
+    expect(context.starts).toHaveLength(1);
   });
 
   it("admits nothing on a host that runs no driver", async () => {

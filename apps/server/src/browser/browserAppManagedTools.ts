@@ -193,12 +193,13 @@ export interface BrowserAppManagedToolsOptions {
    * level the thread holds now (undefined once it differs from the level this
    * turn began with). Chat has no Full access, and terminal, routine and
    * delegated-child tools are lent none, so `run-script` is refused there.
-   * `oneUsePermission` says whether Work below Full access may ask the
-   * person's one-use script permission, as Code does; Strict keeps it off.
+   * Outside Strict, Work below Full access asks the person's one-use script
+   * permission, as Code does; `strict` is the thread's Strict, read at the
+   * call, and under it Work below Full access is refused as before.
    */
   readonly pageScript?: {
     readonly level: () => ProviderExecutionPolicy | undefined;
-    readonly oneUsePermission: () => boolean;
+    readonly strict: () => boolean;
     readonly run: (input: BrowserPageScriptInput) => Promise<BrowserPageScriptReceipt>;
   };
   readonly approvals?: Pick<BrowserToolApprovalService, "request"> &
@@ -298,9 +299,9 @@ export function createBrowserAppManagedTools(
       if (level === undefined) return failure("browser-authority-stale");
       if (level === "plan") return failure("plan-mode-read-only");
       // Below Full access Work asks Code's one-use permission for this exact
-      // source; Strict will keep Work refused there (`oneUsePermission`).
+      // source; Strict keeps Work refused there, as before the lift.
       const scoped = level !== "full-access";
-      if (scoped && !script.oneUsePermission()) return failure("script-needs-full-access");
+      if (scoped && script.strict()) return failure("script-needs-full-access");
       if (!modelIsCurrent(options)) return failure("browser-model-stale");
       const opened = options.browser.inspectThread(options.windowId, options.threadId);
       if (opened.waitingForPerson !== undefined) {

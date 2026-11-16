@@ -176,6 +176,9 @@ export interface OutsideDriverActivationTarget {
  * still select the exact version and digest the instance was added with; any
  * other selection is `superseded`, so trust and Verify tools records never
  * carry over to code the person did not add the provider from.
+ *
+ * Running a driver without confinement on Linux is a lift Octant made; under
+ * the host's Strict the driver is `host-prohibited` there, as before it.
  */
 export function resolveOutsideDriverActivation(input: {
   readonly platform: string;
@@ -183,8 +186,11 @@ export function resolveOutsideDriverActivation(input: {
   /** The host's own verdict on the package's app range and platforms. */
   readonly compatible: boolean;
   readonly driver: OutsideDriverActivationTarget;
+  /** The host's Strict: a driver this host would run unconfined is refused. */
+  readonly strict?: boolean;
 }): ExtensionEffectiveState {
-  if (outsideDriverHostLaunch(input.platform) === "prohibited") {
+  const launch = outsideDriverHostLaunch(input.platform);
+  if (launch === "prohibited" || (launch === "unconfined" && input.strict === true)) {
     return { kind: "blocked", reason: "host-prohibited" };
   }
   const packageState = input.packageState;
