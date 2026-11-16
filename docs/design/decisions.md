@@ -430,6 +430,7 @@ With an account's Claude artifacts switch on, Claude's `Artifact` tool works as 
 - The account switch alone decides the offer in Work and Code; the thread's Canvas or artifacts choice only points Octant's delivery instructions. Chat and Plan offer the read-only actions and refuse publishing.
 - With several Claude accounts, each is its own provider instance with its own sign-in, configuration folder and switch; a thread's calls reach only the claude.ai account it runs on, the publishing account is journaled with the page, and claude.ai decides whether a later account may update an earlier account's page.
 - An API-key account never offers the tool.
+- Each publish journals its account, thread and Claude artifact type, and the page appears in the Artifacts library ([Artifact library and tags](#artifact-library-and-tags)).
 
 Status: Designed, not built. Since: 2026-11-16. Detail: [Provider runtimes: Claude Code](provider-runtimes.md#claude-code) and [Architecture: Security and authority](../architecture.md#security-and-authority).
 
@@ -2981,6 +2982,7 @@ The Artifacts library is host-wide across Projects. It is the deliberate excepti
 - The server decides the library's scope. A paired device is clamped to the Projects its catalog allows.
 - Tags are the person's own labels, kept host-local. They never enter a Canvas version, a share, an export or sync.
 - A window on this host or a paired device changes tags (maintainer decision, 2026-11-12; not built yet: today only a window on this host).
+- The library also lists every page a thread published through Claude's `Artifact` tool, in one view across the person's Claude accounts, built from the journal alone (only pages published from Octant), with Source, kind (Claude's types beside Canvas's kinds) and account filters, versions for updated pages, and Copy into Canvas for an HTML snapshot (maintainer decision, 2026-11-16; designed, not built).
 
 Status: Partly built. Since: —. Detail: [Canvas: Artifact library and tags](canvas.md#artifact-library-and-tags).
 

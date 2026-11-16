@@ -1499,6 +1499,31 @@ which belongs to another computer's Project and is not held here — carries
 no tag and matches no tag filter. Tags are changed from the
 library's cards and rows; the open Canvas tab carries no tag control.
 
+**Claude artifacts in the library** (maintainer decision, 2026-11-16;
+designed, not built). The library and the dock's Artifacts tool also list
+every page a thread published to claude.ai through Claude's `Artifact`
+tool, beside Canvas documents, in one view across all of the person's
+Claude accounts. The entries come from the journal alone: each publish
+already records the page's address and title, and it records also the
+account that published it, the thread and the Claude artifact type. Octant
+still never fetches, frames or signs in to claude.ai, so the view holds only
+pages published from Octant, never the rest of an account's claude.ai
+gallery. An entry shows its title, type, account, thread and date, the
+published snapshot when the publish named a local file, and **Open on
+claude.ai**; a page made from a type with no local file (`/design`,
+`/slides`) shows a card with its type and no snapshot. A thread updating a
+page it published adds a version to the same entry. **Copy into Canvas**
+turns an HTML snapshot into a Canvas document through the
+[HTML importer](#html-import). A **Source** filter (Canvas, Claude) and the
+kind filter apply to both: Claude's types (Design, Slides, Docs, Dashboard,
+spreadsheet and the others an account offers, since claude.ai sets them per
+account) sit beside Canvas's kinds, read from the type the publishing call
+named, and a plain page publish reads as Page. An account filter narrows
+Claude entries. Scoping is the library's: a paired device sees only the
+Projects it may, and a Chat thread's entries follow its rule above.
+Opening a page uses whatever claude.ai account the browser is signed in to,
+and claude.ai decides whether it shows.
+
 ## Design block
 
 A `design` block (Canvas schema version 9) is the one block whose content is
