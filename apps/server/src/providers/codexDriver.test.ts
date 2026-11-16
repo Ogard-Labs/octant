@@ -2834,7 +2834,7 @@ describe("Codex execution authority and approvals", () => {
     });
   });
 
-  it("asks before every command on both prompting postures, since the sandbox outside Codex never escalates", () => {
+  it("asks before every command at Ask first and Accept edits, since the sandbox outside Codex never escalates", () => {
     // Below Full access the process runs inside Octant's profile and macOS
     // refuses Codex's own Seatbelt inside it, so turns name the sandbox
     // external. Under an external sandbox `on-request` runs every command
@@ -2920,17 +2920,59 @@ describe("Codex execution authority and approvals", () => {
     );
   });
 
-  it("lets the reviewer answer on both prompting postures when the thread asks for Auto", () => {
+  it("runs Auto as Codex's own Auto, on request with Codex's reviewer inside Octant's sandbox", () => {
+    // Codex's own Auto is `on-request` with its reviewer; under the external
+    // sandbox Octant names, commands then run unasked inside Octant's wall.
+    expect(codexExecutionSettings("approval-gated", true)).toEqual({
+      approvalPolicy: "on-request",
+      sandbox: "read-only",
+      approvalsReviewer: "auto_review",
+    });
+    expect(codexTurnExecutionSettings("approval-gated", true)).toEqual({
+      approvalPolicy: "on-request",
+      sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },
+      approvalsReviewer: "auto_review",
+    });
+  });
+
+  it("keeps Ask first asking for every command once the reviewer is withdrawn", () => {
+    expect(codexExecutionSettings("approval-gated", false)).toEqual({
+      approvalPolicy: "untrusted",
+      sandbox: "read-only",
+      approvalsReviewer: "user",
+    });
+  });
+
+  it("keeps Accept edits asking for commands even when its prompts go to the reviewer", () => {
+    // Auto is `approval-gated` with the reviewer; Accept edits with it still
+    // reads as Accept edits, so its commands keep asking.
     expect(codexExecutionSettings("auto-accept-edits", true)).toEqual({
       approvalPolicy: "untrusted",
       sandbox: "read-only",
       approvalsReviewer: "auto_review",
     });
-    expect(codexExecutionSettings("approval-gated", true)).toEqual({
-      approvalPolicy: "untrusted",
-      sandbox: "read-only",
+  });
+
+  it("starts an Auto thread on request with Codex's reviewer", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()));
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId,
+        resumeCursor: { driverKind: "codex", value: "thread-existing" },
+        executionPolicy: "approval-gated",
+        autoApprove: true,
+      }),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "Run the tests.", attachments: [], tools: [] }),
+    );
+    expect(f.calls.find(({ method }) => method === "turn/start")?.input).toMatchObject({
+      approvalPolicy: "on-request",
       approvalsReviewer: "auto_review",
+      sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },
     });
+    await acquired.close();
   });
 
   it.each([

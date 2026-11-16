@@ -365,7 +365,8 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
       }
       // Trusting a key provider in a Project lets that runtime load the
       // Project's own hooks, MCP servers, and plugins, code no Octant review
-      // step saw, so only a person at a window on this host decides it.
+      // step saw, so only the host's own person decides it, at a local
+      // window or on a device they paired.
       const principal = readPrincipalRouteContext(request)?.principal;
       if (
         command.kind === "change-project-native-providers" &&

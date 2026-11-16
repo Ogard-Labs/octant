@@ -1618,6 +1618,46 @@ describe("WorkThreadService", () => {
     expect("thread" in result ? result.thread.fullAccessSandbox : "missing").toBeUndefined();
   });
 
+  it("marks a thread as carrying outside content before journaling the session it adopted, and refuses when it cannot", () => {
+    const adopted = {
+      nativeSessionId: "outside-1",
+      providerSessionId: "11111111-1111-4111-8111-111111111111" as never,
+      resumeCursor: { driverKind: "claude", value: "outside-cursor" } as never,
+      providerInstanceId: ids.provider as never,
+      modelId: "model-a" as never,
+      bindingRevisionId: ids.binding as never,
+      workingDirectory: "." as never,
+    };
+    const record = vi.fn<
+      NonNullable<WorkThreadServiceDependencies["recordExternalContentIngestion"]>
+    >(() => ({
+      kind: "recorded",
+      taint: { externalContentIngested: true, ingestedSources: ["adopted-provider-session"] },
+    }));
+    const marked = serviceFixture({ threads: [thread()], recordExternalContentIngestion: record });
+
+    const result = marked.service.recordAdoptedSession(thread(), adopted);
+
+    expect(result).toMatchObject({ status: "recorded", thread: { adoptedSession: adopted } });
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: ids.thread,
+        provenance: { origin: "external-content", sourceLabel: "adopted-provider-session" },
+      }),
+    );
+    expect(record.mock.invocationCallOrder[0]).toBeLessThan(
+      marked.persistence.journal.append.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(marked.projection.read(ids.thread)?.adoptedSession).toEqual(adopted);
+
+    const refused = serviceFixture({
+      threads: [thread()],
+      recordExternalContentIngestion: () => ({ kind: "refused", reason: "malformed" }),
+    });
+    expect(refused.service.recordAdoptedSession(thread(), adopted).status).toBe("refused");
+    expect(refused.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
   it("journals a person turning Wake when a message arrives on and off for a Work thread", async () => {
     const fixture = serviceFixture({ threads: [thread()] });
 

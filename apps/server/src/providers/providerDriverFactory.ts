@@ -39,7 +39,7 @@ import type { AcpProcessPort } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind } from "./acpProfiles";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { makeDevinPlanUsageFacts } from "./devinPlanUsage";
-import { makeOpenCodeDriver } from "./openCodeDriver";
+import { makeOpenCodeDriver, type OpenCodeProtectedPaths } from "./openCodeDriver";
 import { makeOpenCodeGoUsageFacts } from "./openCodeGoUsage";
 import type { OpenCodeProcessPort } from "./openCodeProcess";
 import { makeOllamaDriver } from "./ollamaDriver";
@@ -78,8 +78,8 @@ export interface ProviderDriverFactoryOptions {
   /** The host's process authority clock, which Claude's pre-tool grants expire on. */
   readonly claudeAuthorityNow?: () => number;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
-  /** The host's protected files and folders in force, as absolute paths. */
-  readonly protectedPaths?: () => ReadonlyArray<string>;
+  /** The host's protected files and folders in force, as absolute paths at each level. */
+  readonly protectedPaths?: () => OpenCodeProtectedPaths;
   readonly permissionPersistence: () => PermissionPersistence;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   /**

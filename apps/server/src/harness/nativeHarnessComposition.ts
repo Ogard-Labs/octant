@@ -312,6 +312,14 @@ export interface HarnessEgressScope {
   readonly parentThreadId?: string;
 }
 
+/**
+ * Makes a server Project's file tools for one thread. `fullAccess` reads
+ * whether the thread is at Full access at the time of each call.
+ */
+export type ServerFileTools = (level: {
+  readonly fullAccess: () => boolean;
+}) => NativeHarnessFileSystemPort;
+
 export interface NativeHarnessComposition {
   /** Ordinary admission for a fixed Code command; does not execute it or return credentials. */
   readonly prepareCodeCommand: (input: {
@@ -371,7 +379,11 @@ export interface NativeHarnessComposition {
    */
   readonly forServerCode: (input: {
     readonly thread: CodeThread;
-    readonly filesystem: NativeHarnessFileSystemPort;
+    /**
+     * The file tools on the server, made with the thread's Full access
+     * reader so they follow the level on every call, as `forCode`'s do.
+     */
+    readonly filesystem: ServerFileTools;
     readonly shell: NativeHarnessShellPort;
     readonly windowId: string;
     readonly secrets?: ReadonlyArray<string>;
@@ -385,7 +397,8 @@ export interface NativeHarnessComposition {
    */
   readonly forServerWork: (input: {
     readonly thread: WorkThread;
-    readonly filesystem: NativeHarnessFileSystemPort;
+    /** As `forServerCode`'s, with the Work thread's Full access reader. */
+    readonly filesystem: ServerFileTools;
     readonly shell: NativeHarnessShellPort;
     /** The server's registered record now, whose profile caps Shield there. */
     readonly server: () => ShieldServerRule | undefined;
@@ -1164,6 +1177,7 @@ export function createNativeHarnessComposition(
           filesystem: new NativeHarnessFileSystem({
             root: projectRoot,
             ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
+            fullAccess: () => options.readWorkExecutionPolicy?.(threadId) === "full-access",
           }),
           readsImages: () => options.readsImages?.(thread) === true,
           ...(shell === undefined ? {} : { shell }),
@@ -1223,6 +1237,8 @@ export function createNativeHarnessComposition(
           filesystem: new NativeHarnessFileSystem({
             root: checkoutRoot,
             ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
+            fullAccess: () =>
+              options.readCodeExecutionPolicy?.(threadId, windowId) === "full-access",
           }),
           readsImages: () => options.readsImages?.(thread) === true,
           ...(shell === undefined ? {} : { shell }),
@@ -1253,9 +1269,12 @@ export function createNativeHarnessComposition(
         fullAccess: () => options.readCodeExecutionPolicy?.(threadId, windowId) === "full-access",
       });
     },
-    forServerCode: ({ thread, filesystem, shell, windowId, secrets, server }) => {
+    forServerCode: ({ thread, filesystem: serverFiles, shell, windowId, secrets, server }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
+      const filesystem = serverFiles({
+        fullAccess: () => options.readCodeExecutionPolicy?.(threadId, windowId) === "full-access",
+      });
       const planned =
         thread.executionPolicy === "plan" ||
         options.readCodeExecutionPolicy?.(threadId, windowId) === "plan";
@@ -1309,9 +1328,12 @@ export function createNativeHarnessComposition(
         fullAccess: () => options.readCodeExecutionPolicy?.(threadId, windowId) === "full-access",
       });
     },
-    forServerWork: ({ thread, filesystem, shell, server }) => {
+    forServerWork: ({ thread, filesystem: serverFiles, shell, server }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
+      const filesystem = serverFiles({
+        fullAccess: () => options.readWorkExecutionPolicy?.(threadId) === "full-access",
+      });
       const composed = compose({
         threadId,
         mode: "work",
@@ -1470,7 +1492,10 @@ export function createNativeHarnessComposition(
           },
           ...(authority.filesystem && mode !== "chat"
             ? {
-                filesystem: new NativeHarnessFileSystem({ root: projectRoot }),
+                filesystem: new NativeHarnessFileSystem({
+                  root: projectRoot,
+                  fullAccess: () => authority.executionPolicy === "full-access",
+                }),
                 readsImages: () => options.readsImages?.(target) === true,
               }
             : {}),

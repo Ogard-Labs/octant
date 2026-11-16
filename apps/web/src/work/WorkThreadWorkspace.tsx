@@ -93,6 +93,10 @@ import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import { ThreadWakeups } from "../wakeups/ThreadWakeups";
 import type { ThreadWakeupClient } from "../wakeups/threadWakeupClient";
+import { CodeLiveTasks } from "../code/CodeLiveTasks";
+import { CodeNativeSession } from "../code/CodeNativeSession";
+import type { ThreadSessionClient } from "../code/codeSessionClient";
+import { createWorkSessionClient } from "./workSessionClient";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
@@ -528,6 +532,8 @@ export interface WorkThreadWorkspaceProps {
   readonly messageQueueClient?: ThreadMessageQueueClient;
   /** The thread's wake-ups; absent builds one from the server address. */
   readonly wakeupClient?: ThreadWakeupClient;
+  /** The thread's live tasks and outside sessions; absent builds one from the server address. */
+  readonly sessionClient?: ThreadSessionClient<WorkThreadId>;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
   readonly memoryProposalClient?: ProjectMemoryProposalClient;
@@ -994,6 +1000,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           selected: thread,
           latest: turns.at(-1)?.authority,
         });
+  const { serverUrl, windowCapability, sessionClient: givenSessionClient } = props;
+  const sessionClient = useMemo(
+    () =>
+      givenSessionClient ??
+      (serverUrl === undefined || windowCapability === undefined
+        ? undefined
+        : createWorkSessionClient({ serverUrl, windowCapability })),
+    [givenSessionClient, serverUrl, windowCapability],
+  );
   const messageQueue = useThreadMessageQueue({
     mode: "work",
     hostId: props.hostId,
@@ -3021,6 +3036,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 serverUrl={props.serverUrl}
                 windowCapability={props.windowCapability}
                 client={props.wakeupClient}
+              />
+              <CodeLiveTasks threadId={props.threadId} client={sessionClient} />
+              <CodeNativeSession
+                threadId={props.threadId}
+                client={sessionClient}
+                threadHasTurns={turns.length > 0}
               />
               <ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />
             </>

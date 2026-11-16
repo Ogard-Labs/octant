@@ -195,10 +195,18 @@ export interface NativeHarnessFileSystemOptions {
   readonly maxFileBytes?: number;
   /**
    * The secret guard's refusal for a path, or undefined. Defaults to this
-   * host's protected list; a Project that holds the home folder still never
-   * hands a key to these tools, at any level.
+   * host's protected list; below Full access a Project that holds the home
+   * folder still never hands a key to these tools. `fullAccess` says the
+   * thread runs at Full access now, where only the provider sign-ins stay
+   * refused (`secretGuardRefusal`).
    */
-  readonly protectedFileRefusal?: (path: string) => string | undefined;
+  readonly protectedFileRefusal?: (path: string, fullAccess: boolean) => string | undefined;
+  /**
+   * Whether the thread runs at Full access at the time of the call. Read on
+   * every call, since a turn can change level after these tools were made.
+   * Absent is never Full access, so every refusal applies.
+   */
+  readonly fullAccess?: () => boolean;
 }
 
 interface NativeHarnessWritePlacement {
@@ -251,7 +259,8 @@ export class NativeHarnessFileSystem {
   readonly #extraRoots: ReadonlyArray<string>;
   readonly #maxFileBytes: number;
   readonly #readMarks = new Map<string, string>();
-  readonly #protectedFileRefusal: (path: string) => string | undefined;
+  readonly #protectedFileRefusal: (path: string, fullAccess: boolean) => string | undefined;
+  readonly #fullAccess: () => boolean;
 
   constructor(options: NativeHarnessFileSystemOptions) {
     if (!isAbsolute(options.root)) {
@@ -264,13 +273,16 @@ export class NativeHarnessFileSystem {
     this.#extraRoots = (options.extraRoots ?? []).map((root) => root.replace(/\/+$/, ""));
     this.#maxFileBytes = options.maxFileBytes ?? 5 * 1024 * 1024;
     this.#protectedFileRefusal =
-      options.protectedFileRefusal ?? ((path) => secretGuardRefusal(path));
+      options.protectedFileRefusal ??
+      ((path, fullAccess) => secretGuardRefusal(path, { fullAccess }));
+    this.#fullAccess = options.fullAccess ?? (() => false);
   }
 
   /** A refusal naming the rule, for a path the secret guard protects. */
   #protected(...paths: ReadonlyArray<string>): NativeHarnessFileRefused | undefined {
+    const fullAccess = this.#fullAccess();
     for (const path of paths) {
-      const message = this.#protectedFileRefusal(path);
+      const message = this.#protectedFileRefusal(path, fullAccess);
       if (message !== undefined) return { kind: "refused", reason: "protected-file", message };
     }
     return undefined;

@@ -57,8 +57,12 @@ export interface ProviderAcquireInput {
     readonly projectId: ProjectId;
     readonly threadId: WorkThreadId;
     readonly sessionId: ProviderSessionId;
-    /** Stops a review that waits on a model when the turn is cancelled. */
-    readonly signal?: AbortSignal;
+    /**
+     * Stops a review that waits on a model when the turn is cancelled. Read
+     * whenever a review starts: a connection the host keeps past its turn is
+     * held by later turns, each with its own stop.
+     */
+    readonly signal?: AbortSignal | undefined;
     /**
      * Told when Octant Shield answered or declined one of this session's
      * approvals, so the turn's transcript can show the decision.

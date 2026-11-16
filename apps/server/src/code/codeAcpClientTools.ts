@@ -130,9 +130,11 @@ export interface CodeAcpClientToolsOptions {
   readonly readExecutionPolicy: () => CodeThread["executionPolicy"];
   /**
    * The secret guard's refusal for a path, or undefined; defaults to this
-   * host's protected list. Checked at every posture, Full access included.
+   * host's protected list. Checked at every posture; at Full access
+   * (`fullAccess`, read from `readExecutionPolicy` on each call) only the
+   * provider sign-ins stay refused (`secretGuardRefusal`).
    */
-  readonly protectedFileRefusal?: (path: string) => string | undefined;
+  readonly protectedFileRefusal?: (path: string, fullAccess: boolean) => string | undefined;
   readonly checkoutRoot: string;
   /** The Project's extra folders: they accept the same paths and cwd as the checkout. */
   readonly extraFolders?: ReadonlyArray<string>;
@@ -290,11 +292,13 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
   const resolveFile = async (path: string) => (await containingFolder(path))?.resolved;
 
   const protectedFileRefusal =
-    options.protectedFileRefusal ?? ((path: string) => secretGuardRefusal(path));
+    options.protectedFileRefusal ??
+    ((path: string, fullAccess: boolean) => secretGuardRefusal(path, { fullAccess }));
   /** The refusal names the rule and the channel, never a bare unreadable file. */
   const protectedResult = (...paths: ReadonlyArray<string>) => {
+    const fullAccess = options.readExecutionPolicy() === "full-access";
     for (const path of paths) {
-      const message = protectedFileRefusal(path);
+      const message = protectedFileRefusal(path, fullAccess);
       if (message !== undefined) {
         return { result: { error: "protected-file", message }, isError: true as const };
       }

@@ -400,6 +400,9 @@ export function wireContext(deps: ContextDependencies) {
             const { thread } = session;
             const project = persistence.readProject(thread.projectId);
             if (project?.type !== "work") return undefined;
+            // The compaction resumes this session on a connection of its own,
+            // so a session kept past the last turn is stopped first.
+            if (!(await workTurnService.releaseSessionForCompaction(thread.id))) return undefined;
             return {
               acquire: {
                 instanceId: thread.providerInstanceId,

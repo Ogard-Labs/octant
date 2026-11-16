@@ -191,7 +191,8 @@ async function nativeSessionResponse(
   );
 }
 
-function allowedOrigin(origin: string | null): boolean {
+// Shared with the Work session routes, which answer the same origins.
+export function allowedOrigin(origin: string | null): boolean {
   if (origin === null) return true;
   try {
     const url = new URL(origin);
@@ -200,7 +201,7 @@ function allowedOrigin(origin: string | null): boolean {
     return false;
   }
 }
-function headers(origin: string | null): Record<string, string> {
+export function headers(origin: string | null): Record<string, string> {
   return {
     "content-type": "application/json",
     "cache-control": "no-store",
@@ -209,6 +210,6 @@ function headers(origin: string | null): Record<string, string> {
     "access-control-allow-headers": "content-type, x-octant-window-capability",
   };
 }
-function response(body: unknown, status: number, origin: string | null): Response {
+export function response(body: unknown, status: number, origin: string | null): Response {
   return new Response(JSON.stringify(body), { status, headers: headers(origin) });
 }

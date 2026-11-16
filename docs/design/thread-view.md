@@ -550,8 +550,8 @@ are in [Architecture: wake-ups](../architecture.md#modes-chat-work-and-code).
 
 ## Live tasks
 
-A Code thread whose last turn completed while background work it started
-(a dev server, a watch) still runs shows one row above the message queue, in
+A Work or Code thread whose last turn completed while background work it
+started (a dev server, a watch) still runs shows one row above the message queue, in
 the composer: an activity icon, each task's command on one line in monospace
 (its full text on hover, wrapping under each other at a narrow width),
 **Running** or the count running, and **Stop**, which stops the session and
@@ -566,7 +566,8 @@ person's message. The rules are in
 
 ## Plan-mode asks
 
-When a Code thread's agent asks to plan first, the pending request reads
+When a Code thread's agent asks to plan first (Work has no Plan, so a Work
+thread's agent never asks), the pending request reads
 **Plan first**: the agent's sentence, then "This turn ends; the next one
 runs in Plan, read-only.", with **Switch to Plan** and **Keep working**.
 When it asks to leave Plan, the request reads **Approve the plan**: the
@@ -578,8 +579,8 @@ and scrolling inside the card past 18rem so the buttons stay in reach, then
 
 ## Sessions started outside Octant
 
-An empty Code thread whose provider keeps sessions of its own for the
-thread's folder and account, begun outside Octant, shows one row above the
+An empty Work or Code thread whose provider keeps sessions of its own for the
+folder its turns run in and its account, begun outside Octant, shows one row above the
 message queue: a history icon, how many sessions there are, and **Continue
 one**, which opens a list of them in place. Each choice shows the session's
 title (its name, or the provider's summary of it) on one line, then its

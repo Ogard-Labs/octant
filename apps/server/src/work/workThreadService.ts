@@ -15,6 +15,7 @@ import {
   type AggregateVersion,
   type WorkSettings,
   type WorkThread,
+  type WorkThreadAdoptedSession,
   type WorkThreadBootstrap,
   type WorkThreadNavigation,
   type WorkThreadCommand,
@@ -88,6 +89,7 @@ import {
   folderRelativeTo,
 } from "@octant/domain/thread-project-move-policy";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { createHash } from "node:crypto";
 import {
   INHERITED_MARK_REFUSAL,
   journalWithInheritedMark,
@@ -416,6 +418,56 @@ export class WorkThreadService {
     });
     this.#projection.apply({ kind: "thread-updated", thread: updated });
     return updated;
+  }
+
+  /**
+   * Journals, as the person, that an empty thread continues a provider
+   * session begun outside Octant. The session read things Octant never saw,
+   * so the thread is marked as carrying outside content first; a thread that
+   * cannot be marked, or that changed since `current` was read, is refused.
+   */
+  recordAdoptedSession(
+    current: WorkThread,
+    adopted: WorkThreadAdoptedSession,
+  ):
+    | { readonly status: "recorded"; readonly thread: WorkThread }
+    | { readonly status: "refused"; readonly message: string } {
+    this.#assertReady();
+    const latest = this.#projection.read(current.id);
+    if (latest === undefined || latest.version !== current.version)
+      return { status: "refused", message: "This thread changed. Try again." };
+    const marked = this.#recordExternalContentIngestion?.({
+      threadId: String(current.id),
+      provenance: { origin: "external-content", sourceLabel: "adopted-provider-session" },
+      contentReference: `adopted-session-${createHash("sha256")
+        .update(`${String(adopted.providerInstanceId)}\0${adopted.nativeSessionId}`)
+        .digest("hex")}`,
+      correlationId: this.#uuid(),
+      authorized: true,
+    });
+    if (marked === undefined || (marked.kind !== "recorded" && marked.kind !== "already-recorded"))
+      return {
+        status: "refused",
+        message: "The thread could not be marked as carrying outside content.",
+      };
+    const updated = decodeWorkThread({
+      ...latest,
+      adoptedSession: adopted,
+      version: latest.version + 1,
+      updatedAt: decodeTimestamp(this.#clock()),
+    });
+    try {
+      this.#append(latest.id, latest.version, "work.thread-updated@1", {
+        kind: "thread-updated",
+        thread: updated,
+      });
+    } catch (error) {
+      if (error instanceof ConcurrencyConflict)
+        return { status: "refused", message: "This thread changed. Try again." };
+      throw error;
+    }
+    this.#projection.apply({ kind: "thread-updated", thread: updated });
+    return { status: "recorded", thread: updated };
   }
 
   async bootstrap(authenticatedWindowId: WindowId): Promise<WorkThreadBootstrap> {

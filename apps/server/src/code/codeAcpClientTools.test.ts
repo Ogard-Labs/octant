@@ -150,27 +150,56 @@ describe("ACP Code client tools", () => {
     }
   });
 
-  it("refuses a protected file at Full access and names the rule and channel", async () => {
+  function protectedTools(root: string, executionPolicy: CodeThread["executionPolicy"]) {
+    return createCodeAcpClientTools({
+      windowId,
+      thread: thread(executionPolicy),
+      readExecutionPolicy: () => executionPolicy,
+      checkoutRoot: root,
+      uuid: () => "fixed-id",
+      pathPort: liveCodeTestSourcePort,
+      terminalConfinement: {
+        environment: { PATH: "/usr/bin:/bin", TMPDIR: "/tmp" },
+        prepare: ({ executable, args }) => ({ command: executable, args }),
+      },
+      protectedFileRefusal: (path, fullAccess) =>
+        secretGuardRefusal(path, { platform: "darwin", homeDirectory: root, fullAccess }),
+      wait: async () => undefined,
+    });
+  }
+
+  it("reads a protected file at Full access and still refuses a provider's stored sign-in", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "octant-acp-home-")));
+    try {
+      await mkdir(join(root, ".aws"), { recursive: true });
+      await writeFile(join(root, ".aws", "credentials"), "fake", "utf8");
+      await mkdir(join(root, ".codex"), { recursive: true });
+      await writeFile(join(root, ".codex", "auth.json"), "{}", "utf8");
+      const appTools = protectedTools(root, "full-access");
+      await expect(
+        appTools.execute({
+          name: "octant_acp_fs_read_text_file",
+          inputJson: JSON.stringify({ path: join(root, ".aws", "credentials") }),
+        }),
+      ).resolves.toEqual({ result: { content: "fake" } });
+      const signIn = await appTools.execute({
+        name: "octant_acp_fs_read_text_file",
+        inputJson: JSON.stringify({ path: join(root, ".codex", "auth.json") }),
+      });
+      expect(signIn).toMatchObject({ result: { error: "protected-file" }, isError: true });
+      expect(JSON.stringify(signIn)).toContain("Provider sign-ins");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a protected file below Full access and names the rule and channel", async () => {
     const root = await realpath(await mkdtemp(join(tmpdir(), "octant-acp-home-")));
     try {
       await mkdir(join(root, ".aws"), { recursive: true });
       await writeFile(join(root, ".aws", "credentials"), "fake", "utf8");
       await writeFile(join(root, ".aws", "config"), "[default]\n", "utf8");
-      const appTools = createCodeAcpClientTools({
-        windowId,
-        thread: thread("full-access"),
-        readExecutionPolicy: () => "full-access",
-        checkoutRoot: root,
-        uuid: () => "fixed-id",
-        pathPort: liveCodeTestSourcePort,
-        terminalConfinement: {
-          environment: { PATH: "/usr/bin:/bin", TMPDIR: "/tmp" },
-          prepare: ({ executable, args }) => ({ command: executable, args }),
-        },
-        protectedFileRefusal: (path) =>
-          secretGuardRefusal(path, { platform: "darwin", homeDirectory: root }),
-        wait: async () => undefined,
-      });
+      const appTools = protectedTools(root, "approval-gated");
       for (const [name, input] of [
         ["octant_acp_fs_read_text_file", { path: join(root, ".aws", "credentials") }],
         [

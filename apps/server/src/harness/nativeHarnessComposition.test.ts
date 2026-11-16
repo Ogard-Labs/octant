@@ -183,7 +183,7 @@ describe("native harness composition", () => {
       researchRouting: "automatic",
     } as unknown as ChatThread;
     const serverPorts = {
-      filesystem: { root: "/srv/app" } as never,
+      filesystem: (() => ({ root: "/srv/app" })) as never,
       shell: { run: async () => ({ status: "unavailable" }) } as never,
       server: () => undefined,
     };
