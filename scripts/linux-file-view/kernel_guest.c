@@ -1143,8 +1143,7 @@ static int policy_measure(const char *mode)
   pid_t child = fork();
   if (!child) {
     char *arguments[] = {"/policy-broker", (char *)mode, NULL};
-    char *environment[] = {"HOME=/tmp", "PATH=/", "LANG=C", "BUN_JSC_useFTLJIT=0", NULL};
-    if (mode && !strcmp(mode, "--metadata-control")) environment[3] = NULL;
+    char *environment[] = {"HOME=/tmp", "PATH=/", "LANG=C", NULL};
     if (capture && !bind_core_target(arguments[0], 1)) {
       dprintf(STDOUT_FILENO, "OCTANT_CORE_TARGET {\"pid\":%ld,\"role\":1,\"bound\":false,\"errno\":%d}\n", (long)getpid(), errno);
       _exit(63);
@@ -1194,7 +1193,7 @@ static int session_measure(void)
   if (!child) {
     if (!bind_core_target("/session-cases", 3)) _exit(63);
     char *arguments[] = {"/session-cases", NULL};
-    char *environment[] = {"HOME=/tmp", "PATH=/", "LANG=C", "BUN_JSC_useFTLJIT=0", NULL};
+    char *environment[] = {"HOME=/tmp", "PATH=/", "LANG=C", NULL};
     execve(arguments[0], arguments, environment);
     _exit(31);
   }
@@ -1257,7 +1256,7 @@ int main(void)
     // failure was timing-sensitive. Ordinary policy processes have a 15s
     // bound and the two runtime processes 25s each;
     // the independent QEMU supervisor owns a 150s maximum for the whole guest.
-    for (unsigned attempt = 0; attempt < 3 && !result; attempt++) {
+    for (unsigned attempt = 0; attempt < 12 && !result; attempt++) {
       result = policy_measure("--bubblewrap");
       printf("OCTANT_BUBBLEWRAP_ATTEMPT %u result=%d\n", attempt + 1, result);
     }

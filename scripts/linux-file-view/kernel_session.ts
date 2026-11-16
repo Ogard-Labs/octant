@@ -18,10 +18,7 @@ if (process.argv[2] === "--linux-mediation-worker") {
     await import("../../apps/server/src/process/linuxMediationWorker");
   await runLinuxMediationWorker();
 } else {
-  // Same existing diagnostic-only controller environment; guest commands get
-  // none of these variables. This is not a controller-reliability fix.
-  assert.equal(process.env.BUN_JSC_useFTLJIT, "0");
-  delete process.env.BUN_JSC_useFTLJIT;
+  assert(!Object.keys(process.env).some((name) => name.startsWith("BUN_JSC_")));
   process.env.OCTANT_TEST_SECRET = "synthetic host-only sentinel";
   process.env.OPENAI_API_KEY = "synthetic host-only key sentinel";
   const root = process.argv[3] ?? (await mkdtemp("/tmp/octant-session-"));
@@ -213,7 +210,7 @@ if (process.argv[2] === "--linux-mediation-worker") {
       await rm(`${root}/session-stage`, { force: true });
       const child = spawn("/session-cases", ["--owner-child", root], {
         stdio: ["ignore", "pipe", "inherit"],
-        env: { HOME: "/tmp", PATH: "/", LANG: "C", BUN_JSC_useFTLJIT: "0" },
+        env: { HOME: "/tmp", PATH: "/", LANG: "C" },
       });
       let ownerBytes = "";
       const childJoined = new Promise<void>((resolve) => child.once("close", () => resolve()));
@@ -289,6 +286,7 @@ if (process.argv[2] === "--linux-mediation-worker") {
           productionReady: false,
           actualBubblewrapBuilder: true,
           defaultPayloadEnvironment: true,
+          controllerJitDefaults: true,
           orphanJoinPending: true,
         }),
       );

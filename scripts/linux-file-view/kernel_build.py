@@ -327,18 +327,18 @@ def main():
                          "caller-cancellation-joins", "deadline-joins", "bounded-duplex-pressure-and-private-receipt-mask",
                          "owner-loss-EOF-admission-and-command-stop"}
     if (len(sessions) != 1 or set(sessions[0].get("outcomes", [])) != expected_sessions or
-            sessions[0].get("actualBubblewrapBuilder") is not True or sessions[0].get("productionReady") is not False or
+            sessions[0].get("actualBubblewrapBuilder") is not True or sessions[0].get("controllerJitDefaults") is not True or sessions[0].get("productionReady") is not False or
             len(session_joins) != 1 or any(session_joins[0].get(key) != value for key, value in {"controllerJoined": True, "controllerCode": 0, "orphansJoined": 1, "remaining": False}.items())):
         raise SystemExit("The actual owned session needs all lifecycle/stdio/private-root controls and exact orphan joins.")
-    expected_modes = ["--metadata-control", "direct", "--bubblewrap", "--bubblewrap", "--bubblewrap",
+    expected_modes = ["--metadata-control", "direct", *(["--bubblewrap"] * 12),
                       "--runtime-bun", "--runtime-node", "--fileattr", "--overlay-copyup"]
-    if (len(processes) != 9 or sorted(entry.get("mode", "") for entry in processes) != sorted(expected_modes) or
-            len(core_targets) != 10 or len(core_retirements) != 11 or
+    if (len(processes) != len(expected_modes) or sorted(entry.get("mode", "") for entry in processes) != sorted(expected_modes) or
+            len(core_targets) != len(expected_modes) + 1 or len(core_retirements) != len(expected_modes) + 2 or
             {entry.get("pid") for entry in core_retirements} != {pid, *(entry.get("pid") for entry in processes), session_joins[0].get("controllerPid")} or
             any(entry.get("held") is not True or entry.get("retired") is not True for entry in core_retirements) or
             any(entry.get("diagnosticObserver") is not False or entry.get("joined") is not True
                 for entry in processes)):
-        raise SystemExit("Every captured PID must stay held until inactive-pipe retirement, with no tracer.")
+        raise SystemExit("Every registered controller/probe PID must stay held until inactive-pipe retirement, with no tracer.")
     if (len(fileattr_cases) != 1 or len(fileattr_owners) != 1 or len(fileattr_filesystems) != 1 or
             len(fileattr_brokers) != 1 or fileattr_filesystems[0] != {"ext4": True, "baselineRead": True} or
             any(fileattr_cases[0].get(field) is not True for field in
@@ -381,10 +381,10 @@ def main():
                 case.get("runtime") == "native"]
     direct = [case for case in cases if case.get("actualBubblewrapBuilder") is False]
     runtime_cases = [case for case in cases if case.get("runtime") in ("bun", "node")]
-    if len(capsules) != 3 or len(direct) != 1 or len(runtime_cases) != 2 or any(
+    if len(capsules) != 12 or len(direct) != 1 or len(runtime_cases) != 2 or any(
             case.get("ended") != {"status": "exited", "code": 0} or
             case.get("ownedCommandJoined") is not True or case.get("cleaned") is not True or
-            case.get("lateCompanion") is not True for case in cases):
+            case.get("lateCompanion") is not True or case.get("controllerJitDefaults") is not True for case in cases):
         raise SystemExit("Every original-policy case needs an actual exit/join/cleanup receipt.")
     if any(case.get("metadataUnchanged") is not True for case in [*capsules, *direct]):
         raise SystemExit("The independent owner must verify private xattrs and mode unchanged.")
@@ -396,7 +396,7 @@ def main():
     if len(ordered) != 1 or ordered[0].get("status") != "measured-ordered-admissions" or \
             ordered[0].get("ownedChildJoined") is not True or ordered[0].get("cleaned") is not True:
         raise SystemExit("The controlled queued-read ordering proof did not pass.")
-    for attempt in range(1, 4):
+    for attempt in range(1, 13):
         if f"OCTANT_BUBBLEWRAP_ATTEMPT {attempt} result=0" not in log:
             raise SystemExit("An uninstrumented ordinary capsule repetition did not complete.")
     if len(runtime_joins) != 1 or runtime_joins[0] != {"orphansJoined": 0, "remaining": False}:

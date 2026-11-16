@@ -77,11 +77,7 @@ if (process.argv[2] === "--metadata-control") {
   process.exit(0);
 }
 
-// Only this disposable controller disables the tier that aborted before the
-// Node case. Bun reads the debugging-only option at startup; remove it before
-// any relay/command spawn so the measured runtimes retain their normal JITs.
-assert.equal(process.env.BUN_JSC_useFTLJIT, "0");
-delete process.env.BUN_JSC_useFTLJIT;
+assert(!Object.keys(process.env).some((name) => name.startsWith("BUN_JSC_")));
 
 const runtime =
   process.argv[2] === "--runtime-bun"
@@ -319,6 +315,7 @@ console.log(
           : "failed",
     ended,
     productionReady: false,
+    controllerJitDefaults: true,
     lateCompanion: ready,
     actualBubblewrapBuilder: capsule || fileattr,
     runtime: runtime ?? "native",
