@@ -11,7 +11,6 @@ import {
   decodeProviderSessionId,
   type ProviderExecutionPolicy,
   type ProviderFailure,
-  type ProviderProbeResult,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { Effect, Exit, Fiber, Scope, Stream } from "effect";
