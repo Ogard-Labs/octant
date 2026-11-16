@@ -32,7 +32,9 @@ export async function askOneUsePageScriptPermission(input: {
   /** The page's site and profile approval for this thread, model and authority. */
   readonly bindingIsCurrent: () => boolean;
   readonly callerIsCurrent: () => boolean;
-  readonly observe: () => { readonly url?: string; readonly revision?: number } | undefined;
+  readonly observe: () =>
+    | { readonly url?: string | undefined; readonly revision?: number | undefined }
+    | undefined;
   readonly pageHold:
     | (() => { readonly release: () => void; readonly signal?: AbortSignal } | undefined)
     | undefined;

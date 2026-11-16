@@ -98,7 +98,12 @@ function hostOver(persistence: PersistenceService, clock: { now: number }) {
   });
   const projects = new ProjectService({
     persistence,
-    bindingReceiptStore: { consume: () => ({ canonicalRoot: "/repositories/desktop-app" }) },
+    bindingReceiptStore: {
+      consume: () => ({ canonicalRoot: "/repositories/desktop-app" }),
+      issue: () => {
+        throw new Error("This Project adds no home folder.");
+      },
+    },
     projectRootPort: { validate: async (_type, path) => ({ canonicalRoot: path }) },
     uuid: randomUUID,
     clock: () => new Date(clock.now).toISOString(),
@@ -313,7 +318,12 @@ function cloudHostOver(
   });
   const projects = new ProjectService({
     persistence,
-    bindingReceiptStore: { consume: () => ({ canonicalRoot: "/repositories/desktop-app" }) },
+    bindingReceiptStore: {
+      consume: () => ({ canonicalRoot: "/repositories/desktop-app" }),
+      issue: () => {
+        throw new Error("This Project adds no home folder.");
+      },
+    },
     projectRootPort: { validate: async (_type, path) => ({ canonicalRoot: path }) },
     uuid: randomUUID,
     clock: () => new Date(clock.now).toISOString(),

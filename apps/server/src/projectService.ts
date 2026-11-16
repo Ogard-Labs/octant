@@ -140,7 +140,7 @@ export type AgentMemoryCommand = Exclude<MemoryCommand, { readonly kind: "transf
 
 export interface ProjectServiceOptions {
   readonly persistence: PersistenceService;
-  readonly bindingReceiptStore: Pick<BindingReceiptStorePort, "consume">;
+  readonly bindingReceiptStore: Pick<BindingReceiptStorePort, "consume" | "issue">;
   readonly projectRootPort: Pick<ProjectRootPort, "validate">;
   readonly uuid: () => string;
   readonly clock: () => string;

@@ -2443,7 +2443,7 @@ describe("a Work thread's bounded page script", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it.each([
+  it.each<[string, NonNullable<Parameters<typeof scriptTools>[0]>, string]>([
     [
       "below Full access before the page itself was approved",
       { level: () => "approval-gated" as const },

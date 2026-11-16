@@ -103,7 +103,7 @@ export function ProjectFoldersSection(props: ProjectFoldersSectionProps) {
   async function add(receiptId: string, confirmHomeFolder = false) {
     if (onAdd === undefined) return;
     setHomeWarning(undefined);
-    await settle(onAdd(receiptId, confirmHomeFolder), "Folder added.");
+    await settle(confirmHomeFolder ? onAdd(receiptId, true) : onAdd(receiptId), "Folder added.");
   }
 
   async function choose() {
