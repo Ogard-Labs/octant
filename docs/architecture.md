@@ -14252,7 +14252,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     file tools keep refusing them below Full access, and provider sign-ins
     at Full access. Strict refuses them for every tool.
   - **Denials.** A denied request goes back to the model, which adjusts, as
-    on its own; three denials no longer end a Code turn, in Strict too.
+    on its own; no count of denials ends a Code turn, in Strict too (built:
+    the runtime answers every Deny and the turn keeps running).
   - **Git and pull requests.** A provider's own `git push`, `gh` writes,
     merge, force-push and push to the default branch follow its own
     permission mode, and at Full access run unasked; the journal still
@@ -18806,7 +18807,7 @@ permissions), with credential-shaped text redacted and cut to 8 KB; a write's
 contents, a tool's output, and the runtime's own reason stay out. Codex's
 request to widen its own sandbox is a privilege change, which Shield hands to
 the person. An allow or deny goes straight back to the runtime for that one
-call and does not count toward the three refusals that end a turn; an ask is
+call; an ask is
 the ordinary approval. Every automatic answer, and every answer on a child
 run's behalf, carries the seam's one-call scope (`ProviderApprovalAnswer.scope:
 "once"`): no driver remembers it for the session or the Project or asks the
