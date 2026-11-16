@@ -20,7 +20,7 @@ describe.skipIf(process.platform !== "darwin")("native sandbox process ownership
     const root = mkdtempSync(join(tmpdir(), "octant-scope-"));
     const executable = join(root, "scope");
     const label = `app.octant.sandbox.${root.split("/").at(-1)}`;
-    const domain = `user/${process.getuid?.()}`;
+    const domain = `gui/${process.getuid?.()}`;
     const service = `${domain}/${label}`;
     const output = join(root, "output");
     const plist = join(root, "scope.plist");
