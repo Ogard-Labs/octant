@@ -925,11 +925,14 @@ function withoutPinned(thread: CodeThread): Omit<CodeThread, "pinned"> {
 /** A thread without the two choices a mode change states afresh. */
 function withoutAccessChoices(
   thread: CodeThread,
-): Omit<CodeThread, "autoApprove" | "fullAccessSandbox" | "planReturnPolicy"> {
+): Omit<CodeThread, "autoApprove" | "fullAccessSandbox" | "planReturnPolicy" | "strict"> {
+  // Strict is dropped too, so the change's own choice (or null, returning
+  // the thread to its Project's and Settings' default) is all that stays.
   const {
     autoApprove: _autoApprove,
     fullAccessSandbox: _fullAccessSandbox,
     planReturnPolicy: _planReturnPolicy,
+    strict: _strict,
     ...rest
   } = thread;
   return rest;
