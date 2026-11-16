@@ -1288,27 +1288,33 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   // person needs; Hand back moves into the more menu.
   const ownerHolds =
     activeContext && snapshot?.ownerController !== undefined && props.client.takeOver !== undefined;
-  const holdAction = ownerHolds
-    ? ({
-        hold: "reclaim",
-        label: "Reclaim locally",
-        title: "Stop remote owner control and keep the page held locally",
-      } as const)
-    : activeContext && personHasPage && props.client.handBack !== undefined
+  // Take over and Hand back hold the thread's shared page, the one the agent
+  // uses. A repeated Browser tab shows a page of its own that no agent reaches,
+  // so it offers neither: asked from there, the host would hold the first
+  // tab's page and answer with that page's picture.
+  const holdAction = props.startFresh
+    ? undefined
+    : ownerHolds
       ? ({
-          hold: "hand-back",
-          label: "Hand back",
-          title: "You have the page. Hand it back to let the agent use it again.",
+          hold: "reclaim",
+          label: "Reclaim locally",
+          title: "Stop remote owner control and keep the page held locally",
         } as const)
-      : activeContext &&
-          snapshot?.waitingForPerson === undefined &&
-          props.client.takeOver !== undefined
+      : activeContext && personHasPage && props.client.handBack !== undefined
         ? ({
-            hold: "take-over",
-            label: "Take over",
-            title: "Hold the agent's Browser calls while you use the page",
+            hold: "hand-back",
+            label: "Hand back",
+            title: "You have the page. Hand it back to let the agent use it again.",
           } as const)
-        : undefined;
+        : activeContext &&
+            snapshot?.waitingForPerson === undefined &&
+            props.client.takeOver !== undefined
+          ? ({
+              hold: "take-over",
+              label: "Take over",
+              title: "Hold the agent's Browser calls while you use the page",
+            } as const)
+          : undefined;
   const holdIcon = (hold: "hand-back" | "take-over" | "reclaim") =>
     hold === "hand-back" ? (
       <Undo2 aria-hidden="true" size={16} />

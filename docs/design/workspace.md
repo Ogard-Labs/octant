@@ -2523,7 +2523,9 @@ shared page, so a second tab that asked the ordinary way showed the first tab's
 page and was refused the site it had been given (found 2026-11-16). The
 thread's first Browser tab keeps the shared page, which is the one the agent's
 Browser tool uses; a page in a repeated tab is the person's alone, and its
-start screen says so. Files, Document, Review, Agents, Canvas,
+start screen says so. Such a page offers no Take over or Hand back: those hold
+the thread's shared page, so asked from a repeated tab they would hold the
+first tab's page and show it there. Files, Document, Review, Agents, Canvas,
 Plan, Delivery, Simulator, and Side chat are singleton destinations. One instance
 still appears in only one region at a time.
 

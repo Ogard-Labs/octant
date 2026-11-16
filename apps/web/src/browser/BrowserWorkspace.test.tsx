@@ -2026,6 +2026,33 @@ describe("BrowserWorkspace", () => {
       }
     });
 
+    it("offers no Take over on a repeated tab's own page, which no agent reaches", async () => {
+      const restore = widthOfToolbar(640);
+      try {
+        const browser = holdingClient();
+        render(
+          <BrowserWorkspace
+            client={browser}
+            startFresh
+            tab={{
+              kind: "browser",
+              id: "90000000-0000-4000-8000-000000000032" as any,
+              mode: "work",
+              title: "Browser 2",
+              threadId: threadId as any,
+              contextId: context.contextId as any,
+            }}
+          />,
+        );
+        await screen.findByRole("button", { name: "More Browser actions" });
+        expect(screen.queryByRole("button", { name: "Take over" })).toBeNull();
+        expect(await moreActionNames()).not.toContain("Take over");
+        expect(browser.takeOver).not.toHaveBeenCalled();
+      } finally {
+        restore();
+      }
+    });
+
     it("takes the page from the more menu when the row is narrow", async () => {
       const restore = widthOfToolbar(300);
       try {
