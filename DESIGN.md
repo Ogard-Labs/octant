@@ -809,7 +809,14 @@ dock and the bottom panel) sit in one panel:
 **The sidebar.** 280px by default, resizable (180 to 420px,
 `--oct-sidebar-w-min`, `-max`); Settings shares the saved width. Its header row
 is its part of the title rail. Rows are 32px (`--oct-nav-row-h`) on a 12px
-inset (`--oct-nav-inset`), the account row 44px. A thread row is up to three
+inset (`--oct-nav-inset`), the account row 44px. Every row sits on one grid in
+a column of that width: its leading icon (16px, centred on the column, so the
+account's 20px avatar and the folder's 14px glyph share the centre) starts at
+the inset, its label 8px after the icon, and its trailing things (a shortcut, a
+count, an age, a provider mark, the filter row's last glyph) end on the inset at
+the right. A group heading's text starts at the icon column and its count ends
+on that right edge; groups stand 8px apart, and the first stands 8px under the
+Project filter row. A thread row is up to three
 lines, one button with one accessible name ("title, Project, branch, pull
 request, status or time"):
 

@@ -528,7 +528,6 @@ p.provider-limits__warning {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  margin-bottom: var(--oct-space-1);
 }
 
 .rail-usage__ring {
@@ -542,8 +541,10 @@ p.provider-limits__warning {
 .rail-usage__face {
   position: relative;
   display: flex;
-  width: 32px;
-  height: 32px;
+  /* A rail face is 36px with 2px between faces: the ring was a 32px face with
+     6px under it, so the foot's two buttons did not share a size or a pitch. */
+  width: 36px;
+  height: 36px;
   align-items: center;
   justify-content: center;
   border-radius: var(--oct-radius-sm);

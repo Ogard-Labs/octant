@@ -1114,6 +1114,11 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
 /* Navigation rows must not shrink when the Project tree below them grows. */
 .sidebar-navigation > .sidebar-item {
   flex: 0 0 auto;
+  /* The button recipe keeps a 1px transparent border, which measured as the
+     icon at x 73 and the shortcut ending at 311 while every other row's icon
+     starts at 72 and its trailing mark ends at 312. The border takes its pixel
+     out of the inset so the glyph column and the right edge are the rows'. */
+  padding-inline: calc(var(--oct-nav-inset) - 1px);
 }
 
 /* ── Sidebar count tiles and thread filter ────────────────────────────────
@@ -1329,6 +1334,11 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   align-items: center;
   gap: var(--oct-space-1);
   min-width: 0;
+  /* The last 28px button's 16px glyph ends on the navigation inset, the edge
+     every row's trailing mark ends on: the button reaches (28 - 16) / 2 past it. */
+  padding-inline-end: calc(
+    var(--oct-nav-inset) - (var(--oct-rail-button-h) - var(--oct-icon-md)) / 2
+  );
 }
 
 .project-nav__toolbar > :first-child:not(.project-nav__list-switch) {
@@ -1445,10 +1455,53 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   content: "";
 }
 
-/* On the top line the age ends where a title line's age does: before the
-   provider mark's column, so the age stands at one edge on every row. */
-.sidebar-navigation__thread-context {
+/* A two-line row's trailing column is one 50px slot on the row's right edge:
+   the age ends the top line, the provider mark ends the title line, and the
+   actions fade in over both. Measured before, the age ended 28px short of the
+   edge every other row's trailing mark ends on, and the mark stood 58px short
+   of it under the age. A forked row keeps its older room for the fork mark. */
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-lineage)
+  .sidebar-navigation__thread-context {
   padding-inline-end: 28px;
+}
+
+@media not ((pointer: coarse) or (max-width: 560px)) {
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
+      .sidebar-navigation__thread-context
+    ):not(:has(.sidebar-navigation__thread-lineage))
+    .sidebar-navigation__thread-main:has(> .sidebar-navigation__thread-provider)::after {
+    content: none;
+  }
+
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
+      .sidebar-navigation__thread-context
+    ):not(:has(.sidebar-navigation__thread-lineage))
+    .sidebar-navigation__thread-main
+    > .sidebar-navigation__thread-provider {
+    inline-size: 50px;
+    justify-content: flex-end;
+    margin-inline-start: 0;
+  }
+
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
+      .sidebar-navigation__thread-context
+    ):not(:has(.sidebar-navigation__thread-lineage))
+    .sidebar-navigation__thread-actions {
+    right: var(--oct-nav-inset);
+  }
+
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
+      .sidebar-navigation__thread-context
+    ):not(:has(.sidebar-navigation__thread-lineage)):is(
+      :hover,
+      :focus-within,
+      :has([aria-expanded="true"]),
+      :has([data-popup-open])
+    )
+    .sidebar-navigation__thread-main
+    > .sidebar-navigation__thread-provider {
+    opacity: 0;
+  }
 }
 
 .sidebar-navigation__thread:hover {
@@ -1503,6 +1556,8 @@ html[data-octant-density="compact"]
   :is(.project-mark, .project-icon) {
   width: 14px;
   height: 14px;
+  /* The 14px mark keeps the 16px icon column, so the name still starts at 96. */
+  margin-inline-end: 2px;
 }
 
 .sidebar-navigation__thread-copy {
@@ -1544,6 +1599,12 @@ html[data-octant-density="compact"]
 .sidebar-navigation__thread-checkout {
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
+}
+
+/* The Project's name starts on the label column every row's text starts on
+   (16px mark, 8px gap), not 4px after the mark as it measured before. */
+.sidebar-navigation__thread-project {
+  gap: var(--oct-space-2);
 }
 
 .sidebar-navigation__thread-project > svg,
@@ -4939,11 +5000,13 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
   letter-spacing: var(--oct-tracking-tight);
 }
 
-/* The New thread row at the head of the list: 28px, 8px radius, with its key
-   at the right in the meta ink. */
+/* The New thread row at the head of the list is a navigation row like the ones
+   under it, so it takes their height (32px, 28 compact), not the 28px control
+   height it measured at beside rows of 32; 8px radius, with its key at the
+   right in the meta ink. */
 .sidebar-item.sidebar-item--new-thread {
-  height: 28px;
-  min-height: 28px;
+  height: var(--oct-nav-row-h);
+  min-height: var(--oct-nav-row-h);
   border-radius: var(--oct-radius-sm);
 }
 

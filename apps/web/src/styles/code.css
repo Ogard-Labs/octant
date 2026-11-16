@@ -1503,7 +1503,9 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   align-items: center;
   justify-content: flex-start;
   gap: var(--oct-space-2);
-  padding: 0 var(--oct-nav-inset);
+  /* The menu trigger's 1px transparent border is inside its edge: it comes out
+     of the inset so the glyph column starts at the rows' x. */
+  padding: 0 calc(var(--oct-nav-inset) - 1px);
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-medium);
@@ -1571,6 +1573,9 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 .code-project-views__glyph {
   display: inline-flex;
+  /* The icon column is 16px wide, so the label starts at the rows' label x
+     whatever the glyph (a 14px folder or a colour dot) draws inside it. */
+  width: var(--oct-icon-md);
   flex-shrink: 0;
   align-items: center;
   justify-content: center;

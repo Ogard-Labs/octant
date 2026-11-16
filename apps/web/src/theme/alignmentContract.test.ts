@@ -140,9 +140,10 @@ describe("the shell's edges and gaps", () => {
     expect(
       rule(shell, 'html[data-octant-density="compact"] .sidebar-navigation__thread'),
     ).toContain("--thread-line-title: 18px;");
-    expect(root).toMatch(
-      /\.activity-nav__group:not\(:first-child\) > h2 \{\s*margin-top: var\(--oct-space-2\);/,
-    );
+    // The heading's clearance is the list's own 8px gap; a margin on top of it
+    // made 16px between groups.
+    expect(root).not.toMatch(/\.activity-nav__group:not\(:first-child\) > h2 \{/);
+    expect(rule(root, ".activity-nav")).toContain("gap: 8px;");
   });
 
   it("gives the Move to Project list one icon box, whether the Project has a picture or not", () => {

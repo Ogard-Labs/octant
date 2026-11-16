@@ -967,8 +967,10 @@ strong {
   color: var(--oct-meta);
 }
 
-/* A status group's heading stands 8px clear of the rows above it. */
-.activity-nav__group:not(:first-child) > h2 {
+/* A status group's heading stands 8px clear of the rows above it: the list's
+   own 8px gap, with no margin on top of it (the two summed to 16px between
+   groups). The first group stands the same 8px below the Project filter row. */
+.project-nav__toolbar + .activity-nav {
   margin-top: var(--oct-space-2);
 }
 
@@ -986,11 +988,11 @@ strong {
      it. */
   height: auto;
   min-height: 0;
-  width: 100%;
+  /* Both margins take the recipe's 1px transparent border back, so the word
+     starts on the icon column and the count ends on the right edge. */
+  width: calc(100% + 2px);
   gap: var(--oct-space-1);
-  /* The recipe keeps a 1px transparent border for its outlined variants; the
-     margin takes that pixel back so the word starts where the labels do. */
-  margin-inline-start: -1px;
+  margin-inline: -1px;
   padding: 0;
   font: inherit;
 }
@@ -5834,8 +5836,12 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   opacity: 1;
 }
 
+/* The glyph keeps its 16px wherever the row stands (an earlier measurement at
+   a 1000px window read 0px); at 320 to 1440px it measures 16px by 16px. */
 .empty-start__icon,
 .empty-start__chevron {
+  flex: none;
+  min-width: 16px;
   margin-top: 2px;
   color: var(--octant-text-muted);
 }
