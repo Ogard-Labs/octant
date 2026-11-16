@@ -1204,8 +1204,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         supportsModelSwitch: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
             .modelSwitch === "supported",
-        providerCommands: (instanceId) =>
-          providerRuntimeRegistry.observedState(instanceId)?.commands,
         supportsSessionRollback: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
             .sessionRollback === "supported",
