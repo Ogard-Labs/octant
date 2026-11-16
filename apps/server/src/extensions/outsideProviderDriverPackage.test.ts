@@ -746,12 +746,13 @@ describe("an installed outside provider driver", () => {
     expect(driverState(context.lifecycle.snapshot())).toEqual(driverState(snapshot));
   });
 
-  it("is host-prohibited on a Linux host, which has no confinement to start it in", async () => {
+  it("waits for trust on macOS and Linux, and is host-prohibited on Windows, which cannot start it", async () => {
     const context = await installed();
     const snapshot = context.lifecycle.snapshot();
     for (const [platform, reason] of [
-      ["linux", "host-prohibited"],
+      ["linux", "quarantined"],
       ["darwin", "quarantined"],
+      ["win32", "host-prohibited"],
     ] as const) {
       const driver = effectiveOn(platform, snapshot).packages.find(
         (candidate) => String(candidate.extensionId) === String(context.entry.extensionId),

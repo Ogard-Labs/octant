@@ -1827,6 +1827,47 @@ describe("ACP probe confinement", () => {
     expect(launch.environment.HTTPS_PROXY).toBe("http://octant:token@127.0.0.1:47001");
   });
 
+  it("carries the tool bridge on Linux: directly on the shared host network, and through the forwarder's relay when proxied", async () => {
+    const target = fixture(kilo);
+    const managedHome = join(target.canonicalRoot, "managed-home");
+    const hostAuthenticationPath = join(target.canonicalRoot, "host-auth");
+    mkdirSync(hostAuthenticationPath, { recursive: true });
+    const prepare = (network?: { readonly path: string }) =>
+      Effect.runPromise(
+        makeAcpConfinementLive({
+          platform: "linux",
+          sandboxPath: target.bwrapPath,
+          temporaryDirectory: join(target.canonicalRoot, "tmp"),
+          hostAuthenticationPath,
+        }).prepare({
+          profile: kilo,
+          binaryPath: target.binaryPath,
+          root: managedHome,
+          managedHome,
+          mode: "code",
+          executionPolicy: "approval-gated",
+          environment: {},
+          loopbackPorts: [43124],
+          ...(network === undefined
+            ? {}
+            : {
+                network: {
+                  endpoint: { kind: "unix-socket" as const, path: network.path },
+                  environment: { HTTPS_PROXY: "http://127.0.0.1:3128" },
+                },
+              }),
+        }),
+      );
+    const shared = await prepare();
+    expect(shared.args).toContain("--share-net");
+    expect(shared.args).not.toContain("--loopback");
+    const proxied = await prepare({ path: join(target.canonicalRoot, "egress.sock") });
+    expect(proxied.args).not.toContain("--share-net");
+    const relay = proxied.args.indexOf("--loopback");
+    expect(relay).toBeGreaterThan(-1);
+    expect(proxied.args[relay + 1]).toBe("43124");
+  });
+
   it("lets the agent's own ssh read the Project's server folder and use its agent socket", async () => {
     const target = fixture(kilo);
     const managedHome = join(target.canonicalRoot, "managed-home");

@@ -1179,6 +1179,17 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     expect(supported.capabilities.appManagedTools).toBe("supported");
   });
 
+  it("reports app-managed tools on Linux as on macOS, and not on Windows", async () => {
+    const probed = (platform: NodeJS.Platform) =>
+      withProcessPlatform(platform, () =>
+        Effect.runPromise(
+          Effect.scoped(fixture(profile, { mcpHttp: true }).driver.probe({ instanceId })),
+        ),
+      );
+    expect((await probed("linux")).capabilities.appManagedTools).toBe("supported");
+    expect((await probed("win32")).capabilities.appManagedTools).toBe("unsupported");
+  });
+
   it("registers the exact app tool catalogue before an HTTP-capable ACP session starts", async () => {
     const bridgeClose = vi.fn(async () => undefined);
     type ExecuteManagedTool = (
@@ -1214,30 +1225,34 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       },
     ] as const;
 
-    await withProcessPlatform("darwin", () =>
-      Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
-            yield* connection.start({
-              sessionId,
-              modelId,
-              executionPolicy: "approval-gated",
-              tools,
-            });
-            expect(client.newSession).toHaveBeenCalledWith(projectRoot, [
-              expect.objectContaining({ type: "http", name: "octant-browser" }),
-            ]);
-            yield* connection.stop(sessionId);
-          }),
+    // Linux carries the bridge as macOS does: the launch reaches its port
+    // on the shared host network or through the forwarder's relay.
+    for (const platform of ["darwin", "linux"] as const) {
+      await withProcessPlatform(platform, () =>
+        Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+              yield* connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+                tools,
+              });
+              expect(client.newSession).toHaveBeenLastCalledWith(projectRoot, [
+                expect.objectContaining({ type: "http", name: "octant-browser" }),
+              ]);
+              yield* connection.stop(sessionId);
+            }),
+          ),
         ),
-      ),
-    );
-    expect(bridgeFactory).toHaveBeenCalledOnce();
-    expect(bridgeClose).toHaveBeenCalledOnce();
+      );
+    }
+    expect(bridgeFactory).toHaveBeenCalledTimes(2);
+    expect(bridgeClose).toHaveBeenCalledTimes(2);
   });
 
-  it("refuses app tools before session creation when ACP HTTP MCP was not negotiated", async () => {
+  it("refuses app tools before session creation on a host whose confinement cannot carry the bridge", async () => {
     const bridgeClose = vi.fn(async () => undefined);
     const bridgeFactory = vi.fn(async () => ({
       server: {
@@ -1255,7 +1270,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     const tools = [
       { name: "octant_browser", inputSchema: { type: "object", properties: {} } },
     ] as const;
-    const refusal = await withProcessPlatform("linux", () =>
+    const refusal = await withProcessPlatform("win32", () =>
       Effect.runPromise(
         Effect.scoped(
           Effect.flip(

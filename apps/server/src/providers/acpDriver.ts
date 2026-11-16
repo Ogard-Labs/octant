@@ -1,4 +1,5 @@
 import { compactAcpConversation } from "./acpCompaction";
+import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
 import { readAcpFileReview } from "./acpFileReview";
 import { isAbsolute, resolve } from "node:path";
 import { providerCommandOf } from "@octant/domain";
@@ -316,10 +317,7 @@ function negotiatedAppManagedTools(
   profile: AcpProviderProfile,
   version: string,
 ): ProviderCapabilitySupport {
-  // The managed bridge is a loopback HTTP endpoint. The current Linux
-  // Bubblewrap launch has no narrow host-loopback rule; sharing its network
-  // namespace would grant wider egress, so Linux stays fail-closed here.
-  return process.platform === "darwin" &&
+  return appToolBridgeReachesLaunchOn(process.platform) &&
     (initialized.agentCapabilities.mcpCapabilities?.http === true ||
       (initialized.agentCapabilities.mcpCapabilities?.http === undefined &&
         profile.unadvertisedHttpMcpVersions?.includes(version) === true))
@@ -1592,7 +1590,7 @@ function makeConnection(
                 : undefined;
             if (projectRefusal !== undefined) throw failure("incompatible", projectRefusal);
             const { bridgeTools } = partitionTools(input.tools);
-            if (bridgeTools.length > 0 && process.platform !== "darwin") {
+            if (bridgeTools.length > 0 && !appToolBridgeReachesLaunchOn(process.platform)) {
               throw failure(
                 "unsupported",
                 "App-managed tools are unsupported by this ACP runtime on this platform.",
