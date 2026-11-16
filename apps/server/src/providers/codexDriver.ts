@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { providerOwnMemoryLaunches } from "@octant/domain";
+import { planReadOnlyToolServers, providerOwnMemoryLaunches } from "@octant/domain";
 import {
   decodeProviderFailure,
   decodeProviderProbeResult,
@@ -64,6 +64,7 @@ import { providerApprovalCall } from "./providerApprovalCall";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { isAtLeastRelease } from "./releaseVersion";
 import {
+  codexRunsNativeSandbox,
   type CodexAppServerConnection,
   type CodexLaunchAuthority,
   type CodexProcessPort,
@@ -81,10 +82,12 @@ import {
   decodeAccountReadResult,
   decodeConfigReadResult,
   decodeModelListResult,
+  decodeReviewStartResult,
   decodeSkillsListResult,
   decodeThreadResumeResult,
   decodeThreadStartResult,
   decodeThreadCompactStartResult,
+  decodeThreadInjectItemsResult,
   decodeTurnInterruptResult,
   decodeTurnStartResult,
   decodeTurnSteerResult,
@@ -94,6 +97,7 @@ import {
   type CodexModelListResult,
   type CodexRpcId,
   type CodexRateLimitsReadResult,
+  type CodexReviewStartResult,
   type CodexServerMessage,
   type CodexSkillsListResult,
   type CodexThreadResult,
@@ -135,7 +139,35 @@ export interface CodexThreadStartInput {
   /** An empty list gives the thread no execution environment (Chat). */
   readonly environments?: readonly [];
   readonly dynamicTools?: readonly CodexDynamicToolSpec[];
+  /** Kept out of Codex's saved threads; the thread a review runs on. */
+  readonly ephemeral?: true;
 }
+
+/** What Codex's own review looks at (`ReviewTarget` in codex-rs `v2/review.rs`). */
+export type CodexReviewTarget =
+  | { readonly type: "uncommittedChanges" }
+  | { readonly type: "custom"; readonly instructions: string };
+
+/**
+ * The review a prompt asks for, when it is Codex's `/review` command: with no
+ * text after the name, the working tree's uncommitted changes, as Codex's own
+ * default; otherwise the text as the review's instructions.
+ */
+export function codexReviewRequest(prompt: string): CodexReviewTarget | undefined {
+  const match = /^\/review(?:\s+([\s\S]*))?$/u.exec(prompt.trim());
+  if (match === null) return undefined;
+  const instructions = match[1]?.trim() ?? "";
+  return instructions.length === 0
+    ? { type: "uncommittedChanges" }
+    : { type: "custom", instructions };
+}
+
+/** Codex's `/review`, listed among the provider's commands in every composer. */
+const CODEX_REVIEW_COMMAND = {
+  name: "review",
+  description: "Codex reviews this checkout read-only and reports its findings (Work and Code)",
+  argumentHint: "[what to review]",
+} as const;
 
 export interface CodexThreadConfig {
   readonly model_reasoning_effort?: string;
@@ -272,6 +304,35 @@ function codexChatThreadConfig(
 }
 
 /**
+ * A Plan thread's overrides: every MCP server in the effective config at
+ * `cwd` switched off by name, except the ones the person marked "Read-only —
+ * allowed in Plan" (`planReadOnlyToolServers`). Plan leaves the account's
+ * tool servers off because their tools can write, and Codex has no setting
+ * that switches every server off at once (see `CODEX_CHAT_CONFIG`). A Plan
+ * thread whose servers cannot be listed does not start.
+ */
+function codexPlanThreadConfig(
+  client: CodexClientPort,
+  cwd: string,
+  allowed: ReadonlyArray<string>,
+): Effect.Effect<CodexThreadConfig, ProviderFailure> {
+  return request(() => client.configRead({ cwd })).pipe(
+    Effect.map((result) => {
+      const withheld = Object.keys(result.config.mcp_servers ?? {}).filter(
+        (name) => !allowed.includes(name),
+      );
+      return withheld.length === 0
+        ? {}
+        : {
+            mcp_servers: Object.fromEntries(
+              withheld.map((name) => [name, { enabled: false } as const]),
+            ),
+          };
+    }),
+  );
+}
+
+/**
  * The `skills/list` scopes whose skills do not come from the Project: the
  * user's own (`$CODEX_HOME/skills`, `~/.agents/skills`), Codex's bundled ones,
  * and the administrator's. Any other scope, including one a later release
@@ -381,7 +442,11 @@ export interface CodexTurnStartInput {
   readonly approvalPolicy: "never" | "on-request" | "untrusted";
   readonly sandboxPolicy:
     | { readonly type: "dangerFullAccess" }
-    | { readonly type: "workspaceWrite" }
+    | {
+        readonly type: "workspaceWrite";
+        readonly writableRoots: readonly string[];
+        readonly networkAccess: boolean;
+      }
     | { readonly type: "readOnly" }
     | { readonly type: "externalSandbox"; readonly networkAccess: "restricted" | "enabled" };
   readonly approvalsReviewer: "auto_review" | "user";
@@ -469,6 +534,17 @@ export interface CodexClientPort {
   turnInterrupt(input: { readonly threadId: string; readonly turnId: string }): Promise<void>;
   /** Queues a compaction of the thread, which then runs as a turn of its own. */
   threadCompactStart?(input: { readonly threadId: string }): Promise<void>;
+  /** Appends raw messages to a thread's history without starting a turn. */
+  threadInjectItems?(input: {
+    readonly threadId: string;
+    readonly items: ReadonlyArray<CodexInjectedMessage>;
+  }): Promise<void>;
+  /** Starts Codex's own review on the thread it names, inline. */
+  reviewStart?(input: {
+    readonly threadId: string;
+    readonly target: CodexReviewTarget;
+    readonly delivery: "inline";
+  }): Promise<CodexReviewStartResult>;
   respondApproval(input: CodexApprovalResponse): Promise<void>;
   respondTool(input: CodexApprovalResponse): Promise<void>;
   subscribe(listener: (message: CodexServerMessage) => void): () => void;
@@ -476,6 +552,8 @@ export interface CodexClientPort {
 
 export interface CodexDriverOptions {
   readonly instanceId: ProviderInstanceId;
+  /** The host's platform; defaults to the running one. */
+  readonly platform?: NodeJS.Platform;
   readonly binaryPath: string;
   readonly process: CodexProcessPort;
   readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
@@ -486,6 +564,11 @@ export interface CodexDriverOptions {
    * process is leased. Absent is off.
    */
   readonly ownMemory?: () => boolean;
+  /**
+   * The account's own MCP servers the person marked "Read-only — allowed in
+   * Plan" on this host, read at each Plan start and resume. Absent starts none.
+   */
+  readonly planMcpServers?: () => ReadonlyArray<string>;
   readonly idleLeaseMs?: number;
   readonly clock?: () => string;
   /**
@@ -494,6 +577,12 @@ export interface CodexDriverOptions {
    * exercised without mutating process.env.
    */
   readonly environment?: NodeJS.ProcessEnv;
+  /**
+   * The account's launch environment outside Strict: the host's, less
+   * Octant's variables and other providers' keys. Absent, a lease outside
+   * Strict takes `environment`.
+   */
+  readonly openEnvironment?: NodeJS.ProcessEnv;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly correlationId?: () => string;
   readonly requestId?: () => string;
@@ -510,6 +599,8 @@ interface SessionState {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly autoApprove: boolean | undefined;
   readonly fullAccessSandbox: boolean | undefined;
+  /** The sandbox this session's commands run in; see {@link CodexSessionSandbox}. */
+  readonly sandbox: CodexSessionSandbox;
   readonly threadId: string;
   readonly correlationId: CorrelationId;
   readonly turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">;
@@ -520,6 +611,14 @@ interface SessionState {
    * Undefined when a resumed cursor predates the record.
    */
   readonly carriedTools: ReadonlySet<string> | undefined;
+  /** The thread's own config overrides, restated on the thread a review runs on. */
+  readonly threadConfig: CodexThreadConfig;
+  /** The thread Codex's own review is running on, until that run ends. */
+  reviewThreadId?: string | undefined;
+  /** What the running review was asked to look at, recorded with its findings. */
+  reviewTarget?: CodexReviewTarget | undefined;
+  /** The findings the running review reported, once it left review mode. */
+  reviewFindings?: string | undefined;
   activeTurnId?: string;
   outputAccepted: boolean;
   terminal: boolean;
@@ -697,6 +796,13 @@ function codexTurnRequest(
     });
   }
   if (!separate) return { input: items };
+  return { input: items, additionalContext: codexContextEntries(context) };
+}
+
+/** Octant's context for a turn as `additionalContext` entries, keyed by what each holds. */
+function codexContextEntries(
+  context: ReadonlyArray<ProviderContextBlock>,
+): Readonly<Record<string, CodexAdditionalContextEntry>> {
   const instructions = context.filter(isOctantInstructionContext);
   const material = context.filter((block) => !isOctantInstructionContext(block));
   const restated = context.some(
@@ -708,21 +814,81 @@ function codexTurnRequest(
       ? undefined
       : renderProviderContextSections(material);
   return {
-    input: items,
-    additionalContext: {
-      ...(instructions.length === 0
-        ? {}
-        : {
-            [CODEX_INSTRUCTIONS_KEY]: {
-              kind: "application",
-              value: renderOctantInstructions(instructions),
-            },
-          }),
-      ...(materialValue === undefined
-        ? {}
-        : { [CODEX_MATERIAL_KEY]: { kind: "untrusted", value: materialValue } }),
-    },
+    ...(instructions.length === 0
+      ? {}
+      : {
+          [CODEX_INSTRUCTIONS_KEY]: {
+            kind: "application",
+            value: renderOctantInstructions(instructions),
+          },
+        }),
+    ...(materialValue === undefined
+      ? {}
+      : { [CODEX_MATERIAL_KEY]: { kind: "untrusted", value: materialValue } }),
   };
+}
+
+/**
+ * One raw Responses API message for `thread/inject_items`, which appends it to
+ * the thread's model-visible history without starting a turn (codex-rs
+ * `ThreadInjectItemsParams`, rust-v0.169.0).
+ */
+export interface CodexInjectedMessage {
+  readonly type: "message";
+  readonly role: "developer" | "user" | "assistant";
+  readonly content: ReadonlyArray<
+    | { readonly type: "input_text"; readonly text: string }
+    | { readonly type: "output_text"; readonly text: string }
+  >;
+}
+
+/**
+ * A `/review` turn's Octant context, as the messages `turn/start` would have
+ * placed ahead of a request: Octant's own rules as a developer message, the
+ * rest (pending messages, a handoff, skills, memory) as a user message, each
+ * under the tag its key names. The review itself takes only a target, so the
+ * context goes into the session's own thread instead of being dropped.
+ */
+export function codexInjectedContext(
+  context: ReadonlyArray<ProviderContextBlock>,
+): ReadonlyArray<CodexInjectedMessage> {
+  return Object.entries(codexContextEntries(context)).map(([key, entry]) => ({
+    type: "message",
+    role: entry.kind === "application" ? "developer" : "user",
+    content: [{ type: "input_text", text: `<${key}>\n${entry.value}\n</${key}>` }],
+  }));
+}
+
+/**
+ * What Codex's own review asked and reported, as the session's thread keeps
+ * it: the request and Codex's findings as a user message, and the findings as
+ * Codex's own reply, the two messages Codex records after an inline review
+ * (`exit_review_mode` in codex-rs `core/src/tasks/review.rs`, rust-v0.169.0).
+ * The review ran on a thread of its own, so without them a follow-up such as
+ * "fix those findings" would reach a thread that never saw them.
+ */
+export function codexReviewRecord(
+  target: CodexReviewTarget,
+  findings: string,
+): ReadonlyArray<CodexInjectedMessage> {
+  const asked =
+    target.type === "uncommittedChanges"
+      ? "the uncommitted changes"
+      : `these instructions: ${target.instructions}`;
+  const reported = findings.trim().length === 0 ? "No findings." : findings.trim();
+  return [
+    {
+      type: "message",
+      role: "user",
+      content: [
+        {
+          type: "input_text",
+          text: `I ran /review on ${asked}. Codex's review, run read-only on a thread of its own, reported:\n\n${reported}`,
+        },
+      ],
+    },
+    { type: "message", role: "assistant", content: [{ type: "output_text", text: reported }] },
+  ];
 }
 
 /**
@@ -802,35 +968,41 @@ function request<A>(operation: () => Promise<A>): Effect.Effect<A, ProviderFailu
   return Effect.tryPromise({ try: operation, catch: providerFailure });
 }
 
+/**
+ * Which sandbox a session's commands run in below Full access: Octant's
+ * profile, named to Codex as external (Strict, and every Plan or Chat
+ * session), or Codex's own workspace-write sandbox (`codexRunsNativeSandbox`).
+ */
+export type CodexSessionSandbox =
+  | { readonly kind: "octant" }
+  | { readonly kind: "native"; readonly writableRoots: readonly string[] };
+
+const OCTANT_SANDBOX: CodexSessionSandbox = { kind: "octant" };
+
 export function codexExecutionSettings(
   policy: ProviderExecutionPolicy,
   autoApprove?: boolean,
   fullAccessSandbox?: boolean,
-  ownSandbox?: boolean,
+  sessionSandbox: CodexSessionSandbox = OCTANT_SANDBOX,
 ): Pick<CodexThreadStartInput, "approvalPolicy" | "sandbox" | "approvalsReviewer"> {
-  if (ownSandbox === true && policy !== "full-access") {
-    // The process runs with no Octant sandbox (Windows outside Strict), so
-    // Codex keeps its own: Auto runs as Codex's own Auto (`on-request` in
-    // `workspace-write`), Ask first and Accept edits keep `untrusted`, so
-    // every command Codex does not know to be read-only still asks, and an
-    // approved one runs in Codex's `workspace-write`. Plan stays `read-only`.
-    // Whatever Codex's own sandbox does on this platform is what its own CLI
-    // does here.
-    if (policy === "plan") {
-      return { approvalPolicy: "never", sandbox: "read-only", approvalsReviewer: "user" };
-    }
-    if (policy === "approval-gated" && autoApprove === true) {
-      return {
-        approvalPolicy: "on-request",
-        sandbox: "workspace-write",
-        approvalsReviewer: "auto_review",
-      };
-    }
-    return {
-      approvalPolicy: "untrusted",
-      sandbox: "workspace-write",
-      approvalsReviewer: autoApprove === true ? "auto_review" : "user",
-    };
+  if (
+    sessionSandbox.kind === "native" &&
+    (policy === "approval-gated" || policy === "auto-accept-edits")
+  ) {
+    // Outside Strict Codex runs in its own workspace-write sandbox, as it
+    // does on its own, with the same approval policies as below. Auto's
+    // `on-request` now runs a command unasked inside Codex's own sandbox, as
+    // Codex's own Auto does, and a command that needs to leave it raises
+    // Codex's escalation, which reaches the person or Reviewed's reviewer as
+    // an approval. Ask first and Accept edits keep `untrusted`, which asks for
+    // every command Codex does not know to be read-only and escalates a
+    // command its sandbox refused.
+    const { approvalPolicy, approvalsReviewer } = codexExecutionSettings(
+      policy,
+      autoApprove,
+      fullAccessSandbox,
+    );
+    return { approvalPolicy, sandbox: "workspace-write", approvalsReviewer };
   }
   if (policy === "full-access") {
     // The opt-in sandbox at Full access runs the process inside Octant's
@@ -925,20 +1097,25 @@ export function codexTurnExecutionSettings(
   autoApprove?: boolean,
   fullAccessSandbox?: boolean,
   networkOpen?: boolean,
-  ownSandbox?: boolean,
+  sessionSandbox: CodexSessionSandbox = OCTANT_SANDBOX,
 ): Pick<CodexTurnStartInput, "approvalPolicy" | "sandboxPolicy" | "approvalsReviewer"> {
   const { sandbox, ...rest } = codexExecutionSettings(
     policy,
     autoApprove,
     fullAccessSandbox,
-    ownSandbox,
+    sessionSandbox,
   );
-  if (ownSandbox === true && sandbox !== "danger-full-access") {
-    // No Octant wall is there to name as external, so the turn names Codex's own.
+  if (sandbox === "workspace-write" && sessionSandbox.kind === "native") {
+    // Codex's own sandbox: the Project's folders writable, and network as
+    // Network limits leave it. Behind the egress proxy a command reaches no
+    // network unless it is approved to leave the sandbox.
     return {
       ...rest,
-      sandboxPolicy:
-        sandbox === "workspace-write" ? { type: "workspaceWrite" } : { type: "readOnly" },
+      sandboxPolicy: {
+        type: "workspaceWrite",
+        writableRoots: sessionSandbox.writableRoots,
+        networkAccess: networkOpen === true,
+      },
     };
   }
   // Below Full access the process already runs in Octant's profile, which is
@@ -950,6 +1127,11 @@ export function codexTurnExecutionSettings(
   // network claim follows the launch: `enabled` when the process launched
   // without Octant's egress proxy (Network limits off, the default), so
   // Codex tells the model what it really has; `restricted` behind the proxy.
+  // A Plan session in Codex's own sandbox (Windows outside Strict, where no
+  // Octant wall exists to name as external) keeps Codex's own read-only one.
+  if (sandbox === "read-only" && sessionSandbox.kind === "native") {
+    return { ...rest, sandboxPolicy: { type: "readOnly" } };
+  }
   const sandboxPolicy =
     sandbox === "danger-full-access"
       ? ({ type: "dangerFullAccess" } as const)
@@ -1138,6 +1320,10 @@ export function makeCodexClient(connection: CodexAppServerConnection): CodexClie
     threadCompactStart: async (input) => {
       await rpc.request("thread/compact/start", input, decodeThreadCompactStartResult);
     },
+    reviewStart: (input) => rpc.request("review/start", input, decodeReviewStartResult),
+    threadInjectItems: async (input) => {
+      await rpc.request("thread/inject_items", input, decodeThreadInjectItemsResult);
+    },
     respondApproval: async ({ providerRequestId, result }) => {
       await rpc.respond(providerRequestId, result);
     },
@@ -1210,11 +1396,9 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             const accountResult = yield* request(runtime.client.accountRead);
             const models = yield* readModels(runtime.client);
             const environment = yield* Effect.promise(() => resolveCodexLaunchEnvironment(options));
-            const bedrockSignIn = yield* readCodexBedrockSignIn(
-              runtime.client,
-              accountResult,
-              options.environment ?? process.env,
-            );
+            // A Bedrock sign-in through an AWS profile or exported credentials
+            // is refused only for a Strict session, when its lease starts;
+            // the account itself stays ready for every other thread.
             const result = normalizeProbe(
               instanceId,
               runtime.version,
@@ -1222,7 +1406,6 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
               models,
               clock(),
               codexProviderCredential(environment ?? process.env),
-              bedrockSignIn,
             );
             // Publish the fresh catalog like the other drivers do, so a caller
             // that probes before opening a session (Chat probes before every
@@ -1231,14 +1414,17 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             options.runtimeRegistry.setObservedState(result);
             return result;
           }),
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], attachmentsFolder }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
         );
       }
+      const readOnlyFolders = attachmentsFolder === undefined ? [] : [attachmentsFolder];
       if (
-        [projectRoot, ...extraFolders].some((root) => !isAbsolute(root) || resolve(root) !== root)
+        [projectRoot, ...extraFolders, ...readOnlyFolders].some(
+          (root) => !isAbsolute(root) || resolve(root) !== root,
+        )
       ) {
         return Effect.fail(
           failure(
@@ -1266,33 +1452,31 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           // its memory stays off in Plan and Chat.
           memoryWrites: "background",
         });
-      // A launch below Full access outside Strict is its own process too: on
-      // Windows it runs with no Octant sandbox, so a Strict launch at the same
-      // level must never reuse it. At Full access Strict changes no launch.
-      const outsideStrictAt = (executionPolicy: ProviderExecutionPolicy, outsideStrict: boolean) =>
-        outsideStrict && executionPolicy !== "full-access";
-      const leaseKey = (
-        executionPolicy: ProviderExecutionPolicy,
-        ownSubagents = false,
-        fullAccessSandbox = false,
-        outsideStrict = false,
-      ) =>
+      // Strict is part of the key too: a lease outside Strict gets the host's
+      // environment, and below Full access Codex's own sandbox in place of
+      // Octant's profile, so a Strict and a non-Strict session never share a
+      // process.
+      const leaseKey = ({
+        executionPolicy,
+        ownSubagents,
+        fullAccessSandbox,
+        strict,
+      }: CodexLeasePosture) =>
         JSON.stringify([
           projectRoot,
-          extraFolders,
+          // The read-only folders ride with the extra folders, so a lease's
+          // shape (root, folders, mode, posture) stays what idle-lease
+          // matching reads.
+          [...extraFolders, ...readOnlyFolders.map((folder) => `read-only:${folder}`)],
           threadMode,
           `${executionPolicy}${ownSubagents ? "+own-subagents" : ""}${
             keepsOwnMemory(executionPolicy) ? "+own-memory" : ""
-          }${outsideStrictAt(executionPolicy, outsideStrict) ? "+outside-strict" : ""}`,
+          }${strict ? "" : "+not-strict"}`,
           ...(fullAccessSandbox ? ["+sandbox"] : []),
         ]);
-      const leaseFor = (
-        executionPolicy: ProviderExecutionPolicy,
-        ownSubagents: boolean,
-        fullAccessSandbox = false,
-        outsideStrict = false,
-      ) =>
+      const leaseFor = (posture: CodexLeasePosture) =>
         Effect.gen(function* () {
+          const { executionPolicy, ownSubagents, fullAccessSandbox, strict } = posture;
           const runtime = yield* acquireRuntime(
             options,
             clientFactory,
@@ -1300,17 +1484,21 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
               kind: "thread",
               root: projectRoot,
               ...(extraFolders.length === 0 ? {} : { extraFolders }),
+              ...(readOnlyFolders.length === 0 ? {} : { readOnlyFolders }),
               mode: threadMode,
               executionPolicy,
               ...(ownSubagents ? { ownSubagents: true as const } : {}),
               ...(keepsOwnMemory(executionPolicy) ? { ownMemory: true as const } : {}),
               ...(fullAccessSandbox ? { fullAccessSandbox: true as const } : {}),
-              ...(outsideStrictAt(executionPolicy, outsideStrict) ? { strict: false } : {}),
+              ...(strict ? {} : { strict: false as const }),
             },
-            leaseKey(executionPolicy, ownSubagents, fullAccessSandbox, outsideStrict),
+            leaseKey(posture),
           );
           // Turn starts probe first, but not every caller does (compaction,
-          // summaries, agent runs), so the session itself refuses too.
+          // summaries, agent runs), so the session itself refuses too. Only
+          // Strict refuses a Bedrock sign-in through an AWS profile or
+          // exported credentials; outside it Codex signs in as on its own.
+          if (!strict) return runtime;
           const accountResult = yield* request(runtime.client.accountRead);
           const bedrockSignIn = yield* readCodexBedrockSignIn(
             runtime.client,
@@ -1333,16 +1521,10 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       // folder set is matched loosely on purpose: the old set is gone from the
       // Project by the time the thread resumes. One a connection still holds
       // keeps running and the resume reports the conflict.
-      const closeIdleOtherLeases = (
-        executionPolicy: ProviderExecutionPolicy,
-        ownSubagents: boolean,
-        fullAccessSandbox = false,
-        outsideStrict = false,
-      ) =>
+      const closeIdleOtherLeases = (posture: CodexLeasePosture) =>
         Effect.promise(() =>
           options.runtimeRegistry.closeIdleLeasesWhere(options.instanceId, (lease) => {
-            if (lease === leaseKey(executionPolicy, ownSubagents, fullAccessSandbox, outsideStrict))
-              return false;
+            if (lease === leaseKey(posture)) return false;
             const parsed = codexThreadLease(lease);
             return parsed?.root === projectRoot && parsed.mode === threadMode;
           }),
@@ -1373,14 +1555,39 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
 
 const CATALOG_AUTHORITY: CodexLaunchAuthority = { kind: "catalog" };
 
+/**
+ * Everything one thread lease's process is launched for. None of it can
+ * change on a running process, so a connection keeps the posture its first
+ * session named.
+ */
+interface CodexLeasePosture {
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly ownSubagents: boolean;
+  readonly fullAccessSandbox: boolean;
+  /** Absent from a session start or resume reads as Strict. */
+  readonly strict: boolean;
+}
+
+function codexLeasePosture(input: {
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly nativeSetup?: ProviderNativeSetup;
+  readonly fullAccessSandbox?: boolean;
+  readonly strict?: boolean;
+}): CodexLeasePosture {
+  return {
+    executionPolicy: input.executionPolicy,
+    ownSubagents: codexRunsOwnSubagents(input),
+    fullAccessSandbox: input.fullAccessSandbox === true,
+    strict: input.strict !== false,
+  };
+}
+
 interface CodexLeasedRuntime {
   readonly client: CodexClientPort;
   readonly version: string;
   readonly exited: Promise<void>;
   /** Whether the process launched without Octant's egress proxy, so its commands reach every host. */
   readonly networkOpen: boolean;
-  /** Whether the process runs below Full access with no Octant sandbox, so Codex keeps its own. */
-  readonly ownSandbox: boolean;
 }
 
 /** The root and mode a thread lease key names, or undefined for any other lease. */
@@ -1411,7 +1618,10 @@ function acquireRuntime(
       const scope = await Effect.runPromise(Scope.make());
       let receipt: Awaited<ReturnType<ProviderRuntimeRegistry["trackProcess"]>> | undefined;
       try {
-        const environment = await resolveCodexLaunchEnvironment(options);
+        const environment = await resolveCodexLaunchEnvironment(
+          options,
+          !(authority.kind === "thread" && authority.strict === false),
+        );
         const processExit = await Effect.runPromiseExit(
           options.process
             .start({
@@ -1436,7 +1646,6 @@ function acquireRuntime(
             version: connection.version,
             exited: connection.exited,
             networkOpen: connection.networkOpen === true,
-            ownSandbox: connection.ownSandbox === true,
           },
           pid: connection.pid,
           ...(receipt === undefined ? {} : { receipt }),
@@ -1476,6 +1685,11 @@ function readModels(
 }
 
 /**
+ * Read only under Strict: outside it Codex signs in to Bedrock as it does on
+ * its own, through an AWS profile or exported credentials too (Architecture:
+ * "Octant adds no restrictions of its own unless Strict is on", Codex
+ * sign-ins).
+ *
  * The Bedrock sign-in the runtime would use, or `undefined` when its active
  * provider is not Bedrock. Codex reports a Bedrock account itself; an older
  * runtime that does not is recognised from the account's `config.toml`. The
@@ -1505,18 +1719,18 @@ function readCodexBedrockSignIn(
 }
 
 const CODEX_BEDROCK_RECOVERY =
-  "Use a Bedrock API key for this account instead: sign this Codex account in to Bedrock with an API key, or, for the first Codex account, set AWS_BEARER_TOKEN_BEDROCK and AWS_REGION where Octant starts.";
+  "Turn Strict off for this thread, or use a Bedrock API key for this account instead: sign this Codex account in to Bedrock with an API key, or, for the first Codex account, set AWS_BEARER_TOKEN_BEDROCK and AWS_REGION where Octant starts.";
 
 function codexBedrockRefusal(
   signIn: Extract<CodexBedrockSignIn, { readonly status: "refused" }>,
 ): string {
   switch (signIn.source) {
     case "aws-profile":
-      return `This Codex account signs in to Amazon Bedrock with the AWS profile its config names in aws.profile. The Codex runtime is not confined, so its commands could read that profile's reusable keys in the AWS shared config. Remove aws.profile. ${CODEX_BEDROCK_RECOVERY}`;
+      return `This Codex account signs in to Amazon Bedrock with the AWS profile its config names in aws.profile. Strict refuses it, because the Codex runtime's commands could read that profile's reusable keys in the AWS shared config. Remove aws.profile. ${CODEX_BEDROCK_RECOVERY}`;
     case "credential-export":
-      return `This Codex account signs in to Amazon Bedrock through the aws.credential_export command in its config, which hands the runtime general-purpose AWS keys. The Codex runtime is not confined, so its commands could use them. Remove aws.credential_export. ${CODEX_BEDROCK_RECOVERY}`;
+      return `This Codex account signs in to Amazon Bedrock through the aws.credential_export command in its config, which hands the runtime general-purpose AWS keys. Strict refuses it, because the Codex runtime's commands could use them. Remove aws.credential_export. ${CODEX_BEDROCK_RECOVERY}`;
     case "aws-default-chain":
-      return `This Codex account has no Bedrock API key, so Codex would sign in to Amazon Bedrock from the AWS shared config, an AWS profile, SSO, or AWS IAM keys. The Codex runtime is not confined, so its commands could read those reusable credentials. ${CODEX_BEDROCK_RECOVERY}`;
+      return `This Codex account has no Bedrock API key, so Codex would sign in to Amazon Bedrock from the AWS shared config, an AWS profile, SSO, or AWS IAM keys. Strict refuses it, because the Codex runtime's commands could read those reusable credentials. ${CODEX_BEDROCK_RECOVERY}`;
   }
 }
 
@@ -1543,7 +1757,6 @@ function normalizeProbe(
   sourceModels: ReadonlyArray<CodexModelListResult["data"][number]>,
   observedAt: string,
   providerCredential?: CodexProviderCredential,
-  bedrockSignIn?: CodexBedrockSignIn,
 ): ProviderProbeResult {
   const models = sourceModels
     .filter((source) => !source.hidden && source.id.trim().length > 0)
@@ -1605,29 +1818,26 @@ function normalizeProbe(
     !accountResult.requiresOpenaiAuth && providerCredential?.present === false
       ? providerCredential.envKey
       : undefined;
-  const refusal =
-    bedrockSignIn?.status === "refused" ? codexBedrockRefusal(bedrockSignIn) : undefined;
   const ready =
-    refusal === undefined &&
     models.length > 0 &&
     missingCredential === undefined &&
     (accountResult.account !== null || !accountResult.requiresOpenaiAuth);
   return decodeProviderProbeResult({
     instanceId,
-    readiness: ready ? "ready" : refusal === undefined ? "unauthenticated" : "incompatible",
+    readiness: ready ? "ready" : "unauthenticated",
     accountAuthentication: codexAccountAuthentication(accountResult),
     processState: "running",
     detectedVersion: version,
     models,
     capabilities: codexChatCapabilities(models, version),
+    commands: [CODEX_REVIEW_COMMAND],
     ...(ready
       ? { lastSuccessfulProbeAt: observedAt as UtcTimestamp }
       : {
           message:
-            refusal ??
-            (missingCredential === undefined
+            missingCredential === undefined
               ? "Authenticate Codex and make at least one usable model available."
-              : `The active model provider's credential variable ${missingCredential} is not available to the Codex runtime.`),
+              : `The active model provider's credential variable ${missingCredential} is not available to the Codex runtime.`,
         }),
     observedAt: observedAt as UtcTimestamp,
   });
@@ -1682,17 +1892,9 @@ const UNLEASED_CODEX_CLIENT: CodexClientPort = (() => {
 function makeConnection(
   options: CodexDriverOptions,
   leaseFor: (
-    executionPolicy: ProviderExecutionPolicy,
-    ownSubagents: boolean,
-    fullAccessSandbox?: boolean,
-    outsideStrict?: boolean,
+    posture: CodexLeasePosture,
   ) => Effect.Effect<CodexLeasedRuntime, ProviderFailure, Scope.Scope>,
-  closeIdleOtherLeases: (
-    executionPolicy: ProviderExecutionPolicy,
-    ownSubagents: boolean,
-    fullAccessSandbox?: boolean,
-    outsideStrict?: boolean,
-  ) => Effect.Effect<void>,
+  closeIdleOtherLeases: (posture: CodexLeasePosture) => Effect.Effect<void>,
   projectRoot: string,
   extraFolders: ReadonlyArray<string>,
   mode: ProviderAcquireInput["mode"],
@@ -1702,12 +1904,8 @@ function makeConnection(
     const connectionScope = yield* Effect.scope;
     let client = UNLEASED_CODEX_CLIENT;
     let version = "";
-    let leasedPolicy: ProviderExecutionPolicy | undefined;
-    let leasedOwnSubagents = false;
-    let leasedFullAccessSandbox = false;
-    let leasedOutsideStrict = false;
+    let leased: CodexLeasePosture | undefined;
     let leasedNetworkOpen = false;
-    let leasedOwnSandbox = false;
     let closed = false;
     const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ProviderSessionId, SessionState>();
@@ -1753,6 +1951,7 @@ function makeConnection(
     let pendingLifecycleRegistrations = 0;
     const modeThreadConfig = (
       nativeSetup: ProviderNativeSetup | undefined,
+      executionPolicy: ProviderExecutionPolicy,
     ): Effect.Effect<CodexThreadConfig, ProviderFailure> =>
       Effect.gen(function* () {
         // The person's own Project skills load as Codex loads them, so none
@@ -1766,7 +1965,17 @@ function makeConnection(
             ? nativeSetup?.toolServers === true
               ? CODEX_CHAT_OWN_TOOL_SERVERS_CONFIG
               : yield* codexChatThreadConfig(client, projectRoot)
-            : {};
+            : executionPolicy === "plan"
+              ? yield* codexPlanThreadConfig(
+                  client,
+                  projectRoot,
+                  planReadOnlyToolServers({
+                    executionPolicy,
+                    setup: nativeSetup,
+                    marked: options.planMcpServers?.() ?? [],
+                  }),
+                )
+              : {};
         const webConfig =
           nativeSetup?.webTools === true
             ? modeConfig
@@ -1774,7 +1983,149 @@ function makeConnection(
         return skills === undefined ? webConfig : { ...webConfig, skills };
       });
 
+    // Windows has no Octant profile to hold Plan read-only, so a Plan session
+    // there outside Strict keeps Codex's own read-only sandbox; Strict is
+    // refused there before the process starts.
+    const codexPlanRunsNativeSandbox = (input: {
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly strict?: boolean;
+    }) =>
+      (options.platform ?? process.platform) === "win32" &&
+      mode !== "chat" &&
+      input.executionPolicy === "plan" &&
+      input.strict === false;
+    const sessionSandbox = (input: {
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly strict?: boolean;
+    }): CodexSessionSandbox =>
+      codexRunsNativeSandbox({
+        mode: mode ?? "code",
+        executionPolicy: input.executionPolicy,
+        strict: input.strict,
+      }) || codexPlanRunsNativeSandbox(input)
+        ? { kind: "native", writableRoots: [projectRoot, ...extraFolders] }
+        : OCTANT_SANDBOX;
     const offer = (event: ProviderRuntimeEvent) => Effect.runFork(Queue.offer(queue, event));
+    /** Forgets the thread a review ran on once its run ends, so nothing more is read from it. */
+    const endReview = (state: SessionState) => {
+      const reviewThreadId = state.reviewThreadId;
+      if (reviewThreadId === undefined) return;
+      state.reviewThreadId = undefined;
+      state.reviewTarget = undefined;
+      state.reviewFindings = undefined;
+      if (sessionsByThread.get(reviewThreadId) === state) sessionsByThread.delete(reviewThreadId);
+    };
+    /**
+     * Codex's own review of the thread's checkout. It runs on a thread of
+     * its own started read-only with no approvals, because the review Codex
+     * runs inline takes the sandbox of the thread it runs on, and the
+     * session's thread may write. Codex's read-only sandbox is real only on a
+     * process outside Octant's profile, where Codex's own Seatbelt can start:
+     * a Work or Code thread outside Strict below Full access, or Full access
+     * without the sandbox. Elsewhere the review is refused rather than run
+     * with writes. Plan and Chat never start one.
+     */
+    const startReview = (
+      state: SessionState,
+      target: CodexReviewTarget,
+      input: ProviderTurnInput,
+    ): Effect.Effect<void, ProviderFailure> =>
+      Effect.gen(function* () {
+        if (mode === "chat" || state.executionPolicy === "plan") {
+          return yield* Effect.fail(
+            failure("unsupported", "Codex's review runs in Work and Code, outside Plan."),
+          );
+        }
+        const readOnlyHolds =
+          state.sandbox.kind === "native" ||
+          (state.executionPolicy === "full-access" && state.fullAccessSandbox !== true);
+        if (!readOnlyHolds) {
+          return yield* Effect.fail(
+            failure(
+              "unsupported",
+              "Codex's review needs its own read-only sandbox, which cannot start inside Octant's sandbox. Turn Strict off for this thread, or run it at Full access without the sandbox.",
+            ),
+          );
+        }
+        const reviewStart = client.reviewStart;
+        const threadInjectItems = client.threadInjectItems;
+        if (reviewStart === undefined || threadInjectItems === undefined) {
+          return yield* Effect.fail(failure("unsupported", "This Codex runtime cannot review."));
+        }
+        // The review takes only a target. A file the person attached cannot
+        // reach it, so the send is refused before anything leaves, and
+        // whatever the turn carried stays for the next one.
+        if (input.attachments.length > 0) {
+          return yield* Effect.fail(
+            failure(
+              "unsupported",
+              "Codex's review takes no attachments. Send them in a turn of their own, then run /review.",
+            ),
+          );
+        }
+        ensureSubscribed();
+        // Everything else the turn carries (pending messages, a handoff,
+        // Octant's context) goes into the session's own thread first, so the
+        // send reports delivered only what Codex has. A runtime that cannot
+        // take it refuses the review before anything is delivered.
+        const injected = codexInjectedContext(
+          withCarriedToolRules(input, state.carriedTools).context ?? [],
+        );
+        if (injected.length > 0) {
+          yield* Effect.tryPromise({
+            try: () => threadInjectItems({ threadId: state.threadId, items: injected }),
+            catch: (error) =>
+              error instanceof CodexRpcClientFailure &&
+              error.kind === "remote" &&
+              error.remoteCode === -32601
+                ? failure(
+                    "unsupported",
+                    "This Codex release cannot carry a turn's context into a review.",
+                  )
+                : providerFailure(error),
+          });
+        }
+        const reviewThread = yield* request(() =>
+          client.threadStart({
+            cwd: projectRoot,
+            model: state.modelId,
+            approvalPolicy: "never",
+            sandbox: "read-only",
+            approvalsReviewer: "user",
+            config: state.threadConfig,
+            ephemeral: true,
+          }),
+        );
+        if (reviewThread.cwd !== projectRoot) {
+          return yield* Effect.fail(
+            failure("unauthorized", "Codex review thread belongs to a different Project root."),
+          );
+        }
+        state.reviewThreadId = reviewThread.thread.id;
+        state.reviewTarget = target;
+        state.reviewFindings = undefined;
+        sessionsByThread.set(reviewThread.thread.id, state);
+        const started = yield* Effect.tryPromise({
+          try: () => reviewStart({ threadId: reviewThread.thread.id, target, delivery: "inline" }),
+          catch: (error) =>
+            error instanceof CodexRpcClientFailure &&
+            error.kind === "remote" &&
+            error.remoteCode === -32601
+              ? failure("unsupported", "This Codex release cannot start a review.")
+              : providerFailure(error),
+        }).pipe(Effect.tapError(() => Effect.sync(() => endReview(state))));
+        if (
+          started.reviewThreadId !== reviewThread.thread.id ||
+          (state.activeTurnId !== undefined && state.activeTurnId !== started.turn.id)
+        ) {
+          endReview(state);
+          return yield* Effect.fail(
+            failure("protocol", "Codex review response did not match its thread."),
+          );
+        }
+        state.activeTurnId = started.turn.id;
+        state.context ??= makeEventContext(state, factories);
+      });
     const activate = (state: SessionState) => {
       if (state.active) return;
       state.active = true;
@@ -1784,6 +2135,7 @@ function makeConnection(
       );
     };
     const deactivate = (state: SessionState) => {
+      endReview(state);
       if (!state.active) return;
       state.active = false;
       options.runtimeRegistry.setActiveSessionCount(
@@ -2107,6 +2459,16 @@ function makeConnection(
         state.context = makeEventContext(state, factories);
       }
       if (state.context === undefined) return;
+      if (
+        message.kind === "notification" &&
+        message.method === "item/completed" &&
+        state.reviewThreadId !== undefined &&
+        message.params.threadId === state.reviewThreadId &&
+        message.params.item.type === "exitedReviewMode" &&
+        "review" in message.params.item
+      ) {
+        state.reviewFindings = message.params.item.review;
+      }
       const mapped = mapCodexMessage(state.context, message);
       for (const item of mapped) {
         if (item.kind === "ignored") continue;
@@ -2149,6 +2511,17 @@ function makeConnection(
         if (item.event.kind === "child-agent-activity") {
           recordSubagent(item.event.childAgentId, state.threadId);
         }
+        const reviewTarget = state.reviewTarget;
+        const reviewFindings = state.reviewFindings;
+        if (
+          item.event.kind === "completed" &&
+          state.reviewThreadId !== undefined &&
+          reviewTarget !== undefined &&
+          reviewFindings !== undefined
+        ) {
+          recordReview(state, item.event, reviewTarget, reviewFindings);
+          return;
+        }
         offer(item.event);
         if (isTerminal(item.event)) {
           settleCompaction(state, item.event.kind === "failed" || item.event.kind === "completed");
@@ -2160,6 +2533,50 @@ function makeConnection(
           return;
         }
       }
+    };
+    /**
+     * Ends a review that reported its findings: they go into the session's
+     * own thread (`codexReviewRecord`) before the turn reports completed, so
+     * the next turn, which resumes that thread, sees what the review found. A
+     * runtime that cannot take them fails the turn with a sentence saying so
+     * rather than leave the thread without them unseen.
+     */
+    const recordReview = (
+      state: SessionState,
+      completed: ProviderRuntimeEvent,
+      target: CodexReviewTarget,
+      findings: string,
+    ) => {
+      state.terminal = true;
+      clearPendingApprovals(state);
+      clearPendingTools(state);
+      deactivate(state);
+      const threadInjectItems = client.threadInjectItems;
+      const recorded =
+        threadInjectItems === undefined
+          ? Promise.reject(new Error("Codex cannot take the review's findings."))
+          : threadInjectItems({
+              threadId: state.threadId,
+              items: codexReviewRecord(target, findings),
+            });
+      void recorded
+        .then(
+          () => offer(completed),
+          () =>
+            offer({
+              kind: "failed",
+              failure: failure(
+                "provider-failed",
+                "Codex's review finished, but its findings could not be added to this thread's conversation, so a follow-up turn would not see them.",
+              ),
+              instanceId: completed.instanceId,
+              sessionId: completed.sessionId,
+              sequence: completed.sequence,
+              correlationId: completed.correlationId,
+              occurredAt: completed.occurredAt,
+            } as ProviderRuntimeEvent),
+        )
+        .finally(unsubscribeWhenIdle);
     };
     const ensureSubscribed = () => {
       unsubscribe ??= client.subscribe(handleMessage);
@@ -2201,19 +2618,15 @@ function makeConnection(
      * the process was confined for it, and the profile cannot change on a
      * running process.
      */
-    const ensureRuntime = (
-      executionPolicy: ProviderExecutionPolicy,
-      ownSubagents: boolean,
-      fullAccessSandbox = false,
-      outsideStrict = false,
-    ): Effect.Effect<void, ProviderFailure> =>
+    const ensureRuntime = (posture: CodexLeasePosture): Effect.Effect<void, ProviderFailure> =>
       Effect.suspend(() => {
         const sameAuthority = () =>
-          leasedPolicy === executionPolicy &&
-          leasedOwnSubagents === ownSubagents &&
-          leasedFullAccessSandbox === fullAccessSandbox &&
-          leasedOutsideStrict === outsideStrict;
-        if (leasedPolicy !== undefined) {
+          leased !== undefined &&
+          leased.executionPolicy === posture.executionPolicy &&
+          leased.ownSubagents === posture.ownSubagents &&
+          leased.fullAccessSandbox === posture.fullAccessSandbox &&
+          leased.strict === posture.strict;
+        if (leased !== undefined) {
           return sameAuthority()
             ? Effect.void
             : Effect.fail(
@@ -2223,12 +2636,9 @@ function makeConnection(
                 ),
               );
         }
-        return Scope.extend(
-          leaseFor(executionPolicy, ownSubagents, fullAccessSandbox, outsideStrict),
-          connectionScope,
-        ).pipe(
+        return Scope.extend(leaseFor(posture), connectionScope).pipe(
           Effect.flatMap((runtime) => {
-            if (leasedPolicy !== undefined && !sameAuthority()) {
+            if (leased !== undefined && !sameAuthority()) {
               return Effect.fail(
                 failure(
                   "unauthorized",
@@ -2236,15 +2646,11 @@ function makeConnection(
                 ),
               );
             }
-            if (leasedPolicy === undefined) {
+            if (leased === undefined) {
               client = runtime.client;
               version = runtime.version;
-              leasedPolicy = executionPolicy;
-              leasedOwnSubagents = ownSubagents;
-              leasedFullAccessSandbox = fullAccessSandbox;
-              leasedOutsideStrict = outsideStrict;
+              leased = posture;
               leasedNetworkOpen = runtime.networkOpen;
-              leasedOwnSandbox = runtime.ownSandbox;
               const lost = () => {
                 if (!closed) runtimeLost();
               };
@@ -2286,10 +2692,12 @@ function makeConnection(
         readonly executionPolicy: ProviderExecutionPolicy;
         readonly autoApprove?: boolean;
         readonly fullAccessSandbox?: boolean;
+        readonly strict?: boolean;
       },
       thread: CodexThreadResult,
       modelId: string,
       carriedTools: ReadonlySet<string> | undefined,
+      threadConfig: CodexThreadConfig,
       turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">,
     ) => {
       const previous = sessions.get(input.sessionId);
@@ -2313,10 +2721,12 @@ function makeConnection(
         executionPolicy: input.executionPolicy,
         autoApprove: input.autoApprove,
         fullAccessSandbox: input.fullAccessSandbox,
+        sandbox: sessionSandbox(input),
         threadId: thread.thread.id,
         ...(turnOverrides === undefined ? {} : { turnOverrides }),
         ...(collaborationMode === undefined ? {} : { collaborationMode }),
         carriedTools,
+        threadConfig,
         correlationId: factories.makeCorrelation() as CorrelationId,
         outputAccepted: false,
         terminal: false,
@@ -2339,18 +2749,13 @@ function makeConnection(
       start: (input) =>
         withPendingLifecycle(() =>
           Effect.gen(function* () {
-            yield* ensureRuntime(
-              input.executionPolicy,
-              codexRunsOwnSubagents(input),
-              input.fullAccessSandbox === true,
-              input.strict === false && input.executionPolicy !== "full-access",
-            );
+            yield* ensureRuntime(codexLeasePosture(input));
             ensureSubscribed();
             const settings = codexExecutionSettings(
               input.executionPolicy,
               input.autoApprove,
               input.fullAccessSandbox,
-              leasedOwnSandbox,
+              sessionSandbox(input),
             );
             const requestedOptions = input.modelOptionValues;
             let optionSettings: Pick<CodexThreadStartInput, "serviceTier" | "config"> = {};
@@ -2372,7 +2777,7 @@ function makeConnection(
               optionSettings = codexModelOptionSettings(observedModel, requestedOptions);
             }
             const dynamicTools = codexDynamicTools(input.tools);
-            const modeConfig = yield* modeThreadConfig(input.nativeSetup);
+            const modeConfig = yield* modeThreadConfig(input.nativeSetup, input.executionPolicy);
             const config = {
               ...optionSettings.config,
               ...modeConfig,
@@ -2399,7 +2804,7 @@ function makeConnection(
               );
             }
             const toolNames = (input.tools ?? []).map((tool) => tool.name);
-            register(input, thread, input.modelId, new Set(toolNames));
+            register(input, thread, input.modelId, new Set(toolNames), modeConfig);
             return {
               sessionId: input.sessionId,
               resumeCursor: {
@@ -2459,14 +2864,9 @@ function makeConnection(
         }
         return withPendingLifecycle(() =>
           Effect.gen(function* () {
-            yield* ensureRuntime(
-              input.executionPolicy,
-              codexRunsOwnSubagents(input),
-              input.fullAccessSandbox === true,
-              input.strict === false && input.executionPolicy !== "full-access",
-            );
+            yield* ensureRuntime(codexLeasePosture(input));
             ensureSubscribed();
-            const modeConfig = yield* modeThreadConfig(input.nativeSetup);
+            const modeConfig = yield* modeThreadConfig(input.nativeSetup, input.executionPolicy);
             const resumeRequest = () =>
               Effect.tryPromise({
                 try: () =>
@@ -2493,12 +2893,7 @@ function makeConnection(
                 Effect.catchAll((error) =>
                   isActiveWriterConflict(error) && attempt < CODEX_RESUME_WRITER_CONFLICT_ATTEMPTS
                     ? (attempt === 1
-                        ? closeIdleOtherLeases(
-                            input.executionPolicy,
-                            codexRunsOwnSubagents(input),
-                            input.fullAccessSandbox === true,
-                            input.strict === false && input.executionPolicy !== "full-access",
-                          )
+                        ? closeIdleOtherLeases(codexLeasePosture(input))
                         : Effect.void
                       ).pipe(
                         Effect.zipRight(
@@ -2534,7 +2929,7 @@ function makeConnection(
             // so the new model and its reasoning ride on every turn instead.
             const modelId = input.modelId === undefined ? thread.model : String(input.modelId);
             if (modelId === thread.model) {
-              register(input, thread, thread.model, carriedToolsOf(input.resumeCursor));
+              register(input, thread, thread.model, carriedToolsOf(input.resumeCursor), modeConfig);
               return { sessionId: input.sessionId, resumeCursor: input.resumeCursor };
             }
             const switchedModel = options.runtimeRegistry
@@ -2553,7 +2948,7 @@ function makeConnection(
                 ? undefined
                 : codexModelOptionSettings(switchedModel, input.modelOptionValues).config
                     ?.model_reasoning_effort;
-            register(input, thread, modelId, carriedToolsOf(input.resumeCursor), {
+            register(input, thread, modelId, carriedToolsOf(input.resumeCursor), modeConfig, {
               model: modelId,
               ...(effort === undefined ? {} : { effort }),
             });
@@ -2580,6 +2975,8 @@ function makeConnection(
             if (state.compaction !== undefined) {
               return Effect.fail(failure("unavailable", "Codex is compacting this session."));
             }
+            const review = codexReviewRequest(input.prompt);
+            if (review !== undefined) return startReview(state, review, input);
             ensureSubscribed();
             return Effect.tryPromise({
               try: async () => {
@@ -2594,7 +2991,7 @@ function makeConnection(
                         state.autoApprove,
                         state.fullAccessSandbox,
                         leasedNetworkOpen,
-                        leasedOwnSandbox,
+                        state.sandbox,
                       ),
                       ...state.turnOverrides,
                       ...(state.collaborationMode === undefined
@@ -2644,6 +3041,7 @@ function makeConnection(
               state.terminal ||
               expectedTurnId === undefined ||
               turnSteer === undefined ||
+              state.reviewThreadId !== undefined ||
               message.trim().length === 0 ||
               message.length > 4096
             )
@@ -2723,7 +3121,10 @@ function makeConnection(
             state.activeTurnId === undefined
               ? Effect.fail(failure("protocol", "Codex session has no active turn."))
               : request(() =>
-                  client.turnInterrupt({ threadId: state.threadId, turnId: state.activeTurnId! }),
+                  client.turnInterrupt({
+                    threadId: state.reviewThreadId ?? state.threadId,
+                    turnId: state.activeTurnId!,
+                  }),
                 ),
           ),
         ),
@@ -2787,8 +3188,13 @@ function makeConnection(
                 result: approvalResult(
                   pending,
                   input.approved,
-                  // A one-call answer is never accepted for the session.
-                  input.scope === "once" ? "project-default" : permissionPersistence(options),
+                  // A one-call answer is never accepted for the session. Nor
+                  // is a command in Codex's own sandbox: Codex would run a
+                  // later matching command outside it unasked, and an
+                  // approved escalation runs that one command only.
+                  input.scope === "once" || state.sandbox.kind === "native"
+                    ? "project-default"
+                    : permissionPersistence(options),
                 ),
               }),
             ).pipe(
@@ -2994,8 +3400,9 @@ function stateForMessage(
 
 async function resolveCodexLaunchEnvironment(
   options: CodexDriverOptions,
+  strict = true,
 ): Promise<NodeJS.ProcessEnv | undefined> {
-  const base = options.environment;
+  const base = strict ? options.environment : (options.openEnvironment ?? options.environment);
   if (options.credentialResolver === undefined) return base;
   try {
     if (!(await options.credentialResolver.has(String(options.instanceId)))) return base;
@@ -3014,7 +3421,8 @@ function makeEventContext(state: SessionState, factories: ConnectionFactories): 
     correlationId: state.correlationId,
     occurredAt: factories.clock() as UtcTimestamp,
     projectRoot: state.projectRoot,
-    threadId: state.threadId,
+    threadId: state.reviewThreadId ?? state.threadId,
+    ...(state.reviewThreadId === undefined ? {} : { sessionThreadId: state.threadId }),
     turnId: state.activeTurnId!,
     sequence: state.context?.sequence ?? 1,
     terminal: false,

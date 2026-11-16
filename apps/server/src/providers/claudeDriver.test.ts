@@ -41,9 +41,11 @@ import type {
   ClaudeSessionMetadata,
 } from "./claudeAgentSdkPort";
 import {
+  CLAUDE_ATTACHMENTS_READ_ONLY,
   CLAUDE_MEMORY_WRITE_REFUSAL,
   claudeMemoryWriteRefusal,
   CLAUDE_PLAN_CAPTURED_MESSAGE,
+  CLAUDE_PLAN_MCP_SERVER_REFUSAL,
   claudeExecutionOptions,
   claudeSandboxSettings,
   claudeFileToolSecretRefusal,
@@ -58,7 +60,11 @@ import {
   type ClaudeEnvironmentScope,
   type ClaudeEnvironmentScopeOptions,
 } from "./claudeEnvironment";
-import { claudeLoginKeychainPath, type ClaudeProcessPort } from "./claudeProcess";
+import {
+  claudeLoginKeychainPath,
+  claudePlanRunsCommands,
+  type ClaudeProcessPort,
+} from "./claudeProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import { draftGitText } from "../code/codeGitDraftService";
 import { makeContextSummaryGenerator } from "../context/contextSummaryGenerator";
@@ -237,6 +243,7 @@ function harness(
     readonly runtimeVersion?: string;
     readonly artifactDelivery?: () => boolean;
     readonly ownMemory?: () => boolean;
+    readonly planMcpServers?: () => ReadonlyArray<string>;
     readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
     readonly authorityNow?: () => number;
     readonly platform?: NodeJS.Platform;
@@ -392,6 +399,7 @@ function harness(
         ? {}
         : { artifactDelivery: options.artifactDelivery }),
       ...(options.ownMemory === undefined ? {} : { ownMemory: options.ownMemory }),
+      ...(options.planMcpServers === undefined ? {} : { planMcpServers: options.planMcpServers }),
       ...(options.gitIdentity === undefined ? {} : { gitIdentity: options.gitIdentity }),
       ...(options.runtimeNetwork === undefined ? {} : { runtimeNetwork: options.runtimeNetwork }),
       ...(options.authorityNow === undefined ? {} : { authorityNow: options.authorityNow }),
@@ -799,8 +807,8 @@ describe("Claude execution policy", () => {
       ],
       fullToolSet: false,
     });
-    // A Work or Code Plan turn runs read-only commands only where its Seatbelt
-    // profile can name the programs; Chat has no shell.
+    // A Work or Code Plan turn runs read-only commands only where its sandbox
+    // can hold the shell; Chat has no shell.
     expect(claudeExecutionOptions("plan", false, "work", "darwin")).toEqual(
       claudeExecutionOptions("plan", false, "code", "darwin"),
     );
@@ -816,9 +824,15 @@ describe("Claude execution policy", () => {
       "TaskGet",
       "Bash",
     ]);
+    // Linux holds each command in a nested capsule where the host can build one.
+    for (const mode of ["code", "work"] as const) {
+      expect(claudeExecutionOptions("plan", false, mode, "linux").tools.includes("Bash")).toBe(
+        claudePlanRunsCommands("linux"),
+      );
+    }
     for (const [mode, platform] of [
-      ["code", "linux"],
-      ["work", "linux"],
+      ["code", "win32"],
+      ["work", "win32"],
       ["chat", "darwin"],
     ] as const) {
       expect(claudeExecutionOptions("plan", false, mode, platform).tools).toEqual([
@@ -4887,6 +4901,100 @@ describe("Claude artifact delivery", () => {
         await acquired.close();
       }
     }
+  });
+
+  it("asks in Plan about a call to an account MCP server the person marked and refuses one they did not", async () => {
+    const f = harness("subscription", "current-session", {
+      planMcpServers: () => ["docs-search"],
+    });
+    const acquired = await acquire(f.driver, "code");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "plan",
+          nativeSetup: {
+            subagents: true,
+            webTools: true,
+            skills: true,
+            toolServers: false,
+            hooks: false,
+            projectCode: false,
+          },
+        }),
+      );
+      const open = f.opens.at(-1)!;
+      expect(open.planMcpServers).toEqual(["docs-search"]);
+      const signal = new AbortController().signal;
+      const answer = (toolName: string, toolUseId: string) =>
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName,
+          input: { query: "x" },
+          toolUseId,
+          signal,
+        });
+      await expect(answer("mcp__docs-search__query", "mcp-marked")).resolves.toEqual({
+        behavior: "ask",
+      });
+      await expect(answer("mcp__linear__search", "mcp-unmarked")).resolves.toEqual({
+        behavior: "deny",
+        message: CLAUDE_PLAN_MCP_SERVER_REFUSAL,
+      });
+    } finally {
+      await acquired.close();
+    }
+  });
+
+  it("reads the thread's attached files unasked in Plan and refuses every write into them", async () => {
+    const attachmentsFolder = "/tmp/octant-data/code-threads/thread-1";
+    const file = `${attachmentsFolder}/40000000-0000-4000-8000-000000000031/report.pdf`;
+    for (const executionPolicy of ["plan", "approval-gated"] as const) {
+      const f = harness("subscription", "current-session");
+      const scope = await Effect.runPromise(Scope.make());
+      const connection = await Effect.runPromise(
+        f.driver
+          .acquire({ instanceId, projectRoot, mode: "code", attachmentsFolder })
+          .pipe(Effect.provideService(Scope.Scope, scope)),
+      );
+      try {
+        await Effect.runPromise(connection.start({ sessionId, modelId, executionPolicy }));
+        const open = f.opens.at(-1)!;
+        expect(open.attachmentsFolder).toBe(attachmentsFolder);
+        const signal = new AbortController().signal;
+        const call = (toolName: string, input: Record<string, unknown>, toolUseId: string) =>
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName,
+            input,
+            toolUseId,
+            signal,
+          });
+        await expect(call("Read", { file_path: file }, `read-${executionPolicy}`)).resolves.toEqual(
+          { behavior: "allow" },
+        );
+        // Plan holds no write tool; Guarded holds one and still may not
+        // change an attached file.
+        await expect(
+          call("Write", { file_path: file, content: "changed" }, `write-${executionPolicy}`),
+        ).resolves.toMatchObject(
+          executionPolicy === "plan"
+            ? { behavior: "deny" }
+            : { behavior: "deny", message: CLAUDE_ATTACHMENTS_READ_ONLY },
+        );
+      } finally {
+        await Effect.runPromise(Scope.close(scope, Exit.void));
+      }
+    }
+    // Below Full access the command sandbox reads the folder and never writes it.
+    const sandbox = claudeSandboxSettings("approval-gated", projectRoot, [], undefined, false, [
+      attachmentsFolder,
+    ]);
+    expect(sandbox?.filesystem.allowRead).toContain(attachmentsFolder);
+    expect(sandbox?.filesystem.allowWrite).not.toContain(attachmentsFolder);
   });
 
   it("refuses an Artifact call in Plan without raising an approval, because publishing leaves the computer", async () => {

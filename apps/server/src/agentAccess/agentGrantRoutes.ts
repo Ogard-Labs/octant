@@ -1,9 +1,11 @@
 import {
   AGENT_GRANT_ROUTES,
+  decodeAgentAccessCommand,
   decodeAgentGrantRevokeRequest,
   type AgentAccessResult,
   type AgentThreadAttributions,
 } from "@octant/contracts";
+import { principalActsAsHostPerson } from "../clientPrincipal";
 import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
@@ -14,6 +16,8 @@ import type { AgentAccessService } from "./agentAccessService";
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
 const BODY_LIMIT = 4_096;
+/** A grant's draft names its Projects and tools; the desktop route allows the same. */
+const COMMAND_BODY_LIMIT = 64 * 1_024;
 
 export type AgentGrantRoutes = (request: Request) => Promise<Response | undefined>;
 
@@ -32,8 +36,12 @@ export interface AgentGrantRouteOptions {
  * The grant list, revoking a grant, and which threads each agent started.
  * A local window and a paired device both reach these: a phone can see what
  * an agent may do and end its grant, because revoking only takes authority
- * away. Making or widening a grant stays on the window-only desktop routes.
- * An outside agent never reaches them: its own route guard admits none, and
+ * away. Making, widening, connection codes and keys are the person's: a
+ * device the host's own person paired sends them to `commands`, journaled as
+ * that device (maintainer decision, 2026-11-12), and a local window keeps the
+ * desktop routes behind the bridge secret, so `commands` refuses it, as it
+ * refuses a device the hub's roster introduced and an unproved pairing. An
+ * outside agent never reaches them: its own route guard admits none, and
  * this refuses its principal again.
  */
 export function createAgentGrantRouteHandler(options: AgentGrantRouteOptions): AgentGrantRoutes {
@@ -44,7 +52,8 @@ export function createAgentGrantRouteHandler(options: AgentGrantRouteOptions): A
     if (
       path !== AGENT_GRANT_ROUTES.grants &&
       path !== AGENT_GRANT_ROUTES.revoke &&
-      path !== AGENT_GRANT_ROUTES.threads
+      path !== AGENT_GRANT_ROUTES.threads &&
+      path !== AGENT_GRANT_ROUTES.commands
     ) {
       return undefined;
     }
@@ -87,6 +96,38 @@ export function createAgentGrantRouteHandler(options: AgentGrantRouteOptions): A
     }
 
     if (request.method !== "POST") return failure("Use POST.", 405, origin);
+    if (path === AGENT_GRANT_ROUTES.commands) {
+      if (principal.kind !== "remote-device" || !principalActsAsHostPerson(principal)) {
+        return failure(
+          "Only a device this host's person paired sends agent grant commands here.",
+          403,
+          origin,
+        );
+      }
+      const body = await request.text().catch(() => undefined);
+      if (body === undefined || body.length > COMMAND_BODY_LIMIT) {
+        return failure("That request is too large.", 413, origin);
+      }
+      let command;
+      try {
+        command = decodeAgentAccessCommand(JSON.parse(body));
+      } catch {
+        return json(
+          {
+            kind: "refused",
+            reason: "invalid",
+            message: "That agent access command is not valid.",
+          } satisfies AgentAccessResult,
+          409,
+          origin,
+        );
+      }
+      const result = options.service.execute(command, eventActorForPrincipal(principal));
+      if (command.kind === "revoke" && command.stopRunningTurns && result.kind === "done") {
+        await options.stopRunningTurns(String(command.grantId)).catch(() => undefined);
+      }
+      return json(result, result.kind === "refused" ? 409 : 200, origin);
+    }
     const text = await request.text().catch(() => undefined);
     if (text === undefined || text.length > BODY_LIMIT) {
       return failure("That request is too large.", 413, origin);

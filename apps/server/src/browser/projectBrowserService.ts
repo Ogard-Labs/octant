@@ -182,13 +182,15 @@ export class ProjectBrowserService {
     caller: ProjectBrowserCaller,
     command: ProjectBrowserCommand,
   ): Promise<ProjectBrowserResult> {
-    // A paired device may not open or drive a page on this Mac. A thread's
-    // context keeps creation local for the same reason; a Project's page has
-    // no thread whose approval could stand in for the person being here.
+    // Only the person opens or drives a Project page: at a window here, or on
+    // a device they paired, which the route passes as the person and whose
+    // page belongs to its own scope. Every other device session is refused;
+    // a Project's page has no thread whose approval could stand in for the
+    // person.
     if (caller !== "local-window") {
       return refused(
         "unauthorized",
-        "A Project browser opens only from this computer's own window.",
+        "A Project browser opens only from this computer's own window or a device its person paired.",
       );
     }
     const authority = this.#authority(windowId, command.projectId);

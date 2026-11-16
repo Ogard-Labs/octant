@@ -858,6 +858,6 @@ describe("a coordinator's proposals on a paired phone", () => {
     });
 
     expect(paths).toEqual([`GET /api/code/planner/${projectId}`]);
-    expect(proposals.map((entry) => entry.title)).toEqual(["Worker 01"]);
+    expect(proposals.map((entry) => entry.proposal.title)).toEqual(["Worker 01"]);
   });
 });

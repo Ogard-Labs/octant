@@ -338,6 +338,47 @@ describe("sanitizeCodexEnvironment", () => {
     expect(environment.CODEX_HOME).toBe("/Users/test/.codex-accounts/api");
   });
 
+  it("gives a lease outside Strict the host's environment less Octant's own and other providers' keys", () => {
+    const hostEnvironment = {
+      PATH: "/usr/bin",
+      GH_TOKEN: "host-gh",
+      AWS_PROFILE: "work",
+      AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
+      NODE_EXTRA_CA_CERTS: "/etc/ssl/corporate.pem",
+      OPENAI_API_KEY: "codex-own",
+      ANTHROPIC_API_KEY: "another-provider",
+      OCTANT_DESKTOP_BRIDGE_SECRET: "must-not-cross",
+    };
+    const open = codexAccountProcessEnvironment({
+      binaryPath: "/opt/homebrew/bin/codex",
+      hostEnvironment,
+      codexHome: "/Users/test/.codex",
+      inheritHostAuth: true,
+      strict: false,
+    });
+    expect(open).toMatchObject({
+      GH_TOKEN: "host-gh",
+      AWS_PROFILE: "work",
+      AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
+      NODE_EXTRA_CA_CERTS: "/etc/ssl/corporate.pem",
+      OPENAI_API_KEY: "codex-own",
+      CODEX_HOME: "/Users/test/.codex",
+    });
+    expect(open.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(open.OCTANT_DESKTOP_BRIDGE_SECRET).toBeUndefined();
+
+    // Strict keeps the fixed list.
+    const strict = codexAccountProcessEnvironment({
+      binaryPath: "/opt/homebrew/bin/codex",
+      hostEnvironment,
+      codexHome: "/Users/test/.codex",
+      inheritHostAuth: true,
+    });
+    expect(strict.GH_TOKEN).toBeUndefined();
+    expect(strict.AWS_PROFILE).toBeUndefined();
+    expect(strict.AWS_ACCESS_KEY_ID).toBeUndefined();
+  });
+
   it("prepends the configured binary directory for env-based interpreters", () => {
     const binaryPath = "/opt/homebrew/bin/codex";
 
@@ -838,6 +879,75 @@ describe("Codex launch confinement", () => {
     if (prepared.status === "prepared") prepared.launch.release();
   });
 
+  it("launches a Work or Code thread outside Strict as the program itself, in Codex's own sandbox", () => {
+    for (const mode of ["work", "code"] as const) {
+      let wrapped = false;
+      const prepared = prepareCodexLaunch({
+        binaryPath: "/bin/sh",
+        args: ["-c", "true"],
+        authority: {
+          kind: "thread",
+          root: tmpdir(),
+          mode,
+          executionPolicy: "approval-gated",
+          strict: false,
+        },
+        environment: { HOME: homedir() },
+        confinement: {
+          prepare: (input) => {
+            wrapped = true;
+            return { command: input.executable, args: input.args };
+          },
+        },
+        platform: "darwin",
+        network: {
+          endpoint: { kind: "loopback", port: 47002 },
+          environment: { HTTPS_PROXY: "http://octant:token@127.0.0.1:47002" },
+        },
+      });
+      expect(wrapped, mode).toBe(false);
+      expect(prepared).toMatchObject({
+        status: "prepared",
+        launch: {
+          command: "/bin/sh",
+          cwd: tmpdir(),
+          // The runtime's own traffic keeps the egress proxy.
+          environment: { HTTPS_PROXY: "http://octant:token@127.0.0.1:47002" },
+        },
+      });
+    }
+  });
+
+  it("keeps a Plan thread outside Strict in Octant's profile, with only other providers' sign-ins refused", () => {
+    const captured: Array<Parameters<ProcessConfinementPort["prepare"]>[0]> = [];
+    for (const strict of [false, undefined]) {
+      const prepared = prepareCodexLaunch({
+        binaryPath: "/bin/sh",
+        args: ["-c", "true"],
+        authority: {
+          kind: "thread",
+          root: tmpdir(),
+          mode: "code",
+          executionPolicy: "plan",
+          ...(strict === false ? { strict } : {}),
+        },
+        environment: { HOME: homedir() },
+        confinement: {
+          prepare: (input) => {
+            captured.push(input);
+            return { command: input.executable, args: input.args };
+          },
+        },
+        platform: "darwin",
+      });
+      if (prepared.status === "prepared") prepared.launch.release();
+    }
+    expect(captured[0]?.protectedFiles).toBe("provider-sign-ins");
+    expect(captured[0]?.writeBoundRoot).toBe(false);
+    // Strict refuses every protected file, as before.
+    expect(captured[1]).not.toHaveProperty("protectedFiles");
+  });
+
   it("launches Full access as the program itself, with no profile around it", () => {
     const prepared = prepareCodexLaunch({
       binaryPath: "/bin/sh",
@@ -860,7 +970,6 @@ describe("Codex launch confinement", () => {
     });
     for (const level of [
       { executionPolicy: "full-access" },
-      { executionPolicy: "full-access", strict: true },
       { executionPolicy: "approval-gated", strict: false },
       { executionPolicy: "auto-accept-edits", strict: false },
       { executionPolicy: "plan", strict: false },
@@ -884,7 +993,6 @@ describe("Codex launch confinement", () => {
     }
     for (const [level, reason] of [
       [{ executionPolicy: "approval-gated" }, WINDOWS_STRICT_REFUSAL],
-      [{ executionPolicy: "approval-gated", strict: true }, WINDOWS_STRICT_REFUSAL],
       [{ executionPolicy: "full-access", fullAccessSandbox: true }, WINDOWS_KEPT_SANDBOX_REFUSAL],
     ] as const) {
       const refused = prepareCodexLaunch({

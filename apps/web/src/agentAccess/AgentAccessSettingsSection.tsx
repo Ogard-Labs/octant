@@ -63,10 +63,12 @@ type OneTime = {
 };
 
 /**
- * Settings › Remote access › Agent access. On a local window it makes,
- * changes, and revokes grants, issues connection codes, and confirms the keys
- * that claim them. A paired device sees the same list and can revoke, because
- * revoking only takes authority away; everything else stays at the computer.
+ * Settings › Remote access › Agent access. With `administration` (a local
+ * window's desktop bridge, or a browser the host's own person paired, whose
+ * commands travel over its session) it makes, changes, and revokes grants,
+ * issues connection codes, and confirms the keys that claim them. Any other
+ * paired device sees the same list and can revoke, because revoking only takes
+ * authority away; everything else stays with the host's person.
  */
 export function AgentAccessSettingsSection(props: {
   readonly administration?: AgentAccessAdministrationBridge;

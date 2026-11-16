@@ -1,4 +1,10 @@
 import type { EventActor } from "@octant/contracts";
+import {
+  attachedFilesMessage,
+  partitionAttachedFiles,
+  SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
+  type AttachedFileByPath,
+} from "../attachments/attachedFiles";
 import type { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
 import { requiresLiveCodeReviewAuthority } from "./codeReviewAuthority";
 import {
@@ -1061,6 +1067,11 @@ export interface CodeOperationTurnPort {
     readonly sentContext?: CodeTurnSentContext;
     /** Images this turn carries, already read from the host's own store. */
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
+    /**
+     * The thread's attachments folder, which the session reads at every
+     * level and never writes, for files the turn names by path.
+     */
+    readonly attachmentsFolder?: string;
     /** The selected MCP servers' tools, beside the host's own for this turn. */
     readonly extensionTools?: AppManagedToolSet;
     /** The host rechecks this after runtime preparation, before launching. */
@@ -1362,6 +1373,12 @@ export interface CodeOperationServiceOptions {
   readonly attachments?: CodeAttachmentStore;
   /** Whether the thread's own provider and model can read an image. */
   readonly supportsAttachments?: (thread: CodeThread) => boolean;
+  /**
+   * Whether the thread's provider takes an attached file of this type as it
+   * is (a PDF where its model reads documents). Any other file that is not
+   * an image is named by its path in the thread's attachments folder.
+   */
+  readonly takesFileNatively?: (thread: CodeThread, mediaType: string) => boolean;
   /**
    * Sees images: describes a starting turn's images for a thread whose model
    * cannot read them, or refuses with the reason. Absent, such a turn is
@@ -1993,6 +2010,26 @@ export class CodeOperationService {
                     turnRefusal = admissionRefusal();
                 }
               }
+              // A server thread's agent works with the server's file tools, and
+              // this host's attachments folder is not there: a file the turn
+              // would name by path is refused before the start is journaled.
+              if (
+                command.kind === "start-provider-turn" &&
+                recordedStart === undefined &&
+                turnRefusal === undefined &&
+                this.#options.holdsServerThread?.(turnThread) === true &&
+                partitionAttachedFiles(starting.attachments).files.some(
+                  (reference) =>
+                    this.#options.takesFileNatively?.(turnThread, reference.mediaType) !== true,
+                )
+              ) {
+                turnRefusal = this.#failed(
+                  command.operationId,
+                  "unsupported",
+                  SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
+                  "refused",
+                );
+              }
               // Images for a model that cannot read them are described before
               // the start is journaled, so the start records who described
               // each one and a restart sends the same words again.
@@ -2001,7 +2038,7 @@ export class CodeOperationService {
                 command.kind === "start-provider-turn" &&
                 recordedStart === undefined &&
                 turnRefusal === undefined &&
-                starting.attachments.length > 0 &&
+                partitionAttachedFiles(starting.attachments).images.length > 0 &&
                 this.#options.describeImages !== undefined &&
                 this.#options.supportsAttachments?.(turnThread) !== true
               ) {
@@ -2012,7 +2049,7 @@ export class CodeOperationService {
                 }, 250);
                 const described = await this.#describeStartImages(
                   turnThread,
-                  starting.attachments,
+                  partitionAttachedFiles(starting.attachments).images,
                   describing.signal,
                 ).finally(() => clearInterval(watch));
                 if (described.status === "refused") {
@@ -6346,9 +6383,36 @@ export class CodeOperationService {
     // A model that cannot read a picture gets the words Sees images wrote for
     // each one at the start, or is told so plainly rather than sent the turn
     // with its images quietly removed.
-    let sentReferences = references;
-    if (references.length > 0 && !supportsImages) {
-      const descriptions = await this.#recordedDescriptions(command, references);
+    // Any other file goes natively where the provider takes it, and is
+    // otherwise named by its path in the thread's attachments folder.
+    const { images, files } = partitionAttachedFiles(references);
+    const nativeFiles = files.filter(
+      (reference) => this.#options.takesFileNatively?.(thread, reference.mediaType) === true,
+    );
+    const filesByPath = files.filter((reference) => !nativeFiles.includes(reference));
+    if (serverThread && filesByPath.length > 0) {
+      return this.#failed(
+        command.operationId,
+        "unsupported",
+        SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
+        "refused",
+      );
+    }
+    if (filesByPath.length > 0) {
+      const named = await this.#attachedFilePaths(command.threadId, filesByPath);
+      if (named === undefined) {
+        return this.#failed(
+          command.operationId,
+          "unavailable",
+          "A file attached to this turn is unavailable.",
+          "refused",
+        );
+      }
+      context.push({ kind: "user-message", text: attachedFilesMessage(named) });
+    }
+    let sentReferences = [...images, ...nativeFiles];
+    if (images.length > 0 && !supportsImages) {
+      const descriptions = await this.#recordedDescriptions(command, images);
       if (descriptions === undefined) {
         return this.#failed(
           command.operationId,
@@ -6358,7 +6422,7 @@ export class CodeOperationService {
         );
       }
       context.push(...descriptions.map((text) => ({ kind: "user-message" as const, text })));
-      sentReferences = [];
+      sentReferences = nativeFiles;
     }
     const attachments = await this.#attachmentInputs(command.threadId, sentReferences);
     if (attachments === undefined) {
@@ -6457,6 +6521,12 @@ export class CodeOperationService {
       supportsImages,
       current: () => admissionCurrent?.() !== false,
     });
+    // Made before the runtime launches, so its sandbox binds it even when this
+    // turn carries no file and a later one reuses the runtime. A server
+    // thread's runtime is on its server, where this folder is not.
+    const attachmentsFolder = serverThread
+      ? undefined
+      : this.#options.attachments?.threadFolder(command.threadId);
     const turn = await this.#options.turns.start({
       windowId,
       thread,
@@ -6472,6 +6542,7 @@ export class CodeOperationService {
         ? {}
         : { sentContext }),
       ...(attachments.length === 0 ? {} : { attachments }),
+      ...(attachmentsFolder === undefined ? {} : { attachmentsFolder }),
       ...(extensionTools === undefined ? {} : { extensionTools }),
       ...(admissionCurrent === undefined ? {} : { admissionCurrent }),
       ...(routineRun === undefined ? {} : { routineRun }),
@@ -6612,6 +6683,32 @@ export class CodeOperationService {
     if (peeked.status !== "ok") return { status: "unknown" };
     attachments.release(threadId, attachmentIds);
     return { status: "ok", attachments: peeked.attachments };
+  }
+
+  /**
+   * The paths of attached files a turn names rather than sends, each opened
+   * under its own name after its bytes are checked against the journal.
+   */
+  async #attachedFilePaths(
+    threadId: CodeThreadId,
+    references: ReadonlyArray<CodeAttachmentReference>,
+  ): Promise<ReadonlyArray<AttachedFileByPath> | undefined> {
+    const attachments = this.#options.attachments;
+    if (attachments === undefined) return undefined;
+    const named: AttachedFileByPath[] = [];
+    for (const reference of references) {
+      try {
+        named.push({
+          displayName: reference.displayName,
+          mediaType: reference.mediaType,
+          byteLength: reference.byteLength,
+          path: await attachments.readablePath(threadId, reference),
+        });
+      } catch {
+        return undefined;
+      }
+    }
+    return named;
   }
 
   /**

@@ -1,4 +1,10 @@
 import type { PreparedProductFeedbackTurn } from "../browser/productFeedbackTurnPort";
+import {
+  attachedFilesMessage,
+  partitionAttachedFiles,
+  SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
+  type AttachedFileByPath,
+} from "../attachments/attachedFiles";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import type { ConversationInputReceipt } from "@octant/contracts/conversation-inputs";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
@@ -420,6 +426,18 @@ export interface WorkTurnServiceDependencies {
     readonly modelId: WorkThread["modelId"];
   }) => boolean;
   /**
+   * Whether the provider takes an attached file of this type as it is (a PDF
+   * where its model reads documents). Any other file that is not an image is
+   * named by its path in the thread's attachments folder.
+   */
+  readonly takesFileNatively?: (
+    input: {
+      readonly providerInstanceId: WorkThread["providerInstanceId"];
+      readonly modelId: WorkThread["modelId"];
+    },
+    mediaType: string,
+  ) => boolean;
+  /**
    * Sees images: describes a turn's images for a model that cannot read
    * them, or refuses with the reason. Absent, such a turn is refused as before.
    */
@@ -681,6 +699,7 @@ export class WorkTurnService {
   readonly #attachments: WorkAttachmentStore | undefined;
   readonly #conversationInputTransfer: WorkTurnServiceDependencies["conversationInputTransfer"];
   readonly #supportsAttachments: WorkTurnServiceDependencies["supportsAttachments"];
+  readonly #takesFileNatively: WorkTurnServiceDependencies["takesFileNatively"];
   readonly #describeImages: WorkTurnServiceDependencies["describeImages"];
   readonly #supportsModelSwitch: WorkTurnServiceDependencies["supportsModelSwitch"];
   readonly #selectConversationHandoffContext: WorkTurnServiceDependencies["selectConversationHandoff"];
@@ -751,6 +770,7 @@ export class WorkTurnService {
     this.#attachments = dependencies.attachments;
     this.#conversationInputTransfer = dependencies.conversationInputTransfer;
     this.#supportsAttachments = dependencies.supportsAttachments;
+    this.#takesFileNatively = dependencies.takesFileNatively;
     this.#describeImages = dependencies.describeImages;
     this.#supportsModelSwitch = dependencies.supportsModelSwitch;
     this.#selectConversationHandoffContext = dependencies.selectConversationHandoff;
@@ -1559,8 +1579,27 @@ export class WorkTurnService {
     if (starting.status === "unknown") {
       throw this.#failure("invalid", "An image attached to this turn is no longer staged.");
     }
-    let attachmentInputs = await this.#attachmentInputs(command.threadId, starting.attachments);
-    if (attachmentInputs === undefined) {
+    // A file that is not an image goes natively where the provider takes it,
+    // and is otherwise named by its path in the thread's attachments folder.
+    const { images, files } = partitionAttachedFiles(starting.attachments);
+    const nativeFiles = files.filter(
+      (reference) => this.#takesFileNatively?.(command.authority, reference.mediaType) === true,
+    );
+    const filesByPath = files.filter((reference) => !nativeFiles.includes(reference));
+    if (server !== undefined && filesByPath.length > 0) {
+      throw this.#failure("unsupported", SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL);
+    }
+    const attachedFileTexts: string[] = [];
+    if (filesByPath.length > 0) {
+      const named = await this.#attachedFilePaths(command.threadId, filesByPath);
+      if (named === undefined) {
+        throw this.#failure("unavailable", "A file attached to this turn is unavailable.");
+      }
+      attachedFileTexts.push(attachedFilesMessage(named));
+    }
+    const nativeFileInputs = await this.#attachmentInputs(command.threadId, nativeFiles);
+    let attachmentInputs = await this.#attachmentInputs(command.threadId, images);
+    if (attachmentInputs === undefined || nativeFileInputs === undefined) {
       throw this.#failure("unavailable", "An image attached to this turn is unavailable.");
     }
     // A model that cannot read images gets the words Sees images writes for
@@ -1568,7 +1607,7 @@ export class WorkTurnService {
     // model to describe them, the turn is refused rather than sent without.
     let describedImages: DescribedTurnImages | undefined;
     let describedTexts: ReadonlyArray<string> = [];
-    if (starting.attachments.length > 0 && !this.#modelReadsImages(command.authority)) {
+    if (images.length > 0 && !this.#modelReadsImages(command.authority)) {
       if (this.#describeImages === undefined) {
         throw this.#failure(
           "unsupported",
@@ -1610,6 +1649,8 @@ export class WorkTurnService {
       );
       attachmentInputs = [];
     }
+    attachmentInputs = [...attachmentInputs, ...nativeFileInputs];
+    describedTexts = [...describedTexts, ...attachedFileTexts];
 
     const selections =
       command.extensionSelections?.filter(
@@ -2257,6 +2298,11 @@ export class WorkTurnService {
               if (!folderCurrent())
                 controller.abort("Working folder is unavailable; nothing is redirected.");
             }, 250);
+      // Made before the runtime launches, so its sandbox binds it even when
+      // this turn carries no file and a later one reuses the runtime. A server
+      // thread's runtime is on its server, where this folder is not.
+      const attachmentsFolder =
+        server === undefined ? this.#attachments?.threadFolder(command.threadId) : undefined;
       const launch = this.#runTurn({
         command,
         ...(thread === undefined ? {} : { thread }),
@@ -2269,6 +2315,9 @@ export class WorkTurnService {
         projectCanonicalRoot: project?.binding.canonicalRoot ?? projectRoot,
         ...(project === undefined ? {} : { project }),
         extraFolders,
+        // A server thread's runtime runs on its server, where this host's
+        // attachments folder is not.
+        ...(attachmentsFolder === undefined ? {} : { attachmentsFolder }),
         ...(server === undefined ? {} : { serverTools: server.tools }),
         driver,
         ...(preparedTools === undefined ? {} : { preparedTools }),
@@ -2698,6 +2747,8 @@ export class WorkTurnService {
     readonly project?: Project;
     /** The Project's extra folders, granted what the bound root is granted. */
     readonly extraFolders: ReadonlyArray<string>;
+    /** The thread's attachments folder, read at every level and written at none. */
+    readonly attachmentsFolder?: string;
     /**
      * A server Work thread's tools, all acting on the server. Its folder is a
      * path there, so nothing watches it here and no host tool is offered.
@@ -2936,6 +2987,9 @@ export class WorkTurnService {
             }),
         projectRoot: input.projectRoot,
         ...(input.extraFolders.length === 0 ? {} : { extraFolders: input.extraFolders }),
+        ...(input.attachmentsFolder === undefined
+          ? {}
+          : { attachmentsFolder: input.attachmentsFolder }),
         driver: input.driver,
         signal: input.signal,
         ...(input.thread?.modelOptionValues === undefined
@@ -3923,6 +3977,31 @@ export class WorkTurnService {
       });
     }
     return inputs;
+  }
+
+  /**
+   * The paths of attached files a turn names rather than sends, each opened
+   * under its own name after its bytes are checked against the journal.
+   */
+  async #attachedFilePaths(
+    threadId: WorkThreadId,
+    references: ReadonlyArray<WorkAttachmentReference>,
+  ): Promise<ReadonlyArray<AttachedFileByPath> | undefined> {
+    if (this.#attachments === undefined) return undefined;
+    const named: AttachedFileByPath[] = [];
+    for (const reference of references) {
+      try {
+        named.push({
+          displayName: reference.displayName,
+          mediaType: reference.mediaType,
+          byteLength: reference.byteLength,
+          path: await this.#attachments.readablePath(threadId, reference),
+        });
+      } catch {
+        return undefined;
+      }
+    }
+    return named;
   }
 
   #modelReadsImages(authority: {

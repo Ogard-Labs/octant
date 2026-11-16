@@ -58,6 +58,7 @@ import {
   type CodexRpcClient,
   type CodexRpcStderrCapture,
 } from "./codexRpcClient";
+import { providerHostEnvironment } from "./providerHostEnvironment";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 
 export interface CodexBinaryProbe {
@@ -72,12 +73,6 @@ export interface CodexAppServerConnection {
   readonly exited: Promise<void>;
   /** Set when the launch took no egress proxy, so the process keeps open network. */
   readonly networkOpen?: boolean;
-  /**
-   * Set when a launch below Full access runs with no Octant sandbox (Windows
-   * outside Strict). Codex is then told to use its own sandbox, not an
-   * external one that is not there.
-   */
-  readonly ownSandbox?: boolean;
 }
 
 /**
@@ -103,6 +98,8 @@ export type CodexLaunchAuthority =
       readonly root: string;
       /** The Project's extra folders, granted what the root is granted. */
       readonly extraFolders?: ReadonlyArray<string>;
+      /** Folders read and never written: the thread's attachments folder. */
+      readonly readOnlyFolders?: ReadonlyArray<string>;
       readonly mode: "chat" | "work" | "code";
       readonly executionPolicy: ProviderExecutionPolicy;
       /**
@@ -110,12 +107,6 @@ export type CodexLaunchAuthority =
        * deny-default profile and proxied egress instead of running unwrapped.
        */
       readonly fullAccessSandbox?: boolean;
-      /**
-       * Whether this launch is Strict; absent is Strict. On Windows a launch
-       * below Full access runs only outside Strict, with Codex's own approvals
-       * and sandbox; elsewhere it does not change the launch yet.
-       */
-      readonly strict?: boolean;
       /**
        * The person let Codex run its own subagents. Their requests reach the
        * parent's approval path on their own thread ids, at every level.
@@ -127,7 +118,37 @@ export type CodexLaunchAuthority =
        * its own.
        */
       readonly ownMemory?: true;
+      /**
+       * Strict is off for this lease. Absent is Strict, so a caller that never
+       * resolved it keeps Octant's profile and never loosens a launch.
+       */
+      readonly strict?: false;
     };
+
+/**
+ * Whether a thread lease runs in Codex's own workspace-write sandbox instead
+ * of Octant's profile: a Work or Code thread at Guarded or Reviewed outside
+ * Strict (Architecture: "Providers run in their own sandbox"). macOS refuses a
+ * Seatbelt profile inside another, so the native sandbox replaces Octant's
+ * rather than running in it. Plan and Chat keep Octant's read-only profile,
+ * whose read-only enforcement the rule leaves unchanged, and Full access keeps
+ * no sandbox unless the thread keeps Octant's.
+ */
+export function codexRunsNativeSandbox(input: {
+  readonly mode: "chat" | "work" | "code";
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly strict?: boolean | undefined;
+}): boolean {
+  return (
+    input.strict === false &&
+    input.mode !== "chat" &&
+    (input.executionPolicy === "approval-gated" || input.executionPolicy === "auto-accept-edits")
+  );
+}
+
+function threadRunsNativeSandbox(authority: CodexLaunchAuthority): boolean {
+  return authority.kind === "thread" && codexRunsNativeSandbox(authority);
+}
 
 export interface CodexProcessPort {
   readonly start: (input: {
@@ -177,7 +198,12 @@ export interface CodexProcessOptions {
 const CODEX_WINDOWS_PROGRAM_HINT =
   "the codex.exe the @openai/codex package carries in its vendor folder";
 
-/** How one launch runs on Windows, from that launch's own authority. */
+/**
+ * How one launch runs on Windows, from that launch's own authority. Windows
+ * has no Octant sandbox, so a launch there runs unconfined (Full access, or a
+ * level below it outside Strict, where Codex's own sandbox and approvals hold
+ * it, or a catalog read made for such a host) or is refused with the reason.
+ */
 function codexWindowsLaunch(authority: CodexLaunchAuthority): WindowsProviderLaunch {
   if (authority.kind === "catalog") {
     return authority.unconfinedOnWindows === true
@@ -442,11 +468,45 @@ export function sanitizeCodexEnvironment(
   );
 }
 
+/**
+ * The model-provider credentials Codex reads as its own. Outside Strict these
+ * cross from the host with the rest of its environment; every other
+ * provider's key is dropped.
+ */
+const CODEX_OWN_MODEL_CREDENTIALS: ReadonlySet<string> = new Set([
+  "CODEX_ACCESS_TOKEN",
+  "CODEX_API_KEY",
+  "OPENAI_API_KEY",
+]);
+
+function openCodexEnvironment(
+  environment: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  const open = providerHostEnvironment(environment, CODEX_OWN_MODEL_CREDENTIALS);
+  // Windows spells its names in any case (`Path`); upper-cased as the Strict
+  // list is, so the launch's own `PATH` below replaces the host's.
+  return platform === "win32"
+    ? Object.fromEntries(Object.entries(open).map(([key, value]) => [key.toUpperCase(), value]))
+    : open;
+}
+
+/**
+ * The app-server's environment. Under Strict, the fixed list above. Outside
+ * Strict, the host's environment less Octant's own variables and other
+ * providers' keys, as Codex receives it from the person's own shell
+ * (Architecture: "Octant adds no restrictions of its own unless Strict is
+ * on"): proxies, certificate authorities, `GH_TOKEN`, and the AWS profile or
+ * exported credentials a Bedrock sign-in uses.
+ */
 export function codexProcessEnvironment(
   binaryPath: string,
   environment: NodeJS.ProcessEnv,
+  strict = true,
 ): NodeJS.ProcessEnv {
-  const sanitized = sanitizeCodexEnvironment(environment);
+  const sanitized = strict
+    ? sanitizeCodexEnvironment(environment)
+    : openCodexEnvironment(environment);
   const binaryDirectory = dirname(binaryPath);
   const path = sanitized.PATH?.split(delimiter).filter(Boolean) ?? [];
   return {
@@ -482,8 +542,14 @@ export function codexAccountProcessEnvironment(input: {
   readonly codexHome: string;
   readonly inheritHostAuth?: boolean;
   readonly brokerApiKey?: string;
+  /** Strict is off: the host's environment as `codexProcessEnvironment` opens it. */
+  readonly strict?: false;
 }): NodeJS.ProcessEnv {
-  const environment = codexProcessEnvironment(input.binaryPath, input.hostEnvironment);
+  const environment = codexProcessEnvironment(
+    input.binaryPath,
+    input.hostEnvironment,
+    input.strict !== false,
+  );
   if (input.inheritHostAuth !== true) {
     for (const name of ACCOUNT_AUTH_VARIABLES) {
       delete environment[name];
@@ -820,6 +886,25 @@ export function prepareCodexLaunch(input: {
       },
     };
   }
+  if (authority.kind === "thread" && threadRunsNativeSandbox(authority)) {
+    // Codex's own workspace-write sandbox holds each command it runs; each
+    // turn names the Project's folders as its writable roots
+    // (`codexTurnExecutionSettings`). The runtime itself runs as Codex does
+    // on its own, so a command Codex asks to run outside its sandbox can be
+    // approved, which it cannot raise under an external sandbox. A launch
+    // behind the egress proxy keeps the proxy for the runtime's own traffic,
+    // and its commands get no network unless one is approved to leave.
+    return {
+      status: "prepared",
+      launch: {
+        command: input.binaryPath,
+        args: input.args,
+        cwd: authority.root,
+        environment: { ...input.environment, ...input.network?.environment },
+        release: () => undefined,
+      },
+    };
+  }
   let temporaryDirectory: string | undefined;
   const release = () => {
     if (temporaryDirectory !== undefined) {
@@ -835,6 +920,8 @@ export function prepareCodexLaunch(input: {
     // failing the launch; the main folder above must still exist.
     const extraFolders =
       authority.kind === "thread" ? existingRealPaths(authority.extraFolders ?? []) : [];
+    const readOnlyFolders =
+      authority.kind === "thread" ? existingRealPaths(authority.readOnlyFolders ?? []) : [];
     const mode = authority.kind === "thread" ? authority.mode : "chat";
     const executionPolicy = authority.kind === "thread" ? authority.executionPolicy : "plan";
     const home = input.environment.HOME ?? homedir();
@@ -874,7 +961,7 @@ export function prepareCodexLaunch(input: {
       networkEgress,
       writeBoundRoot: !(executionPolicy === "plan" || mode === "chat"),
       additionalWriteRoots: accountRoots,
-      readRoots: [...accountRoots, ...programPaths, ...serverFolder],
+      readRoots: [...accountRoots, ...programPaths, ...serverFolder, ...readOnlyFolders],
       privateHomeAllowPaths: [
         root,
         ...extraFolders,
@@ -882,8 +969,14 @@ export function prepareCodexLaunch(input: {
         ...accountRoots,
         ...programPaths,
         ...serverFolder,
+        ...readOnlyFolders,
       ],
       allowFileReadStar: true,
+      // Outside Strict Codex's own tools may use the protected files inside
+      // its folders, other providers' sign-ins excepted.
+      ...(authority.kind === "thread" && authority.strict === false
+        ? { protectedFiles: "provider-sign-ins" as const }
+        : {}),
       ...(input.environment.PATH === undefined
         ? {}
         : { interpreterSearchPath: input.environment.PATH }),
@@ -923,10 +1016,10 @@ export function prepareCodexLaunch(input: {
 
 /**
  * A Codex launch on Windows, decided from that launch's own authority. Windows
- * has no Octant sandbox, so a launch runs unconfined (Full access, or a level
- * below it outside Strict, where Codex's own approvals and sandbox hold it, or
- * a catalog read made for such a host) or is refused with the reason. An npm
- * shim is resolved to the program it starts, never run through a shell.
+ * has no Octant sandbox, so a launch runs unconfined, with Codex's own sandbox
+ * and approvals below Full access (`codexExecutionSettings`), or is refused
+ * with the reason. An npm shim is resolved to the program it starts, never run
+ * through a shell.
  */
 function prepareWindowsCodexLaunch(input: {
   readonly binaryPath: string;
@@ -1178,19 +1271,18 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
         // On Windows a launch that runs unconfined (Full access, a level below
         // it outside Strict, or a catalog read made for such a host) reads its
         // version unconfined too: the runtime it precedes has the same reach,
-        // and the confined read has no Windows form. Every other launch keeps
-        // the confined read, which refuses on Windows.
+        // and the confined read has no Windows form. Every other launch is
+        // refused there before anything runs.
         const windowsLaunch = platform === "win32" ? codexWindowsLaunch(authority) : undefined;
         if (windowsLaunch?.status === "refused") {
           return Effect.fail(failure("incompatible", windowsLaunch.reason));
         }
-        const ownSandbox =
-          windowsLaunch?.status === "unconfined" && windowsLaunch.approvals === "provider";
+        const strict = !(authority.kind === "thread" && authority.strict === false);
         const launchEnvironment =
           environment ??
           (resolved.inheritedEnvironment === undefined
             ? undefined
-            : codexProcessEnvironment(binaryPath, resolved.inheritedEnvironment));
+            : codexProcessEnvironment(binaryPath, resolved.inheritedEnvironment, strict));
         // Codex never creates its home: it refuses one that is missing with
         // "CODEX_HOME points to …, but that path does not exist" (codex-cli
         // 0.162.1). An account's assigned home is new, so it has to exist
@@ -1229,7 +1321,7 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
                   }),
             });
             const appServerEnvironment =
-              launchEnvironment ?? codexProcessEnvironment(binaryPath, process.env);
+              launchEnvironment ?? codexProcessEnvironment(binaryPath, process.env, strict);
             const runtimePolicy = authority.kind === "thread" ? authority.executionPolicy : "plan";
             const keepsSandbox =
               runtimePolicy === "full-access" &&
@@ -1248,8 +1340,13 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
                     executionPolicy: keepsSandbox ? "auto-accept-edits" : runtimePolicy,
                     environment: appServerEnvironment,
                   });
+            // Outside Octant's profile the person's own SSH setup is in reach,
+            // as in Codex on its own, so a native-sandbox launch needs no
+            // server folder.
             const servers =
-              authority.kind === "thread" && windowsLaunch === undefined
+              authority.kind === "thread" &&
+              !threadRunsNativeSandbox(authority) &&
+              windowsLaunch === undefined
                 ? yield* acquireProviderServerAccess(options.serverAccess, {
                     root: authority.root,
                     // Inside Octant's profile the person's own SSH setup is
@@ -1284,11 +1381,9 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
               onProcessStarted,
             );
             terminate = managed.terminate;
-            const connection =
-              network === undefined
-                ? { ...managed.connection, networkOpen: true }
-                : managed.connection;
-            return ownSandbox ? { ...connection, ownSandbox: true } : connection;
+            return network === undefined
+              ? { ...managed.connection, networkOpen: true }
+              : managed.connection;
           }),
           () => (terminate === undefined ? Effect.void : cleanupEffect(terminate)),
         );

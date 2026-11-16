@@ -1071,6 +1071,42 @@ describe("browser automation routes", () => {
     await withProjects(paired);
     expect(projectBrowsers.execute).toHaveBeenLastCalledWith(windowId, "remote-device", command);
 
+    // A device the host's own person paired opens the person's page as a window does.
+    const person = post(command);
+    bindPrincipalRouteContext(person, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: "90000000-0000-4000-8000-000000000001" as never,
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "a1000000-0000-4000-8000-000000000002" as never,
+        admittedBy: "host-person",
+      }),
+      scopeId: windowId,
+    });
+    await withProjects(person);
+    expect(projectBrowsers.execute).toHaveBeenLastCalledWith(windowId, "local-window", command);
+    // A profile page, with the person's sign-ins, stays at a window.
+    const profiled = post({ ...command, profile: "personal" });
+    bindPrincipalRouteContext(profiled, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: "90000000-0000-4000-8000-000000000001" as never,
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "a1000000-0000-4000-8000-000000000003" as never,
+        admittedBy: "host-person",
+      }),
+      scopeId: windowId,
+    });
+    const refusedProfile = await withProjects(profiled);
+    expect(await refusedProfile?.json()).toMatchObject({ reason: "profile-unavailable" });
+    expect(projectBrowsers.execute).toHaveBeenCalledTimes(3);
+
     const without = await handler(post(command));
     expect(without?.status).toBe(503);
   });

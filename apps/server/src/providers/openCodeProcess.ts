@@ -93,6 +93,8 @@ export interface OpenCodeProcessStartInput {
   readonly cwd: string;
   /** The Project's extra folders, granted what `cwd` is granted. */
   readonly extraFolders?: ReadonlyArray<string>;
+  /** Folders read at every level and written at none: the thread's attachments folder. */
+  readonly readOnlyFolders?: ReadonlyArray<string>;
   /** Product mode used to derive the OS process policy before launch. */
   readonly mode?: "chat" | "work" | "code";
   /** Effective thread policy used to derive filesystem/process/network limits. */
@@ -1387,6 +1389,7 @@ function prepareOpenCodeLaunch(
         cacheHome,
         stateHome,
         providerDataDirectory,
+        ...(input.readOnlyFolders ?? []),
       ]);
       const globalClaudeInstructions = openCodeGlobalClaudeInstructionFile(
         runtime,
@@ -1404,6 +1407,7 @@ function prepareOpenCodeLaunch(
         cacheHome,
         stateHome,
         providerDataDirectory,
+        ...(input.readOnlyFolders ?? []),
         // Bubblewrap binds this one file read-only. Seatbelt keeps `~/.claude`
         // denied as a whole and reopens the file by literal rule below: as an
         // allowed path here it would deny `.claude` entry by entry instead, so

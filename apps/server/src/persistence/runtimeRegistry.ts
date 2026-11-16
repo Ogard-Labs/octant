@@ -474,6 +474,7 @@ import { registerPersonMemoryEvents } from "../personMemory/personMemoryStore";
 import { registerTodoEvents } from "../todos/todoStore";
 import { registerOctantInstructionsEvents } from "../octantInstructions/octantInstructionsStore";
 import { registerProtectedFilesEvents } from "../protectedFilesService";
+import { registerMcpPlanReadOnlyEvents } from "../providers/mcpPlanReadOnlyService";
 import { registerCanvasExportFolderEvents } from "../canvas/canvasExportFolderEventStore";
 import { registerCanvasNetworkAccessEvents } from "../canvas/canvasNetworkAccessService";
 import { registerCanvasOutsideContentEvents } from "../canvas/canvasOutsideContentMark";
@@ -885,6 +886,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerCanvasExportEvents(events);
   registerCanvasPublicShareEvents(events);
   registerProtectedFilesEvents(events);
+  registerMcpPlanReadOnlyEvents(events);
   registerPersonMemoryEvents(events);
   registerTodoEvents(events);
   registerOctantInstructionsEvents(events);
