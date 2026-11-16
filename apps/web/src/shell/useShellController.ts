@@ -105,6 +105,11 @@ export interface ShellControllerOptions {
      * person minimised minimised, since its card says the session is there.
      */
     readonly offered: boolean;
+    /**
+     * The sessions an offer announces (their Browser context ids). A page the
+     * person opened themselves is announced too, and is already a tab.
+     */
+    readonly sessionIds?: ReadonlyArray<string>;
   }) => boolean;
   readonly serverUrl: string;
   readonly windowCapability?: string;
@@ -886,6 +891,7 @@ export function useShellController(options: ShellControllerOptions) {
     readonly paneId?: PaneId;
     readonly threadId: string;
     readonly offered?: boolean;
+    readonly sessionIds?: ReadonlyArray<string>;
   }): void {
     const latest = committedShell.current;
     if (latest !== undefined && threadHasBrowserSurface(latest.workspace, input.threadId)) {
@@ -898,6 +904,7 @@ export function useShellController(options: ShellControllerOptions) {
       options.openDockBrowser?.({
         threadId: input.threadId,
         offered: input.offered === true,
+        ...(input.sessionIds === undefined ? {} : { sessionIds: input.sessionIds }),
       }) === true
     ) {
       return;

@@ -778,7 +778,13 @@ describe("useShellController", () => {
       }),
     );
 
-    expect(openDockBrowser).toHaveBeenCalledWith({ threadId: String(threadId), offered: true });
+    // The offer names its sessions, so the dock can tell a page it already
+    // shows from an agent's new one.
+    expect(openDockBrowser).toHaveBeenCalledWith({
+      threadId: String(threadId),
+      offered: true,
+      sessionIds: ["30000000-0000-4000-8000-000000000001"],
+    });
     expect(server.execute.mock.calls.length).toBe(executeCalls);
     expect(
       panes(result.current.workspace!.layouts.code).filter(
@@ -800,7 +806,13 @@ describe("useShellController", () => {
       }),
     );
 
-    expect(openDockBrowser).toHaveBeenCalledWith({ threadId: String(threadId), offered: true });
+    // The offer names its sessions, so the dock can tell a page it already
+    // shows from an agent's new one.
+    expect(openDockBrowser).toHaveBeenCalledWith({
+      threadId: String(threadId),
+      offered: true,
+      sessionIds: ["30000000-0000-4000-8000-000000000001"],
+    });
     const browserPanes = panes(result.current.workspace!.layouts.code).filter(
       (pane) => pane.surface.kind === "browser",
     );

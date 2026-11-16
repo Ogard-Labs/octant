@@ -123,7 +123,7 @@ describe("AgentHierarchyPanel", () => {
 
     rerender(<AgentHierarchyPanel entries={[]} onViewChange={vi.fn()} view="graph" />);
     expect(screen.queryByRole("group", { name: "View" })).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("No subagents yet.");
+    expect(screen.getByRole("status")).toHaveTextContent("No subagents yet");
 
     rerender(<AgentHierarchyPanel entries={entries} onViewChange={vi.fn()} view="list" />);
     expect(screen.getByRole("group", { name: "View" })).toBeInTheDocument();
@@ -389,8 +389,12 @@ describe("AgentHierarchyPanel", () => {
   it("says where subagents come from on a thread with none", () => {
     render(<AgentHierarchyPanel entries={[]} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "No subagents yet. They appear here when the agent hands off part of its work.",
-    );
+    // The shared state: one line that says it, one muted line under it.
+    const state = screen.getByRole("status");
+    expect(state).toHaveClass("surface-empty");
+    expect(within(state).getByText("No subagents yet")).toHaveClass("oct-row-label");
+    expect(
+      within(state).getByText("They appear here when the agent hands off part of its work."),
+    ).toHaveClass("oct-row-detail");
   });
 });

@@ -4,6 +4,8 @@ import { useMemo } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
+import { Bot } from "../ui/icons";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { AgentRunDependencyGraph, type SubagentProviderIdentity } from "./AgentRunDependencyGraph";
 import {
@@ -202,10 +204,15 @@ export function AgentHierarchyPanel(props: {
 
       {/* A coordinator with workers is not empty: saying "No subagents yet"
           above rows that count their subagents would contradict them. */}
-      {model.emptyReason === undefined || rows.length > 0 || workers.length > 0 ? null : (
-        <p className="agent-hierarchy__empty" role="status">
-          {model.emptyReason}
-        </p>
+      {model.empty === undefined || rows.length > 0 || workers.length > 0 ? null : (
+        // The shared state every pane with nothing to show uses: the mark, the
+        // line and one muted line, centred in a pane.
+        <OctantEmpty
+          detail={model.empty.detail}
+          icon={<Bot size={16} />}
+          layout="line"
+          title={model.empty.title}
+        />
       )}
 
       {props.observationsTruncated ? (

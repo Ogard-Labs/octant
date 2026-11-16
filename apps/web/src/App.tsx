@@ -464,6 +464,7 @@ import {
   previewUtilityCardPage,
   MAX_DOCK_TILE_COLUMNS,
   MAX_DOCK_TILES_PER_COLUMN,
+  announcedBrowserSessionsHeld,
   offeredBrowserStaysMinimised,
   restoreUtilityTool,
   moveUtilityTile,
@@ -921,7 +922,7 @@ function LaunchedShell(
     ...(props.shellClient === undefined ? {} : { client: props.shellClient }),
     isNarrow,
     ...(nativeHost === undefined ? {} : { nativeHost }),
-    openDockBrowser: ({ threadId, offered }) => {
+    openDockBrowser: ({ threadId, offered, sessionIds }) => {
       // The dock is thread-scoped: a Browser session belongs in it only when
       // the announcing thread is the subject the dock already describes.
       if (
@@ -939,6 +940,9 @@ function LaunchedShell(
       if (offeredBrowserStaysMinimised(displayedDockState, { offered, shelfDrawn: !isNarrow })) {
         return true;
       }
+      // The page the person just opened from a Browser tab is announced too.
+      // It is already that tab, so the offer has nothing to add.
+      if (offered && announcedBrowserSessionsHeld(dockState, sessionIds)) return true;
       openDockTab("browser");
       return true;
     },

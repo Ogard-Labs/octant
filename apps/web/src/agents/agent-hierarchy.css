@@ -8,6 +8,14 @@
   min-width: 0;
 }
 
+/* With nothing to list, the panel is its pane's one state: it takes the pane's
+   height, so the state stands in the pane's middle like every other tool's. */
+:is(.right-utility-dock__tool, .bottom-utility-panel__content)
+  > .agent-hierarchy:has(> .surface-empty) {
+  flex: 1 1 auto;
+  align-content: center;
+}
+
 .agent-hierarchy--reconnecting {
   opacity: 0.8;
 }
@@ -30,7 +38,6 @@
   font-weight: var(--oct-weight-medium);
 }
 
-.agent-hierarchy__empty,
 .agent-hierarchy__banner {
   margin: 0;
   color: var(--oct-muted);

@@ -2363,11 +2363,13 @@ function renderNonCodeTab(
   }
   if (tab.kind === "browser") {
     return props.browserAutomationClient === undefined ? (
+      // A pane's state: the mark, one line, one muted line with the reason.
+      // It said "Browser unavailable" over the tab's own title and a sentence
+      // about an automation client.
       <OctantEmpty
-        eyebrow="Browser unavailable"
-        message="The host browser automation client is unavailable."
+        message="This host has no Browser to open pages in."
         state="warning"
-        title={tab.title}
+        title="Browser is unavailable"
       />
     ) : (
       <BrowserWorkspace

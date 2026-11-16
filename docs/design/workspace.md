@@ -2402,7 +2402,12 @@ does not repeat a second title block. Split panes and utility surfaces retain
 their own pane headers and lifecycle controls. Capability-gated toggles for
 Open in, bottom panel, and right dock remain window chrome. Several Browsers are one Browser
 tool: their pages sit in a row of their own at the top of the Browser, with a +
-for a new page, and closing the Browser closes every page.
+for a new page, and closing the Browser closes every page. A page opened from
+a new Browser tab (an address, a local server) stays that tab, and the tab
+takes the page's title. The host announces that page as it announces an
+agent's session; an announcement whose every session is already a tab of the
+dock's Browser opens nothing, where it used to open the thread's shared
+Browser tab and leave an empty "New tab" beside the page.
 The Browser's toolbar is one row of plain icon buttons, the address field and
 trailing icons, as the Browser toolbar rules above set out. The right dock's tools are opened from a **tool row** in the
 thread pane's header, after the title and ending on the thread box's narrowest

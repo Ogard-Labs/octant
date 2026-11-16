@@ -611,9 +611,17 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
   const pageObservation = (tabId: string) => {
     const contextId = displayedDockState.tabs.find((tab) => tab.id === tabId)?.browserContextId;
     if (contextId === undefined) return pageIconSnapshot?.observation;
-    return pageIconSnapshot?.contexts?.find(
+    const listed = pageIconSnapshot?.contexts?.find(
       (entry) => String(entry.context.contextId) === contextId,
     )?.observation;
+    if (listed !== undefined) return listed;
+    // A page opened from a new Browser tab is the thread's current context,
+    // which the list of the thread's other contexts does not repeat: the tab
+    // kept the name "New tab" over the page it was showing.
+    return pageIconSnapshot?.context !== undefined &&
+      String(pageIconSnapshot.context.contextId) === contextId
+      ? pageIconSnapshot.observation
+      : undefined;
   };
   const pageIcon = (tabId: string): string | undefined => pageObservation(tabId)?.faviconDataUrl;
   // The tab's name is what the page shows: its title, else its host.

@@ -10,6 +10,7 @@ import {
   isUtilityToolMinimised,
   minimiseUtilityTool,
   previewUtilityCardPage,
+  announcedBrowserSessionsHeld,
   offeredBrowserStaysMinimised,
   minimisedUtilityTabIds,
   MINIMISABLE_DOCK_SURFACES,
@@ -1458,3 +1459,33 @@ function memoryStorage(): Storage {
     },
   } as unknown as Storage;
 }
+
+describe("a Browser session announced for a thread whose dock already shows it", () => {
+  const page = { id: "page-1", surface: "browser", browserContextId: "context-1" } as const;
+
+  it("is held when the page the person opened is the session announced", () => {
+    // Opening a local server from a Browser tab binds that tab to its page,
+    // and the page is then announced like an agent's session.
+    expect(announcedBrowserSessionsHeld({ tabs: [page], active: "page-1" }, ["context-1"])).toBe(
+      true,
+    );
+  });
+
+  it("is not held for a session no tab is bound to, so the shared Browser tab opens for it", () => {
+    expect(announcedBrowserSessionsHeld({ tabs: [page], active: "page-1" }, ["context-2"])).toBe(
+      false,
+    );
+    expect(
+      announcedBrowserSessionsHeld({ tabs: [page], active: "page-1" }, ["context-1", "context-2"]),
+    ).toBe(false);
+    // A tab not yet bound to a page holds nothing.
+    expect(
+      announcedBrowserSessionsHeld({ tabs: [{ id: "new", surface: "browser" }] }, ["context-1"]),
+    ).toBe(false);
+  });
+
+  it("is not held when the announcement names no session", () => {
+    expect(announcedBrowserSessionsHeld({ tabs: [page] }, undefined)).toBe(false);
+    expect(announcedBrowserSessionsHeld({ tabs: [page] }, [])).toBe(false);
+  });
+});

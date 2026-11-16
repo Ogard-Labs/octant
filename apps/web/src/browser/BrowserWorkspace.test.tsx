@@ -546,7 +546,14 @@ describe("BrowserWorkspace", () => {
         }}
       />,
     );
-    expect(screen.getByText("Browser unavailable")).toBeInTheDocument();
+    // One line and one muted line, with no eyebrow over them.
+    expect(screen.getByText("Browser needs a thread")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Open it from a Work or Code thread. A page is isolated to the thread that owns it.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Browser unavailable")).not.toBeInTheDocument();
   });
 
   it("creates a server-owned context and navigates through the normalized client", async () => {

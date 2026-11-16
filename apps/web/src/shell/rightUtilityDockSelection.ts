@@ -404,6 +404,26 @@ export function minimiseUtilityTool(
  * session opens the Browser like any other tab (which also clears the
  * minimised flag, as choosing any tab of a minimised tool does).
  */
+/**
+ * Whether every Browser session an offer announces is already a page of this
+ * dock's Browser: each one is the context some Browser tab is bound to. A page
+ * the person opens from a Browser tab is announced like an agent's session,
+ * about two seconds later, and opening the thread's shared Browser tab for it
+ * left an empty "New tab" beside the page it had just been used to open.
+ */
+export function announcedBrowserSessionsHeld(
+  state: ThreadUtilityDockState,
+  sessionIds: ReadonlyArray<string> | undefined,
+): boolean {
+  if (sessionIds === undefined || sessionIds.length === 0) return false;
+  const bound = new Set(
+    state.tabs.flatMap((tab) =>
+      tab.surface === "browser" && tab.browserContextId !== undefined ? [tab.browserContextId] : [],
+    ),
+  );
+  return sessionIds.every((id) => bound.has(id));
+}
+
 export function offeredBrowserStaysMinimised(
   state: ThreadUtilityDockState,
   options: { readonly offered: boolean; readonly shelfDrawn: boolean },

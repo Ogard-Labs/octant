@@ -712,11 +712,12 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         aria-label="Browser automation"
         className="browser-workspace browser-workspace--state"
       >
+        {/* A pane's state: the mark, one line, one muted line with the
+            reason. An eyebrow over the title made it three. */}
         <OctantEmpty
-          eyebrow="Browser unavailable"
-          message="The host requires one exact owning thread before it can create an isolated context."
+          message="Open it from a Work or Code thread. A page is isolated to the thread that owns it."
           state="neutral"
-          title="Open Browser from a Work or Code thread"
+          title="Browser needs a thread"
         />
       </section>
     );
