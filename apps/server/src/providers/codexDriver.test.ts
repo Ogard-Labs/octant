@@ -166,6 +166,7 @@ function fixture(
     }>;
     readonly version?: string;
     readonly threadCompactStart?: (input: { readonly threadId: string }) => Promise<void>;
+    readonly threadInjectItems?: (input: unknown) => Promise<void>;
   } = {},
 ): Fixture {
   const calls: Array<{ method: string; input?: unknown }> = [];
@@ -244,6 +245,10 @@ function fixture(
     threadCompactStart: async (value) => {
       calls.push({ method: "thread/compact/start", input: value });
       await input.threadCompactStart?.(value);
+    },
+    threadInjectItems: async (value) => {
+      calls.push({ method: "thread/inject_items", input: value });
+      await input.threadInjectItems?.(value);
     },
     reviewStart: async (value) => {
       calls.push({ method: "review/start", input: value });
@@ -3301,6 +3306,154 @@ describe("Codex execution authority and approvals", () => {
       resumeCursor: { driverKind: "codex", value: "thread-1" },
     });
     expect(completed).not.toHaveProperty("nativeAnchor");
+    await acquired.close();
+  });
+
+  const startOutsideStrict = async (f: ReturnType<typeof fixture>) => {
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    return acquired;
+  };
+  const finishReview = (f: ReturnType<typeof fixture>, review: string) => {
+    f.emit(
+      notification("item/completed", {
+        threadId: "thread-2",
+        turnId: "review-turn",
+        item: { type: "exitedReviewMode", id: "review-1", review },
+        completedAtMs: 20,
+      }),
+    );
+    f.emit(
+      notification("turn/completed", {
+        threadId: "thread-2",
+        turn: { id: "review-turn", status: "completed" },
+      }),
+    );
+  };
+
+  it("puts what a /review turn carries into the session's own thread before the review starts", async () => {
+    const f = fixture();
+    const acquired = await startOutsideStrict(f);
+    await Effect.runPromise(
+      acquired.connection.send({
+        sessionId,
+        prompt: "/review",
+        context: [{ kind: "user-message", text: "From the planner: check the parser too." }],
+        attachments: [],
+        tools: [],
+      }),
+    );
+    const methods = f.calls.map(({ method }) => method);
+    const injected = f.calls.find(({ method }) => method === "thread/inject_items");
+    expect(injected?.input).toMatchObject({ threadId: "thread-1" });
+    expect(JSON.stringify(injected?.input)).toContain("From the planner: check the parser too.");
+    expect(methods.indexOf("thread/inject_items")).toBeLessThan(methods.indexOf("review/start"));
+    await acquired.close();
+  });
+
+  it("refuses a /review that carries an attachment before anything reaches Codex", async () => {
+    // A model that takes images, so only the review's own rule refuses it.
+    const f = fixture({
+      modelPages: [{ data: [model("gpt-5.4", ["text", "image"])], nextCursor: null }],
+    });
+    const registry = new ProviderRuntimeRegistry();
+    const driver = makeCodexDriver(f.options({ runtimeRegistry: registry }));
+    registry.setObservedState(await Effect.runPromise(Effect.scoped(driver.probe({ instanceId }))));
+    const acquired = await acquireConnection(driver, "work");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    const before = f.calls.length;
+    const refused = await Effect.runPromise(
+      Effect.either(
+        acquired.connection.send({
+          sessionId,
+          prompt: "/review",
+          context: [{ kind: "user-message", text: "pending message" }],
+          attachments: [
+            {
+              attachmentId: "attachment-1",
+              displayName: "diagram.png",
+              mediaType: "image/png",
+              bytes: new Uint8Array([1, 2, 3]),
+            },
+          ],
+          tools: [],
+        }),
+      ),
+    );
+    expect(refused._tag === "Left" ? refused.left.category : undefined).toBe("unsupported");
+    expect(refused._tag === "Left" ? refused.left.message : "").toContain("attachments");
+    // Nothing was sent, so the turn's pending messages stay pending.
+    expect(
+      f.calls
+        .slice(before)
+        .filter(({ method }) =>
+          ["thread/inject_items", "thread/start", "review/start"].includes(method),
+        ),
+    ).toEqual([]);
+    await acquired.close();
+  });
+
+  it("records the review's request and findings in the session's thread before the turn completes", async () => {
+    const f = fixture();
+    const acquired = await startOutsideStrict(f);
+    await Effect.runPromise(
+      acquired.connection.send({
+        sessionId,
+        prompt: "/review the auth changes",
+        attachments: [],
+        tools: [],
+      }),
+    );
+    const events = takeEvents(acquired.connection, 2);
+    finishReview(f, "- src/auth.ts: token is logged");
+    const [, completed] = await events;
+    expect(completed).toMatchObject({ kind: "completed" });
+    const recorded = f.calls.filter(({ method }) => method === "thread/inject_items");
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]?.input).toMatchObject({
+      threadId: "thread-1",
+      items: [
+        { type: "message", role: "user" },
+        {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "- src/auth.ts: token is logged" }],
+        },
+      ],
+    });
+    expect(JSON.stringify(recorded[0]?.input)).toContain("the auth changes");
+    await acquired.close();
+  });
+
+  it("fails the review turn with a sentence when its findings cannot reach the session's thread", async () => {
+    const f = fixture({
+      threadInjectItems: async () => {
+        throw new CodexRpcClientFailure("remote", "refused", { remoteCode: -32600 });
+      },
+    });
+    const acquired = await startOutsideStrict(f);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "/review", attachments: [], tools: [] }),
+    );
+    const events = takeEvents(acquired.connection, 2);
+    finishReview(f, "- a finding");
+    const [, ended] = await events;
+    expect(ended).toMatchObject({ kind: "failed", failure: { category: "provider-failed" } });
+    expect(ended?.kind === "failed" ? ended.failure.message : "").toContain("follow-up");
     await acquired.close();
   });
 

@@ -200,6 +200,12 @@ export const decodeTurnInterruptResult = (value: unknown): CodexTurnInterruptRes
   return {};
 };
 
+/** `thread/inject_items` answers `{}` once the items are in the thread's history. */
+export const decodeThreadInjectItemsResult = (value: unknown): Record<string, never> => {
+  decode(Schema.Record({ key: Schema.String, value: Schema.Unknown }))(value);
+  return {};
+};
+
 /** `thread/compact/start` answers `{}` once it has queued the compaction. */
 export const decodeThreadCompactStartResult = (value: unknown): Record<string, never> => {
   decode(Schema.Record({ key: Schema.String, value: Schema.Unknown }))(value);

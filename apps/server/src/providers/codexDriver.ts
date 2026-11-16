@@ -87,6 +87,7 @@ import {
   decodeThreadResumeResult,
   decodeThreadStartResult,
   decodeThreadCompactStartResult,
+  decodeThreadInjectItemsResult,
   decodeTurnInterruptResult,
   decodeTurnStartResult,
   decodeTurnSteerResult,
@@ -504,6 +505,11 @@ export interface CodexClientPort {
   turnInterrupt(input: { readonly threadId: string; readonly turnId: string }): Promise<void>;
   /** Queues a compaction of the thread, which then runs as a turn of its own. */
   threadCompactStart?(input: { readonly threadId: string }): Promise<void>;
+  /** Appends raw messages to a thread's history without starting a turn. */
+  threadInjectItems?(input: {
+    readonly threadId: string;
+    readonly items: ReadonlyArray<CodexInjectedMessage>;
+  }): Promise<void>;
   /** Starts Codex's own review on the thread it names, inline. */
   reviewStart?(input: {
     readonly threadId: string;
@@ -573,6 +579,10 @@ interface SessionState {
   readonly threadConfig: CodexThreadConfig;
   /** The thread Codex's own review is running on, until that run ends. */
   reviewThreadId?: string | undefined;
+  /** What the running review was asked to look at, recorded with its findings. */
+  reviewTarget?: CodexReviewTarget | undefined;
+  /** The findings the running review reported, once it left review mode. */
+  reviewFindings?: string | undefined;
   activeTurnId?: string;
   outputAccepted: boolean;
   terminal: boolean;
@@ -750,6 +760,13 @@ function codexTurnRequest(
     });
   }
   if (!separate) return { input: items };
+  return { input: items, additionalContext: codexContextEntries(context) };
+}
+
+/** Octant's context for a turn as `additionalContext` entries, keyed by what each holds. */
+function codexContextEntries(
+  context: ReadonlyArray<ProviderContextBlock>,
+): Readonly<Record<string, CodexAdditionalContextEntry>> {
   const instructions = context.filter(isOctantInstructionContext);
   const material = context.filter((block) => !isOctantInstructionContext(block));
   const restated = context.some(
@@ -761,21 +778,81 @@ function codexTurnRequest(
       ? undefined
       : renderProviderContextSections(material);
   return {
-    input: items,
-    additionalContext: {
-      ...(instructions.length === 0
-        ? {}
-        : {
-            [CODEX_INSTRUCTIONS_KEY]: {
-              kind: "application",
-              value: renderOctantInstructions(instructions),
-            },
-          }),
-      ...(materialValue === undefined
-        ? {}
-        : { [CODEX_MATERIAL_KEY]: { kind: "untrusted", value: materialValue } }),
-    },
+    ...(instructions.length === 0
+      ? {}
+      : {
+          [CODEX_INSTRUCTIONS_KEY]: {
+            kind: "application",
+            value: renderOctantInstructions(instructions),
+          },
+        }),
+    ...(materialValue === undefined
+      ? {}
+      : { [CODEX_MATERIAL_KEY]: { kind: "untrusted", value: materialValue } }),
   };
+}
+
+/**
+ * One raw Responses API message for `thread/inject_items`, which appends it to
+ * the thread's model-visible history without starting a turn (codex-rs
+ * `ThreadInjectItemsParams`, rust-v0.169.0).
+ */
+export interface CodexInjectedMessage {
+  readonly type: "message";
+  readonly role: "developer" | "user" | "assistant";
+  readonly content: ReadonlyArray<
+    | { readonly type: "input_text"; readonly text: string }
+    | { readonly type: "output_text"; readonly text: string }
+  >;
+}
+
+/**
+ * A `/review` turn's Octant context, as the messages `turn/start` would have
+ * placed ahead of a request: Octant's own rules as a developer message, the
+ * rest (pending messages, a handoff, skills, memory) as a user message, each
+ * under the tag its key names. The review itself takes only a target, so the
+ * context goes into the session's own thread instead of being dropped.
+ */
+export function codexInjectedContext(
+  context: ReadonlyArray<ProviderContextBlock>,
+): ReadonlyArray<CodexInjectedMessage> {
+  return Object.entries(codexContextEntries(context)).map(([key, entry]) => ({
+    type: "message",
+    role: entry.kind === "application" ? "developer" : "user",
+    content: [{ type: "input_text", text: `<${key}>\n${entry.value}\n</${key}>` }],
+  }));
+}
+
+/**
+ * What Codex's own review asked and reported, as the session's thread keeps
+ * it: the request and Codex's findings as a user message, and the findings as
+ * Codex's own reply, the two messages Codex records after an inline review
+ * (`exit_review_mode` in codex-rs `core/src/tasks/review.rs`, rust-v0.169.0).
+ * The review ran on a thread of its own, so without them a follow-up such as
+ * "fix those findings" would reach a thread that never saw them.
+ */
+export function codexReviewRecord(
+  target: CodexReviewTarget,
+  findings: string,
+): ReadonlyArray<CodexInjectedMessage> {
+  const asked =
+    target.type === "uncommittedChanges"
+      ? "the uncommitted changes"
+      : `these instructions: ${target.instructions}`;
+  const reported = findings.trim().length === 0 ? "No findings." : findings.trim();
+  return [
+    {
+      type: "message",
+      role: "user",
+      content: [
+        {
+          type: "input_text",
+          text: `I ran /review on ${asked}. Codex's review, run read-only on a thread of its own, reported:\n\n${reported}`,
+        },
+      ],
+    },
+    { type: "message", role: "assistant", content: [{ type: "output_text", text: reported }] },
+  ];
 }
 
 /**
@@ -1203,6 +1280,9 @@ export function makeCodexClient(connection: CodexAppServerConnection): CodexClie
       await rpc.request("thread/compact/start", input, decodeThreadCompactStartResult);
     },
     reviewStart: (input) => rpc.request("review/start", input, decodeReviewStartResult),
+    threadInjectItems: async (input) => {
+      await rpc.request("thread/inject_items", input, decodeThreadInjectItemsResult);
+    },
     respondApproval: async ({ providerRequestId, result }) => {
       await rpc.respond(providerRequestId, result);
     },
@@ -1861,6 +1941,8 @@ function makeConnection(
       const reviewThreadId = state.reviewThreadId;
       if (reviewThreadId === undefined) return;
       state.reviewThreadId = undefined;
+      state.reviewTarget = undefined;
+      state.reviewFindings = undefined;
       if (sessionsByThread.get(reviewThreadId) === state) sessionsByThread.delete(reviewThreadId);
     };
     /**
@@ -1876,6 +1958,7 @@ function makeConnection(
     const startReview = (
       state: SessionState,
       target: CodexReviewTarget,
+      input: ProviderTurnInput,
     ): Effect.Effect<void, ProviderFailure> =>
       Effect.gen(function* () {
         if (mode === "chat" || state.executionPolicy === "plan") {
@@ -1895,10 +1978,43 @@ function makeConnection(
           );
         }
         const reviewStart = client.reviewStart;
-        if (reviewStart === undefined) {
+        const threadInjectItems = client.threadInjectItems;
+        if (reviewStart === undefined || threadInjectItems === undefined) {
           return yield* Effect.fail(failure("unsupported", "This Codex runtime cannot review."));
         }
+        // The review takes only a target. A file the person attached cannot
+        // reach it, so the send is refused before anything leaves, and
+        // whatever the turn carried stays for the next one.
+        if (input.attachments.length > 0) {
+          return yield* Effect.fail(
+            failure(
+              "unsupported",
+              "Codex's review takes no attachments. Send them in a turn of their own, then run /review.",
+            ),
+          );
+        }
         ensureSubscribed();
+        // Everything else the turn carries (pending messages, a handoff,
+        // Octant's context) goes into the session's own thread first, so the
+        // send reports delivered only what Codex has. A runtime that cannot
+        // take it refuses the review before anything is delivered.
+        const injected = codexInjectedContext(
+          withCarriedToolRules(input, state.carriedTools).context ?? [],
+        );
+        if (injected.length > 0) {
+          yield* Effect.tryPromise({
+            try: () => threadInjectItems({ threadId: state.threadId, items: injected }),
+            catch: (error) =>
+              error instanceof CodexRpcClientFailure &&
+              error.kind === "remote" &&
+              error.remoteCode === -32601
+                ? failure(
+                    "unsupported",
+                    "This Codex release cannot carry a turn's context into a review.",
+                  )
+                : providerFailure(error),
+          });
+        }
         const reviewThread = yield* request(() =>
           client.threadStart({
             cwd: projectRoot,
@@ -1916,6 +2032,8 @@ function makeConnection(
           );
         }
         state.reviewThreadId = reviewThread.thread.id;
+        state.reviewTarget = target;
+        state.reviewFindings = undefined;
         sessionsByThread.set(reviewThread.thread.id, state);
         const started = yield* Effect.tryPromise({
           try: () => reviewStart({ threadId: reviewThread.thread.id, target, delivery: "inline" }),
@@ -2271,6 +2389,16 @@ function makeConnection(
         state.context = makeEventContext(state, factories);
       }
       if (state.context === undefined) return;
+      if (
+        message.kind === "notification" &&
+        message.method === "item/completed" &&
+        state.reviewThreadId !== undefined &&
+        message.params.threadId === state.reviewThreadId &&
+        message.params.item.type === "exitedReviewMode" &&
+        "review" in message.params.item
+      ) {
+        state.reviewFindings = message.params.item.review;
+      }
       const mapped = mapCodexMessage(state.context, message);
       for (const item of mapped) {
         if (item.kind === "ignored") continue;
@@ -2313,6 +2441,17 @@ function makeConnection(
         if (item.event.kind === "child-agent-activity") {
           recordSubagent(item.event.childAgentId, state.threadId);
         }
+        const reviewTarget = state.reviewTarget;
+        const reviewFindings = state.reviewFindings;
+        if (
+          item.event.kind === "completed" &&
+          state.reviewThreadId !== undefined &&
+          reviewTarget !== undefined &&
+          reviewFindings !== undefined
+        ) {
+          recordReview(state, item.event, reviewTarget, reviewFindings);
+          return;
+        }
         offer(item.event);
         if (isTerminal(item.event)) {
           settleCompaction(state, item.event.kind === "failed" || item.event.kind === "completed");
@@ -2324,6 +2463,50 @@ function makeConnection(
           return;
         }
       }
+    };
+    /**
+     * Ends a review that reported its findings: they go into the session's
+     * own thread (`codexReviewRecord`) before the turn reports completed, so
+     * the next turn, which resumes that thread, sees what the review found. A
+     * runtime that cannot take them fails the turn with a sentence saying so
+     * rather than leave the thread without them unseen.
+     */
+    const recordReview = (
+      state: SessionState,
+      completed: ProviderRuntimeEvent,
+      target: CodexReviewTarget,
+      findings: string,
+    ) => {
+      state.terminal = true;
+      clearPendingApprovals(state);
+      clearPendingTools(state);
+      deactivate(state);
+      const threadInjectItems = client.threadInjectItems;
+      const recorded =
+        threadInjectItems === undefined
+          ? Promise.reject(new Error("Codex cannot take the review's findings."))
+          : threadInjectItems({
+              threadId: state.threadId,
+              items: codexReviewRecord(target, findings),
+            });
+      void recorded
+        .then(
+          () => offer(completed),
+          () =>
+            offer({
+              kind: "failed",
+              failure: failure(
+                "provider-failed",
+                "Codex's review finished, but its findings could not be added to this thread's conversation, so a follow-up turn would not see them.",
+              ),
+              instanceId: completed.instanceId,
+              sessionId: completed.sessionId,
+              sequence: completed.sequence,
+              correlationId: completed.correlationId,
+              occurredAt: completed.occurredAt,
+            } as ProviderRuntimeEvent),
+        )
+        .finally(unsubscribeWhenIdle);
     };
     const ensureSubscribed = () => {
       unsubscribe ??= client.subscribe(handleMessage);
@@ -2723,7 +2906,7 @@ function makeConnection(
               return Effect.fail(failure("unavailable", "Codex is compacting this session."));
             }
             const review = codexReviewRequest(input.prompt);
-            if (review !== undefined) return startReview(state, review);
+            if (review !== undefined) return startReview(state, review, input);
             ensureSubscribed();
             return Effect.tryPromise({
               try: async () => {

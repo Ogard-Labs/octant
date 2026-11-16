@@ -1351,7 +1351,21 @@ the permission profile of the thread it runs on (codex-rs
 `session/review.rs`, rust-v0.169.0) and the session's thread may write. Its
 `exitedReviewMode` item becomes the reply's own paragraph under a **Codex
 review** heading, and the completed turn names the session's own thread in
-its resume cursor, with no native anchor. Rationale for the refusals: Codex's
+its resume cursor, with no native anchor. The review takes only a target,
+so what the turn carries reaches the session's own thread instead:
+Octant's context, pending Work agent messages and a provider-switch handoff
+are appended there with `thread/inject_items` (raw Responses messages that
+start no turn, codex-rs `ThreadInjectItemsParams`, rust-v0.169.0) before the
+review starts, Octant's rules as a developer message and the rest as a user
+message, so a send reports delivered only what Codex has. A `/review` with an
+attachment is refused before anything is sent, which leaves the turn's
+pending messages pending, and a runtime without `thread/inject_items` refuses
+the review the same way. When the review reports its findings, the request
+and the findings are appended to the session's thread as the user and
+assistant messages Codex records after an inline review (`exit_review_mode`
+in `core/src/tasks/review.rs`) before the turn reports completed, so a
+follow-up such as "fix those findings" sees them; if they cannot be appended
+the turn fails with a sentence saying so. Rationale for the refusals: Codex's
 read-only sandbox is real only where Codex's own Seatbelt can start, outside
 Octant's profile, so under Strict and at Full access that keeps the sandbox a
 review is refused with a sentence rather than run where its commands could
