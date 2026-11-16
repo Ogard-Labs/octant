@@ -35,6 +35,7 @@ function sources(input: {
   readonly driverKind: ProviderInstance["driverKind"];
   readonly nativeProviders?: ReadonlyArray<string>;
   readonly readProviderCliTrust?: ThreadProjectCodeSources["readProviderCliTrust"];
+  readonly strict?: boolean;
 }): ThreadProjectCodeSources {
   const thread = { id: threadId, projectId, providerInstanceId: instanceId };
   return {
@@ -51,6 +52,7 @@ function sources(input: {
     ...(input.readProviderCliTrust === undefined
       ? {}
       : { readProviderCliTrust: input.readProviderCliTrust }),
+    readStrict: () => input.strict ?? false,
   };
 }
 
@@ -125,6 +127,29 @@ describe("reading a thread's untrusted Project code", () => {
         { threadId, mode: "code" },
       ),
     ).resolves.toMatchObject({ status: "untrusted" });
+  });
+
+  it("asks again under Strict for a Project only the provider's own CLI trusts, and keeps Octant's own trust", async () => {
+    const root = projectRoot({ ".mcp.json": "{}" });
+    const trust: ThreadProjectCodeSources["readProviderCliTrust"] = () => true;
+    await expect(
+      readThreadProjectCode(
+        sources({ root, driverKind: "claude", readProviderCliTrust: trust, strict: true }),
+        { threadId, mode: "code" },
+      ),
+    ).resolves.toMatchObject({ status: "untrusted", provider: "claude" });
+    await expect(
+      readThreadProjectCode(
+        sources({ root, driverKind: "claude", readProviderCliTrust: trust, strict: false }),
+        { threadId, mode: "code" },
+      ),
+    ).resolves.toMatchObject({ status: "trusted", provider: "claude" });
+    await expect(
+      readThreadProjectCode(
+        sources({ root, driverKind: "claude", nativeProviders: ["claude"], strict: true }),
+        { threadId, mode: "code" },
+      ),
+    ).resolves.toMatchObject({ status: "trusted", provider: "claude" });
   });
 
   it("reports nothing for a Project folder without the provider's Project code", async () => {

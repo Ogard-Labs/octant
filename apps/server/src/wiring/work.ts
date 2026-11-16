@@ -756,8 +756,8 @@ export function wireWork(deps: WorkDependencies) {
                           : workThreadAccessOf(current.access).executionPolicy;
                       },
                       // Below Full access Work asks the one-use script
-                      // permission Code asks. Strict will answer false here.
-                      oneUsePermission: () => true,
+                      // permission Code asks, unless the thread is Strict.
+                      strict: () => resolveThreadStrict(String(input.thread.id)),
                       run: (command) => browserAutomationService.runScript(command),
                     },
                   }),

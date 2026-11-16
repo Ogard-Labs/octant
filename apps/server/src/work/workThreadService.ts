@@ -79,6 +79,8 @@ import {
   withUsageLimitHandoff,
   withUsageLimitHandoffOutcome,
   ProjectProviderPolicyRejected,
+  resolveStrict,
+  STRICT_REFUSES_FULL_ACCESS_RUN_FLAG,
   workProjectKeepsStatusFile,
 } from "@octant/domain";
 import {
@@ -1365,6 +1367,18 @@ export class WorkThreadService {
               "invalid",
               "The per-run Full access flag puts a thread at Full access only.",
             );
+          // The flag is a lift Octant made; Strict refuses it, read as the
+          // thread would resolve it once this change applies.
+          const chosen = command.strict === undefined ? current.strict : command.strict;
+          const project = this.#persistence.readProject(current.projectId);
+          if (
+            resolveStrict({
+              thread: { strict: chosen ?? undefined },
+              project: project?.type === "work" ? project : undefined,
+              settings: this.#projection.settings(),
+            })
+          )
+            throw this.#failure("invalid", STRICT_REFUSES_FULL_ACCESS_RUN_FLAG);
         }
         const {
           fullAccessSandbox: currentSandbox,

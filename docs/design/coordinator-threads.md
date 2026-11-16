@@ -91,7 +91,9 @@ make changes itself.
   delegates take the same read-only gate. At Full access its own turn runs at
   that level instead (maintainer decision, 2026-11-16; built, under
   [Octant's own limits become settings](../architecture.md#security-and-authority)):
-  the person chose to let the thread act without asking. Below Full access
+  the person chose to let the thread act without asking. Under the thread's
+  Strict, read as each turn starts, its own actions keep Plan's read-only
+  gate at every level, Full access included (built). Below Full access
   its guardrail level does not govern its own actions; at every level it is
   the ceiling for the workers it starts. It opens no pull request of its own
   (`octant_pull_request` is not offered).
