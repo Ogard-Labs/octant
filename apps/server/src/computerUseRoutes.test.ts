@@ -126,7 +126,7 @@ describe("computer-use lifecycle routes", () => {
     const stopped = await handle(deviceRequest("/api/computer-use/stop", scope, "host-person"));
     expect(stopped?.status).toBe(200);
     await expect(stopped?.json()).resolves.toMatchObject({ state: "stopped" });
-    expect(runtime.stopForHostPerson).toHaveBeenCalledWith(scope);
+    expect(runtime.stopForHostPerson).toHaveBeenCalledWith(scope, { deviceId: String(deviceId) });
     // The window-scoped lookups are never used for the person's device.
     expect(runtime.list).not.toHaveBeenCalled();
     expect(runtime.stop).not.toHaveBeenCalled();

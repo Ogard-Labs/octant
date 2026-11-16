@@ -58,6 +58,7 @@ export function createComputerUseRouteHandler(options: {
 
     let ownerWindowId;
     let pairedPerson = false;
+    let pairedDeviceId = "";
     try {
       const context = authenticateRoutePrincipal({
         request,
@@ -78,6 +79,7 @@ export function createComputerUseRouteHandler(options: {
           );
         }
         pairedPerson = true;
+        pairedDeviceId = String(context.principal.deviceId);
       }
     } catch (error) {
       return failure(
@@ -138,7 +140,7 @@ export function createComputerUseRouteHandler(options: {
       } else {
         const stop = decodeComputerUseStopRequest(body.value);
         result = pairedPerson
-          ? await options.runtime.stopForHostPerson(stop)
+          ? await options.runtime.stopForHostPerson(stop, { deviceId: pairedDeviceId })
           : await options.runtime.stop({ ownerWindowId, ...stop });
       }
       return new Response(JSON.stringify(decodeComputerUseSessionView(result)), {

@@ -143,6 +143,7 @@ export interface ComputerUseRuntime {
   ) => ComputerUseRuntimeView | undefined;
   readonly stopForHostPerson: (
     input: ComputerUseHostPersonScope,
+    device: { readonly deviceId: string },
   ) => Promise<ComputerUseRuntimeView>;
   readonly revokeWindow: (windowId: WindowId) => Promise<void>;
   readonly close: () => Promise<void>;
@@ -587,10 +588,12 @@ export function createComputerUseRuntime(_options: {
   const stop: ComputerUseRuntime["stop"] = async (input) =>
     await stopSession(scoped(input), "User requested an immediate stop.");
 
-  const stopForHostPerson: ComputerUseRuntime["stopForHostPerson"] = async (input) =>
+  // The stop keeps the session's original requester and names the paired
+  // device in the stop event itself, so the journal says which device asked.
+  const stopForHostPerson: ComputerUseRuntime["stopForHostPerson"] = async (input, device) =>
     await stopSession(
       scopedForHostPerson(input),
-      "The person requested an immediate stop from a device they paired.",
+      `The person requested an immediate stop from paired device ${device.deviceId}.`,
     );
 
   const stopSession = async (

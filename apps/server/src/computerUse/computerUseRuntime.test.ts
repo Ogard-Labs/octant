@@ -375,22 +375,24 @@ describe("ComputerUseRuntime", () => {
       runtime.inspectForHostPerson({ threadId, authority, sessionId: request.sessionId }),
     ).toEqual(waiting);
     await expect(
-      runtime.stopForHostPerson({
-        threadId: "20000000-0000-4000-8000-000000000099",
-        authority,
-        sessionId: request.sessionId,
-      }),
+      runtime.stopForHostPerson(
+        {
+          threadId: "20000000-0000-4000-8000-000000000099",
+          authority,
+          sessionId: request.sessionId,
+        },
+        { deviceId: "phone-1" },
+      ),
     ).rejects.toMatchObject({ category: "unauthorized" });
 
-    const stopped = await runtime.stopForHostPerson({
-      threadId,
-      authority,
-      sessionId: request.sessionId,
-    });
+    const stopped = await runtime.stopForHostPerson(
+      { threadId, authority, sessionId: request.sessionId },
+      { deviceId: "phone-1" },
+    );
     expect(stopped.state).toBe("stopped");
     expect(stopped.pendingApproval).toBeUndefined();
     expect(stopped.events.find(({ kind }) => kind === "stop-requested")?.detail).toBe(
-      "The person requested an immediate stop from a device they paired.",
+      "The person requested an immediate stop from paired device phone-1.",
     );
     expect(adapter.execute).not.toHaveBeenCalled();
     expect(adapter.cleanup).toHaveBeenCalledWith(request.sessionId);
