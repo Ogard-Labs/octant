@@ -255,6 +255,23 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
           origin,
         );
       }
+      // The per-run Full access flag is typed by the person on `octant agent`
+      // at this host; no device and no agent grant sets it.
+      if (
+        command.kind === "change-work-thread-access" &&
+        command.fullAccessRunFlag === true &&
+        readPrincipalRouteContext(request)?.principal.kind === "remote-device"
+      ) {
+        return failureResponse(
+          {
+            category: "unauthorized",
+            message:
+              "The per-run Full access flag is set by the person on `octant agent` on this host.",
+          },
+          403,
+          origin,
+        );
+      }
       // Whether the host may continue a turn by itself after a restart is the
       // person's choice about this computer's unattended work, at a window on
       // it or on a device they paired, as for Code.

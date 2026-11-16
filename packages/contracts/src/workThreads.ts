@@ -116,6 +116,12 @@ export const WorkThread = Schema.Struct({
    */
   fullAccessSandbox: Schema.optional(Schema.Boolean),
   /**
+   * This thread runs at Full access because the person passed the per-run
+   * Full access flag to `octant agent` on this host; same meaning as
+   * `CodeThread.fullAccessRunFlag`. Dropped once the thread leaves Full access.
+   */
+  fullAccessRunFlag: Schema.optional(Schema.Literal(true)),
+  /**
    * The thread's pending usage-resume opt-in, when a person asked the host to
    * resume a usage-limited turn at the provider's declared reset. Journaled on
    * this thread's own stream; absent means no recovery is pending.
@@ -373,6 +379,11 @@ export const ChangeWorkThreadAccessCommand = Schema.Struct({
    * the thread's current choice; the host drops it at any other level.
    */
   fullAccessSandbox: Schema.optional(Schema.Boolean),
+  /**
+   * The person passed `octant agent`'s per-run Full access flag; only with
+   * `access: "full-access"`, and only from a window on this host.
+   */
+  fullAccessRunFlag: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type ChangeWorkThreadAccessCommand = typeof ChangeWorkThreadAccessCommand.Type;
 

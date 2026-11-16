@@ -2233,6 +2233,21 @@ export class CodeService {
             this.#threadWithProfiledAuthority(command.thread, profiled),
           ),
         );
+        // The per-run flag is the person's own, typed on `octant agent` here:
+        // a routine never carries it, and it starts a thread at Full access
+        // only, which a profile narrowing the level would contradict.
+        if (command.thread.fullAccessRunFlag === true) {
+          if (isRoutineHostScope(authenticatedWindowId))
+            throw this.#failure(
+              "unauthorized",
+              "Only the person starts a thread with the per-run Full access flag.",
+            );
+          if (thread.executionPolicy !== "full-access")
+            throw this.#failure(
+              "invalid",
+              "The per-run Full access flag starts a thread at Full access only.",
+            );
+        }
         if (
           this.#isProviderModelAllowed?.({
             projectId: thread.projectId,
@@ -4789,16 +4804,17 @@ export class CodeService {
   }
 
   #withGuardrailStamp(thread: CodeThread): CodeThread {
-    const { autoApprove, fullAccessSandbox, ...rest } = thread;
+    const { autoApprove, fullAccessSandbox, fullAccessRunFlag, ...rest } = thread;
     if (rest.executionPolicy !== "full-access") {
-      // The sandbox flag only means something at Full access; at any other
-      // level it is dropped rather than journaled.
+      // The sandbox flag and the run flag only mean something at Full
+      // access; at any other level they are dropped rather than journaled.
       return decodeCodeThread({ ...rest, ...(autoApprove === true ? { autoApprove } : {}) });
     }
     return decodeCodeThread({
       ...rest,
       permissionPersistence: "project-default",
       ...(fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+      ...(fullAccessRunFlag === true ? { fullAccessRunFlag: true } : {}),
     });
   }
 

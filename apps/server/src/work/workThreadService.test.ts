@@ -701,6 +701,46 @@ describe("WorkThreadService", () => {
     expect(inUnit).toEqual(["work.thread-updated@1", "guardrail.level-lowered@1"]);
   });
 
+  it("journals the person's per-run Full access flag on the thread until it leaves Full access, and refuses it at another level or from a routine", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+    const raised = await fixture.service.execute(ids.window, {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "full-access",
+      fullAccessRunFlag: true,
+    });
+    expect(raised).toMatchObject({
+      thread: { access: "full-access", fullAccessRunFlag: true },
+    });
+    const lowered = await fixture.service.execute(ids.window, {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 2,
+      access: "auto",
+    });
+    expect(lowered).toMatchObject({ thread: { access: "auto" } });
+    expect((lowered as { thread: object }).thread).not.toHaveProperty("fullAccessRunFlag");
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-work-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 3,
+        access: "auto",
+        fullAccessRunFlag: true,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    await expect(
+      fixture.service.execute(ROUTINE_HOST_SCOPE_ID, {
+        kind: "change-work-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 3,
+        access: "full-access",
+        fullAccessRunFlag: true,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+  });
+
   it("journals who lowered Work's default or a thread's level, from which level and at which scope", async () => {
     const fixture = serviceFixture({ threads: [thread()] });
     await fixture.service.execute(ids.window, {

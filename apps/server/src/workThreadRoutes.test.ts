@@ -179,6 +179,20 @@ describe("Work thread routes", () => {
       )?.status,
     ).toBe(403);
     expect(execute).toHaveBeenCalledTimes(3);
+    // The per-run flag is the person's own on `octant agent`: no device and
+    // no agent grant sets it, while a local window may.
+    const runFlag = { ...raiseThread, fullAccessRunFlag: true };
+    expect((await route(from(runFlag, paired)))?.status).toBe(403);
+    expect((await route(from(runFlag, { origin: AGENT_ACCESS_ORIGIN })))?.status).toBe(403);
+    expect(execute).toHaveBeenCalledTimes(3);
+    const local = await route(
+      request("/api/work/threads/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(runFlag),
+      }),
+    );
+    expect(local?.status).toBe(200);
   });
 
   it("refuses a hub-introduced device raising a Work thread or the Work default to Full access, and lets it lower one", async () => {

@@ -1273,14 +1273,38 @@ export class WorkThreadService {
         // The sandbox choice only means something at Full access: kept from the
         // command, else from the thread, and dropped at any other level so a
         // later raise to Full access never inherits a stale choice.
-        const { fullAccessSandbox: currentSandbox, ...unsandboxed } = current;
+        if (command.fullAccessRunFlag === true) {
+          // The per-run flag is the person's own, typed on `octant agent`
+          // here; a routine never carries it, and it means Full access only.
+          if (isRoutineHostScope(authenticatedWindowId))
+            throw this.#failure(
+              "unauthorized",
+              "Only the person starts a thread with the per-run Full access flag.",
+            );
+          if (command.access !== "full-access")
+            throw this.#failure(
+              "invalid",
+              "The per-run Full access flag puts a thread at Full access only.",
+            );
+        }
+        const {
+          fullAccessSandbox: currentSandbox,
+          fullAccessRunFlag: currentRunFlag,
+          ...unsandboxed
+        } = current;
         const sandboxed =
           command.access === "full-access" &&
           (command.fullAccessSandbox ?? currentSandbox) === true;
+        // Kept while the thread stays at Full access; any other level ends it.
+        const runFlag =
+          command.access === "full-access" &&
+          (command.fullAccessRunFlag === true ||
+            (currentRunFlag === true && current.access === "full-access"));
         const updated = decodeWorkThread({
           ...unsandboxed,
           access: command.access,
           ...(sandboxed ? { fullAccessSandbox: true } : {}),
+          ...(runFlag ? { fullAccessRunFlag: true } : {}),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
