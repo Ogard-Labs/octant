@@ -7,7 +7,7 @@ import { OutsideContentRow } from "../composer/OutsideContentNotice";
 import { EnvironmentSuggestedTasks } from "../followUps/FollowUpSuggestionChips";
 import type { EnvironmentCompactIdentity } from "@octant/contracts";
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { LocalServerGroupCounts } from "./localServerGroups";
 
@@ -67,14 +67,22 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
   // Environment arrive on different renders. A single lookup left the panel
   // inline above the transcript, or portalled into a detached element and so
   // invisible. Follow whatever host the document currently holds.
+  // The host last handed to React. The observer below fires for every change
+  // anywhere in the page, a streamed reply included, and telling React "the
+  // same host" each time still cost a render of this panel now and then: a
+  // slowed run measured one extra commit in eight streamed events.
+  const knownHost = useRef<Element | null>(null);
   useEffect(() => {
     if (!shown) {
+      knownHost.current = null;
       setDockHost(null);
       return;
     }
     const sync = () => {
       const next = document.querySelector("[data-octant-environment-dock]");
-      setDockHost((current) => (current === next ? current : next));
+      if (knownHost.current === next) return;
+      knownHost.current = next;
+      setDockHost(next);
     };
     sync();
     const observer = new MutationObserver(sync);
