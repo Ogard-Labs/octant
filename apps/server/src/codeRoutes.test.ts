@@ -711,7 +711,12 @@ describe("Code routes", () => {
       reason: "unavailable",
       message: "No start.",
     });
-    expect(execute).toHaveBeenCalledWith(windowId, "local-window", command);
+    expect(execute).toHaveBeenCalledWith(
+      windowId,
+      "local-window",
+      command,
+      expect.objectContaining({ kind: "local-user" }),
+    );
 
     // A caller cannot name the window or point the shell at a folder.
     expect((await route(post({ ...command, windowId })))?.status).toBe(400);
@@ -745,7 +750,35 @@ describe("Code routes", () => {
       scopeId: remoteDeviceId as never,
     });
     await route(remoteRequest);
-    expect(execute).toHaveBeenLastCalledWith(remoteDeviceId, "remote-device", command);
+    expect(execute).toHaveBeenLastCalledWith(
+      remoteDeviceId,
+      "remote-device",
+      command,
+      expect.objectContaining({ kind: "remote-device" }),
+    );
+
+    // A device the host's own person paired is judged as the person, and its
+    // shell is journaled as that device.
+    const pairedRequest = post(command);
+    bindPrincipalRouteContext(pairedRequest, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-000000000924" as never,
+        admittedBy: "host-person",
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+    await route(pairedRequest);
+    expect(execute).toHaveBeenLastCalledWith(remoteDeviceId, "local-window", command, {
+      kind: "remote-device",
+      actorId: remoteDeviceId,
+      deviceId: remoteDeviceId,
+    });
   });
 
   it("reports Project terminals unavailable on a host without them", async () => {

@@ -1017,6 +1017,8 @@ export function startOctantServer(
       remoteServerGrants,
     } = yield* wireCodeTooling({
       onWindowRevoked,
+      isPairedDeviceScope,
+      isRestrictedDeviceScope,
       desktopLeases,
       installDesktopPreviewRequest,
       workThreadProjection,
