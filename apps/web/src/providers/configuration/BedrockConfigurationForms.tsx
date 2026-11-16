@@ -295,6 +295,17 @@ export function CloudEndpointSignIn(props: {
           )}
         </>
       ) : null}
+      {(state.kind === "signed-out" || ended) && props.onProviderOAuth !== undefined ? (
+        <PersonAwsCredentials
+          disabled={disabled}
+          instanceId={instanceId}
+          run={props.onProviderOAuth}
+          onConnected={() => {
+            setChecks((count) => count + 1);
+            props.onSignedOut?.();
+          }}
+        />
+      ) : null}
       {ended ? (
         <OctantButton
           disabled={disabled}
@@ -320,6 +331,135 @@ export function CloudEndpointSignIn(props: {
           Check again
         </OctantButton>
       ) : null}
+    </div>
+  );
+}
+
+/** What the host answered when a profile or key pair could not be connected. */
+function connectRefusal(reason: string | undefined): string {
+  switch (reason) {
+    case "aws-sso-sign-in-needed":
+      return "That profile's single sign-on has no current session. Run aws sso login for it, then connect again.";
+    case "aws-profile-missing":
+      return "No AWS profile by that name was found in the AWS config or credentials file on this computer.";
+    case "aws-process-failed":
+      return "The profile's credential_process did not print credentials.";
+    case "aws-unsupported":
+      return "That profile only assumes a role or names a source Octant does not read yet. Use a profile with keys, single sign-on or credential_process.";
+    case "aws-not-authorized":
+      return "Your organization's portal does not give you that profile's account and role.";
+    case "local-host-required":
+      return "Connect your AWS profile or keys from Octant on this computer.";
+    default:
+      return "Octant couldn't connect these credentials. Check them and try again.";
+  }
+}
+
+/**
+ * The person's own AWS credentials in place of the portal sign-in: a named
+ * AWS profile, read in place by the host's credential broker on every
+ * renewal, or a long-lived access key pair, which the broker keeps and which
+ * the page warns about. Neither is stored or journaled by the server.
+ */
+function PersonAwsCredentials(props: {
+  readonly instanceId: string;
+  readonly disabled: boolean;
+  readonly run: (command: ProviderOAuthCommand) => Promise<ProviderOAuthCommandResult | undefined>;
+  readonly onConnected: () => void;
+}) {
+  const [profile, setProfile] = useState("");
+  const [keyId, setKeyId] = useState("");
+  const [secret, setSecret] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | undefined>();
+  const { descriptorId } = AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN;
+  const connect = async (
+    command:
+      | { readonly kind: "connect-aws-profile"; readonly awsProfile: string }
+      | {
+          readonly kind: "connect-access-keys";
+          readonly accessKeys: { readonly accessKeyId: string; readonly secretAccessKey: string };
+        },
+  ) => {
+    setBusy(true);
+    setMessage(undefined);
+    const result = await props
+      .run({ ...command, instanceId: props.instanceId, descriptorId })
+      .catch(() => undefined);
+    setBusy(false);
+    if (result?.kind === "signed-in") {
+      setSecret("");
+      props.onConnected();
+      return;
+    }
+    setMessage(
+      result?.kind === "signed-out" && result.termsRequired === true
+        ? "Accept the sign-in terms with a portal sign-in first, then connect again."
+        : connectRefusal(result?.reason),
+    );
+  };
+  const disabled = props.disabled || busy;
+  return (
+    <div className="provider-oauth-sign-in__aws">
+      <p>Or use credentials you already have on this computer.</p>
+      <label htmlFor={`${props.instanceId}-aws-profile`}>Use my AWS profile</label>
+      <OctantInput
+        autoComplete="off"
+        className="input"
+        disabled={disabled}
+        id={`${props.instanceId}-aws-profile`}
+        onChange={(event) => setProfile(event.target.value)}
+        placeholder="default"
+        value={profile}
+      />
+      <OctantButton
+        disabled={disabled || profile.trim().length === 0}
+        onClick={() => void connect({ kind: "connect-aws-profile", awsProfile: profile.trim() })}
+        size="sm"
+        type="button"
+        variant="secondary"
+      >
+        Connect profile
+      </OctantButton>
+      <OctantAlert tone="warning">
+        Long-lived access keys work until someone revokes them, so anyone who copies them can sign
+        Bedrock requests as you. Prefer a profile with single sign-on. Octant keeps the keys in this
+        computer's credential store and never shows or records them.
+      </OctantAlert>
+      <label htmlFor={`${props.instanceId}-aws-key-id`}>Access key ID</label>
+      <OctantInput
+        autoComplete="off"
+        className="input"
+        disabled={disabled}
+        id={`${props.instanceId}-aws-key-id`}
+        onChange={(event) => setKeyId(event.target.value)}
+        value={keyId}
+      />
+      <label htmlFor={`${props.instanceId}-aws-secret`}>Secret access key</label>
+      <OctantInput
+        autoComplete="off"
+        className="input"
+        disabled={disabled}
+        id={`${props.instanceId}-aws-secret`}
+        onChange={(event) => setSecret(event.target.value)}
+        type="password"
+        value={secret}
+      />
+      <OctantButton
+        disabled={disabled || keyId.trim().length === 0 || secret.length === 0}
+        onClick={() =>
+          void connect({
+            kind: "connect-access-keys",
+            accessKeys: { accessKeyId: keyId.trim(), secretAccessKey: secret },
+          })
+        }
+        size="sm"
+        type="button"
+        variant="secondary"
+      >
+        Connect keys
+      </OctantButton>
+      {message === undefined ? null : <OctantAlert tone="warning">{message}</OctantAlert>}
     </div>
   );
 }

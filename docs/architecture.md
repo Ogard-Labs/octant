@@ -4007,13 +4007,19 @@ the thread it came from.
   Events arriving while a run is active, and CI from the routine's reserved
   `automation/` branches, are held for review. This conservative attribution
   and the finite allowance bound feedback without claiming to identify every
-  outside writer. The activity check retains at most 64 owned runs (decided:
-  the person may clear or raise it, under
-  [Octant's own limits become settings](#security-and-authority); designed, not built), including
-  cancelled runs whose ordinary turn or children remain active. Missing or
-  overflowing evidence is unknown and blocks automatic admission and re-arm;
-  finish and review tasks and children, then archive and explicitly configure a
-  new routine when its history is full. Code completion is observed from the
+  outside writer. The activity check retains 64 owned runs by default,
+  including cancelled runs whose ordinary turn or children remain active; the
+  person may raise the window up to 1,024 runs or clear it on the routine's
+  detail ([Octant's own limits become settings](#security-and-authority);
+  built). Each change is journaled on the routine
+  (`automation-file-source-window-changed@1`) with the whole resulting
+  checkpoint, so replay rebuilds the same window and the same overflow, and
+  is made from a window on this host or a device its person paired. Missing
+  or overflowing evidence is unknown and blocks automatic admission and
+  re-arm; when the history is full, finish and review tasks and children,
+  then clear it. A clear is refused while any run it holds, or the routine's
+  current run, is active, and returns the input to arming, so it needs one
+  quiet check before an arrival counts again; a held batch stays held. Code completion is observed from the
   exact recorded operation, session, prompt, checkout and provider, never from
   the thread's latest unrelated turn. Pause, restart, quiet time and ordinary Save reset no budget.
   Explicit Review/Re-arm requires current source and Project authority from a
@@ -4923,10 +4929,18 @@ thread's [guardrail level](#security-and-authority). New tasks may choose an app
   An extra working folder is shared, including for a child worktree. Code Git,
   PRs, changed-file receipts and Review still describe that thread's primary
   checkout only; the UI states that limit.
-- **What can be a folder.** The domain policy refuses the home folder (decided:
-  allowed behind a warning outside Strict, credential folders still protected,
-  under [Octant adds no restrictions of its own unless Strict is on](#security-and-authority);
-  designed, not built) and any folder above it, a system folder (`/`, `/System`, `/Library`, `/usr`,
+- **What can be a folder.** The home folder is an extra folder only once the
+  person confirms its warning (under
+  [Octant adds no restrictions of its own unless Strict is on](#security-and-authority);
+  built): the add command answers a home folder with
+  `project-extra-folder-needs-confirmation`, the warning, and a fresh
+  single-use receipt for the same folder, window and Project type in place of
+  the spent one, and only a resend with `confirmHomeFolder` spends it. The
+  confirmed home folder may hold the main folder and the other extra folders;
+  its credential folders stay denied for every confined launch, because the
+  secret guard's denials follow every folder grant. Relinking the main folder
+  inside it is refused until it is removed. The domain policy refuses any
+  folder above home, a system folder (`/`, `/System`, `/Library`, `/usr`,
   `/etc`, `/private`, `/Volumes` itself and their peers) or a folder inside
   a system-owned tree, a credential folder in home (`.ssh`, `.aws`,
   `.azure`, `.gnupg`, `.kube`, `.docker`, `.password-store`,
@@ -7527,10 +7541,20 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   stays Azure AI Foundry's opt-in.
   Amazon Bedrock speaks `cloud-iam`: the person signs in at the organization's
   single sign-on portal with a device code from the host-local
-  `octant provider sign-in` command, or opts in to "Use my AWS profile",
-  which reads the person's existing cloud profile (maintainer request,
-  2026-11-12; not built yet: today only the device-code sign-in exists), and the broker keeps that session and the
-  temporary credentials it mints for the instance's one account and role. The
+  `octant provider sign-in` command, or, at a window on this host, opts in to
+  "Use my AWS profile" or long-lived access keys (maintainer request,
+  2026-11-12, and decision, 2026-11-16; built), and the broker keeps that
+  session and the temporary credentials it mints for the instance's one
+  account and role. A profile is read in place by the broker on every
+  renewal, the way the AWS CLI reads it (`AWS_CONFIG_FILE` and
+  `AWS_SHARED_CREDENTIALS_FILE` honoured): shared-file keys, the single
+  sign-on token `aws sso login` cached under `~/.aws/sso/cache`, then
+  `credential_process` run through the platform shell; a profile that only
+  assumes a role is refused as unsupported (not built yet). A key pair goes
+  to the broker's `/v1/cloud-iam/connect` route once and is kept there; the
+  card warns that long-lived keys work until revoked. Either grant is cloud
+  material the raw resolve refuses, and the server stores only the pointer
+  and journals only the reference. The
   server describes each Converse request to the broker's
   `/v1/cloud-iam/sign` route by its fields (method, host, path, query, the
   content type and accept headers, and the body's hash); the broker checks
@@ -10501,10 +10525,13 @@ the model at another size.
   person, so the server keeps three rules of its own: it never answers an
   approval or any other request listed for the person (only a harness
   question or a Chat turn's question, through the routes line mode uses);
-  it refuses `full-access` (decided: the CLI is to take a per-run Full access
-  flag the person sets, under
-  [Octant adds no restrictions of its own unless Strict is on](#security-and-authority); designed, not built),
-  which would save Full access on the Project, so
+  it refuses `full-access`, which would save Full access on the Project (the
+  person's own per-run flag, `octant agent --full-access`, starts that run's
+  new thread alone at Full access and journals `fullAccessRunFlag` on it,
+  saving nothing on the Project; the host accepts the flag only from a window
+  on this host, so no agent grant, device or routine sets it, and the MCP
+  server never sends it; under
+  [Octant adds no restrictions of its own unless Strict is on](#security-and-authority); built), so
   a thread starts at Full access only where the person already set it (the
   same tools served to an agent grant accept it when the person chose Full
   access for that grant, and give it to the thread alone, never the Project;
@@ -14296,8 +14323,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   **Octant adds no restrictions of its own unless Strict is on**
   (maintainer decision, 2026-11-16; partly built: slash commands, the
   Strict setting, Project trust from Claude Code and Codex, the default
-  level, image generation, the resource queue and the items marked built
-  below). A person who moves
+  level, image generation, the resource queue, Work's Browser page scripts,
+  the local CLI's Full access flag, the home folder as an extra folder and
+  the items marked built below). A person who moves
   from a provider's own CLI to Octant keeps every workflow that worked
   there, and Octant restricts a provider no more than any other agent
   workspace does. Outside Strict, the provider's own sandbox, permission
@@ -14436,21 +14464,25 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   - **Browser page scripts in Work.** Below Full access a Work thread gets
     Code's one-use, exact-source script permission under the same rules
     ([Browser for agents: Bounded page scripts](design/browser-agent-tool.md#bounded-page-scripts));
-    today Work below Full access is refused. Strict keeps Work refused.
+    built: both tools ask through one shared function
+    (`browserPageScriptPermission.ts`), and Work's `oneUsePermission` is
+    where Strict will keep Work refused.
   - **Local CLI at Full access.** `octant agent` takes an explicit per-run
     Full access flag the person sets on the command line: that run's thread
     starts at Full access alone, journaled with the flag, never saving Full
     access on the Project. A tool call another agent makes through
     `octant agent mcp` still cannot choose it, outside an agent grant the
-    person set to Full access. Today the CLI refuses `full-access`
-    ([Native harness: scripted callers](#native-harness)). Strict refuses
+    person set to Full access. Built as `octant agent --full-access`
+    ([Native harness: scripted callers](#native-harness)); Strict will refuse
     the flag.
   - **Home folder as an extra folder.** A Project's extra folder may be the
     home folder, behind a warning naming what it opens; the credential
     folders inside it (`.ssh`, `.aws`, `.gnupg`, `Library/Keychains` and the
     rest) stay protected, a folder above home and the system folders stay
-    refused ([Projects with several folders](#projects-with-several-folders)). Strict
-    refuses the home folder, as today.
+    refused ([Projects with several folders](#projects-with-several-folders));
+    built: the host answers the home folder with its warning and a fresh
+    single-use receipt, and a confirmed resend adds it. Strict will refuse
+    the home folder; `homeFolderConfirmed` in the domain policy is where.
   - **Stalled-turn limit.** At Full access the stalled-turn limit defaults
     to Off; below Full access it stays 30 minutes, and the person may set
     either. Strict keeps 30 minutes at every level (built: Settings ›
@@ -14474,10 +14506,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   journaling every ask either way.
 
   **Octant's own limits become settings** (maintainer decision, 2026-11-16;
-  partly built: each limit below but the routine window is a host setting in
+  built: each limit below but the routine window is a host setting in
   Settings › Permissions, journaled with the host's other settings, changed
   at a local window or a device the host's own person paired, and read by the
-  server where it applies). Under the
+  server where it applies; the routine window is set per routine and
+  journaled with it). Under the
   [unattended-work rule](#security-and-authority) a fixed constant needs a
   reason beside it; these have none that protects a hard line, so each
   becomes a setting with today's value as its default, and each owner keeps
@@ -14506,9 +14539,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   - **Routines.** A file routine's 64-run activity window can be cleared or
     raised, and a setting, off by default, **Start agent-created routines
     active at Full access** lets a routine an agent creates at Full access
-    start enabled instead of paused. Not built yet: the routine window keeps
-    its fixed 64 runs, because a raised or cleared window has to be journaled
-    with the routine so replay rebuilds the same overflow.
+    start enabled instead of paused. The window is raised (up to 1,024 runs)
+    or cleared on the routine's detail and journaled with the routine, so
+    replay rebuilds the same overflow.
 
   Rationale: a limit the person cannot change stops the workflow it was
   meant to bound; the journal, spend ceilings and the person's Stop still
@@ -14536,14 +14569,15 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   unchanged.
 
   **Provider reach Octant no longer narrows** (maintainer decision,
-  2026-11-16; partly built: Ollama off loopback is built, the rest is
-  designed, not built):
+  2026-11-16; partly built: Ollama off loopback and Bedrock's AWS profile and
+  access keys are built, the rest is designed, not built):
   - **Ollama off loopback.** An Ollama address on the local network or a
     hosted Ollama is allowed, and plain HTTP to a private-network address is
     allowed with a warning; a public address still needs HTTPS
     ([Native harness](#native-harness)).
   - **Bedrock request signing.** The designed "Use my AWS profile" is built,
-    and long-lived access keys are allowed with a warning
+    and long-lived access keys are allowed with a warning (built; a profile
+    that only assumes a role is not read yet)
     ([Providers and model endpoints: Amazon Bedrock](design/model-endpoints.md#organization-sign-in-amazon-bedrock)).
   - **Unreviewed releases.** At Full access a provider release newer than
     the one a version pin was reviewed against is offered as "unverified"

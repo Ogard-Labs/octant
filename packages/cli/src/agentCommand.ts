@@ -96,6 +96,12 @@ export type AgentCliCommand =
       /** Keep the OS sandbox and proxied network on at Full access (needs --access full-access). */
       readonly sandbox?: boolean;
       /**
+       * `--full-access`: the person's per-run flag. This run's new thread alone
+       * starts at Full access, journaled as the person's flag; the Project
+       * keeps the level it had, unlike `--access full-access`.
+       */
+      readonly fullAccessRun?: true;
+      /**
        * Start the prompt's turn and return once the host lists it, without
        * waiting for the reply; approvals and questions wait in Octant.
        */
@@ -140,6 +146,7 @@ export const AGENT_SWITCHES: ReadonlyArray<string> = [
   "quiet",
   "sandbox",
   "detach",
+  "full-access",
 ];
 
 const AGENT_FLAGS: ReadonlyArray<string> = [
@@ -157,6 +164,7 @@ const AGENT_FLAGS: ReadonlyArray<string> = [
   "access",
   "sandbox",
   "detach",
+  "full-access",
 ];
 
 export function resolveAgentCliCommand(
@@ -193,7 +201,17 @@ export function resolveAgentCliCommand(
     if (access !== undefined && !isAgentAccessMode(access)) return undefined;
     // The sandbox only exists at Full access, so asking for it with any other
     // level (or none) is refused rather than quietly ignored.
-    if (flags.sandbox === true && access !== "full-access") return undefined;
+    // The per-run flag starts a new thread at Full access; it neither names
+    // another level nor reaches a thread that already exists.
+    const fullAccessRun = flags["full-access"] === true;
+    if (
+      fullAccessRun &&
+      ((access !== undefined && access !== "full-access") ||
+        threadId !== undefined ||
+        flags.last === true)
+    )
+      return undefined;
+    if (flags.sandbox === true && access !== "full-access" && !fullAccessRun) return undefined;
     // `--prompt` runs one turn and exits; a bare prompt opens the session with it.
     if (prompt !== undefined && openingPrompt.length > 0) return undefined;
     // Detaching starts one turn, so it needs the prompt to start it with.
@@ -210,7 +228,11 @@ export function resolveAgentCliCommand(
       ...(project === undefined ? {} : { project }),
       ...(title === undefined ? {} : { title }),
       ...(model === undefined ? {} : { model }),
-      ...(access === undefined ? {} : { access }),
+      ...(fullAccessRun
+        ? { access: "full-access" as const, fullAccessRun: true as const }
+        : access === undefined
+          ? {}
+          : { access }),
       ...(flags.sandbox === true ? { sandbox: true } : {}),
       ...(flags.detach === true ? { detach: true as const } : {}),
       json: flags.json === true,
@@ -1268,6 +1290,7 @@ async function resolveThread(input: RunAgentCliCommandInput): Promise<string | u
     projectName: input.command.project,
     model: input.command.model,
     access: input.command.access,
+    ...(input.command.fullAccessRun === true ? { fullAccessScope: "run" as const } : {}),
     sandbox: input.command.sandbox === true,
   });
   if (created.kind === "refused") {

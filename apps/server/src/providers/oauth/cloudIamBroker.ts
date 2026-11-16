@@ -20,6 +20,14 @@ export interface CloudIamBrokerPort {
     readonly termsAcknowledgedAt: string;
   }) => Promise<unknown>;
   readonly status: (attemptId: string) => Promise<unknown>;
+  /** Store a grant from the person's own AWS profile or long-lived key pair. */
+  readonly connect: (input: {
+    readonly descriptorId: string;
+    readonly source: CloudIamPersonSource;
+    readonly scope: CloudIamSignInDescriptor["scope"];
+    readonly actorId: string;
+    readonly termsAcknowledgedAt: string;
+  }) => Promise<unknown>;
   readonly sign: (
     credentialRef: string,
     request: CloudIamRequest,
@@ -28,6 +36,18 @@ export interface CloudIamBrokerPort {
   /** Sign out: the broker asks the portal to end the session and deletes the grant. */
   readonly revoke: (credentialRef: string) => Promise<unknown>;
 }
+
+/**
+ * A source the person already holds. A key pair travels to the broker once,
+ * here, and is kept only there; the server never stores or journals it.
+ */
+export type CloudIamPersonSource =
+  | { readonly kind: "aws-profile"; readonly profileName: string }
+  | {
+      readonly kind: "access-keys";
+      readonly accessKeyId: string;
+      readonly secretAccessKey: string;
+    };
 
 export function makeCloudIamBrokerClient(options: {
   readonly url: string;
@@ -79,6 +99,24 @@ export function makeCloudIamBrokerClient(options: {
             method: descriptor.scope.method,
           },
         },
+      });
+    },
+    connect: async (input) => {
+      reference(input.actorId);
+      const { scope } = input;
+      return post("/v1/cloud-iam/connect", {
+        descriptorId: input.descriptorId,
+        source: input.source,
+        scope: {
+          partition: scope.partition,
+          region: String(scope.region),
+          service: scope.service,
+          host: scope.host,
+          pathPrefix: scope.pathPrefix,
+          method: scope.method,
+        },
+        actorId: input.actorId,
+        termsAcknowledgedAt: input.termsAcknowledgedAt,
       });
     },
     status: async (attemptId) => {
