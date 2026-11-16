@@ -226,8 +226,10 @@ static int serve(const char *path) {
   if (peer_pid(fd, &client)) return 125;
   int stdio[3];
   if (transfer_fds(fd, 1, stdio, 3)) return 125;
+  uint32_t native_program;
+  if (full_read(fd, &native_program, sizeof(native_program)) || native_program > 1) return 125;
   char **cwd = read_vector(fd), **args = read_vector(fd), **environment = read_vector(fd);
-  if (!cwd || !cwd[0] || cwd[1] || cwd[0][0] != '/' || chdir(cwd[0]) || !args || !args[0] || strcmp(args[0], "/usr/bin/sandbox-exec") || !environment) return 125;
+  if (!cwd || !cwd[0] || cwd[1] || cwd[0][0] != '/' || chdir(cwd[0]) || !args || !args[0] || args[0][0] != '/' || (!native_program && strcmp(args[0], "/usr/bin/sandbox-exec")) || !environment) return 125;
   uint32_t terminal = isatty(stdio[0]) ? 1 : 0;
   int master = -1, slave = -1;
   if (terminal) {
@@ -394,8 +396,8 @@ done:
   close(master);
   return error;
 }
-static int run(const char *root, const char *epoch, char **args) {
-  if (!token(epoch) || strcmp(args[0], "/usr/bin/sandbox-exec")) return 125;
+static int run(const char *root, const char *epoch, char **args, uint32_t native_program) {
+  if (!token(epoch) || args[0][0] != '/' || (!native_program && strcmp(args[0], "/usr/bin/sandbox-exec"))) return 125;
   int directory = private_directory(root);
   if (directory < 0) return 125;
   char control[] = "/tmp/octant-sandbox-control-XXXXXXXX";
@@ -458,7 +460,7 @@ static int run(const char *root, const char *epoch, char **args) {
   char cwd[PATH_MAX];
   if (!getcwd(cwd, sizeof(cwd))) goto cleanup;
   char *cwd_vector[] = {cwd, NULL};
-  if (transfer_fds(control_fd, 0, stdio, 3) || send_vector(control_fd, cwd_vector) || send_vector(control_fd, args) || send_vector(control_fd, environ)) goto cleanup;
+  if (transfer_fds(control_fd, 0, stdio, 3) || full_write(control_fd, &native_program, sizeof(native_program)) || send_vector(control_fd, cwd_vector) || send_vector(control_fd, args) || send_vector(control_fd, environ)) goto cleanup;
   uint32_t terminal;
   if (full_read(control_fd, &terminal, sizeof(terminal)) || terminal > 1) goto cleanup;
   if (terminal) {
@@ -568,6 +570,7 @@ int main(int argc, char **argv) {
     if (*end || pid <= 1 || pid > INT_MAX) return 125;
     return reap(argv[2], argv[3], (pid_t)pid);
   }
-  if (argc >= 6 && !strcmp(argv[1], "--run") && !strcmp(argv[4], "--")) return run(argv[2], argv[3], argv+5);
+  if (argc >= 6 && !strcmp(argv[1], "--run") && !strcmp(argv[4], "--")) return run(argv[2], argv[3], argv+5, 0);
+  if (argc >= 6 && !strcmp(argv[1], "--run-native") && !strcmp(argv[4], "--")) return run(argv[2], argv[3], argv+5, 1);
   return 125;
 }

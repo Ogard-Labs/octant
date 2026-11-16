@@ -137,6 +137,12 @@ time.sleep(12)
       expect(normal.stdout).toBe("completed");
       expect(readdirSync(root).some((name) => name.endsWith(".scope"))).toBe(false);
 
+      const native = spawnSync(executable, ["--run-native", root, "native-provider:epoch", "--", "/bin/sh", "-c", "printf native-provider; exit 9"],
+        { cwd: root, encoding: "utf8", timeout: 10000 });
+      expect(native.status, native.stderr).toBe(9);
+      expect(native.stdout).toBe("native-provider");
+      expect(readdirSync(root).some((name) => name.endsWith(".scope"))).toBe(false);
+
       const librarySource = join(root, "loader.c");
       const library = join(root, "loader.dylib");
       const payloadSource = join(root, "payload.c");
