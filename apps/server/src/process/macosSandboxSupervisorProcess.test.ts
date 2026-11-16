@@ -220,10 +220,30 @@ const timer=setInterval(()=>{try {if(fs.readFileSync(process.argv[4],"utf8")!==p
         "/usr/bin/python3",
         [
           "-c",
-          `import os, pty, signal
+          `import os, pty, signal, select, time
 signal.alarm(20)
 args=["${executable}","--run","${root}","terminal:epoch","--","/usr/bin/sandbox-exec","-p","(version 1)(allow default)","/bin/sh","-c","test -t 0 && test -t 1 && test -t 2 && printf terminal-ready"]
-status=pty.spawn(args)
+pid, master=pty.fork()
+if pid == 0: os.execv(args[0], args)
+status=None
+try:
+ deadline=time.monotonic()+12
+ while time.monotonic()<deadline:
+  ready,_,_=select.select([master],[],[],.05)
+  if ready:
+   try: data=os.read(master,65536)
+   except OSError: data=b""
+   if data: os.write(1,data)
+  found,value=os.waitpid(pid,os.WNOHANG)
+  if found:
+   status=value
+   break
+ if status is None: raise RuntimeError("owned terminal client did not exit")
+finally:
+ os.close(master)
+ if status is None:
+  os.kill(pid,signal.SIGKILL)
+  os.waitpid(pid,0)
 raise SystemExit(os.waitstatus_to_exitcode(status))
 `,
         ],
@@ -239,6 +259,7 @@ raise SystemExit(os.waitstatus_to_exitcode(status))
         }),
       ).toBe(0);
       expect(terminal.stdout).toContain("terminal-ready");
+      expect(readdirSync(root).some((name) => name.endsWith(".scope"))).toBe(false);
     } finally {
       child?.kill("SIGKILL");
       if (existsSync(executable)) {
