@@ -157,16 +157,29 @@ export function makeTurnTextParagraphs(): (event: ProviderRuntimeEvent) => Provi
   };
 }
 
+/** What decides which stalled-turn limit a turn runs under. */
+export interface StalledTurnScope {
+  readonly fullAccess: boolean;
+  readonly strict: boolean;
+}
+
 /**
- * The stalled-turn limit the host setting asks for, in milliseconds; `null`
- * when the setting is Off and no turn is cut off for silence.
+ * The stalled-turn limit the host settings ask for one turn, in milliseconds;
+ * `null` when that setting is Off and no turn is cut off for silence. A turn
+ * at Full access outside Strict takes the Full access limit, Off unless the
+ * person set one; every other turn, and every turn under Strict, takes the
+ * stalled-turn limit (Architecture: "Octant adds no restrictions of its own
+ * unless Strict is on").
  */
 export function stalledTurnLimitMs(
-  settings: Pick<ShellSettings, "stalledTurnLimitMinutes">,
+  settings: Pick<ShellSettings, "stalledTurnLimitMinutes" | "fullAccessStalledTurnLimitMinutes">,
+  turn: StalledTurnScope,
 ): number | null {
-  return settings.stalledTurnLimitMinutes === null
-    ? null
-    : settings.stalledTurnLimitMinutes * 60_000;
+  const minutes =
+    turn.fullAccess && !turn.strict
+      ? settings.fullAccessStalledTurnLimitMinutes
+      : settings.stalledTurnLimitMinutes;
+  return minutes === null ? null : minutes * 60_000;
 }
 
 /**

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { stopWindowsProcessTree } from "../process/windowsProcessTree";
+import { providerHostEnvironment } from "./providerHostEnvironment";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
   accessSync,
@@ -88,6 +89,8 @@ export interface PiConfinementPort {
      * Accept edits has. Absent, Full access launches unwrapped.
      */
     readonly fullAccessSandbox?: boolean;
+    /** Whether the launch is Strict; absent is Strict. */
+    readonly strict?: boolean;
     readonly environment: NodeJS.ProcessEnv;
     readonly tools?: ReadonlyArray<ProviderToolDefinition>;
     readonly toolBridge?: PiManagedToolBridgeConfig;
@@ -122,6 +125,12 @@ export interface PiProcessPort {
      * Accept edits has. Absent, Full access launches unwrapped.
      */
     readonly fullAccessSandbox?: boolean;
+    /**
+     * Whether the launch is Strict; absent is Strict. Off, the process gets the
+     * host's environment less Octant's variables and other providers' keys,
+     * and Pi's telemetry follows the person's own setting.
+     */
+    readonly strict?: boolean;
     /** The Pi provider the thread's model runs on; only its credentials reach the process. */
     readonly modelProvider?: string;
     readonly onProcessStarted?: ProviderProcessStartedListener;
@@ -307,8 +316,16 @@ function failure(category: ProviderFailure["category"], message: string): Provid
   return { category, message };
 }
 
-/** Static switches every Pi launch sets; the version read keeps them too. */
+/** Static switches every Pi launch under Strict sets; the version read keeps them too. */
 const PI_GUARDS = { PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1" } as const;
+
+/**
+ * What a launch outside Strict still sets: the release check stays off,
+ * because Octant installs and updates provider CLIs itself. Pi's telemetry
+ * follows the person's own setting (Architecture: "Octant adds no
+ * restrictions of its own unless Strict is on").
+ */
+const OPEN_PI_GUARDS = { PI_SKIP_VERSION_CHECK: "1" } as const;
 
 // `modelProvider` is the Pi provider a thread runs its model on. A discovery
 // run has no thread, so it names none and holds no provider credential.
@@ -317,10 +334,23 @@ export function sanitizePiEnvironment(
   piHome: string,
   approvals: "enabled" | "disabled" = "enabled",
   modelProvider?: string,
+  strict = true,
 ): NodeJS.ProcessEnv {
   const credentials = new Set(
     modelProvider === undefined ? [] : (PROVIDER_CREDENTIALS.get(modelProvider) ?? []),
   );
+  if (!strict) {
+    // The thread's own provider's variables are its own; Pi's account home
+    // stays Octant's, so the account it signs in as stays the thread's.
+    return {
+      ...providerHostEnvironment(host, credentials),
+      HOME: piHome,
+      PI_CODING_AGENT_DIR: piHome,
+      ...OPEN_PI_GUARDS,
+      OCTANT_PI_APPROVALS: approvals,
+      NO_COLOR: "1",
+    };
+  }
   return Object.fromEntries([
     ...Object.entries(host).filter(
       ([key, value]) =>
@@ -346,8 +376,9 @@ export function piProcessEnvironment(
   piHome: string,
   approvals: "enabled" | "disabled" = "enabled",
   modelProvider?: string,
+  strict = true,
 ): NodeJS.ProcessEnv {
-  const sanitized = sanitizePiEnvironment(host, piHome, approvals, modelProvider);
+  const sanitized = sanitizePiEnvironment(host, piHome, approvals, modelProvider, strict);
   const binaryDirectory = dirname(binaryPath);
   const path = sanitized.PATH?.split(delimiter).filter(Boolean) ?? [];
   const searched = [binaryDirectory, ...approvedHomeBinDirs(host.HOME), ...path];
@@ -851,6 +882,9 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
               writeBoundRoot: !(input.executionPolicy === "plan" || input.mode === "chat"),
               additionalWriteRoots: [piHome],
               allowFileReadStar: true,
+              // Outside Strict Pi's own tools may use the protected files
+              // inside its folders, other providers' sign-ins excepted.
+              ...(input.strict === false ? { protectedFiles: "provider-sign-ins" as const } : {}),
               // Work declares shell "denied"; an in-process provider shell
               // emits no permission request, so the jail itself must refuse
               // to spawn it.
@@ -991,6 +1025,7 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
             input.piHome,
             input.executionPolicy === "full-access" ? "disabled" : "enabled",
             input.modelProvider,
+            input.strict !== false,
           );
           const wall = piWallPolicy(input);
           const network =

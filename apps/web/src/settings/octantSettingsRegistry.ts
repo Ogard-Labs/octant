@@ -687,6 +687,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "work full access sandbox seatbelt confinement secrets network prompts",
         },
         {
+          id: settingId("work-strict"),
+          label: "Strict",
+          scope: "host",
+          keywords:
+            "work strict octant limits environment telemetry secret files outside content provider own rules",
+        },
+        {
           id: settingId("work-restart-continuation"),
           label: "Continue after restart",
           scope: "mode",
@@ -781,6 +788,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "full access sandbox seatbelt confinement secrets network prompts codex harness",
         },
         {
+          id: settingId("code-strict"),
+          label: "Strict",
+          scope: "app",
+          keywords:
+            "strict octant limits environment telemetry secret files outside content provider own rules",
+        },
+        {
           id: settingId("code-terminal-shell"),
           label: "Terminal shell",
           scope: "mode",
@@ -861,6 +875,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "stalled turn limit silent silence no provider event inactivity idle timeout timed out cut off stop minutes hours off never long tool call",
+        },
+        {
+          id: settingId("full-access-stalled-turn-limit"),
+          label: "Stalled-turn limit at Full access",
+          scope: "host",
+          keywords:
+            "stalled turn limit full access strict silent silence idle timeout cut off off never",
         },
         {
           id: settingId("provider-tool-call-pause-limit"),

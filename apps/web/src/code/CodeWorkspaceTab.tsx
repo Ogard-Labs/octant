@@ -50,6 +50,7 @@ export default function CodeWorkspaceTab(props: {
   ) => void;
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly harnessAutoReviewSupported?: boolean;
+  readonly strictDefault?: CodeWorkspaceProps["strictDefault"];
   readonly projectExtraFolders?: CodeWorkspaceProps["projectExtraFolders"];
   /** Who answers the thread's prompts at Auto, or why nobody can. */
   readonly autoReview?: AutoReview;
@@ -188,6 +189,7 @@ export default function CodeWorkspaceTab(props: {
         {...(props.harnessAutoReviewSupported === undefined
           ? {}
           : { harnessAutoReviewSupported: props.harnessAutoReviewSupported })}
+        {...(props.strictDefault === undefined ? {} : { strictDefault: props.strictDefault })}
         {...(props.autoReview === undefined ? {} : { autoReview: props.autoReview })}
         {...(props.projectExtraFolders === undefined
           ? {}

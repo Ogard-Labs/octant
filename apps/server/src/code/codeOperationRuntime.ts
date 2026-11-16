@@ -1,4 +1,5 @@
 import { OwnerApprovalId } from "@octant/contracts/owner-approvals";
+import type { StalledTurnScope } from "../providers/turnBudget";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import type { DesignSystemTurnContext } from "../designSystems/designSystemContext";
 import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecovery";
@@ -400,7 +401,7 @@ export interface CodeOperationRuntimeOptions {
    * The host's stalled-turn limit in milliseconds, `null` when it is Off,
    * read as each turn starts. Absent uses the default limit.
    */
-  readonly stalledTurnLimitMs?: () => number | null;
+  readonly stalledTurnLimitMs?: (turn: StalledTurnScope) => number | null;
   /**
    * The person's tool-step limit for a turn at the given level, `undefined`
    * when it is off; a turn's event budget follows it. Read as each turn starts.
@@ -857,6 +858,12 @@ export interface CodeOperationRuntimeOptions {
   readonly readThreadExternalContentTaint?: (threadId: CodeThreadId) => {
     readonly externalContentIngested: boolean;
   };
+  /**
+   * Whether Strict is on for this thread now (`createStrictResolver`), read
+   * at each launch and each decision. Absent reads as Strict, so a runtime
+   * built without the resolver keeps every protection.
+   */
+  readonly resolveStrict?: (threadId: CodeThreadId) => boolean;
   /**
    * Octant Shield, which answers a provider's approval prompts before the
    * person is asked when it is the thread's reviewer at Auto. Absent, or
@@ -1577,8 +1584,11 @@ export function createCodeOperationRuntime(
     ...(options.readThreadExternalContentTaint === undefined
       ? {}
       : {
+          // The mark adds the ask before a comment only under Strict; outside
+          // it the Project's switch and the level decide as before the mark.
           threadReadOutsideContent: (thread: CodeThread) =>
-            options.readThreadExternalContentTaint?.(thread.id).externalContentIngested !== false,
+            options.readThreadExternalContentTaint?.(thread.id).externalContentIngested !== false &&
+            (options.resolveStrict?.(thread.id) ?? true),
         }),
     ...(options.recordExternalContentIngestion === undefined
       ? {}
@@ -3246,8 +3256,6 @@ interface ActiveTurn {
   shutDown?: boolean;
   /** A burst that could not be journaled; the turn may not report `completed` afterwards. */
   deltaFlushFailure?: { readonly error: unknown };
-  /** Denied tool requests on this turn, provider and browser alike; the third ends it. */
-  deniedApprovals: number;
   /** Reason a forced stop journals instead of the runner's generic cancellation copy. */
   interruptMessage?: string;
   state: "running" | "waiting" | "completed" | "interrupted" | "failed";
@@ -4192,7 +4200,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       harnessQuestions: new Set(),
       providerQuestionnaires: new Map(),
       cursor: 0,
-      deniedApprovals: 0,
       state: "running",
     };
     active.launch = () =>
@@ -4788,9 +4795,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       this.#persistNormalized(active, event);
       return;
     }
-    // Shield's answer covers this one call. It is not the person's, so it
-    // does not count toward the three refusals that end a turn; Shield's own
-    // brake hands the next call to the person after repeated denials.
+    // Shield's answer covers this one call. Shield's own brake hands the next
+    // call to the person after repeated denials.
     try {
       await Effect.runPromise(
         active.connection.answerApproval({
@@ -5292,8 +5298,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       toolApproval.finish(input.decision === "approved" ? "approved" : "denied");
       if (ownerCurrent === undefined)
         this.#recordApprovalAnswered(active, input.approvalId, input.decision);
-      if (input.decision === "approved") return answeredTurnState(active.state);
-      return this.#countDeniedApproval(active);
+      return answeredTurnState(active.state);
     }
     if (active === undefined || providerRequestId === undefined)
       return this.#settleDeadTurnRequest(input.thread, "approval", String(input.approvalId));
@@ -5330,8 +5335,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // An owner's answer journals `owner-approval-settled` instead.
     if (ownerCurrent === undefined)
       this.#recordApprovalAnswered(active, input.approvalId, input.decision);
-    if (input.decision === "approved") return answeredTurnState(active.state);
-    return this.#countDeniedApproval(active);
+    // A denial goes back to the model, which adjusts, as on the provider's
+    // own: no count of denials ends the turn (Architecture: "Octant adds no
+    // restrictions of its own unless Strict is on", in Strict too).
+    return answeredTurnState(active.state);
   }
 
   /**
@@ -5434,38 +5441,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     await Effect.runPromise(
       connection.interrupt(active.sessionId as never).pipe(Effect.catchAll(() => Effect.void)),
     );
-    return turnState("interrupted");
-  }
-
-  /**
-   * A provider that keeps asking after repeated refusals is looping on the
-   * person, so the third denial ends the turn the way a cancel does. The
-   * reason rides on `interruptMessage` so the runner's settlement — not this
-   * answer — writes the single terminal frame after the change list. The
-   * denial itself was delivered, so its result is a bare `interrupted` with no
-   * failure: every refused answer names its reason, and a surface that read
-   * this one as refused would keep a Deny the provider already acted on.
-   */
-  async #countDeniedApproval(active: ActiveTurn) {
-    active.deniedApprovals += 1;
-    if (active.deniedApprovals < 3 || (active.state !== "running" && active.state !== "waiting"))
-      return answeredTurnState(active.state);
-    const lostText = this.#flushBeforeStop(active);
-    const deniedMessage =
-      "Stopped after 3 denied tool requests in one turn. Send a new message to continue.";
-    active.interruptMessage =
-      lostText === undefined ? deniedMessage : `${deniedMessage} ${lostText}`;
-    active.state = "interrupted";
-    this.#revokeBrowserGrants(active);
-    this.#persistRuntimeWork(active, "interrupted");
-    active.abort.abort();
-    if (active.connection !== undefined) {
-      await Effect.runPromise(
-        active.connection
-          .interrupt(active.sessionId as never)
-          .pipe(Effect.catchAll(() => Effect.void)),
-      );
-    }
     return turnState("interrupted");
   }
 
@@ -5816,9 +5791,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               this.#options.projectForgeChoices?.(current).comments === true
             );
           },
+          // Under Strict only, as for the operation service above.
           threadReadOutsideContent: () =>
             this.#options.readThreadExternalContentTaint?.(active.thread.id)
-              .externalContentIngested !== false,
+              .externalContentIngested !== false && this.#strict(active.thread.id),
           ...(pullRequestWatch === undefined
             ? {}
             : {
@@ -6370,6 +6346,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               }),
           ...(attachments === undefined ? {} : { attachments }),
           ...(harnessAutoReviewEnabled ? { harnessAutoReviewEnabled: true } : {}),
+          strict: this.#strict(active.thread.id),
           ...(nativeSetup === undefined ? {} : { nativeSetup }),
           ...(wakeups === undefined ? {} : { wakeups }),
           ...(active.runtimeTurn === true ? { runtimeTurn: true as const } : {}),
@@ -6642,8 +6619,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       autoApprove: true,
       posture: thread.executionPolicy,
       externalContentIngested,
+      strict: this.#strict(thread.id),
       capabilitySupported: capabilities.harnessAutoReview === "supported",
     });
+  }
+
+  #strict(threadId: CodeThreadId): boolean {
+    return this.#options.resolveStrict?.(threadId) ?? true;
   }
 
   #noteHarnessRetry(active: ActiveTurn, event: CodeOperationEvent): void {
@@ -7756,8 +7738,7 @@ function sanitizeProviderEvent(
 /**
  * What an answer the turn took reports. A turn a cancel or an earlier stop
  * already interrupted cannot act on the answer, so it is refused with that
- * reason; only the denial that itself stops a turn reports a bare
- * `interrupted`.
+ * reason.
  */
 function answeredTurnState(state: ActiveTurn["state"]): ReturnType<typeof turnState> {
   return state === "interrupted"

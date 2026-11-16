@@ -243,6 +243,8 @@ export interface CodeThreadWorkspaceProps {
    * false or absent Auto is shown disabled with the reason.
    */
   readonly harnessAutoReviewSupported?: boolean;
+  /** Strict as the thread's Project and Settings set it, for a thread that did not choose. */
+  readonly strictDefault?: boolean;
   /** Who answers the thread's prompts at Auto, or why nobody can. */
   readonly autoReview?: AutoReview;
   readonly threadId: CodeThreadId;
@@ -1572,6 +1574,24 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         executionPolicy: access.executionPolicy,
         permissionPersistence: thread.permissionPersistence,
         autoApprove: access.autoApprove,
+      });
+    } finally {
+      setAccessChanging(false);
+    }
+  }
+
+  async function changeStrict(strict: boolean) {
+    props.controller.setAccessNotice(undefined);
+    setAccessChanging(true);
+    try {
+      await props.controller.execute({
+        kind: "change-code-thread-access",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+        executionPolicy: thread.executionPolicy,
+        permissionPersistence: thread.permissionPersistence,
+        ...(thread.autoApprove === true ? { autoApprove: true } : {}),
+        strict,
       });
     } finally {
       setAccessChanging(false);
@@ -2960,6 +2980,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       ?.executionPolicy,
                     threadPolicy: thread.executionPolicy,
                   })}
+                  strict={thread.strict ?? props.strictDefault === true}
+                  onStrictChange={(strict) => void changeStrict(strict)}
                 />
               </>
             ),

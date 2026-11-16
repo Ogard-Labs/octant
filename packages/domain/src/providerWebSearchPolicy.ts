@@ -66,11 +66,14 @@ export function openAiOwnSearchOrigin(
  * The research route picks between the provider's search and Octant's own in
  * the order Architecture gives (`resolveResearchBackend`), under every web
  * search data policy, since the policy governs only Octant's own backends.
- * Below Full access a thread that has read outside content is not offered it,
- * since Octant sees a built-in query only after the provider sent it and so
- * could not refuse one that carries data. Such a thread searches through
- * `web-search` when a backend is eligible. Below Full access the offer also
- * ends within the turn at its first search or tool answer.
+ * Under Strict, below Full access, a thread that has read outside content is
+ * not offered it, since Octant sees a built-in query only after the provider
+ * sent it and so could not refuse one that carries data. Such a thread
+ * searches through `web-search` when a backend is eligible. Under Strict below
+ * Full access the offer also ends within the turn at its first search or tool
+ * answer. Outside Strict outside content only marks the thread, so the offer
+ * stands as at Full access (Architecture: "Octant adds no restrictions of its
+ * own unless Strict is on").
  */
 export function decideHarnessProviderSearch(input: {
   readonly research: boolean;
@@ -79,6 +82,7 @@ export function decideHarnessProviderSearch(input: {
   readonly webSearchReady: boolean;
   readonly tainted: boolean;
   readonly fullAccess: boolean;
+  readonly strict: boolean;
 }): { readonly withdrawAfterFirstStep: boolean } | undefined {
   const route = resolveResearchBackend({
     researchEnabled: input.research,
@@ -88,6 +92,7 @@ export function decideHarnessProviderSearch(input: {
     nativeResearch: input.origin === undefined ? "unsupported" : "supported",
   });
   if (route.kind !== "selected" || route.backend !== "provider-native") return undefined;
-  if (input.tainted && !input.fullAccess) return undefined;
-  return { withdrawAfterFirstStep: !input.fullAccess };
+  const recordedOnly = input.fullAccess || !input.strict;
+  if (input.tainted && !recordedOnly) return undefined;
+  return { withdrawAfterFirstStep: !recordedOnly };
 }

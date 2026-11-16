@@ -468,6 +468,15 @@ describe("Claude file tools and the secret guard", () => {
     );
   });
 
+  it("outside Strict lets Claude's own file tools use the files Octant protects, another provider's sign-in excepted", () => {
+    const open = (tool: string, input: Record<string, unknown>) =>
+      claudeFileToolSecretRefusal(tool, input, [], `${home}/project`, true, home, false);
+    expect(open("Read", { file_path: `${home}/.aws/credentials` })).toBeUndefined();
+    expect(open("Write", { file_path: `${home}/.npmrc` })).toBeUndefined();
+    expect(open("Read", { file_path: `${home}/.codex/auth.json` })).toBeDefined();
+    expect(refusal("Read", { file_path: `${home}/.aws/credentials` })).toBeDefined();
+  });
+
   it("lets the runtime read its own account state and ordinary files", () => {
     expect(
       refusal("Read", { file_path: `${home}/.claude/.credentials.json` }, [`${home}/.claude`]),

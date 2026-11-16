@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ISOLATED_CLAUDE_LAUNCH_GUARDS,
+  OPEN_CLAUDE_LAUNCH_GUARDS,
   canonicalClaudeAccountDirectory,
   claudeArtifactLaunchEnvironment,
   claudeOwnMemoryLaunchEnvironment,
@@ -50,6 +51,56 @@ describe("isolatedClaudeAccountEnvironment", () => {
     expect(JSON.stringify(environment)).not.toMatch(
       /ambient-|other-account|other-secure|routing\.invalid|unrelated-secret/,
     );
+  });
+
+  it("outside Strict passes the host's environment less Octant's variables, other providers' keys and host Claude credentials, and leaves channels to the person", () => {
+    const environment = isolatedClaudeAccountEnvironment({
+      hostEnvironment: {
+        ...hostileHostEnvironment,
+        HTTPS_PROXY: "http://proxy.invalid:8080",
+        NODE_EXTRA_CA_CERTS: "/etc/company-ca.pem",
+        CLAUDE_CODE_USE_BEDROCK: "1",
+        GH_TOKEN: "gh-token-sentinel",
+        OPENAI_API_KEY: "other-provider-key-sentinel",
+        OCTANT_PI_TOOL_BRIDGE_TOKEN: "octant-secret-sentinel",
+        DISABLE_ERROR_REPORTING: "0",
+      },
+      configDirectory: "/Users/provider-user/.claude-accounts/work",
+      authentication: "subscription",
+      strict: false,
+    });
+
+    expect(environment).toMatchObject({
+      ...OPEN_CLAUDE_LAUNCH_GUARDS,
+      CLAUDE_CONFIG_DIR: "/Users/provider-user/.claude-accounts/work",
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: "/Users/provider-user/.claude-accounts/work",
+      ANTHROPIC_BASE_URL: "https://routing.invalid",
+      HTTPS_PROXY: "http://proxy.invalid:8080",
+      NODE_EXTRA_CA_CERTS: "/etc/company-ca.pem",
+      CLAUDE_CODE_USE_BEDROCK: "1",
+      GH_TOKEN: "gh-token-sentinel",
+      UNRELATED_TEST_SECRET: "unrelated-secret-sentinel",
+      DISABLE_ERROR_REPORTING: "0",
+    });
+    expect(environment).not.toHaveProperty("DISABLE_TELEMETRY");
+    expect(environment).not.toHaveProperty("DISABLE_BUG_COMMAND");
+    expect(environment).not.toHaveProperty("CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL");
+    expect(JSON.stringify(environment)).not.toMatch(
+      /ambient-|other-account|other-secure|other-provider-key|octant-secret/,
+    );
+  });
+
+  it("under Strict keeps the fixed list and every channel off", () => {
+    const environment = isolatedClaudeAccountEnvironment({
+      hostEnvironment: { ...hostileHostEnvironment, GH_TOKEN: "gh-token-sentinel" },
+      configDirectory: "/Users/provider-user/.claude-accounts/work",
+      authentication: "subscription",
+      strict: true,
+    });
+
+    expect(environment).toMatchObject(ISOLATED_CLAUDE_LAUNCH_GUARDS);
+    expect(environment).not.toHaveProperty("GH_TOKEN");
+    expect(environment).not.toHaveProperty("ANTHROPIC_BASE_URL");
   });
 
   it("keeps an explicit API-key account on the broker key and the same isolated directory", () => {
@@ -144,6 +195,23 @@ describe("claudeArtifactLaunchEnvironment", () => {
       expect(environment).not.toHaveProperty("CLAUDE_CODE_ARTIFACT");
     },
   );
+
+  it("outside Strict lifts nothing, and the person's own telemetry opt-out keeps the tool off", () => {
+    const open = (hostEnvironment: NodeJS.ProcessEnv) =>
+      claudeArtifactLaunchEnvironment(
+        isolatedClaudeAccountEnvironment({
+          hostEnvironment,
+          configDirectory: "/Users/provider-user/.claude-accounts/personal",
+          authentication: "subscription",
+          strict: false,
+        }),
+        false,
+      );
+    expect(open({ PATH: "/usr/bin" })).toMatchObject({ CLAUDE_CODE_ARTIFACT: "1" });
+    const optedOut = open({ PATH: "/usr/bin", DISABLE_TELEMETRY: "1" });
+    expect(optedOut).toMatchObject({ DISABLE_TELEMETRY: "1" });
+    expect(optedOut).not.toHaveProperty("CLAUDE_CODE_ARTIFACT");
+  });
 
   it("carries no opt-out the host did not set", () => {
     const environment = launch({ PATH: "/usr/bin", DO_NOT_TRACK: "0" });

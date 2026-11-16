@@ -2402,6 +2402,39 @@ describe("CodeService commands", () => {
       ).toBeUndefined();
     });
 
+    it("keeps a Code thread's Strict choice across a mode change and drops it when the change returns the thread to its defaults", async () => {
+      const kept = serviceFixture({
+        threads: [thread({ executionPolicy: "approval-gated", strict: false })],
+        approve: false,
+      });
+      const unchanged = await kept.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+      });
+      expect(unchanged).toMatchObject({ thread: { strict: false } });
+
+      const reset = serviceFixture({
+        threads: [thread({ executionPolicy: "approval-gated", strict: false })],
+        approve: false,
+      });
+      const result = await reset.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+        strict: null,
+      });
+      expect(
+        "thread" in result && result.thread !== undefined
+          ? (result.thread as { strict?: boolean }).strict
+          : "missing",
+      ).toBeUndefined();
+    });
+
     it("journals a paired device's Full access changes with the device as their actor, and a local window's as the local user", async () => {
       const deviceId = "00000000-0000-4000-8000-0000000000d1";
       const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;

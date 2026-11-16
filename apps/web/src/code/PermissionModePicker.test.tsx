@@ -251,3 +251,25 @@ describe("the mode picker on a Windows host", () => {
     );
   });
 });
+
+describe("Strict in the mode picker", () => {
+  it("offers Strict at every mode, states its trade-off, and saves the choice", async () => {
+    const onStrictChange = vi.fn();
+    render(
+      <PermissionModePicker
+        autoSupported
+        onChange={() => undefined}
+        onStrictChange={onStrictChange}
+        strict={false}
+        value="ask-first"
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /^Mode:/ }));
+    const strict = await screen.findByRole("menuitemcheckbox", { name: /^Strict/ });
+    expect(strict).toHaveAccessibleDescription(
+      /Some workflows that work in the provider's own app/,
+    );
+    await userEvent.click(strict);
+    expect(onStrictChange).toHaveBeenCalledWith(true);
+  });
+});

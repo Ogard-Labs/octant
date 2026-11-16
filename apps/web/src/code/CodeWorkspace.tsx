@@ -162,6 +162,8 @@ export interface CodeWorkspaceProps {
   ) => void;
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly harnessAutoReviewSupported?: boolean;
+  /** Strict as the thread's Project and Settings set it, for a thread that did not choose. */
+  readonly strictDefault?: boolean;
   /** The Project's extra folders, by absolute path, offered by the Terminal tab. */
   readonly projectExtraFolders?: ReadonlyArray<string>;
   /** Who answers the thread's prompts at Auto, or why nobody can. */
@@ -252,6 +254,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.harnessAutoReviewSupported === undefined
           ? {}
           : { harnessAutoReviewSupported: props.harnessAutoReviewSupported })}
+        {...(props.strictDefault === undefined ? {} : { strictDefault: props.strictDefault })}
         {...(props.autoReview === undefined ? {} : { autoReview: props.autoReview })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
         {...(props.imageGenerationClient === undefined

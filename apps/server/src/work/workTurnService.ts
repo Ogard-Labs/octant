@@ -445,6 +445,8 @@ export interface WorkTurnServiceDependencies {
    * turn.
    */
   readonly outsideContentMarks?: RuntimeOutsideContentMarking;
+  /** Strict for a thread now (`createStrictResolver`); absent reads as Strict. */
+  readonly resolveStrict?: (threadId: string) => boolean;
   /** Journals the pushes and pull-request changes a runtime's own shell starts. */
   readonly forgeChanges?: RuntimeForgeChangeObserver;
   readonly onRequestSettled?: (
@@ -685,6 +687,7 @@ export class WorkTurnService {
   readonly #turnRuntime: WorkTurnRuntimePort;
   readonly #prepareProductFeedbackForTurn: WorkTurnServiceDependencies["prepareProductFeedbackForTurn"];
   readonly #outsideContentMarks: RuntimeOutsideContentMarking | undefined;
+  readonly #resolveStrict: ((threadId: string) => boolean) | undefined;
   readonly #forgeChanges: RuntimeForgeChangeObserver | undefined;
   readonly #onRequestSettled: WorkTurnServiceDependencies["onRequestSettled"];
   readonly #resolveAppManagedTools: WorkTurnServiceDependencies["resolveAppManagedTools"];
@@ -754,6 +757,7 @@ export class WorkTurnService {
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
     this.#prepareProductFeedbackForTurn = dependencies.prepareProductFeedbackForTurn;
     this.#outsideContentMarks = dependencies.outsideContentMarks;
+    this.#resolveStrict = dependencies.resolveStrict;
     this.#forgeChanges = dependencies.forgeChanges;
     this.#recordAdoptedSession = dependencies.recordAdoptedSession;
     this.#stopKeptSession = dependencies.stopKeptSession;
@@ -2880,6 +2884,8 @@ export class WorkTurnService {
             }),
         ...(input.access === undefined ? {} : { access: input.access }),
         ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+        // Read as the turn launches, never carried from an earlier one.
+        strict: this.#resolveStrict?.(String(input.command.threadId)) ?? true,
         ...(artifactToolName === undefined ? {} : { nativeArtifacts: true }),
         ...nativeSetupOption(
           sessionNativeSetup(this.#persistence, {
