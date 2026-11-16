@@ -14,7 +14,9 @@
 
 .pr-page__frame {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  /* 384px: at the old 320px a title was cut after about 25 characters. One
+     width for every state, so choosing a row moves nothing. */
+  grid-template-columns: 384px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   padding-top: var(--oct-title-rail-h, 44px);
@@ -33,6 +35,15 @@
 
 .pr-page[data-empty="true"] .pr-page__detail {
   display: none;
+}
+
+/* The header keeps the list column's width, so it stays where it is when a
+   refresh or a repository fills the page. Across a 1104px page it left the back
+   arrow and the Repository control at the far right, away from the title. */
+.pr-page[data-empty="true"] .pr-page__list-head {
+  width: calc(384px - 2 * var(--oct-space-4));
+  max-width: 100%;
+  align-self: flex-start;
 }
 
 .pr-page[data-empty="true"]
@@ -112,6 +123,18 @@
   align-items: center;
 }
 
+/* The column's own 8px gap spaces the search, the chips and the rows. The
+   toolbar's 16px bottom margin added a second one under the search: 24px
+   there against 8px between the chips and the status line. The field is the
+   28px control, not the 30px the dock's search row sets. */
+.pr-page .surface-toolbar {
+  margin-bottom: 0;
+}
+
+.pr-page .code-project-pull-requests__search input {
+  height: 28px;
+}
+
 .pr-page__chips {
   display: flex;
   flex-wrap: wrap;
@@ -165,7 +188,10 @@
   background: var(--oct-wash-selected);
 }
 
+/* A title takes two lines before it is cut: one line lost the end of most
+   titles even at 384px. */
 .pr-page .work-list__title {
+  -webkit-line-clamp: 2;
   font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-regular);
 }
@@ -209,10 +235,10 @@
   overflow: hidden;
 }
 
-.pr-page__detail-empty {
-  margin: var(--oct-space-8) var(--oct-space-6);
-  color: var(--oct-meta);
-  font-size: var(--oct-text-detail);
+/* The pane with nothing chosen is the panes' one empty state, in its middle. */
+.pr-page__detail > .surface-empty {
+  flex: 1 1 auto;
+  align-content: center;
 }
 
 .pr-page__detail-back {
@@ -220,8 +246,9 @@
   padding: var(--oct-space-1) var(--oct-space-3);
 }
 
-/* One column under 680px: the list or the pull request, with a way back. */
-@container pr-page (max-width: 679px) {
+/* One column under 760px: the list or the pull request, with a way back. The
+   list is 384px, so 760 keeps the reading pane at 376px or more beside it. */
+@container pr-page (max-width: 759px) {
   .pr-page__frame,
   .pr-page[data-detail="off"] .pr-page__frame {
     grid-template-columns: minmax(0, 1fr);
@@ -408,9 +435,11 @@
   font-size: var(--oct-text-xs);
 }
 
-.pr-detail__meta > span ~ span::before {
+/* The dot closes the item before it: opening the next one, it led the wrapped
+   line ("· branch → main") once the author and the age filled the first. */
+.pr-detail__meta > span:not(:last-child)::after {
   content: "·";
-  margin-inline-end: var(--oct-space-2);
+  margin-inline-start: var(--oct-space-2);
 }
 
 .pr-detail__branches {
@@ -718,5 +747,21 @@
 
   .pr-detail__notice {
     margin-inline: var(--oct-space-4);
+  }
+}
+
+/* Under 480px the tabs and the actions no longer fit side by side: at 320px
+   the action icons sat on top of "Changes". The actions take the row under
+   the tabs and wrap there. */
+@container pr-detail (max-width: 479px) {
+  .pr-detail__bar {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--oct-space-1);
+  }
+
+  .pr-detail__tools {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    justify-self: start;
   }
 }

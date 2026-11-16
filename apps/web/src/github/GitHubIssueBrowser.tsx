@@ -37,6 +37,7 @@ import {
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { describeGithubRemediation } from "./githubRemediation";
@@ -651,6 +652,7 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
                   <ArrowLeft aria-hidden="true" size={16} />
                 </OctantButton>
               )}
+
               {browsing ? (
                 <WorkListSortMenu
                   label="Sort issues"
@@ -818,18 +820,10 @@ function IssueDetailPane(props: {
 }) {
   const { detail, selected } = props;
   if (detail.kind === "idle") {
-    return (
-      <p className="pr-page__detail-empty" role="status">
-        Select an issue to read it.
-      </p>
-    );
+    return <OctantEmpty layout="line" title="Select an issue to read it." />;
   }
   if (detail.kind === "loading") {
-    return (
-      <p className="pr-page__detail-empty" role="status">
-        Loading issue…
-      </p>
-    );
+    return <OctantEmpty layout="line" title="Loading issue…" />;
   }
   if (detail.kind === "error") {
     return <UnavailableNotice message={detail.message} onRetry={props.onRetry} role="alert" />;

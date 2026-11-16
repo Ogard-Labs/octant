@@ -1965,7 +1965,8 @@ host restart and is cleared when GitHub authority is revoked.
 
 **The Pull requests and Issues lists.** The Pull requests destination is a
 list column and a reading pane, not a full-width list. The list column is
-320px with its own scroll: a header with the title and, as icon buttons with
+384px with its own scroll (the same width whether or not a row is chosen, so choosing one moves
+nothing): a header with the title and, as icon buttons with
 tooltips, Sort, Filter, Repository settings (only while the list is not
 grouped) and Refresh (with the back arrow first when the page can close), on a 16px inset line
 that the title, the count, the search field and the chips share, the icons ending on the search
@@ -1977,12 +1978,15 @@ chip never promises rows the list lacks); a **Repository** control beside the
 count (below); then the rows and, once more than 50 are listed, a quiet **Show more**.
 A soft one-line note at the foot says when some Project repositories could not
 be refreshed and that their cached pull requests are still shown. The pane is
-described under **The Pull requests reading pane** below. Under 680px the page
+described under **The Pull requests reading pane** below. Before any Project has been
+refreshed the page is one centred empty state, a single sentence and a **Refresh** button,
+without the header's menus, the count or the search field. With rows listed and none chosen,
+the pane holds the panes' one empty state, centred. Under 760px the page
 is one column, the list or the pull request, with a back button over the
 pane.
 
 A row is two lines. Line one is the title at medium weight, cut after
-one line, and at its trailing edge the one thing that needs attention, in
+two lines in the page's list (one line in the dock), and at its trailing edge the one thing that needs attention, in
 words and as the quiet chip (Conflicts, Checks failing, Changes
 requested, Checks pending, Review pending; a draft has none, its glyph says it), or a small check when the pull
 request is mergeable and nothing blocks it. A state
@@ -3340,7 +3344,7 @@ the global preview bound. Known closed or merged identities are recovered
 separately. Stale cached data is visibly stale. Provider usage follows the same
 provider-neutral context/limit model and preserves unavailable values.
 
-The Issues surface is laid out as the Pull requests page is: a 320px list
+The Issues surface is laid out as the Pull requests page is: a 384px list
 column with the title and count, the Repository control in the same place and
 at the same fixed width (All repositories, or one repository, from the picker),
 Sort, a search field at the column's width, and Open, Closed and All as the
@@ -3357,8 +3361,8 @@ whole catalogue. Start a Code thread leaves the surface with the issue
 attached to a new draft as its Create from context.
 
 The Pull requests page is the list column and reading pane above: rows of a
-13px title (one line) and one 12px meta line (repository, author, age, and the
-number in tabular numerals at the trailing edge), 52px tall with 8px above and
+13px title (up to two lines in the page's list, one in the dock) and one 12px meta line (repository, author, age, and the
+number in tabular numerals at the trailing edge), 52px tall (a two-line title makes it taller) with 8px above and
 below; the state (open, draft, merged, closed) is a 16px glyph at the row's start
 in the meta ink or its semantic ink, so a draft has no pill; one
 quiet chip for what needs the person (Review pending, Conflicts) or a success

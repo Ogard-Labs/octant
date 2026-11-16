@@ -73,6 +73,14 @@
   color: var(--oct-link);
 }
 
+/* The two branches and the arrow are one meta item. At 320px they sat on one
+   line, each chip shrunk until its name broke after two or three characters
+   ("acme/wi / dgets:m / ain"); wrapping puts the arrow and the base on the next
+   line so each name keeps the whole width. */
+.code-pr-review__meta-item:has(> .code-pr-review__branch) {
+  flex-wrap: wrap;
+}
+
 /* Lines added and removed, in the host's green and red, with figures that
    keep one width so a column of them lines up. */
 .code-pr-review__tally {
@@ -208,10 +216,21 @@
 
 /* A commit is one line: its id, what it says, and who wrote it at the end. */
 .code-pr-review__commits > li {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--oct-space-2);
+  gap: var(--oct-space-1) var(--oct-space-2);
+}
+
+/* In a 320px pane the author used to keep its column and squeeze the headline
+   to a word per line; below 20 characters of headline it drops to its own line. */
+.code-pr-review__commits > li > span:nth-of-type(1) {
+  flex: 1 1 20ch;
+  min-width: 0;
+}
+
+.code-pr-review__commits > li > .code-pr-review__muted {
+  margin-inline-start: auto;
 }
 
 .code-pr-review__commits,

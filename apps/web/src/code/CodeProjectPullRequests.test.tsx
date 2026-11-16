@@ -755,6 +755,28 @@ describe("CodeProjectPullRequests", () => {
     expect(await screen.findByText("Not refreshed yet: Divetools.")).toBeVisible();
   });
 
+  it("says once, with one Refresh button, that nothing has been refreshed yet", async () => {
+    const neverRefreshed = view({
+      rows: [],
+      freshness: { status: "empty" },
+      projectFreshness: [{ projectId: projectA, freshness: { status: "empty" } }],
+    });
+    render(
+      <CodeProjectPullRequests
+        load={async () => neverRefreshed}
+        refresh={async () => neverRefreshed}
+      />,
+    );
+
+    expect(await screen.findByText("Refresh to load pull requests")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeVisible();
+    expect(screen.queryByText(/No GitHub snapshot yet/)).toBeNull();
+    expect(screen.queryByText(/will list here/)).toBeNull();
+    expect(screen.queryByText(/Not refreshed yet/)).toBeNull();
+    expect(screen.queryByRole("searchbox", { name: "Search pull requests" })).toBeNull();
+    expect(document.querySelector(".pr-page")).toHaveAttribute("data-empty", "true");
+  });
+
   it("selects a pull request row without refreshing GitHub", async () => {
     const user = userEvent.setup();
     const onSelectRow = vi.fn();
@@ -1193,9 +1215,9 @@ describe("CodeProjectPullRequests", () => {
     expect(screen.queryByText("List active pull requests")).not.toBeInTheDocument();
   });
 
-  it("gives the list a 320px column of its own beside a reading pane", () => {
+  it("gives the list a 384px column of its own beside a reading pane", () => {
     const page = readFileSync(resolve(import.meta.dirname, "pull-request-page.css"), "utf8");
-    expect(ruleBody(page, ".pr-page__frame")).toMatch(/grid-template-columns:\s*320px\s+minmax/);
+    expect(ruleBody(page, ".pr-page__frame")).toMatch(/grid-template-columns:\s*384px\s+minmax/);
     expect(ruleBody(page, ".pr-page__list")).toMatch(/overflow:\s*hidden\s+auto/);
     expect(ruleBody(page, ".pr-page .work-list__list")).toMatch(/gap:\s*4px/);
   });

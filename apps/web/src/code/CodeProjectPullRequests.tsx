@@ -425,6 +425,14 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
           !scopedRows.some((row) => String(row.projectId) === String(project.projectId))
         );
       });
+  // Before the first refresh nothing is known, so the page says that once, with
+  // the one thing to do, instead of a status line, a hint, a note and a count.
+  const firstLoad =
+    !dock &&
+    ready &&
+    !showGroups &&
+    scopedRows.length === 0 &&
+    neverRefreshed.length === connectedProjects.length;
   const backgroundNotes =
     view === undefined || dock
       ? []
@@ -441,7 +449,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       data-bar-hosted={dock && placement !== undefined ? "true" : undefined}
       data-presentation={dock ? "dock" : "page"}
     >
-      {!ready ? null : dock ? (
+      {!ready || firstLoad ? null : dock ? (
         <div className="surface-toolbar">
           {searchField}
           {countInBar ? null : (
@@ -556,7 +564,30 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
           {workspace.message}
         </OctantAlert>
       ) : null}
-      {view === undefined || !ready ? null : (
+      {view === undefined || !ready ? null : firstLoad ? (
+        <OctantEmpty
+          layout="line"
+          action={
+            <OctantButton
+              disabled={busy}
+              onClick={() =>
+                void runRefresh(
+                  projectId === undefined
+                    ? { kind: "refresh-all" }
+                    : { kind: "refresh-project", projectId },
+                )
+              }
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Refresh
+            </OctantButton>
+          }
+          icon={<GitPullRequest size={20} />}
+          title="Refresh to load pull requests"
+        />
+      ) : (
         <>
           <p
             className="code-project-pull-requests__status"
@@ -732,54 +763,55 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
 
   if (dock) return body;
 
-  const listActions = ready ? (
-    <>
-      <WorkListSortMenu
-        grouped={grouped}
-        label="Sort pull requests"
-        onGroupedChange={chooseGrouped}
-        onValueChange={chooseSort}
-        options={PULL_REQUEST_SORT_OPTIONS}
-        value={sort}
-      />
-      <FilterMenu
-        filters={filters}
-        onChange={chooseFilters}
-        onClearRepositories={() => chooseRepositories([])}
-        repositoryCount={repositories.length}
-        viewerLogin={props.viewerLogin}
-      />
-      {grouped ? null : (
-        <RepositorySettingsMenu
-          busy={busy}
-          onRefresh={(project) =>
-            void runRefresh({ kind: "refresh-project", projectId: project.projectId })
-          }
-          projects={connectedProjects}
-          {...(props.backgroundRefresh === undefined
-            ? {}
-            : { backgroundRefresh: props.backgroundRefresh })}
-          {...(props.agentMerge === undefined ? {} : { agentMerge: props.agentMerge })}
-          {...(props.agentForgeChoices === undefined
-            ? {}
-            : { agentForgeChoices: props.agentForgeChoices })}
+  const listActions =
+    ready && !firstLoad ? (
+      <>
+        <WorkListSortMenu
+          grouped={grouped}
+          label="Sort pull requests"
+          onGroupedChange={chooseGrouped}
+          onValueChange={chooseSort}
+          options={PULL_REQUEST_SORT_OPTIONS}
+          value={sort}
         />
-      )}
-      <OctantTooltip label="Refresh all pull requests">
-        <OctantButton
-          aria-label="Refresh all"
-          className="work-list__icon-button"
-          disabled={busy}
-          onClick={() => void runRefresh({ kind: "refresh-all" })}
-          size="icon"
-          type="button"
-          variant="ghost"
-        >
-          <RefreshCw aria-hidden="true" size={16} />
-        </OctantButton>
-      </OctantTooltip>
-    </>
-  ) : null;
+        <FilterMenu
+          filters={filters}
+          onChange={chooseFilters}
+          onClearRepositories={() => chooseRepositories([])}
+          repositoryCount={repositories.length}
+          viewerLogin={props.viewerLogin}
+        />
+        {grouped ? null : (
+          <RepositorySettingsMenu
+            busy={busy}
+            onRefresh={(project) =>
+              void runRefresh({ kind: "refresh-project", projectId: project.projectId })
+            }
+            projects={connectedProjects}
+            {...(props.backgroundRefresh === undefined
+              ? {}
+              : { backgroundRefresh: props.backgroundRefresh })}
+            {...(props.agentMerge === undefined ? {} : { agentMerge: props.agentMerge })}
+            {...(props.agentForgeChoices === undefined
+              ? {}
+              : { agentForgeChoices: props.agentForgeChoices })}
+          />
+        )}
+        <OctantTooltip label="Refresh all pull requests">
+          <OctantButton
+            aria-label="Refresh all"
+            className="work-list__icon-button"
+            disabled={busy}
+            onClick={() => void runRefresh({ kind: "refresh-all" })}
+            size="icon"
+            type="button"
+            variant="ghost"
+          >
+            <RefreshCw aria-hidden="true" size={16} />
+          </OctantButton>
+        </OctantTooltip>
+      </>
+    ) : null;
 
   const withDetail = props.renderDetail !== undefined;
   return (
@@ -787,7 +819,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       aria-label="Pull requests"
       className="pr-page"
       data-detail={withDetail ? (selectedRow === undefined ? "none" : "open") : "off"}
-      data-empty={view !== undefined && !ready ? "true" : undefined}
+      data-empty={view !== undefined && (!ready || firstLoad) ? "true" : undefined}
     >
       <div className="pr-page__frame">
         <div className="pr-page__list">
@@ -808,7 +840,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
               )}
               {listActions}
             </div>
-            {ready ? (
+            {ready && !firstLoad ? (
               <div className="pr-page__list-sub">
                 {countCopy === undefined ? null : (
                   <span className="oct-meta pr-page__list-count">{countCopy}</span>
@@ -828,9 +860,13 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
         {withDetail ? (
           <div className="pr-page__detail">
             {selectedRow === undefined ? (
-              <p className="pr-page__detail-empty" role="status">
-                {ready && visibleRows.length > 0 ? "Choose a pull request to read it." : ""}
-              </p>
+              ready && visibleRows.length > 0 ? (
+                <OctantEmpty
+                  layout="line"
+                  icon={<GitPullRequest size={20} />}
+                  title="Choose a pull request to read it."
+                />
+              ) : null
             ) : (
               <>
                 <div className="pr-page__detail-back">
