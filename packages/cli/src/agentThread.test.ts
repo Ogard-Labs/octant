@@ -7,6 +7,7 @@ import {
   createAgentThread,
   openAgentThreadById,
 } from "./agentThread";
+import { changeAgentThreadModel } from "./agentHost";
 import { statusLineFrom } from "./agentTuiModel";
 import type { LocalControlRequest, OpenedLocalControlSession } from "./localControl";
 
@@ -1215,4 +1216,80 @@ describe("stopping a Work turn from the terminal", () => {
       { kind: "cancel-work-turn", requestId: request, threadId: workThread, turnId: turn },
     ]);
   });
+});
+
+describe("coding provider selection from the terminal", () => {
+  it("starts Code on a native provider through the same host create command", async () => {
+    const fake = host("current-session");
+    const session = {
+      ...fake.session,
+      send: async (request: LocalControlRequest) => {
+        if (request.path === "/api/providers/bootstrap")
+          return {
+            status: 200,
+            body: {
+              ...providers,
+              instances: [
+                {
+                  ...providers.instances[0],
+                  driverKind: "codex",
+                  displayName: "Codex",
+                  configuration: { kind: "codex-cli", binaryPath: "codex" },
+                },
+              ],
+            },
+          };
+        return fake.session.send(request);
+      },
+    };
+    const result = await createAgentThread(session, {
+      mode: "code",
+      title: "Fix",
+      projectName: "Repo",
+      model: "Codex/loopback-model",
+    });
+    expect(result.kind).toBe("created");
+    expect(fake.created()).toBeDefined();
+  });
+
+  it.each(["code", "work"] as const)(
+    "changes a %s model through its versioned command and preserves refusals",
+    async (mode) => {
+      const seen: LocalControlRequest[] = [];
+      let refuse = false;
+      const session: OpenedLocalControlSession = {
+        kind: "opened",
+        windowId: "window",
+        close: async () => undefined,
+        send: async (request) => {
+          seen.push(request);
+          return refuse
+            ? { status: 409, body: { message: "A turn is running." } }
+            : {
+                status: 200,
+                body: {
+                  kind: "thread-updated",
+                  thread: {
+                    id: ids.project,
+                    providerInstanceId: ids.provider,
+                    modelId: "new-model",
+                  },
+                },
+              };
+        },
+      };
+      const thread = { id: ids.project, version: 3, mode };
+      const choice = { instanceId: ids.provider, modelId: "new-model" };
+      expect(await changeAgentThreadModel(session, thread, choice)).toEqual({ kind: "changed" });
+      expect(seen[0]).toMatchObject({
+        path: mode === "code" ? "/api/code/commands" : "/api/work/threads/commands",
+        body: { kind: `change-${mode}-thread-provider`, expectedVersion: 3 },
+      });
+      refuse = true;
+      expect(await changeAgentThreadModel(session, thread, choice)).toEqual({
+        kind: "refused",
+        message: "A turn is running.",
+      });
+    },
+  );
 });

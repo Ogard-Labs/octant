@@ -33,6 +33,7 @@ import {
   refusalMessage,
   sendAgentPrompt,
   type HostRefusal,
+  type AgentModelChoice,
 } from "./agentHost";
 import type { OpenedLocalControlSession } from "./localControl";
 import { openAgentWindow } from "./agentWindow";
@@ -83,6 +84,7 @@ export interface AgentThreadSnapshot {
   readonly version: number;
   /** The checkout bound to a Code thread, for host-authorized review. */
   readonly checkoutId?: string;
+  readonly projectId?: string;
   /** The thread's turns, oldest first: all of them, or its newest when `hasEarlier`. */
   readonly turns: ReadonlyArray<AgentThreadTurn>;
   /** The thread has turns older than the first in `turns`. */
@@ -147,6 +149,7 @@ export function snapshotFromChat(view: ChatThreadView): AgentThreadSnapshot {
     id: String(view.thread.id),
     mode: "chat",
     title: view.thread.title,
+    ...(view.thread.projectId === undefined ? {} : { projectId: String(view.thread.projectId) }),
     providerInstanceId: String(view.thread.providerInstanceId),
     modelId: String(view.thread.modelId),
     version: view.thread.version,
@@ -269,6 +272,7 @@ function workThreadPort(session: OpenedLocalControlSession, threadId: string): A
         id: threadId,
         mode: "work",
         title: current.title,
+        projectId: String(current.projectId),
         providerInstanceId: String(current.providerInstanceId),
         modelId: String(current.modelId),
         version: current.version,
@@ -292,7 +296,7 @@ function workThreadPort(session: OpenedLocalControlSession, threadId: string): A
         workItems: [],
       };
     },
-    send: async (prompt) => {
+    send: async (prompt, extras) => {
       const current = thread ?? (await loadThread());
       if (current === undefined)
         return { kind: "refused", message: "The Work thread could not be read." };
@@ -315,6 +319,7 @@ function workThreadPort(session: OpenedLocalControlSession, threadId: string): A
           threadId,
           turnId: randomUUID(),
           prompt,
+          ...(extras?.attachmentIds?.length ? { attachmentIds: extras.attachmentIds } : {}),
           authority: {
             hostId: "local",
             projectId: String(current.projectId),
@@ -474,6 +479,7 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
         id: threadId,
         mode: "code",
         title: current.thread.title,
+        projectId: String(current.thread.projectId),
         checkoutId: String(current.checkout.id),
         providerInstanceId: String(current.thread.providerInstanceId),
         modelId: String(current.thread.modelId),
@@ -498,7 +504,7 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
         workItems: [],
       };
     },
-    send: async (prompt) => {
+    send: async (prompt, extras) => {
       const current = await view();
       if (current === undefined)
         return { kind: "refused", message: "The Code thread could not be read." };
@@ -527,6 +533,7 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
           checkoutId: String(current.checkout.id),
           sessionId: randomUUID(),
           prompt: decodeHostAnswer(CodeEvidenceReference)(staged.body),
+          ...(extras?.attachmentIds?.length ? { attachmentIds: extras.attachmentIds } : {}),
         },
       });
       if (response.status !== 200) {
@@ -598,8 +605,11 @@ export async function createAgentThread(
     readonly title: string;
     readonly projectName?: string | undefined;
     readonly cwd?: string | undefined;
-    /** `model` or `endpoint/model`; the first harness model when absent. */
+    /** A unique `model` or `endpoint/model` selection. */
     readonly model?: string | undefined;
+    readonly chooseModel?: (
+      models: readonly AgentModelChoice[],
+    ) => Promise<AgentModelChoice | undefined>;
     /**
      * The access a new Work or Code thread starts at, as the composer's mode
      * picker names it. `full-access` is remembered for the Code Project first,
@@ -725,14 +735,33 @@ export async function createAgentThread(
     return { kind: "refused", message: "The Project for this thread is unavailable." };
   }
   const models = await listAgentModels(session);
-  const model = input.model === undefined ? models[0] : pickAgentModel(models, input.model);
+  let model = input.model === undefined ? undefined : pickAgentModel(models, input.model);
+  if (input.model === undefined && mode === "work") {
+    const bootstrap = await session.send({ path: "/api/work/threads/bootstrap", method: "GET" });
+    if (bootstrap.status === 200) {
+      const settings = decodeHostAnswer(WorkThreadBootstrap)(bootstrap.body).settings;
+      if (settings?.defaultProviderInstanceId !== undefined)
+        model = models.find(
+          (entry) =>
+            entry.instanceId === String(settings.defaultProviderInstanceId) &&
+            entry.modelId === String(settings.defaultModelId),
+        );
+    }
+  }
+  if (input.model === undefined && model === undefined)
+    model =
+      input.chooseModel === undefined
+        ? models.length === 1
+          ? models[0]
+          : undefined
+        : await input.chooseModel(models);
   if (model === undefined) {
     return {
       kind: "refused",
       message:
         input.model === undefined
-          ? "No harness endpoint offers a model yet. Add one in Settings → Providers."
-          : `No harness endpoint offers "${input.model}". Models here: ${models.map((entry) => `${entry.endpoint}/${entry.modelId}`).join(", ") || "none"}.`,
+          ? "Choose a provider/model with --model <account/model>, or configure an enabled provider in Settings → Providers."
+          : `No unique provider/model matches "${input.model}". Models here: ${models.map((entry) => `${entry.endpoint}/${entry.modelId}`).join(", ") || "none"}.`,
     };
   }
   const projectOpened = await openAgentWindow(session, {

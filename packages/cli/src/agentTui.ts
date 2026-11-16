@@ -16,6 +16,9 @@ import {
 } from "./agentChildren";
 import {
   agentThreadPort,
+  createAgentThread,
+  openAgentThreadById,
+  pickAgentModel,
   attachAgentThread,
   isAgentSnapshotRunning,
   type AgentThreadPort,
@@ -29,7 +32,7 @@ import {
   activateAgentFollowUp,
   answerAgentQuestion,
   attachmentMediaType,
-  changeAgentModel,
+  changeAgentThreadModel,
   commandAgentSession,
   contextPercent,
   approvalDecisionBody,
@@ -38,7 +41,8 @@ import {
   decideAgentApproval,
   preselectedCommandHosts,
   listAgentModels,
-  listAgentThreads,
+  listAgentNavigation,
+  type AgentNavigationThread,
   openAgentSideChat,
   previewAgentFollowUp,
   readAgentGoal,
@@ -82,7 +86,10 @@ import {
   type TuiTranscriptEntry,
   approvalPanelOutsideContent,
 } from "./agentTuiModel";
-import type { ChatNavigationThread } from "@octant/contracts";
+import { ProjectBootstrap, decodeHostAnswer } from "@octant/contracts";
+import { agentTuiMark } from "./agentTuiMark";
+import { terminalMarkdownTables } from "./agentTuiMarkdown";
+import { agentTuiLayout } from "./agentTuiLayout";
 import type { OpenedLocalControlSession } from "./localControl";
 import { readAgentDiff, type AgentDiff } from "./agentDiff";
 
@@ -112,7 +119,7 @@ const HINT =
 const REASONING_FENCE = /```(?:reasoning|thinking)\n([\s\S]*?)```|<think>([\s\S]*?)<\/think>/g;
 const QUIT_WINDOW_MS = 1_500;
 /** Which list or panel the screen shows in place of the hint, if any. */
-type TuiListing = "threads" | "models" | "agents" | "agent" | "goal" | undefined;
+type TuiListing = "threads" | "models" | "agents" | "agent" | "goal" | "palette" | undefined;
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 const SHOWN_TOOL_LINES = 4;
@@ -189,7 +196,7 @@ class AgentScreen {
    * Steering and goal changes are refused here: Side Chat only reads.
    */
   #home: { readonly threadId: string; readonly mode: OctantMode } | undefined;
-  #threads: ReadonlyArray<ChatNavigationThread> = [];
+  #threads: ReadonlyArray<AgentNavigationThread> = [];
   #models: ReadonlyArray<AgentModelChoice> = [];
   readonly #wake = new AgentWake();
   /** Ends the live feed of the thread on screen; a switch starts a new one. */
@@ -211,6 +218,8 @@ class AgentScreen {
     | undefined;
   #resolveExit: ((code: number) => void) | undefined;
 
+  readonly #sidebar;
+  readonly #info;
   readonly #header;
   readonly #transcript;
   readonly #panel;
@@ -303,13 +312,38 @@ class AgentScreen {
         { name: "return", action: "submit" },
         { name: "return", shift: true, action: "newline" },
       ],
-      onSubmit: () => void this.#submit(),
+      onSubmit: () =>
+        void this.#submit().catch(() => {
+          this.#note = "The host request failed. Retry the command.";
+          this.#draw();
+        }),
     });
     composerBox.add(this.#composer);
     this.#noteText = new TextRenderable(renderer, { content: "", height: 1, paddingLeft: 2 });
     this.#footer = new TextRenderable(renderer, { content: "", height: 1, paddingLeft: 2 });
     root.add(this.#header);
-    root.add(this.#transcript);
+    const body = new BoxRenderable(renderer, { flexDirection: "row", flexGrow: 1, flexShrink: 1 });
+    this.#sidebar = new TextRenderable(renderer, {
+      width: 26,
+      paddingLeft: 1,
+      paddingRight: 1,
+      wrapMode: "word",
+      content: "",
+      fg: palette.textSecondary,
+    });
+    this.#info = new TextRenderable(renderer, {
+      width: 28,
+      paddingLeft: 1,
+      paddingRight: 1,
+      wrapMode: "word",
+      content: "",
+      fg: palette.textSecondary,
+    });
+    body.add(this.#sidebar);
+    body.add(this.#transcript);
+    body.add(this.#info);
+    root.add(body);
+    renderer.on("resize", () => this.#draw());
     root.add(this.#tasks);
     root.add(this.#panel);
     root.add(composerBox);
@@ -343,7 +377,16 @@ class AgentScreen {
             this.#draw();
           } else void this.#interrupt();
         } else if (key.ctrl && key.name === "p") {
+          this.#listing = this.#listing === "palette" ? undefined : "palette";
+          this.#draw();
+        } else if (key.ctrl && key.name === "o") {
           void this.#pauseOrResume();
+        } else if (key.name === "tab" && this.#suggestions?.items[0] !== undefined) {
+          this.#composer.setText(
+            this.#composer.plainText.replace(/(?:@|#)[^\s@#]*$/, this.#suggestions.items[0] + " "),
+          );
+          this.#suggestions = undefined;
+          this.#draw();
         } else if (key.ctrl && key.name === "e") {
           this.#verbose = !this.#verbose;
           this.#draw();
@@ -409,11 +452,19 @@ class AgentScreen {
   }
 
   async refresh(): Promise<void> {
+    const readingThreadId = this.#threadId;
+    const readingMode = this.#mode;
     const [thread, session, sites] = await Promise.all([
       this.#port.read(),
       readAgentSession(this.#input.session, this.#threadId),
       listAgentSiteApprovals(this.#input.session, this.#port.mode, this.#threadId).catch(() => []),
     ]);
+    const navigation = await listAgentNavigation(this.#input.session, readingMode).catch(() => {
+      this.#note = "Thread list unavailable; retrying.";
+      return this.#threads;
+    });
+    if (readingThreadId !== this.#threadId || readingMode !== this.#mode) return;
+    this.#threads = navigation;
     this.#thread = thread;
     this.#session = session === "unavailable" ? undefined : session;
     this.#siteApproval = sites[0];
@@ -445,7 +496,8 @@ class AgentScreen {
     }
     const needle = (token[2] ?? "").toLowerCase();
     if (token[1] === "#") {
-      if (this.#threads.length === 0) this.#threads = await listAgentThreads(this.#input.session);
+      if (this.#threads.length === 0)
+        this.#threads = await listAgentNavigation(this.#input.session, this.#mode);
       const items = this.#threads
         .filter((thread) => String(thread.id) !== this.#threadId)
         .filter((thread) => thread.title.toLowerCase().includes(needle))
@@ -476,18 +528,23 @@ class AgentScreen {
     for (const match of text.matchAll(/(?:^|\s)@([^\s@#]+)/g)) {
       const path = match[1] ?? "";
       if (attachmentMediaType(path) === undefined) continue;
-      if (this.#port.mode !== "chat") {
-        refused.push(`Attach files to a ${this.#port.mode} thread from the app.`);
-        continue;
-      }
-      const uploaded = await uploadAgentAttachment(this.#input.session, this.#threadId, path);
+      // Coding runtimes read source paths inside the bound Project. Images use
+      // the mode's staged attachment route, as in the app composer.
+      if (this.#port.mode !== "chat" && !attachmentMediaType(path)?.startsWith("image/")) continue;
+      const uploaded = await uploadAgentAttachment(
+        this.#input.session,
+        this.#threadId,
+        path,
+        this.#port.mode,
+      );
       if (uploaded.kind === "uploaded") attachmentIds.push(uploaded.attachmentId);
       else refused.push(uploaded.message);
     }
     let prompt = text;
     for (const match of text.matchAll(/(?:^|\s)#([^\s@#]+)/g)) {
       const fragment = (match[1] ?? "").toLowerCase();
-      if (this.#threads.length === 0) this.#threads = await listAgentThreads(this.#input.session);
+      if (this.#threads.length === 0)
+        this.#threads = await listAgentNavigation(this.#input.session, this.#mode);
       const byNumber = /^\d+$/.test(fragment) ? this.#threads[Number(fragment) - 1] : undefined;
       const thread =
         byNumber ??
@@ -509,6 +566,13 @@ class AgentScreen {
 
   async #switchThread(threadId: string, mode: OctantMode = "chat"): Promise<void> {
     this.#diff = undefined;
+    const opened = await openAgentThreadById(this.#input.session, threadId);
+    if (opened.kind === "refused") {
+      this.#note = opened.message;
+      this.#draw();
+      return;
+    }
+    mode = opened.mode;
     this.#threadId = threadId;
     this.#mode = mode;
     this.#port = agentThreadPort(this.#input.session, mode, threadId);
@@ -611,6 +675,37 @@ class AgentScreen {
     const { t, fg, bold, dim } = this.#tui;
     const p = this.#palette;
     const session = this.#session;
+    const layout = agentTuiLayout(this.#renderer.width);
+    this.#sidebar.visible = layout.sidebar;
+    this.#info.visible = layout.info;
+    const projectThreads = this.#threads.filter(
+      (thread) => thread.projectId === this.#thread?.projectId,
+    );
+    this.#sidebar.content = [
+      "Threads · /threads",
+      "",
+      ...projectThreads
+        .slice(0, 20)
+        .map(
+          (thread) =>
+            `${thread.id === this.#threadId ? "●" : "○"} ${thread.awaitingInput ? "Needs input" : thread.executing ? "Working" : "Idle"} · ${thread.title}`,
+        ),
+    ].join("\n");
+    this.#info.content = [
+      this.#thread?.title ?? "Thread",
+      "",
+      `Mode: ${this.#mode}`,
+      `Model: ${this.#thread?.modelId ?? "Unavailable"}`,
+      "",
+      "Context and usage",
+      statusLineFrom(this.#thread, session),
+      "",
+      "Checkout changes",
+      "/diff opens review",
+      "",
+      "/model changes model",
+      "/next-waiting opens an ask",
+    ].join("\n");
     const title = this.#thread?.title ?? "Octant";
     const status = session?.session.status ?? "";
     const statusColor =
@@ -643,6 +738,15 @@ class AgentScreen {
     const pending =
       session?.questions.find((question) => question.status === "pending") ??
       this.#thread?.pendingQuestion;
+    if (
+      pending !== undefined ||
+      session?.approvals?.some((entry) => entry.status === "pending") ||
+      this.#siteApproval !== undefined
+    ) {
+      this.#listing = undefined;
+      this.#suggestions = undefined;
+      this.#showHelp = false;
+    }
     // A new ask must not be hidden behind review.
     if (
       pending !== undefined ||
@@ -667,6 +771,20 @@ class AgentScreen {
       this.#drawn = digest;
       for (const child of this.#transcript.getChildren()) child.destroyRecursively();
       if (this.#diff === undefined) {
+        if (entries.length === 0) {
+          this.#transcript.add(
+            new this.#tui.TextRenderable(this.#renderer, {
+              content: this.#renderer.width >= 100 ? agentTuiMark : "◆",
+              fg: p.accent,
+            }),
+          );
+          this.#transcript.add(
+            new this.#tui.TextRenderable(this.#renderer, {
+              content: `Octant · ${this.#thread?.modelId ?? "Reading model…"}\nDescribe a task to start. Ctrl+P opens commands.`,
+              fg: p.textSecondary,
+            }),
+          );
+        }
         for (const entry of entries) this.#transcript.add(this.#entryBox(entry, spinner));
       } else {
         const diff = this.#diff;
@@ -711,10 +829,15 @@ class AgentScreen {
 
     const approval = session?.approvals?.find((entry) => entry.status === "pending");
     const site = this.#siteApproval;
-    if (this.#suggestions !== undefined && this.#suggestions.items.length > 0) {
+    if (this.#listing === "palette") {
+      this.#panel.title = " Command palette ";
+      this.#panelText.content =
+        "diff · review checkout changes\nthreads · list sessions\nnew · start a session\nmodel · choose provider/model\nnext-waiting · open a pending ask\nagents · helper agents\ngoal · objective\nType a command and Enter. Ctrl+P closes.";
+      this.#panel.visible = true;
+    } else if (this.#suggestions !== undefined && this.#suggestions.items.length > 0) {
       this.#panel.title = this.#suggestions.kind === "file" ? " Files " : " Threads ";
       this.#panel.borderColor = p.border;
-      this.#panelText.content = t`${fg(p.textSecondary)(this.#suggestions.items.join("\n"))}\n${dim(fg(p.muted)(this.#suggestions.kind === "file" ? "Type the rest of the name; images, PDFs, and text files attach to the prompt." : "Type the rest of the title; the thread's transcript is read-only context for this turn."))}`;
+      this.#panelText.content = t`${fg(p.textSecondary)(this.#suggestions.items.join("\n"))}\n${dim(fg(p.muted)(this.#suggestions.kind === "file" ? "Tab completes the first match; finish the path to attach it." : "Type the rest of the title; the thread's transcript is read-only context for this turn."))}`;
       this.#panel.visible = true;
     } else if (this.#listing === "threads") {
       this.#panel.title = " Threads ";
@@ -744,7 +867,7 @@ class AgentScreen {
           model.modelId === this.#thread.modelId;
         return `${here ? "●" : "○"} ${index + 1}. ${model.displayName}  ${model.endpoint}${model.contextLimit === undefined ? "" : `  ${Math.round(model.contextLimit / 1000)}k`}`;
       });
-      this.#panelText.content = t`${fg(p.textSecondary)(lines.length === 0 ? "No harness endpoint offers a model yet. Add one in Settings → Providers." : lines.join("\n"))}\n${dim(fg(p.muted)("/model N switches the thread's model."))}`;
+      this.#panelText.content = t`${fg(p.textSecondary)(lines.length === 0 ? "No enabled provider offers a model yet. Add one in Settings → Providers." : lines.join("\n"))}\n${dim(fg(p.muted)("/model N switches the thread's model."))}`;
       this.#panel.visible = true;
     } else if (this.#listing === "goal") {
       this.#panel.title = " Goal ";
@@ -760,7 +883,7 @@ class AgentScreen {
           "Shift+Enter  new line",
           "Esc          stop the running turn        Ctrl+C  stop, twice to quit",
           "Ctrl+E       show / hide diffs and output  Ctrl+R  show / hide reasoning",
-          "Ctrl+P       pause / resume the run        PgUp/PgDn · Ctrl+Home/End  scroll",
+          "Ctrl+P       command palette · Ctrl+O pause / resume        PgUp/PgDn · Ctrl+Home/End  scroll",
           "/next N      take a suggested follow-up    /pause /resume /model /threads /open N /quit",
           "/diff        review current checkout changes · Esc returns",
           "/side text   ask Side Chat, which only reads  /back  return to the thread",
@@ -950,7 +1073,7 @@ class AgentScreen {
   ): void {
     const { TextRenderable, t, fg, dim } = this.#tui;
     const p = this.#palette;
-    const shown = tools.slice(-SHOWN_TOOL_LINES);
+    const shown = this.#verbose ? tools : tools.slice(-SHOWN_TOOL_LINES);
     const folded = total - shown.length;
     const width = Math.max(4, ...shown.map((tool) => tool.name.length));
     if (folded > 0) {
@@ -1076,7 +1199,7 @@ class AgentScreen {
     const p = this.#palette;
     const chunks: import("@opentui/core").TextChunk[] = [];
     let inFence = false;
-    const lines = text.split("\n");
+    const lines = terminalMarkdownTables(text).split("\n");
     lines.forEach((line, index) => {
       const eol = index < lines.length - 1 ? "\n" : "";
       if (line.startsWith("```")) {
@@ -1086,7 +1209,14 @@ class AgentScreen {
         return;
       }
       if (inFence) {
-        chunks.push(fg(p.success)(`│ ${line}${eol}`));
+        chunks.push(fg(p.muted)("│ "));
+        const tokens = line.split(
+          /(\b(?:const|let|function|return|import|from|export|class|interface|type|async|await|if|else|throw|new|def|fn|pub|use)\b|"[^"\n]*"|'[^'\n]*'|\b\d+(?:\.\d+)?\b)/g,
+        );
+        tokens.forEach((token, index) =>
+          chunks.push(fg(index % 2 === 1 ? p.accent : p.textSecondary)(token)),
+        );
+        chunks.push(fg(p.muted)(eol));
         return;
       }
       const heading = /^(#{1,6})\s+(.*)$/.exec(line);
@@ -1117,7 +1247,14 @@ class AgentScreen {
   }
 
   async #submit(): Promise<void> {
-    const text = this.#composer.plainText.trim();
+    const entered = this.#composer.plainText.trim();
+    const text =
+      this.#listing === "palette" && entered.length > 0
+        ? entered.startsWith("/")
+          ? entered
+          : `/${entered}`
+        : entered;
+    if (this.#listing === "palette") this.#listing = undefined;
     this.#composer.setText("");
     if (this.#showHelp) {
       this.#showHelp = false;
@@ -1187,8 +1324,49 @@ class AgentScreen {
       this.#draw();
       return;
     }
+    if (text === "/new") {
+      const response = await this.#input.session.send({
+        path: "/api/projects/bootstrap",
+        method: "GET",
+      });
+      const project =
+        response.status === 200
+          ? decodeHostAnswer(ProjectBootstrap)(response.body).active.find(
+              (entry) => String(entry.id) === this.#thread?.projectId,
+            )
+          : undefined;
+      if (this.#mode !== "chat" && project === undefined) {
+        this.#note = "The Project is unavailable.";
+        this.#draw();
+        return;
+      }
+      const model = this.#models.find(
+        (entry) =>
+          entry.instanceId === this.#thread?.providerInstanceId &&
+          entry.modelId === this.#thread?.modelId,
+      );
+      const created = await createAgentThread(this.#input.session, {
+        mode: this.#mode,
+        title: "New session",
+        projectName: project?.name,
+        ...(model === undefined ? {} : { model: `${model.endpoint}/${model.modelId}` }),
+      });
+      if (created.kind === "refused") this.#note = created.message;
+      else await this.#switchThread(created.threadId, created.mode);
+      this.#draw();
+      return;
+    }
+    if (text === "/next-waiting") {
+      const next = this.#threads.find(
+        (thread) => thread.awaitingInput && thread.id !== this.#threadId,
+      );
+      if (next === undefined) this.#note = "No other waiting thread is currently reported.";
+      else await this.#switchThread(next.id, next.mode);
+      this.#draw();
+      return;
+    }
     if (text === "/threads") {
-      this.#threads = await listAgentThreads(this.#input.session);
+      this.#threads = await listAgentNavigation(this.#input.session, this.#mode);
       this.#listing = this.#listing === "threads" ? undefined : "threads";
       this.#draw();
       return;
@@ -1228,27 +1406,13 @@ class AgentScreen {
       }
       const choice = /^\d+$/.test(argument)
         ? this.#models[Number(argument) - 1]
-        : this.#models.find(
-            (model) =>
-              model.modelId === argument ||
-              model.displayName.toLowerCase() === argument.toLowerCase(),
-          );
+        : pickAgentModel(this.#models, argument);
       if (choice === undefined || this.#thread === undefined) {
         this.#note = "Pick a model by number from /model: /model 2";
         this.#draw();
         return;
       }
-      if (this.#thread.mode !== "chat") {
-        this.#note =
-          "Change a Work or Code thread's model from the app; the terminal switches Chat threads only.";
-        this.#draw();
-        return;
-      }
-      const changed = await changeAgentModel(
-        this.#input.session,
-        { thread: { id: this.#thread.id, version: this.#thread.version } } as never,
-        choice,
-      );
+      const changed = await changeAgentThreadModel(this.#input.session, this.#thread, choice);
       this.#note = changed.kind === "refused" ? changed.message : `Now on ${choice.displayName}.`;
       this.#listing = undefined;
       await this.refresh();

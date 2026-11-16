@@ -6610,7 +6610,10 @@ The exact API, account limitations and verification boundary are owned by
 
 - **CLI model selection.** An explicit `octant agent --model` selects the
   provider account and model for a new Chat thread before its first prompt.
-  Work and Code retain their harness-endpoint selection. Unknown or ambiguous
+  Work and Code also list enabled text providers, including native coding runtimes.
+  Work reads its configured provider/model default; without a usable default,
+  an interactive terminal offers a picker. Noninteractive callers must supply
+  a unique model when several choices exist. Unknown or ambiguous
   names refuse before inference; a qualified name must identify exactly one
   account/model pair. The creation flag cannot silently override or be ignored
   when attaching with `--thread` or `--last`; that combination is refused.
@@ -10274,7 +10277,18 @@ the model at another size.
   and Code adapters over the modes' own routes, plus creation), `agentHost.ts`
   the harness calls, `agentTuiModel.ts` the pure presentation (transcript,
   footer, palette projected from `@octant/theme` tokens), and `agentTui.ts`
-  the OpenTUI screen, loaded only when stdout is a terminal and `--plain` or
+  the OpenTUI screen. The terminal reads each mode's lightweight navigation
+  projection, preserves its mode when switching, and opens the destination
+  through the host's window commands. At 100 columns it shows the thread list;
+  at 140 it also shows thread information. `/threads` remains available at
+  smaller widths. `/next-waiting` opens another pending thread in the current
+  mode; an unavailable navigation read retains the last list with a notice.
+  Ctrl+P opens the command palette; Ctrl+O pauses or resumes. `/model` sends
+  the mode's versioned provider-change command and preserves host refusals.
+  Source-path mentions remain prompt context for Code and Work, whose runtimes
+  read their bound Project. Image mentions stage through their attachment routes
+  and the next turn carries those identifiers. The screen is loaded only when
+  stdout is a terminal and `--plain` or
   `--json` was not asked for. Starting needs no subcommand: `octant` alone at
   a terminal, a run that begins with one of the agent's flags
   (`octant --last`), or a quoted prompt (`octant "fix the tests"`, which no
