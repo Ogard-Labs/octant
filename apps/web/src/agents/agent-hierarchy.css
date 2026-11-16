@@ -551,6 +551,15 @@
   font-weight: normal;
 }
 
+/* A message for a running subagent: one line, the field taking the room. */
+.composer-subagents__message {
+  display: flex;
+  flex: 1 1 12rem;
+  align-items: center;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
 /* Stop appears on the row the pointer or focus is on. Hidden rather than
    transparent, so the status words at rest end at one edge. Focusing the
    row's button reveals it, so the next Tab reaches it. */

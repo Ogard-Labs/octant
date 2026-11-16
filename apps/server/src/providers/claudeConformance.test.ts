@@ -395,6 +395,7 @@ class ConformanceQuery implements ClaudeQueryPort {
   };
 
   readonly stopTask = () => Effect.succeed("unsupported" as const);
+  readonly backgroundTask = () => Effect.succeed("unsupported" as const);
 
   readonly interrupt = () =>
     Effect.promise(async () => {

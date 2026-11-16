@@ -93,6 +93,26 @@
   padding-top: 0.75rem;
 }
 
+/* Pages a thread published to claude.ai: one card per page, its facts and
+   actions under it, its snapshot drawn below when the person asks. */
+.artifact-library__claude {
+  display: grid;
+  gap: 0.75rem;
+  padding-top: 0.75rem;
+}
+
+.artifact-library__claude-page {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.artifact-library__claude-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
 /* The list answer to the card grid: one compact row per artifact, its facts
    on one line, the tags it carries beside them. */
 .artifact-library__list {

@@ -472,3 +472,78 @@ describe("artifacts synced across this person's computers", () => {
     expect(screen.queryByRole("button", { name: /^Versions of/ })).toBeNull();
   });
 });
+
+describe("Claude pages in the artifact library", () => {
+  const withClaude = {
+    ...listing,
+    claude: [
+      {
+        url: "https://claude.ai/artifact/hero",
+        title: "Hero",
+        artifactType: "Design",
+        account: "claude-work",
+        accountName: "Claude (work)",
+        projectId: "20000000-0000-4000-8000-000000000001",
+        projectName: "Storefront",
+        mode: "work",
+        threadId: "70000000-0000-4000-8000-000000000002",
+        threadTitle: "Landing page",
+        toolCallId: "call-2",
+        versionCount: 2,
+        publishedAt: "2026-08-18T08:00:00.000Z",
+        snapshot: "html",
+      },
+    ],
+    claudeMatchCount: 1,
+    claudeTypes: ["Design"],
+    claudeAccounts: [{ account: "claude-work", name: "Claude (work)", pageCount: 1 }],
+  } as unknown as ArtifactLibraryListing;
+
+  it("lists a page published to claude.ai with its type, account, thread and versions, and shows its snapshot on request", async () => {
+    const user = userEvent.setup();
+    const onLoadSnapshot = vi.fn(async () => ({
+      kind: "claude-snapshot" as const,
+      snapshot: { format: "markdown" as const, content: "Hero copy" },
+    }));
+    view({ listing: withClaude, claudePageActions: { onLoadSnapshot } });
+
+    const page = screen.getByRole("listitem", { name: "Claude page: Hero" });
+    expect(page).toHaveTextContent("Design");
+    expect(page).toHaveTextContent("Published by Claude (work)");
+    expect(page).toHaveTextContent("Landing page · Storefront");
+    expect(page).toHaveTextContent("2 versions");
+    expect(within(page).getByRole("link")).toHaveAttribute(
+      "href",
+      "https://claude.ai/artifact/hero",
+    );
+
+    await user.click(within(page).getByRole("button", { name: "Show snapshot" }));
+    expect(onLoadSnapshot).toHaveBeenCalledWith(expect.objectContaining({ toolCallId: "call-2" }));
+    expect(await within(page).findByText("Hero copy")).toBeInTheDocument();
+  });
+
+  it("filters by source, Claude type and account, a Claude type replacing a Canvas kind", async () => {
+    const user = userEvent.setup();
+    const { onFiltersChange } = view({
+      listing: withClaude,
+      filters: { tab: "all", query: "", kind: "chart" },
+    });
+
+    // One Filter menu holds every choice and stays open between picks.
+    await user.click(screen.getByRole("button", { name: "Filter, 1 active" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Design (Claude)" }));
+    expect(onFiltersChange).toHaveBeenLastCalledWith({
+      tab: "all",
+      query: "",
+      claudeType: "Design",
+    });
+
+    await user.click(screen.getByRole("menuitemradio", { name: "Claude" }));
+    expect(onFiltersChange).toHaveBeenLastCalledWith(expect.objectContaining({ source: "claude" }));
+
+    await user.click(screen.getByRole("menuitemradio", { name: "Claude (work) (1)" }));
+    expect(onFiltersChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ account: "claude-work" }),
+    );
+  });
+});

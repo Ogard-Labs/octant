@@ -12,7 +12,7 @@ import {
 } from "./buildAgentHierarchyModel";
 import { SubagentStatusIcon, subagentElapsedLabel, subagentStatusWord } from "./subagentStatus";
 import { AgentResultPreview, latestResultPacket } from "./AgentRunResults";
-import { ObservedChildRow } from "./ObservedChildActivity";
+import { ObservedChildRow, type ObservedChildClient } from "./ObservedChildActivity";
 import type { SubagentProviderIdentity } from "./AgentRunDependencyGraph";
 import { SubagentProviderMark, useSubagentProviders } from "./subagentProviders";
 import {
@@ -92,7 +92,7 @@ export interface SubagentsTrayProps {
   /** Cancels every active subagent on the thread. Already confirmed when called. */
   readonly onStopAll: () => void;
   /** Stops one provider-native subagent where the host offers it. */
-  readonly stopClient?: Pick<AgentRunClient, "stopObserved">;
+  readonly stopClient?: ObservedChildClient;
   readonly busy?: boolean;
   /**
    * What is shown is the last status the host reported. The tray dims and stops

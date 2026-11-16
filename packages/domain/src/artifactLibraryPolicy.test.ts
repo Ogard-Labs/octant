@@ -8,7 +8,9 @@ import {
   artifactEditedAgo,
   artifactKindForBlocks,
   artifactTagRoster,
+  foldClaudePublishes,
   selectArtifactLibraryEntries,
+  selectClaudeLibraryEntries,
   selectSyncedArtifactLibraryEntries,
 } from "./artifactLibraryPolicy";
 
@@ -239,5 +241,67 @@ describe("choosing synced artifacts for a library query", () => {
 
   it("matches nothing under a tag filter, because this host holds none to tag", () => {
     expect(selectSyncedArtifactLibraryEntries([synced], query({ tag: "Launch" }))).toEqual([]);
+  });
+});
+
+describe("Claude pages in the library", () => {
+  const base = {
+    url: "https://claude.ai/artifact/deck",
+    projectId: "20000000-0000-4000-8000-000000000001" as never,
+    projectName: "Storefront",
+    mode: "code" as const,
+    threadId: "70000000-0000-4000-8000-000000000002",
+  };
+
+  it("folds an update into the page it updates and keeps the type and title an earlier publish gave it", () => {
+    const [deck] = foldClaudePublishes([
+      {
+        ...base,
+        title: "Pitch",
+        artifactType: "Slides",
+        account: "claude-work",
+        toolCallId: "first",
+        publishedAt: "2026-08-18T08:00:00.000Z" as never,
+        sequence: 1,
+      },
+      {
+        ...base,
+        account: "claude-personal",
+        toolCallId: "update",
+        publishedAt: "2026-08-18T09:00:00.000Z" as never,
+        sequence: 2,
+      },
+    ]);
+    expect(deck).toMatchObject({
+      title: "Pitch",
+      artifactType: "Slides",
+      account: "claude-personal",
+      toolCallId: "update",
+      versionCount: 2,
+    });
+  });
+
+  it("shows the update that came last in its thread when a publish and its update share one time", () => {
+    const sameTurn = "2026-08-18T08:00:00.000Z" as never;
+    const [deck] = foldClaudePublishes([
+      { ...base, title: "Draft", toolCallId: "z-publish", publishedAt: sameTurn, sequence: 1 },
+      { ...base, title: "Final", toolCallId: "a-update", publishedAt: sameTurn, sequence: 2 },
+    ]);
+    expect(deck).toMatchObject({ title: "Final", toolCallId: "a-update", versionCount: 2 });
+  });
+
+  it("reads a publish that named no type as a plain page", () => {
+    const [page] = foldClaudePublishes([
+      {
+        ...base,
+        toolCallId: "only",
+        publishedAt: "2026-08-18T08:00:00.000Z" as never,
+        sequence: 1,
+      },
+    ]);
+    expect(page).toMatchObject({ title: "Published page", artifactType: "Page" });
+    const pages = page === undefined ? [] : [page];
+    expect(selectClaudeLibraryEntries(pages, { tab: "shared" })).toEqual([]);
+    expect(selectClaudeLibraryEntries(pages, { tab: "all", claudeType: "Page" })).toEqual(pages);
   });
 });

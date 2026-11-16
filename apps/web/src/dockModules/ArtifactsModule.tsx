@@ -1,6 +1,7 @@
 import {
   ArtifactLibraryClientFailure,
   loadArtifactLibrary,
+  loadClaudePageSnapshot,
 } from "@octant/client-runtime/artifact-library-client";
 import type {
   ArtifactLibraryEntry,
@@ -9,6 +10,7 @@ import type {
 import { decodeWorkspaceTab, decodeWorkspaceTabId } from "@octant/contracts";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { ArtifactListRow } from "../artifacts/ArtifactListRow";
+import { ClaudePageCard } from "../artifacts/ClaudePageCard";
 import { createThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
 import { Compass } from "../ui/icons";
@@ -133,6 +135,7 @@ export default function ArtifactsModule(props: Props) {
   }
 
   const { entries, truncated } = state.listing;
+  const claudePages = state.listing.claude ?? [];
   return (
     <section aria-label="Project artifacts" className="dock-artifacts">
       <div className="dock-artifacts__bar">
@@ -146,9 +149,9 @@ export default function ArtifactsModule(props: Props) {
         </OctantButton>
       </div>
       <div className="dock-artifacts__body">
-        {entries.length === 0 ? (
+        {entries.length === 0 && claudePages.length === 0 ? (
           <OctantEmpty
-            detail="Canvas documents made in this Project appear here."
+            detail="Canvas documents and pages published to claude.ai from this Project appear here."
             icon={<Compass size={16} />}
             layout="line"
             title="No artifacts yet"
@@ -161,6 +164,24 @@ export default function ArtifactsModule(props: Props) {
                 entry={entry}
                 observedAt={observedAt}
                 onOpen={setOpen}
+              />
+            ))}
+          </ul>
+        )}
+        {claudePages.length === 0 ||
+        serverUrl === undefined ||
+        windowCapability === undefined ? null : (
+          <ul aria-label="Published to claude.ai" className="artifact-library__claude">
+            {claudePages.map((page) => (
+              <ClaudePageCard
+                entry={page}
+                key={page.url}
+                onLoadSnapshot={(entry) =>
+                  loadClaudePageSnapshot(
+                    { baseUrl: serverUrl, fetch, windowCapability },
+                    { mode: entry.mode, threadId: entry.threadId, toolCallId: entry.toolCallId },
+                  )
+                }
               />
             ))}
           </ul>
