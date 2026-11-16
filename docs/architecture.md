@@ -1435,8 +1435,13 @@ document as a future version. Frames follow the
   respect authority sees: the same window context, Project, and create-policy
   checks run on the host before the page is read, the server writes the
   Canvas, and a paired device imports and creates as a local window does
-  (maintainer decision, 2026-11-12; not built yet: today a paired device may
-  neither import nor create). The host
+  (maintainer decision, 2026-11-12). Built for import: a device the host's own
+  person paired has no window context, so its import is checked against the
+  mode and Project its request's workspace scope names (an active Project of
+  that mode, or a Chat thread's own Canvas in no Project) and journaled with
+  the device as actor, while the version keeps the person as author; the
+  paired browser offers no create panel yet, and a device's plain create is
+  not built. The host
   bounds the page (256 KiB, and one frame and stylesheet after the import)
   and answers `too-large`, `not-html`, `unparseable`, `empty`, or
   `unsupported` before anything is journaled. The tier is the design policy's
@@ -3777,8 +3782,11 @@ Project's board and proposes new Code threads for a person to accept. The
 server, contracts, domain policy (`@octant/domain/code-planner-policy`), and
 client-runtime transport implement it. The Code Project overview's **Project
 planner** section lets a person designate an existing same-Project thread,
-inspect proposals, remove the designation and approve or decline. Phone and CLI
-designation or resolution are not added. The rules are:
+inspect proposals, remove the designation and approve or decline. A paired
+browser and phone approve or decline a coordinator's proposed worker as it was
+asked for (a new managed worktree from the coordinator's base branch, on the
+named provider and model, at the requested level), journaled as the device;
+CLI designation or resolution are not added. The rules are:
 
 - **Routes.** `GET /api/code/planner/:projectId` returns the designation, its
   version, and the proposals; it needs only the authenticated window's access
@@ -14293,7 +14301,10 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   - **Claude Code's full tool preset.** Outside Plan and Chat, Octant offers
     Claude Code's full built-in tool preset with no Octant deny list.
   - **OpenCode's `task` subagents** are always allowed outside Plan, instead
-    of following the level; Plan still denies them.
+    of following the level; Plan still denies them. Built: `task` and 2.x
+    `subagent` start unasked at every level outside Plan, a child session's
+    requests still reach the person through the parent's approval path, and a
+    person's own OpenCode rule denying `task` still wins.
 
   Rationale: each provider then behaves as its own documentation says, and
   Octant's server still answers every ask the provider raises and journals
@@ -14341,8 +14352,10 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     Codex: outside Strict a Work or Code thread below Full access runs in
     Codex's own sandbox, which reads them as Codex on its own does, and a
     Plan or Chat lease keeps Octant's profile with only other providers'
-    sign-ins refused. Not built yet for OpenCode, whose processes are shared
-    per posture and do not yet key on Strict. Until
+    sign-ins refused. Built for OpenCode, whose shared process is keyed on
+    Strict: outside Strict its wall and its permission rules refuse only
+    other providers' sign-ins, and a process started under one Strict value
+    refuses a session asking for the other. Until
     [Providers run in their own sandbox](#security-and-authority) is built for
     a runtime, its wall still keeps files outside the Project's folders
     unreadable, so outside Strict the narrowing reaches the protected files
@@ -14543,19 +14556,27 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   on pull requests; a thread's wake-ups
   ([wake-ups](#modes-chat-work-and-code)); Safe networks and Network limits;
   local work resource limits; growing an MCP grant by answering any prompt
-  whose thread still stands in its Project; and Full access and extension
-  install, built earlier. Each is journaled with the device as the actor. Not
-  built yet: a Project terminal and Project browser, the Browser's Take over
-  and Hand back, `sign-in`, profile pages and saved flows, finishing a
-  connector sign-in, creating an agent grant, approving a coordinator proposal
-  from the paired clients, Canvas HTML import, provider cloud sessions and
-  server Projects. Each owning section keeps its own "not built yet" line
-  until it is built. A device the host knows only through the hub's roster is
-  unchanged.
+  whose thread still stands in its Project; a Project terminal, the device's
+  own shell, ended when the device is revoked or goes quiet; a Private
+  Project browser page; making and changing agent grants, over the forwarded
+  `/api/agent-grants/commands` route and the paired browser's Agent access
+  settings; approving or declining a coordinator's proposed worker from the
+  paired browser and phone, as the coordinator asked for it; Canvas HTML
+  import, whose request names its Project in its workspace scope; and Full
+  access and extension install, built earlier. Each is journaled with the
+  device as the actor. Not built yet: the Browser's Take over and Hand back,
+  `sign-in`, profile pages and saved flows, which drive the desktop's native
+  Browser and have no remote input path; finishing a connector sign-in,
+  whose redirect returns to this host's loopback; provider cloud sessions,
+  whose submission policy and job records know only a local window; and
+  server Projects beyond reading, whose journaled records name only a local
+  window. Each owning section keeps its own "not built yet" line until it is
+  built. A device the host knows only through the hub's roster is unchanged.
 
   **Provider reach Octant no longer narrows** (maintainer decision,
-  2026-11-16; partly built: Ollama off loopback and Bedrock's AWS profile and
-  access keys are built, the rest is designed, not built):
+  2026-11-16; partly built: Ollama off loopback, Bedrock's AWS profile and
+  access keys, and Kimi Code's unverified command inventory are built, as
+  each item says):
   - **Ollama off loopback.** An Ollama address on the local network or a
     hosted Ollama is allowed, and plain HTTP to a private-network address is
     allowed with a warning; a public address still needs HTTPS
@@ -14568,7 +14589,10 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     the one a version pin was reviewed against is offered as "unverified"
     instead of losing the pinned features (Kimi Code's command inventory,
     OpenCode's Octant tools, an ACP probe's claims); below Full access the
-    pin holds ([Provider runtimes](design/provider-runtimes.md)).
+    pin holds ([Provider runtimes](design/provider-runtimes.md)). Built for
+    Kimi Code's command inventory; OpenCode's Octant tools were already
+    offered at Full access on any release that accepts them (`mixed`). Not
+    built yet for an ACP probe's exact-release claims.
   - **Linux parity.** Octant's tools reach OpenCode and ACP agents on Linux
     as on macOS (built: the launch reaches the tool bridge on the shared host
     network, or through the egress forwarder's loopback relay for the
@@ -15346,7 +15370,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
     native sandboxes. Copilot CLI and Cursor follow once their ACP releases
     are checked for a sandbox Octant can configure, and Grok Build once it is
     known why its launch sets `GROK_SANDBOX=off`; until then each keeps
-    Octant's profile.
+    Octant's profile. A provider's own sandbox replaces Octant's profile
+    only where it can keep other providers' sign-ins unreadable, since one
+    provider never reads another's credentials, Strict or not. Checked, and
+    kept on Octant's profile below Full access for that reason or the ones
+    [Provider runtimes](design/provider-runtimes.md#own-sandboxes-checked-and-not-switched)
+    records: Gemini CLI, Qwen Code, Copilot CLI, Cursor and Grok Build.
   - **Unchanged.** Server-side approval authority and journaling; Plan's
     read-only enforcement and no shell in Chat; the paired-device and
     routine rules; never handing one provider another's credentials;
@@ -15366,9 +15395,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Code settings for the same reason. Octant's profile cannot hold a native sandbox inside
   it on macOS, which refuses nested Seatbelt, so keeping the wall means
   giving the native sandbox up. The accepted trade-off: below Full access a
-  provider's native sandbox may allow reads outside the Project, other
-  credentials included, as the provider on its own does; a person who wants
-  those reads closed turns Strict on.
+  provider's native sandbox may allow reads outside the Project, the
+  person's other credentials included, as the provider on its own does; a
+  person who wants those reads closed turns Strict on. Another provider's
+  sign-in is never among them: a native sandbox that cannot refuse those
+  keeps Octant's profile.
 
   | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                                                     | OS egress below Full access                  | Plan's read-only enforced by                                                                                                                                                                                                               |
   | ------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -16278,8 +16309,16 @@ approval-gated` command that undoes it. The terminal shows no one-time
   user-initiated terminal the Code policy already lets a local person open in
   an approval-gated thread without a prompt, so it asks for none and reaches no
   further than that thread's terminal. A paired device uses it as the local
-  person does (maintainer decision, 2026-11-12). Not built yet: today a paired
-  device is refused outright: a remote Code terminal is gated as an agent,
+  person does (maintainer decision, 2026-11-12). Built: a device the host's
+  own person paired starts, attaches to, types into, resizes, reads and stops
+  its own shell in a local Work or Code Project it reaches; the shell belongs
+  to the device's scope as a window's belongs to its window, its start and
+  end are journaled with the device as actor, and the host ends it as
+  `authority-revoked` once the device is revoked or expires and as
+  `transport-lost` after a minute with no command from it (a paired client
+  reads a shown shell's output every few seconds). Saved actions, worktree
+  setup and a server Project's shell stay at a window. A device the hub's
+  roster introduced is refused: a remote Code terminal is gated as an agent,
   and a Project terminal has no thread to hold that approval. The shell runs under the posture a new thread
   in the Project starts with, approval-gated or Full access where a Code
   Project remembers it (a Work Project's terminal is approval-gated); Plan never applies, because nothing plans in it. Built: outside Strict the terminal runs unconfined, a Work Project's included, read at each start from the task's Strict value for a terminal opened for a Work task, else the Project's (its own default, else its mode's Settings default); a terminal on a Plan checkout stays read-only ([Octant adds no restrictions of its own unless Strict is on](#security-and-authority)). The owning
@@ -16465,9 +16504,13 @@ approval-gated` command that undoes it. The terminal shows no one-time
   runtime is handed only the page action, never an authority. Only the person,
   at a local window whose workspace holds that Project for its mode or at a
   paired device that reaches it, may open, read, or close it (maintainer
-  decision, 2026-11-12). Not built yet: today a paired device is refused
-  outright, because creating a browsing context is local-only and a Project
-  page has no thread whose approval could stand in. It opens only http and https addresses; a
+  decision, 2026-11-12). Built: a device the host's own person paired opens,
+  reads and closes its own Private page for an active Work or Code Project;
+  the page belongs to the device's scope and closes when the device is
+  revoked or expires. A profile page, which opens in the desktop's native
+  Browser with the person's sign-ins, opens only at a window, and a device
+  the hub's roster introduced is refused, because a Project page has no
+  thread whose approval could stand in. It opens only http and https addresses; a
   page on the same site takes a new address in place, and another site starts
   a fresh context whose allowlist is that site. It carries the host's usual
   session ceiling and is not journaled, like a thread's browsing context.
@@ -16685,7 +16728,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
     provider sign-in, and stores, replaces, or removes a provider key
     ([Provider credentials](#security-and-authority)); navigates and types in the host's agent Browser and reviews its session, upload, and download permissions, for every active Work or Code Project, since no workspace on the host is bound for a device; writes to a thread terminal and lists, reads, and starts a
     thread from a terminal session; merges a pull request or a stack, acts on
-    a pull request, and switches Merge when ready and Auto-fix; sets a
+    a pull request, and switches Merge when ready and Auto-fix; approves or
+    declines a coordinator's proposed worker; opens its own Project terminal
+    and a Private Project browser page; makes, changes, and revokes agent
+    grants, issues their connection codes and confirms their keys
+    (`/api/agent-grants/commands`); imports an HTML page into a new Canvas in
+    the Project its request names; sets a
     routine's level and agent merge; answers native harness approvals and
     questions and a thread's network access proposals, a Project rule included;
     approves a language server or debug start; reviews and clears a thread's
@@ -16701,8 +16749,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
     and revoking every device takes the asking one with the rest. The paired
     browser offers these where its shell has a control: the thread mode
     picker, Default modes, starting a Work or Code thread, tool prompts,
-    Settings › Extensions and Providers (key entry included), and Paired
-    devices. The phone offers the thread, Project, and default modes and
+    a coordinator's proposed workers, Settings › Extensions and Providers
+    (key entry included), Agent access, and Paired devices; the phone offers
+    a coordinator's proposed workers too. The phone offers the thread, Project, and default modes and
     Always allow in this Project on a rememberable tool prompt.
   - **What stays on the host.** The private listener forwards these to no
     device, a person-paired one included: the listener's own controls
@@ -16710,8 +16759,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     secret a window on the host holds and whose native controls (a folder
     picker, an external editor) exist only there; a window's own shell (its bootstrap, workspace commands and local sessions); linking a secret store and
     pointing a key at it, which are acts at the machine; pointing a runtime at an executable, which goes through the host's native file picker; choosing a new skill folder or a local plugin folder, which goes through the host's native folder picker; the replica store and its membership; and the whole host's
-    export, bulk data with no bound for a remote caller. Not built yet: provider cloud sessions (the submission policy and the job records know only a local window), server Projects beyond reading (binding, renaming, removing and their actions and Developer tools switch, whose journaled records name only a local window; the setup check; a server preview's tunnel), disk cleanup, switching a Canvas to another design system, the reviewed re-arm of a file routine, and diagnostics are not open to a person-paired device either, and creating or
-    widening an agent grant stays on the loopback administration channel. In
+    export, bulk data with no bound for a remote caller. Not built yet: provider cloud sessions (the submission policy and the job records know only a local window), server Projects beyond reading (binding, renaming, removing and their actions and Developer tools switch, whose journaled records name only a local window; the setup check; a server preview's tunnel), disk cleanup, switching a Canvas to another design system, the reviewed re-arm of a file routine, and diagnostics are not open to a person-paired device either. In
     the Browser no device takes the page over from the agent or hands it
     back, reads a signed-in profile's page or a capture, grants login
     permission, chooses a task profile, or runs, saves, or deletes a flow.

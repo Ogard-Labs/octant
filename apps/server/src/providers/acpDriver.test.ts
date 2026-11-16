@@ -2503,18 +2503,38 @@ describe("ACP provider driver profile quirks", () => {
     }
   });
 
-  it("fails closed when Kimi Code advertises an unreviewed embedded command", async () => {
+  it("offers a Kimi Code release with an unreviewed command as unverified: refused below Full access, run with that command at Full access", async () => {
     const { driver, client } = fixture(kimi);
     client.availableCommands.push("unexpected-provider-command");
 
-    const failure = await Effect.runPromise(
-      Effect.scoped(Effect.flip(driver.probe({ instanceId }))),
+    const probed = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect(probed.readiness).toBe("ready");
+    expect(probed.message).toContain("is unverified");
+    expect(probed.message).toContain("unexpected-provider-command");
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          const refused = yield* Effect.flip(
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+          );
+          expect(refused).toMatchObject({
+            category: "incompatible",
+            message:
+              "Kimi Code lists commands Octant has not reviewed, so this release runs at Full access only, unverified.",
+          });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "full-access" });
+          yield* connection.send({
+            sessionId,
+            prompt: "/unexpected-provider-command",
+            attachments: [],
+            tools: [],
+          });
+          expect(client.prompt).toHaveBeenCalled();
+          yield* connection.stop(sessionId);
+        }),
+      ),
     );
-    expect(failure).toEqual({
-      category: "incompatible",
-      reason: "runtime-incompatible",
-      message: "Kimi Code advertised an unreviewed command inventory.",
-    });
   });
 
   it("runs Kimi Code's own reviewed slash commands in Plan as in Code, and only those", async () => {

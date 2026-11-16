@@ -1013,6 +1013,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                 authenticatedWindowId,
                 callerAuthority,
                 command,
+                callerActor,
               ),
             ),
             200,

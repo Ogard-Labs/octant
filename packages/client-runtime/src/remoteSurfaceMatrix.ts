@@ -58,6 +58,7 @@ export type RemoteShellSurfaceKind =
   | "provider-setup"
   | "provider-credentials"
   | "device-management"
+  | "agent-access"
   | "listener-controls"
   | "host-controls";
 
@@ -206,6 +207,14 @@ const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
     description: "List, rename, and revoke paired devices, and approve a new device.",
     availability: "local-host-only",
     catalogAction: "desktop.approve-device",
+  },
+  {
+    id: "agent-access",
+    label: "Agent access",
+    description:
+      "Make, change and revoke outside agents' grants, issue connection codes and confirm keys.",
+    availability: "local-host-only",
+    catalogAction: "agent-access.manage",
   },
   {
     id: "listener-controls",

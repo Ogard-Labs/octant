@@ -9,6 +9,10 @@ import {
   type RemoteSessionStanding,
 } from "@octant/client-runtime";
 import {
+  createAgentGrantClient,
+  type AgentGrantClient,
+} from "@octant/client-runtime/agent-grant-client";
+import {
   createExtensionClient,
   type ExtensionClient,
 } from "@octant/client-runtime/extension-client";
@@ -103,6 +107,18 @@ export function createRemotePairedDeviceAdministrationClient(
   return createPairedDeviceAdministrationClient({
     baseUrl: REMOTE_CLIENT_BASE_URL,
     fetch: createRemoteProductFetch({ bridge }),
+  });
+}
+
+/**
+ * Outside agents' grants over the session: listed and revoked by every paired
+ * browser, and made and changed by one the host's own person paired.
+ */
+export function createRemoteAgentGrantClient(bridge: RemoteSessionBridge): AgentGrantClient {
+  return createAgentGrantClient({
+    baseUrl: REMOTE_CLIENT_BASE_URL,
+    fetch: createRemoteProductFetch({ bridge }),
+    windowCapability: NO_WINDOW_CAPABILITY,
   });
 }
 

@@ -391,6 +391,12 @@ export const AGENT_GRANT_ROUTES = {
   grants: "/api/agent-grants",
   revoke: "/api/agent-grants/revoke",
   threads: "/api/agent-grants/threads",
+  /**
+   * Every grant command (make, change, revoke, connection codes, keys) from a
+   * device the host's own person paired; a local window sends them through
+   * the desktop bridge instead.
+   */
+  commands: "/api/agent-grants/commands",
 } as const;
 
 export const AgentGrantRevokeRequest = Schema.Struct({

@@ -32,6 +32,7 @@ import {
   type PiRpcConnection,
   type PiSessionMode,
 } from "./piProcess";
+import { makePiNativeSessions } from "./piNativeSessions";
 import { PiRpcFailure, type PiRpcEvent, type PiRpcResponse } from "./piRpcClient";
 import { outputStopReason } from "./outputStopReason";
 import { providerApprovalCall } from "./providerApprovalCall";
@@ -52,6 +53,7 @@ export interface PiClientPort {
   readonly request: (
     type: string,
     fields?: Readonly<Record<string, unknown>>,
+    options?: { readonly timeoutMs?: number },
   ) => Promise<PiRpcResponse>;
   readonly respondToUi: (
     id: string,
@@ -76,6 +78,8 @@ export interface PiDriverOptions {
   readonly requestId?: () => string;
   /** Test seam for asserting bridge/process teardown ordering. */
   readonly managedToolsFactory?: typeof createPiManagedToolsBridge;
+  /** The person's own Pi session folder a thread may start from; defaults to Pi's own. */
+  readonly personSessionDirectory?: string;
 }
 
 interface ResumeIdentity {
@@ -131,6 +135,8 @@ interface SessionState {
   usage?: Extract<RuntimeEventWithoutEnvelope, { readonly kind: "usage" }>;
   usageIncomplete?: boolean;
   promptActive: boolean;
+  /** A requested compaction is running; Pi's own compaction events then belong to it. */
+  compacting?: boolean;
   terminal: boolean;
   closed: boolean;
   /** The last assistant message's stop reason, when Pi reported one Octant understands. */
@@ -163,6 +169,9 @@ const capabilities = {
   nativeChildAgents: "unsupported",
   harnessAutoReview: "unsupported",
   ...unsupportedChatCapabilities,
+  // Pi's RPC `compact` compacts the session it holds in every mode, outside a
+  // turn (Pi's RPC command reference).
+  sessionCompaction: { chat: "supported", work: "supported", code: "supported" },
 } as const;
 const MAX_REMEMBERED_TOOL_CALLS = 256;
 /** Pi's interface requests that expect no answer (`RpcExtensionUIRequest` in Pi's RPC types). */
@@ -195,6 +204,8 @@ export function piVerifiesManagedTools(version: string): boolean {
     PI_APP_MANAGED_TOOLS_FLOOR,
   );
 }
+/** How long a requested compaction may run before Octant stops waiting for it. */
+const PI_COMPACTION_TIMEOUT_MS = 10 * 60_000;
 /** The one release whose settled process Octant verified for warm reuse; others cold-resume. */
 const PI_WARM_REUSE_VERSION = "0.85.1";
 
@@ -319,6 +330,13 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
   return {
     kind: "pi",
     conversationOwnership: "provider",
+    nativeSessions: makePiNativeSessions({
+      instanceId: options.instanceId,
+      octantSessionDirectory: join(options.piHome, "sessions"),
+      ...(options.personSessionDirectory === undefined
+        ? {}
+        : { personSessionDirectory: options.personSessionDirectory }),
+    }),
     probe: ({ instanceId }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
@@ -773,7 +791,7 @@ function makeConnection(
       // docs), so how much of the earlier prompts survives is Pi's own choice.
       // An aborted or failed compaction carries no result and changed nothing.
       // The turn runner that sees the event says so for the rest of the turn.
-      if (event.type === "compaction_end" && state.promptActive) {
+      if (event.type === "compaction_end" && state.promptActive && state.compacting !== true) {
         if (record(event.result) !== undefined) {
           emit(state, { kind: "context-compacted", trigger: "automatic" });
         }
@@ -1227,6 +1245,85 @@ function makeConnection(
             );
           }),
         ),
+      // Pi's RPC `steer` queues a message into the running turn, delivered
+      // after the current assistant step finishes its tool calls and before
+      // the next model call (Pi's RPC command reference). A person's note and
+      // a relayed subagent result both go as text.
+      steer: ({ sessionId, message }) =>
+        stateFor(sessionId).pipe(
+          Effect.flatMap((state) => {
+            if (
+              !state.promptActive ||
+              state.terminal ||
+              state.compacting === true ||
+              message.trim().length === 0
+            )
+              return Effect.succeed("unsupported" as const);
+            return Effect.tryPromise({
+              try: () => state.client.request("steer", { message }),
+              catch: (error) => error,
+            }).pipe(
+              Effect.map(() => "steered" as const),
+              // Pi answers a steer it will not take (an extension command, a
+              // run that just ended) with a failed response, which leaves the
+              // turn as it was.
+              Effect.catchAll((error) =>
+                error instanceof PiRpcFailure && error.kind === "remote"
+                  ? Effect.succeed("unsupported" as const)
+                  : Effect.fail(providerFailure(error)),
+              ),
+            );
+          }),
+        ),
+      compact: ({ sessionId }) => {
+        const state = sessions.get(sessionId);
+        if (state === undefined || state.closed)
+          return Effect.succeed({ kind: "refused", reason: "no-session" } as const);
+        if (state.promptActive || state.compacting === true)
+          return Effect.succeed({ kind: "refused", reason: "turn-running" } as const);
+        state.compacting = true;
+        state.promptActive = true;
+        return Effect.tryPromise({
+          // A compaction summarizes the conversation with the model, which
+          // can take far longer than an ordinary request.
+          try: () => state.client.request("compact", {}, { timeoutMs: PI_COMPACTION_TIMEOUT_MS }),
+          catch: (error) => error,
+        }).pipe(
+          Effect.map((response) => {
+            const result = record(response.data);
+            const tokensBefore = result?.tokensBefore;
+            const tokensAfter = result?.estimatedTokensAfter;
+            emit(state, { kind: "context-compacted", trigger: "requested" });
+            return {
+              kind: "compacted" as const,
+              ...(typeof tokensBefore === "number" && Number.isSafeInteger(tokensBefore)
+                ? { tokensBefore }
+                : {}),
+              ...(typeof tokensAfter === "number" && Number.isSafeInteger(tokensAfter)
+                ? { tokensAfter }
+                : {}),
+            };
+          }),
+          // Pi writes the compaction entry only once the summary exists, but
+          // a failed response does not say how far it got, so the session is
+          // reported as possibly changed.
+          Effect.catchAll((error) =>
+            error instanceof PiRpcFailure && error.kind === "remote"
+              ? Effect.succeed({
+                  kind: "failed" as const,
+                  message: "Pi did not compact the session.",
+                  sessionMayHaveChanged: true,
+                })
+              : Effect.fail(providerFailure(error)),
+          ),
+          Effect.ensuring(
+            Effect.sync(() => {
+              state.compacting = false;
+              state.promptActive = false;
+            }),
+          ),
+        );
+      },
       interrupt: (sessionId) =>
         stateFor(sessionId).pipe(
           Effect.flatMap((state) =>
