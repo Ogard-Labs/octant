@@ -27,6 +27,13 @@ export const AgentObservedChild = Schema.Struct({
    * finished; everything else is read-only.
    */
   control: Schema.Literal("unavailable", "stop"),
+  /**
+   * The further controls the thread's running turn offers for this running
+   * child: `background` sends it to the background so the turn goes on, and
+   * `message` queues a note it reads with its next tool call. Absent or
+   * empty, only `control` applies.
+   */
+  steering: Schema.optional(Schema.Array(Schema.Literal("background", "message"))),
 }).annotations(strict);
 export type AgentObservedChild = typeof AgentObservedChild.Type;
 export const decodeAgentObservedChild = Schema.decodeUnknownSync(AgentObservedChild);
@@ -59,6 +66,56 @@ export const AgentObservedChildStopResponse = Schema.Union(
 export type AgentObservedChildStopResponse = typeof AgentObservedChildStopResponse.Type;
 export const decodeAgentObservedChildStopResponse = Schema.decodeUnknownSync(
   AgentObservedChildStopResponse,
+);
+/** Asks the thread's running turn to send one subagent its runtime started to the background. */
+export const AgentObservedChildBackgroundRequest = AgentObservedChildStopRequest;
+export type AgentObservedChildBackgroundRequest = AgentObservedChildStopRequest;
+export const decodeAgentObservedChildBackgroundRequest = decodeAgentObservedChildStopRequest;
+
+/** How a background request settled; the refusals read as a stop's do. */
+export const AgentObservedChildBackgroundResponse = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("backgrounded") }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: Schema.Literal("not-found", "unsupported", "not-live", "unauthorized"),
+  }).annotations(strict),
+);
+export type AgentObservedChildBackgroundResponse = typeof AgentObservedChildBackgroundResponse.Type;
+export const decodeAgentObservedChildBackgroundResponse = Schema.decodeUnknownSync(
+  AgentObservedChildBackgroundResponse,
+);
+
+export const MAX_AGENT_OBSERVED_CHILD_MESSAGE_CHARACTERS = 4096;
+/** A person's message for one running subagent its runtime started. */
+export const AgentObservedChildMessageRequest = Schema.Struct({
+  parentThreadId: AgentRunParentThreadId,
+  observationId: AgentObservedChild.fields.observationId,
+  message: Schema.String.pipe(
+    Schema.filter(
+      (value) =>
+        value.trim().length > 0 && value.length <= MAX_AGENT_OBSERVED_CHILD_MESSAGE_CHARACTERS,
+    ),
+  ),
+}).annotations(strict);
+export type AgentObservedChildMessageRequest = typeof AgentObservedChildMessageRequest.Type;
+export const decodeAgentObservedChildMessageRequest = Schema.decodeUnknownSync(
+  AgentObservedChildMessageRequest,
+);
+
+/**
+ * How a message settled. `queued` means the subagent reads it with its next
+ * tool call; one that makes none before it finishes never does.
+ */
+export const AgentObservedChildMessageResponse = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("queued") }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: Schema.Literal("not-found", "unsupported", "not-live", "unauthorized"),
+  }).annotations(strict),
+);
+export type AgentObservedChildMessageResponse = typeof AgentObservedChildMessageResponse.Type;
+export const decodeAgentObservedChildMessageResponse = Schema.decodeUnknownSync(
+  AgentObservedChildMessageResponse,
 );
 export const MAX_AGENT_RESULT_PACKETS = 16;
 export const MAX_AGENT_RESULT_SUMMARY_CHARACTERS = 4096;

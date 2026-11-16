@@ -3,6 +3,7 @@ import type {
   ArtifactKind,
   ArtifactLibraryEntry,
   ArtifactLibraryListing,
+  ArtifactLibrarySource,
   ArtifactLibraryTab,
 } from "@octant/contracts/artifact-library";
 import type { CanvasId, OctantMode, ProjectId } from "@octant/contracts";
@@ -15,6 +16,7 @@ import { OctantTabs, OctantTabsList, OctantTabsTab } from "../ui/base/OctantTabs
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ArtifactCard } from "./ArtifactCard";
 import { ArtifactListRow } from "./ArtifactListRow";
+import { ClaudePageCard, type ClaudePageActions } from "./ClaudePageCard";
 import { SyncedArtifactCard } from "./SyncedArtifactCard";
 import type { ArtifactLibraryFilters } from "./useArtifactLibrary";
 import type { ArtifactLibraryView as LibraryViewMode } from "./artifactLibraryViewPreference";
@@ -50,7 +52,16 @@ export interface ArtifactLibraryViewProps {
   readonly onTagAdd?: (canvasId: CanvasId, tag: string) => void;
   /** Removes one of the person's own tags; absent when this surface cannot change them. */
   readonly onTagRemove?: (canvasId: CanvasId, tag: string) => void;
+  /** What a Claude page's card can do on this surface. */
+  readonly claudePageActions?: ClaudePageActions;
 }
+
+/** A Claude type in the kind filter, kept apart from the Canvas kinds. */
+const CLAUDE_KIND_PREFIX = "claude:";
+const SOURCES: ReadonlyArray<{ readonly id: ArtifactLibrarySource; readonly label: string }> = [
+  { id: "canvas", label: "Canvas" },
+  { id: "claude", label: "Claude" },
+];
 
 const TABS: ReadonlyArray<{ readonly id: ArtifactLibraryTab; readonly label: string }> = [
   { id: "by-project", label: "By Project" },
@@ -87,6 +98,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
   const { filters, listing } = props;
   const entries = listing?.entries ?? [];
   const synced = listing?.synced ?? [];
+  const claudePages = listing?.claude ?? [];
   const syncActions = {
     ...(props.onSync === undefined ? {} : { onSync: props.onSync }),
     ...(props.onRestore === undefined ? {} : { onRestore: props.onRestore }),
@@ -100,7 +112,10 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
     filters.kind !== undefined ||
     filters.projectId !== undefined ||
     filters.mode !== undefined ||
-    filters.tag !== undefined;
+    filters.tag !== undefined ||
+    filters.source !== undefined ||
+    filters.claudeType !== undefined ||
+    filters.account !== undefined;
   // With nothing made yet there is nothing to search, sort, or arrange, and the
   // controls would frame one line of text. A filtered or Shared view keeps them,
   // because the way out of an empty result is through them.
@@ -109,6 +124,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
     !props.busy &&
     entries.length === 0 &&
     synced.length === 0 &&
+    claudePages.length === 0 &&
     !hasActiveFilters &&
     filters.tab !== "shared";
   const change = (next: Partial<ArtifactLibraryFilters>) =>
@@ -116,7 +132,9 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
   // Clearing a filter removes the key rather than setting it to undefined:
   // `exactOptionalPropertyTypes` treats those as different, and the query the
   // host decodes has no room for an explicitly absent field.
-  const clear = (key: "kind" | "projectId" | "mode" | "tag") => {
+  const clear = (
+    key: "kind" | "projectId" | "mode" | "tag" | "source" | "claudeType" | "account",
+  ) => {
     const { [key]: _removed, ...rest } = filters;
     props.onFiltersChange(rest);
   };
@@ -163,24 +181,77 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
               />
             </div>
 
+            <label className="sr-only" htmlFor="artifact-library-source">
+              Filter by source
+            </label>
+            <OctantSelectField
+              className="artifact-library__select select"
+              id="artifact-library-source"
+              onValueChange={(value) =>
+                value === "" ? clear("source") : change({ source: value as ArtifactLibrarySource })
+              }
+              options={[{ id: "", label: "Any source" }, ...SOURCES]}
+              value={filters.source ?? ""}
+            />
+
             <label className="sr-only" htmlFor="artifact-library-kind">
               Filter by kind
             </label>
             <OctantSelectField
               className="artifact-library__select select"
               id="artifact-library-kind"
-              onValueChange={(value) =>
-                value === "" ? clear("kind") : change({ kind: value as ArtifactKind })
-              }
+              onValueChange={(value) => {
+                // A Claude type and a Canvas kind are one filter: choosing
+                // either clears the other.
+                const { kind: _kind, claudeType: _claudeType, ...rest } = filters;
+                if (value === "") props.onFiltersChange(rest);
+                else if (value.startsWith(CLAUDE_KIND_PREFIX)) {
+                  props.onFiltersChange({
+                    ...rest,
+                    claudeType: value.slice(CLAUDE_KIND_PREFIX.length),
+                  });
+                } else props.onFiltersChange({ ...rest, kind: value as ArtifactKind });
+              }}
               options={[
                 { id: "", label: "Any kind" },
                 ...KINDS.map((kind) => ({
                   id: kind,
                   label: `${kind[0]?.toUpperCase()}${kind.slice(1)}`,
                 })),
+                ...(listing?.claudeTypes ?? []).map((type) => ({
+                  id: `${CLAUDE_KIND_PREFIX}${type}`,
+                  label: `${type} (Claude)`,
+                })),
               ]}
-              value={filters.kind ?? ""}
+              value={
+                filters.claudeType === undefined
+                  ? (filters.kind ?? "")
+                  : `${CLAUDE_KIND_PREFIX}${filters.claudeType}`
+              }
             />
+
+            {(listing?.claudeAccounts ?? []).length === 0 ? null : (
+              <>
+                <label className="sr-only" htmlFor="artifact-library-account">
+                  Filter by Claude account
+                </label>
+                <OctantSelectField
+                  className="artifact-library__select select"
+                  id="artifact-library-account"
+                  onValueChange={(value) =>
+                    value === "" ? clear("account") : change({ account: value })
+                  }
+                  options={[
+                    { id: "", label: "Any Claude account" },
+                    ...(listing?.claudeAccounts ?? []).map((account) => ({
+                      id: account.account,
+                      label: `${account.name ?? account.account} (${String(account.pageCount)})`,
+                    })),
+                  ]}
+                  value={filters.account ?? ""}
+                />
+              </>
+            )}
 
             <label className="sr-only" htmlFor="artifact-library-project">
               Filter by Project
@@ -318,6 +389,23 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
         />
       )}
 
+      {claudePages.length === 0 ? null : (
+        <SurfaceSection label="Published to claude.ai">
+          <ul className="artifact-library__claude">
+            {claudePages.map((page) => (
+              <ClaudePageCard entry={page} key={page.url} {...props.claudePageActions} />
+            ))}
+          </ul>
+          {listing?.claudeMatchCount !== undefined &&
+          listing.claudeMatchCount > claudePages.length ? (
+            <p className="oct-meta" role="status">
+              Showing {String(claudePages.length)} of {String(listing.claudeMatchCount)} Claude
+              pages. Narrow the search to see the rest.
+            </p>
+          ) : null}
+        </SurfaceSection>
+      )}
+
       {synced.length === 0 || props.onSync === undefined || props.onRestore === undefined ? null : (
         <SurfaceSection label="From your other computers">
           <ul className="artifact-library__grid artifact-library__grid--grouped">
@@ -334,7 +422,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
         </SurfaceSection>
       )}
 
-      {props.busy || entries.length > 0 || synced.length > 0 ? null : (
+      {props.busy || entries.length > 0 || synced.length > 0 || claudePages.length > 0 ? null : (
         <OctantEmpty
           layout="line"
           {...(filters.tab === "shared" || hasActiveFilters

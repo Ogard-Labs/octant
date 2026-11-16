@@ -172,6 +172,13 @@ export type CanvasDependencies = Pick<ServerStart, "options" | "persistence"> &
     FoundationsWiring,
     "providerRuntimeRegistry" | "workArtifactProjection" | "workThreadProjection"
   > & {
+    /**
+     * Every page a Work or Code thread published to claude.ai, for the
+     * Artifacts library. Wired after Work and Code exist; read per listing.
+     */
+    readonly claudePublishes?: NonNullable<
+      ConstructorParameters<typeof ArtifactLibraryService>[0]["claudePublishes"]
+    >;
     /** Wired after Work and Code exist; read only when a request asks. */
     readonly findPublishedSnapshot?: NonNullable<
       Parameters<typeof createCanvasRouteHandler>[0]["findPublishedSnapshot"]
@@ -1228,6 +1235,10 @@ export function wireCanvas(deps: CanvasDependencies) {
     liveShares: () => canvasShareService.liveShareCanvasIds(),
     tags: (canvasId) => canvasTagService.tags(canvasId),
     threadHoldsCanvas,
+    ...(deps.claudePublishes === undefined ? {} : { claudePublishes: deps.claudePublishes }),
+    claudeAccountName: (account) =>
+      persistence.readProviderInstances().find((instance) => String(instance.id) === account)
+        ?.displayName,
     synced: () =>
       replicaSyncedLibraryEntries(
         persistence.replicaArtifactProjection.state(),
@@ -1245,6 +1256,9 @@ export function wireCanvas(deps: CanvasDependencies) {
     library: artifactLibraryService,
     windowAuthorityStore,
     tags: canvasTagService,
+    ...(deps.findPublishedSnapshot === undefined
+      ? {}
+      : { findPublishedSnapshot: deps.findPublishedSnapshot }),
   });
   const artifactMirrorRoutes = createArtifactMirrorRouteHandler({
     mirror: artifactMirrorService,

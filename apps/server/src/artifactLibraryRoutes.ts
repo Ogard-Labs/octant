@@ -1,5 +1,14 @@
-import { decodeArtifactLibraryQuery } from "@octant/contracts/artifact-library";
-import { decodeCanvasTagCommandResult } from "@octant/contracts";
+import {
+  decodeArtifactLibraryClaudeSnapshotRequest,
+  decodeArtifactLibraryClaudeSnapshotResult,
+  decodeArtifactLibraryQuery,
+} from "@octant/contracts/artifact-library";
+import {
+  decodeCanvasTagCommandResult,
+  type PublishedSnapshotRunRequest,
+  type ThreadPublishedSnapshot,
+  type WindowId,
+} from "@octant/contracts";
 import type { ArtifactLibraryService } from "./canvas/artifactLibraryService";
 import type { CanvasTagService } from "./canvas/canvasTagService";
 import type { ClientPrincipal } from "./clientPrincipal";
@@ -15,6 +24,15 @@ export interface ArtifactLibraryRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   /** Filing tags onto a Canvas from the library. Absent on hosts without it. */
   readonly tags?: CanvasTagService;
+  /**
+   * The copy a thread's tool call kept of the file it published, read under
+   * that thread's own read check for the window. Absent: no Claude page shows
+   * its snapshot from the library.
+   */
+  readonly findPublishedSnapshot?: (
+    windowId: WindowId,
+    request: PublishedSnapshotRunRequest,
+  ) => Promise<ThreadPublishedSnapshot | undefined>;
   readonly now?: () => number;
 }
 
@@ -30,7 +48,11 @@ export function createArtifactLibraryRouteHandler(deps: ArtifactLibraryRouteDepe
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     const origin = request.headers.get("origin");
-    if (url.pathname !== "/api/artifacts/library" && url.pathname !== "/api/artifacts/tag") {
+    if (
+      url.pathname !== "/api/artifacts/library" &&
+      url.pathname !== "/api/artifacts/tag" &&
+      url.pathname !== "/api/artifacts/claude-snapshot"
+    ) {
       return undefined;
     }
 
@@ -94,6 +116,29 @@ export function createArtifactLibraryRouteHandler(deps: ArtifactLibraryRouteDepe
           ? "Artifact tag command is invalid."
           : "Artifact library query is invalid.",
         400,
+        origin,
+      );
+    }
+    if (url.pathname === "/api/artifacts/claude-snapshot") {
+      // A snapshot is a thread's content, so only a window on this host reads
+      // it, through the thread's own read check; a paired device sees the
+      // page's card and opens it on claude.ai.
+      let snapshotRequest: PublishedSnapshotRunRequest;
+      try {
+        snapshotRequest = decodeArtifactLibraryClaudeSnapshotRequest(body);
+      } catch {
+        return failure("Claude page snapshot request is invalid.", 400, origin);
+      }
+      if (principal.kind !== "local-window" || deps.findPublishedSnapshot === undefined) {
+        return json(decodeArtifactLibraryClaudeSnapshotResult({ kind: "unavailable" }), origin);
+      }
+      const snapshot = await deps
+        .findPublishedSnapshot(principal.windowId as WindowId, snapshotRequest)
+        .catch(() => undefined);
+      return json(
+        decodeArtifactLibraryClaudeSnapshotResult(
+          snapshot === undefined ? { kind: "unavailable" } : { kind: "claude-snapshot", snapshot },
+        ),
         origin,
       );
     }

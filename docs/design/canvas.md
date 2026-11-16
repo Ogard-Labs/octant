@@ -1500,7 +1500,7 @@ no tag and matches no tag filter. Tags are changed from the
 library's cards and rows; the open Canvas tab carries no tag control.
 
 **Claude artifacts in the library** (maintainer decision, 2026-11-16;
-designed, not built). The library and the dock's Artifacts tool also list
+built except Copy into Canvas). The library and the dock's Artifacts tool also list
 every page a thread published to claude.ai through Claude's `Artifact`
 tool, beside Canvas documents, in one view across all of the person's
 Claude accounts. The entries come from the journal alone: each publish
@@ -1522,7 +1522,19 @@ named, and a plain page publish reads as Page. An account filter narrows
 Claude entries. Scoping is the library's: a paired device sees only the
 Projects it may, and a Chat thread's entries follow its rule above.
 Opening a page uses whatever claude.ai account the browser is signed in to,
-and claude.ai decides whether it shows.
+and claude.ai decides whether it shows. Built: the host reads each Work turn's
+published steps and each Code thread's summarized history, which keeps every
+frame that published a page, so a deleted thread takes its pages with it; the
+listing carries `claude`, `claudeTypes` and `claudeAccounts` beside the Canvas
+entries, filtered by `source`, `claudeType` and `account`, and a Claude page
+matches no tag, Shared or Canvas kind filter. The snapshot is read on request
+through `/api/artifacts/claude-snapshot`, under the publishing thread's own read
+check, by a window on this host only; a paired device sees the card and opens
+the page on claude.ai. Which publish to a page is newest is read from its
+thread's journal order, not a time: a Work step has no time of its own, so a
+publish and the update after it in one turn are ordered by the turn's place
+and the step's place in it, and a Code publish by its frame's cursor. Not built yet: Copy into Canvas, because the library
+holds no thread context for the HTML importer's create.
 
 ## Design block
 

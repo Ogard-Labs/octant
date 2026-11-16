@@ -51,6 +51,14 @@ import {
   claudeFileToolSecretRefusal,
   claudeOwnRulesDecide,
   claudeSearchesRunUnguarded,
+  claudeArtifactCall,
+  claudeArtifactCallRefusal,
+  claudeOctantConfiguresSandbox,
+  claudeOffersArtifacts,
+  claudeOwnPermissions,
+  claudeWithheldTools,
+  CLAUDE_LEVEL_CHANGE_REFUSAL,
+  CLAUDE_WAKEUP_UNAVAILABLE,
   makeClaudeDriver,
 } from "./claudeDriver";
 import type { ClaudeResumeIdentity, ClaudeResumeIdentityPort } from "./claudeDriver";
@@ -169,6 +177,9 @@ class FakeQuery implements ClaudeQueryPort {
   readonly requestCompaction = () => this.compactionRequests();
   readonly interrupt = vi.fn(() => Effect.void);
   readonly stopTask = vi.fn((_taskId: string) => Effect.succeed("requested" as const));
+  readonly backgroundTask = vi.fn((_toolUseId: string) =>
+    Effect.succeed("backgrounded" as "backgrounded" | "not-found" | "unsupported"),
+  );
   readonly forceKill = vi.fn(() => Effect.void);
   readonly setPermissionMode = vi.fn(() => Effect.void);
   readonly supportedModels = vi.fn(() => Effect.succeed(this.initialization.models));
@@ -1903,6 +1914,90 @@ describe("Claude execution policy", () => {
       expect(query.interrupt).not.toHaveBeenCalled();
       await expect(
         Effect.runPromise(stopChild({ sessionId, childAgentId: "another-child" })),
+      ).resolves.toBe("not-found");
+    } finally {
+      await Effect.runPromise(Fiber.interrupt(subscription));
+      await acquired.close();
+    }
+  });
+
+  it("sends one running subagent to the background and carries a person's message to its next tool call", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    const children: ProviderRuntimeEvent[] = [];
+    const subscription = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          if (event.kind === "child-agent-activity") children.push(event);
+        }),
+      ),
+    );
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "Delegate", attachments: [], tools: [] }),
+      );
+      const query = f.queries[0]!;
+      const open = f.opens[0]!;
+      await query.emit({
+        kind: "stream-event",
+        sessionId: "sdk-session-1",
+        event: {
+          kind: "content-start",
+          index: 0,
+          content: {
+            kind: "tool-use",
+            toolUseId: "sdk-agent-use",
+            toolName: "Agent",
+            input: { description: "Read the notes" },
+          },
+        },
+      });
+      await vi.waitFor(() => expect(children.length).toBeGreaterThan(0));
+      const child = children[0];
+      if (child?.kind !== "child-agent-activity") throw new Error("Expected a subagent");
+      const background = acquired.connection.backgroundChildAgent;
+      const message = acquired.connection.messageChildAgent;
+      if (background === undefined || message === undefined) {
+        throw new Error("Expected subagent steering");
+      }
+      // Not a runtime task yet: nothing to background or message.
+      await expect(
+        Effect.runPromise(background({ sessionId, childAgentId: child.childAgentId })),
+      ).resolves.toBe("not-found");
+      await expect(
+        Effect.runPromise(
+          message({ sessionId, childAgentId: child.childAgentId, message: "Skip the tests" }),
+        ),
+      ).resolves.toBe("not-found");
+      await query.emit({
+        kind: "task",
+        sessionId: "sdk-session-1",
+        subtype: "task_started",
+        taskId: "sdk-runtime-task",
+        toolUseId: "sdk-agent-use",
+        description: "Read the notes",
+      });
+      await expect(
+        Effect.runPromise(background({ sessionId, childAgentId: child.childAgentId })),
+      ).resolves.toBe("backgrounded");
+      // The runtime backgrounds the one call that started the subagent.
+      expect(query.backgroundTask).toHaveBeenCalledWith("sdk-agent-use");
+      expect(query.interrupt).not.toHaveBeenCalled();
+
+      await expect(
+        Effect.runPromise(
+          message({ sessionId, childAgentId: child.childAgentId, message: "Skip the tests" }),
+        ),
+      ).resolves.toBe("queued");
+      // Another subagent's call takes nothing; this one's next call takes it once.
+      expect(open.subagentMessages?.("another-agent")).toBeUndefined();
+      expect(open.subagentMessages?.("sdk-runtime-task")).toContain("Skip the tests");
+      expect(open.subagentMessages?.("sdk-runtime-task")).toBeUndefined();
+      await expect(
+        Effect.runPromise(message({ sessionId, childAgentId: "another-child", message: "Hello" })),
       ).resolves.toBe("not-found");
     } finally {
       await Effect.runPromise(Fiber.interrupt(subscription));
@@ -5317,6 +5412,7 @@ describe("Claude artifact delivery", () => {
       expect(linkOnly?.kind === "tool-success" ? linkOnly.published : undefined).toEqual({
         url: "https://claude.ai/artifact/publish-binary",
         title: "Report",
+        account: String(instanceId),
       });
     } finally {
       await Effect.runPromise(Fiber.interrupt(subscription));
@@ -9105,5 +9201,421 @@ describe("Claude wake-ups", () => {
     ).resolves.toMatchObject({ behavior: "deny" });
     expect(planWakeups.requests).toEqual([]);
     await planAcquired.close();
+  });
+});
+
+describe("Claude Code's own permission modes and sandbox outside Strict", () => {
+  /** A setup that reads the person's own Claude settings, where their sandbox and rules live. */
+  const readsHome = {
+    subagents: false,
+    webTools: false,
+    skills: true,
+    toolServers: false,
+    hooks: false,
+    projectCode: false,
+  } as ProviderNativeSetup;
+
+  async function opened(
+    mode: "chat" | "work" | "code",
+    executionPolicy: ProviderExecutionPolicy,
+    strict: boolean,
+    extra: {
+      readonly autoApprove?: boolean;
+      readonly fullAccessSandbox?: boolean;
+      readonly nativeSetup?: ProviderNativeSetup;
+    } = { nativeSetup: readsHome },
+  ) {
+    const f = harness();
+    const acquired = await acquire(f.driver, mode);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy, strict, ...extra }),
+    );
+    return { f, acquired, open: f.opens[0]! };
+  }
+
+  it("maps each level onto Claude Code's own permission mode outside Strict and keeps today's under Strict", () => {
+    const mode = (
+      policy: ProviderExecutionPolicy,
+      strict: boolean,
+      octantMode: "chat" | "work" | "code" = "code",
+      autoApprove = false,
+    ) =>
+      claudeExecutionOptions(policy, autoApprove, octantMode, "darwin", strict, readsHome)
+        .permissionMode;
+    expect(mode("approval-gated", false)).toBe("default");
+    expect(mode("auto-accept-edits", false)).toBe("acceptEdits");
+    expect(mode("approval-gated", false, "work", true)).toBe("auto");
+    expect(mode("full-access", false)).toBe("bypassPermissions");
+    expect(mode("plan", false)).toBe("plan");
+    // Strict keeps Octant's own waiver of in-root edits, so Claude runs `default`.
+    expect(mode("auto-accept-edits", true)).toBe("default");
+    // Chat keeps its list and Octant's gate at every Strict setting.
+    expect(mode("auto-accept-edits", false, "chat")).toBe("default");
+    expect(
+      claudeOwnPermissions({
+        strict: false,
+        mode: "work",
+        executionPolicy: "plan",
+        setup: readsHome,
+      }),
+    ).toBe(false);
+  });
+
+  it("passes Claude no sandbox settings outside Strict and today's configured sandbox under Strict", async () => {
+    for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
+      const outside = await opened("work", executionPolicy, false);
+      expect(outside.open.sandbox).toBeUndefined();
+      expect(outside.open.ownPermissions).toBe(true);
+      await outside.acquired.close();
+
+      const inside = await opened("work", executionPolicy, true);
+      expect(inside.open.sandbox).toMatchObject({
+        autoAllowBashIfSandboxed: false,
+        filesystem: { denyRead: ["/"], allowRead: [projectRoot], allowWrite: [projectRoot] },
+      });
+      expect(inside.open.ownPermissions).toBeUndefined();
+      await inside.acquired.close();
+    }
+    // A Full access thread that kept its sandbox keeps Octant's outside Strict too.
+    const kept = await opened("code", "full-access", false, {
+      fullAccessSandbox: true,
+      nativeSetup: readsHome,
+    });
+    expect(kept.open.sandbox).toMatchObject({ enabled: true, allowUnsandboxedCommands: false });
+    await kept.acquired.close();
+    expect(
+      claudeOctantConfiguresSandbox({
+        executionPolicy: "plan",
+        fullAccessSandbox: false,
+        ownPermissions: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps Octant's sandbox and gate outside Strict when the session reads none of the person's Claude settings", async () => {
+    // With no setup, or only subagents and web tools on, the launch reads no
+    // home settings, so the person's own sandbox and deny rules would not load.
+    for (const nativeSetup of [
+      undefined,
+      { ...readsHome, skills: false, subagents: true, webTools: true },
+    ]) {
+      const session = await opened(
+        "work",
+        "auto-accept-edits",
+        false,
+        nativeSetup === undefined ? {} : { nativeSetup },
+      );
+      expect(session.open.ownPermissions).toBeUndefined();
+      expect(session.open.sandbox).toMatchObject({
+        enabled: true,
+        autoAllowBashIfSandboxed: false,
+      });
+      await Effect.runPromise(
+        session.acquired.connection.send({ sessionId, prompt: "go", attachments: [], tools: [] }),
+      );
+      await expect(
+        session.open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Edit",
+          input: { file_path: `${projectRoot}/a.ts`, old_string: "a", new_string: "b" },
+          toolUseId: "edit",
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toEqual({ behavior: "allow" });
+      await session.acquired.close();
+    }
+    expect(
+      claudeExecutionOptions("auto-accept-edits", false, "work", "darwin", false).permissionMode,
+    ).toBe("default");
+  });
+
+  it("offers the full tool preset outside Plan and Chat with only the person's own switched-off features withheld", async () => {
+    const outside = await opened("code", "approval-gated", false);
+    // Skills are on in this setup; the switched-off subagents and web tools stay out.
+    expect(outside.open.withheldTools).toEqual(["Agent", "Workflow", "WebSearch", "WebFetch"]);
+    await outside.acquired.close();
+    const inside = await opened("code", "approval-gated", true);
+    expect(inside.open.withheldTools).toEqual(
+      expect.arrayContaining(["EnterPlanMode", "ExitPlanMode", "ScheduleWakeup", "Artifact"]),
+    );
+    await inside.acquired.close();
+    const plan = await opened("code", "plan", false);
+    expect(plan.open.withheldTools).toBeUndefined();
+    expect(plan.open.tools).not.toContain("Edit");
+    await plan.acquired.close();
+    expect(
+      claudeWithheldTools(
+        { subagents: true, webTools: true, skills: true } as ProviderNativeSetup,
+        false,
+        false,
+        false,
+        false,
+      ),
+    ).toEqual([]);
+  });
+
+  it("leaves reads and edits to Claude's own rules outside Strict and refuses what would break a server rule", async () => {
+    const { f, acquired, open } = await opened("work", "auto-accept-edits", false);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "go", attachments: [], tools: [] }),
+    );
+    const signal = new AbortController().signal;
+    const call = (toolName: string, input: object, toolUseId: string) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName,
+        input,
+        toolUseId,
+        signal,
+      });
+    // A person's `deny` rule can still refuse an in-Project read or edit.
+    await expect(call("Read", { file_path: `${projectRoot}/a.ts` }, "read")).resolves.toEqual({
+      behavior: "own-rules",
+    });
+    await expect(
+      call("Edit", { file_path: `${projectRoot}/a.ts`, old_string: "a", new_string: "b" }, "edit"),
+    ).resolves.toEqual({ behavior: "own-rules" });
+    // A command leaving Claude's sandbox keeps Octant's ask, never remembered.
+    await expect(
+      call("Bash", { command: "git push", dangerouslyDisableSandbox: true }, "escape"),
+    ).resolves.toEqual({ behavior: "ask" });
+    // A path outside the Project keeps asking below Full access.
+    await expect(
+      call(
+        "Edit",
+        { file_path: "/tmp/octant-elsewhere/a.ts", old_string: "a", new_string: "b" },
+        "out",
+      ),
+    ).resolves.toEqual({ behavior: "ask" });
+    // The mode is the server's and a wake-up never runs in this session.
+    await expect(call("EnterPlanMode", {}, "plan")).resolves.toMatchObject({
+      behavior: "deny",
+      message: CLAUDE_LEVEL_CHANGE_REFUSAL,
+    });
+    await expect(
+      call("ScheduleWakeup", { delaySeconds: 60, prompt: "x" }, "wake"),
+    ).resolves.toMatchObject({ behavior: "deny", message: CLAUDE_WAKEUP_UNAVAILABLE });
+    // An edit Claude's own rules ask about reaches the person, not Octant's waiver.
+    const edit = { file_path: `${projectRoot}/a.ts`, old_string: "a", new_string: "b" };
+    const approvals: ProviderRuntimeEvent[] = [];
+    const subscriber = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          if (event.kind === "approval-request") approvals.push(event);
+        }),
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const asked = open.canUseTool({ toolName: "Edit", input: edit, toolUseId: "edit", signal });
+    await vi.waitFor(() => expect(approvals).toHaveLength(1));
+    await acquired.close();
+    await expect(asked).resolves.toMatchObject({ behavior: "deny" });
+    await Effect.runPromise(Fiber.join(subscriber));
+    expect(f.opens).toHaveLength(1);
+  });
+
+  it("keeps Octant's gate under Strict: in-root reads and Accept edits' edits run unasked", async () => {
+    const { acquired, open } = await opened("work", "auto-accept-edits", true);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "go", attachments: [], tools: [] }),
+    );
+    const signal = new AbortController().signal;
+    const call = (toolName: string, input: object, toolUseId: string) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName,
+        input,
+        toolUseId,
+        signal,
+      });
+    await expect(call("Read", { file_path: `${projectRoot}/a.ts` }, "read")).resolves.toEqual({
+      behavior: "allow",
+    });
+    await expect(
+      call("Edit", { file_path: `${projectRoot}/a.ts`, old_string: "a", new_string: "b" }, "edit"),
+    ).resolves.toEqual({ behavior: "allow" });
+    await expect(
+      call("Bash", { command: "git push", dangerouslyDisableSandbox: true }, "escape"),
+    ).resolves.toEqual({ behavior: "ask" });
+    await acquired.close();
+  });
+
+  it("refuses a command leaving the sandbox in Plan at every Strict setting", async () => {
+    const { acquired, open } = await opened("code", "plan", false);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "go", attachments: [], tools: [] }),
+    );
+    await expect(
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Bash",
+        input: { command: "ls", dangerouslyDisableSandbox: true },
+        toolUseId: "plan-escape",
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({ behavior: "deny" });
+    await acquired.close();
+  });
+});
+
+describe("Claude artifacts outside Strict", () => {
+  const confined = (root: string, path: string) => path.startsWith(`${root}/`);
+  const refusal = (
+    input: Record<string, unknown>,
+    extra: { readonly strict?: boolean; readonly readOnly?: boolean } = {},
+  ) =>
+    claudeArtifactCallRefusal({
+      stillOn: true,
+      input,
+      projectRoot,
+      isProjectConfinedPath: confined,
+      strict: false,
+      ...extra,
+    });
+
+  it("offers the tool on the account's switch alone, in every mode, and never on an API key", () => {
+    const offers = (
+      mode: "chat" | "work" | "code",
+      executionPolicy: ProviderExecutionPolicy,
+      strict: boolean,
+      threadChoseArtifacts = false,
+      authentication: ClaudeAuthentication = "subscription",
+    ) =>
+      claudeOffersArtifacts({
+        authentication,
+        artifactDelivery: true,
+        threadChoseArtifacts,
+        hostTrafficDisabled: false,
+        mode,
+        executionPolicy,
+        strict,
+      });
+    expect(offers("work", "approval-gated", false)).toBe(true);
+    expect(offers("code", "plan", false)).toBe(true);
+    expect(offers("chat", "approval-gated", false)).toBe(true);
+    expect(offers("work", "approval-gated", false, true, "api-key")).toBe(false);
+    // Strict keeps the thread's choice and Plan's and Chat's refusal.
+    expect(offers("work", "approval-gated", true)).toBe(false);
+    expect(offers("work", "approval-gated", true, true)).toBe(true);
+    expect(offers("code", "plan", true, true)).toBe(false);
+  });
+
+  it("lets every action through outside Strict, refuses publishing in Chat and Plan, and keeps the publish-only rule under Strict", () => {
+    expect(refusal({ action: "quickstart" })).toBeUndefined();
+    expect(refusal({ action: "list" })).toBeUndefined();
+    expect(refusal({ action: "read", url: "https://claude.ai/artifact/a" })).toBeUndefined();
+    expect(refusal({ type_url: "https://claude.ai/types/design", title: "Hero" })).toBeUndefined();
+    expect(refusal({ file_path: "/elsewhere/page.html" })).toBeUndefined();
+    expect(refusal({ action: "list" }, { readOnly: true })).toBeUndefined();
+    expect(refusal({ file_path: `${projectRoot}/page.html` }, { readOnly: true })).toContain(
+      "only read",
+    );
+    expect(
+      refusal({ action: "delete", url: "https://claude.ai/artifact/a" }, { readOnly: true }),
+    ).toContain("only read");
+    expect(refusal({ action: "list" }, { strict: true })).toContain("only to publish");
+    expect(refusal({ file_path: "/elsewhere/page.html" }, { strict: true })).toContain(
+      "outside the Project",
+    );
+    expect(
+      claudeArtifactCallRefusal({
+        stillOn: false,
+        input: { action: "list" },
+        projectRoot,
+        isProjectConfinedPath: confined,
+        strict: false,
+      }),
+    ).toContain("turned off");
+  });
+
+  it("journals a publish from a type with its account and type, and no page for a read", async () => {
+    const f = harness("subscription", "current-session", { artifactDelivery: () => true });
+    const acquired = await acquire(f.driver, "work");
+    const published: ProviderRuntimeEvent[] = [];
+    const subscription = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          if (event.kind === "tool-success") published.push(event);
+        }),
+      ),
+    );
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "full-access",
+          strict: false,
+        }),
+      );
+      const open = f.opens[0]!;
+      expect(open.tools).toContain("Artifact");
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "Design it", attachments: [], tools: [] }),
+      );
+      const query = f.queries[0]!;
+      const run = async (toolUseId: string, input: Readonly<Record<string, string>>) => {
+        await query.emit({
+          kind: "stream-event",
+          sessionId: "sdk-session-1",
+          event: {
+            kind: "content-start",
+            index: 0,
+            content: { kind: "tool-use", toolUseId, toolName: "Artifact", input },
+          },
+        });
+        await expect(
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName: "Artifact",
+            input,
+            toolUseId,
+            signal: new AbortController().signal,
+          }),
+        ).resolves.toEqual({ behavior: "allow" });
+        await query.emit({
+          kind: "tool-results",
+          sessionId: "sdk-session-1",
+          results: [
+            {
+              toolUseId,
+              isError: false,
+              publishedPage: { url: "https://claude.ai/artifact/hero", title: "Hero" },
+            },
+          ],
+        });
+      };
+      await run("design", { type_url: "https://claude.ai/artifact-types/design", title: "Hero" });
+      await run("read", { action: "read", url: "https://claude.ai/artifact/hero" });
+      await vi.waitFor(() => expect(published).toHaveLength(2));
+      expect(published[0]).toMatchObject({
+        published: {
+          url: "https://claude.ai/artifact/hero",
+          account: String(instanceId),
+          artifactType: "Design",
+        },
+      });
+      expect(published[1]).not.toHaveProperty("published");
+    } finally {
+      await Effect.runPromise(Fiber.interrupt(subscription));
+      await acquired.close();
+    }
+  });
+
+  it("reads a publish's Claude artifact type from the type it names, and nothing for another action", () => {
+    expect(claudeArtifactCall({ type_url: "https://claude.ai/artifact-types/slides" })).toEqual({
+      publishes: true,
+      artifactType: "Slides",
+    });
+    expect(claudeArtifactCall({ file_path: "/p/page.html" })).toEqual({ publishes: true });
+    expect(claudeArtifactCall({ action: "read", url: "https://claude.ai/artifact/a" })).toEqual({
+      publishes: false,
+    });
+    expect(claudeArtifactCall({ type_url: "not a url" })).toEqual({ publishes: true });
   });
 });
