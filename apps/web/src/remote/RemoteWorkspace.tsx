@@ -468,13 +468,6 @@ function RemoteCodeSurface(props: RemoteSurfaceProps) {
               actsAsHostPerson={props.actsAsHostPerson}
               client={props.clients.code}
               connected={props.connected}
-              startFirstTurn={(worker, prompt) =>
-                controller.startThreadTurn({
-                  threadId: worker.id,
-                  checkoutId: worker.checkoutId,
-                  prompt,
-                })
-              }
               thread={activeThread}
             />
           )}

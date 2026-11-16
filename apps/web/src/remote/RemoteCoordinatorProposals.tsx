@@ -19,14 +19,15 @@ import { OctantButton } from "../ui/base/OctantButton";
  * since the host refuses its decision.
  */
 export function RemoteCoordinatorProposals(props: {
-  readonly client: Pick<CodeClient, "readPlanner" | "execute" | "executePlannerProposal">;
+  readonly client: Pick<
+    CodeClient,
+    "readPlanner" | "execute" | "executePlannerProposal" | "putEvidence" | "executeOperation"
+  >;
   readonly thread: CodeThread;
   /** What the host said of this session; absent or false shows no decision. */
   readonly actsAsHostPerson?: boolean;
   /** False while the session is stale: the host would not hear a decision. */
   readonly connected?: boolean;
-  /** Sends the approved worker's first message; true once the host took it. */
-  readonly startFirstTurn?: (thread: CodeThread, prompt: string) => Promise<boolean>;
 }) {
   const { client, thread } = props;
   const [view, setView] = useState<{ readonly threadId: string; readonly view: CodePlannerView }>();
@@ -51,18 +52,19 @@ export function RemoteCoordinatorProposals(props: {
   const approve = (entry: CoordinatorProposalEntry) =>
     decide(async () => {
       if (executePlannerProposal === undefined) return "This host cannot approve workers.";
+      // The worker's first turn goes straight to the host, never through the
+      // controller of the coordinator this view has selected.
       const approved = await approveCoordinatorProposal({
-        port: { execute: (command) => client.execute(command), executePlannerProposal },
+        port: {
+          execute: (command) => client.execute(command),
+          executePlannerProposal,
+          putEvidence: (threadId, text) => client.putEvidence(threadId, text),
+          executeOperation: (command) => client.executeOperation(command),
+        },
         entry,
         coordinator: thread,
       });
-      if (approved.status === "refused") return approved.message;
-      // The worker is durable whether or not its first turn starts.
-      const started =
-        (await props.startFirstTurn?.(approved.thread, entry.proposal.intent)) ?? false;
-      return started
-        ? "Worker approved and started."
-        : "The worker was created, but its first message could not be sent. Open it to retry.";
+      return approved.status === "approved" ? "Worker approved and started." : approved.message;
     });
   const decline = (entry: CoordinatorProposalEntry) =>
     decide(async () => {

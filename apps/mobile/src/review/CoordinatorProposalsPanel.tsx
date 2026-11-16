@@ -6,7 +6,6 @@ import {
   loadMobileCoordinatorProposals,
   mobileCoordinatorProposalPort,
   OWNER_POSTURE_LABELS,
-  sendMobileCodeTurn,
   type MobileCoordinatorProposal,
   type MobileRemoteTransport,
 } from "@octant/client-runtime";
@@ -59,17 +58,7 @@ export function CoordinatorProposalsPanel(props: {
         entry,
         coordinator: props.thread,
       });
-      if (approved.status === "refused") return approved.message;
-      // The worker is durable whether or not its first turn starts.
-      try {
-        await sendMobileCodeTurn({
-          transport,
-          threadId: String(approved.thread.id),
-          prompt: entry.proposal.intent,
-        });
-      } catch {
-        return "The worker was created, but its first message could not be sent. Open it to retry.";
-      }
+      if (approved.status !== "approved") return approved.message;
       return "Worker approved and started.";
     });
   const decline = (entry: MobileCoordinatorProposal) =>

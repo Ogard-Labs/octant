@@ -56,6 +56,8 @@ function readOnly(readPlanner: () => Promise<unknown>) {
     readPlanner: readPlanner as never,
     execute: vi.fn(),
     executePlannerProposal: vi.fn(),
+    putEvidence: vi.fn(),
+    executeOperation: vi.fn(),
   };
 }
 
@@ -176,12 +178,22 @@ describe("a coordinator's proposals on a paired browser", () => {
         thread: { ...coordinator, id: command.creation?.threadId, coordinator: undefined },
       },
     }));
-    const startFirstTurn = vi.fn(async () => true);
+    const putEvidence = vi.fn(async () => ({
+      contentId: "60000000-0000-4000-8000-000000000001",
+      digest: "a".repeat(64),
+      byteLength: 20,
+    }));
+    const executeOperation = vi.fn(async (command: { operationId: string }) => ({
+      kind: "provider-turn-state",
+      operationId: command.operationId,
+      state: "running",
+    }));
     render(
       <RemoteCoordinatorProposals
         actsAsHostPerson
-        client={{ readPlanner, execute, executePlannerProposal } as never}
-        startFirstTurn={startFirstTurn}
+        client={
+          { readPlanner, execute, executePlannerProposal, putEvidence, executeOperation } as never
+        }
         thread={coordinator}
       />,
     );
@@ -211,9 +223,10 @@ describe("a coordinator's proposals on a paired browser", () => {
         }),
       }),
     );
-    expect(startFirstTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ projectId: PROJECT }),
-      "Intent of worker 01.",
+    const workerId = executePlannerProposal.mock.calls[0]?.[0].creation?.threadId;
+    expect(putEvidence).toHaveBeenCalledWith(workerId, "Intent of worker 01.");
+    expect(executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "start-provider-turn", threadId: workerId }),
     );
   });
 

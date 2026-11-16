@@ -7,11 +7,6 @@ import { decodeCodeThread } from "@octant/contracts";
 import { ThemeProvider } from "../../design-system/theme";
 import { CoordinatorProposalsPanel } from "./CoordinatorProposalsPanel";
 vi.mock("react-native", () => vi.importActual("react-native-web"));
-const sendMobileCodeTurn = vi.hoisted(() => vi.fn(async () => ({})));
-vi.mock("@octant/client-runtime", async () => ({
-  ...(await vi.importActual<object>("@octant/client-runtime")),
-  sendMobileCodeTurn,
-}));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const roots: Root[] = [];
 afterEach(() => {
@@ -105,60 +100,12 @@ describe("a coordinator's proposals on the phone", () => {
   });
 
   it("approves a worker as it was asked for from a phone the person paired, then sends its request", async () => {
-    const calls: Array<{ readonly method: string; readonly path: string; readonly body?: string }> =
-      [];
-    let created: Record<string, unknown> | undefined;
-    const transport: MobileRemoteTransport = {
-      hostId: "host-1",
-      authenticatedFetch: (async (request: { method: string; path: string; body?: string }) => {
-        calls.push(request);
-        const body = request.body === undefined ? undefined : JSON.parse(String(request.body));
-        if (request.path.startsWith("/api/code/planner/") && request.method === "GET")
-          return Response.json({
-            designation: { kind: "none", projectId: PROJECT, updatedAt: NOW },
-            designationVersion: 0,
-            proposals: created === undefined ? [PENDING] : [],
-          });
-        if (request.path === "/api/code/planner/proposals/commands") {
-          created = { ...coordinator, id: body.creation.threadId, coordinator: undefined };
-          return Response.json({
-            status: "confirmed",
-            proposal: {
-              ...PENDING.proposal,
-              status: "confirmed",
-              resolvedAt: NOW,
-              createdThreadId: body.creation.threadId,
-            },
-            creation: { kind: "thread-created", thread: created },
-          });
-        }
-        if (request.path === "/api/code/commands" && body.kind === "prepare-code-project-checkout")
-          return Response.json({
-            kind: "checkout-prepared",
-            bindingRevisionId: "70000000-0000-4000-8000-000000000002",
-            checkout: {
-              id: coordinator.checkoutId,
-              repositoryId: coordinator.repositoryId,
-              kind: "existing-worktree",
-              availability: "available",
-              head: { kind: "branch", name: "main", oid: "a".repeat(40) },
-              observedAt: NOW,
-            },
-          });
-        return Response.json({}, { status: 503 });
-      }) as MobileRemoteTransport["authenticatedFetch"],
-    };
-    const container = await renderPanel(transport, true);
+    const host = pairedHost("running");
+    const container = await renderPanel(host.transport, true);
     expect(container.textContent).not.toContain("Approve at a window on this computer.");
-    const approve = [...container.querySelectorAll<HTMLElement>("[role=button]")].find(
-      (button) => button.textContent === "Approve and start",
-    );
-    await act(async () => approve?.click());
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    await approve(container);
 
-    const confirm = calls.find((call) => call.path === "/api/code/planner/proposals/commands");
+    const confirm = host.calls.find((call) => call.path === "/api/code/planner/proposals/commands");
     expect(JSON.parse(String(confirm?.body))).toMatchObject({
       kind: "confirm-planner-work-proposal",
       proposalId: PENDING.proposal.id,
@@ -172,11 +119,117 @@ describe("a coordinator's proposals on the phone", () => {
         sourceBranch: "main",
       },
     });
-    expect(sendMobileCodeTurn).toHaveBeenCalledWith({
-      transport,
-      threadId: created?.["id"],
-      prompt: "Find and fix it.",
-    });
+    // The worker's first message is the proposal's request, staged and started.
+    const evidence = host.calls.find((call) => call.path === "/api/code/evidence");
+    expect(evidence?.body).toBe("Find and fix it.");
+    expect(host.startedThreadId()).toBe(host.createdThreadId());
     expect(container.textContent).toContain("Worker approved and started.");
   });
+
+  it("says the worker's first turn did not start when the host answers it failed", async () => {
+    const host = pairedHost("failed");
+    const container = await renderPanel(host.transport, true);
+    await approve(container);
+
+    expect(host.startedThreadId()).toBe(host.createdThreadId());
+    expect(container.textContent).not.toContain("Worker approved and started.");
+    expect(container.textContent).toContain("Open it to retry.");
+  });
 });
+
+async function approve(container: HTMLElement) {
+  const button = [...container.querySelectorAll<HTMLElement>("[role=button]")].find(
+    (candidate) => candidate.textContent === "Approve and start",
+  );
+  await act(async () => button?.click());
+  for (let round = 0; round < 5; round += 1)
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+}
+
+/** A host that creates the worker and answers its first turn's start with `turnState`. */
+function pairedHost(turnState: "running" | "failed") {
+  const calls: Array<{ readonly method: string; readonly path: string; readonly body?: string }> =
+    [];
+  let created: Record<string, unknown> | undefined;
+  let startedThreadId: string | undefined;
+  const checkout = {
+    id: coordinator.checkoutId,
+    repositoryId: coordinator.repositoryId,
+    kind: "existing-worktree",
+    availability: "available",
+    head: { kind: "branch", name: "main", oid: "a".repeat(40) },
+    observedAt: NOW,
+  };
+  const transport: MobileRemoteTransport = {
+    hostId: "host-1",
+    authenticatedFetch: (async (request: { method: string; path: string; body?: string }) => {
+      calls.push(request);
+      const body =
+        request.body === undefined || request.path === "/api/code/evidence"
+          ? undefined
+          : JSON.parse(String(request.body));
+      if (request.path.startsWith("/api/code/planner/") && request.method === "GET")
+        return Response.json({
+          designation: { kind: "none", projectId: PROJECT, updatedAt: NOW },
+          designationVersion: 0,
+          proposals: created === undefined ? [PENDING] : [],
+        });
+      if (request.path === "/api/code/planner/proposals/commands") {
+        created = { ...coordinator, id: body.creation.threadId, coordinator: undefined };
+        return Response.json({
+          status: "confirmed",
+          proposal: {
+            ...PENDING.proposal,
+            status: "confirmed",
+            resolvedAt: NOW,
+            createdThreadId: body.creation.threadId,
+          },
+          creation: { kind: "thread-created", thread: created },
+        });
+      }
+      if (request.path === "/api/code/bootstrap")
+        return Response.json({
+          settings: {
+            defaultExecutionPolicy: "approval-gated",
+            defaultPermissionPersistence: "current-session",
+            requireGitRepository: true,
+            defaultDiffLayout: "unified",
+            updatedAt: NOW,
+            version: 1,
+          },
+          threads: created === undefined ? [] : [created],
+          checkouts: [checkout],
+          activity: [],
+        });
+      if (request.path === "/api/code/evidence")
+        return Response.json({
+          contentId: "60000000-0000-4000-8000-000000000001",
+          digest: "a".repeat(64),
+          byteLength: 16,
+        });
+      if (request.path === "/api/code/commands" && body.kind === "prepare-code-project-checkout")
+        return Response.json({
+          kind: "checkout-prepared",
+          bindingRevisionId: "70000000-0000-4000-8000-000000000002",
+          checkout,
+        });
+      if (request.path === "/api/code/commands" && body.kind === "start-provider-turn") {
+        startedThreadId = body.threadId;
+        return Response.json({
+          kind: "provider-turn-state",
+          operationId: body.operationId,
+          state: turnState,
+        });
+      }
+      return Response.json({}, { status: 503 });
+    }) as MobileRemoteTransport["authenticatedFetch"],
+  };
+  return {
+    transport,
+    calls,
+    createdThreadId: () => created?.["id"],
+    startedThreadId: () => startedThreadId,
+  };
+}

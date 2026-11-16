@@ -134,6 +134,22 @@ export function mobileCoordinatorProposalPort(
         decodeHostAnswer(CodePlannerProposalOutcome),
         "The proposal decision could not reach the host.",
       ),
+    putEvidence: async (threadId, text) =>
+      decodeJson(
+        await transport.authenticatedFetch({
+          method: "PUT",
+          path: "/api/code/evidence",
+          body: text,
+          headers: {
+            "content-type": "text/plain; charset=utf-8",
+            "x-octant-code-thread-id": String(threadId),
+          },
+          contentType: "text/plain; charset=utf-8",
+        }),
+        decodeHostAnswer(CodeEvidenceReference),
+        "The worker's first message could not be staged on the host.",
+      ),
+    executeOperation: (command) => executeMobileCodeOperation(transport, command),
   };
 }
 

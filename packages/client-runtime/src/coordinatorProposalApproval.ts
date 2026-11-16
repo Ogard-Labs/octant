@@ -1,7 +1,11 @@
 import {
   decodeCodeCommand,
+  decodeCodeOperationCommand,
   type CodeCommand,
   type CodeCommandResult,
+  type CodeEvidenceReference,
+  type CodeOperationCommand,
+  type CodeOperationResult,
   type CodePlannerProposalCommand,
   type CodePlannerProposalOutcome,
   type CodePlannerView,
@@ -14,18 +18,32 @@ import { defaultDeliveryBranchIntent } from "@octant/domain";
 export type CoordinatorProposalEntry = CodePlannerView["proposals"][number];
 
 /**
- * The two host calls a decision needs. The paired browser passes its Code
- * client; the phone passes the same calls over its remote session.
+ * The host calls a decision needs. The paired browser passes its Code client;
+ * the phone passes the same calls over its remote session. The worker's first
+ * turn is started here through these calls, never through a controller that
+ * drives the thread the person has selected: that controller's turn state is
+ * the coordinator's, which would then read as running and refuse its sends.
  */
 export interface CoordinatorProposalDecisionPort {
   readonly execute: (command: CodeCommand) => Promise<CodeCommandResult | undefined>;
   readonly executePlannerProposal: (
     command: CodePlannerProposalCommand,
   ) => Promise<CodePlannerProposalOutcome>;
+  readonly putEvidence: (
+    threadId: CodeThread["id"],
+    text: string,
+  ) => Promise<CodeEvidenceReference>;
+  readonly executeOperation: (command: CodeOperationCommand) => Promise<CodeOperationResult>;
 }
 
+/**
+ * `approved`: the worker exists and its first turn is running.
+ * `not-started`: the worker exists but its first turn did not start (refused,
+ * failed, interrupted or lost); the person opens it to retry.
+ */
 export type CoordinatorProposalApproval =
   | { readonly status: "approved"; readonly thread: CodeThread }
+  | { readonly status: "not-started"; readonly thread: CodeThread; readonly message: string }
   | { readonly status: "refused"; readonly message: string };
 
 /**
@@ -43,8 +61,8 @@ export function coordinatorProposalLevel(entry: CoordinatorProposalEntry): Provi
  * worktree in the coordinator's Project, from the coordinator's base branch,
  * on the provider and model the proposal names (else the coordinator's), at
  * the level it asked for. The host confirms the proposal and creates the
- * thread in one versioned command and journals the device as the actor; the
- * caller then sends the proposal's request as the first message.
+ * thread in one versioned command and journals the device as the actor, and
+ * the proposal's request is then sent as the worker's first message.
  *
  * A paired client has no creation review, so it offers only what was asked;
  * choosing another provider, checkout or lower level stays with the review at
@@ -129,7 +147,42 @@ export async function approveCoordinatorProposal(input: {
   ) {
     return { status: "refused", message: "The host did not confirm the worker it created." };
   }
-  return { status: "approved", thread: outcome.creation.thread };
+  const thread = outcome.creation.thread;
+  // The worker is durable whether or not its first turn starts.
+  const notStarted = (message?: string): CoordinatorProposalApproval => ({
+    status: "not-started",
+    thread,
+    message:
+      message ??
+      "The worker was created, but its first message could not be sent. Open it to retry.",
+  });
+  let started: CodeOperationResult;
+  try {
+    const prompt = await input.port.putEvidence(thread.id, proposal.intent);
+    const uuid = input.uuid ?? (() => globalThis.crypto.randomUUID());
+    started = await input.port.executeOperation(
+      decodeCodeOperationCommand({
+        kind: "start-provider-turn",
+        operationId: uuid(),
+        threadId: thread.id,
+        checkoutId: thread.checkoutId,
+        sessionId: uuid(),
+        prompt,
+      }),
+    );
+  } catch {
+    return notStarted();
+  }
+  // Only a running turn is a started worker; the host answers a refused,
+  // failed or interrupted start with the same kind and another state.
+  if (started.kind === "provider-turn-state" && started.state === "running") {
+    return { status: "approved", thread };
+  }
+  return notStarted(
+    started.kind === "provider-turn-state" && started.failure !== undefined
+      ? `The worker was created, but its first turn did not start: ${started.failure.message} Open it to retry.`
+      : undefined,
+  );
 }
 
 /** Decline a coordinator's proposed worker; nothing is created. */
