@@ -257,7 +257,8 @@ export function useProjectController(options: ProjectControllerOptions) {
    */
   /**
    * Record the mode a Code or Work Project's new threads start in; absent
-   * follows Settings. Work has no Plan, so a Work Project takes the other four.
+   * follows Settings. No Work thread starts in Plan, so a Work Project takes
+   * the other four.
    */
   async function setCodePermissionMode(
     projectId: ProjectId,

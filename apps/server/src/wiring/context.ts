@@ -624,7 +624,7 @@ export function wireContext(deps: ContextDependencies) {
       hostLendsBrowser:
         (code !== undefined && codeOperationRuntime !== undefined) || work !== undefined,
       toolConstraints: effective?.toolConstraints ?? code?.toolConstraints ?? [],
-      readOnly: effective?.executionPolicy === "plan",
+      readOnly: effective?.executionPolicy === "plan" || work?.access === "plan",
     });
   };
   const taskAccessFacts = createTaskAccessFacts({

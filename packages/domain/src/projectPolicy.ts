@@ -253,7 +253,7 @@ export function changeCodeProjectAccess(
 
 /**
  * Set the mode a Work Project's new threads start in, or return it to Work's
- * default in Settings. Work shares Code's levels and has no Plan overlay.
+ * default in Settings. Work shares Code's levels; no Work thread starts in Plan.
  */
 export function changeWorkProjectPermissionMode(
   project: Project,

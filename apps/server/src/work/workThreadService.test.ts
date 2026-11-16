@@ -741,6 +741,64 @@ describe("WorkThreadService", () => {
     });
   });
 
+  it("moves a thread into Plan remembering the level it left, and an approved plan back to it as the person who answered", async () => {
+    const fixture = serviceFixture({ threads: [thread({ access: "auto-accept-edits" })] });
+    const entered = await fixture.service.execute(ids.window, {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "plan",
+    });
+    expect(entered).toMatchObject({
+      kind: "thread-updated",
+      thread: { access: "plan", planReturnAccess: "auto-accept-edits" },
+    });
+
+    const deviceId = "72000000-0000-4000-8000-0000000000d1";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const left = fixture.service.changeLevelAtAgentRequest({
+      threadId: ids.thread,
+      kind: "exit-plan",
+      actor: device,
+    });
+    expect(left).toMatchObject({ status: "changed", thread: { access: "auto-accept-edits" } });
+    expect(left.status === "changed" ? left.thread.planReturnAccess : "kept").toBeUndefined();
+    const updated = fixture.persistence.journal.append.mock.calls
+      .map(([request]) => request.events[0])
+      .filter((event) => event.eventName === "work.thread-updated@1");
+    expect(updated.at(-1)?.actor).toEqual(device);
+    // The answer came after the thread already left Plan: nothing moves again.
+    expect(
+      fixture.service.changeLevelAtAgentRequest({
+        threadId: ids.thread,
+        kind: "exit-plan",
+        actor: device,
+      }),
+    ).toMatchObject({ status: "refused" });
+  });
+
+  it("returns a thread the agent moved to Plan from Full access to Ask first, never to Full access", () => {
+    const fixture = serviceFixture({ threads: [thread({ access: "full-access" })] });
+    const person = { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" } as never;
+    expect(
+      fixture.service.changeLevelAtAgentRequest({
+        threadId: ids.thread,
+        kind: "enter-plan",
+        actor: person,
+      }),
+    ).toMatchObject({
+      status: "changed",
+      thread: { access: "plan", planReturnAccess: "ask-first" },
+    });
+    expect(
+      fixture.service.changeLevelAtAgentRequest({
+        threadId: ids.thread,
+        kind: "exit-plan",
+        actor: person,
+      }),
+    ).toMatchObject({ status: "changed", thread: { access: "ask-first" } });
+  });
+
   it("journals a paired device's Full access changes with the device as their actor, and a local window's as the local user", async () => {
     const deviceId = "72000000-0000-4000-8000-0000000000d1";
     const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;

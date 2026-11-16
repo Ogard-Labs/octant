@@ -444,10 +444,14 @@ export function claudeExecutionOptions(
     ...policyOptions,
     fullToolSet: policyOptions.fullToolSet && (mode === "work" || mode === "code"),
   };
-  // A Code Plan turn may run read-only commands where its sandbox can hold the
-  // shell to them (see `claudePlanRunsCommands`). Plan has no approvals, so
-  // the sandbox, not a person, is what keeps those commands read-only.
-  if (policy === "plan" && mode === "code" && claudePlanRunsCommands(platform)) {
+  // A Work or Code Plan turn may run read-only commands where its sandbox can
+  // hold the shell to them (see `claudePlanRunsCommands`). Plan has no
+  // approvals, so the sandbox, not a person, is what keeps them read-only.
+  if (
+    policy === "plan" &&
+    (mode === "code" || mode === "work") &&
+    claudePlanRunsCommands(platform)
+  ) {
     return { ...options, tools: [...options.tools, "Bash"] };
   }
   return options;

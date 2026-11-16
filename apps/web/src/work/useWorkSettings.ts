@@ -1,7 +1,7 @@
 import type {
   ProviderInstanceId,
   ProviderModelId,
-  WorkAccess,
+  WorkDefaultAccess,
   WorkSettings,
 } from "@octant/contracts";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
@@ -11,7 +11,7 @@ export interface WorkSettingsChange {
   readonly defaultModel?:
     | { readonly providerInstanceId: ProviderInstanceId; readonly modelId: ProviderModelId }
     | undefined;
-  readonly defaultAccess?: WorkAccess;
+  readonly defaultAccess?: WorkDefaultAccess;
   /** Absent keeps the stored choice. */
   readonly defaultFullAccessSandbox?: boolean;
   /** Absent keeps the stored choice. */

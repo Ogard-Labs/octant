@@ -87,12 +87,12 @@ export function ownerPostureLabel(posture: OwnerPosture, requested = posture.pos
   return OWNER_POSTURE_LABELS[requested];
 }
 
-/** Work has its own Auto level and no Plan overlay or remembered Project default. */
+/** Work has its own Auto level, takes Plan as Code does, and has no remembered Project default. */
 export function ownerPostureLevels(
   posture: OwnerPosture | undefined,
 ): ReadonlyArray<OwnerPosture["posture"]> {
   return posture?.subject.kind === "work-thread"
-    ? ["ask-first", "auto-accept-edits", "auto", "full-access"]
+    ? ["ask-first", "auto-accept-edits", "auto", "plan", "full-access"]
     : posture?.subject.kind === "project"
       ? ["approval-gated", "full-access"]
       : ["approval-gated", "auto-accept-edits", "plan", "full-access"];
