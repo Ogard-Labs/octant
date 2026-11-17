@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/xattr.h>
 #include <unistd.h>
 
 #define ROOT "/tmp/octant-policy-broker"
@@ -25,12 +26,24 @@ static bool refused(const char *path)
   return size == -1 && error == EACCES && !memcmp(bytes, sentinel, sizeof(bytes));
 }
 
+static bool marker_refused(const char *name)
+{
+  unsigned char bytes[16], sentinel[16];
+  memset(bytes, 0xa5, sizeof(bytes));
+  memcpy(sentinel, bytes, sizeof(bytes));
+  errno = 0;
+  ssize_t size = getxattr(ROOT "/overlay/lower/.ssh/deployment", name, bytes, sizeof(bytes));
+  return size == -1 && errno == EACCES && !memcmp(bytes, sentinel, sizeof(bytes));
+}
+
 int main(void)
 {
   alarm(10);
   for (int fd = 3; fd < 64; fd++)
     if (fcntl(fd, F_GETFD) >= 0 || errno != EBADF) return 2;
   bool direct = refused(ROOT "/overlay/lower/.ssh/deployment");
+  bool trusted_marker = marker_refused("trusted.overlay.metacopy");
+  bool user_marker = marker_refused("user.overlay.metacopy");
   bool alias = refused(ROOT "/home/.ssh/deployment");
   errno = 0;
   int private_write = open(ROOT "/home/.ssh/deployment", O_WRONLY | O_CLOEXEC | O_NOFOLLOW);
@@ -48,9 +61,10 @@ int main(void)
   bool ordinary = file >= 0 && read_result == (ssize_t)sizeof(original) - 1 &&
     !memcmp(bytes, original, sizeof(original) - 1);
   if (file >= 0) close(file);
-  printf("{\"status\":\"overlayfs-actor-workload\",\"directPrivateRefused\":%s,\"overlayPrivateRefused\":%s,\"overlayPrivateWriteRefused\":%s,\"ordinaryOverlayRead\":%s,\"ordinaryOpenResult\":%d,\"ordinaryOpenErrno\":%d,\"ordinaryReadResult\":%zd,\"ordinaryReadErrno\":%d}\n",
-    direct ? "true" : "false", alias ? "true" : "false", write_refused ? "true" : "false",
+  printf("{\"status\":\"overlayfs-actor-workload\",\"directPrivateRefused\":%s,\"directTrustedMarkerRefused\":%s,\"directUserMarkerRefused\":%s,\"overlayPrivateRefused\":%s,\"overlayPrivateWriteRefused\":%s,\"ordinaryOverlayRead\":%s,\"ordinaryOpenResult\":%d,\"ordinaryOpenErrno\":%d,\"ordinaryReadResult\":%zd,\"ordinaryReadErrno\":%d}\n",
+    direct ? "true" : "false", trusted_marker ? "true" : "false", user_marker ? "true" : "false",
+    alias ? "true" : "false", write_refused ? "true" : "false",
     ordinary ? "true" : "false",
     file < 0 ? -1 : 0, open_error, read_result, read_error);
-  return direct && alias && write_refused && ordinary ? 0 : 3;
+  return direct && trusted_marker && user_marker && alias && write_refused && ordinary ? 0 : 3;
 }

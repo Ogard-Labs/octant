@@ -394,8 +394,8 @@ def main():
             any(overlay_actors[0].get(field) is not True for field in
                 ("inspected", "unmounted", "cleaned", "controllerJitDefaults")) or
             any(overlay_actor_workloads[0].get(field) is not True for field in
-                ("directPrivateRefused", "overlayPrivateRefused", "overlayPrivateWriteRefused",
-                 "ordinaryOverlayRead")) or
+                ("directPrivateRefused", "directTrustedMarkerRefused", "directUserMarkerRefused",
+                 "overlayPrivateRefused", "overlayPrivateWriteRefused", "ordinaryOverlayRead")) or
             any(overlay_actor_owners[0].get(field) is not True for field in
                 ("lowerUnchanged", "noUpperCopy", "unmounted"))):
         raise SystemExit("Backing-file credential overrides need private refusals, unchanged output/owner state and an ordinary OverlayFS read.")

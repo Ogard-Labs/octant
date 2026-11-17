@@ -34,6 +34,7 @@
 #include <linux/sched/task.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
+#include <linux/string.h>
 #include <linux/uaccess.h>
 #include <linux/wait.h>
 #include "octant_mediation.h"
@@ -420,11 +421,8 @@ struct octant_open_scope octant_open_begin(struct file *file)
 	unsigned long flags;
 	u32 operation;
 	bool valid;
-	if (!octant_mediation_restricted()) {
-		if (file_inode(file)->i_sb->s_magic == OVERLAYFS_SUPER_MAGIC)
-			pr_info("Octant mediation: overlay open unrestricted\n");
+	if (!octant_mediation_restricted())
 		return scope;
-	}
 	inode = d_inode(file->f_path.dentry);
 	if (!guarded_inode(inode))
 		return scope;
@@ -477,10 +475,6 @@ struct octant_open_scope octant_open_begin(struct file *file)
 		else
 			open->prepared = true;
 	}
-	if (inode->i_sb->s_magic == OVERLAYFS_SUPER_MAGIC)
-		pr_info("Octant mediation: overlay open logical error=%d active=%u prepared=%u operation=%u epoch=%llu\n",
-			scope.error, open->active, open->prepared, open->operation,
-			(unsigned long long)open->epoch);
 	return scope;
 }
 
@@ -503,33 +497,18 @@ int octant_open_backing(struct inode *inode)
 	open = &task->open;
 	context = open->context;
 	if (!open->active || !open->prepared || open->owner != current || !context ||
-	    current_context() != context) {
-		pr_info("Octant mediation: overlay backing state active=%u prepared=%u owner=%u context=%u current=%u\n",
-			open->active, open->prepared, open->owner == current, !!context,
-			context && current_context() == context);
+	    current_context() != context)
 		return -EACCES;
-	}
 	error = admit_inode_request(inode, open->operation, &request);
-	if (error) {
-		pr_info("Octant mediation: overlay backing decision error=%d device=%u:%u inode=%llu operation=%u\n",
-			error, MAJOR(inode->i_sb->s_dev), MINOR(inode->i_sb->s_dev),
-			(unsigned long long)inode->i_ino, open->operation);
+	if (error)
 		return error;
-	}
-	if (request.namespace_epoch != open->epoch) {
-		pr_info("Octant mediation: overlay backing epoch open=%llu decision=%llu\n",
-			(unsigned long long)open->epoch,
-			(unsigned long long)request.namespace_epoch);
+	if (request.namespace_epoch != open->epoch)
 		return -EAGAIN;
-	}
 	spin_lock_irqsave(&context->lock, flags);
 	spin_lock(&namespace_lock);
 	valid = !context->dead && broker_alive(context) && scope_epoch_valid(open->epoch, task);
 	spin_unlock(&namespace_lock);
 	spin_unlock_irqrestore(&context->lock, flags);
-	pr_info("Octant mediation: overlay backing admitted=%u device=%u:%u inode=%llu operation=%u\n",
-		valid, MAJOR(inode->i_sb->s_dev), MINOR(inode->i_sb->s_dev),
-		(unsigned long long)inode->i_ino, open->operation);
 	return valid ? 0 : -EACCES;
 }
 
@@ -712,8 +691,33 @@ static int octant_metadata_readlink(struct dentry *dentry)
 	return check_metadata_hook(dentry, OCTANT_MEDIATION_READ);
 }
 
+/* OverlayFS checks only this private marker while resolving a new lower dentry,
+ * before its file open callback can create an object-bound admission scope.
+ * Permit that kernel-internal query only under the unconfined mounter credential
+ * saved by the audited production mount. A direct caller, setfsuid credential,
+ * enrolled mounter, other xattr, dead broker or later backing access still uses
+ * normal admission. The open callback separately admits the resolved backing
+ * inode before copy-up or backing-file open. */
+static bool overlay_lookup_xattr_allows(const char *name)
+{
+	struct octant_context *actor = octant_cred(current_real_cred())->context;
+	struct octant_context *subjective = octant_cred(current_cred())->context;
+	unsigned long flags;
+	bool valid;
+	if (!actor || subjective == actor ||
+	    (strcmp(name, "trusted.overlay.metacopy") &&
+	     strcmp(name, "user.overlay.metacopy")))
+		return false;
+	spin_lock_irqsave(&actor->lock, flags);
+	valid = !actor->dead && broker_alive(actor);
+	spin_unlock_irqrestore(&actor->lock, flags);
+	return valid;
+}
+
 static int octant_metadata_getxattr(struct dentry *dentry, const char *name)
 {
+	if (overlay_lookup_xattr_allows(name))
+		return 0;
 	return check_metadata_hook(dentry, OCTANT_MEDIATION_READ);
 }
 
