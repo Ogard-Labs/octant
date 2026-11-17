@@ -512,11 +512,15 @@ static bool stacked_open_allows(u32 operation)
 {
 	struct octant_task *task = octant_task();
 	struct octant_open *open = &task->open;
-	struct octant_context *context = current_context();
+	struct octant_context *context = open->context;
 	unsigned long flags;
 	bool valid;
-	if (!open->active || !open->prepared || open->owner != current ||
-	    open->context != context ||
+	/* OverlayFS may temporarily override the caller credential with the
+	 * mounter's credential while resolving metacopy/backing state. The scope
+	 * is bound to this task and exact kernel call, so validate its retained
+	 * enrolled context rather than treating that credential override as a
+	 * different workload. */
+	if (!open->active || !open->prepared || open->owner != current || !context ||
 	    (operation == OCTANT_MEDIATION_WRITE && open->operation != OCTANT_MEDIATION_WRITE))
 		return false;
 	spin_lock_irqsave(&context->lock, flags);

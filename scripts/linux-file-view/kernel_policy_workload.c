@@ -115,19 +115,23 @@ static bool advanced_policy_controls(void)
   if (readonly >= 0) close(readonly);
   errno = 0;
   int direct_write = open(ROOT "/read-only/document", O_WRONLY | O_CLOEXEC);
-  bool direct_refused = direct_write < 0 && errno == EACCES;
+  bool direct_refused = (direct_write < 0 && errno == EACCES) ||
+    (direct_write >= 0 && write(direct_write, "x", 1) == -1 && errno == EACCES);
   if (direct_write >= 0) close(direct_write);
   errno = 0;
   int alias_write = open(ROOT "/read-only-write-alias", O_WRONLY | O_CLOEXEC);
-  bool alias_refused = alias_write < 0 && errno == EACCES;
+  bool alias_refused = (alias_write < 0 && errno == EACCES) ||
+    (alias_write >= 0 && write(alias_write, "x", 1) == -1 && errno == EACCES);
   if (alias_write >= 0) close(alias_write);
   errno = 0;
   int selected_write = open(ROOT "/selected-read-only/settings", O_WRONLY | O_CLOEXEC);
-  bool selected_write_refused = selected_write < 0 && errno == EACCES;
+  bool selected_write_refused = (selected_write < 0 && errno == EACCES) ||
+    (selected_write >= 0 && write(selected_write, "x", 1) == -1 && errno == EACCES);
   if (selected_write >= 0) close(selected_write);
   errno = 0;
   int denied = open(ROOT "/selected-deny/secret", O_RDONLY | O_CLOEXEC);
-  bool deny_read_refused = denied < 0 && errno == EACCES;
+  bool deny_read_refused = (denied < 0 && errno == EACCES) ||
+    (denied >= 0 && read(denied, bytes, sizeof(bytes)) == -1 && errno == EACCES);
   if (denied >= 0) close(denied);
   errno = 0;
   int created = open(ROOT "/read-only/late", O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
