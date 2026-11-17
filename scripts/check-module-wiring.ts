@@ -414,11 +414,13 @@ function collectReferences(
     // product use either; counting it would hide every module only it depends on.
     if (islands.has(file.path)) continue;
 
-    // Electron loads dedicated preloads from bundled output, so there is no
-    // TypeScript import edge. Count only literal entries declared by tsdown.
+    // Bundled process entries (including Electron preloads and server workers)
+    // are launched from built paths, so there is no TypeScript import edge.
+    // Count only literal array or object values declared by tsdown.
     if (file.path.endsWith("/tsdown.config.ts")) {
-      for (const entry of file.content.matchAll(/\bentry\s*:\s*\[([^\]]*)\]/g)) {
-        for (const literal of (entry[1] ?? "").matchAll(/["']([^"']+\.(?:ts|tsx))["']/g)) {
+      for (const entry of file.content.matchAll(/\bentry\s*:\s*(?:\[([^\]]*)\]|\{([^}]*)\})/g)) {
+        const declaration = entry[1] ?? entry[2] ?? "";
+        for (const literal of declaration.matchAll(/["']([^"']+\.(?:ts|tsx))["']/g)) {
           const source = literal[1];
           if (source === undefined) continue;
           const target = normalizeJoin(dirname(file.path), source);

@@ -381,6 +381,7 @@ function resolveServiceEnvironment(
     "OCTANT_SERVER_PORT",
     "OCTANT_PACKAGED_RUNTIME",
     "OCTANT_CODE_FILE_HELPER_PATH",
+    "OCTANT_SANDBOX_SCOPE_PATH",
   ] as const) {
     const value = source[key];
     if (value !== undefined) environment[key] = value;

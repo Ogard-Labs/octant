@@ -1,3 +1,5 @@
+import { authorizeSandboxHostRequest, sandboxToolPolicy } from "../process/sandboxRuntimePolicy";
+import { createPinnedFetch } from "../harness/nativeHarnessWebFetch";
 import {
   ActorId,
   AggregateId,
@@ -259,6 +261,24 @@ export class WebSearchSettingsService {
    */
   async search(input: WebSearchInput): Promise<WebSearchAnswer> {
     const keys = this.#keys;
+    const searchFetch: SearxngFetch | undefined =
+      sandboxToolPolicy() === undefined
+        ? this.#fetch
+        : async (target, init) => {
+            const request = new Request(target, init);
+            const url = new URL(request.url);
+            authorizeSandboxHostRequest(url);
+            if (request.method !== "GET" && request.method !== "POST")
+              throw new Error("Unsupported search transport method");
+            return createPinnedFetch()(url, {
+              signal: request.signal,
+              headers: Object.fromEntries(request.headers.entries()),
+              redirect: "manual",
+              ...(request.method === "POST"
+                ? { body: new Uint8Array(await request.arrayBuffer()) }
+                : {}),
+            });
+          };
     return searchWebSearchBackends({
       backends: this.eligible(),
       search: input,
@@ -274,7 +294,7 @@ export class WebSearchSettingsService {
               return await keys.resolve(entry.credentialRef);
             },
           }),
-      ...(this.#fetch === undefined ? {} : { fetch: this.#fetch }),
+      ...(searchFetch === undefined ? {} : { fetch: searchFetch }),
       onRouted: (routed) => {
         for (const failed of routed.failed) {
           if (failed.failure === "key-refused") this.#refusedKeys.add(String(failed.entryId));

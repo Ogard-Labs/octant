@@ -27,6 +27,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { decodeCodeLanguageReadRequest } from "@octant/contracts/code-language";
+import { decodeSandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import type {
   CodeLanguageDocumentResult,
   CodeLanguageReadResult,
@@ -37,6 +38,7 @@ import {
   type ProcessConfinementPort,
   type ProcessConfinementPrepareInput,
 } from "../process/seatbeltProfile";
+import { configureSandboxRestrictionsAuthority } from "../process/sandboxRuntimePolicy";
 import { deriveCodeFileId } from "./codeFileIdentity";
 import { withProjectExtraFolders } from "./codeProjectFolderRoot";
 import {
@@ -56,6 +58,7 @@ const roots: string[] = [];
 const services: CodeLanguageService[] = [];
 
 afterEach(async () => {
+  configureSandboxRestrictionsAuthority(undefined);
   await Promise.all(services.splice(0).map((service) => service.close()));
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -938,6 +941,57 @@ describe("Code language service reads for an agent", () => {
       reason: "path-outside-checkout",
     });
     expect(test.launches()).toBe(0);
+  });
+
+  it("refuses host-owned agent reads that require object-level sandbox mediation", async () => {
+    for (const policy of [
+      {
+        filesystem: {
+          readOnlyRoots: [],
+          readWriteRoots: [],
+          protectedPaths: [{ path: "/protected/source.ts", mode: "deny" as const }],
+        },
+        credentials: "existing-policy" as const,
+      },
+      {
+        filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
+        credentials: "isolated" as const,
+      },
+    ]) {
+      const { test, paths } = fake();
+      const selection = decodeSandboxPolicySelection({
+        policy: {
+          schemaVersion: 1,
+          revision: 1,
+          ...policy,
+          network: "existing-policy",
+          hostServices: "blocked",
+        },
+        context: {
+          root: paths.checkout,
+          hostId: "host",
+          projectId: test.state.thread.projectId,
+          threadId: test.state.thread.id,
+          checkoutId: test.state.thread.checkoutId,
+          sessionId: `sandbox-${policy.credentials}`,
+          provider: "codex",
+        },
+      });
+      configureSandboxRestrictionsAuthority({
+        validateSelection: () => true,
+        active: () => selection,
+        beginTurn: () => ({ status: "refused", message: "unused" }),
+        storageDirectory: () => undefined,
+        deny: () => undefined,
+        registerCleanup: () => () => undefined,
+      });
+      expect(await test.agent("b.ts")).toEqual({
+        status: "refused",
+        reason: "sandbox-read-denied",
+      });
+      expect(test.launches()).toBe(0);
+      configureSandboxRestrictionsAuthority(undefined);
+    }
   });
 
   it("reads a file in an extra folder by absolute path, in a server of its own, and refuses a folder beside it", async () => {

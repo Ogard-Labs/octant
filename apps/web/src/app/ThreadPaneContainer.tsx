@@ -617,6 +617,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   {...(workDefaultStrict === true ? { workDefaultStrict: true } : {})}
                   octantInstructionsClient={props.clients.octantInstructionsClient}
                   threadMenuItems={threadMenuItems}
+                  sandboxRestrictionsClient={props.clients.sandboxRestrictionsClient}
                   {...(contextClient === undefined ? {} : { contextClient })}
                   {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
                   followUpSuggestions={{
@@ -1061,6 +1062,13 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   onOpenProviderSettings={() => void openSettings({ section: "providers" })}
                   onOpenReviewerSettings={() =>
                     void openSettings({ section: "code", setting: "code-auto-reviewer" })
+                  }
+                  onOpenSandboxRestrictionsSettings={(sandboxScope) =>
+                    void openSettings({
+                      section: "permissions",
+                      setting: "sandbox-restrictions",
+                      sandboxScope,
+                    })
                   }
                   onOpenProtectedFilesSettings={() =>
                     void openSettings({ section: "permissions", setting: "protected-files" })

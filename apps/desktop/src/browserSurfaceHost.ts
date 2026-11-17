@@ -49,6 +49,7 @@ import {
   type HumanBrowserResult,
 } from "@octant/contracts/browser-presentation";
 import { createHash, randomUUID } from "node:crypto";
+import { isIP } from "node:net";
 import { BrowserCredentialFill } from "./browserCredentialFill";
 import type { BrowserSurfacePointSelection } from "@octant/contracts/desktop-bridge";
 import {
@@ -92,6 +93,7 @@ import {
   type BrowserTransferLimits,
 } from "@octant/domain";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
+import { isPrivateAddress } from "./privateAddress";
 import { DesktopDownloadHold, type DesktopDownloadItemPort } from "./browserDownloadHold";
 import {
   autoAttachSurfaceFrames,
@@ -521,6 +523,12 @@ interface OwnedSurface {
    */
   humanInputTail: Promise<void>;
   control: BrowserSurfaceState["control"];
+  /**
+   * True while a navigation the person started from the address bar loads.
+   * Its hops are the person's browsing, except onto this computer or its
+   * network; see `admitNavigation`.
+   */
+  personNavigation: boolean;
   /** Remote owner input never turns delayed page navigation into a local person's origin grant. */
   ownerNavigationRestricted: boolean;
   shellWindow: BrowserSurfaceShellWindowPort | undefined;
@@ -695,6 +703,15 @@ export type BrowserSurfaceAction = Pick<BrowserActionRequest, "kind"> &
       readonly name: string;
       readonly url: string;
     };
+    /**
+     * Set by the server only on a `navigate` a person started from the address
+     * bar of a window of this computer. It is the person's browsing, as a link
+     * they click is: its redirects are followed, and a site it reaches outside
+     * the allowlist is one only the person's view shows. Typing an address
+     * that moved to another site stopped on a refusal written for the agent
+     * until 2026-11-17.
+     */
+    readonly startedBy?: "person";
   };
 
 export interface BrowserSurfaceRuntimeObservation {
@@ -1554,7 +1571,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         target.downloads.accept(
           event,
           item,
-          target.control === "user" ? options.personDownloadsFolder : undefined,
+          // A typed address is not a click on a download: while it loads, a
+          // page it was redirected to starts none in the person's name.
+          target.control === "user" && !target.personNavigation
+            ? options.personDownloadsFolder
+            : undefined,
         );
       });
     }
@@ -1629,6 +1650,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       },
     );
     view.webContents.on("console-message", (...args: readonly unknown[]) => {
+      if (!diagnosable(owned, view.webContents.getURL())) return;
       recordConsoleError(owned, view.webContents.getURL(), args);
     });
     // Electron keeps one failed-request listener per session, and the pages of a
@@ -1637,15 +1659,28 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     // installed it last.
     const webContentsId = view.webContents.id;
     if (webContentsId !== undefined) surfaceByWebContents.set(webContentsId, owned);
+    // The page a request belongs to: the tab it came from, else this one.
+    const requestPage = (surface: OwnedSurface, id: number | undefined): string =>
+      (
+        surface.tabs.find((entry) => entry.view.webContents.id === id)?.view ?? view
+      ).webContents.getURL();
     view.webContents.session.webRequest?.onErrorOccurred((details) => {
-      if (details.webContentsId === undefined) return recordFailedRequest(owned, details);
-      const target = surfaceByWebContents.get(details.webContentsId);
-      if (target !== undefined) recordFailedRequest(target, details);
+      const target =
+        details.webContentsId === undefined
+          ? owned
+          : surfaceByWebContents.get(details.webContentsId);
+      if (target === undefined || !diagnosable(target, requestPage(target, details.webContentsId)))
+        return;
+      recordFailedRequest(target, details);
     });
     view.webContents.session.webRequest?.onCompleted?.((details) => {
-      if (details.webContentsId === undefined) return recordHttpError(owned, details);
-      const target = surfaceByWebContents.get(details.webContentsId);
-      if (target !== undefined) recordHttpError(target, details);
+      const target =
+        details.webContentsId === undefined
+          ? owned
+          : surfaceByWebContents.get(details.webContentsId);
+      if (target === undefined || !diagnosable(target, requestPage(target, details.webContentsId)))
+        return;
+      recordHttpError(target, details);
     });
     view.webContents.on("context-menu", (_event: unknown, raw?: unknown) => {
       if (
@@ -3009,12 +3044,33 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           throw new BrowserTargetStaleError();
         }
         const inputsAtStart = owned.personInputs;
-        owned.control = "agent";
+        // The address bar reaches the page through this route too. A navigation
+        // the server marks as the person's is driven by them, not by the agent.
+        const personNavigation = request.kind === "navigate" && request.startedBy === "person";
+        // Set together: the person's control without the mark would let the
+        // page already open start a download in their name, or move to this
+        // computer's network, while the dialog guard below is still attaching.
+        owned.control = personNavigation ? "user" : "agent";
+        owned.personNavigation = personNavigation;
         owned.blockedNavigationUrl = undefined;
         publish(contextId, owned);
         // Dialogs an earlier action answered before it failed come first.
         const dialogs: DialogReport[] = owned.unreportedDialogs.splice(0);
-        const releaseDialogs = await guardDialogs(contentsView(owned), dialogs, request.dialog);
+        // Those came from earlier actions; the rest are this action's page's.
+        const carriedDialogs = dialogs.length;
+        const diagnosticsAtStart = owned.diagnosticSeq;
+        let withheld = false;
+        let releaseDialogs: () => Promise<void>;
+        try {
+          releaseDialogs = await guardDialogs(contentsView(owned), dialogs, request.dialog);
+        } catch (error) {
+          // The action never began, so the `finally` below never runs: nothing
+          // may be left reading the next hops as the person's.
+          owned.personNavigation = false;
+          owned.control = "idle";
+          publish(contextId, owned);
+          throw error;
+        }
         if (request.downloads === "hold") owned.downloads.begin(request.downloadLimits);
         try {
           checkObservation();
@@ -3257,6 +3313,21 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 break;
             }
             if (SETTLING_ACTIONS.has(request.kind)) await settlePage(contentsView(owned));
+            // The typed address has loaded. What the page does from here on is
+            // nobody's action, so a move it makes during the reads below
+            // grants no site.
+            if (personNavigation) owned.control = "idle";
+            // The person's own navigation may end on a site only their view
+            // shows. Nothing of that page goes into the answer, which the
+            // server keeps as the observation an agent's results are built
+            // from: no address, title, text, hash or picture.
+            if (
+              personNavigation &&
+              !originAllowed(contents.getURL(), owned.policy.allowedOrigins)
+            ) {
+              withheld = true;
+              return {};
+            }
             refuseUnapprovedPage(owned, contents);
             const include = new Set(request.include ?? []);
             const wantsText = request.kind === "extract-text" || include.has("text");
@@ -3298,6 +3369,16 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 ? undefined
                 : await captureScreenshot(contentsView(owned));
             const outline = include.has("snapshot") ? await snapshotOf(owned) : {};
+            // The reads above await, and a page can move itself meanwhile to a
+            // site only the person's view may show (one they reached before).
+            // What was read may describe that page, so none of it goes back.
+            if (!originAllowed(contents.getURL(), owned.policy.allowedOrigins)) {
+              if (personNavigation) {
+                withheld = true;
+                return {};
+              }
+              refuseUnapprovedPage(owned, contents);
+            }
             return {
               ...outline,
               ...(contents.getURL() === ""
@@ -3317,6 +3398,13 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               ...(pageToolCall === undefined ? {} : { pageToolCall }),
             };
           })();
+          // A dialog's text is the page's own words, so none this load raised
+          // goes back either, and the agent has not read this page.
+          if (withheld) {
+            owned.unreportedDialogs.push(...dialogs.slice(0, carriedDialogs));
+            dropDiagnosticsAfter(owned, diagnosticsAtStart);
+            return {};
+          }
           if (
             request.kind === "snapshot" ||
             request.kind === "navigate" ||
@@ -3337,7 +3425,12 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         } catch (error) {
           // The action failed after the page raised a dialog: the answer the
           // policy gave is reported with the next action that succeeds.
-          owned.unreportedDialogs.push(...dialogs.slice(-8));
+          // The person's navigation may have failed on a page approval never
+          // covered, so its dialogs are not kept for the agent's next answer.
+          owned.unreportedDialogs.push(
+            ...(personNavigation ? dialogs.slice(0, carriedDialogs) : dialogs).slice(-8),
+          );
+          if (personNavigation) dropDiagnosticsAfter(owned, diagnosticsAtStart);
           throw error;
         } finally {
           // Released before the surface is handed back, whatever the action did;
@@ -3345,6 +3438,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           await releaseDialogs().catch(() => undefined);
           // A failed action stops holding too; its reports wait for the next answer.
           if (request.downloads === "hold") await owned.downloads.finish().catch(() => undefined);
+          owned.personNavigation = false;
           owned.control = "idle";
           publish(contextId, owned);
         }
@@ -3365,6 +3459,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         // A context that has not navigated yet has no document to inspect and
         // no painted frame to capture; both probes below would never resolve.
         if (contents.getURL() === "") return {};
+        // A page only the person's view shows is not described to the server,
+        // whose observation an agent's results are built from. The address,
+        // title and picture of a page the person had browsed to reached it
+        // through the preview's poll.
+        if (!originAllowed(contents.getURL(), owned.policy.allowedOrigins)) return {};
         const sensitiveDocument = await hasSensitiveDocument(
           contentsView(owned),
           owned.policy.credentialFieldProtection,
@@ -3736,6 +3835,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       actionTail: Promise.resolve(),
       humanInputTail: Promise.resolve(),
       control: "idle",
+      personNavigation: false,
       ownerNavigationRestricted: false,
       shellWindow: undefined,
       blockedNavigationUrl: undefined,
@@ -3894,6 +3994,11 @@ function admitNavigation(
   // a surface nobody has touched must not grant itself an origin because a
   // page redirected on load.
   if (!allowPersonOriginGrant || owned.control !== "user" || owned.extensionLoads > 0) return false;
+  // An address the person typed follows its redirects like any browsing, but
+  // not onto this computer or its network: a public page must not walk the
+  // person's view to an address only they can reach. One the page was opened
+  // for, or one the person already reached, passed above.
+  if (owned.personNavigation && onThisComputerOrNetwork(target)) return false;
   const origin = originOf(target);
   if (origin === undefined) return false;
   if (owned.userGrantedOrigins.length >= MAX_USER_GRANTED_ORIGINS) {
@@ -3918,6 +4023,31 @@ function refuseUnapprovedPage(
   const showing = contents.getURL();
   if (showing === "" || originAllowed(showing, owned.policy.allowedOrigins)) return;
   throw new Error("Octant Browser will not act on a page outside this context's allowed origins.");
+}
+
+/**
+ * Whether an address names this computer or its network by its own text: an
+ * IP literal outside the public ranges, localhost, a name under a suffix kept
+ * for private networks, or a bare name with no dot. A public name that
+ * resolves to a private address is not caught here.
+ */
+export function onThisComputerOrNetwork(target: string): boolean {
+  let hostname: string;
+  try {
+    hostname = new URL(normalizeUrl(target)).hostname.toLowerCase().replace(/\.$/, "");
+  } catch {
+    return true;
+  }
+  const bare =
+    hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+  if (isIP(bare) !== 0) return isPrivateAddress(bare);
+  return (
+    !bare.includes(".") ||
+    bare === "localhost" ||
+    [".localhost", ".local", ".internal", ".lan", ".home.arpa"].some((suffix) =>
+      bare.endsWith(suffix),
+    )
+  );
 }
 
 function originOf(target: string): string | undefined {
@@ -5553,6 +5683,32 @@ function recordHttpError(
 }
 
 /** Number one diagnostic entry and keep it, dropping the oldest of its kind past the bound. */
+/**
+ * Whether what a page logs or fails to load is kept for the agent's
+ * diagnostics read. A page outside the approved origins is one only the
+ * person's view shows: its console text is its own words, and its requests
+ * name where the person went.
+ */
+function diagnosable(owned: OwnedSurface, pageUrl: string): boolean {
+  return pageUrl === "" || originAllowed(pageUrl, owned.policy.allowedOrigins);
+}
+
+/**
+ * Forget what was recorded after `seq`: the hops of a person's navigation that
+ * ended outside the approved origins, logged while the approved page was still
+ * the one in front. The cursor is left alone, so a reader's `since` still holds.
+ */
+function dropDiagnosticsAfter(owned: OwnedSurface, seq: number): void {
+  for (const list of [
+    owned.consoleErrors,
+    owned.consoleWarnings,
+    owned.failedRequests,
+    owned.httpErrors,
+  ] as ReadonlyArray<Array<{ seq: number }>>) {
+    list.splice(0, list.length, ...list.filter((entry) => entry.seq <= seq));
+  }
+}
+
 function keepDiagnostic<T extends { seq: number }>(
   owned: OwnedSurface,
   list: T[],

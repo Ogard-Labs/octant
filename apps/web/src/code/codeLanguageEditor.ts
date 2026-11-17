@@ -113,6 +113,7 @@ const REFUSAL_TEXT: Readonly<Record<CodeLanguageRefusalReason, string>> = {
   "checkout-mismatch": "the thread moved to another checkout",
   "file-outside-thread": "the host no longer holds this file open",
   "path-outside-checkout": "the file resolves outside the checkout",
+  "sandbox-read-denied": "sandbox restrictions block this host-owned file read",
   "no-reach": "this window cannot reach the thread",
   "turned-off": "they are off in Settings › Code",
   "no-language-server": "no language server reads this file",

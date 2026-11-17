@@ -202,6 +202,7 @@ export const CodeLanguageRefusalReason = Schema.Literal(
   "checkout-mismatch",
   "file-outside-thread",
   "path-outside-checkout",
+  "sandbox-read-denied",
   "no-reach",
   "turned-off",
   "no-language-server",

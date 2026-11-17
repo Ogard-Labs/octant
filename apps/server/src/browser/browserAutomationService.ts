@@ -584,6 +584,11 @@ export class BrowserAutomationService {
     /** True when this Open needs a context of its own. See `OwnedContext`. */
     readonly dedicated?: boolean | undefined;
     /**
+     * True when this Open is the thread's shared context if there is none, and
+     * a context of its own if there is one. See the create command.
+     */
+    readonly ownPageWhenShared?: boolean | undefined;
+    /**
      * Who is behind the request, for a page in a stored profile. A paired device
      * and a terminal grant name themselves; anything else is the person at a
      * local window unless the scope is the host acting alone.
@@ -605,7 +610,6 @@ export class BrowserAutomationService {
         },
         "failed",
       );
-    const dedicated = input.dedicated === true;
     const current = this.#current(input.windowId, input.threadId);
     if (
       !this.#authority.canAccessWindow(input.windowId, input.threadId, input.action.authority.mode)
@@ -637,27 +641,36 @@ export class BrowserAutomationService {
         { category: "stale", message: "Browser flow custody changed before opening the page." },
         "failed",
       );
+    // An Open that takes a page of its own only when the shared one is live is
+    // judged here, against the thread as it stands now: nothing below awaits
+    // before the new context is registered, so of two such Opens that arrive
+    // together exactly one becomes the shared page. Read earlier, both saw no
+    // shared page and the second was handed the first's.
+    const shared =
+      input.ownPageWhenShared === true ? this.#current(input.windowId, input.threadId) : current;
+    const dedicated =
+      input.dedicated === true || (input.ownPageWhenShared === true && shared !== undefined);
     // A dedicated Open never reconciles against the thread's shared context: it
     // must neither inherit that context's origin nor stop it to take the slot.
-    if (!dedicated && current !== undefined) {
-      if (!this.#authorityIsActive(current)) {
-        this.#revokeAuthority(current);
+    if (!dedicated && shared !== undefined) {
+      if (!this.#authorityIsActive(shared)) {
+        this.#revokeAuthority(shared);
         return failedSnapshot(
           input.threadId,
           { category: "unauthorized", message: "Browser context authority is no longer active." },
           "failed",
         );
       }
-      if (current.record.state === "creating") await current.creation;
-      if (!this.#authorityIsActive(current)) {
-        this.#revokeAuthority(current);
+      if (shared.record.state === "creating") await shared.creation;
+      if (!this.#authorityIsActive(shared)) {
+        this.#revokeAuthority(shared);
         return failedSnapshot(
           input.threadId,
           { category: "unauthorized", message: "Browser context authority is no longer active." },
           "failed",
         );
       }
-      return snapshot(current);
+      return snapshot(shared);
     }
     if (!dedicated) this.#forgetExpiry(input.windowId, input.threadId);
     const contextId = this.#uuid() as BrowserContextId;
@@ -1230,6 +1243,14 @@ export class BrowserAutomationService {
     readonly holdDownloads?: boolean;
     /** Set by the agent tool for a turn at Full access; no route can name it. */
     readonly fullAccess?: true;
+    /**
+     * Set only by the action route, for a window of this computer: the person
+     * typed the address. A `navigate` so marked is their browsing, as a link
+     * they click on the page is, and the desktop Browser follows its redirects
+     * to a site only their view shows. It approves no origin: the agent reads
+     * and acts only inside the context's approved origins, as before.
+     */
+    readonly startedBy?: "person";
   }): Promise<BrowserAutomationSnapshot> {
     const owned = this.#contexts.get(input.request.contextId);
     const foreign =
@@ -1374,9 +1395,16 @@ export class BrowserAutomationService {
       readonly refuseStaleRevision?: boolean;
       readonly holdDownloads?: boolean;
       readonly fullAccess?: true;
+      readonly startedBy?: "person";
     },
   ): Promise<BrowserAutomationSnapshot> {
     const activityBy = input.activityBy ?? input.capturedBy;
+    // Never an agent's call or a flow's, whatever else the caller passed.
+    const personNavigation =
+      input.startedBy === "person" &&
+      input.request.kind === "navigate" &&
+      activityBy !== "agent" &&
+      input.flowRun === undefined;
     if (owned.abort.signal.aborted || owned.record.state !== "active") {
       return this.#failure(
         owned,
@@ -1614,6 +1642,7 @@ export class BrowserAutomationService {
             (input.fullAccess === true || this.#agentDownloadsEnabled())
               ? { downloads: "hold" as const, downloadLimits: this.#transferLimits() }
               : {}),
+            ...(personNavigation ? { startedBy: "person" as const } : {}),
           },
           owned.abort.signal,
         ),
@@ -1710,15 +1739,21 @@ export class BrowserAutomationService {
           );
         }
       }
-      const change = describeChange(
-        input.request.kind,
-        {
-          url: owned.observation?.url,
-          title: owned.observation?.title,
-          contentHash: owned.contentHash,
-        },
-        observed,
-      );
+      // The desktop Browser answers the person's own navigation with nothing
+      // of a page that ended outside the approved origins. Compared as a
+      // page, that reads as a blank one holding a credential field.
+      const change =
+        personNavigation && observed.url === undefined
+          ? "The person took this page to a site outside its approved origins. Nothing of that page was read."
+          : describeChange(
+              input.request.kind,
+              {
+                url: owned.observation?.url,
+                title: owned.observation?.title,
+                contentHash: owned.contentHash,
+              },
+              observed,
+            );
       const observation: BrowserObservation = {
         contextId: owned.record.contextId,
         actionId: owned.record.actionId,

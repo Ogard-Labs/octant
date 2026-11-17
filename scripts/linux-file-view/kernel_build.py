@@ -155,33 +155,52 @@ def main():
     run("gcc", "-static", "-pthread", "-std=c11", "-Wall", "-Wextra", "-Werror",
         str(repository / "scripts/linux-file-view/kernel_guest.c"), "-o", str(init_binary), timeout=30)
     relay = root / "octant-mediation"
+    sandbox_launcher = root / "octant-sandbox-launch"
     workload = root / "policy-workload"
     policy = root / "policy-broker"
     session_cases = root / "session-cases"
+    policy_module = root / "policy-broker.mjs"
+    session_module = root / "session-cases.mjs"
+    production_worker = root / "linuxMediationWorker.mjs"
+    production_supervisor = root / "linuxMediationSupervisor.mjs"
     core_notes_binary = root / "core-notes"
     core_probe = root / "core-probe"
     fileattr_workload = root / "fileattr-workload"
     overlayfs_workload = root / "overlayfs-workload"
     overlayfs_fixture = root / "overlayfs-fixture"
+    overlayfs_actor = root / "overlayfs-actor-workload"
     for source, target in ((native / "broker.c", relay),
+                           (repository / "apps/server/native/sandbox-launch/OctantSandboxLaunch.c",
+                            sandbox_launcher),
                            (repository / "scripts/linux-file-view/kernel_policy_workload.c", workload),
                            (repository / "scripts/linux-file-view/kernel_core_probe.c", core_probe),
                            (repository / "scripts/linux-file-view/kernel_fileattr_workload.c", fileattr_workload),
                            (repository / "scripts/linux-file-view/overlayfs_workload.c", overlayfs_workload),
-                           (repository / "scripts/linux-file-view/overlayfs_fixture.c", overlayfs_fixture)):
-        run("gcc", "-static", "-std=c11", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(target), timeout=30)
+                           (repository / "scripts/linux-file-view/overlayfs_fixture.c", overlayfs_fixture),
+                           (repository / "scripts/linux-file-view/overlayfs_actor_workload.c", overlayfs_actor)):
+        run("gcc", "-static", "-std=c11", "-Wall", "-Wextra", "-Werror",
+            str(source), "-o", str(target), timeout=30)
     core_check = root / "core-notes-check"
     run("gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-DOCTANT_CORE_NOTES_TEST=1",
         str(repository / "scripts/linux-file-view/kernel_core_notes.c"), "-o", str(core_check), timeout=30)
     run(str(core_check), timeout=5, cwd=root)
-    run("bun", "build", "--compile", str(repository / "scripts/linux-file-view/kernel_policy.ts"),
-        "--outfile", str(policy), timeout=120, cwd=repository)
-    run("bun", "build", "--compile", str(repository / "scripts/linux-file-view/kernel_session.ts"),
-        "--outfile", str(session_cases), timeout=120, cwd=repository)
-    controller_image(policy)
-    # Same compiled classifier, default JIT, no device/enrollment on the stock
-    # runner. Keep this independent control before any guest mitigation.
-    run(str(policy), "--metadata-control", timeout=15, cwd=root)
+    node_path = shutil.which("node")
+    if not node_path:
+        raise SystemExit("The owned controller requires the existing Node runtime.")
+    # Fixed, separate interpreter images preserve the role-specific executable
+    # identities in the kernel-owned core collector. No shell or runtime flags.
+    for executable in (policy, session_cases):
+        shutil.copyfile(Path(node_path).resolve(strict=True), executable)
+        executable.chmod(0o700)
+        controller_image(executable)
+    for source, target in (("kernel_policy.ts", policy_module), ("kernel_session.ts", session_module)):
+        run("bun", "build", "--target=node", "--format=esm",
+            str(repository / "scripts/linux-file-view" / source), "--outfile", str(target), timeout=120, cwd=repository)
+    for source, target in (("linuxMediationWorker.ts", production_worker),
+                           ("linuxMediationSupervisor.ts", production_supervisor)):
+        run("bun", "build", "--target=node", "--format=esm",
+            str(repository / "apps/server/src/process" / source), "--outfile", str(target), timeout=120, cwd=repository)
+    run(str(policy), str(policy_module), "--metadata-control", timeout=15, cwd=root)
     # Copy only this task-owned public executable's dynamic loader/libraries
     # into the disposable initramfs. Nothing is mounted from the runner home.
     runtime_files = {}
@@ -201,11 +220,18 @@ def main():
                    "fileattr-workload": fileattr_workload,
                    "overlayfs-workload": overlayfs_workload,
                    "overlayfs-fixture": overlayfs_fixture,
+                   "overlayfs-actor-workload": overlayfs_actor,
                    "core-probe": core_probe,
-                   "policy-broker": policy, "session-cases": session_cases, "usr/bin/bwrap": Path("/usr/bin/bwrap"),
+                   "policy-broker": policy, "session-cases": session_cases,
+                   "policy-broker.mjs": policy_module, "session-cases.mjs": session_module,
+                   "dist/native/octant-mediation": relay,
+                   "dist/native/octant-sandbox-launch": sandbox_launcher,
+                   "dist/linuxMediationWorker.mjs": production_worker,
+                   "dist/linuxMediationSupervisor.mjs": production_supervisor,
+                   "usr/bin/bwrap": Path("/usr/bin/bwrap"),
                    "kernel-runtime.mjs": repository / "scripts/linux-file-view/kernel_runtime.mjs",
                    **runtime_files}
-    module_names = {"policy-broker", "core-probe"}
+    module_names = {"policy-broker", "session-cases", "core-probe"}
     for path in re.findall(r"(?:=>\s+)?(/[^\s]+)", library_log.read_text()):
         library = Path(path)
         if not library.is_file():
@@ -249,27 +275,41 @@ def main():
     # same owned image without that optional feature to prove real mutations.
     run("mke2fs", "-q", "-F", "-t", "ext4", "-O", "^metadata_csum", "-d", str(tree), str(image), timeout=30)
     with (root / "guest.log").open("wb") as output:
-        run("timeout", "--kill-after=3s", "150s", "qemu-system-x86_64", "-machine", "accel=tcg",
+        run("timeout", "--kill-after=3s", "240s", "qemu-system-x86_64", "-machine", "accel=tcg",
             "-cpu", "max", "-m", "512M", "-smp", "2", "-nic", "none", "-nographic",
             "-no-reboot", "-kernel", str(kernel / "arch/x86/boot/bzImage"),
             "-drive", f"file={image},format=raw,if=virtio",
             "-append", "console=ttyS0 root=/dev/vda rootfstype=ext4 rw init=/init panic=-1",
-            timeout=155, cwd=root, output=output)
+            timeout=245, cwd=root, output=output)
     log = (root / "guest.log").read_text(errors="replace")
-    print(log[-20000:])
+    # Retain every native receipt in job output; later runtime failures must
+    # not hide the earlier security counterexample and its positive controls.
+    print(log)
     cases = []
+    classifier_controls = []
     ordered = []
+    core_evidence = []
+    namespaces = []
     runtime_receipts = []
     runtime_joins = []
     outside = []
     fileattr_cases, fileattr_owners, fileattr_filesystems, fileattr_brokers = [], [], [], []
-    overlay_reproductions = []
+    advanced_policy_cases = []
+    overlay_reproductions, overlay_actors, overlay_actor_workloads, overlay_actor_owners = [], [], [], []
     probe_addresses, probe_exits, core_notes, core_targets, core_retirements, processes = [], [], [], [], [], []
     for line in log.splitlines():
         if line.startswith("{"):
             value = json.loads(line)
             if value.get("status") == "measured-original-policy-broker":
                 cases.append(value)
+            elif value.get("status") == "measured-unconfined-classifier":
+                classifier_controls.append(value)
+            elif value.get("status") == "overlayfs-actor-workload":
+                overlay_actor_workloads.append(value)
+            elif value.get("status") == "overlayfs-actor-owner":
+                overlay_actor_owners.append(value)
+            elif value.get("status") == "measured-overlayfs-actor":
+                overlay_actors.append(value)
             elif value.get("status") == "measured-overlayfs-copy-up":
                 overlay_reproductions.append(value)
             elif value.get("status") == "measured-kernel-runtime":
@@ -282,8 +322,14 @@ def main():
             fileattr_owners.append(json.loads(line.split(" ", 1)[1]))
         elif line.startswith("OCTANT_FILEATTR_FILESYSTEM "):
             fileattr_filesystems.append(json.loads(line.split(" ", 1)[1]))
+        elif line.startswith("OCTANT_ADVANCED_POLICY_CASE "):
+            advanced_policy_cases.append(json.loads(line.split(" ", 1)[1]))
         elif line.startswith("OCTANT_ORDERED_ADMISSIONS "):
             ordered.append(json.loads(line.split(" ", 1)[1]))
+        elif line.startswith("OCTANT_KERNEL_EVIDENCE "):
+            core_evidence.append(json.loads(line.split(" ", 1)[1]))
+        elif line.startswith("OCTANT_KERNEL_NAMESPACE "):
+            namespaces.append(json.loads(line.split(" ", 1)[1]))
         elif line.startswith("OCTANT_OUTSIDE_EPOCH "):
             outside.append(json.loads(line.split(" ", 1)[1]))
         elif line.startswith("OCTANT_CORE_PROBE_ADDRESS "):
@@ -324,20 +370,22 @@ def main():
     session_joins = [json.loads(line.split(" ", 1)[1]) for line in log.splitlines() if line.startswith("OCTANT_SESSION_JOIN ")]
     expected_sessions = {"invalid-deadline-refuses-before-spawn", "close-before-launch-no-command", "early-exit-real-code",
                          "caller-cancellation-joins", "deadline-joins", "bounded-duplex-pressure-and-private-receipt-mask",
-                         "owner-loss-EOF-admission-and-command-stop"}
+                         "owner-loss-EOF-admission-and-command-stop", "private-packaged-production-supervisor"}
     if (len(sessions) != 1 or set(sessions[0].get("outcomes", [])) != expected_sessions or
-            sessions[0].get("actualBubblewrapBuilder") is not True or sessions[0].get("productionReady") is not False or
+            sessions[0].get("actualBubblewrapBuilder") is not True or sessions[0].get("controllerJitDefaults") is not True or sessions[0].get("controllerRuntime") != "node" or sessions[0].get("productionReady") is not True or
+            set(sessions[0].get("production", {}).keys()) != {"privateRuntime", "configConsumed", "receiptsCleaned", "payloadExited"} or
+            any(value is not True for value in sessions[0]["production"].values()) or
             len(session_joins) != 1 or any(session_joins[0].get(key) != value for key, value in {"controllerJoined": True, "controllerCode": 0, "orphansJoined": 1, "remaining": False}.items())):
         raise SystemExit("The actual owned session needs all lifecycle/stdio/private-root controls and exact orphan joins.")
-    expected_modes = ["--metadata-control", "direct", "--bubblewrap", "--bubblewrap", "--bubblewrap",
-                      "--runtime-bun", "--runtime-node", "--fileattr", "--overlay-copyup"]
-    if (len(processes) != 9 or sorted(entry.get("mode", "") for entry in processes) != sorted(expected_modes) or
-            len(core_targets) != 10 or len(core_retirements) != 11 or
+    expected_modes = ["--metadata-control", "direct", *(["--bubblewrap"] * 12),
+                      "--runtime-bun", "--runtime-node", "--fileattr", "--overlay-copyup", "--overlay-actor"]
+    if (len(processes) != len(expected_modes) or sorted(entry.get("mode", "") for entry in processes) != sorted(expected_modes) or
+            len(core_targets) != len(expected_modes) + 1 or len(core_retirements) != len(expected_modes) + 2 or
             {entry.get("pid") for entry in core_retirements} != {pid, *(entry.get("pid") for entry in processes), session_joins[0].get("controllerPid")} or
             any(entry.get("held") is not True or entry.get("retired") is not True for entry in core_retirements) or
             any(entry.get("diagnosticObserver") is not False or entry.get("joined") is not True
                 for entry in processes)):
-        raise SystemExit("Every captured PID must stay held until inactive-pipe retirement, with no tracer.")
+        raise SystemExit("Every registered controller/probe PID must stay held until inactive-pipe retirement, with no tracer.")
     if (len(fileattr_cases) != 1 or len(fileattr_owners) != 1 or len(fileattr_filesystems) != 1 or
             len(fileattr_brokers) != 1 or fileattr_filesystems[0] != {"ext4": True, "baselineRead": True} or
             any(fileattr_cases[0].get(field) is not True for field in
@@ -347,13 +395,27 @@ def main():
             any(fileattr_owners[0].get(field) is not True for field in
                 ("measured", "flagsUnchanged", "statUnchanged", "unchanged")) or
             fileattr_brokers[0].get("status") != "measured-fileattr-broker" or
+            fileattr_brokers[0].get("productionReady") is not True or
             fileattr_brokers[0].get("actualBubblewrapBuilder") is not True or
             fileattr_brokers[0].get("ownedCommandJoined") is not True or
             fileattr_brokers[0].get("cleaned") is not True):
         raise SystemExit("The ext4 attributes need private read/mutation refusals, unchanged output/owner state and public positive controls.")
+    if (len(overlay_actors) != 1 or len(overlay_actor_workloads) != 1 or len(overlay_actor_owners) != 1 or
+            overlay_actors[0].get("ended") != {"status": "exited", "code": 0} or
+            overlay_actors[0].get("actualBubblewrapBuilder") is not False or
+            overlay_actors[0].get("productionReady") is not True or
+            overlay_actors[0].get("controllerRuntime") != "node" or
+            any(overlay_actors[0].get(field) is not True for field in
+                ("inspected", "unmounted", "cleaned", "controllerJitDefaults")) or
+            any(overlay_actor_workloads[0].get(field) is not True for field in
+                ("directPrivateRefused", "directTrustedMarkerRefused", "directUserMarkerRefused",
+                 "overlayPrivateRefused", "overlayPrivateWriteRefused", "ordinaryOverlayRead")) or
+            any(overlay_actor_owners[0].get(field) is not True for field in
+                ("lowerUnchanged", "noUpperCopy", "unmounted"))):
+        raise SystemExit("Backing-file credential overrides need private refusals, unchanged output/owner state and an ordinary OverlayFS read.")
     if (len(overlay_reproductions) != 1 or
             overlay_reproductions[0].get("actualBubblewrapBuilder") is not False or
-            overlay_reproductions[0].get("productionReady") is not False or
+            overlay_reproductions[0].get("productionReady") is not True or
             overlay_reproductions[0].get("ended") != {"status": "exited", "code": 0} or
             overlay_reproductions[0].get("overlayCopyupBeforeTransition") is not True or
             overlay_reproductions[0].get("overlayWriteRefused") is not True or
@@ -362,7 +424,8 @@ def main():
             overlay_reproductions[0].get("cleaned") is not True or
             overlay_reproductions[0].get("overlayReport", {}).get("upperCopyAfterDeniedWrite") is not True or
             overlay_reproductions[0].get("overlayReport", {}).get("contentUnchanged") is not True or
-            overlay_reproductions[0].get("overlayReport", {}).get("distinctUpperObject") is not True):
+            overlay_reproductions[0].get("overlayReport", {}).get("distinctUpperObject") is not True or
+            overlay_reproductions[0].get("overlayReport", {}).get("productionReady") is not True):
         raise SystemExit("The isolated OverlayFS case needs pre-transition copy-up, denied first write, unchanged upper bytes, confirmed unmount and cleanup.")
     if any(entry.get("code") != 0 or entry.get("signal") != 0 for entry in processes):
         raise SystemExit("Every untraced policy process must also exit normally with code zero.")
@@ -372,30 +435,45 @@ def main():
             {case.get("case") for case in outside} != expected_outside or any(
                 any(case.get(field) is not True for field in
                     ("mutationSucceeded", "epochAdvanced", "staleRefused", "freshAllowed",
-                     "childrenJoined", "cleaned", "passed")) for case in outside)):
+                     "childrenJoined", "cleaned", "passed", "productionReady")) for case in outside)):
         raise SystemExit("Every outside-mutation epoch case requires actual stale/fresh/cleanup proof on two CPUs.")
-    if '"status":"measured-unconfined-classifier","snapshots":256,"jitDefaults":true,"enrolled":false,"cleaned":true' not in log:
+    if (len(classifier_controls) != 1 or classifier_controls[0].get("snapshots") != 256 or
+            classifier_controls[0].get("controllerRuntime") != "node" or
+            classifier_controls[0].get("enrolled") is not False or
+            any(classifier_controls[0].get(field) is not True for field in ("jitDefaults", "cleaned"))):
         raise SystemExit("The guest default-JIT classifier control requires an actual cleanup receipt.")
     capsules = [case for case in cases if case.get("actualBubblewrapBuilder") is True and
                 case.get("runtime") == "native"]
     direct = [case for case in cases if case.get("actualBubblewrapBuilder") is False]
     runtime_cases = [case for case in cases if case.get("runtime") in ("bun", "node")]
-    if len(capsules) != 3 or len(direct) != 1 or len(runtime_cases) != 2 or any(
+    if len(capsules) != 12 or len(direct) != 1 or len(runtime_cases) != 2 or any(
             case.get("ended") != {"status": "exited", "code": 0} or
             case.get("ownedCommandJoined") is not True or case.get("cleaned") is not True or
-            case.get("lateCompanion") is not True for case in cases):
+            case.get("lateCompanion") is not True or case.get("controllerJitDefaults") is not True or
+            case.get("controllerRuntime") != "node" or case.get("productionReady") is not True
+            for case in cases):
         raise SystemExit("Every original-policy case needs an actual exit/join/cleanup receipt.")
     if any(case.get("metadataUnchanged") is not True for case in [*capsules, *direct]):
         raise SystemExit("The independent owner must verify private xattrs and mode unchanged.")
+    if len(advanced_policy_cases) != 13 or any(not all(case.values()) for case in advanced_policy_cases):
+        raise SystemExit("Selected deny and same-filesystem read-only policy controls did not all pass.")
     expected = {"bun", "node"}
     if {case.get("runtime") for case in runtime_receipts} != expected or len(runtime_receipts) != 2 or any(
-            case.get("jitDefaults") is not True for case in runtime_receipts) or any(
+            case.get("jitDefaults") is not True or case.get("productionReady") is not True
+            for case in runtime_receipts) or any(
             case.get("actualBubblewrapBuilder") is not True for case in runtime_cases):
         raise SystemExit("Both real runtime workloads need their actual capsule receipt.")
     if len(ordered) != 1 or ordered[0].get("status") != "measured-ordered-admissions" or \
-            ordered[0].get("ownedChildJoined") is not True or ordered[0].get("cleaned") is not True:
+            ordered[0].get("ownedChildJoined") is not True or ordered[0].get("cleaned") is not True or \
+            ordered[0].get("productionReady") is not True:
         raise SystemExit("The controlled queued-read ordering proof did not pass.")
-    for attempt in range(1, 4):
+    if (len(core_evidence) != 1 or core_evidence[0].get("status") != "measured-admission-core" or
+            len(namespaces) != 1 or namespaces[0].get("status") != "measured-namespace-token" or
+            any(receipt.get("productionReady") is not True or
+                receipt.get("ownedChildJoined") is not True or receipt.get("cleaned") is not True
+                for receipt in (*core_evidence, *namespaces))):
+        raise SystemExit("The core and namespace receipts must carry complete production coverage.")
+    for attempt in range(1, 13):
         if f"OCTANT_BUBBLEWRAP_ATTEMPT {attempt} result=0" not in log:
             raise SystemExit("An uninstrumented ordinary capsule repetition did not complete.")
     if len(runtime_joins) != 1 or runtime_joins[0] != {"orphansJoined": 0, "remaining": False}:

@@ -314,6 +314,13 @@ describe("Code routes", () => {
     // level the person chose; the route only stops refusing what it admitted.
     expect((await route(from(raiseThread, { origin: AGENT_ACCESS_ORIGIN })))?.status).toBe(200);
     expect(execute).toHaveBeenCalledTimes(3);
+    // An agent's Full-access grant never authorizes changing protection.
+    for (const strict of [true, false]) {
+      expect(
+        (await route(from({ ...raiseThread, strict }, { origin: AGENT_ACCESS_ORIGIN })))?.status,
+      ).toBe(403);
+    }
+    expect(execute).toHaveBeenCalledTimes(3);
 
     for (const introduced of [
       { origin: "https://octant.invalid", admittedBy: "hub-roster" },
@@ -439,11 +446,26 @@ describe("Code routes", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
-  it("lets a device the host's own person paired change Continue after restart, move a thread to another account or set its usage-limit hand-off, as that device, and refuses any other device", async () => {
+  it("lets a device the host's own person paired change Strict, restart continuation and account choices, as that device, and refuses any other device", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated" }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
     const commands = [
+      {
+        kind: "change-code-thread-access",
+        threadId,
+        expectedVersion: 1,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+        strict: false,
+      },
+      {
+        kind: "update-code-settings",
+        expectedVersion: 1,
+        defaultExecutionPolicy: "approval-gated",
+        defaultPermissionPersistence: "current-session",
+        defaultStrict: false,
+      },
       {
         kind: "set-code-thread-restart-continuation",
         threadId,
@@ -510,7 +532,7 @@ describe("Code routes", () => {
         }),
       );
     }
-    expect(execute).toHaveBeenCalledTimes(4);
+    expect(execute).toHaveBeenCalledTimes(commands.length);
   });
 
   it("refuses a paired device choosing the model for automatic calls, and lets a local window", async () => {

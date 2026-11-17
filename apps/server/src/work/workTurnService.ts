@@ -1397,6 +1397,7 @@ export class WorkTurnService {
       platform: process.platform,
       access: {
         ...workThreadAccessOf(turnAccess),
+        ...(thread?.strict === undefined ? {} : { strict: thread.strict }),
         ...(thread?.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
       },
       strict: this.#resolveStrict?.(String(command.threadId)) ?? true,

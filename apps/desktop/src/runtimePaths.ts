@@ -18,6 +18,7 @@ export const EXTENSION_BRIDGE_PRELOAD_FILENAME = "extensionBridgePreload.cjs" as
 export const CANVAS_PROTOTYPE_HOST_RUNTIME_FILENAME = "canvasPrototypeHost.mjs" as const;
 export const NIGHTLY_CLIENT_RUNTIME_FILENAME = "nightlyClient.mjs" as const;
 export const TERMINAL_LAUNCHER_RUNTIME_FILENAME = "terminalLauncherRuntime.mjs" as const;
+export const SANDBOX_SCOPE_FILENAME = "octant-sandbox-scope" as const;
 export const CODE_FILE_HELPER_FILENAME = "octant-code-file-helper" as const;
 export const WINDOWS_CREDENTIAL_HELPER_FILENAME = "octant-credential-helper.exe" as const;
 export const KEYCHAIN_HELPER_FILENAME = "octant-keychain-helper" as const;
@@ -40,6 +41,7 @@ export interface DesktopNativeHelperPathOptions {
 export function resolveDesktopNativeHelperPath(
   options: DesktopNativeHelperPathOptions,
   filename:
+    | typeof SANDBOX_SCOPE_FILENAME
     | typeof CODE_FILE_HELPER_FILENAME
     | typeof KEYCHAIN_HELPER_FILENAME
     | typeof WINDOWS_HOST_OWNER_FILENAME

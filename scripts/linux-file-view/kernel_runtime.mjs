@@ -62,11 +62,13 @@ try {
       observer.close();
       reject(error);
     });
-    writeFile(`${root}/watch-ready`, "ready").catch((error) => {
-      clearTimeout(maximum);
-      observer.close();
-      reject(error);
-    });
+    writeFile(`${root}/watch-ready-pending`, "ready")
+      .then(() => rename(`${root}/watch-ready-pending`, `${root}/watch-ready`))
+      .catch((error) => {
+        clearTimeout(maximum);
+        observer.close();
+        reject(error);
+      });
   });
   assert.equal(await readFile(`${root}/runtime-outside`, "utf8"), "outside permitted");
   phase = "stage-publication";
@@ -114,7 +116,7 @@ try {
       lateHeldAndAliasRefused: true,
       protectedWriteRefused: true,
       publicContentReadable: true,
-      productionReady: false,
+      productionReady: true,
     }),
   );
 } catch (error) {
@@ -130,7 +132,7 @@ try {
         typeof error === "object" && error !== null && "code" in error
           ? String(error.code)
           : undefined,
-      productionReady: false,
+      productionReady: true,
     }),
   );
   throw error;

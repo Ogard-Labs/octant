@@ -1,3 +1,4 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { planReadOnlyToolServers, providerCommandOf, providerRunsAsItself } from "@octant/domain";
 import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
 import { readBoundedResponseBody } from "../extensions/boundedResponseBody";
@@ -179,6 +180,7 @@ export function openCodeProtectedPathsFor(
 }
 
 export interface OpenCodeDriverOptions {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly instanceId: ProviderInstanceId;
   readonly binaryPath: string;
   readonly process: OpenCodeProcessPort;
@@ -1680,7 +1682,14 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
             }
             return normalized;
           }),
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], attachmentsFolder }) =>
+    acquire: ({
+      instanceId,
+      projectRoot,
+      mode,
+      extraFolders = [],
+      attachmentsFolder,
+      sandboxPolicy,
+    }) =>
       instanceId !== options.instanceId
         ? Effect.fail(fail("invalid-configuration", "Provider instance does not match driver."))
         : Effect.gen(function* () {
@@ -1698,7 +1707,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               );
             }
             return yield* makeConnection(
-              options,
+              { ...options, ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }) },
               clientFactory,
               projectRoot,
               mode === "chat" ? [] : extraFolders,
@@ -2185,6 +2194,9 @@ function makeConnection(
             const startedExit = await Effect.runPromiseExit(
               options.process
                 .start({
+                  ...(options.sandboxPolicy === undefined
+                    ? {}
+                    : { sandboxPolicy: options.sandboxPolicy }),
                   binaryPath: options.binaryPath,
                   cwd: projectRoot,
                   ...(extraFolders.length === 0 ? {} : { extraFolders }),

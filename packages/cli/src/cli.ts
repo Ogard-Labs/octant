@@ -948,7 +948,7 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
   },
   {
     octant:
-      "settings sandbox on|off [--work]  (whether new Full access threads keep the sandbox, Code unless --work)",
+      "settings sandbox on|off [--work]  (whether new Full access threads keep the sandbox, Code unless --work; additional folder/network limits follow Settings > Permissions > Sandbox restrictions)",
   },
   { octant: "plugin install npm:<package>[@<version or range>]" },
   { octant: "plugin check-update <package>" },

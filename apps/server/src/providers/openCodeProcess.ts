@@ -1,3 +1,6 @@
+import { sandboxAuthorityDirectory, trackSandboxChild } from "../process/sandboxRuntimePolicy";
+import { startLinuxControlRelay, type LinuxControlRelay } from "../process/linuxControlRelay";
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { stopWindowsProcessTree } from "../process/windowsProcessTree";
 import {
@@ -106,6 +109,7 @@ export interface OpenCodeProcessStartInput {
    * unwrapped.
    */
   readonly fullAccessSandbox?: boolean;
+  readonly sandboxPolicy?: SandboxPolicySelection;
   /**
    * Whether the launch is Strict; absent is Strict. Outside Strict the wall
    * refuses only other providers' sign-ins among the protected files, so
@@ -1283,7 +1287,8 @@ function prepareGitStandinDirectory(profile: PrivateOpenCodeProfile): string {
  */
 function openCodeWallPolicy(input: OpenCodeProcessStartInput): ProviderExecutionPolicy {
   const executionPolicy = input.executionPolicy ?? "approval-gated";
-  return executionPolicy === "full-access" && input.fullAccessSandbox === true
+  return executionPolicy === "full-access" &&
+    (input.fullAccessSandbox === true || input.sandboxPolicy !== undefined)
     ? "auto-accept-edits"
     : executionPolicy;
 }
@@ -1306,7 +1311,7 @@ function openCodeWindowsLaunch(
     mode: input.mode ?? "code",
     executionPolicy: input.executionPolicy ?? "approval-gated",
     fullAccessSandbox: input.fullAccessSandbox,
-    strict: input.strict,
+    strict: input.sandboxPolicy === undefined ? input.strict : true,
   });
 }
 
@@ -1350,6 +1355,7 @@ function prepareOpenCodeLaunch(
   platform: NodeJS.Platform,
   /** The person's global `AGENTS.md`, linked into the private config folder. */
   globalAgentsInstructions: string | undefined,
+  controlSocket?: string,
 ): Effect.Effect<OpenCodeLaunch, ProviderFailure> {
   const mode = input.mode ?? "code";
   const executionPolicy = openCodeWallPolicy(input);
@@ -1423,7 +1429,11 @@ function prepareOpenCodeLaunch(
         stateHome,
         providerDataDirectory,
       ]);
-      if (executionPolicy === "full-access") {
+      if (
+        executionPolicy === "full-access" &&
+        input.sandboxPolicy === undefined &&
+        input.fullAccessSandbox !== true
+      ) {
         return {
           command: input.binaryPath,
           args,
@@ -1481,9 +1491,14 @@ function prepareOpenCodeLaunch(
         input.servers,
       );
       const launch = confinement.prepare({
+        ...(controlSocket === undefined
+          ? {}
+          : { inboundRelay: { socketPath: controlSocket, port } }),
         executable: input.binaryPath,
         args,
         boundRoot: root,
+        sandboxProviderChannel: true,
+        ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
         ...(mode === "chat" || input.extraFolders === undefined
           ? {}
           : { extraBoundRoots: input.extraFolders }),
@@ -1501,7 +1516,11 @@ function prepareOpenCodeLaunch(
         writeBoundRoot: !chatOrPlan,
         // Outside Strict OpenCode's own tools may use the protected files
         // inside its folders, other providers' sign-ins excepted.
-        ...(input.strict === false ? { protectedFiles: "provider-sign-ins" as const } : {}),
+        ...(input.strict === false &&
+        input.fullAccessSandbox !== true &&
+        input.sandboxPolicy === undefined
+          ? { protectedFiles: "provider-sign-ins" as const }
+          : {}),
         allowProcessExec: !jailDeniesProcess,
         // On macOS the stand-in needs fork so OpenCode can spawn the failing
         // git; exec stays denied except for the single /usr/bin/false literal
@@ -1554,7 +1573,7 @@ function prepareOpenCodeLaunch(
             }
           : {}),
       });
-      return { ...launch, cwd: root, environment };
+      return { ...launch, cwd: root, environment: { ...environment, ...launch.environment } };
     },
     catch: (error) =>
       failure(
@@ -1727,8 +1746,12 @@ function acquireOpenCodeServer(
     // OpenCode 2 rejects port 0, unlike the legacy server. Reserve an
     // ephemeral loopback port before launch so every v2 connection remains
     // isolated without relying on the provider's fixed default port.
+    const isolatedControl =
+      input.sandboxPolicy !== undefined &&
+      options.platform === "linux" &&
+      input.network?.endpoint.kind === "unix-socket";
     const port =
-      runtime === "beta"
+      runtime === "beta" || isolatedControl
         ? yield* Effect.tryPromise({
             try: options.reserveLoopbackPort,
             catch: () => failure("unavailable", "OpenCode loopback port could not be reserved."),
@@ -1780,6 +1803,9 @@ function acquireOpenCodeServer(
           port,
           options.platform,
           globalAgentsInstructions,
+          isolatedControl && profile.environment.TMPDIR !== undefined
+            ? join(profile.environment.TMPDIR, "control.sock")
+            : undefined,
         ),
       );
       if (Exit.isFailure(prepared)) {
@@ -1811,6 +1837,7 @@ function acquireOpenCodeServer(
         resume(Effect.fail(failure("unavailable", "OpenCode server could not be started.")));
         return cleanupDefect(async () => undefined);
       }
+      trackSandboxChild(input.sandboxPolicy, child);
       const childExited = new Promise<void>((resolveExit) =>
         child.once("exit", () => resolveExit()),
       );
@@ -1826,6 +1853,30 @@ function acquireOpenCodeServer(
         options.shutdownTimeoutMs,
         options.terminateProcessGroup,
       );
+      let controlRelay: LinuxControlRelay | undefined;
+      let relayStartupFailed = false;
+      if (isolatedControl) {
+        const authorityDirectory = sandboxAuthorityDirectory();
+        const scratch = profile.environment.TMPDIR;
+        if (authorityDirectory === undefined || scratch === undefined) {
+          relayStartupFailed = true;
+        } else {
+          try {
+            controlRelay = startLinuxControlRelay({
+              socketPath: join(scratch, "control.sock"),
+              ownerDirectory: join(authorityDirectory, "sandbox-control"),
+              exited: childExited,
+              launchReady: ownershipReady,
+              timeoutMs: options.startupTimeoutMs,
+              onLost: () => {
+                child.kill("SIGKILL");
+              },
+            });
+          } catch {
+            relayStartupFailed = true;
+          }
+        }
+      }
       let settled = false;
       let stdout = "";
       let stderr = "";
@@ -1845,7 +1896,11 @@ function acquireOpenCodeServer(
           // Profile cleanup is best effort after the owned process is gone.
         }
       };
-      const terminateOwned = () => terminate().finally(cleanupProfile);
+      const terminateOwned = () =>
+        terminate().finally(async () => {
+          await controlRelay?.close();
+          cleanupProfile();
+        });
       const finishFailure = (providerFailure: ProviderFailure) => {
         if (settled) return;
         settled = true;
@@ -1889,10 +1944,16 @@ function acquireOpenCodeServer(
           return;
         }
         if (settled || child.pid === undefined) return;
+        if (isolatedControl && Number(url.port) !== port) {
+          finishFailure(
+            failure("protocol", "OpenCode reported a different confined control port."),
+          );
+          return;
+        }
         settled = true;
         cleanup();
-        void ownershipReady.then(
-          () =>
+        void Promise.all([ownershipReady, controlRelay?.ready]).then(
+          ([, controlUrl]) =>
             resume(
               Effect.succeed({
                 connection: {
@@ -1906,7 +1967,7 @@ function acquireOpenCodeServer(
                   ...(profile.environment.TMPDIR === undefined
                     ? {}
                     : { temporaryDirectory: profile.environment.TMPDIR }),
-                  url,
+                  url: controlUrl ?? url,
                 },
                 terminate: terminateOwned,
               }),
@@ -1981,6 +2042,13 @@ function acquireOpenCodeServer(
       child.stderr.on("data", onStderr);
       child.once("error", onError);
       child.once("exit", onExit);
+      if (relayStartupFailed) {
+        finishFailure(failure("unavailable", "Sandbox control relay could not start."));
+      } else {
+        void controlRelay?.ready.catch(() => {
+          finishFailure(failure("unavailable", "Sandbox control relay could not become ready."));
+        });
+      }
 
       return cleanupDefect(async () => {
         if (!settled) settled = true;
@@ -2077,6 +2145,9 @@ export function makeOpenCodeProcessLive(
           executionPolicy === "full-access" || windows !== undefined
             ? undefined
             : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                ...(input.sandboxPolicy === undefined
+                  ? {}
+                  : { sandboxPolicy: input.sandboxPolicy }),
                 runtime: "opencode",
                 root: input.cwd,
                 executionPolicy,
@@ -2085,10 +2156,15 @@ export function makeOpenCodeProcessLive(
               });
         const servers =
           windows === undefined
-            ? yield* acquireProviderServerAccess(options.serverAccess, {
-                root: input.cwd,
-                executionPolicy,
-              })
+            ? yield* acquireProviderServerAccess(
+                input.sandboxPolicy?.policy.hostServices === "blocked"
+                  ? undefined
+                  : options.serverAccess,
+                {
+                  root: input.cwd,
+                  executionPolicy,
+                },
+              )
             : undefined;
         const { network: _ignored, servers: _ignoredServers, ...requested } = input;
         let terminate: (() => Promise<void>) | undefined;

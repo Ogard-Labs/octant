@@ -5,6 +5,7 @@ import {
   decodeCodeThreadId,
   type CodeThread,
   type CodeThreadId,
+  type ProviderDriverKind,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { CommandCredentialBinding } from "@octant/contracts/command-credentials";
@@ -15,10 +16,12 @@ import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
 import { confinedCommandCredentialProcess } from "./confinedCommandCredentialProcess";
 import type { CommandCredentialContext } from "./commandCredentialBindings";
 import type { PreparedCredentialCommand } from "./commandCredentialExecution";
+import { acquireSandboxCommand, registerSandboxCleanup } from "../process/sandboxRuntimePolicy";
 
 /** Ordinary Code policy and egress are additional to one-use credential consent. */
 export function createCommandCredentialPreparation(options: {
   readonly readThread: (id: CodeThreadId) => CodeThread | undefined;
+  readonly providerKind: (thread: CodeThread) => ProviderDriverKind | undefined;
   readonly ordinary: Pick<NativeHarnessComposition, "prepareCodeCommand">;
   readonly egress: Pick<ToolEgressRules, "startLaunch">;
   readonly endpoint: ToolEgressProxyEndpointRequest | undefined;
@@ -57,7 +60,30 @@ export function createCommandCredentialPreparation(options: {
       signal,
     });
     if (policy.status === "refused") return { status: "refused" };
+    let sandbox: ReturnType<typeof acquireSandboxCommand> | undefined;
+    try {
+      const provider = options.providerKind(thread);
+      sandbox =
+        provider === undefined
+          ? undefined
+          : acquireSandboxCommand({
+              threadId: context.threadId,
+              projectId: context.projectId,
+              root: context.root,
+              mode: "code",
+              provider,
+            });
+    } catch {
+      policy.finish({ started: false });
+      return { status: "refused" };
+    }
+    if (sandbox?.status !== "admitted") {
+      policy.finish({ started: false });
+      return { status: "refused" };
+    }
+    const selection = sandbox.turn.selection;
     let live: Awaited<ReturnType<typeof options.egress.startLaunch>> | undefined;
+    let leaveNetwork: (() => void) | undefined;
     let finished: Promise<boolean> | undefined;
     const finish: PreparedCredentialCommand["finish"] = (result) =>
       (finished ??= (async () => {
@@ -75,21 +101,31 @@ export function createCommandCredentialPreparation(options: {
         } catch {
           policyRecorded = false;
         }
+        leaveNetwork?.();
+        try {
+          await sandbox.turn.end();
+        } catch {
+          return false;
+        }
         return networkRecorded && policyRecorded;
       })());
     try {
-      if (!context.current() || signal.aborted) {
+      if (!context.current() || !sandbox.turn.current() || signal.aborted) {
         await finish({ started: false });
         return { status: "refused" };
       }
-      if (context.executionPolicy === "full-access")
+      if (
+        context.executionPolicy === "full-access" &&
+        selection === undefined &&
+        sandbox.turn.strict !== true
+      )
         return {
           status: "admitted",
           command: {
             mode: "full-access",
             process: options.fullAccessProcess,
             environment: {},
-            admitStart: policy.admitStart,
+            admitStart: () => sandbox.turn.current() && context.current() && policy.admitStart(),
             finish,
           },
         };
@@ -111,6 +147,10 @@ export function createCommandCredentialPreparation(options: {
         await finish({ started: false });
         return { status: "refused" };
       }
+      const network = live.launch;
+      leaveNetwork = registerSandboxCleanup(selection, async () => {
+        await network.finish();
+      });
       const proxy = live.launch.proxy;
       const proxyUrl = proxiedLaunchEnvironment(proxy.endpoint, proxy.token).HTTP_PROXY;
       if (proxyUrl === undefined) {
@@ -125,6 +165,7 @@ export function createCommandCredentialPreparation(options: {
         proxyUrl,
         temporaryDirectory: options.temporaryDirectory,
         receiptDirectory: options.receiptDirectory,
+        ...(selection === undefined ? {} : { sandboxPolicy: selection }),
       });
       return {
         status: "admitted",
@@ -132,7 +173,7 @@ export function createCommandCredentialPreparation(options: {
           mode: "confined",
           process: confined.process,
           environment: confined.environment,
-          admitStart: policy.admitStart,
+          admitStart: () => sandbox.turn.current() && context.current() && policy.admitStart(),
           finish,
         },
       };

@@ -577,6 +577,43 @@ describe("browser automation routes", () => {
       expect((await handler(pairedRequest(kind, "host-person")))?.status).toBe(200);
     }
     expect(service.act).toHaveBeenCalledTimes(3);
+    // A paired device's navigation is never marked as the person's own
+    // browsing: it could not act on a page that followed a redirect.
+    expect(service.act).not.toHaveBeenCalledWith(expect.objectContaining({ startedBy: "person" }));
+  });
+
+  it("marks a navigation from a window of this computer as the person's, and no other action", async () => {
+    const act = (kind: string) =>
+      handler(
+        new Request("http://127.0.0.1/api/browser/actions", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-octant-window-capability": capability,
+          },
+          body: JSON.stringify({
+            actionId: "70000000-0000-4000-8000-000000000001",
+            contextId,
+            correlationId: "80000000-0000-4000-8000-000000000001",
+            authority,
+            kind,
+            ...(kind === "navigate" ? { target: "https://example.com/" } : {}),
+            ...(kind === "click" ? { point: { x: 0.5, y: 0.5 } } : {}),
+          }),
+        }),
+      );
+
+    expect((await act("navigate"))?.status).toBe(200);
+    expect(service.act).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        startedBy: "person",
+        request: expect.objectContaining({ kind: "navigate" }),
+      }),
+    );
+    expect((await act("click"))?.status).toBe(200);
+    expect(service.act).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ startedBy: "person" }),
+    );
   });
 
   it("refuses a paired device that asks to record the host's page", async () => {

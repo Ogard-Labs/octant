@@ -1,3 +1,4 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { planReadOnlyToolServers, providerOwnMemoryLaunches } from "@octant/domain";
@@ -440,14 +441,14 @@ export interface CodexTurnStartInput {
   /** Restated per turn, because a turn without it falls back to the thread's. */
   readonly environments?: readonly [];
   readonly approvalPolicy: "never" | "on-request" | "untrusted";
-  readonly sandboxPolicy:
+  readonly sandboxPolicy?:
     | { readonly type: "dangerFullAccess" }
     | {
         readonly type: "workspaceWrite";
-        readonly writableRoots: readonly string[];
-        readonly networkAccess: boolean;
+        readonly writableRoots?: ReadonlyArray<string>;
+        readonly networkAccess?: boolean;
       }
-    | { readonly type: "readOnly" }
+    | { readonly type: "readOnly"; readonly networkAccess?: boolean }
     | { readonly type: "externalSandbox"; readonly networkAccess: "restricted" | "enabled" };
   readonly approvalsReviewer: "auto_review" | "user";
   /**
@@ -551,6 +552,7 @@ export interface CodexClientPort {
 }
 
 export interface CodexDriverOptions {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly instanceId: ProviderInstanceId;
   /** The host's platform; defaults to the running one. */
   readonly platform?: NodeJS.Platform;
@@ -599,6 +601,7 @@ interface SessionState {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly autoApprove: boolean | undefined;
   readonly fullAccessSandbox: boolean | undefined;
+  readonly strict: boolean | undefined;
   /** The sandbox this session's commands run in; see {@link CodexSessionSandbox}. */
   readonly sandbox: CodexSessionSandbox;
   readonly threadId: string;
@@ -987,6 +990,7 @@ export function codexExecutionSettings(
 ): Pick<CodexThreadStartInput, "approvalPolicy" | "sandbox" | "approvalsReviewer"> {
   if (
     sessionSandbox.kind === "native" &&
+    fullAccessSandbox !== true &&
     (policy === "approval-gated" || policy === "auto-accept-edits")
   ) {
     // Outside Strict Codex runs in its own workspace-write sandbox, as it
@@ -1017,6 +1021,8 @@ export function codexExecutionSettings(
       approvalsReviewer: "user",
     };
   }
+  if (sessionSandbox.kind === "native" && policy === "plan" && fullAccessSandbox !== true)
+    return { approvalPolicy: "never", sandbox: "read-only", approvalsReviewer: "user" };
   if (policy === "approval-gated" && autoApprove === true) {
     // Auto runs as Codex's own Auto does: `on-request` with Codex's reviewer.
     // Codex's own Auto pairs that with its workspace-write sandbox; here the
@@ -1127,11 +1133,11 @@ export function codexTurnExecutionSettings(
   // network claim follows the launch: `enabled` when the process launched
   // without Octant's egress proxy (Network limits off, the default), so
   // Codex tells the model what it really has; `restricted` behind the proxy.
-  // A Plan session in Codex's own sandbox (Windows outside Strict, where no
-  // Octant wall exists to name as external) keeps Codex's own read-only one.
-  if (sandbox === "read-only" && sessionSandbox.kind === "native") {
-    return { ...rest, sandboxPolicy: { type: "readOnly" } };
-  }
+  if (
+    sessionSandbox.kind === "native" &&
+    (sandbox === "read-only" || (policy === "plan" && fullAccessSandbox !== true))
+  )
+    return { ...rest, sandboxPolicy: { type: "readOnly", networkAccess: networkOpen === true } };
   const sandboxPolicy =
     sandbox === "danger-full-access"
       ? ({ type: "dangerFullAccess" } as const)
@@ -1414,7 +1420,14 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             options.runtimeRegistry.setObservedState(result);
             return result;
           }),
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], attachmentsFolder }) => {
+    acquire: ({
+      instanceId,
+      projectRoot,
+      mode,
+      extraFolders = [],
+      attachmentsFolder,
+      sandboxPolicy,
+    }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
@@ -1473,6 +1486,8 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             keepsOwnMemory(executionPolicy) ? "+own-memory" : ""
           }${strict ? "" : "+not-strict"}`,
           ...(fullAccessSandbox ? ["+sandbox"] : []),
+          { strict: strict ?? "legacy" },
+          ...(sandboxPolicy === undefined ? [] : [sandboxPolicy]),
         ]);
       const leaseFor = (posture: CodexLeasePosture) =>
         Effect.gen(function* () {
@@ -1482,6 +1497,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             clientFactory,
             {
               kind: "thread",
+              ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }),
               root: projectRoot,
               ...(extraFolders.length === 0 ? {} : { extraFolders }),
               ...(readOnlyFolders.length === 0 ? {} : { readOnlyFolders }),
@@ -1600,7 +1616,13 @@ function codexThreadLease(
   } catch {
     return undefined;
   }
-  if (!Array.isArray(parsed) || (parsed.length !== 4 && parsed.length !== 5)) return undefined;
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length < 4 ||
+    parsed.length > 7 ||
+    typeof parsed[3] !== "string"
+  )
+    return undefined;
   const [root, , mode] = parsed;
   return typeof root === "string" && typeof mode === "string" ? { root, mode } : undefined;
 }
@@ -1612,7 +1634,10 @@ function acquireRuntime(
   lease?: string,
 ) {
   return options.runtimeRegistry.acquireRuntime<CodexLeasedRuntime>(options.instanceId, {
-    idleMs: options.idleLeaseMs ?? 30_000,
+    idleMs:
+      authority.kind === "thread" && authority.sandboxPolicy !== undefined
+        ? 0
+        : (options.idleLeaseMs ?? 30_000),
     ...(lease === undefined ? {} : { lease }),
     start: async () => {
       const scope = await Effect.runPromise(Scope.make());
@@ -1998,11 +2023,13 @@ function makeConnection(
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly strict?: boolean;
     }): CodexSessionSandbox =>
+      (process.platform === "win32" && input.strict !== true) ||
       codexRunsNativeSandbox({
         mode: mode ?? "code",
         executionPolicy: input.executionPolicy,
         strict: input.strict,
-      }) || codexPlanRunsNativeSandbox(input)
+      }) ||
+      codexPlanRunsNativeSandbox(input)
         ? { kind: "native", writableRoots: [projectRoot, ...extraFolders] }
         : OCTANT_SANDBOX;
     const offer = (event: ProviderRuntimeEvent) => Effect.runFork(Queue.offer(queue, event));
@@ -2721,6 +2748,7 @@ function makeConnection(
         executionPolicy: input.executionPolicy,
         autoApprove: input.autoApprove,
         fullAccessSandbox: input.fullAccessSandbox,
+        strict: input.strict,
         sandbox: sessionSandbox(input),
         threadId: thread.thread.id,
         ...(turnOverrides === undefined ? {} : { turnOverrides }),

@@ -1,27 +1,164 @@
 /** Actual candidate-session lifecycle inside the owned networkless guest. */
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { decodeSandboxPolicySelection } from "@octant/contracts/sandbox-policy";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, statfs, writeFile } from "node:fs/promises";
 import { setTimeout as pause } from "node:timers/promises";
 import {
   prepareLinuxMediationSession,
   type LinuxMediationSession,
 } from "../../apps/server/src/process/linuxMediationSession";
+import { LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS } from "../../apps/server/src/process/linuxMediationBroker";
 import { secretGuardMediationPolicy } from "../../apps/server/src/process/secretGuard";
 import {
   readOwnedProcessReceipts,
   readProcessIdentity,
 } from "../../apps/server/src/process/nodeOwnedProcessReceipt";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+
+export async function measureProductionLaunch(root: string): Promise<{
+  readonly privateRuntime: boolean;
+  readonly configConsumed: boolean;
+  readonly receiptsCleaned: boolean;
+  readonly payloadExited: boolean;
+}> {
+  const productionRoot = `${root}/production`;
+  const authority = `${productionRoot}/authority`;
+  const project = `${productionRoot}/project`;
+  const temporary = `${productionRoot}/temporary`;
+  const readOnly = `${productionRoot}/read-only`;
+  const denied = `${productionRoot}/denied`;
+  for (const path of [productionRoot, authority, project, temporary, readOnly, denied])
+    await mkdir(path, { recursive: true, mode: 0o700 });
+  await writeFile(`${readOnly}/document`, "synthetic production read-only bytes", {
+    mode: 0o600,
+  });
+  await writeFile(`${denied}/secret`, "synthetic production denied bytes", { mode: 0o600 });
+  process.env.OCTANT_LINUX_MEDIATION_PREVIEW = "1";
+  const { prepareLinuxMediatedLaunch } =
+    await import("../../apps/server/src/process/linuxMediationProduction");
+  const selection = decodeSandboxPolicySelection({
+    policy: {
+      schemaVersion: 1,
+      revision: 1,
+      filesystem: {
+        readOnlyRoots: [readOnly],
+        readWriteRoots: [],
+        protectedPaths: [{ path: denied, mode: "deny" }],
+      },
+      network: "deny",
+      credentials: "isolated",
+      hostServices: "blocked",
+    },
+    context: {
+      root: project,
+      hostId: "owned-kernel-guest",
+      projectId: "20000000-0000-4000-8000-000000000936",
+      checkoutId: "owned-kernel-checkout",
+      sessionId: "owned-kernel-session",
+      provider: "native-production-proof",
+    },
+  });
+  const receiptDirectory = `${authority}/linux-mediation-runtime/receipts`;
+  const runtimeDirectory = `${authority}/linux-mediation-runtime`;
+  let prepared: ReturnType<typeof prepareLinuxMediatedLaunch>;
+  try {
+    prepared = prepareLinuxMediatedLaunch(
+      {
+        executable: "/policy-workload",
+        args: ["--session-exit", project, receiptDirectory],
+        boundRoot: project,
+        temporaryDirectory: temporary,
+        networkEgress: "none",
+        ownAccountAccess: "none",
+      },
+      selection,
+      authority,
+    );
+  } catch (error) {
+    const runtimeEntries = await readdir(runtimeDirectory).catch(() => []);
+    const broker = runtimeEntries.find((name) => name.startsWith("broker-"));
+    const probe =
+      broker === undefined
+        ? undefined
+        : spawnSync(`${runtimeDirectory}/${broker}`, ["--check"], {
+            timeout: 1_000,
+            stdio: "ignore",
+          });
+    const filesystem = await statfs(productionRoot);
+    console.log(
+      JSON.stringify({
+        status: "failed-production-preparation",
+        runtimeAssets: {
+          broker: broker !== undefined,
+          launcher: runtimeEntries.some((name) => name.startsWith("launcher-")),
+          worker: runtimeEntries.some((name) => name.startsWith("worker-")),
+          supervisor: runtimeEntries.some((name) => name.startsWith("supervisor-")),
+        },
+        availableBytes: filesystem.bavail * filesystem.bsize,
+        probeStatus: probe?.status,
+        probeSignal: probe?.signal,
+        probeError: (probe?.error as NodeJS.ErrnoException | undefined)?.code,
+      }),
+    );
+    throw error;
+  }
+  assert.equal(prepared.command, process.execPath);
+  assert.equal(prepared.args.length, 2);
+  const supervisor = prepared.args[0] as string;
+  const configuration = prepared.args[1] as string;
+  const runtimeEntries = await readdir(runtimeDirectory);
+  const launcher = runtimeEntries.find((name) => name.startsWith("launcher-"));
+  const privateRuntime =
+    (await stat(runtimeDirectory)).mode % 0o1000 === 0o700 &&
+    (await stat(supervisor)).mode % 0o1000 === 0o400 &&
+    launcher !== undefined &&
+    (await stat(`${runtimeDirectory}/${launcher}`)).mode % 0o1000 === 0o500 &&
+    runtimeEntries.some((name) => name.startsWith("broker-")) &&
+    runtimeEntries.some((name) => name.startsWith("worker-")) &&
+    runtimeEntries.some((name) => name.startsWith("supervisor-"));
+  await writeFile(`${receiptDirectory}/private-marker`, "synthetic production receipt", {
+    mode: 0o600,
+  });
+  const child = spawn(prepared.command, [...prepared.args], {
+    stdio: "inherit",
+    env: {
+      HOME: "/tmp",
+      PATH: "/usr/bin:/bin",
+      LANG: "C",
+      OCTANT_LINUX_MEDIATION_PREVIEW: "1",
+      ...prepared.environment,
+    },
+  });
+  const completed = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+    (resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (code, signal) => resolve({ code, signal }));
+    },
+  );
+  const configConsumed = await stat(configuration).then(
+    () => false,
+    (error: NodeJS.ErrnoException) => error.code === "ENOENT",
+  );
+  const receiptsCleaned =
+    (await readdir(receiptDirectory)).filter((name) => name.endsWith(".json")).length === 0;
+  const payloadExited =
+    completed.code === 7 &&
+    completed.signal === null &&
+    (await stat(`${project}/session-stage`)).isFile();
+  return { privateRuntime, configConsumed, receiptsCleaned, payloadExited };
+}
+
+// A runtime comparison, with the actual controller and worker at default JIT.
+assert.equal(process.versions.bun, undefined);
+assert.equal(process.env.NODE_OPTIONS, undefined);
+assert.deepEqual(process.execArgv, []);
 
 if (process.argv[2] === "--linux-mediation-worker") {
   const { runLinuxMediationWorker } =
     await import("../../apps/server/src/process/linuxMediationWorker");
   await runLinuxMediationWorker();
 } else {
-  // Same existing diagnostic-only controller environment; guest commands get
-  // none of these variables. This is not a controller-reliability fix.
-  assert.equal(process.env.BUN_JSC_useFTLJIT, "0");
-  delete process.env.BUN_JSC_useFTLJIT;
+  assert(!Object.keys(process.env).some((name) => name.startsWith("BUN_JSC_")));
   process.env.OCTANT_TEST_SECRET = "synthetic host-only sentinel";
   process.env.OPENAI_API_KEY = "synthetic host-only key sentinel";
   const root = process.argv[3] ?? (await mkdtemp("/tmp/octant-session-"));
@@ -40,6 +177,7 @@ if (process.argv[2] === "--linux-mediation-worker") {
       maximumMs,
       receiptDirectory: receipts,
       brokerExecutable: "/session-cases",
+      brokerScript: "/session-cases.mjs",
       nativeExecutable: "/octant-mediation",
       launch: {
         executable: "/policy-workload",
@@ -54,6 +192,7 @@ if (process.argv[2] === "--linux-mediation-worker") {
         homeDirectory: `${root}/home`,
         ownAccountPaths: [],
       }),
+      production: true,
     });
   const stage = async (mode: string, session: LinuxMediationSession, maximumMs: number) => {
     const until = performance.now() + 5_000;
@@ -122,7 +261,7 @@ if (process.argv[2] === "--linux-mediation-worker") {
       );
     } else {
       const outcomes: string[] = [];
-      const refused = await prepare("--session-wait", 180_001);
+      const refused = await prepare("--session-wait", LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS + 1);
       assert.equal(refused.status, "unavailable");
       assert.equal((await readdir(receipts)).filter((name) => name.endsWith(".json")).length, 0);
       outcomes.push("invalid-deadline-refuses-before-spawn");
@@ -211,9 +350,9 @@ if (process.argv[2] === "--linux-mediation-worker") {
       assert.equal(errors, 1_048_576);
       outcomes.push("bounded-duplex-pressure-and-private-receipt-mask");
       await rm(`${root}/session-stage`, { force: true });
-      const child = spawn("/session-cases", ["--owner-child", root], {
+      const child = spawn("/session-cases", ["/session-cases.mjs", "--owner-child", root], {
         stdio: ["ignore", "pipe", "inherit"],
-        env: { HOME: "/tmp", PATH: "/", LANG: "C", BUN_JSC_useFTLJIT: "0" },
+        env: { HOME: "/tmp", PATH: "/", LANG: "C" },
       });
       let ownerBytes = "";
       const childJoined = new Promise<void>((resolve) => child.once("close", () => resolve()));
@@ -282,13 +421,23 @@ if (process.argv[2] === "--linux-mediation-worker") {
         if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
         await childJoined;
       }
+      const production = await measureProductionLaunch(root);
+      assert.equal(production.privateRuntime, true);
+      assert.equal(production.configConsumed, true);
+      assert.equal(production.receiptsCleaned, true);
+      assert.equal(production.payloadExited, true);
+      outcomes.push("private-packaged-production-supervisor");
       console.log(
         JSON.stringify({
           status: "measured-owned-mediation-session",
           outcomes,
-          productionReady: false,
+          productionReady: true,
+          production,
           actualBubblewrapBuilder: true,
           defaultPayloadEnvironment: true,
+          controllerJitDefaults: true,
+          controllerRuntime: "node",
+          controllerVersion: process.versions.node,
           orphanJoinPending: true,
         }),
       );

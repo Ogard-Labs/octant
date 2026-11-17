@@ -1,3 +1,5 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
+import { sandboxToolPolicy, trackSandboxChild } from "../process/sandboxRuntimePolicy";
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { connect as connectSocket } from "node:net";
 import { chmod, link, lstat, mkdir, rm } from "node:fs/promises";
@@ -49,6 +51,7 @@ export type DebugSessionNetwork =
   | { readonly kind: "allow" };
 
 export interface DebugAdapterLaunchInput {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   /** The session id: one receipt and one state folder per session. */
   readonly sessionId: string;
   /** Absolute, verified path of the adapter's binary. */
@@ -217,6 +220,7 @@ export class DebugAdapterProcessPort {
     let launch: ConfinedProcessLaunch;
     try {
       launch = this.#confinement.prepare({
+        ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
         executable: input.executable,
         args: [],
         boundRoot: input.checkoutRoot,
@@ -249,19 +253,23 @@ export class DebugAdapterProcessPort {
     try {
       child = this.#spawn(launch.command, launch.args, {
         cwd: input.checkoutRoot,
-        env: sessionEnvironment({
-          stateDirectory,
-          temporaryDirectory,
-          configured: input.environment,
-          proxy,
-          childPorts,
-        }),
+        env: {
+          ...launch.environment,
+          ...sessionEnvironment({
+            stateDirectory,
+            temporaryDirectory,
+            configured: input.environment,
+            proxy,
+            childPorts,
+          }),
+        },
       });
     } catch {
       await closeNetwork();
       await removeState();
       return { status: "failed" };
     }
+    trackSandboxChild(input.sandboxPolicy ?? sandboxToolPolicy(), child);
     const exited = new Promise<void>((resolve) => {
       if (child.exitCode !== null || child.signalCode !== null) resolve();
       else child.once("exit", () => resolve());

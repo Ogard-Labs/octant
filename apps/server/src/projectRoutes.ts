@@ -1,4 +1,4 @@
-import { boundPrincipalIsRestricted } from "./principalRouteContext";
+import { boundPrincipalIsRestricted, boundPrincipalIsAgent } from "./principalRouteContext";
 import { principalActsAsHostPerson } from "./clientPrincipal";
 import {
   decodeMemoryCommand,
@@ -293,6 +293,24 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
         return response(
           { category: "invalid", message: "Project command is invalid." },
           400,
+          origin,
+        );
+      }
+      if (
+        boundPrincipalIsRestricted(request) &&
+        (command.kind === "change-code-project-permission-mode" ||
+          command.kind === "change-work-project-permission-mode") &&
+        ((command.strict !== undefined &&
+          (command.strict !== true || boundPrincipalIsAgent(request))) ||
+          command.fullAccessSandbox !== undefined)
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message:
+              "Only you, from a window or a device you paired, can change Strict protections.",
+          },
+          403,
           origin,
         );
       }

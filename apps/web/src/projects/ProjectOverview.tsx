@@ -90,14 +90,13 @@ export interface ProjectOverviewProps {
     projectId: ProjectId,
     providers: KeyProviderDriverKinds,
   ) => Promise<boolean>;
+  readonly onOpenSandboxRestrictions?: () => void;
   /** Sets the mode this Code Project's new threads start in; absent follows Settings. */
   readonly onPermissionModeChange?: (
     projectId: ProjectId,
     permissionMode: PermissionMode | undefined,
     /** "keep" (the default) leaves the Project's sandbox choice as it is. */
-    fullAccessSandbox?: boolean | "settings" | "keep",
-    /** "keep" (the default) leaves the Project's Strict choice as it is. */
-    strict?: boolean | "settings" | "keep",
+    strict?: boolean | "inherit" | "keep",
   ) => Promise<boolean>;
   /** Sets who answers this Code Project's prompts at Auto; absent follows Settings. */
   readonly onAutoReviewerChange?: (
@@ -623,12 +622,14 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 summary="The mode this Project's new threads start in"
               >
                 <ProjectPermissionModeSection
+                  {...(props.onOpenSandboxRestrictions === undefined
+                    ? {}
+                    : { onOpenSandboxRestrictions: props.onOpenSandboxRestrictions })}
                   disabled={archived || connectionStale}
-                  onChange={async (mode, fullAccessSandbox, strict) =>
+                  onChange={async (mode, strict) =>
                     (await props.onPermissionModeChange?.(
                       props.project.id,
                       mode,
-                      fullAccessSandbox ?? "keep",
                       strict ?? "keep",
                     )) ?? false
                   }

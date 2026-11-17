@@ -1,3 +1,4 @@
+import { configureSandboxRestrictionsAuthority } from "../process/sandboxRuntimePolicy";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -19,6 +20,8 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ProviderFailure } from "@octant/contracts";
+import { decodeSandboxPolicySelection } from "@octant/contracts/sandbox-policy";
+import { compileSandboxLaunchPolicy } from "../process/sandboxLaunchPolicy";
 import type { SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import { Effect, Either, Fiber } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -449,6 +452,9 @@ describe("ClaudeProcessPort spawn", () => {
     if (pid === undefined) throw new Error("Expected the owned Claude process ID.");
     const exited = waitForExit(child);
 
+    await expect
+      .poll(() => records(target.root).some((entry) => entry.kind === "stderr-ready"))
+      .toBe(true);
     child.kill("SIGTERM");
     await exited;
     await expectMissing(pid);
@@ -550,6 +556,104 @@ describe("Claude runtime confinement", () => {
       `proxy=${network.environment.HTTPS_PROXY}\n`,
       `proxy=${network.environment.HTTPS_PROXY}\n`,
     ]);
+  });
+
+  it("refuses a Strict native runtime that the selected Project could rewrite", () => {
+    const f = fixture();
+    const authority = mkdtempSync(join(tmpdir(), "octant-native-runtime-authority-"));
+    directories.push(authority);
+    const selection = decodeSandboxPolicySelection({
+      policy: {
+        schemaVersion: 1,
+        revision: 1,
+        filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
+        network: "existing-policy",
+        credentials: "existing-policy",
+        hostServices: "existing-policy",
+      },
+      context: {
+        root: realpathSync(f.root),
+        hostId: "host",
+        projectId: "20000000-0000-4000-8000-000000000001",
+        checkoutId: "checkout",
+        sessionId: "native-runtime:epoch",
+        provider: "claude",
+      },
+    });
+    configureSandboxRestrictionsAuthority({
+      validateSelection: () => true,
+      registerCleanup: () => () => undefined,
+      storageDirectory: () => authority,
+      active: () => selection,
+      beginTurn: () => ({ status: "refused", message: "unused" }),
+      deny: () => undefined,
+    });
+    try {
+      expect(() =>
+        makePort(f).spawn({
+          projectRoot: f.root,
+          executionPolicy: "full-access",
+          strict: true,
+          sandboxPolicy: selection,
+        })({
+          command: f.binaryPath,
+          args: [],
+          cwd: f.root,
+          env: f.environment,
+          signal: new AbortController().signal,
+        }),
+      ).toThrow("runtime stored in an allowed writable folder");
+      expect(pids(f.root)).toEqual([]);
+    } finally {
+      configureSandboxRestrictionsAuthority(undefined);
+    }
+  });
+
+  it("keeps the brokered model channel available while selected policy denies tool networking", async () => {
+    const target = fixture();
+    const confinement = recordingConfinement();
+    const endpoint = { kind: "loopback", port: 47004 } as const;
+    const sandboxPolicy = decodeSandboxPolicySelection({
+      policy: {
+        schemaVersion: 1,
+        revision: 1,
+        filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
+        network: "deny",
+        credentials: "existing-policy",
+        hostServices: "existing-policy",
+      },
+      context: {
+        root: realpathSync(target.root),
+        hostId: "host",
+        projectId: "20000000-0000-4000-8000-000000000001",
+        checkoutId: "checkout",
+        sessionId: "epoch:session",
+        provider: "claude",
+      },
+    });
+    const child = makePort(target, { confinement: confinement.port }).spawn({
+      projectRoot: target.root,
+      executionPolicy: "full-access",
+      sandboxPolicy,
+      network: { endpoint, environment: { HTTPS_PROXY: "http://octant:token@127.0.0.1:47004" } },
+    })({
+      command: target.binaryPath,
+      args: ["sdk-test"],
+      cwd: target.root,
+      env: target.environment,
+      signal: new AbortController().signal,
+    });
+    try {
+      const launch = confinement.prepared[0];
+      if (launch === undefined) throw new Error("Expected a selected launch");
+      expect(compileSandboxLaunchPolicy(launch, "linux")).toMatchObject({
+        status: "admitted",
+        input: { networkEgress: { kind: "proxied", endpoint } },
+      });
+    } finally {
+      child.kill("SIGTERM");
+      await waitForExit(child);
+    }
   });
 
   it("gives a Plan turn a temporary directory only that launch can name, and removes it after the runtime exits", async () => {
@@ -677,7 +781,10 @@ describe("Claude runtime confinement", () => {
     const target = fixture();
     const confinement = recordingConfinement();
     for (const runsCommands of [false, true]) {
-      const child = makePort(target, { confinement: confinement.port }).spawn({
+      const child = makePort(target, {
+        confinement: confinement.port,
+        linuxPlanShellCapsule: () => false,
+      }).spawn({
         projectRoot: target.root,
         executionPolicy: "plan",
         runsCommands,

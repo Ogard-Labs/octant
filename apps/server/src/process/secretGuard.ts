@@ -28,7 +28,7 @@ import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, win32 } from "node:path";
 
-interface SecretGuardState {
+export interface SecretGuardState {
   readonly dataDirectory?: string | undefined;
   readonly runtimeDirectory?: string | undefined;
   readonly choice: ProtectedFilesChoice;
@@ -91,7 +91,11 @@ function serverPatternInForce(fullAccess: boolean): ServerPattern {
   const text = serverProtectedPathPattern(
     fullAccess ? fullAccessChoice(state.choice) : state.choice,
   );
-  const built = { choice: state.choice, text, expression: new RegExp(text, "imu") };
+  const built = {
+    choice: state.choice,
+    text,
+    expression: new RegExp(text, "imu"),
+  };
   if (fullAccess) fullAccessServerPattern = built;
   else serverPattern = built;
   return built;
@@ -162,10 +166,29 @@ export function secretGuardEntries(input: {
   return [...entries, ...sshKeys];
 }
 
+/** Native command sandboxes that cannot carry a required protected-file rule
+ * must refuse overlapping read grants, including names not created yet. */
+export function secretGuardNativeReadOverlap(
+  roots: ReadonlyArray<string>,
+  platform: NodeJS.Platform = process.platform,
+): ResolvedProtectedEntry | undefined {
+  const forms = roots.flatMap((root) => pathForms(root, platform));
+  return withResolvedForms(secretGuardEntries({ platform }), platform).find((entry) => {
+    const location = entry.kind === "path" ? entry.path : entry.directory;
+    return forms.some((root) => isSameOrInside(location, root) || isSameOrInside(root, location));
+  });
+}
+
 export interface SecretGuardMediationPolicy {
   readonly entries: ReadonlyArray<ResolvedProtectedEntry>;
   readonly ownAccountPaths: ReadonlyArray<string>;
   readonly sshCompanionDirectory: string | undefined;
+  /** Optional Strict additions consumed only by the access-time backend. */
+  readonly readOnlyRoots?: ReadonlyArray<string>;
+  readonly protectedPaths?: ReadonlyArray<{
+    readonly path: string;
+    readonly mode: "read-only" | "deny";
+  }>;
 }
 
 /** Original structured rules, before startup enumeration or mount covers. */
@@ -293,7 +316,10 @@ const WINDOWS_UNSPELLED_HOME =
  */
 export function isProtectedSecretPath(
   path: string,
-  options: { readonly platform?: NodeJS.Platform; readonly homeDirectory?: string } = {},
+  options: {
+    readonly platform?: NodeJS.Platform;
+    readonly homeDirectory?: string;
+  } = {},
 ): boolean {
   const homeDirectory = options.homeDirectory ?? homedir();
   const home = /^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/.exec(path);
@@ -562,7 +588,10 @@ function entryRules(
   ownWrite: ReadonlyArray<string>,
   readable: ReadonlyArray<string>,
   profile: SecretGuardSeatbeltInput["profile"],
-): { readonly denials: ReadonlyArray<string>; readonly exceptions: ReadonlyArray<string> } {
+): {
+  readonly denials: ReadonlyArray<string>;
+  readonly exceptions: ReadonlyArray<string>;
+} {
   const denials: string[] = [];
   const exceptions: string[] = [];
   if (entry.kind === "path") {

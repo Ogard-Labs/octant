@@ -228,6 +228,7 @@ describe("Project routes", () => {
         projectId,
         expectedVersion: 0,
         permissionMode: "full-access",
+        strict: true,
       },
     ];
     const from = (command: unknown, admittedBy: "host-person" | "hub-roster") => {

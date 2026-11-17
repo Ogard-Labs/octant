@@ -6,9 +6,11 @@ import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { DEFERRED_PROXY_SOURCE } from "../process/deferredProxyEnvironment";
 import { makeProcessConfinementLive } from "../process/seatbeltProfile";
 import type { ProxiedNetworkEgress } from "../process/threadEgressPolicy";
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 
 /** op authenticates outside; its only child is the host-prepared recipient capsule. */
 export function confinedCommandCredentialProcess(options: {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly binding: CommandCredentialBinding;
   readonly recipientIdentity: string;
   /** The Code checkout; the binding's directory may be a subdirectory of it. */
@@ -19,6 +21,7 @@ export function confinedCommandCredentialProcess(options: {
   readonly receiptDirectory: string;
 }) {
   const confinement = makeProcessConfinementLive();
+  const sandboxPolicy = options.sandboxPolicy;
   const home = homedir();
   const credentialRoots = [join(home, ".op"), join(home, ".config", "op")];
   const port = new RepositoryTestProcessPort({
@@ -42,7 +45,11 @@ export function confinedCommandCredentialProcess(options: {
           ownAccountAccess: "none",
           isolatedRoots: [...(input.isolatedRoots ?? []), ...credentialRoots],
           // Bubblewrap consumes these as masks; isolatedRoots is Seatbelt-only.
-          additionalDenyReadPaths: [...(input.additionalDenyReadPaths ?? []), ...credentialRoots],
+          additionalDenyReadPaths: [
+            ...(input.additionalDenyReadPaths ?? []),
+            ...(input.isolatedRoots ?? []),
+            ...credentialRoots,
+          ],
           recipientAdmission: {
             digest: options.binding.executableDigest,
             identity: options.recipientIdentity,
@@ -58,7 +65,13 @@ export function confinedCommandCredentialProcess(options: {
     },
   });
   return {
-    process: port,
+    process:
+      sandboxPolicy === undefined
+        ? port
+        : {
+            execute: (input: Parameters<typeof port.execute>[0], signal?: AbortSignal) =>
+              port.execute({ ...input, sandboxPolicy }, signal),
+          },
     environment: {
       [DEFERRED_PROXY_SOURCE]: options.proxyUrl,
       ...(process.versions.electron === undefined ? {} : { ELECTRON_RUN_AS_NODE: "1" }),

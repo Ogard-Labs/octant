@@ -49,6 +49,7 @@ import {
   DESKTOP_PEER_LINUX_FILENAME,
   BROWSER_TEXT_INPUT_FILENAME,
 } from "../apps/desktop/src/runtimePaths";
+import { buildSandboxScope } from "./build-sandbox-scope";
 import { buildCodeFileHelper } from "./build-code-file-helper";
 import { buildDeviceHelper } from "./build-device-helper";
 import { buildBrowserTextInput } from "./build-browser-text-input";
@@ -388,6 +389,7 @@ export const REQUIRED_WINDOWS_PTY_FILES = [
 export const REQUIRED_DARWIN_HELPER_FILES = [
   "Octant.app/Contents/Resources/native/octant-keychain-helper",
   "Octant.app/Contents/Resources/native/octant-code-file-helper",
+  "Octant.app/Contents/Resources/native/octant-sandbox-scope",
   "Octant.app/Contents/Resources/native/octant-device-helper",
   "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
   "Octant.app/Contents/Resources/native/octant-browser-text-input.node",
@@ -447,6 +449,7 @@ const LINUX_LANGUAGE_SERVER_BINARY = `app/apps/server/node_modules/${bundledLang
 export const PACKAGED_EXECUTABLE_FILES = [
   "native/octant-keychain-helper",
   "native/octant-code-file-helper",
+  "native/octant-sandbox-scope",
   "native/octant-device-helper",
   "native/cua-driver",
   "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
@@ -547,12 +550,17 @@ export async function installTerminalLauncher(
   await writeFile(join(directory, "octant"), terminalLauncherScript(identity), { mode: 0o755 });
   await chmod(join(directory, "octant"), 0o755);
 }
-export const PACKAGED_LINUX_EXECUTABLE_FILES = [LINUX_LANGUAGE_SERVER_BINARY] as const;
+export const PACKAGED_LINUX_EXECUTABLE_FILES = [
+  LINUX_LANGUAGE_SERVER_BINARY,
+  "app/apps/server/dist/native/octant-sandbox-launch",
+  "app/apps/server/dist/native/octant-mediation",
+] as const;
 export const PACKAGED_ARM64_FILES = [
   "native/octant-desktop-peer-status.node",
   "native/octant-browser-text-input.node",
   "native/octant-keychain-helper",
   "native/octant-code-file-helper",
+  "native/octant-sandbox-scope",
   "native/octant-device-helper",
   "native/cua-driver",
   "app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
@@ -562,6 +570,8 @@ export const PACKAGED_ARM64_FILES = [
   DARWIN_LANGUAGE_SERVER_BINARY,
 ] as const;
 export const PACKAGED_LINUX_NATIVE_FILES = [
+  "app/apps/server/dist/native/octant-sandbox-launch",
+  "app/apps/server/dist/native/octant-mediation",
   `native/${DESKTOP_PEER_LINUX_FILENAME}`,
   "app/apps/server/node_modules/node-pty/build/Release/pty.node",
   "app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
@@ -570,6 +580,7 @@ export const PACKAGED_LINUX_NATIVE_FILES = [
 export const FORBIDDEN_PACKAGED_FILES = [
   "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-keychain-helper",
   "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-code-file-helper",
+  "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-sandbox-scope",
   "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-device-helper",
   "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-desktop-peer-status.node",
   "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-browser-text-input.node",
@@ -578,6 +589,7 @@ export const FORBIDDEN_PACKAGED_FILES = [
 export const FORBIDDEN_LINUX_HELPER_PATTERNS = [
   /(?:^|\/)octant-keychain-helper$/,
   /(?:^|\/)octant-code-file-helper$/,
+  /(?:^|\/)octant-sandbox-scope$/,
   /(?:^|\/)octant-device-helper$/,
   /(?:^|\/)octant-desktop-peer-status\.node$/,
   /(?:^|\/)octant-browser-text-input\.node$/,
@@ -604,6 +616,7 @@ const ALLOWED_DARWIN_NATIVE_PAYLOADS = new Set([
   "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
   "Octant.app/Contents/Resources/native/octant-keychain-helper",
   "Octant.app/Contents/Resources/native/octant-code-file-helper",
+  "Octant.app/Contents/Resources/native/octant-sandbox-scope",
   "Octant.app/Contents/Resources/native/octant-device-helper",
   "Octant.app/Contents/Resources/native/octant-desktop-peer-status.node",
   "Octant.app/Contents/Resources/native/octant-browser-text-input.node",
@@ -1465,6 +1478,7 @@ async function packageDarwinDesktop(
     resolve(repositoryRoot, "apps/desktop/native/keychain-helper/OctantKeychainHelper.swift"),
     keychainHelper,
   );
+  await buildSandboxScope(undefined, join(nativeResources, "octant-sandbox-scope"));
   const codeFileHelper = join(nativeResources, "octant-code-file-helper");
   await buildCodeFileHelper(
     resolve(repositoryRoot, "apps/desktop/native/code-file-helper/OctantCodeFileHelper.swift"),
