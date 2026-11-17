@@ -260,6 +260,7 @@ export const REQUIRED_STAGED_PACKAGED_FILES = [
   "apps/desktop/resources/menuBarTemplate@2x.png",
   "apps/desktop/resources/whats-new.txt",
   "apps/server/dist/main.mjs",
+  "apps/server/dist/server.mjs",
   "apps/server/dist/canvasExportWorker.mjs",
   "apps/server/dist/dbMaintenance.mjs",
   "apps/web/dist/index.html",

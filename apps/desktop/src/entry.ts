@@ -8,6 +8,7 @@ import { app } from "electron";
 import { writeDiagnostic } from "./diagnosticLog";
 import { showStartupFailureAndQuit } from "./startupFailureElectron";
 import { mkdirSync, readFileSync } from "node:fs";
+import { enableCompileCache } from "node:module";
 import { join } from "node:path";
 import {
   desktopIdentity,
@@ -37,6 +38,22 @@ const identity = app.isPackaged
       JSON.parse(readFileSync(join(app.getAppPath(), "package.json"), "utf8")),
     )
   : desktopIdentity("stable");
+// The large desktop module is compiled by V8 on every launch. A cache beside
+// the app's own data (never inside the signed bundle) reuses that work; any
+// failure starts the app as it would without one. It must precede the imports
+// of main.mjs below.
+try {
+  enableCompileCache(
+    join(
+      identity.flavor === "stable"
+        ? app.getPath("userData")
+        : desktopWindowStorageDirectory(identity, "", app.getPath("appData")),
+      "compile-cache",
+    ),
+  );
+} catch {
+  // Missing or refused: start without the cache.
+}
 const launchLinks = createNightlyLaunchLinks(identity.scheme);
 let windowsHostOnlyLaunch = false;
 
