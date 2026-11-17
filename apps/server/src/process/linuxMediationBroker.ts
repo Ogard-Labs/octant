@@ -40,6 +40,13 @@ export function scheduleLinuxMediationDeadline(expire: () => void, maximumMs: nu
   return () => clearTimeout(timer);
 }
 
+export function linuxMediationStatusMatchesProduction(
+  status: Buffer,
+  production: boolean,
+): boolean {
+  return status.readBigUInt64LE(16) === (production ? 1n : 0n);
+}
+
 export type BrokerRefusal =
   | "unsupported-platform"
   | "native-unavailable"
@@ -488,7 +495,7 @@ export async function runLinuxMediationBroker(input: {
           if (
             phase !== "hello" ||
             frame.readUInt32LE(12) !== 2 ||
-            frame.readBigUInt64LE(16) !== 0n
+            !linuxMediationStatusMatchesProduction(frame, input.production === true)
           ) {
             refuse("broker-protocol");
             return;
@@ -528,7 +535,7 @@ export async function runLinuxMediationBroker(input: {
           if (
             statusWait === undefined ||
             frame.readUInt32LE(12) !== 2 ||
-            frame.readBigUInt64LE(16) !== 0n
+            !linuxMediationStatusMatchesProduction(frame, input.production === true)
           ) {
             refuse("broker-protocol");
             return;

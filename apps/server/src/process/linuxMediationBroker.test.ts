@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS,
+  linuxMediationStatusMatchesProduction,
   scheduleLinuxMediationDeadline,
 } from "./linuxMediationBroker";
 
@@ -28,5 +29,18 @@ describe("Linux mediation broker deadline", () => {
     cancel();
     await vi.advanceTimersByTimeAsync(10 * 24 * 60 * 60 * 1_000);
     expect(expire).not.toHaveBeenCalled();
+  });
+});
+
+describe("Linux mediation broker status", () => {
+  it("requires coverage one for production and zero for a candidate", () => {
+    const candidate = Buffer.alloc(24);
+    const production = Buffer.alloc(24);
+    production.writeBigUInt64LE(1n, 16);
+
+    expect(linuxMediationStatusMatchesProduction(candidate, false)).toBe(true);
+    expect(linuxMediationStatusMatchesProduction(candidate, true)).toBe(false);
+    expect(linuxMediationStatusMatchesProduction(production, false)).toBe(false);
+    expect(linuxMediationStatusMatchesProduction(production, true)).toBe(true);
   });
 });
