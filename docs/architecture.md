@@ -18748,13 +18748,15 @@ cards; general Azure CLI credentials remain unavailable by design.
   where the policy permits them. Full access outside Strict and unconfined host
   changes are unchanged. Replacing an enrolled account path with a symlink does
   not transfer its exception.
-- **Server-owned file tools do not borrow subprocess coverage.** A native-harness
-  model's file calls execute in the server rather than the enrolled provider
-  process. Its turn therefore refuses same-filesystem read-only grants and
-  selected protected-path or isolated-credential rules that require object-level
-  mediation. Separate-filesystem folder rules remain supported. The refusal names
-  the unsupported rule before any file effect; path checks are never presented as
-  alias-safe kernel enforcement.
+- **Server-owned file tools do not borrow subprocess coverage.** Native-harness
+  model file calls and ACP client file calls (including OpenCode's ACP stack)
+  execute in the server rather than the enrolled provider process. Their turns
+  therefore refuse same-filesystem read-only grants and selected protected-path
+  or isolated-credential rules that require object-level mediation.
+  Separate-filesystem folder rules remain supported. The refusal names the
+  unsupported rule before any file effect; path checks are never presented as
+  alias-safe kernel enforcement. An active Strict selection also keeps the full
+  protected-file guard on those host-owned reads at Full access.
 - **Admission follows the effect.** One-use enrollment begins only after
   `no_new_privs`; inherited proc-memory/pidfd and asynchronous contexts refuse.
   Blocking broker work happens before native locks. The final LSM checks compare

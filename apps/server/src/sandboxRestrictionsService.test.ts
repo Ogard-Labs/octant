@@ -599,8 +599,11 @@ describe.skipIf(process.platform !== "linux")("trusted sandbox restrictions", ()
     });
     expect(f.start()).toMatchObject({ status: "admitted" });
   });
-  it("refuses object-mediated rules for native-harness file tools", () => {
-    const sameFilesystem = (rule: "read-only" | "protected") => {
+  it("refuses object-mediated rules for host-owned provider file tools", () => {
+    const sameFilesystem = (
+      provider: "openai-compatible" | "kimi-code",
+      rule: "read-only" | "protected",
+    ) => {
       const f = fixture(true, true);
       const guarded = join(f.base, rule);
       mkdirSync(guarded);
@@ -617,15 +620,17 @@ describe.skipIf(process.platform !== "linux")("trusted sandbox restrictions", ()
         },
         expectedVersion: 0,
       });
-      return f.start("openai-compatible");
+      return f.start(provider);
     };
-    expect(sameFilesystem("read-only")).toMatchObject({
-      status: "refused",
-      message: expect.stringContaining("hard-link aliases"),
-    });
-    expect(sameFilesystem("protected")).toMatchObject({
-      status: "refused",
-      message: expect.stringContaining("filesystem.protectedPaths"),
-    });
+    for (const provider of ["openai-compatible", "kimi-code"] as const) {
+      expect(sameFilesystem(provider, "read-only")).toMatchObject({
+        status: "refused",
+        message: expect.stringContaining("hard-link aliases"),
+      });
+      expect(sameFilesystem(provider, "protected")).toMatchObject({
+        status: "refused",
+        message: expect.stringContaining("filesystem.protectedPaths"),
+      });
+    }
   });
 });

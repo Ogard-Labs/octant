@@ -16,6 +16,7 @@ import type { SandboxPolicyLaunchDetails } from "@octant/contracts/sandbox-polic
 import { admitSandboxPolicy, intersectSandboxPolicies } from "@octant/domain/sandbox-policy";
 import { refusesFullAccessSandbox } from "@octant/domain/guardrail-policy";
 import { isNativeHarnessDriverKind } from "@octant/domain/provider-policy";
+import { isAcpProviderKind } from "./providers/acpProfiles";
 import { ProviderDriverKind, ProjectId } from "@octant/contracts";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -664,11 +665,13 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
           (this.#dependencies.accessTimeMediationAvailable ?? linuxMediationProductionAvailable)(
             this.#dependencies.dataDirectory,
           );
-        // Native-harness file calls execute in the server, not the enrolled
-        // provider process. Until they have object-level mediation, do not
-        // advertise alias-safe rules that only the subprocess backend carries.
+        // Native-harness and ACP client file calls execute in the server, not
+        // the enrolled provider process. Until they have object-level
+        // mediation, do not advertise alias-safe rules that only the
+        // subprocess backend carries.
         const accessTimeReady =
-          accessTimeBackendReady && (kind === undefined || !isNativeHarnessDriverKind(kind));
+          accessTimeBackendReady &&
+          (kind === undefined || (!isNativeHarnessDriverKind(kind) && !isAcpProviderKind(kind)));
         if (platform === "linux" && !linuxPinnedLaunchAvailable(this.#dependencies.dataDirectory))
           throw new Error(
             "Linux Strict requires the installed native launch helper, private runtime storage and a kernel supporting openat2 and close_range. Rebuild the host runtime before enabling Strict.",

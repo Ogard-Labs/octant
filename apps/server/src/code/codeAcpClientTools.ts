@@ -139,7 +139,8 @@ export interface CodeAcpClientToolsOptions {
    * The secret guard's refusal for a path, or undefined; defaults to this
    * host's protected list. Checked at every posture; at Full access
    * (`fullAccess`, read from `readExecutionPolicy` on each call) only the
-   * provider sign-ins stay refused (`secretGuardRefusal`).
+   * provider sign-ins stay refused (`secretGuardRefusal`). An active sandbox
+   * selection always keeps the complete protected-file guard.
    */
   readonly protectedFileRefusal?: (path: string, fullAccess: boolean) => string | undefined;
   readonly checkoutRoot: string;
@@ -311,7 +312,9 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
     ((path: string, fullAccess: boolean) => secretGuardRefusal(path, { fullAccess }));
   /** The refusal names the rule and the channel, never a bare unreadable file. */
   const protectedResult = (...paths: ReadonlyArray<string>) => {
-    const fullAccess = options.readExecutionPolicy() === "full-access";
+    const fullAccess =
+      options.readExecutionPolicy() === "full-access" &&
+      activeSandboxPolicy(String(options.thread.id)) === undefined;
     for (const path of paths) {
       const message = protectedFileRefusal(path, fullAccess);
       if (message !== undefined) {
