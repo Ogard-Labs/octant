@@ -1956,6 +1956,337 @@ describe("BrowserSurfaceHost", () => {
     ).rejects.toThrow("ERR_TIMED_OUT");
   });
 
+  describe("a navigation the person started from the address bar", () => {
+    const policy = {
+      profileMode: "isolated" as const,
+      allowedOrigins: ["https://short.example"],
+      credentialFieldProtection: true,
+      maxConcurrentTabs: 1,
+      sessionTimeoutMs: 300_000,
+    };
+    async function opened() {
+      const base = view();
+      // A debugger that can be listened on, so a dialog the page raises is heard.
+      let heard: ((event: unknown, method: string, params: unknown) => void) | undefined;
+      const created = {
+        ...base,
+        webContents: {
+          ...base.webContents,
+          id: 7,
+          debugger: {
+            ...base.webContents.debugger,
+            on: vi.fn((_event: string, listener: typeof heard) => {
+              heard = listener;
+            }),
+            removeListener: vi.fn(),
+          },
+        },
+      };
+      const host = createBrowserSurfaceHost({
+        createView: () => created as never,
+        personDownloadsFolder: "/people/sam/Downloads",
+      });
+      await host.createContext({ contextId, owner: { windowId: "window-a", threadId }, policy });
+      const redirectGuard = vi
+        .mocked(created.webContents.on)
+        .mock.calls.find(([event]) => event === "will-redirect")?.[1];
+      const willDownload = vi
+        .mocked(created.webContents.session.on)
+        .mock.calls.find(([event]) => event === "will-download")?.[1];
+      const onConsole = vi
+        .mocked(created.webContents.on)
+        .mock.calls.find(([event]) => event === "console-message")?.[1];
+      const onFailed = vi.mocked(created.webContents.session.webRequest!.onErrorOccurred).mock
+        .calls[0]?.[0];
+      const onCompleted = vi.mocked(created.webContents.session.webRequest!.onCompleted!).mock
+        .calls[0]?.[0];
+      /** The page logs an error and has one request fail and one answer 500. */
+      const misbehave = (site: string) => {
+        onConsole?.({ level: "error", message: `Words logged by ${site}` });
+        onFailed?.({
+          url: `${site}/lost.js`,
+          method: "GET",
+          error: "net::ERR_FAILED",
+          webContentsId: 7,
+        });
+        onCompleted?.({ url: `${site}/api`, method: "GET", statusCode: 500, webContentsId: 7 });
+      };
+      /** The page raises an alert; the host's fixed policy answers it. */
+      const alert = (message: string) =>
+        heard?.(undefined, "Page.javascriptDialogOpening", { type: "alert", message });
+      /** The page starts a download; answers whether it was saved for the person. */
+      const download = (): boolean => {
+        const item = {
+          getFilename: () => "octant-test-file-that-does-not-exist.bin",
+          getTotalBytes: () => 0,
+          getReceivedBytes: () => 0,
+          setSavePath: vi.fn(),
+          cancel: vi.fn(),
+          on: vi.fn(),
+        };
+        willDownload?.({ preventDefault: vi.fn() }, item, created.webContents);
+        return item.setSavePath.mock.calls.length > 0;
+      };
+      /** Runs one hop through the guard; answers whether the guard let it pass. */
+      const hop = (url: string): boolean => {
+        const preventDefault = vi.fn();
+        redirectGuard?.({ preventDefault, isMainFrame: true, url });
+        return preventDefault.mock.calls.length === 0;
+      };
+      return { created, host, hop, alert, download, misbehave };
+    }
+
+    it("follows a chain of redirects to another site and answers with nothing of that page", async () => {
+      const { created, host, hop, alert, download, misbehave } = await opened();
+      const followed: boolean[] = [];
+      let savedForPerson: boolean | undefined;
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+        followed.push(
+          hop("https://www.short.example/"),
+          hop("https://moved.example.net/"),
+          hop("https://www.final.example.org/front"),
+        );
+        // A hop fails and logs while the approved page is still the one in front.
+        misbehave("https://moved.example.net");
+        vi.mocked(created.webContents.getURL).mockReturnValue(
+          "https://www.final.example.org/front",
+        );
+        vi.mocked(created.webContents.getTitle).mockReturnValue("Front page");
+        // The page the redirect reached speaks, logs, and starts a download on its own.
+        alert("Words from a site nobody approved");
+        misbehave("https://www.final.example.org");
+        savedForPerson = download();
+      });
+
+      const answer = await host.act(contextId, {
+        kind: "navigate",
+        target: "https://short.example/",
+        startedBy: "person",
+        include: ["screenshot"],
+      });
+
+      expect(followed).toEqual([true, true, true]);
+      // No address, title, text, hash, picture or dialog of a page approval never covered.
+      expect(answer).toEqual({});
+      expect(created.webContents.capturePage).not.toHaveBeenCalled();
+      // A typed address is not a click on a download.
+      expect(savedForPerson).toBe(false);
+      // The person sees where they are; the load over, the page is nobody's
+      // to move until they touch it.
+      expect(host.state(contextId)).toMatchObject({
+        control: "idle",
+        url: "https://www.final.example.org/front",
+      });
+      // The preview's read describes nothing of it either.
+      await expect(host.peek(contextId)).resolves.toEqual({});
+      expect(created.webContents.capturePage).not.toHaveBeenCalled();
+      // The agent is still refused that page.
+      await expect(host.act(contextId, { kind: "snapshot" })).rejects.toThrow(
+        "Octant Browser will not act on a page outside this context's allowed origins.",
+      );
+      // And the page's words do not wait for the agent's next answer.
+      vi.mocked(created.webContents.getURL).mockReturnValue("https://short.example/");
+      const back = await host.act(contextId, {
+        kind: "navigate",
+        target: "https://short.example/",
+      });
+      expect(back).toMatchObject({ url: "https://short.example/" });
+      expect(back).not.toHaveProperty("dialogs");
+      // Nor does what it logged or failed to load: the diagnostics read is
+      // empty until the approved page itself has something to report.
+      expect(await host.act(contextId, { kind: "observe-diagnostics" })).toMatchObject({
+        consoleErrors: [],
+        failedRequests: [],
+        httpErrors: [],
+      });
+      misbehave("https://short.example");
+      expect(await host.act(contextId, { kind: "observe-diagnostics" })).toMatchObject({
+        consoleErrors: [{ text: "Words logged by https://short.example" }],
+        failedRequests: [{ url: "https://short.example/lost.js" }],
+        httpErrors: [{ url: "https://short.example/api", status: 500 }],
+      });
+    });
+
+    it.each([
+      "http://127.0.0.1:8080/admin",
+      "http://localhost:3000/",
+      "http://192.168.1.1/",
+      "http://10.0.0.5/",
+      "http://100.100.4.2/",
+      "http://[::1]/",
+      "http://[fd00::1]/",
+      "http://printer.local/",
+      "http://nas/",
+      "http://2130706433/",
+      "http://0x7f.1/",
+      "http://0.0.0.0/",
+      "http://[::ffff:10.0.0.5]/",
+      "http://LOCALHOST./",
+    ])("refuses a hop to this computer or its network (%s)", async (privateHop) => {
+      const { created, host, hop } = await opened();
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+        // A public hop first: the refusal is for the private one, not the chain.
+        expect(hop("https://moved.example.net/")).toBe(true);
+        expect(hop(privateHop)).toBe(false);
+        throw new Error("ERR_ABORTED (-3) loading 'https://short.example/'");
+      });
+
+      await expect(
+        host.act(contextId, {
+          kind: "navigate",
+          target: "https://short.example/",
+          startedBy: "person",
+        }),
+      ).rejects.toMatchObject({ name: "BrowserNavigationBlockedError", url: privateHop });
+    });
+
+    it("drops the dialogs of a navigation that failed, and treats the next action's hops as nobody's", async () => {
+      const { created, host, hop, alert, misbehave } = await opened();
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+        expect(hop("https://moved.example.net/")).toBe(true);
+        alert("Words from a site nobody approved");
+        misbehave("https://moved.example.net");
+        expect(hop("http://192.168.1.1/")).toBe(false);
+        throw new Error("ERR_ABORTED (-3) loading 'https://short.example/'");
+      });
+      await expect(
+        host.act(contextId, {
+          kind: "navigate",
+          target: "https://short.example/",
+          startedBy: "person",
+        }),
+      ).rejects.toMatchObject({ name: "BrowserNavigationBlockedError" });
+
+      // The agent's next navigation: a site the person's failed one had not
+      // reached is refused, and no dialog of that load is reported with it.
+      vi.mocked(created.webContents.getURL).mockReturnValue("https://short.example/");
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+        expect(hop("https://other.example.net/")).toBe(false);
+      });
+      const next = await host.act(contextId, {
+        kind: "navigate",
+        target: "https://short.example/",
+      });
+      expect(next).not.toHaveProperty("dialogs");
+      expect(await host.act(contextId, { kind: "observe-diagnostics" })).toMatchObject({
+        consoleErrors: [],
+        failedRequests: [],
+        httpErrors: [],
+      });
+    });
+
+    it("grants nothing in the person's name before the load starts or after it has settled", async () => {
+      const { created, host, hop, download } = await opened();
+      vi.mocked(created.webContents.getURL).mockReturnValue("https://short.example/");
+      // While the dialog guard attaches, the page already open acts on its own.
+      const early: boolean[] = [];
+      vi.mocked(created.webContents.debugger.sendCommand).mockImplementation(async (method) => {
+        if (method === "Page.enable") early.push(download(), hop("http://192.168.1.1/"));
+        return undefined;
+      });
+      // After the typed address has loaded, the page moves itself during the reads.
+      let late: boolean | undefined;
+      vi.mocked(created.webContents.capturePage).mockImplementationOnce(async () => {
+        late = hop("https://late.example.net/");
+        return { isEmpty: () => false, toJPEG: () => Uint8Array.from([1, 2, 3]) };
+      });
+
+      const answer = await host.act(contextId, {
+        kind: "navigate",
+        target: "https://short.example/",
+        startedBy: "person",
+        include: ["screenshot"],
+      });
+
+      expect(early).toEqual([false, false]);
+      expect(late).toBe(false);
+      expect(answer).toMatchObject({ url: "https://short.example/" });
+    });
+
+    it("answers with nothing when the page moves to a site the person reached before while it is read", async () => {
+      const { created, host, hop } = await opened();
+      // The person's earlier typed address ended on another site.
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+        expect(hop("https://moved.example.net/")).toBe(true);
+        vi.mocked(created.webContents.getURL).mockReturnValue("https://moved.example.net/");
+      });
+      await host.act(contextId, {
+        kind: "navigate",
+        target: "https://short.example/",
+        startedBy: "person",
+      });
+
+      // A later typed address loads the approved page, which then moves itself
+      // back to that site while the answer is being read.
+      vi.mocked(created.webContents.getURL).mockReturnValue("https://short.example/");
+      vi.mocked(created.webContents.capturePage).mockImplementationOnce(async () => {
+        expect(hop("https://moved.example.net/")).toBe(true);
+        vi.mocked(created.webContents.getURL).mockReturnValue("https://moved.example.net/");
+        return { isEmpty: () => false, toJPEG: () => Uint8Array.from([1, 2, 3]) };
+      });
+      const answer = await host.act(contextId, {
+        kind: "navigate",
+        target: "https://short.example/",
+        startedBy: "person",
+        include: ["screenshot"],
+      });
+      expect(answer).toEqual({});
+
+      // The agent's own navigation that ends the same way is refused, not answered.
+      vi.mocked(created.webContents.getURL).mockReturnValue("https://short.example/");
+      vi.mocked(created.webContents.capturePage).mockImplementationOnce(async () => {
+        vi.mocked(created.webContents.getURL).mockReturnValue("https://moved.example.net/");
+        return { isEmpty: () => false, toJPEG: () => Uint8Array.from([1, 2, 3]) };
+      });
+      await expect(
+        host.act(contextId, {
+          kind: "navigate",
+          target: "https://short.example/",
+          include: ["screenshot"],
+        }),
+      ).rejects.toThrow(
+        "Octant Browser will not act on a page outside this context's allowed origins.",
+      );
+    });
+
+    it("still refuses the same redirect when the agent asked for the navigation", async () => {
+      const { created, host, hop } = await opened();
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+        expect(hop("https://moved.example.net/")).toBe(false);
+        throw new Error("ERR_ABORTED (-3) loading 'https://short.example/'");
+      });
+
+      await expect(
+        host.act(contextId, { kind: "navigate", target: "https://short.example/" }),
+      ).rejects.toMatchObject({
+        name: "BrowserNavigationBlockedError",
+        url: "https://moved.example.net/",
+      });
+      expect(host.state(contextId)).toMatchObject({ control: "idle" });
+    });
+
+    it("answers as any navigation does when the address stays on its approved site", async () => {
+      const { created, host, alert } = await opened();
+      vi.mocked(created.webContents.getURL).mockReturnValue("https://short.example/");
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+        alert("Words from the approved site");
+      });
+
+      const answer = await host.act(contextId, {
+        kind: "navigate",
+        target: "https://short.example/",
+        startedBy: "person",
+      });
+
+      // An approved page's dialog is reported as before; only a withheld page's is not.
+      expect(answer).toMatchObject({
+        url: "https://short.example/",
+        title: "Example",
+        dialogs: [{ type: "alert", message: "Words from the approved site" }],
+      });
+    });
+  });
+
   it("serializes user chrome commands behind an in-flight agent action", async () => {
     const created = view();
     let releaseAction!: () => void;

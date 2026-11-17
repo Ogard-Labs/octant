@@ -423,6 +423,7 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
             ? {}
             : { destinationExpected: request.destinationExpected }),
           ...(request.files === undefined ? {} : { files: request.files }),
+          ...(request.startedBy === undefined ? {} : { startedBy: request.startedBy }),
           ...(request.tabId === undefined ? {} : { tabId: request.tabId }),
           ...(request.waitFor === undefined ? {} : { waitFor: request.waitFor }),
           ...(request.viewport === undefined ? {} : { viewport: request.viewport }),

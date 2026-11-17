@@ -1244,6 +1244,14 @@ export class BrowserAutomationService {
     readonly holdDownloads?: boolean;
     /** Set by the agent tool for a turn at Full access; no route can name it. */
     readonly fullAccess?: true;
+    /**
+     * Set only by the action route, for a window of this computer: the person
+     * typed the address. A `navigate` so marked is their browsing, as a link
+     * they click on the page is, and the desktop Browser follows its redirects
+     * to a site only their view shows. It approves no origin: the agent reads
+     * and acts only inside the context's approved origins, as before.
+     */
+    readonly startedBy?: "person";
   }): Promise<BrowserAutomationSnapshot> {
     const owned = this.#contexts.get(input.request.contextId);
     const foreign =
@@ -1388,9 +1396,16 @@ export class BrowserAutomationService {
       readonly refuseStaleRevision?: boolean;
       readonly holdDownloads?: boolean;
       readonly fullAccess?: true;
+      readonly startedBy?: "person";
     },
   ): Promise<BrowserAutomationSnapshot> {
     const activityBy = input.activityBy ?? input.capturedBy;
+    // Never an agent's call or a flow's, whatever else the caller passed.
+    const personNavigation =
+      input.startedBy === "person" &&
+      input.request.kind === "navigate" &&
+      activityBy !== "agent" &&
+      input.flowRun === undefined;
     if (owned.abort.signal.aborted || owned.record.state !== "active") {
       return this.#failure(
         owned,
@@ -1628,6 +1643,7 @@ export class BrowserAutomationService {
             (input.fullAccess === true || this.#agentDownloadsEnabled())
               ? { downloads: "hold" as const, downloadLimits: this.#transferLimits() }
               : {}),
+            ...(personNavigation ? { startedBy: "person" as const } : {}),
           },
           owned.abort.signal,
         ),
@@ -1724,15 +1740,21 @@ export class BrowserAutomationService {
           );
         }
       }
-      const change = describeChange(
-        input.request.kind,
-        {
-          url: owned.observation?.url,
-          title: owned.observation?.title,
-          contentHash: owned.contentHash,
-        },
-        observed,
-      );
+      // The desktop Browser answers the person's own navigation with nothing
+      // of a page that ended outside the approved origins. Compared as a
+      // page, that reads as a blank one holding a credential field.
+      const change =
+        personNavigation && observed.url === undefined
+          ? "The person took this page to a site outside its approved origins. Nothing of that page was read."
+          : describeChange(
+              input.request.kind,
+              {
+                url: owned.observation?.url,
+                title: owned.observation?.title,
+                contentHash: owned.contentHash,
+              },
+              observed,
+            );
       const observation: BrowserObservation = {
         contextId: owned.record.contextId,
         actionId: owned.record.actionId,

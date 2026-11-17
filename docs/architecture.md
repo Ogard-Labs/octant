@@ -16921,7 +16921,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   switches, and closes tabs, takes the page over from the agent and hands it
   back, writes to a thread terminal, answers profile site approvals, and
   raises a thread to Full access or starts one there. The host's navigation
-  guards and site approvals apply to it as they do to a window, and each
+  guards and site approvals apply to it as they do to a window, with one
+  difference: only an address typed at a local window follows a redirect to a
+  site outside the approved origins, as that person's own view
+  ([Refusal and expiry recovery](design/browser-agent-tool.md#refusal-and-expiry-recovery));
+  a paired device's navigation refuses it. Each
   action is journaled with the device as its actor. Built: it navigates,
   types, and sends every page action the route takes, writes to a thread
   terminal, and sets Full access. A

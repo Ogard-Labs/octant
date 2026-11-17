@@ -972,7 +972,17 @@ export function createBrowserAutomationRouteHandler(
         return success(
           shown(
             decodeBrowserAutomationSnapshot(
-              await dependencies.service.act({ windowId, request: pictured }),
+              await dependencies.service.act({
+                windowId,
+                request: pictured,
+                // The address bar of a window of this computer. A paired
+                // device is left out: it reaches the page only through this
+                // route, which acts on approved origins alone, so a page that
+                // followed a redirect off them would leave it unable to act.
+                ...(callerKind === "local-window" && pictured.kind === "navigate"
+                  ? { startedBy: "person" as const }
+                  : {}),
+              }),
             ),
           ),
           origin,
