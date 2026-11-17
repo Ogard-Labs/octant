@@ -22,7 +22,23 @@ const MAX_CONTROL_BYTES = 4_096;
 const CONTROL_DEADLINE_MS = 500;
 const POLICY_DEADLINE_MS = 1_500;
 const MAXIMUM_MS = 180_000;
+const NODE_TIMER_MAXIMUM_MS = 2_147_483_647;
 export const LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS = 30 * 24 * 60 * 60 * 1_000;
+
+export function scheduleLinuxMediationDeadline(expire: () => void, maximumMs: number): () => void {
+  let remainingMs = maximumMs;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const schedule = () => {
+    const delayMs = Math.min(remainingMs, NODE_TIMER_MAXIMUM_MS);
+    timer = setTimeout(() => {
+      remainingMs -= delayMs;
+      if (remainingMs <= 0) expire();
+      else schedule();
+    }, delayMs);
+  };
+  schedule();
+  return () => clearTimeout(timer);
+}
 
 export type BrokerRefusal =
   | "unsupported-platform"
@@ -111,7 +127,7 @@ export async function runLinuxMediationBroker(input: {
     let policyTimer: ReturnType<typeof setTimeout> | undefined;
     let stopTimer: ReturnType<typeof setTimeout> | undefined;
     let cachedSnapshot: LinuxMediationPolicySnapshot | undefined;
-    const maximum = setTimeout(
+    const clearMaximum = scheduleLinuxMediationDeadline(
       () => refuse("deadline"),
       input.maximumMs ??
         (input.production === true ? LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS : MAXIMUM_MS),
@@ -139,7 +155,7 @@ export async function runLinuxMediationBroker(input: {
     const complete = (code: number | null) => {
       if (settled) return;
       settled = true;
-      clearTimeout(maximum);
+      clearMaximum();
       clearTimeout(policyTimer);
       clearTimeout(stopTimer);
       statusWait?.accept(undefined);
