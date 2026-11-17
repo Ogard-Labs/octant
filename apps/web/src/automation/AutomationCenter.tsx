@@ -635,7 +635,7 @@ function AutomationListBody(props: {
   if (controller.list.status === "loading") {
     return (
       <OctantEmpty
-        eyebrow="Automation Center"
+        eyebrow="Automations"
         message="Loading automations."
         state="loading"
         title="Loading"
@@ -646,7 +646,7 @@ function AutomationListBody(props: {
     return (
       <OctantEmpty
         action={{ label: "Retry", onClick: controller.retryList }}
-        eyebrow="Automation Center"
+        eyebrow="Automations"
         message={controller.list.message}
         role="alert"
         state="disconnected"
@@ -988,7 +988,7 @@ function AutomationDetail(props: {
   if (controller.detail.status === "loading" || controller.detail.status === "idle") {
     return (
       <OctantEmpty
-        eyebrow="Automation Center"
+        eyebrow="Automations"
         message="Loading the automation."
         state="loading"
         title="Loading"
@@ -999,7 +999,7 @@ function AutomationDetail(props: {
     return (
       <OctantEmpty
         action={{ label: "Retry", onClick: controller.retryDetail }}
-        eyebrow="Automation Center"
+        eyebrow="Automations"
         message={controller.detail.message}
         role="alert"
         state="disconnected"
