@@ -47,6 +47,7 @@ import {
   useAgentsCenterController,
   type AgentsCenterController,
 } from "./useAgentsCenterController";
+import { agentStatusTone, runTimeCell, startedCell, usageCell } from "./agentsTable";
 import { FollowUpControl } from "./FollowUpControl";
 import { AgentsCenterGraph } from "./AgentsCenterGraph";
 
@@ -340,6 +341,10 @@ function AgentsCenterListBody(props: {
   readonly onSelect: (runId: string) => void;
 }) {
   const { controller } = props;
+  // One clock per answer from the host, so a table of rows does not each read
+  // its own and drift apart by a few milliseconds.
+  // oxlint-disable-next-line react-hooks/exhaustive-deps
+  const now = useMemo(() => new Date().toISOString(), [controller.visibleItems]);
   if (controller.list.status === "loading") {
     return (
       <OctantEmpty eyebrow="Agents" message="Loading agent runs." state="loading" title="Loading" />
@@ -407,79 +412,121 @@ function AgentsCenterListBody(props: {
     );
   }
   return (
-    <ul
-      aria-busy={controller.list.status === "refreshing"}
-      aria-label="Agent runs"
-      className="agents-center__rows"
-      data-refreshing={controller.list.status === "refreshing" ? "true" : undefined}
-    >
-      {controller.visibleItems.map((summary) => (
-        <li className="agents-center-row" key={String(summary.runId)}>
-          <OctantButton
-            className="agents-center-row__open"
-            data-agent-run-row={String(summary.runId)}
-            onClick={() => props.onSelect(String(summary.runId))}
-            type="button"
-            variant="ghost"
-          >
-            <span className="agents-center-row__task">{summary.task}</span>
-          </OctantButton>
-          <div className="agents-center-row__meta">
-            <span className="agents-center-row__parent">{summary.parentThreadTitle}</span>
-            <span className="agents-center-row__mode">{agentRunModeLabel(summary.mode)}</span>
-            <span className="agents-center-row__project">
-              {summary.projectId === undefined
-                ? "No Project"
-                : (props.projectNames.get(String(summary.projectId)) ?? "Project")}
-            </span>
-            <span className="agents-center-row__provider">
-              <RanOn providerLabels={props.providerLabels} route={summary.route} />
-            </span>
-            <span className="agents-center-row__state" data-lifecycle={summary.lifecycleStatus}>
-              {agentRunLifecycleLabel(summary.lifecycleStatus)}
-            </span>
-            {summary.resultAcknowledgement.required &&
-            !summary.resultAcknowledgement.acknowledged ? (
-              <OctantBadge className="agents-center-row__ack" variant="secondary">
-                Needs acknowledgement
-              </OctantBadge>
-            ) : null}
-          </div>
-          <div className="agents-center-row__actions">
-            <OctantButton
-              className="agents-center-row__open-thread"
-              onClick={() => {
-                const target = agentRunCenterThreadTarget(summary);
-                props.onOpenThread?.({
-                  ...target,
-                  title: summary.parentThreadTitle,
-                });
-              }}
-              type="button"
-              variant="ghost"
-            >
-              Open thread
-            </OctantButton>
-            {summary.resultAcknowledgement.required &&
-            !summary.resultAcknowledgement.acknowledged ? (
+    <div className="agents-table">
+      {/* The column names, drawn once. Each row says the same things in its
+          own accessible name and description, so this line is for the eye. */}
+      <div aria-hidden="true" className="agents-table__head">
+        <span>Agent</span>
+        <span>Status</span>
+        <span>Started</span>
+        <span>Run time</span>
+        <span>Usage</span>
+        <span />
+      </div>
+      <ul
+        aria-busy={controller.list.status === "refreshing"}
+        aria-label="Agent runs"
+        className="agents-center__rows"
+        data-refreshing={controller.list.status === "refreshing" ? "true" : undefined}
+      >
+        {controller.visibleItems.map((summary) => {
+          const rowId = `agents-row-${String(summary.runId)}`;
+          const needsAcknowledgement =
+            summary.resultAcknowledgement.required && !summary.resultAcknowledgement.acknowledged;
+          const usage = usageCell(summary);
+          return (
+            <li className="agents-center-row" key={String(summary.runId)}>
               <OctantButton
-                onClick={() =>
-                  void props.controls
-                    .acknowledge({ runId: String(summary.runId), version: summary.version })
-                    .then((message) => {
-                      if (message !== undefined) controller.setNotice(message);
-                    })
-                }
+                // Named for the task alone; where it ran, its state and its
+                // figures are the description, so a screen reader hears the
+                // name first and the rest after.
+                aria-describedby={`${rowId}-where ${rowId}-state ${rowId}-started ${rowId}-time ${rowId}-usage`}
+                aria-label={summary.task}
+                className="agents-center-row__open"
+                data-agent-run-row={String(summary.runId)}
+                onClick={() => props.onSelect(String(summary.runId))}
                 type="button"
-                variant="secondary"
+                variant="bare"
               >
-                Acknowledge
+                <span className="agents-center-row__agent">
+                  <span className="agents-center-row__task">{summary.task}</span>
+                  <span className="agents-center-row__where" id={`${rowId}-where`}>
+                    {`${summary.parentThreadTitle} · ${agentRunModeLabel(summary.mode)} · ${
+                      summary.projectId === undefined
+                        ? "No Project"
+                        : (props.projectNames.get(String(summary.projectId)) ?? "Project")
+                    }`}
+                    <span className="agents-center-row__provider">
+                      {" · "}
+                      <RanOn providerLabels={props.providerLabels} route={summary.route} />
+                    </span>
+                  </span>
+                </span>
+                <span className="agents-center-row__status" id={`${rowId}-state`}>
+                  <span
+                    className="agents-center-row__state"
+                    data-lifecycle={summary.lifecycleStatus}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="agents-center-row__dot"
+                      data-tone={agentStatusTone(summary.lifecycleStatus)}
+                    />
+                    {agentRunLifecycleLabel(summary.lifecycleStatus)}
+                  </span>
+                  <span className="agents-center-row__quiet">
+                    {needsAcknowledgement ? "Needs acknowledgement" : ""}
+                  </span>
+                </span>
+                <span className="agents-center-row__figure" id={`${rowId}-started`}>
+                  {startedCell(summary.createdAt, now)}
+                </span>
+                <span className="agents-center-row__figure" id={`${rowId}-time`}>
+                  {runTimeCell(summary, now)}
+                </span>
+                <span className="agents-center-row__figure" id={`${rowId}-usage`}>
+                  <span>{usage.primary}</span>
+                  <span className="agents-center-row__quiet">{usage.secondary}</span>
+                </span>
               </OctantButton>
-            ) : null}
-          </div>
-        </li>
-      ))}
-    </ul>
+              <span className="agents-center-row__actions">
+                <OctantButton
+                  className="agents-center-row__open-thread"
+                  onClick={() => {
+                    const target = agentRunCenterThreadTarget(summary);
+                    props.onOpenThread?.({
+                      ...target,
+                      title: summary.parentThreadTitle,
+                    });
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Open thread
+                </OctantButton>
+                {needsAcknowledgement ? (
+                  <OctantButton
+                    onClick={() =>
+                      void props.controls
+                        .acknowledge({ runId: String(summary.runId), version: summary.version })
+                        .then((message) => {
+                          if (message !== undefined) controller.setNotice(message);
+                        })
+                    }
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Acknowledge
+                  </OctantButton>
+                ) : null}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 

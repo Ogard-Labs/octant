@@ -15,7 +15,7 @@ import { FilterMenu, FilterMenuGroup } from "../surface/FilterMenu";
 import { OctantTabs, OctantTabsList, OctantTabsTab } from "../ui/base/OctantTabs";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ArtifactCard } from "./ArtifactCard";
-import { ArtifactListRow } from "./ArtifactListRow";
+import { ArtifactTableHead, ArtifactTableRow } from "./ArtifactTableRow";
 import { ClaudePageCard, type ClaudePageActions } from "./ClaudePageCard";
 import { SyncedArtifactCard } from "./SyncedArtifactCard";
 import type { ArtifactLibraryFilters } from "./useArtifactLibrary";
@@ -498,11 +498,14 @@ function ArtifactEntries(
   const { className, entries, view, ...actions } = props;
   if (view === "list") {
     return (
-      <ul className="artifact-library__list">
-        {entries.map((entry) => (
-          <ArtifactListRow entry={entry} key={String(entry.canvasId)} {...actions} />
-        ))}
-      </ul>
+      <div className="artifact-table">
+        <ArtifactTableHead />
+        <ul className="artifact-table__rows">
+          {entries.map((entry) => (
+            <ArtifactTableRow entry={entry} key={String(entry.canvasId)} {...actions} />
+          ))}
+        </ul>
+      </div>
     );
   }
   return (

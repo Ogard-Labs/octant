@@ -1114,6 +1114,20 @@ automation is the page's primary button. In a narrow list the runs column gives
 way first; the trailing columns have fixed widths, so nothing moves when a run
 arrives or the switch flips (maintainer request, 2026-11-17).
 
+The Agents List view and the Artifacts list view are tables of the same kind:
+one quiet head of column names over the rows, each row one press that opens the
+item and is named for it, and the row's other cells read as its description.
+Agents shows Agent (the task, with its thread, mode, Project, and provider and
+model on a quiet second line), Status, Started, Run time and Usage. Run time
+counts only while a run is live: a run summary has no end time, and its last
+update moves when its result is acknowledged or delivered. Usage the provider
+did not report is left blank, never zero, and an estimate says Estimated. Artifacts shows Name (with Project and kind under it), Tags, Shared
+and Edited, with sync state, Export and Versions in a trailing cell. Controls
+that act on a row (Open thread, Acknowledge, tag editing, sync choices) sit
+beside the row's press, never inside it. In a narrow list the figure columns
+give way first, and their head cells with them (maintainer request,
+2026-11-17).
+
 ### Inbox page
 
 The Inbox opens as a few flat cards in one readable column, not as sections

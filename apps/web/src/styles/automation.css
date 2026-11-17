@@ -202,6 +202,12 @@
   min-height: 0;
   min-width: 0;
   padding-block: var(--oct-space-2);
+  /* The button's inline padding and border would push its subgrid cells off
+     the column head's edges (measured 9px right, then 6px left, 2026-11-17),
+     and a subgrid keeps its own gap, which the recipe sets to 4px. */
+  padding-inline: 0;
+  border-width: 0;
+  column-gap: inherit;
   color: inherit;
   text-align: start;
   cursor: default;

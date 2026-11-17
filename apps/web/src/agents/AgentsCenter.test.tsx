@@ -296,6 +296,37 @@ describe("AgentsCenter", () => {
     expect(open).toHaveFocus();
   });
 
+  it("lists runs as a table with a column head and each row's status and run time", async () => {
+    const stopped = decodeAgentRunCenterSummary({
+      ...summary,
+      lifecycleStatus: "completed",
+      createdAt: "2026-08-01T10:00:00.000Z",
+      updatedAt: "2026-08-01T10:12:00.000Z",
+      usage: { inputTokens: 12_000, outputTokens: 3_000 },
+    });
+    const { container } = render(
+      <AgentsCenter client={createClient({ center: vi.fn(async () => ({ items: [stopped] })) })} />,
+    );
+    const open = await screen.findByRole("button", { name: summary.task });
+    const head = container.querySelector(".agents-table__head");
+    expect(head).toHaveTextContent("AgentStatusStartedRun timeUsage");
+    expect(open).toHaveTextContent("Completed");
+    expect(open).toHaveTextContent("15k");
+    // A stopped run carries no end time, so its run time stays blank.
+    expect(container.querySelector("[id$='-time']")).toHaveTextContent(/^$/);
+  });
+
+  it("leaves usage blank for a run whose provider reported none", async () => {
+    const unreported = decodeAgentRunCenterSummary({ ...summary, usageQuality: "unavailable" });
+    const { container } = render(
+      <AgentsCenter
+        client={createClient({ center: vi.fn(async () => ({ items: [unreported] })) })}
+      />,
+    );
+    await screen.findByRole("button", { name: summary.task });
+    expect(container.querySelector("[id$='-usage']")).toHaveTextContent(/^$/);
+  });
+
   it("keeps the rows on screen while a changed filter is in flight", async () => {
     const user = userEvent.setup();
     let settleSecond: ((value: { readonly items: readonly [] }) => void) | undefined;

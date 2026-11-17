@@ -328,8 +328,28 @@ describe("choosing how the page reads", () => {
     await user.click(screen.getByRole("button", { name: "List view" }));
 
     expect(onViewChange).toHaveBeenCalledWith("list");
-    expect(document.querySelector(".artifact-row")).not.toBeNull();
+    expect(document.querySelector(".artifact-table-row")).not.toBeNull();
     expect(document.querySelector(".artifact-card")).toBeNull();
+  });
+
+  it("shows the list view as a table with a column head and each artifact's facts in its columns", () => {
+    renderView("list", { tab: "all", query: "" });
+
+    const head = document.querySelector(".artifact-table__head");
+    expect(head?.textContent).toBe("NameTagsSharedEdited");
+
+    const row = screen.getByRole("button", { name: "Launch plan" }).closest("li");
+    expect(row).not.toBeNull();
+    const cells = within(row as HTMLElement);
+    expect(cells.getByText(/Storefront/)).toBeInTheDocument();
+    expect(cells.getByText("Launch")).toBeInTheDocument();
+    expect(cells.getByText("Shared")).toBeInTheDocument();
+    expect(cells.getByText("Edited 3 hours ago")).toBeInTheDocument();
+    // Under the Edited head the cell does not say the word again.
+    expect(cells.getByText("3 hours ago")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByRole("button", { name: "Launch plan" })).toHaveAccessibleDescription(
+      /Storefront.*Shared/,
+    );
   });
 
   it("keeps grouped sections in the list view too", async () => {
