@@ -157,6 +157,14 @@ export const BrowserContextCreateCommand = Schema.Struct({
    * neither take over nor destroy the first server's session.
    */
   dedicated: Schema.optional(Schema.Boolean),
+  /**
+   * Ask for a context of this Open's own only while the thread's shared
+   * context is live; otherwise this Open becomes the shared context. A
+   * Browser tab opened from the tool row asks this way. The host decides as it
+   * registers the context, so two tabs that open together, or a tab and the
+   * agent, cannot both become the shared page or both be handed it.
+   */
+  ownPageWhenShared: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type BrowserContextCreateCommand = typeof BrowserContextCreateCommand.Type;
 

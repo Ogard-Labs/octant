@@ -2517,15 +2517,21 @@ immediately attaches or starts and preserves one server session when moved.
 
 Browser and Terminal are repeatable right-dock workspaces: New Terminal and New Browser page on the tool's button menu create a
 new tab identity, an isolated Browser context or Terminal session, and a stable
-numbered label when siblings are open. A New Browser page opens a context of
-its own and says so to the host: an ordinary Open answers with the thread's one
-shared page, so a second tab that asked the ordinary way showed the first tab's
-page and was refused the site it had been given (found 2026-11-16). The
-thread's first Browser tab keeps the shared page, which is the one the agent's
-Browser tool uses; a page in a repeated tab is the person's alone, and its
-start screen says so. Such a page offers no Take over or Hand back: those hold
-the thread's shared page, so asked from a repeated tab they would hold the
-first tab's page and show it there. Files, Document, Review, Agents, Canvas,
+numbered label when siblings are open. The first Browser page opened in a
+thread is the thread's shared page, the one the agent's Browser tool uses. A
+Browser page opened while that page is live opens a context of its own and
+says so to the host: an ordinary Open answers with the shared page, so a second
+tab that asked the ordinary way showed the first tab's page and was refused the
+site it had been given (found 2026-11-16). A page of its own is the person's
+alone, and its start screen says so. Such a page offers no Take over or Hand
+back: those hold the thread's shared page, so asked from it they would hold
+that page and show it there. Every Browser tab opened from the tool row is
+opened the same way, the first one too, so the tab does not choose: it asks the
+host for the shared page if the thread has none and a page of its own if it
+has, and the host decides as it registers the page. Two tabs that open at the
+same moment, or a tab and the agent, therefore never end up on one page. A tab
+asks once which of the two it holds.
+Files, Document, Review, Agents, Canvas,
 Plan, Delivery, Simulator, and Side chat are singleton destinations. One instance
 still appears in only one region at a time.
 

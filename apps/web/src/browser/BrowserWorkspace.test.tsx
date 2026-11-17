@@ -393,7 +393,7 @@ describe("BrowserWorkspace", () => {
     await waitFor(() => expect(onContextCreated).toHaveBeenCalledWith(context.contextId));
   });
 
-  it("gives a repeated Browser tab its own page, address and title beside the first tab's", async () => {
+  it("makes the first Browser tab the thread's shared page and gives the next its own page, address and title", async () => {
     // A stand-in that answers as the host does: an ordinary Open returns the
     // thread's shared page when it has one, and only an Open that asks for a
     // page of its own gets a new one. A page moves only to a site it was
@@ -427,10 +427,12 @@ describe("BrowserWorkspace", () => {
     };
     const browser = client();
     vi.mocked(browser.create).mockImplementation(async (input) => {
-      if (input.dedicated !== true && shared !== undefined) return snapshotOf(shared);
+      const own =
+        input.dedicated === true || (input.ownPageWhenShared === true && shared !== undefined);
+      if (!own && shared !== undefined) return snapshotOf(shared);
       const contextId = `60000000-0000-4000-8000-00000000010${String(pages.size + 1)}`;
       pages.set(contextId, { context: { ...context, contextId, policy: input.policy as any } });
-      if (input.dedicated !== true) shared = contextId;
+      if (!own) shared = contextId;
       return snapshotOf(contextId);
     });
     vi.mocked(browser.act).mockImplementation(async (request) => {
@@ -458,9 +460,11 @@ describe("BrowserWorkspace", () => {
         : snapshotOf(shared),
     );
     const onContextCreated = vi.fn();
+    // Both start fresh, as every tab opened from the tool row does.
     const first = render(
       <BrowserWorkspace
         client={browser}
+        startFresh
         tab={{
           kind: "browser",
           id: "90000000-0000-4000-8000-000000000001" as any,
@@ -497,10 +501,16 @@ describe("BrowserWorkspace", () => {
     await open(second, "http://127.0.0.1:4102/");
     await within(second.container).findByText("Page on port 4102");
 
-    // The second tab asked for a page of its own and is bound to it.
-    expect(vi.mocked(browser.create).mock.calls.map(([input]) => input.dedicated)).toEqual([
-      undefined,
-      true,
+    // The first tab opened the thread's shared page, the one the agent's tool
+    // uses; the second asked for a page of its own and is bound to it.
+    // Both asked the host to choose; neither chose for itself.
+    expect(
+      vi
+        .mocked(browser.create)
+        .mock.calls.map(([input]) => [input.ownPageWhenShared, input.dedicated]),
+    ).toEqual([
+      [true, undefined],
+      [true, undefined],
     ]);
     expect(pages.size).toBe(2);
     const own = [...pages.keys()].find((contextId) => contextId !== shared);
@@ -2026,11 +2036,13 @@ describe("BrowserWorkspace", () => {
       }
     });
 
-    it("offers no Take over on a repeated tab's own page, which no agent reaches", async () => {
+    it("offers Take over on the tab that holds the thread's shared page, and not on a tab with a page of its own", async () => {
       const restore = widthOfToolbar(640);
       try {
+        // Every tab opened from the tool row starts fresh. This one holds the
+        // page the thread shares with its agent.
         const browser = holdingClient();
-        render(
+        const shared = render(
           <BrowserWorkspace
             client={browser}
             startFresh
@@ -2038,13 +2050,39 @@ describe("BrowserWorkspace", () => {
               kind: "browser",
               id: "90000000-0000-4000-8000-000000000032" as any,
               mode: "work",
-              title: "Browser 2",
+              title: "Browser",
               threadId: threadId as any,
               contextId: context.contextId as any,
             }}
           />,
         );
+        expect(await screen.findByRole("button", { name: "Take over" })).toBeVisible();
+        shared.unmount();
+
+        // This one holds a page of its own, which no agent reaches.
+        const ownContext = { ...context, contextId: "60000000-0000-4000-8000-000000000077" };
+        vi.mocked(browser.inspect).mockResolvedValue({
+          status: "running",
+          threadId,
+          context: ownContext,
+          evidence: [],
+        } as any);
+        render(
+          <BrowserWorkspace
+            client={browser}
+            startFresh
+            tab={{
+              kind: "browser",
+              id: "90000000-0000-4000-8000-000000000033" as any,
+              mode: "work",
+              title: "Browser 2",
+              threadId: threadId as any,
+              contextId: ownContext.contextId as any,
+            }}
+          />,
+        );
         await screen.findByRole("button", { name: "More Browser actions" });
+        await act(async () => {});
         expect(screen.queryByRole("button", { name: "Take over" })).toBeNull();
         expect(await moreActionNames()).not.toContain("Take over");
         expect(browser.takeOver).not.toHaveBeenCalled();
@@ -2814,6 +2852,57 @@ describe("BrowserWorkspace", () => {
       // Every later poll asks for the replacement, never the stopped context.
       const asked = vi.mocked(browser.inspect).mock.calls.map(([input]) => input.contextId);
       expect(new Set(asked)).toEqual(new Set([replacement.contextId]));
+    });
+
+    it("keeps a tool-row tab's page the thread's shared page across a profile switch", async () => {
+      // The tab holds the shared page; switching profile stops it, so the
+      // thread has no shared page when the replacement opens.
+      const browser = client();
+      const replacement = { ...context, contextId: "60000000-0000-4000-8000-0000000000ab" };
+      vi.mocked(browser.inspect).mockImplementation(
+        async ({ contextId }: { contextId: string }) =>
+          ({
+            status: "running",
+            threadId,
+            context: contextId === context.contextId ? context : replacement,
+            observation: {
+              contextId,
+              actionId: context.actionId,
+              correlationId: context.correlationId,
+              authority,
+              url: "https://example.com/start",
+              revision: 1,
+              observedAt: "2026-07-27T20:01:00.000Z",
+              stale: false,
+            },
+            evidence: [],
+          }) as any,
+      );
+      vi.mocked(browser.create).mockResolvedValue({
+        status: "running",
+        threadId,
+        context: replacement,
+        evidence: [],
+      } as any);
+      render(
+        <BrowserWorkspace
+          client={browser}
+          hostBridge={nativeBridge}
+          startFresh
+          tab={{ ...tab, contextId: context.contextId as any }}
+        />,
+      );
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Browser profile: Private" }));
+      await user.click(await screen.findByRole("menuitemradio", { name: "Personal" }));
+
+      await waitFor(() => expect(browser.create).toHaveBeenCalled());
+      // The host decides, as for any tool-row tab: the tab does not ask for a
+      // page of its own because it is switching profile.
+      expect(vi.mocked(browser.create).mock.calls[0]?.[0]).toMatchObject({
+        ownPageWhenShared: true,
+      });
+      expect(vi.mocked(browser.create).mock.calls[0]?.[0].dedicated).toBeUndefined();
     });
 
     it("says in words when the host refuses a profile page", async () => {
