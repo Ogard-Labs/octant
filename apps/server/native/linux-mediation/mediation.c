@@ -538,20 +538,35 @@ static bool stacked_open_allows(u32 operation)
 	struct octant_open *open = &task->open;
 	struct octant_context *context = open->context;
 	unsigned long flags;
-	bool valid;
+	bool valid, dead, alive;
+	u64 current_epoch;
+	u32 mutations, depth;
 	/* OverlayFS may temporarily override the caller credential with the
 	 * mounter's credential while resolving metacopy/backing state. The scope
 	 * is bound to this task and exact kernel call, so validate its retained
 	 * enrolled context rather than treating that credential override as a
 	 * different workload. */
 	if (!open->active || !open->prepared || open->owner != current || !context ||
-	    (operation == OCTANT_MEDIATION_WRITE && open->operation != OCTANT_MEDIATION_WRITE))
+	    (operation == OCTANT_MEDIATION_WRITE && open->operation != OCTANT_MEDIATION_WRITE)) {
+		pr_info_ratelimited("Octant mediation: stacked open state active=%u prepared=%u owner=%u context=%u operation=%u admitted=%u\n",
+			open->active, open->prepared, open->owner == current, !!context,
+			operation, open->operation);
 		return false;
+	}
 	spin_lock_irqsave(&context->lock, flags);
 	spin_lock(&namespace_lock);
-	valid = !context->dead && broker_alive(context) && scope_epoch_valid(open->epoch, task);
+	dead = context->dead;
+	alive = broker_alive(context);
+	current_epoch = namespace_epoch;
+	mutations = active_mutations;
+	depth = task->mutation_depth;
+	valid = !dead && alive && scope_epoch_valid(open->epoch, task);
 	spin_unlock(&namespace_lock);
 	spin_unlock_irqrestore(&context->lock, flags);
+	if (!valid)
+		pr_info_ratelimited("Octant mediation: stacked open validity dead=%u broker=%u epoch=%llu namespace=%llu mutations=%u depth=%u\n",
+			dead, alive, (unsigned long long)open->epoch,
+			(unsigned long long)current_epoch, mutations, depth);
 	return valid;
 }
 

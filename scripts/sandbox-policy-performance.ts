@@ -103,7 +103,9 @@ try {
       provider: "codex",
     });
     if (admission.status !== "admitted" || admission.turn.selection === undefined)
-      throw new Error("Strict policy was not admitted for calibration.");
+      throw new Error(
+        `Strict policy was not admitted for calibration (${JSON.stringify(admission)}).`,
+      );
     const selected = confinement.prepare({ ...launch, sandboxPolicy: admission.turn.selection });
     if (index >= 10) admissionSamples.push(performance.now() - preparationStarted);
     if (index < 30) {

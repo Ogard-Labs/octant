@@ -45,7 +45,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Measure paired warm workload and policy preparation
-        run: bun scripts/sandbox-policy-performance.ts | tee "$RUNNER_TEMP/strict-performance.json"
+        run: |
+          set -o pipefail
+          bun scripts/build-linux-sandbox-launch.ts
+          bun scripts/sandbox-policy-performance.ts 2>&1 | tee "$RUNNER_TEMP/strict-performance.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
