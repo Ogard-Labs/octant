@@ -291,7 +291,7 @@ describe("Strict in the mode picker", () => {
     await userEvent.click(screen.getByRole("button", { name: /^Mode:/ }));
     const strict = await screen.findByRole("menuitemcheckbox", { name: /^Strict/ });
     expect(strict).toHaveAccessibleDescription(
-      /Some workflows that work in the provider's own app/,
+      "Octant's own limits on top. Some provider features stop working.",
     );
     await userEvent.click(strict);
     expect(onStrictChange).toHaveBeenCalledWith(true);

@@ -174,6 +174,12 @@ export interface PermissionModePickerProps {
  */
 export const STRICT_DETAIL =
   "Adds Octant's own limits on top of the provider's: a fixed environment, provider telemetry off, secret files closed to every tool, and asks again after outside content. Some workflows that work in the provider's own app stop working.";
+/**
+ * The menu's one-line form of the same trade-off. The full list took five
+ * lines under a two-word name and outweighed every mode above it; Settings,
+ * which has the room, keeps the list.
+ */
+const STRICT_MENU_DETAIL = "Octant's own limits on top. Some provider features stop working.";
 const STRICT_WINDOWS_DETAIL = "Strict needs a sandbox Windows doesn't have yet.";
 
 /** What a level below Full access runs with on Windows, said wherever it is offered. */
@@ -388,7 +394,7 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                     <span className="flex min-w-0 flex-col">
                       <span>Strict</span>
                       <span className="oct-menu-detail" id={`${idPrefix}-strict-note`}>
-                        {strictUnavailable ? STRICT_WINDOWS_DETAIL : STRICT_DETAIL}
+                        {strictUnavailable ? STRICT_WINDOWS_DETAIL : STRICT_MENU_DETAIL}
                       </span>
                     </span>
                   </OctantMenuCheckboxItem>
