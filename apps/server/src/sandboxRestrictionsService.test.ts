@@ -31,7 +31,7 @@ afterEach(() => {
   connections.splice(0).forEach((db) => db.close());
   directories.splice(0).forEach((path) => rmSync(path, { recursive: true, force: true }));
 });
-function fixture(strict = true) {
+function fixture(strict = true, accessTimeMediationAvailable = false) {
   let legacy = false;
   let strictEnabled = strict;
   const base = mkdtempSync(join(tmpdir(), "octant-restrictions-"));
@@ -81,6 +81,7 @@ function fixture(strict = true) {
       project: () => project,
       thread: () => ({ projectId, mode: "work" }),
       platform: process.platform,
+      accessTimeMediationAvailable: () => accessTimeMediationAvailable,
       strictPreferences: () =>
         legacy
           ? { executionPolicy: "full-access", thread: { fullAccessSandbox: true } }
@@ -565,17 +566,37 @@ describe.skipIf(process.platform !== "linux")("trusted sandbox restrictions", ()
   });
   it("refuses a folder grant over the host's private enforcement artifacts", () => {
     const f = fixture();
-    const filters = join(f.base, "sandbox-filters");
-    mkdirSync(filters);
+    for (const [index, name] of ["sandbox-filters", "linux-mediation-runtime"].entries()) {
+      const privateRuntime = join(f.base, name);
+      mkdirSync(privateRuntime);
+      f.save({
+        kind: "set-policy",
+        scope: f.settings,
+        policy: {
+          ...f.policy,
+          filesystem: { ...f.policy.filesystem, readWriteRoots: [privateRuntime] },
+        },
+        expectedVersion: index,
+      });
+      expect(f.start()).toMatchObject({
+        status: "refused",
+        message: expect.stringContaining("private policy store"),
+      });
+    }
+  });
+  it("admits same-filesystem read-only folders when access-time mediation is available", () => {
+    const f = fixture(true, true);
+    const sameFilesystem = join(f.base, "same-filesystem-read-only");
+    mkdirSync(sameFilesystem);
     f.save({
       kind: "set-policy",
       scope: f.settings,
-      policy: { ...f.policy, filesystem: { ...f.policy.filesystem, readWriteRoots: [filters] } },
+      policy: {
+        ...f.policy,
+        filesystem: { ...f.policy.filesystem, readOnlyRoots: [sameFilesystem] },
+      },
       expectedVersion: 0,
     });
-    expect(f.start()).toMatchObject({
-      status: "refused",
-      message: expect.stringContaining("private policy store"),
-    });
+    expect(f.start()).toMatchObject({ status: "admitted" });
   });
 });

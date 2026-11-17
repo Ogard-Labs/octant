@@ -290,7 +290,9 @@ export class NativeHarnessFileSystem {
 
   /** A refusal naming the rule, for a path the secret guard protects. */
   #protected(...paths: ReadonlyArray<string>): NativeHarnessFileRefused | undefined {
-    const fullAccess = this.#fullAccess();
+    // Strict keeps the full protected-file list even when the thread's own
+    // access level is Full access. Enforce that invariant at the file boundary.
+    const fullAccess = this.#fullAccess() && this.#sandboxPolicy?.() === undefined;
     for (const path of paths) {
       const message = this.#protectedFileRefusal(path, fullAccess);
       if (message !== undefined) return { kind: "refused", reason: "protected-file", message };

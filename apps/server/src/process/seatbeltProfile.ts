@@ -1160,7 +1160,9 @@ export function makeProcessConfinementLive(
         }
         return {
           ...launch,
-          ...(toolNetwork === undefined ? {} : { environment: toolNetwork.environment }),
+          ...(toolNetwork === undefined
+            ? {}
+            : { environment: { ...launch.environment, ...toolNetwork.environment } }),
           policyReceipt: Object.freeze({
             ...compilation.receipt,
             reuseKey: createHash("sha256")

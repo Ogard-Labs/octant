@@ -91,14 +91,34 @@ describe("native harness file tools and the secret guard", () => {
       `-----END OPENSSH ${"PRIVATE"} KEY-----`,
     ].join("\n");
 
-    async function fullAccessFixture(fullAccess: boolean) {
+    async function fullAccessFixture(fullAccess: boolean, strict = false) {
       const root = await realpath(await mkdtemp(join(tmpdir(), "octant-harness-full-")));
       await mkdir(join(root, ".ssh"), { recursive: true });
       await writeFile(join(root, ".ssh", "id_test"), `${fakeKey}\n`);
       await mkdir(join(root, ".codex"), { recursive: true });
       await writeFile(join(root, ".codex", "auth.json"), '{"token":"fake"}\n');
+      const { decodeSandboxPolicySelection } = await import("@octant/contracts/sandbox-policy");
+      const selection = decodeSandboxPolicySelection({
+        policy: {
+          schemaVersion: 1,
+          revision: 1,
+          filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
+          network: "deny",
+          credentials: "existing-policy",
+          hostServices: "blocked",
+        },
+        context: {
+          root,
+          hostId: "host",
+          projectId: "20000000-0000-4000-8000-000000000001",
+          checkoutId: "checkout",
+          sessionId: "session",
+          provider: "native-harness",
+        },
+      });
       const fs = new NativeHarnessFileSystem({
         root,
+        ...(strict ? { sandboxPolicy: () => selection } : {}),
         protectedFileRefusal: (path, atFullAccess) =>
           secretGuardRefusal(path, {
             platform: "darwin",
@@ -129,6 +149,14 @@ describe("native harness file tools and the secret guard", () => {
 
     it("keeps refusing a protected file below Full access", async () => {
       const { fs } = await fullAccessFixture(false);
+      expect(await fs.read({ path: ".ssh/id_test" })).toMatchObject({
+        kind: "refused",
+        reason: "protected-file",
+      });
+    });
+
+    it("keeps the full protected-file list at Full access while Strict is active", async () => {
+      const { fs } = await fullAccessFixture(true, true);
       expect(await fs.read({ path: ".ssh/id_test" })).toMatchObject({
         kind: "refused",
         reason: "protected-file",

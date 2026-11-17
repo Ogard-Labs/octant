@@ -15,11 +15,13 @@ import { decodeSandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { compileSandboxLaunchPolicy } from "./sandboxLaunchPolicy";
 import { ownAccountRoots, type ProcessConfinementPrepareInput } from "./seatbeltProfile";
 import { buildBubblewrapLaunch } from "./linuxConfinement";
+import { configureSandboxRestrictionsAuthority } from "./sandboxRuntimePolicy";
 
 const directories: string[] = [];
-afterEach(() =>
-  directories.splice(0).forEach((path) => rmSync(path, { recursive: true, force: true })),
-);
+afterEach(() => {
+  configureSandboxRestrictionsAuthority(undefined);
+  directories.splice(0).forEach((path) => rmSync(path, { recursive: true, force: true }));
+});
 
 function fixture() {
   const base = realpathSync(mkdtempSync(join(tmpdir(), "octant-sandbox-policy-")));
@@ -212,6 +214,43 @@ describe("sandbox launch policy", () => {
     expect(result).toMatchObject({
       status: "refused",
       rules: ["filesystem.hostAdministration"],
+    });
+  });
+
+  it("refuses grants that overlap the private Linux mediation runtime", () => {
+    const { base, input, selection } = fixture();
+    const authority = join(base, "authority");
+    const runtime = join(authority, "linux-mediation-runtime");
+    mkdirSync(authority);
+    mkdirSync(runtime);
+    configureSandboxRestrictionsAuthority({
+      validateSelection: () => true,
+      registerCleanup: () => () => undefined,
+      active: () => selection,
+      beginTurn: () => ({ status: "refused", message: "unused" }),
+      storageDirectory: () => authority,
+      deny: () => undefined,
+    });
+    const result = compileSandboxLaunchPolicy(
+      {
+        ...input,
+        sandboxPolicy: {
+          ...selection,
+          policy: {
+            ...selection.policy,
+            filesystem: {
+              ...selection.policy.filesystem,
+              readWriteRoots: [runtime],
+            },
+          },
+        },
+      },
+      "linux",
+      { accessTimeMediation: true },
+    );
+    expect(result).toMatchObject({
+      status: "refused",
+      rules: ["filesystem.authorityStorage"],
     });
   });
 

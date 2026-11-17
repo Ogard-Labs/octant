@@ -99,6 +99,7 @@ export interface SandboxRestrictionsDependencies {
   readonly enrollmentEnabled?: boolean;
   readonly platform?: NodeJS.Platform;
   readonly dataDirectory?: string;
+  readonly accessTimeMediationAvailable?: (authority: string | undefined) => boolean;
 }
 
 export class SandboxRestrictionsService implements SandboxRestrictionsAuthority {
@@ -314,7 +315,10 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
       (platform === "linux" && linuxPinnedLaunchAvailable(this.#dependencies.dataDirectory)) ||
       (platform === "darwin" && macosSandboxScopeAvailable());
     const accessTimeReady =
-      platform === "linux" && linuxMediationProductionAvailable(this.#dependencies.dataDirectory);
+      platform === "linux" &&
+      (this.#dependencies.accessTimeMediationAvailable ?? linuxMediationProductionAvailable)(
+        this.#dependencies.dataDirectory,
+      );
     const threadId = scope.kind === "session" ? scope.threadId : undefined;
     const projectId =
       scope.kind === "project"
@@ -652,7 +656,9 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
         const platform = this.#dependencies.platform ?? process.platform;
         const accessTimeReady =
           platform === "linux" &&
-          linuxMediationProductionAvailable(this.#dependencies.dataDirectory);
+          (this.#dependencies.accessTimeMediationAvailable ?? linuxMediationProductionAvailable)(
+            this.#dependencies.dataDirectory,
+          );
         if (platform === "linux" && !linuxPinnedLaunchAvailable(this.#dependencies.dataDirectory))
           throw new Error(
             "Linux Strict requires the installed native launch helper, private runtime storage and a kernel supporting openat2 and close_range. Rebuild the host runtime before enabling Strict.",
@@ -713,7 +719,7 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
               "The helper's workspace exceeds its parent's sandbox grants. Choose a workspace within the parent's writable roots.",
             );
         }
-        if (platform === "linux" || platform === "darwin") {
+        if (platform === "darwin" || (platform === "linux" && !accessTimeReady)) {
           const writableDevices = [root.path, ...selectedPolicy.filesystem.readWriteRoots].map(
             (path) => statSync(path).dev,
           );
@@ -738,7 +744,13 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
             if (
               canonical === privateRoot ||
               privateRoot.startsWith(`${canonical}/`) ||
-              ["sandbox-filters", "sandbox-control", "sandbox-scopes", "sandbox-runtime"].some(
+              [
+                "sandbox-filters",
+                "sandbox-control",
+                "sandbox-scopes",
+                "sandbox-runtime",
+                "linux-mediation-runtime",
+              ].some(
                 (name) =>
                   canonical === join(privateRoot, name) ||
                   canonical.startsWith(`${join(privateRoot, name)}/`) ||

@@ -196,9 +196,13 @@ export function compileSandboxLaunchPolicy(
           return (
             canonical === authorityRoot ||
             authorityRoot.startsWith(`${canonical}/`) ||
-            ["sandbox-filters", "sandbox-control", "sandbox-scopes", "sandbox-runtime"].some(
-              (name) => overlaps(canonical, join(authorityRoot, name)),
-            )
+            [
+              "sandbox-filters",
+              "sandbox-control",
+              "sandbox-scopes",
+              "sandbox-runtime",
+              "linux-mediation-runtime",
+            ].some((name) => overlaps(canonical, join(authorityRoot, name)))
           );
         })
       )
