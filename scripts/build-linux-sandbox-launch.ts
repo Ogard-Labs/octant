@@ -1,6 +1,31 @@
-import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+
+export function verifyRelocatableLinuxMediationBundles(root: string): void {
+  if (process.platform !== "linux") return;
+  const temporary = mkdtempSync(join(tmpdir(), "octant-mediation-bundles-"));
+  try {
+    for (const [name, expected] of [
+      ["linuxMediationWorker.mjs", 0],
+      ["linuxMediationSupervisor.mjs", 64],
+    ] as const) {
+      const relocated = join(temporary, name);
+      copyFileSync(resolve(root, "apps/server/dist", name), relocated);
+      const result = spawnSync(process.execPath, [relocated], {
+        encoding: "utf8",
+        timeout: 5_000,
+      });
+      if (result.status !== expected)
+        throw new Error(
+          `${name} is not a standalone relocatable runtime (status ${String(result.status)}, signal ${String(result.signal)}): ${result.stderr}`,
+        );
+    }
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+}
 
 export function buildLinuxSandboxLaunch(): void {
   if (process.platform !== "linux") return;
@@ -38,6 +63,7 @@ export function buildLinuxSandboxLaunch(): void {
     { stdio: "inherit" },
   );
   chmodSync(mediation, 0o755);
+  verifyRelocatableLinuxMediationBundles(root);
 }
 
 if (import.meta.main) buildLinuxSandboxLaunch();
