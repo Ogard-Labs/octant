@@ -1133,7 +1133,10 @@ export function codexTurnExecutionSettings(
   // network claim follows the launch: `enabled` when the process launched
   // without Octant's egress proxy (Network limits off, the default), so
   // Codex tells the model what it really has; `restricted` behind the proxy.
-  if (sessionSandbox.kind === "native" && (sandbox === "read-only" || (policy === "plan" && fullAccessSandbox !== true)))
+  if (
+    sessionSandbox.kind === "native" &&
+    (sandbox === "read-only" || (policy === "plan" && fullAccessSandbox !== true))
+  )
     return { ...rest, sandboxPolicy: { type: "readOnly", networkAccess: networkOpen === true } };
   const sandboxPolicy =
     sandbox === "danger-full-access"
@@ -2025,7 +2028,8 @@ function makeConnection(
         mode: mode ?? "code",
         executionPolicy: input.executionPolicy,
         strict: input.strict,
-      }) || codexPlanRunsNativeSandbox(input)
+      }) ||
+      codexPlanRunsNativeSandbox(input)
         ? { kind: "native", writableRoots: [projectRoot, ...extraFolders] }
         : OCTANT_SANDBOX;
     const offer = (event: ProviderRuntimeEvent) => Effect.runFork(Queue.offer(queue, event));

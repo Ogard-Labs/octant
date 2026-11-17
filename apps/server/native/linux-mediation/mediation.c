@@ -447,6 +447,17 @@ static int check_metadata(struct dentry *dentry, u32 operation)
 	return check_metadata_decision(dentry, operation, true);
 }
 
+/* Temporary native-fixture diagnostic: identify which stacked-filesystem
+ * metadata route refused while an enrolled actor's real credentials survived
+ * a filesystem override. It records no path, name or content. */
+static int check_metadata_hook(struct dentry *dentry, u32 operation, const char *route)
+{
+	int result = check_metadata(dentry, operation);
+	if (result && current_cred() != current_real_cred())
+		pr_info("OCTANT_STACKED_METADATA_DENIAL route=%s operation=%u\n", route, operation);
+	return result;
+}
+
 int octant_metadata_check_read(struct dentry *dentry)
 {
 	return check_metadata(dentry, OCTANT_MEDIATION_READ);
@@ -484,49 +495,49 @@ static void octant_creation_task_free(struct task_struct *task)
 
 static int octant_metadata_getattr(const struct path *path)
 {
-	return check_metadata(path->dentry, OCTANT_MEDIATION_READ);
+	return check_metadata_hook(path->dentry, OCTANT_MEDIATION_READ, "getattr");
 }
 
 static int octant_metadata_readlink(struct dentry *dentry)
 {
-	return check_metadata(dentry, OCTANT_MEDIATION_READ);
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_READ, "readlink");
 }
 
 static int octant_metadata_getxattr(struct dentry *dentry, const char *name)
 {
-	return check_metadata(dentry, OCTANT_MEDIATION_READ);
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_READ, "getxattr");
 }
 
 static int octant_metadata_listxattr(struct dentry *dentry)
 {
-	return check_metadata(dentry, OCTANT_MEDIATION_READ);
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_READ, "listxattr");
 }
 
 static int octant_metadata_get_acl(struct mnt_idmap *idmap, struct dentry *dentry, const char *name)
 {
-	return check_metadata(dentry, OCTANT_MEDIATION_READ);
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_READ, "get-acl");
 }
 
 static int octant_metadata_setxattr(struct mnt_idmap *idmap, struct dentry *dentry,
 	const char *name, const void *value, size_t size, int flags)
 {
-	return check_metadata(dentry, OCTANT_MEDIATION_WRITE);
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_WRITE, "setxattr");
 }
 
 static int octant_metadata_removexattr(struct mnt_idmap *idmap, struct dentry *dentry, const char *name)
 {
-	return check_metadata(dentry, OCTANT_MEDIATION_WRITE);
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_WRITE, "removexattr");
 }
 
 static int octant_metadata_set_acl(struct mnt_idmap *idmap, struct dentry *dentry, const char *name,
 	struct posix_acl *acl)
 {
-	return check_metadata(dentry, OCTANT_MEDIATION_WRITE);
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_WRITE, "set-acl");
 }
 
 static int octant_metadata_remove_acl(struct mnt_idmap *idmap, struct dentry *dentry, const char *name)
 {
-	return check_metadata(dentry, OCTANT_MEDIATION_WRITE);
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_WRITE, "remove-acl");
 }
 
 static int copy_name(struct octant_mediation_name *output, struct inode *parent,

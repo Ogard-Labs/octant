@@ -33,11 +33,18 @@ int main(void)
   bool direct = refused(ROOT "/overlay/lower/.ssh/deployment");
   bool alias = refused(ROOT "/home/.ssh/deployment");
   char bytes[sizeof(original)];
+  memset(bytes, 0xa5, sizeof(bytes));
+  errno = 0;
   int file = open(ROOT "/home/public", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-  bool ordinary = file >= 0 && read(file, bytes, sizeof(bytes)) == (ssize_t)sizeof(original) - 1 &&
+  int open_error = errno;
+  errno = 0;
+  ssize_t read_result = file >= 0 ? read(file, bytes, sizeof(bytes)) : -1;
+  int read_error = errno;
+  bool ordinary = file >= 0 && read_result == (ssize_t)sizeof(original) - 1 &&
     !memcmp(bytes, original, sizeof(original) - 1);
   if (file >= 0) close(file);
-  printf("{\"status\":\"overlayfs-actor-workload\",\"directPrivateRefused\":%s,\"overlayPrivateRefused\":%s,\"ordinaryOverlayRead\":%s}\n",
-    direct ? "true" : "false", alias ? "true" : "false", ordinary ? "true" : "false");
+  printf("{\"status\":\"overlayfs-actor-workload\",\"directPrivateRefused\":%s,\"overlayPrivateRefused\":%s,\"ordinaryOverlayRead\":%s,\"ordinaryOpenResult\":%d,\"ordinaryOpenErrno\":%d,\"ordinaryReadResult\":%zd,\"ordinaryReadErrno\":%d}\n",
+    direct ? "true" : "false", alias ? "true" : "false", ordinary ? "true" : "false",
+    file < 0 ? -1 : 0, open_error, read_result, read_error);
   return direct && alias && ordinary ? 0 : 3;
 }

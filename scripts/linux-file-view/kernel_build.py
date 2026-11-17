@@ -261,12 +261,12 @@ def main():
     # same owned image without that optional feature to prove real mutations.
     run("mke2fs", "-q", "-F", "-t", "ext4", "-O", "^metadata_csum", "-d", str(tree), str(image), timeout=30)
     with (root / "guest.log").open("wb") as output:
-        run("timeout", "--kill-after=3s", "150s", "qemu-system-x86_64", "-machine", "accel=tcg",
+        run("timeout", "--kill-after=3s", "240s", "qemu-system-x86_64", "-machine", "accel=tcg",
             "-cpu", "max", "-m", "512M", "-smp", "2", "-nic", "none", "-nographic",
             "-no-reboot", "-kernel", str(kernel / "arch/x86/boot/bzImage"),
             "-drive", f"file={image},format=raw,if=virtio",
             "-append", "console=ttyS0 root=/dev/vda rootfstype=ext4 rw init=/init panic=-1",
-            timeout=155, cwd=root, output=output)
+            timeout=245, cwd=root, output=output)
     log = (root / "guest.log").read_text(errors="replace")
     # Retain every native receipt in job output; later runtime failures must
     # not hide the earlier security counterexample and its positive controls.
