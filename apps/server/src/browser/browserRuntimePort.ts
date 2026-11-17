@@ -287,6 +287,14 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
      */
     readonly downloads?: "hold";
     /**
+     * Set only on a `navigate` a person started from the address bar of a
+     * window of this computer. The desktop Browser follows its redirects as
+     * the person's own browsing and answers with nothing of a page that ends
+     * outside the context's approved origins; the headless Browser ignores it
+     * and refuses the redirect as it does for anyone.
+     */
+    readonly startedBy?: "person";
+    /**
      * The person's limits for the downloads this action holds, set by the
      * server beside `downloads`. Absent, the runtime uses the defaults.
      */
