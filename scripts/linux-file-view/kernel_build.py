@@ -283,6 +283,8 @@ def main():
     cases = []
     classifier_controls = []
     ordered = []
+    core_evidence = []
+    namespaces = []
     runtime_receipts = []
     runtime_joins = []
     outside = []
@@ -319,6 +321,10 @@ def main():
             advanced_policy_cases.append(json.loads(line.split(" ", 1)[1]))
         elif line.startswith("OCTANT_ORDERED_ADMISSIONS "):
             ordered.append(json.loads(line.split(" ", 1)[1]))
+        elif line.startswith("OCTANT_KERNEL_EVIDENCE "):
+            core_evidence.append(json.loads(line.split(" ", 1)[1]))
+        elif line.startswith("OCTANT_KERNEL_NAMESPACE "):
+            namespaces.append(json.loads(line.split(" ", 1)[1]))
         elif line.startswith("OCTANT_OUTSIDE_EPOCH "):
             outside.append(json.loads(line.split(" ", 1)[1]))
         elif line.startswith("OCTANT_CORE_PROBE_ADDRESS "):
@@ -359,9 +365,11 @@ def main():
     session_joins = [json.loads(line.split(" ", 1)[1]) for line in log.splitlines() if line.startswith("OCTANT_SESSION_JOIN ")]
     expected_sessions = {"invalid-deadline-refuses-before-spawn", "close-before-launch-no-command", "early-exit-real-code",
                          "caller-cancellation-joins", "deadline-joins", "bounded-duplex-pressure-and-private-receipt-mask",
-                         "owner-loss-EOF-admission-and-command-stop"}
+                         "owner-loss-EOF-admission-and-command-stop", "private-packaged-production-supervisor"}
     if (len(sessions) != 1 or set(sessions[0].get("outcomes", [])) != expected_sessions or
-            sessions[0].get("actualBubblewrapBuilder") is not True or sessions[0].get("controllerJitDefaults") is not True or sessions[0].get("controllerRuntime") != "node" or sessions[0].get("productionReady") is not False or
+            sessions[0].get("actualBubblewrapBuilder") is not True or sessions[0].get("controllerJitDefaults") is not True or sessions[0].get("controllerRuntime") != "node" or sessions[0].get("productionReady") is not True or
+            set(sessions[0].get("production", {}).keys()) != {"privateRuntime", "configConsumed", "receiptsCleaned", "payloadExited"} or
+            any(value is not True for value in sessions[0]["production"].values()) or
             len(session_joins) != 1 or any(session_joins[0].get(key) != value for key, value in {"controllerJoined": True, "controllerCode": 0, "orphansJoined": 1, "remaining": False}.items())):
         raise SystemExit("The actual owned session needs all lifecycle/stdio/private-root controls and exact orphan joins.")
     expected_modes = ["--metadata-control", "direct", *(["--bubblewrap"] * 12),
@@ -382,6 +390,7 @@ def main():
             any(fileattr_owners[0].get(field) is not True for field in
                 ("measured", "flagsUnchanged", "statUnchanged", "unchanged")) or
             fileattr_brokers[0].get("status") != "measured-fileattr-broker" or
+            fileattr_brokers[0].get("productionReady") is not True or
             fileattr_brokers[0].get("actualBubblewrapBuilder") is not True or
             fileattr_brokers[0].get("ownedCommandJoined") is not True or
             fileattr_brokers[0].get("cleaned") is not True):
@@ -389,7 +398,7 @@ def main():
     if (len(overlay_actors) != 1 or len(overlay_actor_workloads) != 1 or len(overlay_actor_owners) != 1 or
             overlay_actors[0].get("ended") != {"status": "exited", "code": 0} or
             overlay_actors[0].get("actualBubblewrapBuilder") is not False or
-            overlay_actors[0].get("productionReady") is not False or
+            overlay_actors[0].get("productionReady") is not True or
             overlay_actors[0].get("controllerRuntime") != "node" or
             any(overlay_actors[0].get(field) is not True for field in
                 ("inspected", "unmounted", "cleaned", "controllerJitDefaults")) or
@@ -401,7 +410,7 @@ def main():
         raise SystemExit("Backing-file credential overrides need private refusals, unchanged output/owner state and an ordinary OverlayFS read.")
     if (len(overlay_reproductions) != 1 or
             overlay_reproductions[0].get("actualBubblewrapBuilder") is not False or
-            overlay_reproductions[0].get("productionReady") is not False or
+            overlay_reproductions[0].get("productionReady") is not True or
             overlay_reproductions[0].get("ended") != {"status": "exited", "code": 0} or
             overlay_reproductions[0].get("overlayCopyupBeforeTransition") is not True or
             overlay_reproductions[0].get("overlayWriteRefused") is not True or
@@ -410,7 +419,8 @@ def main():
             overlay_reproductions[0].get("cleaned") is not True or
             overlay_reproductions[0].get("overlayReport", {}).get("upperCopyAfterDeniedWrite") is not True or
             overlay_reproductions[0].get("overlayReport", {}).get("contentUnchanged") is not True or
-            overlay_reproductions[0].get("overlayReport", {}).get("distinctUpperObject") is not True):
+            overlay_reproductions[0].get("overlayReport", {}).get("distinctUpperObject") is not True or
+            overlay_reproductions[0].get("overlayReport", {}).get("productionReady") is not True):
         raise SystemExit("The isolated OverlayFS case needs pre-transition copy-up, denied first write, unchanged upper bytes, confirmed unmount and cleanup.")
     if any(entry.get("code") != 0 or entry.get("signal") != 0 for entry in processes):
         raise SystemExit("Every untraced policy process must also exit normally with code zero.")
@@ -420,7 +430,7 @@ def main():
             {case.get("case") for case in outside} != expected_outside or any(
                 any(case.get(field) is not True for field in
                     ("mutationSucceeded", "epochAdvanced", "staleRefused", "freshAllowed",
-                     "childrenJoined", "cleaned", "passed")) for case in outside)):
+                     "childrenJoined", "cleaned", "passed", "productionReady")) for case in outside)):
         raise SystemExit("Every outside-mutation epoch case requires actual stale/fresh/cleanup proof on two CPUs.")
     if (len(classifier_controls) != 1 or classifier_controls[0].get("snapshots") != 256 or
             classifier_controls[0].get("controllerRuntime") != "node" or
@@ -435,7 +445,8 @@ def main():
             case.get("ended") != {"status": "exited", "code": 0} or
             case.get("ownedCommandJoined") is not True or case.get("cleaned") is not True or
             case.get("lateCompanion") is not True or case.get("controllerJitDefaults") is not True or
-            case.get("controllerRuntime") != "node" for case in cases):
+            case.get("controllerRuntime") != "node" or case.get("productionReady") is not True
+            for case in cases):
         raise SystemExit("Every original-policy case needs an actual exit/join/cleanup receipt.")
     if any(case.get("metadataUnchanged") is not True for case in [*capsules, *direct]):
         raise SystemExit("The independent owner must verify private xattrs and mode unchanged.")
@@ -443,12 +454,20 @@ def main():
         raise SystemExit("Selected deny and same-filesystem read-only policy controls did not all pass.")
     expected = {"bun", "node"}
     if {case.get("runtime") for case in runtime_receipts} != expected or len(runtime_receipts) != 2 or any(
-            case.get("jitDefaults") is not True for case in runtime_receipts) or any(
+            case.get("jitDefaults") is not True or case.get("productionReady") is not True
+            for case in runtime_receipts) or any(
             case.get("actualBubblewrapBuilder") is not True for case in runtime_cases):
         raise SystemExit("Both real runtime workloads need their actual capsule receipt.")
     if len(ordered) != 1 or ordered[0].get("status") != "measured-ordered-admissions" or \
-            ordered[0].get("ownedChildJoined") is not True or ordered[0].get("cleaned") is not True:
+            ordered[0].get("ownedChildJoined") is not True or ordered[0].get("cleaned") is not True or \
+            ordered[0].get("productionReady") is not True:
         raise SystemExit("The controlled queued-read ordering proof did not pass.")
+    if (len(core_evidence) != 1 or core_evidence[0].get("status") != "measured-admission-core" or
+            len(namespaces) != 1 or namespaces[0].get("status") != "measured-namespace-token" or
+            any(receipt.get("productionReady") is not True or
+                receipt.get("ownedChildJoined") is not True or receipt.get("cleaned") is not True
+                for receipt in (*core_evidence, *namespaces))):
+        raise SystemExit("The core and namespace receipts must carry complete production coverage.")
     for attempt in range(1, 13):
         if f"OCTANT_BUBBLEWRAP_ATTEMPT {attempt} result=0" not in log:
             raise SystemExit("An uninstrumented ordinary capsule repetition did not complete.")

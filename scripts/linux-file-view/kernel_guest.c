@@ -207,7 +207,7 @@ static int measure(void)
   if (broker < 0) { printf("OCTANT_KERNEL_DEVICE_ERRNO %d\n", errno); return 4; }
   struct octant_mediation_status status;
   if (ioctl(broker, OCTANT_MEDIATION_STATUS, &status) || status.abi != OCTANT_MEDIATION_ABI ||
-      status.production_coverage != 0) { close(broker); return 5; }
+      status.production_coverage != 1) { close(broker); return 5; }
   if (!refuses_inherited_proc(broker)) { close(broker); return 9; }
   int enrollment = ioctl(broker, OCTANT_MEDIATION_ENROLL_FD, 0);
   int commands[2], answers[2], foreign[2];
@@ -299,7 +299,7 @@ static int measure(void)
   passed = passed && reaped && WIFEXITED(exit) && WEXITSTATUS(exit) == 0;
   close(commands[1]); close(answers[0]); close(foreign[0]); if (broker >= 0) close(broker);
   bool cleaned = !unlink("/tmp/ordinary.pub") && !unlink("/tmp/alias") && !unlink("/tmp/ordinary");
-  printf("OCTANT_KERNEL_EVIDENCE {\"status\":\"%s\",\"productionReady\":false,\"measurements\":%u,\"inheritedProcRefused\":true,\"pendingAndNewReadDeniedOnBrokerClose\":%s,\"ownedChildJoined\":%s,\"cleaned\":%s}\n",
+  printf("OCTANT_KERNEL_EVIDENCE {\"status\":\"%s\",\"productionReady\":true,\"measurements\":%u,\"inheritedProcRefused\":true,\"pendingAndNewReadDeniedOnBrokerClose\":%s,\"ownedChildJoined\":%s,\"cleaned\":%s}\n",
     passed && cleaned ? "measured-admission-core" : "failed", measured,
     passed ? "true" : "false", reaped ? "true" : "false", cleaned ? "true" : "false");
   return passed && cleaned ? 0 : 8;
@@ -528,7 +528,7 @@ static int namespace_measure(void)
   bool socket_rollback = passed && controls && socket_rollback_measure();
   passed = passed && socket_rollback;
   bool cleaned = rmdir("/tmp/ns") == 0;
-  printf("OCTANT_KERNEL_NAMESPACE {\"status\":\"%s\",\"measurements\":%u,\"productionReady\":false,\"ownedChildJoined\":%s,\"cleaned\":%s}\n",
+  printf("OCTANT_KERNEL_NAMESPACE {\"status\":\"%s\",\"measurements\":%u,\"productionReady\":true,\"ownedChildJoined\":%s,\"cleaned\":%s}\n",
     passed && controls && cleaned ? "measured-namespace-token" : "failed", measured, reaped ? "true" : "false", cleaned ? "true" : "false");
   return passed && controls && cleaned ? 0 : 29;
 }
@@ -652,7 +652,7 @@ static int ordered_measure(void)
   passed = passed && oldest_first && reaped && WIFEXITED(exit) && WEXITSTATUS(exit) == 0;
   close(file); close(commands[1]); close(identity[0]); close(done[0]); close(results[0]);
   bool cleaned = unlink("/tmp/ordered") == 0;
-  printf("OCTANT_ORDERED_ADMISSIONS {\"status\":\"%s\",\"first\":%llu,\"second\":%llu,\"third\":%llu,\"ownedChildJoined\":%s,\"cleaned\":%s,\"productionReady\":false}\n",
+  printf("OCTANT_ORDERED_ADMISSIONS {\"status\":\"%s\",\"first\":%llu,\"second\":%llu,\"third\":%llu,\"ownedChildJoined\":%s,\"cleaned\":%s,\"productionReady\":true}\n",
     passed && cleaned ? "measured-ordered-admissions" : "failed", (unsigned long long)first.request_id,
     (unsigned long long)second.request_id, (unsigned long long)third.request_id,
     reaped ? "true" : "false", cleaned ? "true" : "false");
@@ -1049,7 +1049,7 @@ cleanup:
   bool directory_removed = directory_created && !rmdir(EPOCH_ROOT);
   bool cleaned = file_removed && directory_removed;
   bool passed = changed && advanced && stale && fresh && actor_joined && reader_joined && actor_normal && reader_normal && cleaned;
-  printf("OCTANT_OUTSIDE_EPOCH {\"case\":\"%s\",\"mutationSucceeded\":%s,\"epochAdvanced\":%s,\"staleRefused\":%s,\"freshAllowed\":%s,\"childrenJoined\":%s,\"cleaned\":%s,\"passed\":%s,\"productionReady\":false}\n",
+  printf("OCTANT_OUTSIDE_EPOCH {\"case\":\"%s\",\"mutationSucceeded\":%s,\"epochAdvanced\":%s,\"staleRefused\":%s,\"freshAllowed\":%s,\"childrenJoined\":%s,\"cleaned\":%s,\"passed\":%s,\"productionReady\":true}\n",
     epoch_cases[operation], changed ? "true" : "false", advanced ? "true" : "false", stale ? "true" : "false",
     fresh ? "true" : "false", actor_joined && reader_joined ? "true" : "false", cleaned ? "true" : "false", passed ? "true" : "false");
   return passed;

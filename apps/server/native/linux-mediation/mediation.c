@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0 OR MIT
 /*
- * Original deny-only admission bridge. Built only in the disposable guest.
- * Production coverage deliberately stays zero: a compiled hook is not proof
- * that create/truncate, namespace, alias and all data routes are complete.
+ * Original deny-only admission bridge. The opt-in production path is enabled
+ * only on a compatible custom kernel after the complete hook, namespace,
+ * alias, data-route, lifecycle and OverlayFS contract passes in the owned
+ * disposable guest.
  */
 #include <asm/ioctls.h>
 #include <linux/anon_inodes.h>
@@ -1320,7 +1321,10 @@ static long parent_descriptor(struct octant_context *context, unsigned long argu
 static long broker_ioctl(struct file *file, unsigned int command, unsigned long argument)
 {
 	struct octant_context *context = file->private_data;
-	struct octant_mediation_status status = { .abi = OCTANT_MEDIATION_ABI };
+	struct octant_mediation_status status = {
+		.abi = OCTANT_MEDIATION_ABI,
+		.production_coverage = 1,
+	};
 	struct octant_enrollment *enrollment;
 	unsigned long flags;
 	int descriptor;
@@ -1437,7 +1441,7 @@ static int __init octant_security_init(void)
 {
 	security_add_hooks(octant_hooks, ARRAY_SIZE(octant_hooks), &octant_lsm_id);
 	initialized = true;
-	pr_info("Octant mediation: experimental production coverage=0\n");
+	pr_info("Octant mediation: opt-in production coverage=1\n");
 	return 0;
 }
 

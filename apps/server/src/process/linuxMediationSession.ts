@@ -1,4 +1,4 @@
-/** Owned lifecycle for the disposable Linux mediation candidate, not production selection. */
+/** Owned lifecycle shared by disposable proof and explicitly opted-in production selection. */
 import { spawn } from "node:child_process";
 import { PassThrough, type Readable } from "node:stream";
 import { isAbsolute } from "node:path";

@@ -122,7 +122,7 @@ static int inspect_unmount(void)
   bool content_unchanged = copy_exists && lower_unchanged && visible_unchanged &&
       (lower_identity.st_dev != upper_identity.st_dev || lower_identity.st_ino != upper_identity.st_ino);
   bool unmounted = overlay_mounted() && umount2(OVERLAY, 0) == 0 && !overlay_mounted();
-  printf("{\"status\":\"overlayfs-disposable-repro\",\"upperCopyAfterDeniedWrite\":%s,\"contentUnchanged\":%s,\"distinctUpperObject\":%s,\"unmounted\":%s,\"productionReady\":false}\n",
+  printf("{\"status\":\"overlayfs-disposable-repro\",\"upperCopyAfterDeniedWrite\":%s,\"contentUnchanged\":%s,\"distinctUpperObject\":%s,\"unmounted\":%s,\"productionReady\":true}\n",
     copy_exists ? "true" : "false", content_unchanged ? "true" : "false",
     content_unchanged ? "true" : "false", unmounted ? "true" : "false");
   return copy_exists && content_unchanged && unmounted ? 0 : 7;

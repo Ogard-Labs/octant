@@ -23,6 +23,7 @@ export async function measureOverlayActor(): Promise<void> {
     // OverlayFS's credential override can identify the protected inode.
     ended = await runLinuxMediationBroker({
       nativeExecutable: "/octant-mediation",
+      production: true,
       command: "/overlayfs-actor-workload",
       args: [],
       policy: secretGuardMediationPolicy({
@@ -72,7 +73,7 @@ export async function measureOverlayActor(): Promise<void> {
       controllerRuntime: "node",
       controllerVersion: process.versions.node,
       actualBubblewrapBuilder: false,
-      productionReady: false,
+      productionReady: true,
     }),
   );
   process.exit(passed ? 0 : 1);

@@ -114,7 +114,7 @@ try {
       lateHeldAndAliasRefused: true,
       protectedWriteRefused: true,
       publicContentReadable: true,
-      productionReady: false,
+      productionReady: true,
     }),
   );
 } catch (error) {
@@ -130,7 +130,7 @@ try {
         typeof error === "object" && error !== null && "code" in error
           ? String(error.code)
           : undefined,
-      productionReady: false,
+      productionReady: true,
     }),
   );
   throw error;

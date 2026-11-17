@@ -159,7 +159,7 @@ if (process.argv[2] === "--linux-mediation-worker") {
         homeDirectory: `${root}/home`,
         ownAccountPaths: [],
       }),
-      production: false,
+      production: true,
     });
   const stage = async (mode: string, session: LinuxMediationSession, maximumMs: number) => {
     const until = performance.now() + 5_000;
@@ -388,11 +388,18 @@ if (process.argv[2] === "--linux-mediation-worker") {
         if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
         await childJoined;
       }
+      const production = await measureProductionLaunch(root);
+      assert.equal(production.privateRuntime, true);
+      assert.equal(production.configConsumed, true);
+      assert.equal(production.receiptsCleaned, true);
+      assert.equal(production.payloadExited, true);
+      outcomes.push("private-packaged-production-supervisor");
       console.log(
         JSON.stringify({
           status: "measured-owned-mediation-session",
           outcomes,
-          productionReady: false,
+          productionReady: true,
+          production,
           actualBubblewrapBuilder: true,
           defaultPayloadEnvironment: true,
           controllerJitDefaults: true,

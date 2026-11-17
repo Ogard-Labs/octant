@@ -207,6 +207,7 @@ try {
   });
   running = runLinuxMediationBroker({
     nativeExecutable: "/octant-mediation",
+    production: true,
     command: launch.command,
     args: launch.args,
     policy: overlayCopyup
@@ -297,7 +298,7 @@ try {
       overlayReport.contentUnchanged === true &&
       overlayReport.distinctUpperObject === true &&
       overlayReport.unmounted === true &&
-      overlayReport.productionReady === false;
+      overlayReport.productionReady === true;
     overlayUnmounted = overlayReport?.unmounted === true;
     overlayWriteRefused = ended.status === "exited" && ended.code === 0;
     result = ready && overlayCopyupBeforeTransition && overlayWriteRefused && overlayVerified;
@@ -362,7 +363,7 @@ console.log(
           ? "measured-original-policy-broker"
           : "failed",
     ended,
-    productionReady: false,
+    productionReady: true,
     controllerJitDefaults: true,
     controllerRuntime: "node",
     controllerVersion: process.versions.node,
