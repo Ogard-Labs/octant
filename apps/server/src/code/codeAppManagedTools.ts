@@ -422,19 +422,13 @@ export interface CodeAppManagedToolsOptions {
   };
   /** Host-only notification after an admitted checkout command completes or times out; never mutation proof. */
   readonly onCheckoutActivity?: () => void;
+  /**
+   * Which Private pages this turn opened, for expiry recovery. A Private page
+   * needs no site approval, so these grant nothing.
+   */
   readonly browserApproval?: {
-    readonly isApproved: (contextId: string) => boolean;
-    /** Identity-only receipts for expiry recovery; these never satisfy an approval. */
     readonly isBound?: (contextId: string) => boolean;
     readonly rememberBinding?: (contextId: string) => void;
-    readonly request: (
-      origin: string,
-      signal?: AbortSignal,
-    ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
-    /** A grant the person remembered with "always allow"; a new context for
-     * that origin opens without asking. */
-    readonly isOriginRemembered?: (origin: string) => boolean;
-    readonly remember: (contextId: string) => void;
     readonly forget: (contextId: string) => void;
   };
   /**
@@ -1671,7 +1665,6 @@ async function browserToolOne(
           authority,
         });
       }
-      if (profile === undefined) options.browserApproval?.remember(contextId);
       options.browserApproval?.rememberBinding?.(contextId);
     }
   }

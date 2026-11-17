@@ -1335,7 +1335,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             browserModelBindings.delete(contextId);
           },
         },
-        isBrowserOriginRemembered: (origin) => browserToolApprovalService.isRemembered(origin),
         browserTransferApprovals: browserToolApprovalService,
         browserUploadFileCountLimit: () =>
           (persistence.readShellSettings()?.settings ?? defaultShellSettings())

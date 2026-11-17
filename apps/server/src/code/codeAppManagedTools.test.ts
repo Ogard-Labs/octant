@@ -787,10 +787,6 @@ describe("Code app-managed tools", () => {
         executeOperation: vi.fn(),
         terminal: { read: vi.fn() },
         browserApproval: {
-          // The page was opened and approved by this thread before.
-          isApproved: () => true,
-          request,
-          remember: vi.fn(),
           forget: vi.fn(),
         },
         browser: {
@@ -903,7 +899,6 @@ describe("Code app-managed tools", () => {
       );
       const create = vi.fn(async (_input: { policy: { profile?: unknown } }) => active);
       const act = vi.fn(async () => active);
-      const privateRequest = vi.fn(async () => "approved" as const);
       const tools = createCodeAppManagedTools({
         windowId,
         thread: current,
@@ -927,11 +922,7 @@ describe("Code app-managed tools", () => {
           },
         },
         browserApproval: {
-          request: privateRequest,
-          isApproved: () => false,
-          remember: vi.fn(),
           forget: vi.fn(),
-          isOriginRemembered: () => true,
         },
         browser: {
           resolveAuthority: () => authority,
@@ -946,7 +937,7 @@ describe("Code app-managed tools", () => {
       });
       const run = (input: Record<string, unknown>) =>
         tools.execute({ name: CODE_BROWSER_TOOL_NAME, inputJson: JSON.stringify(input) });
-      return { run, request, privateRequest, create, act, bindings, active };
+      return { run, request, create, act, bindings, active };
     }
     it.each(["project", "personal"] as const)(
       "asks through the real profile policy for a %s default even at Full access",
@@ -960,7 +951,6 @@ describe("Code app-managed tools", () => {
             profile: expect.objectContaining({ kind: profile }),
           }),
         );
-        expect(f.privateRequest).not.toHaveBeenCalled();
         expect(f.create).toHaveBeenCalledWith(
           expect.objectContaining({
             policy: expect.objectContaining({
@@ -987,7 +977,6 @@ describe("Code app-managed tools", () => {
           policy: expect.objectContaining({ profile: { kind: "account", profileId } }),
         }),
       );
-      expect(f.privateRequest).not.toHaveBeenCalled();
     });
     it("accepts an explicit Private override without rewriting the task default", async () => {
       const f = fixture({ profile: "personal" });
@@ -1044,19 +1033,14 @@ describe("Code app-managed tools", () => {
         evidence: [],
       };
       const bound = new Set<string>();
-      const request = vi.fn(async () => "approved" as const);
-      const remember = vi.fn();
       const create = vi.fn(async () => {
         current = active;
         return active;
       });
       const act = vi.fn(async () => active);
       const browserApproval = {
-        isApproved: () => false,
         isBound: (contextId: string) => bound.has(contextId),
         rememberBinding: (contextId: string) => void bound.add(contextId),
-        request,
-        remember,
         forget: (contextId: string) => void bound.delete(contextId),
       };
       const tools = createCodeAppManagedTools({
@@ -1085,9 +1069,8 @@ describe("Code app-managed tools", () => {
       });
       await call({ operation: "navigate", url: "https://example.com" });
       // A Private page asks no one at any level; the open itself binds it.
-      expect(request).not.toHaveBeenCalled();
-      expect(remember).toHaveBeenCalledOnce();
       if (active.context === undefined) throw Error("Missing test context");
+      expect(bound.has(active.context.contextId)).toBe(true);
       current = {
         status: "stale",
         threadId: active.threadId,
@@ -1146,10 +1129,7 @@ describe("Code app-managed tools", () => {
         executeOperation: vi.fn(),
         terminal: { read: vi.fn() },
         browserApproval: {
-          isApproved: () => false,
           isBound: () => true,
-          request: vi.fn(),
-          remember: vi.fn(),
           forget: vi.fn(),
         },
         browser: {
@@ -1343,9 +1323,7 @@ describe("Code app-managed tools", () => {
     });
   });
 
-  it("opens a remembered browser origin in a new context without asking again", async () => {
-    const approve = vi.fn(async () => "approved" as const);
-    const remember = vi.fn();
+  it("opens a Private page in a new context at approval-gated access without asking", async () => {
     const authority = browserAuthority();
     const active = browserSnapshot(authority);
     const create = vi.fn(async () => active);
@@ -1372,10 +1350,6 @@ describe("Code app-managed tools", () => {
       executeOperation: vi.fn(),
       terminal: { read: vi.fn() },
       browserApproval: {
-        isApproved: () => false,
-        isOriginRemembered: () => true,
-        request: approve,
-        remember,
         forget: vi.fn(),
       },
       browser: {
@@ -1396,8 +1370,6 @@ describe("Code app-managed tools", () => {
       inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com/docs" }),
     });
 
-    expect(approve).not.toHaveBeenCalled();
-    expect(remember).toHaveBeenCalledWith(active.context?.contextId);
     expect(create).toHaveBeenCalledOnce();
     expect(result).toMatchObject({
       isError: false,
@@ -1538,9 +1510,6 @@ describe("Code app-managed tools", () => {
         executeOperation: vi.fn(),
         terminal: { read: vi.fn() },
         browserApproval: {
-          isApproved: () => options.approved ?? true,
-          request: ask,
-          remember: vi.fn(),
           forget: vi.fn(),
         },
         browserProfiles: {
@@ -1732,9 +1701,6 @@ describe("Code app-managed tools", () => {
         executeOperation: vi.fn(),
         terminal: { read: vi.fn() },
         browserApproval: {
-          isApproved: () => true,
-          request: vi.fn(),
-          remember: vi.fn(),
           forget: vi.fn(),
         },
         browserDownload: {
@@ -1936,9 +1902,6 @@ describe("Code app-managed tools", () => {
         executeOperation: vi.fn(),
         terminal: { read: vi.fn() },
         browserApproval: {
-          isApproved: () => true,
-          request: vi.fn(),
-          remember: vi.fn(),
           forget: vi.fn(),
         },
         browserProfiles: {
@@ -2026,9 +1989,6 @@ describe("Code app-managed tools", () => {
         executeOperation: vi.fn(),
         terminal: { read: vi.fn() },
         browserApproval: {
-          isApproved: () => true,
-          request: vi.fn(),
-          remember: vi.fn(),
           forget: vi.fn(),
         },
         browserUpload: {
@@ -2831,9 +2791,6 @@ describe("Code app-managed tools", () => {
         page.signal,
         {
           browserApproval: {
-            isApproved: () => true,
-            request: vi.fn(),
-            remember: vi.fn(),
             forget: vi.fn(),
           },
           browserSignIn: {
@@ -4988,9 +4945,6 @@ it.each([undefined, "private"] as const)(
         },
       },
       browserApproval: {
-        isApproved: () => false,
-        request,
-        remember: () => {},
         forget: () => {},
       },
       browser: {

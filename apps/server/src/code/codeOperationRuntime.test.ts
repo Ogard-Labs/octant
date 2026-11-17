@@ -2508,235 +2508,192 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
-  it.each(["approved", "denied", "cancelled"] as const)(
-    "honors %s browser approval without changing thread access",
-    async (decision) => {
-      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-      const request = new AbortController();
-      const provider = { ...providerConnection(queue), toolRequestSignal: () => request.signal };
-      const authority = decodeToolActionAuthority({
-        hostId: "90000000-0000-4000-8000-000000000001",
-        mode: "code",
-        projectId: thread().projectId,
-        rootId: "90000000-0000-4000-8000-000000000009",
-        worktreeId: checkoutId,
-        providerInstanceId: thread().providerInstanceId,
-        extension: { kind: "core" },
-      });
-      const snapshot = decodeBrowserAutomationSnapshot({
-        status: "running",
+  it("opens a Private Browser page without asking the person", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const authority = decodeToolActionAuthority({
+      hostId: "90000000-0000-4000-8000-000000000001",
+      mode: "code",
+      projectId: thread().projectId,
+      rootId: "90000000-0000-4000-8000-000000000009",
+      worktreeId: checkoutId,
+      providerInstanceId: thread().providerInstanceId,
+      extension: { kind: "core" },
+    });
+    const snapshot = decodeBrowserAutomationSnapshot({
+      status: "running",
+      threadId,
+      evidence: [],
+      context: {
+        contextId: "90000000-0000-4000-8000-000000000060",
         threadId,
-        evidence: [],
-        context: {
-          contextId: "90000000-0000-4000-8000-000000000060",
-          threadId,
-          actionId: "90000000-0000-4000-8000-000000000061",
-          correlationId: "90000000-0000-4000-8000-000000000062",
-          authority,
-          policy: {
-            profileMode: "isolated",
-            allowedOrigins: ["https://example.com"],
-            credentialFieldProtection: true,
-            maxConcurrentTabs: 1,
-            sessionTimeoutMs: 600000,
-          },
-          state: "active",
-          createdAt: now,
+        actionId: "90000000-0000-4000-8000-000000000061",
+        correlationId: "90000000-0000-4000-8000-000000000062",
+        authority,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 600000,
+        },
+        state: "active",
+        createdAt: now,
+      },
+    });
+    let currentSnapshot = decodeBrowserAutomationSnapshot({
+      status: "ready",
+      threadId,
+      evidence: [],
+    });
+    const create = vi.fn(async () => {
+      currentSnapshot = snapshot;
+      return snapshot;
+    });
+    const act = vi.fn(async () => snapshot);
+    const fixture = runtimeFixture({
+      provider: providerDriver(provider),
+      browserAutomation: {
+        resolveAuthority: () => authority,
+        inspectThread: () => currentSnapshot,
+        create,
+        act,
+        releaseThread: vi.fn(async () => snapshot),
+      },
+    });
+    try {
+      const operation = operationId(70);
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "browser-request",
+            toolName: "octant_browser",
+            inputJson: '{"operation":"navigate","url":"https://example.com"}',
+          }),
+        ),
+      );
+      await vi.waitFor(() =>
+        expect(provider.answerTool).toHaveBeenCalledWith(
+          expect.objectContaining({ requestId: "browser-request", isError: false }),
+        ),
+      );
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(act).toHaveBeenCalledTimes(1);
+      currentSnapshot = decodeBrowserAutomationSnapshot({
+        ...snapshot,
+        status: "stale",
+        context: { ...snapshot.context, state: "expired" },
+        failure: {
+          category: "context-expired",
+          message: "The Browser page expired. It used the Private profile.",
         },
       });
-      let currentSnapshot = decodeBrowserAutomationSnapshot({
-        status: "ready",
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "browser-expired",
+            toolName: "octant_browser",
+            inputJson: '{"operation":"snapshot"}',
+          }),
+        ),
+      );
+      await vi.waitFor(() => {
+        const answer = vi
+          .mocked(provider.answerTool)
+          .mock.calls.find(([reply]) => reply.requestId === "browser-expired")?.[0];
+        expect(answer?.isError).toBe(true);
+        expect(JSON.parse(answer?.resultJson ?? "null")).toMatchObject({
+          failure: { category: "context-expired" },
+        });
+      });
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(act).toHaveBeenCalledTimes(1);
+      currentSnapshot = snapshot;
+      await fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(72),
         threadId,
-        evidence: [],
+        checkoutId,
       });
-      const create = vi.fn(async () => {
-        currentSnapshot = snapshot;
-        return snapshot;
+      await vi.waitFor(() => expect(provider.stop).toHaveBeenCalled());
+      const nextOperation = operationId(73);
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: nextOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
       });
-      const act = vi.fn(async () => snapshot);
-      const fixture = runtimeFixture({
-        provider: providerDriver(provider),
-        browserAutomation: {
-          resolveAuthority: () => authority,
-          inspectThread: () => currentSnapshot,
-          create,
-          act,
-          releaseThread: vi.fn(async () => snapshot),
-        },
+      await vi.waitFor(() => expect(provider.send).toHaveBeenCalledTimes(2));
+      currentSnapshot = decodeBrowserAutomationSnapshot({
+        ...snapshot,
+        status: "stale",
+        context: { ...snapshot.context, state: "expired" },
+        failure: { category: "context-expired", message: "Expired Private page." },
       });
-      try {
-        const operation = operationId(70);
-        await fixture.runtime.execute(windowId, {
-          kind: "start-provider-turn",
-          operationId: operation,
-          threadId,
-          checkoutId,
-          sessionId,
-          prompt: fixture.prompt,
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "browser-expired-after-cancel",
+            toolName: "octant_browser",
+            inputJson: '{"operation":"snapshot"}',
+          }),
+        ),
+      );
+      await vi.waitFor(() => {
+        const reply = vi
+          .mocked(provider.answerTool)
+          .mock.calls.find(([answer]) => answer.requestId === "browser-expired-after-cancel")?.[0];
+        expect(JSON.parse(reply?.resultJson ?? "null")).toMatchObject({
+          error: "browser-navigation-required",
         });
-        await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
-        await Effect.runPromise(
-          Queue.offer(
-            queue,
-            providerEvent({
-              kind: "tool-request",
-              requestId: "browser-request",
-              toolName: "octant_browser",
-              inputJson: '{"operation":"navigate","url":"https://example.com"}',
-            }),
-          ),
-        );
-        let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
-        await vi.waitFor(async () => {
-          const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 30);
-          approval = frames
-            .map((frame) => frame.event)
-            .find((event) => event.kind === "approval-requested");
-          expect(approval).toBeDefined();
-        });
-        expect(create).not.toHaveBeenCalled();
-        if (approval === undefined) throw new Error("Expected browser approval");
-        if (decision === "cancelled") request.abort();
-        await fixture.runtime.execute(windowId, {
-          kind: "answer-provider-approval",
-          operationId: operationId(71),
-          threadId,
-          checkoutId,
-          approvalId: approval.approvalId,
-          decision: decision === "denied" ? "denied" : "approved",
-        });
-        if (decision === "cancelled") {
-          await vi.waitFor(async () => {
-            const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 30);
-            expect(
-              frames.some(
-                (frame) =>
-                  frame.event.kind === "tool-activity" &&
-                  frame.event.state === "failed" &&
-                  frame.event.summary === "App-managed action was cancelled.",
-              ),
-            ).toBe(true);
-          });
-          expect(provider.answerTool).not.toHaveBeenCalled();
-        } else {
-          await vi.waitFor(() =>
-            expect(provider.answerTool).toHaveBeenCalledWith(
-              expect.objectContaining({
-                requestId: "browser-request",
-                isError: decision === "denied",
-              }),
-            ),
-          );
-        }
-        expect(create).toHaveBeenCalledTimes(decision === "approved" ? 1 : 0);
-        expect(act).toHaveBeenCalledTimes(decision === "approved" ? 1 : 0);
-        if (decision === "approved") {
-          currentSnapshot = decodeBrowserAutomationSnapshot({
-            ...snapshot,
-            status: "stale",
-            context: { ...snapshot.context, state: "expired" },
-            failure: {
-              category: "context-expired",
-              message: "The Browser page expired. It used the Private profile.",
-            },
-          });
-          await Effect.runPromise(
-            Queue.offer(
-              queue,
-              providerEvent({
-                kind: "tool-request",
-                requestId: "browser-expired",
-                toolName: "octant_browser",
-                inputJson: '{"operation":"snapshot"}',
-              }),
-            ),
-          );
-          await vi.waitFor(() => {
-            const answer = vi
-              .mocked(provider.answerTool)
-              .mock.calls.find(([reply]) => reply.requestId === "browser-expired")?.[0];
-            expect(answer?.isError).toBe(true);
-            expect(JSON.parse(answer?.resultJson ?? "null")).toMatchObject({
-              failure: { category: "context-expired" },
-            });
-          });
-          expect(create).toHaveBeenCalledTimes(1);
-          expect(act).toHaveBeenCalledTimes(1);
-          currentSnapshot = snapshot;
-          await fixture.runtime.execute(windowId, {
-            kind: "cancel-provider-turn",
-            operationId: operationId(72),
-            threadId,
-            checkoutId,
-          });
-          await vi.waitFor(() => expect(provider.stop).toHaveBeenCalled());
-          const nextOperation = operationId(73);
-          await fixture.runtime.execute(windowId, {
-            kind: "start-provider-turn",
-            operationId: nextOperation,
-            threadId,
-            checkoutId,
-            sessionId,
-            prompt: fixture.prompt,
-          });
-          await vi.waitFor(() => expect(provider.send).toHaveBeenCalledTimes(2));
-          currentSnapshot = decodeBrowserAutomationSnapshot({
-            ...snapshot,
-            status: "stale",
-            context: { ...snapshot.context, state: "expired" },
-            failure: { category: "context-expired", message: "Expired Private page." },
-          });
-          await Effect.runPromise(
-            Queue.offer(
-              queue,
-              providerEvent({
-                kind: "tool-request",
-                requestId: "browser-expired-after-cancel",
-                toolName: "octant_browser",
-                inputJson: '{"operation":"snapshot"}',
-              }),
-            ),
-          );
-          await vi.waitFor(() => {
-            const reply = vi
-              .mocked(provider.answerTool)
-              .mock.calls.find(
-                ([answer]) => answer.requestId === "browser-expired-after-cancel",
-              )?.[0];
-            expect(JSON.parse(reply?.resultJson ?? "null")).toMatchObject({
-              error: "browser-navigation-required",
-            });
-          });
-          currentSnapshot = snapshot;
-          await Effect.runPromise(
-            Queue.offer(
-              queue,
-              providerEvent({
-                kind: "tool-request",
-                requestId: "browser-again",
-                toolName: "octant_browser",
-                inputJson: '{"operation":"navigate","url":"https://example.com"}',
-              }),
-            ),
-          );
-          await vi.waitFor(async () => {
-            const frames = await fixture.runtime.subscribe(
-              windowId,
-              threadId,
-              nextOperation,
-              0,
-              30,
-            );
-            expect(frames.some((frame) => frame.event.kind === "approval-requested")).toBe(true);
-          });
-          expect(act).toHaveBeenCalledTimes(1);
-        }
-      } finally {
-        await fixture.runtime.close();
-        fixture.close();
+      });
+      currentSnapshot = snapshot;
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "browser-again",
+            toolName: "octant_browser",
+            inputJson: '{"operation":"navigate","url":"https://example.com"}',
+          }),
+        ),
+      );
+      await vi.waitFor(() =>
+        expect(
+          vi
+            .mocked(provider.answerTool)
+            .mock.calls.some(([reply]) => reply.requestId === "browser-again"),
+        ).toBe(true),
+      );
+      for (const id of [operation, nextOperation]) {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, id, 0, 60);
+        expect(frames.some((frame) => frame.event.kind === "approval-requested")).toBe(false);
       }
-    },
-  );
+      // The reopened page is used straight away: nothing waits on the person.
+      expect(act).toHaveBeenCalledTimes(2);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
 
   it.each([
     ["an approval-gated thread", "approval-gated", undefined],
@@ -4763,93 +4720,6 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
-  it("refuses a browser allow answered after the thread's posture changed, opening nothing", async () => {
-    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-    const provider = providerConnection(queue);
-    const authority = decodeToolActionAuthority({
-      hostId: "90000000-0000-4000-8000-000000000001",
-      mode: "code",
-      projectId: thread().projectId,
-      rootId: "90000000-0000-4000-8000-000000000009",
-      worktreeId: checkoutId,
-      providerInstanceId: thread().providerInstanceId,
-      extension: { kind: "core" },
-    });
-    const ready = decodeBrowserAutomationSnapshot({ status: "ready", threadId, evidence: [] });
-    const create = vi.fn(async () => ready);
-    const act = vi.fn(async () => ready);
-    const fixture = runtimeFixture({
-      provider: providerDriver(provider),
-      browserAutomation: {
-        resolveAuthority: () => authority,
-        inspectThread: () => ready,
-        create,
-        act,
-        releaseThread: vi.fn(async () => ready),
-      },
-    });
-    const operation = operationId(150);
-    await fixture.runtime.execute(windowId, {
-      kind: "start-provider-turn",
-      operationId: operation,
-      threadId,
-      checkoutId,
-      sessionId,
-      prompt: fixture.prompt,
-    });
-    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
-    await Effect.runPromise(
-      Queue.offer(
-        queue,
-        providerEvent({
-          kind: "tool-request",
-          requestId: "browser-before-auto",
-          toolName: "octant_browser",
-          inputJson: '{"operation":"navigate","url":"https://example.com"}',
-        }),
-      ),
-    );
-    let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
-    await vi.waitFor(async () => {
-      const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 40);
-      approval = frames
-        .map((frame) => frame.event)
-        .find((event) => event.kind === "approval-requested");
-      expect(approval).toBeDefined();
-    });
-    if (approval === undefined) throw new Error("Expected browser approval");
-    fixture.setThread(decodeCodeThread({ ...thread(), autoApprove: true }));
-
-    await expect(
-      fixture.runtime.execute(windowId, {
-        kind: "answer-provider-approval",
-        operationId: operationId(151),
-        threadId,
-        checkoutId,
-        approvalId: approval.approvalId,
-        decision: "approved",
-      }),
-    ).resolves.toMatchObject({
-      failure: { category: "failed", message: APPROVAL_POSTURE_CHANGED_MESSAGE },
-    });
-    expect(create).not.toHaveBeenCalled();
-    expect(act).not.toHaveBeenCalled();
-    expect(await fixture.runtime.pendingRequests?.(windowId)).toMatchObject([{ kind: "approval" }]);
-    await expect(
-      fixture.runtime.execute(windowId, {
-        kind: "answer-provider-approval",
-        operationId: operationId(152),
-        threadId,
-        checkoutId,
-        approvalId: approval.approvalId,
-        decision: "denied",
-      }),
-    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
-    expect(act).not.toHaveBeenCalled();
-    expect(await fixture.runtime.pendingRequests?.(windowId)).toEqual([]);
-    fixture.close();
-  });
-
   it("keeps a running turn where the host reads its posture, and lets it go when the turn is cancelled", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -5253,75 +5123,6 @@ describe("CodeOperationRuntime", () => {
       approved: false,
     });
     expect(connection.interrupt).not.toHaveBeenCalled();
-    fixture.close();
-  });
-
-  it("keeps a browser approval waiting a day later and gives it up when its thread is archived, which journals nothing", async () => {
-    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-    const provider = providerConnection(queue);
-    const authority = decodeToolActionAuthority({
-      hostId: "90000000-0000-4000-8000-000000000001",
-      mode: "code",
-      projectId: thread().projectId,
-      rootId: "90000000-0000-4000-8000-000000000009",
-      worktreeId: checkoutId,
-      providerInstanceId: thread().providerInstanceId,
-      extension: { kind: "core" },
-    });
-    const ready = decodeBrowserAutomationSnapshot({ status: "ready", threadId, evidence: [] });
-    const withdrawn = vi.fn();
-    const fixture = runtimeFixture({
-      provider: providerDriver(provider),
-      onPendingRequestWithdrawn: withdrawn,
-      browserAutomation: {
-        resolveAuthority: () => authority,
-        inspectThread: () => ready,
-        create: vi.fn(async () => ready),
-        act: vi.fn(async () => ready),
-        releaseThread: vi.fn(async () => ready),
-      },
-    });
-    const operation = operationId(910);
-    await fixture.runtime.execute(windowId, {
-      kind: "start-provider-turn",
-      operationId: operation,
-      threadId,
-      checkoutId,
-      sessionId,
-      prompt: fixture.prompt,
-    });
-    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    try {
-      await Effect.runPromise(
-        Queue.offer(
-          queue,
-          providerEvent({
-            kind: "tool-request",
-            requestId: "browser-waiting",
-            toolName: "octant_browser",
-            inputJson: '{"operation":"navigate","url":"https://example.com"}',
-          }),
-        ),
-      );
-      await vi.waitFor(async () =>
-        expect((await fixture.runtime.pendingRequests?.(windowId))?.map((r) => r.kind)).toEqual([
-          "approval",
-        ]),
-      );
-      // The listing names the site, so a terminal can tell this ask from a provider's own.
-      expect(await fixture.runtime.pendingRequests?.(windowId)).toMatchObject([
-        { kind: "approval", browserOrigin: "https://example.com" },
-      ]);
-      vi.advanceTimersByTime(24 * 60 * 60_000);
-      expect(withdrawn).not.toHaveBeenCalled();
-      expect(await fixture.runtime.pendingRequests?.(windowId)).toHaveLength(1);
-    } finally {
-      vi.useRealTimers();
-    }
-    fixture.runtime.withdrawThreadAsks?.(String(threadId));
-    expect(withdrawn).toHaveBeenCalledOnce();
-    expect(await fixture.runtime.pendingRequests?.(windowId)).toEqual([]);
     fixture.close();
   });
 
