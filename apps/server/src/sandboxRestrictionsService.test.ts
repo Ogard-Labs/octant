@@ -98,8 +98,8 @@ function fixture(strict = true, accessTimeMediationAvailable = false) {
   });
   const settings = { kind: "settings", mode: "work" } as const;
   const save = (value: unknown) => service.change(decodeSandboxRestrictionsCommand(value));
-  const start = () =>
-    service.beginTurn({ threadId, projectId, mode: "work", root, provider: "codex" });
+  const start = (provider = "codex") =>
+    service.beginTurn({ threadId, projectId, mode: "work", root, provider });
   return {
     base,
     root,
@@ -598,5 +598,34 @@ describe.skipIf(process.platform !== "linux")("trusted sandbox restrictions", ()
       expectedVersion: 0,
     });
     expect(f.start()).toMatchObject({ status: "admitted" });
+  });
+  it("refuses object-mediated rules for native-harness file tools", () => {
+    const sameFilesystem = (rule: "read-only" | "protected") => {
+      const f = fixture(true, true);
+      const guarded = join(f.base, rule);
+      mkdirSync(guarded);
+      f.save({
+        kind: "set-policy",
+        scope: f.settings,
+        policy: {
+          ...f.policy,
+          filesystem: {
+            ...f.policy.filesystem,
+            readOnlyRoots: rule === "read-only" ? [guarded] : [],
+            protectedPaths: rule === "protected" ? [{ path: guarded, mode: "deny" }] : [],
+          },
+        },
+        expectedVersion: 0,
+      });
+      return f.start("openai-compatible");
+    };
+    expect(sameFilesystem("read-only")).toMatchObject({
+      status: "refused",
+      message: expect.stringContaining("hard-link aliases"),
+    });
+    expect(sameFilesystem("protected")).toMatchObject({
+      status: "refused",
+      message: expect.stringContaining("filesystem.protectedPaths"),
+    });
   });
 });

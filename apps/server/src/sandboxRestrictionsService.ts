@@ -15,6 +15,7 @@ import {
 import type { SandboxPolicyLaunchDetails } from "@octant/contracts/sandbox-policy";
 import { admitSandboxPolicy, intersectSandboxPolicies } from "@octant/domain/sandbox-policy";
 import { refusesFullAccessSandbox } from "@octant/domain/guardrail-policy";
+import { isNativeHarnessDriverKind } from "@octant/domain/provider-policy";
 import { ProviderDriverKind, ProjectId } from "@octant/contracts";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -654,11 +655,20 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
         )
           this.#validate(parentRecord);
         const platform = this.#dependencies.platform ?? process.platform;
-        const accessTimeReady =
+        const kind =
+          request.executionRoute === "terminal"
+            ? undefined
+            : Schema.decodeUnknownSync(ProviderDriverKind)(request.provider);
+        const accessTimeBackendReady =
           platform === "linux" &&
           (this.#dependencies.accessTimeMediationAvailable ?? linuxMediationProductionAvailable)(
             this.#dependencies.dataDirectory,
           );
+        // Native-harness file calls execute in the server, not the enrolled
+        // provider process. Until they have object-level mediation, do not
+        // advertise alias-safe rules that only the subprocess backend carries.
+        const accessTimeReady =
+          accessTimeBackendReady && (kind === undefined || !isNativeHarnessDriverKind(kind));
         if (platform === "linux" && !linuxPinnedLaunchAvailable(this.#dependencies.dataDirectory))
           throw new Error(
             "Linux Strict requires the installed native launch helper, private runtime storage and a kernel supporting openat2 and close_range. Rebuild the host runtime before enabling Strict.",
@@ -684,10 +694,6 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
           throw new Error(
             `Unsupported sandbox restrictions: ${admission.rules.join(", ")}. Review the unsupported rows in Sandbox restrictions.`,
           );
-        const kind =
-          request.executionRoute === "terminal"
-            ? undefined
-            : Schema.decodeUnknownSync(ProviderDriverKind)(request.provider);
         if (
           kind !== undefined &&
           refusesFullAccessSandbox({

@@ -18748,6 +18748,13 @@ cards; general Azure CLI credentials remain unavailable by design.
   where the policy permits them. Full access outside Strict and unconfined host
   changes are unchanged. Replacing an enrolled account path with a symlink does
   not transfer its exception.
+- **Server-owned file tools do not borrow subprocess coverage.** A native-harness
+  model's file calls execute in the server rather than the enrolled provider
+  process. Its turn therefore refuses same-filesystem read-only grants and
+  selected protected-path or isolated-credential rules that require object-level
+  mediation. Separate-filesystem folder rules remain supported. The refusal names
+  the unsupported rule before any file effect; path checks are never presented as
+  alias-safe kernel enforcement.
 - **Admission follows the effect.** One-use enrollment begins only after
   `no_new_privs`; inherited proc-memory/pidfd and asynchronous contexts refuse.
   Blocking broker work happens before native locks. The final LSM checks compare
