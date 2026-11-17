@@ -2,8 +2,17 @@
 import { Schema } from "effect";
 import { buildBubblewrapLaunch } from "./linuxConfinement";
 import { applyProtectedFilesChoice, configureSecretGuardLocations } from "./secretGuard";
-import { runLinuxMediationBroker } from "./linuxMediationBroker";
+import { runLinuxMediationBroker, scheduleLinuxMediationDeadline } from "./linuxMediationBroker";
 import { LinuxMediationWorkerConfig, MEDIATION_CONFIG_BYTES } from "./linuxMediationConfig";
+
+export function replaceLinuxMediationWorkerDeadline(
+  clearCurrent: () => void,
+  expire: () => void,
+  maximumMs: number,
+): () => void {
+  clearCurrent();
+  return scheduleLinuxMediationDeadline(expire, maximumMs);
+}
 
 export async function runLinuxMediationWorker(): Promise<void> {
   if (process.send === undefined || !process.connected) return;
@@ -11,6 +20,7 @@ export async function runLinuxMediationWorker(): Promise<void> {
   let configured = false;
   let received = 0;
   let queuedBytes = 0;
+  let clearMaximum: () => void = () => undefined;
   let pending:
     | {
         readonly expected: string;
@@ -29,7 +39,7 @@ export async function runLinuxMediationWorker(): Promise<void> {
     pending?.resolve(false);
     pending = undefined;
     if (!configured) {
-      clearTimeout(maximum);
+      clearMaximum();
       disconnect();
       process.stdin.destroy();
       process.removeListener("SIGTERM", stop);
@@ -78,13 +88,14 @@ export async function runLinuxMediationWorker(): Promise<void> {
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
   process.once("disconnect", stop);
-  const maximum = setTimeout(stop, 180_000);
+  clearMaximum = scheduleLinuxMediationDeadline(stop, 180_000);
   const run = async (value: unknown) => {
     let cleanup: "confirmed" | "uncertain" = "confirmed";
     try {
       const config = Schema.decodeUnknownSync(LinuxMediationWorkerConfig)(value, {
         onExcessProperty: "error",
       });
+      clearMaximum = replaceLinuxMediationWorkerDeadline(clearMaximum, stop, config.maximumMs);
       applyProtectedFilesChoice(config.secretGuard.choice);
       if (config.secretGuard.dataDirectory !== undefined)
         configureSecretGuardLocations({
@@ -145,7 +156,7 @@ export async function runLinuxMediationWorker(): Promise<void> {
         cleanup,
       });
     } finally {
-      clearTimeout(maximum);
+      clearMaximum();
       stop();
       process.removeListener("SIGTERM", stop);
       process.removeListener("SIGINT", stop);
