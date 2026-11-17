@@ -61,7 +61,7 @@ export function ApprovedWorkingFolderControl(props: {
         : selected.kind === "extra" && props.code
           ? "Shared folder: outside the child worktree. Git, changed files and Review cover the Code checkout only."
           : props.inline === true
-            ? "Use . for the whole folder, or a path inside it such as apps/web."
+            ? "Use . for the whole folder, or a path inside it."
             : "Provider, terminal, saved actions and new Work artifacts use this folder. Choose another root in a new task.";
   const fields = (
     <div className="working-directory-control">

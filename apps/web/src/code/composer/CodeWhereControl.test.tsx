@@ -73,7 +73,7 @@ describe("CodeWhereControl", () => {
     expect(onChosen).toHaveBeenCalledExactlyOnceWith("managed-worktree");
     expect(base.closest("[inert]")).toBeNull();
     expect(screen.getByText("octant/fix-login")).toBeVisible();
-    expect(screen.getByText("(auto)")).toBeVisible();
+    expect(screen.getByText("named for you")).toBeVisible();
   });
 
   it("moves the choice with the arrow keys, closes on Escape and returns focus to the chip", async () => {

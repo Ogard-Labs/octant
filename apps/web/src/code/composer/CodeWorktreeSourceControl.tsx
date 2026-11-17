@@ -1,4 +1,5 @@
 import {
+  branchDisplayName,
   describeWorktreeSource,
   selectWorktreeRemote,
   type WorktreeRemoteFacts,
@@ -39,10 +40,10 @@ export function CodeWorktreeSourceControl(props: CodeWorktreeSourceControlProps)
   const disclosure = describeWorktreeSource(props.resolution, now);
 
   const supportingCopy = !remoteAvailable
-    ? "No usable remote is configured for this branch, so the new worktree starts from the local commit."
+    ? "No usable remote is configured for this branch. It starts from the local commit."
     : props.startFromOrigin
-      ? `Fetch and start from ${activeRemote ?? "origin"}/${props.branch}`
-      : `Start from the local ${props.branch} commit.`;
+      ? `Fetch and start from ${activeRemote ?? "origin"}/${branchDisplayName(props.branch)}`
+      : `Start from the local ${branchDisplayName(props.branch)} commit.`;
 
   const remotes = props.remoteFacts.remotes;
   const remoteChoosable = props.startFromOrigin && remoteAvailable && remotes.length > 0;
@@ -81,7 +82,9 @@ export function CodeWorktreeSourceControl(props: CodeWorktreeSourceControlProps)
         {disclosure === undefined ? null : (
           <>
             <span className="code-worktree-source__disclosure-label">{disclosure.label}</span>
-            {disclosure.detail === undefined ? null : (
+            {/* "May differ from the remote" says nothing when there is no
+                remote to differ from; the note above already says so. */}
+            {disclosure.detail === undefined || !remoteAvailable ? null : (
               <span className="oct-menu-detail code-worktree-source__disclosure-detail">
                 {disclosure.detail}
               </span>
@@ -95,22 +98,27 @@ export function CodeWorktreeSourceControl(props: CodeWorktreeSourceControlProps)
         ) : null}
       </p>
 
-      <label className="code-worktree-source__field" data-reserved="">
-        <span className="oct-menu-option">Remote</span>
-        <OctantSelectField
-          aria-label="Remote"
-          disabled={
-            props.disabled === true || props.onSelectRemote === undefined || !remoteChoosable
-          }
-          onValueChange={(value) => props.onSelectRemote?.(value)}
-          options={
-            remotes.length === 0
-              ? [{ id: "", label: "None" }]
-              : remotes.map((remote) => ({ id: remote, label: remote }))
-          }
-          value={remotes.length === 0 ? "" : (activeRemote ?? remotes[0] ?? "")}
-        />
-      </label>
+      {remotes.length === 0 ? (
+        // With no remote there is nothing to choose; a disabled list reading
+        // "None" looked like a control that was broken.
+        <div className="code-worktree-source__field" data-reserved="">
+          <span className="oct-menu-option">Remote</span>
+          <span className="oct-menu-detail">None</span>
+        </div>
+      ) : (
+        <label className="code-worktree-source__field" data-reserved="">
+          <span className="oct-menu-option">Remote</span>
+          <OctantSelectField
+            aria-label="Remote"
+            disabled={
+              props.disabled === true || props.onSelectRemote === undefined || !remoteChoosable
+            }
+            onValueChange={(value) => props.onSelectRemote?.(value)}
+            options={remotes.map((remote) => ({ id: remote, label: remote }))}
+            value={activeRemote ?? remotes[0] ?? ""}
+          />
+        </label>
+      )}
     </section>
   );
 }

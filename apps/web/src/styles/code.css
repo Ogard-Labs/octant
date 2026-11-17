@@ -3008,9 +3008,14 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   font-weight: var(--oct-weight-regular);
 }
 
+/* A field on a float takes its fill from the float, as every control on one
+   does: the page's input well drew a black slot inside the grey panel. */
 .code-where__subfolder .working-directory-control input {
   height: var(--oct-menu-row-h);
   padding: 0 var(--oct-menu-row-inset);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-sm);
+  background: color-mix(in oklab, var(--oct-fg) 5%, transparent);
   font-size: var(--oct-text-detail);
 }
 

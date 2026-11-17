@@ -3270,6 +3270,14 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   padding-inline: var(--oct-menu-row-inset);
 }
 
+/* A hairline between the place a thread starts without a Project and the
+   ways to make one, so the two read as separate groups. */
+.composer-folder-selector__divider {
+  height: 1px;
+  margin: var(--oct-space-1) var(--oct-menu-row-inset);
+  background: var(--oct-hairline);
+}
+
 .composer-folder-selector__actions {
   display: grid;
   flex: 0 0 auto;
@@ -3812,11 +3820,16 @@ form > .work-composer-adapter__attachments {
 
 .code-worktree-source__row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: var(--oct-space-2);
-  height: var(--oct-menu-row-two-h);
+  gap: var(--oct-space-3);
   min-width: 0;
+  padding-block: var(--oct-space-1);
+}
+
+.code-worktree-source__row > [role="switch"] {
+  flex: none;
+  margin-top: 2px;
 }
 
 .code-worktree-source__labels {
@@ -3825,10 +3838,17 @@ form > .work-composer-adapter__attachments {
   min-width: 0;
 }
 
+/* The note wraps to two lines in a slot that is always two lines tall, so a
+   longer reason (no remote, a failed fetch) reads whole and moves nothing. A
+   note cut off with an ellipsis hid the part that said what would happen. */
 .code-worktree-source__copy {
+  display: -webkit-box;
+  height: calc(2 * var(--oct-line-meta, 16px));
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: var(--oct-line-meta, 16px);
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .code-worktree-source__disclosure {

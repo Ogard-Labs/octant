@@ -181,7 +181,7 @@ describe("ComposerProjectSelector", () => {
     expect(screen.getByRole("group", { name: "On your servers" })).toBeVisible();
   });
 
-  it("starts on the chosen Project and moves to the first and last row with Home and End", async () => {
+  it("starts the keyboard on the chosen Project without drawing it pressed, and moves to the first and last row with Home and End", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
     const all = [...manyProjects(3), { kind: "add-folder" as const }];
@@ -198,7 +198,8 @@ describe("ComposerProjectSelector", () => {
     );
     await user.click(screen.getByRole("button", { name: "Project: Project 2" }));
     const rows = screen.getAllByRole("option");
-    expect(rows[1]).toHaveAttribute("data-active", "true");
+    expect(screen.getByRole("listbox")).toHaveAttribute("aria-activedescendant", rows[1]?.id);
+    expect(rows[1]).not.toHaveAttribute("data-active");
     await user.keyboard("{End}");
     expect(rows[3]).toHaveAttribute("data-active", "true");
     await user.keyboard("{Home}");

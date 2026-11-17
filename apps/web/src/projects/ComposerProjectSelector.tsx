@@ -15,6 +15,7 @@ import {
   useState,
   type KeyboardEvent,
   type ReactNode,
+  Fragment,
 } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -224,6 +225,11 @@ function ProjectMenu(props: ComposerProjectSelectorProps & { readonly close: () 
     return searchShown ? -1 : 0;
   });
 
+  // The highlight follows the keyboard only. Drawn from the moment the list
+  // opened, the chosen row read as a filled, pressed row before anything was
+  // pressed (2026-11-17); the pointer has its own hover fill.
+  const [keyboardMoved, setKeyboardMoved] = useState(false);
+
   const activate = useCallback(
     (entry: MenuEntry) => {
       if (entry.kind === "add-github") {
@@ -243,6 +249,7 @@ function ProjectMenu(props: ComposerProjectSelectorProps & { readonly close: () 
     (event: KeyboardEvent<HTMLDivElement>) => {
       if (view !== "projects" || flatEntries.length === 0) return;
       const inSearch = event.target === searchRef.current;
+      if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) setKeyboardMoved(true);
       if (event.key === "ArrowDown") {
         event.preventDefault();
         setActiveIndex((i) => (i + 1 >= flatEntries.length ? 0 : i + 1));
@@ -301,7 +308,7 @@ function ProjectMenu(props: ComposerProjectSelectorProps & { readonly close: () 
 
   const optionProps = (index: number) => ({
     className: "octant-popover-option composer-folder-selector__option",
-    "data-active": index === activeIndex ? "true" : undefined,
+    "data-active": keyboardMoved && index === activeIndex ? "true" : undefined,
     id: `${listboxId}-option-${index}`,
     role: "option" as const,
     tabIndex: -1,
@@ -493,59 +500,70 @@ function ProjectMenu(props: ComposerProjectSelectorProps & { readonly close: () 
                       : undefined;
                   const refused = entry.kind === "default-folder" && entry.disabled === true;
                   const nameId = `${listboxId}-option-${index}-name`;
+                  // The ways to make a Project are a group of their own, apart
+                  // from the place a thread can start without one.
+                  const startsCreate =
+                    (entry.kind === "add-folder" || entry.kind === "add-github") &&
+                    offset > 0 &&
+                    actionEntries[offset - 1]?.kind !== "add-folder" &&
+                    actionEntries[offset - 1]?.kind !== "add-github";
                   const reasonId = `${listboxId}-option-${index}-reason`;
                   return (
-                    <OctantButton
-                      aria-selected={chosen}
-                      {...(refused ? { "aria-disabled": true } : {})}
-                      {...(reason === undefined
-                        ? {}
-                        : { "aria-describedby": reasonId, "aria-labelledby": nameId })}
-                      key={entry.kind}
-                      onClick={() => activate(entry)}
-                      {...(entry.kind === "default-folder" && reason === undefined
-                        ? { title: entry.rootPath }
-                        : {})}
-                      {...optionProps(index)}
-                      {...(reason === undefined
-                        ? {}
-                        : {
-                            className:
-                              "octant-popover-option composer-folder-selector__option composer-folder-selector__option--two-line",
-                          })}
-                    >
-                      {entry.kind === "add-github" ? (
-                        <FolderGit2 aria-hidden="true" size={14} />
-                      ) : entry.kind === "default-folder" || entry.kind === "unfiled" ? (
-                        <FolderOpen aria-hidden="true" size={14} />
-                      ) : (
-                        <FolderPlus aria-hidden="true" size={14} />
-                      )}
-                      <span className="composer-folder-selector__option-copy">
-                        <span className="composer-folder-selector__option-name" id={nameId}>
-                          {label}
+                    <Fragment key={entry.kind}>
+                      {startsCreate ? (
+                        <div aria-hidden="true" className="composer-folder-selector__divider" />
+                      ) : null}
+                      <OctantButton
+                        aria-selected={chosen}
+                        {...(refused ? { "aria-disabled": true } : {})}
+                        {...(reason === undefined
+                          ? {}
+                          : { "aria-describedby": reasonId, "aria-labelledby": nameId })}
+                        onClick={() => activate(entry)}
+                        {...(entry.kind === "default-folder" && reason === undefined
+                          ? { title: entry.rootPath }
+                          : {})}
+                        {...optionProps(index)}
+                        {...(reason === undefined
+                          ? {}
+                          : {
+                              className:
+                                "octant-popover-option composer-folder-selector__option composer-folder-selector__option--two-line",
+                            })}
+                      >
+                        {entry.kind === "add-github" ? (
+                          <FolderGit2 aria-hidden="true" size={14} />
+                        ) : entry.kind === "default-folder" || entry.kind === "unfiled" ? (
+                          <FolderOpen aria-hidden="true" size={14} />
+                        ) : (
+                          <FolderPlus aria-hidden="true" size={14} />
+                        )}
+                        <span className="composer-folder-selector__option-copy">
+                          <span className="composer-folder-selector__option-name" id={nameId}>
+                            {label}
+                          </span>
+                          {reason !== undefined ? (
+                            // A refused row says why in full under its name, wrapping
+                            // if it must; the reason is also the row's description.
+                            <span
+                              className="composer-folder-selector__option-path composer-folder-selector__option-reason"
+                              id={reasonId}
+                            >
+                              {reason}
+                            </span>
+                          ) : entry.kind === "unfiled" ? (
+                            <span className="composer-folder-selector__option-path">
+                              Start an unfiled thread
+                            </span>
+                          ) : entry.kind === "default-folder" ? (
+                            <span className="composer-folder-selector__option-path">
+                              {homeRelativePath(entry.rootPath)}
+                            </span>
+                          ) : null}
                         </span>
-                        {reason !== undefined ? (
-                          // A refused row says why in full under its name, wrapping
-                          // if it must; the reason is also the row's description.
-                          <span
-                            className="composer-folder-selector__option-path composer-folder-selector__option-reason"
-                            id={reasonId}
-                          >
-                            {reason}
-                          </span>
-                        ) : entry.kind === "unfiled" ? (
-                          <span className="composer-folder-selector__option-path">
-                            Start an unfiled thread
-                          </span>
-                        ) : entry.kind === "default-folder" ? (
-                          <span className="composer-folder-selector__option-path">
-                            {homeRelativePath(entry.rootPath)}
-                          </span>
-                        ) : null}
-                      </span>
-                      {check(chosen)}
-                    </OctantButton>
+                        {check(chosen)}
+                      </OctantButton>
+                    </Fragment>
                   );
                 })}
               </div>

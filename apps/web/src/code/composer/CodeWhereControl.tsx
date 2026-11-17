@@ -149,13 +149,13 @@ export function CodeWhereControl(props: CodeWhereControlProps) {
         inert={!worktree}
       >
         <div className="code-where__line" data-reserved="">
-          <span className="oct-menu-detail code-where__line-label">from</span>
+          <span className="oct-menu-detail code-where__line-label">From</span>
           {props.baseBranchPicker}
         </div>
         <div className="code-where__line" data-reserved="">
-          <span className="oct-menu-detail code-where__line-label">branch</span>
+          <span className="oct-menu-detail code-where__line-label">Branch</span>
           <MiddleEllipsis className="code-where__code" text={props.worktreeBranch} />
-          <span className="oct-menu-detail">(auto)</span>
+          <span className="oct-menu-detail">named for you</span>
         </div>
         {props.sourceControl}
       </div>
