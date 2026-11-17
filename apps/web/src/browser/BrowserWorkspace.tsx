@@ -240,6 +240,12 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const [ownedContextId, setOwnedContextId] = useState<BrowserContextId | undefined>(
     props.tab.contextId,
   );
+  // Which of the thread's pages a Browser tab opened from the tool row shows:
+  // the thread's shared page, which the agent's Browser tool uses, or a page
+  // of its own. Unknown until the tab opens a page or reads which it holds.
+  const [ownPage, setOwnPage] = useState<boolean>();
+  // Whether the thread already has its shared page, as the last read saw it.
+  const [threadHasSharedPage, setThreadHasSharedPage] = useState(false);
   const [nativeSupported, setNativeSupported] = useState(false);
   const accounts = useBrowserAccountProfiles(props.client, nativeSupported);
   // Where the next page keeps its site data. A new page opens Private unless the
@@ -373,6 +379,35 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     useRef<BrowserActionRequest["expectedObservationRevision"]>(undefined);
   const remoteActionTail = useRef<Promise<void>>(Promise.resolve());
   const activeContext = snapshot?.context?.state === "active";
+  // A tab that comes back bound to a page (the dock remembers it) did not open
+  // that page in this mount, so it asks once which of the thread's pages it is.
+  const shownContextId = snapshot?.context?.contextId;
+  useEffect(() => {
+    const threadId = props.tab.threadId;
+    if (
+      props.startFresh !== true ||
+      threadId === undefined ||
+      shownContextId === undefined ||
+      ownPage !== undefined
+    ) {
+      return;
+    }
+    let current = true;
+    void props.client
+      .inspectThread({ threadId, freshPicture: false })
+      .then((thread) => {
+        if (!current) return;
+        setOwnPage(
+          !(
+            sharedPageIsLive(thread) && String(thread.context?.contextId) === String(shownContextId)
+          ),
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [ownPage, props.client, props.startFresh, props.tab.threadId, shownContextId]);
   const nativeContext = nativeSupported && snapshot?.context?.presentation !== "headless";
   const nativeSurface = useNativeBrowserSurface({
     ...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge }),
@@ -622,6 +657,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         // A fresh tab reads only the thread's admission fact. Its current page
         // belongs to another tab until this one creates its own context.
         if (fresh) {
+          setThreadHasSharedPage(sharedPageIsLive(next));
           setStatus("ready");
           return;
         }
@@ -749,6 +785,21 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         setMessage("This thread has no Project profile.");
         return;
       }
+      // Every Browser tab opened from the tool row starts fresh, the first one
+      // too. The first becomes the thread's shared page, which the agent's
+      // tool uses; a tab opened while that page is live asks for a page of its
+      // own. An ordinary Open answers with the shared page, so a second tab
+      // that asked the ordinary way showed the first tab's page and was
+      // refused the site it had been asked to open.
+      // A tool-row tab decides by what the thread holds, a profile switch
+      // included: the tab that held the shared page has just stopped it, so
+      // its new page is the shared one again.
+      const threadId = props.tab.threadId;
+      const own =
+        props.startFresh === true
+          ? threadId !== undefined &&
+            sharedPageIsLive(await props.client.inspectThread({ threadId, freshPicture: false }))
+          : switchingProfile.current;
       const next = await props.client.create({
         threadId: props.tab.threadId!,
         action,
@@ -762,12 +813,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           ...(prepared?.acceptsLocalCertificate === true ? { acceptsLocalCertificate: true } : {}),
         },
         // A tab bound to one context is replaced by a context of its own, never by
-        // whatever shared context the thread already holds. A repeated Browser
-        // tab asks for its own too: an ordinary Open answers with the thread's
-        // shared page, so a second tab showed the first tab's page and was
-        // refused the site it had been asked to open.
-        ...(switchingProfile.current || props.startFresh === true ? { dedicated: true } : {}),
+        // whatever shared context the thread already holds.
+        ...(own ? { dedicated: true } : {}),
       });
+      if (props.startFresh === true) setOwnPage(own);
       setScope(resolved);
       update(next);
       if (next.context !== undefined) {
@@ -1289,32 +1338,34 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const ownerHolds =
     activeContext && snapshot?.ownerController !== undefined && props.client.takeOver !== undefined;
   // Take over and Hand back hold the thread's shared page, the one the agent
-  // uses. A repeated Browser tab shows a page of its own that no agent reaches,
-  // so it offers neither: asked from there, the host would hold the first
-  // tab's page and answer with that page's picture.
-  const holdAction = props.startFresh
-    ? undefined
-    : ownerHolds
-      ? ({
-          hold: "reclaim",
-          label: "Reclaim locally",
-          title: "Stop remote owner control and keep the page held locally",
-        } as const)
-      : activeContext && personHasPage && props.client.handBack !== undefined
+  // uses. A tab that shows a page of its own, which no agent reaches, offers
+  // neither: asked from there, the host would hold the shared page and answer
+  // with that page's picture. A tab that does not yet know which page it
+  // holds waits to offer them.
+  const holdAction =
+    props.startFresh === true && ownPage !== false
+      ? undefined
+      : ownerHolds
         ? ({
-            hold: "hand-back",
-            label: "Hand back",
-            title: "You have the page. Hand it back to let the agent use it again.",
+            hold: "reclaim",
+            label: "Reclaim locally",
+            title: "Stop remote owner control and keep the page held locally",
           } as const)
-        : activeContext &&
-            snapshot?.waitingForPerson === undefined &&
-            props.client.takeOver !== undefined
+        : activeContext && personHasPage && props.client.handBack !== undefined
           ? ({
-              hold: "take-over",
-              label: "Take over",
-              title: "Hold the agent's Browser calls while you use the page",
+              hold: "hand-back",
+              label: "Hand back",
+              title: "You have the page. Hand it back to let the agent use it again.",
             } as const)
-          : undefined;
+          : activeContext &&
+              snapshot?.waitingForPerson === undefined &&
+              props.client.takeOver !== undefined
+            ? ({
+                hold: "take-over",
+                label: "Take over",
+                title: "Hold the agent's Browser calls while you use the page",
+              } as const)
+            : undefined;
   const holdIcon = (hold: "hand-back" | "take-over" | "reclaim") =>
     hold === "hand-back" ? (
       <Undo2 aria-hidden="true" size={16} />
@@ -1920,12 +1971,14 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             </section>
           ) : null}
           {serverSuggestions.length > 0 || recentSuggestions.length > 0 ? (
-            <p className="browser-workspace__local-note">{startNote(props.startFresh === true)}</p>
+            <p className="browser-workspace__local-note">
+              {startNote(props.startFresh === true && threadHasSharedPage)}
+            </p>
           ) : (
             <div className="browser-workspace__empty">
               <ShieldCheck aria-hidden="true" size={20} />
               <h2>Open a private Browser session</h2>
-              <p>{startNote(props.startFresh === true)}</p>
+              <p>{startNote(props.startFresh === true && threadHasSharedPage)}</p>
               <OctantButton
                 aria-label="Start browser"
                 disabled={starting || url.trim() === ""}
@@ -2217,10 +2270,15 @@ function captureNotKeptNotice(
   return `This screenshot could not be kept: ${why[reason]}.`;
 }
 
+/** Whether a read of the thread shows its shared page open or opening. */
+function sharedPageIsLive(thread: BrowserAutomationSnapshot): boolean {
+  return thread.context?.state === "active" || thread.context?.state === "creating";
+}
+
 /**
- * Who a page opened here is for. A repeated Browser tab opens a page of its
- * own, which the agent's Browser tool never reaches: that tool works on the
- * thread's first Browser page.
+ * Who a page opened here is for. A Browser tab opened while the thread's
+ * shared page is live opens a page of its own, which the agent's Browser tool
+ * never reaches: that tool works on the shared page, the first one opened.
  */
 function startNote(ownPage: boolean): string {
   return ownPage
