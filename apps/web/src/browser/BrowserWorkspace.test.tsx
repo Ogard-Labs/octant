@@ -427,10 +427,12 @@ describe("BrowserWorkspace", () => {
     };
     const browser = client();
     vi.mocked(browser.create).mockImplementation(async (input) => {
-      if (input.dedicated !== true && shared !== undefined) return snapshotOf(shared);
+      const own =
+        input.dedicated === true || (input.ownPageWhenShared === true && shared !== undefined);
+      if (!own && shared !== undefined) return snapshotOf(shared);
       const contextId = `60000000-0000-4000-8000-00000000010${String(pages.size + 1)}`;
       pages.set(contextId, { context: { ...context, contextId, policy: input.policy as any } });
-      if (input.dedicated !== true) shared = contextId;
+      if (!own) shared = contextId;
       return snapshotOf(contextId);
     });
     vi.mocked(browser.act).mockImplementation(async (request) => {
@@ -501,9 +503,14 @@ describe("BrowserWorkspace", () => {
 
     // The first tab opened the thread's shared page, the one the agent's tool
     // uses; the second asked for a page of its own and is bound to it.
-    expect(vi.mocked(browser.create).mock.calls.map(([input]) => input.dedicated)).toEqual([
-      undefined,
-      true,
+    // Both asked the host to choose; neither chose for itself.
+    expect(
+      vi
+        .mocked(browser.create)
+        .mock.calls.map(([input]) => [input.ownPageWhenShared, input.dedicated]),
+    ).toEqual([
+      [true, undefined],
+      [true, undefined],
     ]);
     expect(pages.size).toBe(2);
     const own = [...pages.keys()].find((contextId) => contextId !== shared);
@@ -2890,6 +2897,11 @@ describe("BrowserWorkspace", () => {
       await user.click(await screen.findByRole("menuitemradio", { name: "Personal" }));
 
       await waitFor(() => expect(browser.create).toHaveBeenCalled());
+      // The host decides, as for any tool-row tab: the tab does not ask for a
+      // page of its own because it is switching profile.
+      expect(vi.mocked(browser.create).mock.calls[0]?.[0]).toMatchObject({
+        ownPageWhenShared: true,
+      });
       expect(vi.mocked(browser.create).mock.calls[0]?.[0].dedicated).toBeUndefined();
     });
 

@@ -3790,6 +3790,45 @@ describe("BrowserAutomationService", () => {
     );
   });
 
+  it("makes the first tool-row Open the thread's shared page and gives each later one its own, even when two arrive together", async () => {
+    const { runtime, service } = harness();
+    const open = (origin: string) =>
+      service.create({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        policy: { ...policy, allowedOrigins: [origin] },
+        ownPageWhenShared: true,
+      });
+    // Two tabs open at the same moment: neither has seen a shared page.
+    const [first, second] = await Promise.all([
+      open("http://127.0.0.1:4101"),
+      open("http://127.0.0.1:4102"),
+    ]);
+    const third = await open("http://127.0.0.1:4103");
+
+    expect(runtime.createContext).toHaveBeenCalledTimes(3);
+    const ids = [first, second, third].map((snapshot) => snapshot.context?.contextId);
+    expect(new Set(ids).size).toBe(3);
+    // Each kept the site it was opened for; none was handed another's page.
+    expect(
+      [first, second, third].map((snapshot) => snapshot.context?.policy.allowedOrigins),
+    ).toEqual([["http://127.0.0.1:4101"], ["http://127.0.0.1:4102"], ["http://127.0.0.1:4103"]]);
+    // Exactly one is the thread's shared page, the one the agent's tool uses:
+    // with it stopped the thread has none, though the other two are still open.
+    expect(service.inspectThread(windowId, threadOne).context?.contextId).toBe(
+      first.context?.contextId,
+    );
+    await service.stop(windowId, threadOne, first.context!.contextId);
+    expect(service.inspectThread(windowId, threadOne).context?.state).not.toBe("active");
+    for (const own of [second, third]) {
+      expect(service.inspect(windowId, threadOne, own.context!.contextId).context?.state).toBe(
+        "active",
+      );
+    }
+    await service.close();
+  });
+
   it("accepts one localhost certificate only for a loopback HTTPS context", async () => {
     const { runtime, service } = harness();
     const accepted = await service.create({
