@@ -947,10 +947,30 @@ export function heldForPersonAnswer(
     result: {
       error: "browser-person-took-over",
       message:
-        "The person took over the page. Browser calls wait until they hand it back; say that you are waiting instead of retrying.",
+        "The person took over the page and this call cannot take it back. It waits until they hand it back; say that you are waiting instead of retrying.",
     },
     isError: true,
   };
+}
+
+/**
+ * The thread's page with the person's Take over ended for the agent's call,
+ * where the host lets the agent take it back; any other hold stands.
+ */
+export function takenBack<WindowIdentity, ThreadIdentity>(
+  browser: {
+    readonly takeBack?: (
+      windowId: WindowIdentity,
+      threadId: ThreadIdentity,
+    ) => BrowserAutomationSnapshot;
+  },
+  windowId: WindowIdentity,
+  threadId: ThreadIdentity,
+  snapshot: BrowserAutomationSnapshot,
+): BrowserAutomationSnapshot {
+  return snapshot.waitingForPerson === "take-over" && browser.takeBack !== undefined
+    ? browser.takeBack(windowId, threadId)
+    : snapshot;
 }
 
 /**
@@ -986,26 +1006,23 @@ export function browserPageAdmitsEverySite(context: BrowserContextRecord | undef
 }
 
 /**
- * Whether a call needs a new page in place of the open one, because the open
- * page's reach no longer fits the thread's level. An any-site page was opened
- * at Full access and has no site approval to stand on below it; Plan only
- * reads it where it is, so it stays. A Private page opened below Full access
- * holds one site, and at Full access a navigation elsewhere reopens it rather
- * than being refused.
+ * Whether a navigation needs a new page in place of the open one. A Private
+ * page admits every site at every level, but one opened for a single site
+ * (before that rule, or for a local server's certificate) holds that site, so
+ * a navigation elsewhere reopens it as an any-site page rather than being
+ * refused.
  */
 export function browserPageReach(input: {
   readonly existing: BrowserContextRecord;
-  readonly fullAccess: boolean;
-  readonly plan: boolean;
   /** The address a `navigate` asks for, when the call is one that stays Private. */
   readonly privateNavigation: string | undefined;
-}): "kept" | "reopen" | "navigation-required" {
-  const everySite = browserPageAdmitsEverySite(input.existing);
-  if (everySite && !input.fullAccess && !input.plan) return "navigation-required";
+}): "kept" | "reopen" {
   if (
-    !everySite &&
-    input.fullAccess &&
+    !browserPageAdmitsEverySite(input.existing) &&
     storedBrowserProfile(input.existing.policy.profile) === undefined &&
+    // A local server's own certificate is accepted for its one origin only, so
+    // that page is the person's server, not one to close for another site.
+    input.existing.policy.acceptsLocalCertificate !== true &&
     input.privateNavigation !== undefined &&
     httpOrigin(input.privateNavigation) !== undefined &&
     !originAllowed(input.privateNavigation, input.existing.policy.allowedOrigins)

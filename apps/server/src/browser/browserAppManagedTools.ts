@@ -30,6 +30,7 @@ import {
   browserPageToolCallArguments,
   handBrowserToPerson,
   heldForPersonAnswer,
+  takenBack,
   heldWhileQueued,
   isBrowserToolFlowInput,
   runBrowserToolSteps,
@@ -92,8 +93,8 @@ export interface BrowserAppManagedToolsOptions {
   ) => ToolActionAuthority | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
   /**
-   * Whether the thread's turn runs at Full access now, where a Private page
-   * needs no site approval. A Work turn's level is its `access`, which the
+   * Whether the thread's turn runs at Full access now, where uploads, saved
+   * downloads and page scripts ask nothing. A Work turn's level is its `access`, which the
    * composed `executionPolicy` does not carry; absent, that policy decides.
    */
   readonly fullAccess?: () => boolean;
@@ -109,8 +110,6 @@ export interface BrowserAppManagedToolsOptions {
       readonly action: ToolActionRequest;
       readonly policy: BrowserContextPolicy;
       readonly profileCaller?: "terminal-grant";
-      /** The agent's own open at Full access; only it may ask for every site. */
-      readonly fullAccessAgent?: true;
     }) => Promise<BrowserAutomationSnapshot>;
     readonly act: (input: {
       readonly windowId: WindowId;
@@ -128,6 +127,11 @@ export interface BrowserAppManagedToolsOptions {
       readonly holdDownloads?: boolean;
       /** The turn runs at Full access, where a download is held whatever the switch says. */
       readonly fullAccess?: true;
+      /**
+       * This call takes back a page the person took over. The agent tool sets
+       * it for its own calls, never for a flow's replayed steps.
+       */
+      readonly takesBack?: true;
     }) => Promise<BrowserAutomationSnapshot>;
     /**
      * Saves a download the thread's Browser holds into the workspace once
@@ -187,6 +191,14 @@ export interface BrowserAppManagedToolsOptions {
       windowId: WindowId,
       threadId: BrowserThreadId,
     ) => { readonly release: () => void; readonly signal?: AbortSignal };
+    /**
+     * Ends the person's Take over so the agent's call can run. Absent, the
+     * call waits for Hand back as before.
+     */
+    readonly takeBack?: (
+      windowId: WindowId,
+      threadId: BrowserThreadId,
+    ) => BrowserAutomationSnapshot;
   };
   /**
    * Lent only to a Work thread's own tool: the bounded script runner, and the
@@ -282,7 +294,13 @@ export function createBrowserAppManagedTools(
     input: Exclude<BrowserToolInput, { readonly operation: "steps" }>,
     signal: AbortSignal | undefined,
     afterSignIn = false,
+    // A saved flow's replayed step: it waits for the person's Hand back
+    // rather than taking the page back, as a flow's own call would.
+    replaying = false,
   ): Promise<BrowserToolAnswer> => {
+    const reclaims = replaying ? {} : options.browser;
+    // Only a port that may take the page back asks the service to.
+    const takesBack = !replaying && options.browser.takeBack !== undefined;
     const authority = options.resolveAuthority(options.threadId, options.mode);
     if (authority === undefined) return failure("browser-authority-unavailable");
     // Every question about the open page is withdrawn when that page ends.
@@ -303,7 +321,12 @@ export function createBrowserAppManagedTools(
       const scoped = level !== "full-access";
       if (scoped && script.strict()) return failure("script-needs-full-access");
       if (!modelIsCurrent(options)) return failure("browser-model-stale");
-      const opened = options.browser.inspectThread(options.windowId, options.threadId);
+      const opened = takenBack(
+        reclaims,
+        options.windowId,
+        options.threadId,
+        options.browser.inspectThread(options.windowId, options.threadId),
+      );
       if (opened.waitingForPerson !== undefined) {
         return heldForPersonAnswer(opened.waitingForPerson);
       }
@@ -393,9 +416,15 @@ export function createBrowserAppManagedTools(
     if (options.executionPolicy === "plan" && browserOperationRefusedInPlan(input.operation)) {
       return failure("plan-mode-read-only");
     }
-    let snapshot = options.browser.inspectThread(options.windowId, options.threadId);
-    // While the person signs in, the page is theirs: no other agent action
-    // reaches it until they press Continue or the ask ends.
+    // The agent takes back a page the person took over. While the person
+    // signs in, the page is theirs: no other agent action reaches it until
+    // they press Continue or the ask ends.
+    let snapshot = takenBack(
+      reclaims,
+      options.windowId,
+      options.threadId,
+      options.browser.inspectThread(options.windowId, options.threadId),
+    );
     if (snapshot.waitingForPerson !== undefined) {
       return heldForPersonAnswer(snapshot.waitingForPerson);
     }
@@ -438,18 +467,13 @@ export function createBrowserAppManagedTools(
     if (existing !== undefined) {
       const reach = browserPageReach({
         existing,
-        fullAccess,
-        plan: options.executionPolicy === "plan",
         privateNavigation:
           input.operation === "navigate" &&
           (input.profile ?? defaultChoice ?? "private") === "private"
             ? input.url
             : undefined,
       });
-      if (reach !== "kept") {
-        if (reach === "navigation-required" && input.operation !== "navigate") {
-          return failure("browser-navigation-required");
-        }
+      if (reach === "reopen") {
         // The same stop and navigate the refusal would have asked the agent for.
         options.modelBindings.delete(String(existing.contextId));
         snapshot = await options.browser.releaseThread(options.windowId, options.threadId);
@@ -521,9 +545,9 @@ export function createBrowserAppManagedTools(
     const remembered =
       (existing === undefined || (identityMatches && existingBinding?.approval === "pending")) &&
       options.approvals?.isRemembered?.(origin, profile) === true;
-    // At Full access a Private page needs no site approval; a page in a
+    // A Private page needs no site approval at any level; a page in a
     // signed-in profile keeps its own at every level.
-    const needsNoSiteApproval = fullAccess && profile === undefined;
+    const needsNoSiteApproval = profile === undefined;
     if ((existing === undefined || !contextApproved) && !remembered && !needsNoSiteApproval) {
       if (options.approvals === undefined) return failure("browser-approval-required");
       const approvals = options.approvals;
@@ -572,7 +596,6 @@ export function createBrowserAppManagedTools(
           allowedOrigins: [needsNoSiteApproval ? ANY_BROWSER_ORIGIN : origin],
         },
         ...(options.profileCaller === undefined ? {} : { profileCaller: options.profileCaller }),
-        ...(needsNoSiteApproval ? { fullAccessAgent: true as const } : {}),
       });
       snapshot = created;
       if (created.context?.state === "active") {
@@ -714,6 +737,7 @@ export function createBrowserAppManagedTools(
             threadId: options.threadId,
             request: declaredRead,
             capturedBy: "agent",
+            ...(takesBack ? { takesBack: true as const } : {}),
           }),
         // A CLI in a terminal is not the person who would be asked.
         ask:
@@ -836,6 +860,7 @@ export function createBrowserAppManagedTools(
     // later action, so the service keeps the copies until the page closes.
     const acted = await options.browser.act({
       windowId: options.windowId,
+      ...(takesBack ? { takesBack: true as const } : {}),
       // The service refuses a context that is another thread's, even when the
       // two threads share a Project and so an authority.
       threadId: options.threadId,
@@ -911,13 +936,14 @@ export function createBrowserAppManagedTools(
   const runRecorded = (
     step: Exclude<BrowserToolInput, { readonly operation: "steps" }>,
     signal: AbortSignal | undefined,
+    replaying = false,
   ): Promise<BrowserToolAnswer> =>
     runRecordingFlow({
       step,
       flows: options.browser.snapshotRefs === undefined ? undefined : options.flows,
       refs: refsOfLatestSnapshot,
       contextId: activeContextId,
-      run: () => runOne(step, signal),
+      run: () => runOne(step, signal, false, replaying),
     });
   const runFlow = async (
     input: Extract<
@@ -946,7 +972,7 @@ export function createBrowserAppManagedTools(
       actor: () => browserFlowAgentActor(authority, String(options.threadId)),
       contextId: activeContextId,
       refs: refsOfLatestSnapshot,
-      run: (step) => runRecorded(step, signal),
+      run: (step) => runRecorded(step, signal, true),
     });
   };
   const tools: AppManagedToolSet = {

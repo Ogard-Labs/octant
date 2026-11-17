@@ -529,6 +529,8 @@ interface OwnedSurface {
    * network; see `admitNavigation`.
    */
   personNavigation: boolean;
+  /** The origin the person typed, while `personNavigation` holds. */
+  personNavigationOrigin: string | undefined;
   /** Remote owner input never turns delayed page navigation into a local person's origin grant. */
   ownerNavigationRestricted: boolean;
   shellWindow: BrowserSurfaceShellWindowPort | undefined;
@@ -3052,6 +3054,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         // computer's network, while the dialog guard below is still attaching.
         owned.control = personNavigation ? "user" : "agent";
         owned.personNavigation = personNavigation;
+        owned.personNavigationOrigin =
+          personNavigation && request.target !== undefined ? originOf(request.target) : undefined;
         owned.blockedNavigationUrl = undefined;
         publish(contextId, owned);
         // Dialogs an earlier action answered before it failed come first.
@@ -3067,6 +3071,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           // The action never began, so the `finally` below never runs: nothing
           // may be left reading the next hops as the person's.
           owned.personNavigation = false;
+          owned.personNavigationOrigin = undefined;
           owned.control = "idle";
           publish(contextId, owned);
           throw error;
@@ -3439,6 +3444,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           // A failed action stops holding too; its reports wait for the next answer.
           if (request.downloads === "hold") await owned.downloads.finish().catch(() => undefined);
           owned.personNavigation = false;
+          owned.personNavigationOrigin = undefined;
           owned.control = "idle";
           publish(contextId, owned);
         }
@@ -3836,6 +3842,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       humanInputTail: Promise.resolve(),
       control: "idle",
       personNavigation: false,
+      personNavigationOrigin: undefined,
       ownerNavigationRestricted: false,
       shellWindow: undefined,
       blockedNavigationUrl: undefined,
@@ -3988,17 +3995,24 @@ function admitNavigation(
     originAllowed(target, temporary.origins)
   )
     return true;
+  // An address the person typed follows its redirects like any browsing, but
+  // never onto this computer or its network, whatever the page admits: a
+  // public page must not walk the person's view to an address only they can
+  // reach. A Private page admits every site, so this comes before that check;
+  // only the origin the person typed is exempt.
+  if (
+    owned.personNavigation &&
+    onThisComputerOrNetwork(target) &&
+    (owned.personNavigationOrigin === undefined ||
+      !originAllowed(target, [owned.personNavigationOrigin]))
+  )
+    return false;
   if (originAllowed(target, owned.policy.allowedOrigins)) return true;
   if (originAllowed(target, owned.userGrantedOrigins)) return true;
   // Only while the person is demonstrably driving. "idle" is nobody's action:
   // a surface nobody has touched must not grant itself an origin because a
   // page redirected on load.
   if (!allowPersonOriginGrant || owned.control !== "user" || owned.extensionLoads > 0) return false;
-  // An address the person typed follows its redirects like any browsing, but
-  // not onto this computer or its network: a public page must not walk the
-  // person's view to an address only they can reach. One the page was opened
-  // for, or one the person already reached, passed above.
-  if (owned.personNavigation && onThisComputerOrNetwork(target)) return false;
   const origin = originOf(target);
   if (origin === undefined) return false;
   if (owned.userGrantedOrigins.length >= MAX_USER_GRANTED_ORIGINS) {

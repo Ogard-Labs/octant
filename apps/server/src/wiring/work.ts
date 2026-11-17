@@ -740,6 +740,8 @@ export function wireWork(deps: WorkDependencies) {
                   browserAutomationService.holdForPerson(ownerWindowId, threadId),
                 holdForAsk: (ownerWindowId, threadId) =>
                   browserAutomationService.holdForAsk(ownerWindowId, threadId),
+                takeBack: (ownerWindowId, threadId) =>
+                  browserAutomationService.takeBack(ownerWindowId, threadId),
                 snapshotRefs: (ownerWindowId, threadId) =>
                   browserAutomationService.snapshotRefs(ownerWindowId, threadId),
               },

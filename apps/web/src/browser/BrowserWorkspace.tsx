@@ -791,7 +791,16 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         policy: {
           profileMode: "isolated",
           ...(profile === undefined ? {} : { profile }),
-          allowedOrigins: [origin],
+          // A Private page admits every site, for the person and the agent
+          // alike; a signed-in profile asks per site, and a local server's
+          // own certificate is accepted for its one origin only. The headless
+          // Browser cannot keep a typed address's redirect off this computer's
+          // network, so there the person's page holds the site they typed.
+          allowedOrigins: [
+            profile === undefined && prepared?.acceptsLocalCertificate !== true && nativeSupported
+              ? ANY_BROWSER_ORIGIN
+              : origin,
+          ],
           credentialFieldProtection: true,
           maxConcurrentTabs: MAX_BROWSER_TABS_PER_CONTEXT,
           sessionTimeoutMs: 300_000,
@@ -1146,7 +1155,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     const targetOrigin = new URL(target).origin;
     const allowed = snapshot?.context?.policy.allowedOrigins.some(
       (origin) =>
-        // The agent's Private page at Full access admits every site.
+        // A Private page admits every site.
         origin === ANY_BROWSER_ORIGIN ||
         new URL(normalizeBrowserUrl(origin)).origin === targetOrigin,
     );
@@ -1360,7 +1369,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             ? ({
                 hold: "take-over",
                 label: "Take over",
-                title: "Hold the agent's Browser calls while you use the page",
+                title: "Use the page yourself. The agent can take it back when it needs it",
               } as const)
             : undefined;
   const holdIcon = (hold: "hand-back" | "take-over" | "reclaim") =>

@@ -349,19 +349,6 @@ async function connect(url: string, token: string) {
   };
 }
 
-/** Answer the next approval the person is shown in the window, as the person would. */
-async function approveNext(fixture: Harness, decision: "approved" | "denied" = "approved") {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    const [pending] = fixture.approvals.list(windowId);
-    if (pending !== undefined) {
-      fixture.approvals.decide(windowId, { approvalId: pending.approvalId, decision });
-      return pending;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error("No approval was raised.");
-}
-
 function skipWithoutLoopback(error: unknown, context: { skip: (note: string) => void }): boolean {
   if (error instanceof Error && error.message.includes("EPERM")) {
     context.skip("the test sandbox does not permit loopback listeners");
@@ -481,7 +468,7 @@ describe("terminal Browser grant", () => {
     expect(fixture.approvals.list(windowId)).toEqual([]);
   });
 
-  it("asks the person before the first effect on an origin and runs it as the thread", async (context) => {
+  it("runs a Private page's first effect as the thread without asking the person", async (context) => {
     const fixture = harness();
     const opening = await open(fixture);
     if (opening.kind === "refused")
@@ -489,15 +476,12 @@ describe("terminal Browser grant", () => {
     const { url, token } = environmentOf(fixture, opening);
     const session = await connect(url, token);
 
-    const navigating = session.call({ operation: "navigate", url: "https://example.com/docs" });
-    const asked = await approveNext(fixture);
-    expect(asked).toMatchObject({
-      origin: "https://example.com",
-      threadId: ids.threadA,
-      mode: "code",
+    const navigated = await session.call({
+      operation: "navigate",
+      url: "https://example.com/docs",
     });
-    const navigated = await navigating;
     expect(navigated).toMatchObject({ isError: false, data: { status: "running" } });
+    expect(fixture.approvals.list(windowId)).toEqual([]);
     expect(fixture.createSpy).toHaveBeenCalledWith(
       expect.objectContaining({ windowId, threadId: decodeBrowserThreadId(ids.threadA) }),
     );
@@ -510,20 +494,21 @@ describe("terminal Browser grant", () => {
     );
   });
 
-  it("refuses the effect when the person denies the origin", async (context) => {
+  it("asks nothing of the person for a second site on a Private page", async (context) => {
     const fixture = harness();
     const opening = await open(fixture);
     if (opening.kind === "refused")
       return void context.skip("loopback listeners are not permitted");
     const { url, token } = environmentOf(fixture, opening);
     const session = await connect(url, token);
-    const navigating = session.call({ operation: "navigate", url: "https://example.com/" });
-    await approveNext(fixture, "denied");
-    expect(await navigating).toMatchObject({
-      isError: true,
-      data: { error: "browser-approval-denied" },
-    });
-    expect(fixture.createSpy).not.toHaveBeenCalled();
+    expect(
+      await session.call({ operation: "navigate", url: "https://example.com/" }),
+    ).toMatchObject({ isError: false });
+    expect(
+      await session.call({ operation: "navigate", url: "https://other.example/" }),
+    ).toMatchObject({ isError: false });
+    expect(fixture.approvals.list(windowId)).toEqual([]);
+    expect(fixture.createSpy).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a granted terminal page alive through explicit reads beyond its original idle deadline", async (context) => {
@@ -533,9 +518,9 @@ describe("terminal Browser grant", () => {
       return void context.skip("loopback listeners are not permitted");
     const { url, token } = environmentOf(fixture, opening);
     const session = await connect(url, token);
-    const navigating = session.call({ operation: "navigate", url: "https://example.com/" });
-    await approveNext(fixture);
-    expect((await navigating).isError).toBe(false);
+    expect(
+      (await session.call({ operation: "navigate", url: "https://example.com/" })).isError,
+    ).toBe(false);
     for (const operation of ["snapshot", "read-page", "screenshot", "diagnostics"] as const) {
       fixture.advance(540_000);
       expect((await session.call({ operation })).isError).toBe(false);
@@ -553,9 +538,7 @@ describe("terminal Browser grant", () => {
       return void context.skip("loopback listeners are not permitted");
     const { url, token } = environmentOf(fixture, opening);
     const session = await connect(url, token);
-    const navigating = session.call({ operation: "navigate", url: "https://example.com/" });
-    await approveNext(fixture);
-    await navigating;
+    await session.call({ operation: "navigate", url: "https://example.com/" });
     const shot = await session.call({ operation: "screenshot" });
     expect(shot.isError).toBe(false);
     expect(fixture.actSpy).toHaveBeenCalledWith(
@@ -579,18 +562,17 @@ describe("terminal Browser grant", () => {
     expect(fixture.runtime.createContext).not.toHaveBeenCalled();
   });
 
-  it("reads the open page while the thread is in Plan, asking first when the model changed", async (context) => {
+  it("reads the open page while the thread is in Plan, with no approval even after the model changed", async (context) => {
     const fixture = harness();
     const opening = await open(fixture);
     if (opening.kind === "refused")
       return void context.skip("loopback listeners are not permitted");
     const { url, token } = environmentOf(fixture, opening);
     const session = await connect(url, token);
-    const navigating = session.call({ operation: "navigate", url: "https://example.com/" });
-    await approveNext(fixture);
-    expect((await navigating).isError).toBe(false);
-    // A new model is not covered by the page's approval, so even a read asks;
-    // the person's yes in Plan answers exactly that read.
+    expect(
+      (await session.call({ operation: "navigate", url: "https://example.com/" })).isError,
+    ).toBe(false);
+    // A Private page needs no site approval, so a new model changes nothing for a read.
     fixture.threads.set(
       ids.threadA,
       codeThread(ids.threadA, {
@@ -598,31 +580,23 @@ describe("terminal Browser grant", () => {
         modelId: "model-b" as CodeThread["modelId"],
       }),
     );
-    const reading = session.call({ operation: "snapshot" });
-    await approveNext(fixture);
-    expect(await reading).toMatchObject({ isError: false });
+    expect(await session.call({ operation: "snapshot" })).toMatchObject({ isError: false });
+    expect(fixture.approvals.list(windowId)).toEqual([]);
     const clicked = await session.call({ operation: "click", selector: "a" });
     expect(clicked).toMatchObject({ isError: true, data: { error: "plan-mode-read-only" } });
   });
 
-  it("does not run an approval answered after the thread moved into Plan", async (context) => {
+  it("refuses a navigation made after the thread moved into Plan", async (context) => {
     const fixture = harness();
     const opening = await open(fixture);
     if (opening.kind === "refused")
       return void context.skip("loopback listeners are not permitted");
     const { url, token } = environmentOf(fixture, opening);
     const session = await connect(url, token);
-    const navigating = session.call({ operation: "navigate", url: "https://example.com/" });
-    for (
-      let attempt = 0;
-      attempt < 200 && fixture.approvals.list(windowId).length === 0;
-      attempt += 1
-    ) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
     fixture.threads.set(ids.threadA, codeThread(ids.threadA, { executionPolicy: "plan" }));
-    await approveNext(fixture);
-    expect(await navigating).toMatchObject({ isError: true });
+    expect(
+      await session.call({ operation: "navigate", url: "https://example.com/" }),
+    ).toMatchObject({ isError: true, data: { error: "plan-mode-read-only" } });
     expect(fixture.runtime.createContext).not.toHaveBeenCalled();
   });
 
@@ -726,20 +700,18 @@ describe("terminal Browser grant", () => {
         return void context.skip("loopback listeners are not permitted");
       const { url, token } = environmentOf(fixture, opening);
       const session = await connect(url, token);
+      let release: () => void = () => undefined;
+      vi.mocked(fixture.runtime.createContext).mockImplementation(
+        () => new Promise<void>((resolve) => (release = resolve)) as never,
+      );
       const navigating = session
         .call({ operation: "navigate", url: "https://example.com/" })
         .catch(() => "dropped");
-      for (
-        let attempt = 0;
-        attempt < 200 && fixture.approvals.list(windowId).length === 0;
-        attempt += 1
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
+      await vi.waitFor(() => expect(fixture.runtime.createContext).toHaveBeenCalled());
       await fixture.service.switchOff({ windowId, threadId: threadA, terminalId: terminalA });
+      release();
       const outcome = await navigating;
       expect(outcome === "dropped" || (outcome as { isError: boolean }).isError).toBe(true);
-      expect(fixture.runtime.createContext).not.toHaveBeenCalled();
     });
 
     it("refuses a call after the terminal closed, whether or not the host was told", async (context) => {
@@ -859,9 +831,7 @@ describe("terminal Browser grant", () => {
           threadId: ids.threadB,
         }),
       ).toMatchObject({ isError: true, data: { error: "invalid-browser-input" } });
-      const navigating = session.call({ operation: "navigate", url: "https://example.com/" });
-      await approveNext(fixture);
-      await navigating;
+      await session.call({ operation: "navigate", url: "https://example.com/" });
       expect(fixture.createSpy.mock.calls.map((call) => String(call[0].threadId))).toEqual([
         ids.threadA,
       ]);
@@ -882,9 +852,7 @@ describe("terminal Browser grant", () => {
     const { url, token } = environmentOf(fixture, opening);
     const path = new URL(url).pathname;
     const session = await connect(url, token);
-    const navigating = session.call({ operation: "navigate", url: "https://example.com/" });
-    await approveNext(fixture);
-    await navigating;
+    await session.call({ operation: "navigate", url: "https://example.com/" });
     await session.call({ operation: "read-page" });
     await fixture.service.switchOff({ windowId, threadId: threadA, terminalId: terminalA });
 
@@ -1054,7 +1022,7 @@ function typedCli(environment: Readonly<Record<string, string>>) {
 }
 
 describe("octant mcp against a terminal Browser grant", () => {
-  it("lists the thread's Browser tool and runs a call the person approves", async (context) => {
+  it("lists the thread's Browser tool and runs a Private page call without asking", async (context) => {
     const fixture = harness();
     const opening = await open(fixture);
     if (opening.kind === "refused")
@@ -1066,9 +1034,10 @@ describe("octant mcp against a terminal Browser grant", () => {
     expect(listed["result"].tools.map((tool: { name: string }) => tool.name)).toEqual([
       "octant_browser",
     ]);
-    const navigating = cli.call({ operation: "navigate", url: "https://example.com/docs" });
-    expect(await approveNext(fixture)).toMatchObject({ origin: "https://example.com" });
-    expect(await navigating).toMatchObject({ result: { isError: false } });
+    expect(
+      await cli.call({ operation: "navigate", url: "https://example.com/docs" }),
+    ).toMatchObject({ result: { isError: false } });
+    expect(fixture.approvals.list(windowId)).toEqual([]);
     cli.close();
     expect(await cli.finished).toBe(0);
     expect(cli.stderr()).toBe("");
