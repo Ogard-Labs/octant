@@ -623,7 +623,7 @@ describe("DraftThreadWorkspace", () => {
     ).toBeVisible();
     // A draft opened for a branch starts a worktree from it, and the Where chip says so.
     await user.click(screen.getByRole("button", { name: /^Where this thread works/ }));
-    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("feature/test");
+    expect(screen.getByRole("button", { name: /^Start from/ })).toHaveTextContent("feature/test");
     await user.keyboard("{Escape}");
     expect(screen.getByRole("button", { name: /^Mode:/ })).toHaveAccessibleName("Mode: Ask first");
   });
@@ -782,8 +782,8 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByRole("button", { name: "Project: Service" })).toBeVisible();
     expect(screen.getByTitle("On a server: devbox:/home/build/service")).toBeVisible();
     // A server thread starts in its folder unless the person picks a worktree there.
-    expect(screen.getByRole("button", { name: /^Where this thread works/ })).toHaveTextContent(
-      "This checkout",
+    expect(screen.getByRole("button", { name: /^Where this thread works/ })).not.toHaveTextContent(
+      "New worktree",
     );
     expect(
       screen.queryByText("The selected Project is unavailable. Choose another Project."),
@@ -1190,6 +1190,8 @@ describe("DraftThreadWorkspace", () => {
     const draft = screen.getByRole("textbox", { name: "First message" });
     await user.type(draft, "Fix search without losing this draft");
     await user.click(screen.getByRole("button", { name: /^Where this thread works/ }));
+    // The subfolder is edited in a pop-out beside the menu's row.
+    await user.click(screen.getByRole("button", { name: /^Subfolder/ }));
     const subfolder = await screen.findByLabelText("Subfolder");
     await user.clear(subfolder);
     await user.type(subfolder, "src");
@@ -1207,10 +1209,11 @@ describe("DraftThreadWorkspace", () => {
     // still holds what was typed.
     const chip = screen.getByRole("button", { name: /^Where this thread works/ });
     expect(chip).toHaveTextContent("subfolder not usable");
-    // Pressing send closed the panel; the rejected entry is still there when
-    // it opens again.
+    // The menu is closed; the rejected entry is still there when the
+    // Subfolder pop-out opens again.
     expect(chip).toHaveAttribute("aria-expanded", "false");
     await user.click(chip);
+    await user.click(screen.getByRole("button", { name: /^Subfolder/ }));
     const reopened = await screen.findByLabelText("Subfolder");
     expect(reopened).toHaveValue("../outside");
 

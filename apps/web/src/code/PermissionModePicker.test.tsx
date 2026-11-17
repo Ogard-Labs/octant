@@ -42,7 +42,7 @@ describe("the approval control", () => {
       await userEvent.click(screen.getByRole("button", { name: "Mode: Ask first" }));
       expect(await screen.findAllByRole("menuitemradio")).toHaveLength(5);
       expect(screen.getByRole("menuitemradio", { name: "Plan" })).toHaveAccessibleDescription(
-        "Read-only. No commands or file changes.",
+        "Read-only. No commands or edits.",
       );
       expect(popup).not.toHaveBeenCalled();
     } finally {
@@ -290,9 +290,7 @@ describe("Strict in the mode picker", () => {
     );
     await userEvent.click(screen.getByRole("button", { name: /^Mode:/ }));
     const strict = await screen.findByRole("menuitemcheckbox", { name: /^Strict/ });
-    expect(strict).toHaveAccessibleDescription(
-      "Octant's own limits on top. Some provider features stop working.",
-    );
+    expect(strict).toHaveAccessibleDescription("Octant's own limits on top of the provider's.");
     await userEvent.click(strict);
     expect(onStrictChange).toHaveBeenCalledWith(true);
   });

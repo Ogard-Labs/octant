@@ -662,8 +662,8 @@ describe("CodeOverview", () => {
     // composer preselects the same habit rather than a second truth.
     const habit = await screen.findByRole("combobox", { name: "New threads start in" });
     expect(habit).toHaveTextContent("This Project's current checkout");
-    expect(screen.getByRole("button", { name: /^Where this thread works/ })).toHaveTextContent(
-      "This checkout",
+    expect(screen.getByRole("button", { name: /^Where this thread works/ })).not.toHaveTextContent(
+      "New worktree",
     );
 
     await chooseSelectFieldOption(user, habit, "A managed worktree Octant creates");

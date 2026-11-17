@@ -27,7 +27,11 @@ export interface OctantPopoverProps {
   readonly keepMounted?: boolean;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
-  readonly side?: "top" | "bottom";
+  /**
+   * "inline-end" opens beside the trigger, for a row inside another popup
+   * that opens a list of its own, like a submenu.
+   */
+  readonly side?: "top" | "bottom" | "inline-end";
   readonly sideOffset?: number;
   /**
    * Accessible name for the popup, rendered as an own sr-only heading. Omit
@@ -71,7 +75,15 @@ export function OctantPopover(props: OctantPopoverProps) {
   // argument; a stable wrapper keeps the adapter's `(open: boolean) => void`
   // contract honest without giving Base UI a new function identity on every
   // render, which previously reset its own mount-transition tracking.
-  const { side, trigger, settle } = useSideWithRoom<HTMLButtonElement>(props.side ?? "bottom");
+  const besideTrigger = props.side === "inline-end";
+  const {
+    side: roomSide,
+    trigger,
+    settle,
+  } = useSideWithRoom<HTMLButtonElement>(
+    props.side === undefined || besideTrigger ? "bottom" : props.side,
+  );
+  const side = besideTrigger ? "inline-end" : roomSide;
   const handleOpenChange = useCallback(
     (open: boolean) => {
       settle(open);
@@ -106,7 +118,9 @@ export function OctantPopover(props: OctantPopoverProps) {
         : {
             "data-variant": props.triggerVariant === "ghost-icon" ? "ghost" : props.triggerVariant,
           })}
-      title={props.triggerTooltip === undefined ? props.triggerLabel : undefined}
+      // The native tooltip names a chip whose words may be cut; while the
+      // popup is open it would sit on top of the popup's first rows.
+      title={props.triggerTooltip === undefined && !props.open ? props.triggerLabel : undefined}
       {...props.triggerDataAttributes}
       {...(props.triggerAriaPressed === undefined
         ? {}

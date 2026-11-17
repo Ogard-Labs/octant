@@ -3193,6 +3193,11 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   text-overflow: ellipsis;
 }
 
+.composer-folder-selector__chevron {
+  flex: none;
+  opacity: 0.7;
+}
+
 /* The Project menu is the shared popover float: its face, shadow, motion and
    4px offset come from the popover recipe, and Base UI opens it on the side of
    the trigger with room. Only its size is written here: the popup's body is

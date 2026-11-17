@@ -2,7 +2,17 @@ import { homeRelativePath } from "../lib/homeRelativePath";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { GithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import type { ProjectId } from "@octant/contracts/projects";
-import { ArrowLeft, Check, FolderGit2, FolderOpen, FolderPlus, Network, Search } from "../ui/icons";
+import {
+  ArrowLeft,
+  Check,
+  ChevronDown,
+  Folder,
+  FolderGit2,
+  FolderOpen,
+  FolderPlus,
+  Network,
+  Search,
+} from "../ui/icons";
 import {
   lazy,
   Suspense,
@@ -132,9 +142,17 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
         side="bottom"
         title="Choose a Project"
         trigger={
+          // The same chip as "where this thread works" beside it: icon, name,
+          // chevron. Without a chevron the Project read as a label, not a
+          // control, and stood out bolder than its neighbour.
           <>
-            <FolderOpen aria-hidden="true" size={12} />
+            <Folder aria-hidden="true" size={14} />
             <span className="composer-folder-selector__label">{selectionLabel}</span>
+            <ChevronDown
+              aria-hidden="true"
+              className="composer-folder-selector__chevron"
+              size={12}
+            />
           </>
         }
         triggerClassName="composer-folder-selector__trigger composer-tray__item"

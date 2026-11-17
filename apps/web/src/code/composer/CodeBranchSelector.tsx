@@ -1,5 +1,5 @@
 import type { CodeWorktreeRef } from "@octant/contracts/code";
-import { Check, ChevronDown, GitBranch, Search } from "../../ui/icons";
+import { Check, ChevronDown, ChevronRight, GitBranch, Search } from "../../ui/icons";
 import { useMemo, useRef, useState } from "react";
 import { OctantSwitch } from "../../ui/base/OctantSwitch";
 import { OctantBadge } from "../../ui/base/OctantBadge";
@@ -21,6 +21,14 @@ export interface CodeBranchSelectorProps {
   readonly onSelectRef: (ref: CodeWorktreeRef) => void;
   readonly onStartFromOriginChange?: (value: boolean) => void;
   readonly startFromOriginAvailable?: boolean;
+  /**
+   * "row" draws the trigger as a row of the Where menu ("Start from  main ›")
+   * and opens the list beside it; the origin switch then lives in Worktree
+   * options, not at the foot of the list. Defaults to the composer chip.
+   */
+  readonly presentation?: "chip" | "row";
+  /** The row's name, when drawn as a row. */
+  readonly rowLabel?: string;
 }
 
 /**
@@ -42,6 +50,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
   }, [props.refs, query]);
 
   const triggerLabel = props.branch;
+  const asRow = props.presentation === "row";
 
   return (
     <OctantPopover
@@ -55,17 +64,31 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
         }
       }}
       open={open}
-      side="top"
+      side={asRow ? "inline-end" : "top"}
       title="Choose base branch"
       trigger={
-        <>
-          <GitBranch aria-hidden="true" size={12} />
-          <span className="code-branch-selector__trigger-label">{triggerLabel}</span>
-          <ChevronDown aria-hidden="true" className="code-branch-selector__chevron" size={12} />
-        </>
+        asRow ? (
+          <>
+            <span className="code-where__row-name">{props.rowLabel ?? "Start from"}</span>
+            <span className="code-where__row-value">
+              <span className="code-where__row-value-text">{triggerLabel}</span>
+              <ChevronRight aria-hidden="true" size={12} />
+            </span>
+          </>
+        ) : (
+          <>
+            <GitBranch aria-hidden="true" size={12} />
+            <span className="code-branch-selector__trigger-label">{triggerLabel}</span>
+            <ChevronDown aria-hidden="true" className="code-branch-selector__chevron" size={12} />
+          </>
+        )
       }
-      triggerClassName="code-branch-selector__trigger composer-tray__item"
-      triggerLabel="Base branch"
+      triggerClassName={
+        asRow
+          ? "code-where__row code-where__row--action"
+          : "code-branch-selector__trigger composer-tray__item"
+      }
+      triggerLabel={asRow ? `${props.rowLabel ?? "Start from"}: ${triggerLabel}` : "Base branch"}
       {...(props.disabled === undefined ? {} : { triggerDisabled: props.disabled })}
     >
       <label className="octant-popover-search code-branch-selector__search">
@@ -125,7 +148,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
           })
         )}
       </div>
-      {props.onStartFromOriginChange !== undefined ? (
+      {props.onStartFromOriginChange !== undefined && !asRow ? (
         <div className="code-branch-selector__footer">
           <span className="oct-menu-option">Start from origin</span>
           <OctantSwitch

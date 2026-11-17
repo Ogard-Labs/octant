@@ -36,8 +36,8 @@ import {
 } from "../ui/base/OctantMenu";
 import { useSideWithRoom } from "../ui/base/popupSide";
 
-const PROVIDER_REVIEW_DETAIL = "The provider's own reviewer approves each action.";
-const SHIELD_REVIEW_DETAIL = "Octant Shield approves each action and asks you when unsure.";
+const PROVIDER_REVIEW_DETAIL = "The provider's reviewer approves each action.";
+const SHIELD_REVIEW_DETAIL = "Octant Shield approves, and asks when unsure.";
 
 /** What Auto means for this thread, by who reviews it. */
 export function autoDetail(review: AutoReview | undefined): string {
@@ -73,13 +73,13 @@ export const PERMISSION_MODE_OPTIONS: ReadonlyArray<{
   {
     id: "accept-edits",
     label: "Accept edits",
-    detail: "Edits files in the folder. Asks before commands.",
+    detail: "Edits files freely. Asks before commands.",
   },
-  { id: "plan", label: "Plan", detail: "Read-only. No commands or file changes." },
+  { id: "plan", label: "Plan", detail: "Read-only. No commands or edits." },
   {
     id: "full-access",
     label: "Full access",
-    detail: "No sandbox and no prompts. Every action is still recorded.",
+    detail: "No sandbox, no prompts. Still recorded.",
   },
 ];
 
@@ -179,7 +179,7 @@ export const STRICT_DETAIL =
  * lines under a two-word name and outweighed every mode above it; Settings,
  * which has the room, keeps the list.
  */
-const STRICT_MENU_DETAIL = "Octant's own limits on top. Some provider features stop working.";
+const STRICT_MENU_DETAIL = "Octant's own limits on top of the provider's.";
 const STRICT_WINDOWS_DETAIL = "Strict needs a sandbox Windows doesn't have yet.";
 
 /** What a level below Full access runs with on Windows, said wherever it is offered. */

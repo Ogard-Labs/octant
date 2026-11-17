@@ -347,7 +347,6 @@ describe("CodeComposerAdapter", () => {
     expect(dock?.textContent).toContain("My Repo");
     expect(dock?.querySelector(".host-selector")).not.toBeNull();
     expect(dock?.querySelector(".host-selector--environment")).not.toBeNull();
-    expect(dock?.textContent).toContain("This checkout");
     expect(dock?.textContent).toContain("development");
     const text = dock?.textContent ?? "";
     expect(text.indexOf("My Repo")).toBeLessThan(text.indexOf("development"));
@@ -459,9 +458,10 @@ describe("CodeComposerAdapter", () => {
     expect(screen.queryByRole("button", { name: "Base branch" })).toBeNull();
   });
 
-  it("names the branch and the checkout on one chip once a Project is chosen", () => {
+  it("names the branch on one quiet chip once a Project is chosen", () => {
     render(<CodeComposerAdapter {...defaultProps} />);
-    expect(whereChip()).toHaveTextContent("development · This checkout");
+    expect(whereChip()).toHaveTextContent("development");
+    expect(whereChip()).not.toHaveTextContent("This checkout");
     expect(screen.queryByRole("button", { name: "Base branch" })).toBeNull();
   });
 
@@ -562,7 +562,10 @@ describe("CodeComposerAdapter", () => {
       />,
     );
     await user.click(whereChip());
-    expect(screen.getByRole("switch", { name: "Start from origin" })).toBeChecked();
+    // Where a worktree is fetched from is a rare setting, kept in the
+    // Worktree options dialog rather than the menu.
+    await user.click(screen.getByRole("button", { name: /Worktree options/ }));
+    expect(await screen.findByRole("switch", { name: "Start from origin" })).toBeChecked();
     expect(screen.getByText("Fetch and start from origin/development")).toBeVisible();
   });
 
@@ -621,7 +624,13 @@ describe("CodeComposerAdapter interactions", () => {
     await act(async () => {
       whereChip().dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(document.querySelector('[role="switch"]')).toHaveAttribute("aria-checked", "false");
+    await act(async () => {
+      screen
+        .getByRole("button", { name: /Worktree options/ })
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const originSwitch = () => screen.getByRole("switch", { name: "Start from origin" });
+    expect(originSwitch()).toHaveAttribute("aria-checked", "false");
 
     await act(async () => {
       root.render(
@@ -633,9 +642,14 @@ describe("CodeComposerAdapter interactions", () => {
       );
     });
 
-    expect(document.querySelector('[role="switch"]')).toHaveAttribute("aria-checked", "true");
-    root.unmount();
-    container.remove();
+    try {
+      expect(originSwitch()).toHaveAttribute("aria-checked", "true");
+    } finally {
+      // Unmounted even when the check fails, so a failure here cannot leave a
+      // second composer in the document for the tests after it.
+      root.unmount();
+      container.remove();
+    }
   });
 
   it("submits the access posture the composer chose", async () => {
@@ -881,7 +895,7 @@ describe("CodeComposerAdapter interactions", () => {
     await act(async () => {
       whereChip().dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    const trigger = document.querySelector('button[aria-label="Base branch"]');
+    const trigger = document.querySelector('button[aria-label^="Start from"]');
     expect(trigger).not.toBeNull();
     await act(async () => {
       trigger!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -1019,7 +1033,7 @@ describe("CodeComposerAdapter interactions", () => {
     await waitFor(() => expect(execute).toHaveBeenCalled());
 
     await user.click(whereChip());
-    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("fix/parser");
+    expect(screen.getByRole("button", { name: /^Start from/ })).toHaveTextContent("fix/parser");
     await user.keyboard("{Escape}");
     await user.type(screen.getByLabelText("First message"), "Fix the failing parser check");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
@@ -1060,7 +1074,7 @@ describe("CodeComposerAdapter interactions", () => {
         />,
       );
     });
-    const trigger = () => document.querySelector('button[aria-label="Base branch"]');
+    const trigger = () => document.querySelector('button[aria-label^="Start from"]');
     await act(async () => {
       whereChip().dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
@@ -1171,7 +1185,8 @@ describe("CodeComposerAdapter interactions", () => {
     const rendered = render(view);
     expect(whereChip()).toHaveTextContent("New worktree");
     await user.click(whereChip());
-    expect(screen.getByRole("switch", { name: /Start from origin/ })).toHaveAttribute(
+    await user.click(screen.getByRole("button", { name: /Worktree options/ }));
+    expect(await screen.findByRole("switch", { name: /Start from origin/ })).toHaveAttribute(
       "aria-checked",
       "true",
     );
@@ -1181,12 +1196,13 @@ describe("CodeComposerAdapter interactions", () => {
 
     expect(whereChip()).toHaveTextContent("New worktree");
     await user.click(whereChip());
-    expect(screen.getByRole("switch", { name: /Start from origin/ })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /^Start from/ })).toHaveTextContent("fix/login");
+    expect(await screen.findByRole("radio", { name: /New worktree/ })).toHaveAttribute(
       "aria-checked",
       "true",
     );
-    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("fix/login");
-    expect(await screen.findByRole("radio", { name: /New worktree/ })).toHaveAttribute(
+    await user.click(screen.getByRole("button", { name: /Worktree options/ }));
+    expect(await screen.findByRole("switch", { name: /Start from origin/ })).toHaveAttribute(
       "aria-checked",
       "true",
     );
@@ -1304,8 +1320,8 @@ describe("CodeComposerAdapter interactions", () => {
 
       expect(screen.getByText("devbox:/home/build/service")).toBeVisible();
       // A habit remembered on this host does not choose a worktree on a server.
-      expect(whereChip()).toHaveTextContent("This checkout");
-      await waitFor(() => expect(whereChip()).toHaveTextContent("main · This checkout"));
+      expect(whereChip()).not.toHaveTextContent("New worktree");
+      await waitFor(() => expect(whereChip()).toHaveTextContent("main"));
       expect(screen.getByRole("button", { name: /^Mode:/ })).toHaveAccessibleName(
         "Mode: Full access",
       );

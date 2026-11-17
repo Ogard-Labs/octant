@@ -662,23 +662,26 @@ as a sunken field. Code welcome keeps one stable question while Project and
 Environment sit on the context row above the composer
 (`.composer-tray--start`, rendered before the card inside `.composer-stack`),
 on the page ground with no band chrome. The **Where** chip joins that row
-once a Project is chosen. It reads the branch and the place, such as `main ·
-This checkout` or `octant/fix-login · New worktree`, and replaces the former
-folder, branch and checkout chips. It opens one panel, "Where should this
-thread work?", a radio group (arrow keys move, Escape closes and returns focus
-to the chip): **This checkout** names the Project's folder in meta ink and
-"on <current branch>", read only; **New worktree** says "isolated copy, its
-own branch". The panel is one fixed size (360px wide) in every state: the
-base-branch picker, the branch name, the "Start from origin" switch, the line
-saying what it resolved to and the Remote are always laid out, quiet and out of
-reach while This checkout is chosen, and fill in as their facts arrive, so
-choosing, toggling or a fetch finishing never resizes or moves it. It hangs
-above the chip, aligned to its start. The same holds for every start-row popup
-(base-branch picker, Project, Create from…): fixed frame, list scrolls inside,
-skeleton rows while loading, lists read before it opens
-([DESIGN.md](../../DESIGN.md) principle 7). Below sit a quiet **Subfolder** row (the working folder
-fields) and, when a Project's remembered default can be recorded, **Remember
-for this Project**. Choosing only sets the draft's workspace; the worktree is
+once a Project is chosen, beside the Project chip and drawn the same way: a
+quiet chip with its icon, its words and a chevron. It names the branch, such
+as `main`, or `New worktree · from main`. It opens a plain menu of 28px rows,
+"Where this thread works" (maintainer decision, 2026-11-17, after comparing a
+clickable prototype of two directions): a radio pair (arrow keys move, Escape
+closes and returns focus to the chip), **This checkout** "on <branch>" with
+the folder's path as its tooltip and **New worktree** "own branch"; then
+**Branch** (a fact for this checkout) or **Start from ›** (the base-branch
+list, opening beside the row); **Subfolder ›** (the working-folder field in a
+pop-out beside the row, which keeps what was typed when it closes); **Remember
+for this Project** as a check, where it can be recorded; and **Worktree
+options…**, a small dialog with "Start from origin", the Remote, what the
+source resolved to and the branch name the host will create, reachable once
+New worktree is chosen. The menu keeps one size in both states: the branch row
+swaps its words, never its place. It hangs above the chip, aligned to its
+start. Every start-row popup (base-branch list, Project, Create from…) keeps a
+fixed frame: the list scrolls inside, skeleton rows while loading, lists read
+before it opens ([DESIGN.md](../../DESIGN.md) principle 7). A chip's native
+tooltip is not shown while its popup is open, so it never covers the popup's
+first rows. Choosing only sets the draft's workspace; the worktree is
 created with the thread. The chip's width may follow the choice; nothing else
 in the row moves when the panel opens. Existing worktrees are not offered: the
 host cannot start a new thread in one. Work keeps its working-folder chip. Environment is the

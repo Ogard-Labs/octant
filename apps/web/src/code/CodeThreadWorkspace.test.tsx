@@ -2573,9 +2573,7 @@ describe("CodeThreadWorkspace", () => {
     );
     const mode = screen.getByRole("button", { name: /^Mode:/ });
     expect(mode).toHaveAccessibleName("Mode: Full access");
-    expect(mode).toHaveAccessibleDescription(
-      "No sandbox and no prompts. Every action is still recorded.",
-    );
+    expect(mode).toHaveAccessibleDescription("No sandbox, no prompts. Still recorded.");
   });
 
   it("keeps sent messages free of access captions", () => {

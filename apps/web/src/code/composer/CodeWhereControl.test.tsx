@@ -1,5 +1,5 @@
 import type { CodeNewThreadWorkspace } from "@octant/contracts/projects";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -18,13 +18,14 @@ function Harness(
   const { initial: _initial, onChosen, ...rest } = props;
   return (
     <CodeWhereControl
-      baseBranchPicker={<button type="button">Base branch</button>}
+      baseBranchPicker={<button type="button">Start from: main</button>}
       branch="main"
       onWorkspaceChange={(next) => {
         onChosen?.(next);
         setWorkspace(next);
       }}
       projectRoot="~/Dev/auroradocs"
+      sourceControl={<p>Source settings</p>}
       workspace={workspace}
       worktreeBranch="octant/fix-login"
       {...rest}
@@ -33,47 +34,75 @@ function Harness(
 }
 
 const chip = () => screen.getByRole("button", { name: /^Where this thread works/ });
+const panel = () => document.querySelector(".code-where__panel") as HTMLElement;
 
 describe("CodeWhereControl", () => {
-  it("reads the branch and the place on one chip for each choice", async () => {
+  it("says the branch on the chip, and a new worktree and where it starts once chosen", async () => {
     const user = userEvent.setup();
     render(<Harness />);
-    expect(chip()).toHaveTextContent("main · This checkout");
+    expect(chip()).toHaveTextContent("main");
+    expect(chip()).not.toHaveTextContent("This checkout");
 
     await user.click(chip());
     await user.click(screen.getByRole("radio", { name: /New worktree/ }));
-    expect(chip()).toHaveTextContent("octant/fix-login · New worktree");
+    expect(chip()).toHaveTextContent("New worktree · from main");
   });
 
-  it("names the Project folder and the current branch under This checkout", async () => {
+  it("is a plain menu: the two choices, the branch, the subfolder, and Remember", async () => {
     const user = userEvent.setup();
-    render(<Harness />);
-    await user.click(chip());
-    expect(screen.getByRole("heading", { name: "Where should this thread work?" })).toBeVisible();
-    expect(screen.getByRole("radio", { name: /This checkout/ })).toHaveTextContent(
-      "~/Dev/auroradocs · on main",
+    render(
+      <Harness
+        remembered={{ value: "current-checkout", onChange: vi.fn() }}
+        subfolder={<input aria-label="Subfolder field" />}
+      />,
     );
-    expect(screen.getByRole("radio", { name: /This checkout/ })).toHaveAttribute(
+    await user.click(chip());
+    const menu = within(panel());
+    expect(menu.getByText("Where this thread works")).toBeVisible();
+    expect(menu.getByRole("radio", { name: /This checkout/ })).toHaveTextContent("on main");
+    expect(menu.getByRole("radio", { name: /This checkout/ })).toHaveAttribute(
       "aria-checked",
       "true",
     );
+    // This checkout says the branch it is on; there is nothing to choose.
+    expect(menu.getByText("Branch")).toBeVisible();
+    expect(menu.queryByRole("button", { name: "Start from: main" })).toBeNull();
+    expect(menu.getByRole("button", { name: /^Subfolder/ })).toHaveTextContent("Whole folder");
+    expect(menu.getByRole("checkbox", { name: "Remember for this Project" })).toBeVisible();
+    expect(menu.getByRole("button", { name: /Worktree options/ })).toBeDisabled();
+    // The folder's path is the choice's tooltip, not a line of its own.
+    expect(menu.getByRole("radio", { name: /This checkout/ })).toHaveAttribute(
+      "title",
+      "~/Dev/auroradocs",
+    );
   });
 
-  it("keeps the worktree rows laid out and out of reach until a new worktree is chosen, and starts nothing by choosing", async () => {
+  it("swaps the branch row for where a worktree starts without moving the menu, and starts nothing by choosing", async () => {
     const user = userEvent.setup();
     const onChosen = vi.fn();
     render(<Harness onChosen={onChosen} />);
     await user.click(chip());
-    const base = screen.getByRole("button", { name: "Base branch" });
-    expect(base.closest("[inert]")).not.toBeNull();
-
-    await expectPopupUnmoved(document.querySelector(".code-where__panel") as Element, async () => {
+    await expectPopupUnmoved(panel(), async () => {
       await user.click(screen.getByRole("radio", { name: /New worktree/ }));
     });
     expect(onChosen).toHaveBeenCalledExactlyOnceWith("managed-worktree");
-    expect(base.closest("[inert]")).toBeNull();
-    expect(screen.getByText("octant/fix-login")).toBeVisible();
-    expect(screen.getByText("named for you")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Start from: main" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Worktree options/ })).toBeEnabled();
+  });
+
+  it("opens the worktree's own settings in a dialog that names the branch it makes", async () => {
+    const user = userEvent.setup();
+    render(<Harness initial="managed-worktree" />);
+    await user.click(chip());
+    await user.click(screen.getByRole("button", { name: /Worktree options/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Worktree options" });
+    expect(dialog).toHaveTextContent("octant/fix-login");
+    expect(within(dialog).getByText("Source settings")).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("dialog", { name: "Worktree options" })).toBeNull();
+    // The row that opened the dialog sits in a menu that has closed, so the
+    // keyboard comes back to the chip instead of to nothing.
+    expect(chip()).toHaveFocus();
   });
 
   it("moves the choice with the arrow keys, closes on Escape and returns focus to the chip", async () => {
@@ -91,22 +120,21 @@ describe("CodeWhereControl", () => {
     expect(chip()).toHaveFocus();
   });
 
-  it("holds the subfolder row and says in words when the subfolder is refused", async () => {
+  it("says in words when the subfolder is refused, and edits it in a pop-out beside its row", async () => {
     const user = userEvent.setup();
     render(
       <Harness
-        subfolder={
-          <label>
-            Subfolder <input defaultValue="." />
-          </label>
-        }
+        subfolder={<input aria-label="Subfolder field" defaultValue="../out" />}
         subfolderName="../out"
         subfolderValid={false}
       />,
     );
     expect(chip()).toHaveTextContent("subfolder not usable");
     await user.click(chip());
-    expect(screen.getByLabelText("Subfolder")).toBeVisible();
+    const row = screen.getByRole("button", { name: /^Subfolder/ });
+    expect(row).toHaveTextContent("Not usable");
+    await user.click(row);
+    expect(await screen.findByLabelText("Subfolder field")).toBeVisible();
   });
 
   it("offers Remember for this Project only where it can be recorded, and records the choice", async () => {
@@ -114,12 +142,12 @@ describe("CodeWhereControl", () => {
     const onChange = vi.fn();
     const { rerender } = render(<Harness initial="managed-worktree" />);
     await user.click(chip());
-    expect(screen.queryByRole("switch", { name: "Remember for this Project" })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: "Remember for this Project" })).toBeNull();
 
     rerender(
       <Harness initial="managed-worktree" remembered={{ value: "current-checkout", onChange }} />,
     );
-    await user.click(screen.getByRole("switch", { name: "Remember for this Project" }));
+    await user.click(screen.getByRole("checkbox", { name: "Remember for this Project" }));
     expect(onChange).toHaveBeenCalledWith("managed-worktree");
   });
 });

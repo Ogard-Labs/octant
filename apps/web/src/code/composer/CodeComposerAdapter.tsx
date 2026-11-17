@@ -845,6 +845,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       onOpen={loadWorktreeRefs}
       onSelectRef={handleSelectRef}
       onStartFromOriginChange={setStartFromOriginOverride}
+      presentation="row"
       remoteName={resolvedWorktreeRemote}
       startFromOrigin={startFromOrigin}
       startFromOriginAvailable={
