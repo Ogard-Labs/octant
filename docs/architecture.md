@@ -18724,117 +18724,77 @@ cards; general Azure CLI credentials remain unavailable by design.
   actor; a window on this host or a device the host's own person paired changes the list (maintainer decision, 2026-11-12). The journal holds changes, not the list, so a group a later Octant
   adds is protected on every host. Changes reach every launch prepared after
   them.
-- **Linux access-time mediation is not yet shipped.** The maintainer approved
-  continued development for explicitly opted-in hosts running a compatible
-  custom kernel (2026-11-16). This supersedes the earlier development pause;
-  it authorizes no automatic kernel installation, bootloader change or reboot.
-  The candidate remains unselected with zero production coverage until the
-  complete implementation and native proofs below pass. Existing Bubblewrap
-  file covers are prepared at launch; they do not enforce the complete rule
-  for absent files or later companion/alias changes. The replacement must use
-  the original structured rules and exact own-account exceptions, preserve live
-  permitted files, durable writes, real hardlinks and native notifications, and
-  leave Full access unchanged. Modern pre-access hooks cover new mappings as
-  well as reads, but the measured stock listener permits unanswered and future
-  reads after its group closes. Its lifecycle cannot be a fail-closed guard.
-  An original credential-bound kernel admission core is being built only in an
-  owned networkless disposable guest. It has finite requests, one-use enrollment
-  after `no_new_privs`, and broker-loss refusal; its production coverage remains
-  zero. Complete namespace and pre-effect mutation ordering, effective policy,
-  aliases and process/data routes, the production launch and native compatibility
-  proof remain required before any production integration. No live kernel,
-  driver, boot configuration or installed host policy changes as part of this
-  development path. Prior admitted operations and mappings need not be erased.
-  A mediated workload must not weaken that live policy by destructively moving
-  or removing a current companion or ancestor when doing so would declassify
-  still-existing protected content. The pre-effect admission binds the actual
-  operation, source, destination and current namespace epoch. This adds no
-  content denial for public keys: their reads/writes, new public-key creation,
-  unrelated aliases and legitimate permitted namespace operations remain
-  available. Host/unconfined changes and Full access retain their normal
-  behavior. There is no sticky per-launch protection floor and no freeze of
-  external writers while userspace inspects metadata. An own-account exception
-  retains its initially enrolled lexical/canonical forms; replacing that path
-  with a link never transfers the exception to a different sign-in.
-  Audited creation entries prepare the actual parent, copied name and any
-  held hardlink source before inode locks. A task/context-bound one-use scope
-  compares those identities and the current epoch immediately before the
-  filesystem effect; every return and delegation retry retires it. Filesystem
-  Unix socket binding follows the same rule. Its failed-bind rollback obtains
-  a fresh UNLINK decision outside the parent lock, then revalidates the exact
-  created socket before removal. It never removes a replacement. Only that
-  rollback may wait through a pending signal, within the existing two-second
-  admission ceiling, so ordinary interruption need not strand its own new
-  node. Broker loss, policy refusal and changed identity or epoch still refuse;
-  unused approval is discarded. Other admission waits remain interruptible.
-  The disposable candidate's owned session prepares the unchanged shared
-  Bubblewrap builder in a separate trusted worker, carrying the exact protected
-  file configuration and structured policy. Real ABI/status and a policy
-  snapshot precede command creation; a second barrier holds exec until the
-  command's actual PID/birth receipt is durable. Private control descriptors
-  never become command stdio. Input, output and error streams use bounded
-  backpressure, with no normal-output drain timeout shorter than the caller's
-  deadline. Closed input refuses before dispatch; an accepted write that loses
-  its pipe reports uncertainty and is never replayed. Preparation shares the
-  caller's finite deadline, capped at this candidate's existing 180 seconds.
-  Cancellation or owner-channel loss closes admission before owned group
-  cleanup. Cleanup has its own four-second bound and reports uncertainty for
-  unconfirmed identities, groups or pipe retirement; relay exit alone is not
-  proof that every descendant joined. The existing canonical owner-only
-  receipt directory is denied read/write by the actual capsule. This port is
-  not selected by production launchers, the device remains root-only, and
-  complete eligible-host lifecycle, data-route and controller reliability
-  acceptance remains required with production coverage zero.
-  Metadata mediation includes a protected symlink's own inode and its followed
-  target; a dangling protected link still has link text and metadata. Blocking
-  preparation belongs before inode locks, under one paired user-operation
-  scope. The final LSM check only compares the actual native identity,
-  operation, live context and current epoch and consumes that scope's decision.
-  Every return clears unused state, and fork, clone and exec inherit none.
-  An unprepared path in the current restricted context refuses until its compatibility is proved; a
-  callback never waits for broker metadata while holding an inode lock.
-  The disposable candidate covers ordinary mode, owner, timestamp and truncate
-  requests at their four pinned entries: preparation precedes the inode lock,
-  and the final write comparison immediately precedes `notify_change`.
-  Delegation retries end the consumed scope before waiting and prepare a fresh
-  attempt. Early refusal retains mount-write and automatic-scope cleanup.
-  Ordinary filesystem-attribute writes prepare in the three audited user
-  entry points: `ioctl_setflags`, `ioctl_fssetxattr` and `file_setattr`. Each
-  uses its actual held file or resolved path after copying values and acquiring
-  mount-write access. Its automatic scope ends before mount-write cleanup,
-  including on refusal. The common setter only compares the decision after
-  the existing security check, immediately before the filesystem effect under
-  the inode lock; it never prepares or waits. Ordinary attribute reads prepare
-  READ in `ioctl_getflags`, `ioctl_fsgetxattr` and `file_getattr`, using their
-  actual held file or resolved path. Their scopes end before copying the
-  admitted result to userspace. The exported getter consumes only an exact READ
-  decision. Only the setter's private internal getter inspects its exact
-  prepared WRITE without consuming it; the final setter consumes once. Both
-  retain native checks and perform no broker I/O. The private purpose is not
-  caller-selectable, and an ordinary read cannot borrow WRITE authority. Failed
-  inspection exits through unlock and outer cleanup, without retry or reuse.
-  Native acceptance requires refusing a protected held attribute read with its
-  output unchanged, and refusing the protected inode's NODUMP
-  change with flags and metadata unchanged while the public file's same toggle,
-  readback, restoration and permitted writes succeed.
-  The bounded ordinary ioctl-read correction covers `FIONREAD` and `FIOQSIZE`
-  on regular file descriptors through the native and conditional compat LSM
-  entries before copyout. Protected observations require pre-effect EACCES with
-  output sentinels unchanged; public files, pipes and sockets retain their
-  permitted observations. Actual native and compat acceptance for this added
-  correction remains pending; it is not a generic ioctl framework.
-  This is not a global `inode_setattr` or ioctl guard. Other attribute routes,
-  internal privilege clearing during writes, other filesystem ioctls, stacked
-  filesystems and kernel credential overrides remain unfinished and must be
-  proved before any production coverage is enabled;
-  the candidate's production coverage remains zero. A global callback without
-  their pre-lock lifetimes would break permitted writes or wait under locks.
-  _Rationale._ Otherwise deleting a readable `name.pub` marker could make its
-  still-existing custom-named private key readable. Retaining all former secret
-  inodes forever would instead reject legitimate host changes and require
-  additional inode-lifetime state. Operation-specific namespace admission keeps
-  the live policy without either shortcut. Complete implementation and native
-  proof of this boundary remain required above.
+- **Linux access-time mediation is an explicitly opted-in production preview.**
+  A compatible custom-kernel host may enroll it with
+  `OCTANT_LINUX_MEDIATION_PREVIEW=1` (maintainer approval, 2026-11-16).
+  Octant never installs a kernel, changes the bootloader or reboots the host.
+  The packaged relay must report the exact UAPI and production coverage bit
+  before a launch can be selected. Missing eligibility, a zero-coverage
+  component or a selected rule outside the proven backend refuses before the
+  workload starts. Stock-kernel Bubblewrap remains the backend for rules it can
+  enforce; it is never presented as late-name, same-filesystem read-only or
+  complete alias mediation.
+- **The original structured policy remains authoritative.** The broker consumes
+  the current read-only roots, protected paths and exact own-account exceptions,
+  indexes actual device/inode identities without opening content, and retains
+  invalid Linux byte names. It permits ordinary Project work, public keys,
+  durable writes, hardlinks, native notifications, installs, builds and tests
+  where the policy permits them. Full access outside Strict and unconfined host
+  changes are unchanged. Replacing an enrolled account path with a symlink does
+  not transfer its exception.
+- **Admission follows the effect.** One-use enrollment begins only after
+  `no_new_privs`; inherited proc-memory/pidfd and asynchronous contexts refuse.
+  Blocking broker work happens before native locks. The final LSM checks compare
+  the exact task/context, object, operation and namespace epoch without waiting
+  under a filesystem lock, then consume the decision. Fork, clone and exec
+  inherit no pending scope. Broker loss, timeout, replay, stale epoch, identity
+  change and unprepared restricted routes fail closed.
+- **The covered data and metadata routes form one production unit.** Reads,
+  writes, truncate, mapping/protection, execution, descriptor receipt,
+  process-memory inspection, supported asynchronous fallback, regular-file
+  metadata, link metadata, xattrs, ACLs, mode/owner/time, file attributes,
+  generation/block-size queries, FIEMAP, FIONREAD/FIOQSIZE and seek observations
+  are admitted at their audited entries. Output-changing reads refuse before
+  copyout. Write preparation precedes locks and the comparison immediately
+  precedes the effect. Public file, pipe and socket controls preserve their
+  normal behavior.
+- **Namespace effects use one-use pre-effect identities.** Create, hardlink,
+  unnamed-file link, Unix-socket bind, unlink, rmdir and rename bind the actual
+  parent/source/destination, copied byte names, flags and current epoch. A
+  failed socket bind obtains a fresh UNLINK decision outside the parent lock
+  and removes only its retained created socket. Destructive companion or
+  ancestor changes that would declassify still-existing protected content
+  refuse; unrelated aliases and legitimate namespace changes remain available.
+  Outside mount and namespace mutations advance the epoch so a stale userspace
+  allow cannot cross them.
+- **OverlayFS is admitted at its backing objects.** The audited Linux 6.18 open
+  path admits the current data inode before copy-up and the resolved real inode
+  before backing-file open. Its private metacopy marker lookup is allowed only
+  during the kernel's unconfined mounter-credential override; a direct enrolled
+  caller, any other xattr, an enrolled mounter or a dead broker uses normal
+  admission. Private backing reads and writes refuse, ordinary overlay reads
+  succeed, and denied writes leave lower/upper content unchanged. Other stacked
+  filesystems and unaudited routes fail closed.
+- **Production lifecycle is owned and finite.** At server startup Octant captures
+  the packaged native relay, policy worker and supervisor. A launch copies their
+  hash-addressed images into a private host-owned runtime, writes a one-use
+  private configuration and holds exec until the command's PID/birth receipt is
+  durable. Control descriptors never become command stdio. Stdio is bounded and
+  backpressured; accepted writes are never replayed after uncertainty.
+  Cancellation, deadline or owner-channel loss closes kernel admission before
+  bounded process-group and adopted-descendant cleanup. Unconfirmed identity,
+  pipe retirement or descendant join stays uncertain and blocks replacement
+  admission.
+- **Native proof is the coverage gate.** The pinned networkless Linux 6.18 guest
+  requires the effective policy, same-filesystem read-only, protected and
+  credential paths, late-created names, aliases, held descriptors, mappings,
+  metadata, namespace effects, credential override, OverlayFS, broker loss,
+  lifecycle, packaged supervisor and actual Bun/Node workloads to pass together.
+  The hosted parser rejects missing or partial receipts. The stock modern
+  pre-access experiment remains negative evidence because pending and future
+  reads survive listener loss. Credentialed-provider, signed-package and live
+  eligible-host checks stay explicit maintainer acceptance in OCT-764; they do
+  not weaken or substitute for this implementation gate.
 - **Work goes through the channel instead of the file.** SSH through the
   agent socket in `SSH_AUTH_SOCK`, a password manager's SSH agent included;
   Git over HTTPS through the system credential helper, which reaches the
