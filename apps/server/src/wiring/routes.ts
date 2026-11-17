@@ -163,10 +163,11 @@ export type RoutesDependencies = {
   Pick<
     AuthorityWiring,
     | "personMemoryRoutes"
-    | "octantInstructionsRoutes"
     | "protectedFilesRoutes"
-    | "todoRoutes"
+    | "sandboxRestrictionsRoutes"
     | "windowAuthorityStore"
+    | "todoRoutes"
+    | "octantInstructionsRoutes"
   >;
 
 export function wireRoutes(deps: RoutesDependencies) {
@@ -241,6 +242,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     personMemoryRoutes,
     octantInstructionsRoutes,
     protectedFilesRoutes,
+    sandboxRestrictionsRoutes,
     todoRoutes,
     providerOAuthRoutes,
     providerRoutes,
@@ -381,6 +383,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await fileMentionRoutes(request)) ??
     (await spendCeilingRoutes(request)) ??
     (await protectedFilesRoutes(request)) ??
+    (await sandboxRestrictionsRoutes(request)) ??
     (await archivedWorktreeRoutes(request)) ??
     (await diskCleanupRoutes(request)) ??
     (await personMemoryRoutes(request)) ??

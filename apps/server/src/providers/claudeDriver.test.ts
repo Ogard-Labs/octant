@@ -1,3 +1,5 @@
+import { applyProtectedFilesChoice, currentProtectedFilesChoice } from "../process/secretGuard";
+import { claudeSandboxToolchainReads } from "./claudeSandboxToolchain";
 import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
@@ -1109,7 +1111,7 @@ describe("Claude execution policy", () => {
         toolUseId,
         signal,
       });
-    if (process.platform === "darwin") {
+    if (claudePlanRunsCommands()) {
       expect(open.tools).toContain("Bash");
       // Plan has no approvals: a prompt here could only fail the turn.
       await expect(command("log", { command: "git log --oneline -5" })).resolves.toEqual({
@@ -2795,85 +2797,138 @@ describe("Claude execution policy", () => {
     }
   });
 
-  it("asks about every command that leaves Claude's sandbox below Full access and refuses one in Plan", async () => {
-    const escaped = { command: "ls ~/Documents", dangerouslyDisableSandbox: true };
-    const f = harness();
-    const acquired = await acquire(f.driver, "code");
-    try {
-      await Effect.runPromise(
-        acquired.connection.start({ sessionId, modelId, executionPolicy: "auto-accept-edits" }),
-      );
-      const open = f.opens[0]!;
-      // Ordinary commands stay in the sandbox; the runtime may let one out.
-      expect(open.sandbox).toMatchObject({
-        enabled: true,
-        allowUnsandboxedCommands: true,
-        filesystem: { denyRead: ["/"], allowRead: [projectRoot], allowWrite: [projectRoot] },
-      });
-      const signal = new AbortController().signal;
-      const approvals: Array<{ readonly requestId: string }> = [];
-      const watched = Effect.runFork(
-        Stream.runForEach(
-          Stream.unwrapScoped(acquired.connection.subscribe).pipe(
-            Stream.filter((event) => event.kind === "approval-request"),
+  it.each(["approval-gated", "auto-accept-edits", "full-access"] as const)(
+    "adds no command sandbox configuration at %s with Strict off",
+    async (executionPolicy) => {
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      try {
+        await Effect.runPromise(
+          acquired.connection.start({
+            sessionId,
+            modelId,
+            executionPolicy,
+            strict: false,
+            nativeSetup: {
+              skills: true,
+              hooks: false,
+              toolServers: false,
+              projectCode: false,
+              subagents: false,
+              webTools: false,
+            },
+          }),
+        );
+        expect(f.opens[0]).toMatchObject({ strict: false, executionPolicy });
+        expect(f.opens[0]).not.toHaveProperty("sandbox");
+      } finally {
+        await acquired.close();
+      }
+    },
+  );
+
+  it.each([
+    { executionPolicy: "auto-accept-edits" as const, strict: false },
+    { executionPolicy: "full-access" as const, strict: true },
+  ])(
+    "asks separately for each native sandbox escape at $executionPolicy, including Strict Full access",
+    async ({ executionPolicy, strict }) => {
+      const escaped = { command: "ls ~/Documents", dangerouslyDisableSandbox: true };
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      try {
+        await Effect.runPromise(
+          acquired.connection.start({
+            sessionId,
+            modelId,
+            executionPolicy,
+            ...(strict ? { strict: true } : {}),
+          }),
+        );
+        const open = f.opens[0]!;
+        // Ordinary commands stay in the sandbox; the runtime may let one out.
+        expect(open.sandbox).toMatchObject({
+          enabled: true,
+          allowUnsandboxedCommands: true,
+          filesystem: {
+            denyRead: ["/"],
+            allowRead: [projectRoot, ...(strict ? claudeSandboxToolchainReads() : [])],
+            allowWrite: [projectRoot],
+          },
+        });
+        const signal = new AbortController().signal;
+        const approvals: Array<{
+          readonly requestId: string;
+          readonly requiresUser?: boolean | undefined;
+          readonly description?: string | undefined;
+        }> = [];
+        const watched = Effect.runFork(
+          Stream.runForEach(
+            Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+              Stream.filter((event) => event.kind === "approval-request"),
+            ),
+            (event) =>
+              Effect.sync(() => {
+                if (event.kind === "approval-request") approvals.push(event);
+              }),
           ),
-          (event) =>
-            Effect.sync(() => {
-              if (event.kind === "approval-request") approvals.push(event);
+        );
+        const run = async (toolUseId: string) => {
+          await expect(
+            open.preToolUse({
+              sessionId: "sdk-session-1",
+              projectRoot,
+              toolName: "Bash",
+              input: escaped,
+              toolUseId,
+              signal,
             }),
-        ),
-      );
-      const run = async (toolUseId: string) => {
+          ).resolves.toEqual({ behavior: "ask" });
+          const callback = open.canUseTool({ toolName: "Bash", input: escaped, toolUseId, signal });
+          await vi.waitFor(() => expect(approvals.length).toBeGreaterThan(0));
+          const raised = approvals.shift();
+          if (raised === undefined) throw new Error("Expected an approval card");
+          if (strict) {
+            expect(raised.requiresUser).toBe(true);
+            expect(raised.description).toContain("Approval applies to this command only");
+          }
+          await Effect.runPromise(
+            acquired.connection.answerApproval({
+              sessionId,
+              requestId: raised.requestId,
+              approved: true,
+            }),
+          );
+          await expect(callback).resolves.toMatchObject({ behavior: "allow" });
+        };
+        await run("escape-1");
+        // A remembered answer never carries over to a command that leaves the sandbox.
+        await run("escape-2");
+        await Effect.runPromise(Fiber.interrupt(watched));
+      } finally {
+        await acquired.close();
+      }
+      const plan = harness();
+      const planConnection = await acquire(plan.driver, "code");
+      try {
+        await Effect.runPromise(
+          planConnection.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+        );
         await expect(
-          open.preToolUse({
+          plan.opens[0]!.preToolUse({
             sessionId: "sdk-session-1",
             projectRoot,
             toolName: "Bash",
             input: escaped,
-            toolUseId,
-            signal,
+            toolUseId: "plan-escape",
+            signal: new AbortController().signal,
           }),
-        ).resolves.toEqual({ behavior: "ask" });
-        const callback = open.canUseTool({ toolName: "Bash", input: escaped, toolUseId, signal });
-        await vi.waitFor(() => expect(approvals.length).toBeGreaterThan(0));
-        const raised = approvals.shift();
-        if (raised === undefined) throw new Error("Expected an approval card");
-        await Effect.runPromise(
-          acquired.connection.answerApproval({
-            sessionId,
-            requestId: raised.requestId,
-            approved: true,
-          }),
-        );
-        await expect(callback).resolves.toMatchObject({ behavior: "allow" });
-      };
-      await run("escape-1");
-      // A remembered answer never carries over to a command that leaves the sandbox.
-      await run("escape-2");
-      await Effect.runPromise(Fiber.interrupt(watched));
-    } finally {
-      await acquired.close();
-    }
-    const plan = harness();
-    const planConnection = await acquire(plan.driver, "code");
-    try {
-      await Effect.runPromise(
-        planConnection.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
-      );
-      await expect(
-        plan.opens[0]!.preToolUse({
-          sessionId: "sdk-session-1",
-          projectRoot,
-          toolName: "Bash",
-          input: escaped,
-          toolUseId: "plan-escape",
-          signal: new AbortController().signal,
-        }),
-      ).resolves.toMatchObject({ behavior: "deny" });
-    } finally {
-      await planConnection.close();
-    }
-  });
+        ).resolves.toMatchObject({ behavior: "deny" });
+      } finally {
+        await planConnection.close();
+      }
+    },
+  );
 
   it.each([
     ["approval-gated", false],
@@ -4835,6 +4890,127 @@ describe("Claude artifact delivery", () => {
     expectEveryGuard(afterChoice.environment);
   });
 
+  it.each(["hooks", "toolServers", "projectCode"] as const)(
+    "withholds unconfined native %s startup while retaining the baseline Strict runtime",
+    async (feature) => {
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      try {
+        const result = await Effect.runPromise(
+          Effect.either(
+            acquired.connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "full-access",
+              strict: true,
+              nativeSetup: {
+                subagents: false,
+                webTools: false,
+                skills: false,
+                toolServers: false,
+                hooks: false,
+                projectCode: false,
+                [feature]: true,
+              },
+            }),
+          ),
+        );
+        expect(result._tag).toBe("Right");
+        expect(f.opens).toHaveLength(1);
+        expect(f.opens[0]?.nativeSetup).toMatchObject({
+          hooks: false,
+          toolServers: false,
+          projectCode: false,
+        });
+      } finally {
+        await acquired.close();
+      }
+    },
+  );
+
+  it("refuses a required protected path under a native command-read grant even before the file exists, leaving native Strict-off execution available", async () => {
+    const previous = currentProtectedFilesChoice();
+    applyProtectedFilesChoice({
+      ...previous,
+      added: [...previous.added, `${projectRoot}/private-token`],
+    });
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    try {
+      const protectedRun = await Effect.runPromise(
+        Effect.either(
+          acquired.connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "full-access",
+            strict: true,
+          }),
+        ),
+      );
+      expect(protectedRun).toMatchObject({
+        _tag: "Left",
+        left: { category: "unsupported", message: expect.stringContaining("protected-file rule") },
+      });
+      expect(f.opens).toHaveLength(0);
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "full-access",
+          strict: false,
+        }),
+      );
+      expect(f.opens).toHaveLength(1);
+    } finally {
+      applyProtectedFilesChoice(previous);
+      await acquired.close();
+    }
+  });
+
+  it("denies parent-process code and unreviewed native effects at Strict Full access while retaining confined commands", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "full-access",
+          strict: true,
+          nativeSetup: {
+            subagents: true,
+            webTools: true,
+            skills: true,
+            hooks: true,
+            toolServers: true,
+            projectCode: true,
+          },
+        }),
+      );
+      const open = f.opens[0];
+      if (open === undefined) throw new Error("Expected a Strict query");
+      expect(open.withheldTools).toBeUndefined();
+      expect(open.tools).toEqual(
+        expect.arrayContaining(["Bash", "Edit", "Read", "Agent", "Skill", "TaskOutput"]),
+      );
+      for (const toolName of ["REPL", "Workflow", "EnterWorktree", "FutureNativeExecutor"]) {
+        expect(open.tools).not.toContain(toolName);
+        await expect(
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName,
+            input: { code: "process.exit()" },
+            toolUseId: `strict-${toolName}`,
+            signal: new AbortController().signal,
+          }),
+        ).resolves.toMatchObject({ behavior: "deny" });
+      }
+    } finally {
+      await acquired.close();
+    }
+  });
+
   it("offers Claude's own subagents, web tools, and skills only to a session that carries the person's setup, keeping every channel guard", async () => {
     const ownSetup = {
       subagents: true,
@@ -5085,9 +5261,16 @@ describe("Claude artifact delivery", () => {
       }
     }
     // Below Full access the command sandbox reads the folder and never writes it.
-    const sandbox = claudeSandboxSettings("approval-gated", projectRoot, [], undefined, false, [
-      attachmentsFolder,
-    ]);
+    const sandbox = claudeSandboxSettings(
+      "approval-gated",
+      projectRoot,
+      [],
+      undefined,
+      false,
+      false,
+      undefined,
+      [attachmentsFolder],
+    );
     expect(sandbox?.filesystem.allowRead).toContain(attachmentsFolder);
     expect(sandbox?.filesystem.allowWrite).not.toContain(attachmentsFolder);
   });
@@ -9271,7 +9454,11 @@ describe("Claude Code's own permission modes and sandbox outside Strict", () => 
       const inside = await opened("work", executionPolicy, true);
       expect(inside.open.sandbox).toMatchObject({
         autoAllowBashIfSandboxed: false,
-        filesystem: { denyRead: ["/"], allowRead: [projectRoot], allowWrite: [projectRoot] },
+        filesystem: {
+          denyRead: ["/"],
+          allowRead: [projectRoot, ...claudeSandboxToolchainReads()],
+          allowWrite: [projectRoot],
+        },
       });
       expect(inside.open.ownPermissions).toBeUndefined();
       await inside.acquired.close();
@@ -9336,9 +9523,16 @@ describe("Claude Code's own permission modes and sandbox outside Strict", () => 
     expect(outside.open.withheldTools).toEqual(["Agent", "Workflow", "WebSearch", "WebFetch"]);
     await outside.acquired.close();
     const inside = await opened("code", "approval-gated", true);
-    expect(inside.open.withheldTools).toEqual(
-      expect.arrayContaining(["EnterPlanMode", "ExitPlanMode", "ScheduleWakeup", "Artifact"]),
-    );
+    expect(inside.open.withheldTools).toBeUndefined();
+    for (const tool of [
+      "REPL",
+      "Workflow",
+      "EnterWorktree",
+      "ExitPlanMode",
+      "ScheduleWakeup",
+      "Artifact",
+    ])
+      expect(inside.open.tools).not.toContain(tool);
     await inside.acquired.close();
     const plan = await opened("code", "plan", false);
     expect(plan.open.withheldTools).toBeUndefined();

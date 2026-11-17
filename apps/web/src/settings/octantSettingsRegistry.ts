@@ -681,12 +681,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "work access ask first auto-accept accept edits approvals files permissions",
         },
         {
-          id: settingId("work-full-access-sandbox"),
-          label: "Keep the sandbox at Full access",
-          scope: "host",
-          keywords: "work full access sandbox seatbelt confinement secrets network prompts",
-        },
-        {
           id: settingId("work-strict"),
           label: "Strict",
           scope: "host",
@@ -779,13 +773,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Auto reviewer",
           scope: "app",
           keywords: "auto reviewer octant shield provider review approvals approve automatic judge",
-        },
-        {
-          id: settingId("code-full-access-sandbox"),
-          label: "Keep the sandbox at Full access",
-          scope: "app",
-          keywords:
-            "full access sandbox seatbelt confinement secrets network prompts codex harness",
         },
         {
           id: settingId("code-strict"),
@@ -1373,6 +1360,25 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       keywords:
         "permissions protected files secrets ssh keys credentials remembered websites sites origins browser always allow forget public links share sharing remembered tool approvals extension tools revoke trust allowed access network safe networks servers ssh trusted hosts domains address ranges local network this mac private network overlay egress proxy refused recently refused trust allow outbound connections",
       settings: [
+        ...[
+          ["sandbox-restrictions", "Sandbox restrictions"],
+          ["sandbox-policy-summary", "Effective sandbox protection"],
+          ["sandbox-policy-folders", "Allowed sandbox folders"],
+          ["sandbox-policy-add-folder", "Add an allowed folder"],
+          ["sandbox-policy-blocked-actions", "Blocked actions"],
+          ["sandbox-policy-network", "Sandbox network"],
+          ["sandbox-policy-services", "Sandbox host services"],
+          ["sandbox-policy-local-services", "Local service exceptions"],
+          ["sandbox-policy-credentials", "Sandbox credentials"],
+        ].map(([id, label]) => ({
+          id: settingId(id ?? "sandbox-restrictions"),
+          label: label ?? "Sandbox restrictions",
+          description:
+            "Configure sandbox limits, inherited policy and precise remembered exceptions.",
+          keywords:
+            "sandbox restrictions allowed folders read only write network blocked session project exception",
+          scope: "host" as const,
+        })),
         {
           id: settingId("protected-files"),
           label: "Protected files",

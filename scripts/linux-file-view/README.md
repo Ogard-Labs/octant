@@ -2,8 +2,17 @@
 
 ## Kernel admission implementation
 
-`apps/server/native/linux-mediation/` contains an original, unshipped built-in
-kernel admission core and its fixed-size UAPI. A context has at most 32 pending
+`apps/server/native/linux-mediation/` contains the original built-in kernel
+admission core and its fixed-size UAPI. Production use is an explicitly opted-in
+preview for compatible custom-kernel Linux hosts; Octant neither installs a
+kernel nor changes the bootloader or reboots the host. The packaged native relay,
+policy worker and supervisor are copied from startup-captured images into a
+private, hash-verified runtime. A production launch is selected only when
+`OCTANT_LINUX_MEDIATION_PREVIEW=1` and the native status check reports the exact
+ABI with production coverage enabled. Missing eligibility or an unsupported
+selected rule refuses before workload launch.
+
+A context has at most 32 pending
 requests, each with a two-second deadline. The actual kernel-held file supplies
 device/inode/operation identity. A one-use enrollment descriptor binds a fresh
 single-thread bootstrap's credentials after `no_new_privs`; existing shared
@@ -39,6 +48,40 @@ private to the relay until answer/cleanup. The relay checks device/inode and
 `STATX_MNT_ID_UNIQUE`; the owned policy process verifies the retained directory
 and repeats the mount/identity query around classification. Guest strings are
 never translated into host paths.
+
+The production proof runs the packaged supervisor and private configuration
+consumption path in the pinned networkless guest. Native acceptance covers the
+effective structured policy, same-filesystem read-only roots, protected and
+credential paths, names created after launch, held descriptors, aliases,
+hardlinks, mappings, metadata, creation and namespace effects, audited OverlayFS
+backing objects, broker loss, cancellation, deadlines, owned descendants and
+normal Bun/Node workloads. The stock-kernel measurements below remain negative
+feasibility evidence; they are not silently substituted for the custom-kernel
+backend. The chronological implementation record that follows preserves the
+red/fix checkpoints that established those boundaries.
+
+### OverlayFS actor credentials
+
+The fixed `--overlay-actor` case classifies the physical lower directory's
+private key before enrollment. The enrolled command must fail to read both
+that object directly and through an OverlayFS mount, without changing its
+read-buffer sentinel, while reading an ordinary file through the same mount.
+Linux 6.18's backing-file read uses the mounter's subjective credentials;
+the process's restriction must survive that temporary override. The owner
+independently verifies unchanged lower bytes, no upper copy, normal command
+exit, unmount and cleanup. This is a direct synthetic backing-file case,
+not production launch or complete stacked-filesystem coverage. All existing
+copy-up, capsule, runtime and lifetime cases remain mandatory.
+
+The baseline native run denied the direct private read but allowed its
+OverlayFS alias, with the ordinary overlay read successful and independent
+unchanged-state/unmount receipts. Restriction lookup now prefers the current
+task's real credentials, retaining a scoped subjective credential when the
+real actor is unconfined; broker ownership still additionally checks its exact
+subjective credential identity and held process identity. Credential copying
+and native filesystem access credentials are unchanged. The fixed native case
+must pass before this correction is credited; it does not prove internal
+metadata/mutation scope lifetimes or all stacked filesystem routes.
 
 ### OverlayFS copy-up ordering
 
@@ -105,7 +148,7 @@ composition rather than a reconstruction of Bubblewrap flags. Its result is
 separate from the direct native broker cases and never implies complete parity.
 The SCM controls also queue a foreign FD before enrollment and reap a same-policy
 sender before receiving its queued FD; send-time credentials must survive both
-transitions. The same actual Bubblewrap scenario runs three times to check
+transitions. The same actual Bubblewrap scenario runs twelve times to check
 the previously observed UID-map timing failure; it is not a broader acceptance
 matrix. The kernel delivers the oldest undelivered request identity rather than
 reused array-slot order, preserving the broker's strict monotonic/replay guard.
@@ -147,23 +190,42 @@ source is not an executed pass. Public runtimes and loader dependencies are
 copied only into the private 512-MiB guest image, never installed on a live host.
 No provider credentials, requests, network services or accounts are involved.
 
-An actual run reached a Bun controller abort during DFG-to-FTL tier-up before
-the Node workload started. A bounded default-JIT control now runs the same
-compiled controller's real metadata classifier without enrollment, first on the
-stock runner and then in the guest. The other guest controller processes use
-`BUN_JSC_useFTLJIT=0` only as a diagnostic isolation step. This is the unstable
-debugging option described by the pinned
-[Bun runtime source](https://github.com/oven-sh/bun/blob/bun-v1.4.4/src/jsc/lib.rs)
-and [JSC option list](https://github.com/oven-sh/WebKit/blob/32dc1b0f51d51d8e0f8cba3398db9cadfd09dc73/Source/JavaScriptCore/runtime/OptionsList.h).
-The controller deletes it before spawning the native relay. Both measured stock
-Bun/Node payloads assert that no `BUN_JSC_*` variable exists and report that check.
-No production launch, kernel hook, authority, timeout or workload executable is
-changed. If the independent default controls do not reproduce the abort, its
-underlying runtime/kernel interaction remains unknown; mitigation is not proof
-of a corrected cause or production eligibility.
+An actual run reached a Bun controller abort during DFG-to-FTL tier-up, and
+another reproduced a segmentation fault with FTL already disabled. Locally
+symbolicated public symbols matched the runtime's executable segment exactly;
+the latter fault was in interpreter entry while draining an async microtask.
+The bounded metadata scan now runs synchronously in its separately owned worker,
+with asynchronous namespace reads before and after the scan. It still requires
+the kernel's final atomic epoch check; synchronous I/O alone is not admission.
 
-The guest-only crash collector retains its fixed controller/probe targets,
-pidfd identity checks, three-second and 128-KiB bounds. After confirming the
+The synchronous scan did not establish Bun controller reliability: subsequent
+untraced standalone-controller runs crashed after seven and eight successful
+capsule launches, including a null-address fault while draining next ticks.
+The controller and private worker now use the existing Node executable with
+bundled modules and no runtime options; this is a runtime comparison pending
+native acceptance, not a claim that the Bun defect is fixed. The session port
+accepts one fixed absolute server-owned module path beside its runtime, never
+a runtime-options string or workload command overload. Relative/option-like
+entries refuse before spawn.
+
+All controllers, private workers and Bun/Node payloads retain default JIT
+settings. Node controller receipts include their actual version, reject
+`NODE_OPTIONS` and runtime arguments, and the original Bun workload remains
+mandatory. Twelve independent ordinary capsule runs, the metadata control,
+private session lifecycle, both runtime workloads and unchanged-state/cleanup
+receipts are still required. Core capture continues to bind each role's real
+copied interpreter image, retained PID and init namespace before exec. The
+public modules are fixed guest files; they are not added to the ELF core
+inventory. No production integration or reliability pass follows from this
+source change alone.
+
+The guest-only crash collector retains fixed policy-controller, session-controller
+and probe images, pidfd identity checks, three-second and 128-KiB bounds. A
+session worker is accepted only as a direct child of its still-retained registered
+controller, with both executable objects and the initial PID namespace checked.
+The kernel-provided pidfd pins the crashing worker itself. Other images,
+reparented workers and unrelated same-image processes remain unconfirmed.
+The session executable is included in the public module/build-identity inventory. After confirming the
 signal notes it may read only the numeric `NT_FILE` entries, stopping before
 all filenames and memory segments. Optional pipe reads have at most 250 ms
 and require a further 250-ms publication reserve within the same total bound.
@@ -217,7 +279,7 @@ Write-induced privilege clearing may already hold inode locks; its pre-lock
 lifetime, filesystem ioctls and stacked mutation routes remain unfinished. A
 global guard without those lifetimes would break legitimate public writes or
 cause blocking under locks. Existing public ACL/truncate and real runtime proof
-must still pass, and production coverage remains zero.
+still had to pass at that checkpoint, and production coverage remained zero.
 
 Ordinary filesystem-attribute GET and SET entries prepare separate READ and
 WRITE scopes using their held file/path before the shared VFS operation. Read
@@ -233,7 +295,7 @@ NODUMP SET refusal with independently unchanged flags/metadata, and permitted
 public toggle/readback/restoration and writes. This covers the audited ordinary
 entries, not all attribute/ioctl routes, internal calls, stacked filesystems or
 kernel credential overrides; those lifetimes and policy semantics remain
-unproved. Production coverage remains zero.
+unproved at that checkpoint. Production coverage remained zero.
 
 The regular-file `FIONREAD`/`FIOQSIZE` correction uses the existing READ
 admission from native and conditional compat ioctl hooks before copying size
@@ -241,7 +303,7 @@ or allocation metadata. Its fixture requires a readable baseline before the
 companion, later EACCES with output sentinels unchanged, public observations,
 and pipe/socket positives. Scoped native controls pass; compat execution remains
 unproved. Other ioctls and credential-override/stacked
-semantics remain outside this bounded correction with production coverage zero.
+semantics remained outside that bounded correction, whose production coverage was zero.
 
 The regular-file `FS_IOC_FIEMAP` entry also prepares READ admission before its
 filesystem callback or output. Its controls require a permitted baseline,
@@ -256,8 +318,8 @@ A stale-epoch waiter must refuse without changing that position.
 A scoped disposable native run passed these FIEMAP, public/output and seek
 pre-lock/stale-epoch controls. Full integrated execution remains unproved.
 Compat execution, complete namespace authority through the filesystem effect,
-other ioctl routes and stacked filesystems remain outside that evidence;
-production coverage stays zero.
+other ioctl routes and stacked filesystems remained outside that checkpoint's evidence;
+its production coverage stayed zero.
 
 The candidate `prepareLinuxMediationSession` port owns its trusted policy worker,
 native relay and held command identities. The worker invokes the unchanged
@@ -323,10 +385,10 @@ owned worker can finish preparation and prove the command has launched before
 expiry. Preparation still counts toward that same caller deadline.
 The complete session suite and both subsequent default runtime controls pass
 at the recorded acceptance snapshot, including the final zero-leftover join.
-Earlier intermittent controller crashes are not explained by that pass. This
-port remains unselected, the device is root-only, and complete policy/data
-routes, eligible-host lifecycle and controller reliability remain unfinished
-with production coverage zero.
+Earlier intermittent controller crashes are not explained by that pass. At
+that checkpoint the port remained unselected, the device was root-only, and
+complete policy/data routes, eligible-host lifecycle and controller reliability
+remained unfinished with production coverage zero.
 
 The inode-query increment admits regular-file generation and block-size reads
 before output and compares generation writes under the ext4 inode lock before
@@ -401,13 +463,13 @@ the guest a 150-second outer bound, and the synthetic client finite IPC
 and admission deadlines. Commands have independent timeout supervisors; retained
 process groups are stopped on interruption or owner-command failure.
 
-This is an implementation increment, not complete confinement. Its status query
-reports `production_coverage: 0`; the host never calls it. Namespace begin/end
-and final epoch comparison exist, but complete VFS mutation/pre-effect hooks,
-all file/alias/process routes, shared production lifecycle integration and the
-complete native compatibility matrix are still required. The actual structured
-policy broker and basic unchanged-builder composition have separate native
-receipts; they do not establish the missing routes. The admission guest check adds actual same-policy inherited-FD transfer,
+The status query reports `production_coverage: 1` only for this complete pinned
+component. The host calls it only after the packaged relay's production check
+confirms that bit and only under explicit preview enrollment. Namespace
+begin/end, pre-effect identity/epoch comparison, the complete audited data and
+mutation routes, structured policy broker, packaged supervisor lifecycle and
+native compatibility matrix are one acceptance unit; the hosted parser refuses
+partial receipts or a zero-coverage component. The admission guest check adds actual same-policy inherited-FD transfer,
 foreign ordinary/proc-memory FD refusal, and future shared-memory controls to
 the earlier fourteen read/alias/new-mapping, same-policy thread, write/truncate,
 async-fallback and group-loss cases. A separate enrollment control refuses an
@@ -415,8 +477,9 @@ inherited proc-memory FD, then succeeds after it is closed. The
 additional namespace cases check copied identities/names, refused and allowed
 mutations, outside same-parent progress while a proposal waits, stale replies,
 and pending/new mutation refusal after broker loss. Their exact-head hosted
-result must be read separately; a newly added case is not an executed pass. Neither compilation nor a successful
-guest-core result enables a provider or closes the production acceptance gap.
+result remains mandatory; compilation by itself is not acceptance. Provider,
+account and signed-package live checks remain maintainer acceptance and do not
+weaken the native production gate.
 
 ## Modern stock pre-access check
 

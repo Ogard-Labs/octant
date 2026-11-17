@@ -8,15 +8,15 @@ export function pinnedRecipientAdmission(input: ProcessConfinementPrepareInput) 
   const pin = input.recipientAdmission;
   if (pin === undefined) return undefined;
   if (
-    typeof input.networkEgress !== "object" ||
-    input.networkEgress.kind !== "proxied" ||
+    (input.networkEgress !== "none" &&
+      (typeof input.networkEgress !== "object" || input.networkEgress.kind !== "proxied")) ||
     !/^[a-f0-9]{64}$/.test(pin.digest) ||
     pin.identity.length === 0 ||
     pin.identity.length > 256
   ) {
     throw new ProcessConfinementError(
       "invalid-configuration",
-      "Pinned recipient admission needs confined proxied network and a valid pin.",
+      "Pinned recipient admission needs a confined network policy and a valid pin.",
     );
   }
   try {

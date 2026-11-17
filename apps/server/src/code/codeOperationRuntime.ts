@@ -324,6 +324,7 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
       confinement.prepare({
         executable: input.executable,
         args: input.args,
+        ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
         boundRoot: input.boundRoot,
         ...(input.extraBoundRoots === undefined ? {} : { extraBoundRoots: input.extraBoundRoots }),
         temporaryDirectory: input.temporaryDirectory,
@@ -1477,7 +1478,7 @@ export function createCodeOperationRuntime(
   const operationAccess = (
     windowId: WindowId,
     command: CodeOperationCommand,
-  ): Pick<CodeThread, "executionPolicy" | "fullAccessSandbox"> => {
+  ): Pick<CodeThread, "executionPolicy" | "fullAccessSandbox" | "strict"> => {
     const stored =
       "threadId" in command ? options.persistence.readCodeThread(command.threadId) : undefined;
     if (stored === undefined) return { executionPolicy: "plan" };
@@ -4759,7 +4760,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return;
     }
     // A level change is the person's alone: no reviewer answers it.
-    if (event.levelChange !== undefined) {
+    if (event.levelChange !== undefined || event.requiresUser === true) {
       this.#persistNormalized(active, event);
       return;
     }

@@ -37,6 +37,7 @@ interface ServerSpawnSpecOptions {
   readonly simulatorDeviceBrokerUrl?: string;
   readonly serveAvdBrokerToken?: string;
   readonly serveAvdBrokerUrl?: string;
+  readonly sandboxScopePath?: string;
   readonly codeFileHelperPath?: string;
   /**
    * The packaged app's terminal launcher folder (`octant mcp` only), which the
@@ -134,6 +135,9 @@ export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
           OCTANT_SERVE_AVD_BROKER_URL: options.serveAvdBrokerUrl,
           OCTANT_SERVE_AVD_BROKER_TOKEN: options.serveAvdBrokerToken,
         }),
+    ...(options.sandboxScopePath === undefined
+      ? {}
+      : { OCTANT_SANDBOX_SCOPE_PATH: options.sandboxScopePath }),
     ...(options.codeFileHelperPath === undefined
       ? {}
       : { OCTANT_CODE_FILE_HELPER_PATH: options.codeFileHelperPath }),

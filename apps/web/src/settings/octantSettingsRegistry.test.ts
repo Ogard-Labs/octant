@@ -126,6 +126,15 @@ describe("octantSettingsRegistry", () => {
     ]);
     expect(section("permissions")?.label).toBe("Permissions");
     expect(ids("permissions")).toEqual([
+      "sandbox-restrictions",
+      "sandbox-policy-summary",
+      "sandbox-policy-folders",
+      "sandbox-policy-add-folder",
+      "sandbox-policy-blocked-actions",
+      "sandbox-policy-network",
+      "sandbox-policy-services",
+      "sandbox-policy-local-services",
+      "sandbox-policy-credentials",
       "protected-files",
       "protected-files-add",
       "public-links",
@@ -197,7 +206,6 @@ describe("octantSettingsRegistry", () => {
     expect(work?.settings.map((setting) => setting.id)).toEqual([
       "work-default-model",
       "work-default-access",
-      "work-full-access-sandbox",
       "work-strict",
       "work-restart-continuation",
     ]);
@@ -298,7 +306,6 @@ describe("octantSettingsRegistry", () => {
       "project-view-switcher",
       "code-default-access",
       "code-auto-reviewer",
-      "code-full-access-sandbox",
       "code-strict",
       "code-terminal-shell",
       "code-editor-executable",

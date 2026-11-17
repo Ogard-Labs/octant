@@ -206,9 +206,10 @@ describe("Pi process boundary", () => {
         ANTHROPIC_API_KEY: "anthropic-key",
         OPENAI_API_KEY: "openai-key",
         XAI_API_KEY: "xai-key",
+        DATABASE_PASSWORD: "synthetic-unrelated-host-value",
       },
     });
-    const start = (modelProvider?: string) =>
+    const start = (modelProvider?: string, kept?: boolean) =>
       Effect.runPromise(
         Effect.scoped(
           port.start({
@@ -218,7 +219,8 @@ describe("Pi process boundary", () => {
             sessionDirectory: join(f.home, "sessions"),
             sessionId: "session-1",
             mode: "code",
-            executionPolicy: "approval-gated",
+            executionPolicy: kept === undefined ? "approval-gated" : "full-access",
+            ...(kept === undefined ? {} : { strict: false, fullAccessSandbox: kept }),
             ...(modelProvider === undefined ? {} : { modelProvider }),
           }),
         ),
@@ -226,7 +228,11 @@ describe("Pi process boundary", () => {
 
     await start("anthropic");
     await start();
+    await start("anthropic", true);
+    await start("anthropic", false);
 
+    expect(prepared[2]?.DATABASE_PASSWORD).toBeUndefined();
+    expect(prepared[3]?.DATABASE_PASSWORD).toBe("synthetic-unrelated-host-value");
     expect(prepared[0]?.ANTHROPIC_API_KEY).toBe("anthropic-key");
     expect(prepared[0]?.OPENAI_API_KEY).toBeUndefined();
     expect(prepared[0]?.XAI_API_KEY).toBeUndefined();

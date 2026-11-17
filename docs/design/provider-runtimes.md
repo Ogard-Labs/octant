@@ -816,18 +816,51 @@ command sandbox keeps its own folders, so below Full access a sandboxed shell
 command cannot reach an outside folder. Redaction of logs, the journal, and
 exports applies at every level.
 
-Under [Providers run in their own sandbox](../architecture.md#security-and-authority)
-(maintainer decision, 2026-11-15; designed, not built), Octant passes Claude's
-sandbox no settings: it runs as the person's own Claude Code settings
-configure it, Claude's own escape request reaches the person as an Octant
-approval, and Plan keeps its read-only confinement. Strict (set per thread,
-per Project and in Settings, as the opt-in sandbox at Full access is; the
-setting is built, and today every launch keeps this configuration whether
-Strict is on or off) keeps
-today's configuration of Claude's own sandbox, since Octant cannot nest its
-profile around it on macOS: reads and writes held to the Project's folders,
-network per Network limits, `autoAllowBashIfSandboxed: false`, and no escape
-request. The sandbox settings described next are today's build.
+Outside Strict, when Claude loads the person's settings, Octant passes no
+command-sandbox settings and Claude follows the person's native configuration.
+When those setting sources are all off, the configured sandbox and gate remain
+as the fallback described above. Disabled account hooks and memory stay off.
+Legacy sessions retain their previous behavior until explicitly migrated.
+Strict configures Claude's native command sandbox, since macOS cannot nest
+Seatbelt: Project and granted folders, recorded Network limits and
+`autoAllowBashIfSandboxed: false`. Plan retains Octant's read-only wall.
+
+Strict binds a standalone trusted native CLI outside writable roots to an
+owned lifetime scope. Native startup hooks, MCP servers and Project startup
+code run outside the command sandbox and are withheld under Strict. The
+runtime can still read enabled skills with hooks disabled and strict MCP
+configuration. Native web tools are withheld when tool networking is filtered;
+Octant's brokered tools retain their own checks. In-process REPL/Workflow scripts, native worktree startup and unreviewed native
+execution tools are also withheld; Strict uses an explicit supported tool list.
+These are withheld features,
+not claims of OS confinement for the parent CLI. The effective-policy panel
+reports this boundary. Ordinary Strict-off native features remain available.
+
+A Strict command-read folder overlapping a required protected-file rule is
+refused before opening the native query, including a protected name not yet
+created. The native route does not claim that a file-tool hook confines shell
+commands, and leaves the rule selected for a supported backend.
+
+Strict's native read rules re-allow public system toolchains, loader and
+resolver files beneath the root read deny; the effective-policy details list
+the exact paths. This grants no home/account folder and no system write.
+On Linux the private lifetime root materializes top-level directory aliases
+so merged-`/usr` symlinks do not break Claude's native read-deny mounts. Each
+selected folder is mounted from its admitted object using the trusted pinned
+launcher. This wrapper owns lifetime and folder bindings; the native command
+sandbox enforces command effects, and an approved escape still leaves it.
+A real bundled runtime test requires an allowed Project write to succeed and
+the same outside write to fail, with both writes succeeding in its control.
+
+Each native command escape under Strict, including Full access and Auto,
+requires a new **human** answer. Its approval discloses personal-file and
+host-service access outside the command sandbox and journals the one-command
+exception. No reviewer or remembered answer can authorize it. A real bundled
+CLI test with an offline model forces two identical escape asks, denies one,
+permits the other, and checks exactly one command ran; a matching control
+proves bypass mode would otherwise run both. Missing required native sandbox
+prerequisites fail before inference or tool execution. Credentialed model and
+signed-package acceptance remain separate checks.
 
 Below Full access Claude's command sandbox lets a command out the way Claude
 Code does on its own (maintainer decision, 2026-11-14): the launch sets
@@ -1335,6 +1368,11 @@ Under Strict, in Plan and in Chat, every Codex app-server below Full access
 runs under Octant's profile, and the
 [confinement matrix](../architecture.md#security-and-authority) owns what that
 profile allows and why. The wire mapping that follows from that profile:
+
+Every turn restates its sandbox policy and writable roots after resume; the
+process lease also includes the admitted policy scope. Required unsupported
+Strict confinement refuses by name. Metadata is read independently and cannot
+authorize a Strict launch.
 
 - A process carries one lease: a thread's root, mode, and posture, or a catalog
   lease for account and model reads. The driver leases it when a connection's

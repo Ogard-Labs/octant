@@ -287,6 +287,7 @@ export function startOctantServer(
       octantInstructions,
       octantInstructionsRoutes,
       protectedFilesRoutes,
+      sandboxRestrictionsRoutes,
       todoRoutes,
       processAuthorityNow,
       processAuthorityTime,
@@ -297,10 +298,10 @@ export function startOctantServer(
       unsubscribeThreadArchivals,
       windowAuthorityStore,
     } = wireAuthority({
+      workThreadProjection,
       browserAuthority,
       options,
       persistence,
-      workThreadProjection,
     });
     const {
       agentRunInteractions,
@@ -1049,6 +1050,7 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      providerRuntimeNetwork,
       resolveThreadStrict,
       resolveProjectStrict,
       onWindowRevoked,
@@ -1911,6 +1913,7 @@ export function startOctantServer(
       personMemoryRoutes,
       octantInstructionsRoutes,
       protectedFilesRoutes,
+      sandboxRestrictionsRoutes,
       todoRoutes,
       providerOAuthRoutes,
       providerRoutes,

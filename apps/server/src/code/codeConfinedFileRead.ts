@@ -14,6 +14,17 @@ export type CodeConfinedFileRead =
       readonly reason: "outside-root" | "not-a-file" | "too-large" | "unreadable";
     };
 
+export type PolicyCheckedCodeConfinedFileRead =
+  | CodeConfinedFileRead
+  | { readonly status: "refused"; readonly reason: "access-denied" };
+
+interface CodeConfinedFileReadInput {
+  readonly port: CodeTestSourcePort;
+  readonly canonicalRoot: string;
+  readonly relativePath: CodeRelativePath;
+  readonly maximumBytes: number;
+}
+
 /**
  * Read one file of a checkout without the file helper.
  *
@@ -25,12 +36,20 @@ export type CodeConfinedFileRead =
  * must be the object containment resolved, capped at `maximumBytes`, so a
  * symlink or a swapped name cannot make it read outside the checkout.
  */
-export async function readConfinedCodeFile(input: {
-  readonly port: CodeTestSourcePort;
-  readonly canonicalRoot: string;
-  readonly relativePath: CodeRelativePath;
-  readonly maximumBytes: number;
-}): Promise<CodeConfinedFileRead> {
+export function readConfinedCodeFile(
+  input: CodeConfinedFileReadInput & {
+    /** A host policy check against the exact canonical name this read will open. */
+    readonly allowResolved: (canonicalPath: string) => boolean;
+  },
+): Promise<PolicyCheckedCodeConfinedFileRead>;
+export function readConfinedCodeFile(
+  input: CodeConfinedFileReadInput,
+): Promise<CodeConfinedFileRead>;
+export async function readConfinedCodeFile(
+  input: CodeConfinedFileReadInput & {
+    readonly allowResolved?: (canonicalPath: string) => boolean;
+  },
+): Promise<PolicyCheckedCodeConfinedFileRead> {
   const resolved = await resolveContainedPath(
     input.port,
     input.canonicalRoot,
@@ -38,6 +57,9 @@ export async function readConfinedCodeFile(input: {
   );
   if (resolved === undefined) return { status: "refused", reason: "outside-root" };
   if (!resolved.stat.isFile) return { status: "refused", reason: "not-a-file" };
+  if (input.allowResolved?.(resolved.canonical) === false) {
+    return { status: "refused", reason: "access-denied" };
+  }
   if (resolved.stat.size > input.maximumBytes) return { status: "refused", reason: "too-large" };
   let file: CodeOpenFile;
   try {

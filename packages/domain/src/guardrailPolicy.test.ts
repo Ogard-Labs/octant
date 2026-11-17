@@ -293,14 +293,14 @@ describe("levels on a host without Octant's sandbox", () => {
         strict: false,
       }),
     ).toBe(WINDOWS_KEPT_SANDBOX_REFUSAL);
-    // Strict confines nothing at Full access on any platform.
+    // Strict keeps its boundary at Full access too.
     expect(
       hostProviderTurnRefusal({
         platform: "win32",
         access: { executionPolicy: "full-access" },
         strict: true,
       }),
-    ).toBeUndefined();
+    ).toBe(WINDOWS_STRICT_REFUSAL);
     expect(
       hostProviderTurnRefusal({
         platform: "linux",
@@ -311,6 +311,17 @@ describe("levels on a host without Octant's sandbox", () => {
   });
 
   it("decides each Windows provider launch from its own mode, level and Strict value", () => {
+    for (const executionPolicy of [
+      "approval-gated",
+      "auto-accept-edits",
+      "plan",
+      "full-access",
+    ] as const) {
+      expect(windowsProviderLaunch({ mode: "code", executionPolicy, strict: true })).toEqual({
+        status: "refused",
+        reason: WINDOWS_STRICT_REFUSAL,
+      });
+    }
     expect(windowsProviderLaunch({ mode: "code", executionPolicy: "full-access" })).toEqual({
       status: "unconfined",
       approvals: "none",

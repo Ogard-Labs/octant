@@ -21,6 +21,7 @@ import { isNativeHarnessDriverKind } from "./providerPolicy";
  */
 export interface ThreadAccess {
   readonly executionPolicy: ProviderExecutionPolicy;
+  readonly strict?: boolean | undefined;
   readonly autoApprove?: boolean | undefined;
   /**
    * Opt-in sandbox at Full access: when the posture is `full-access` and this
@@ -190,16 +191,16 @@ export function hostSandboxRefusal(input: {
   readonly platform: string | undefined;
   readonly access: ThreadAccess;
 }): string | undefined {
-  return input.platform === "win32" && levelNeedsSandbox(input.access)
+  return input.platform === "win32" &&
+    (input.access.strict === true || levelNeedsSandbox(input.access))
     ? WINDOWS_SANDBOX_MISSING_REASON
     : undefined;
 }
 
 /**
- * Why Strict refuses on a Windows host below Full access. Strict runs the
- * provider inside Octant's process sandbox instead of its own approvals alone,
- * and Windows has no Octant sandbox yet; at Full access Strict confines nothing
- * on any platform, so it runs there.
+ * Why Strict refuses on a Windows host at every level. The shared Strict
+ * control is independent of autonomy and Windows has no admitted Octant
+ * sandbox. A native approval mode cannot substitute for its confinement.
  */
 export const WINDOWS_STRICT_REFUSAL =
   "Strict needs a sandbox Windows doesn't have yet. Turn Strict off for this thread to run it with the provider's own approvals, or run it on a Mac or Linux host.";
@@ -229,6 +230,7 @@ export function hostProviderTurnRefusal(input: {
   readonly strict: boolean;
 }): string | undefined {
   if (input.platform !== "win32") return undefined;
+  if (input.strict || input.access.strict === true) return WINDOWS_STRICT_REFUSAL;
   if (input.access.executionPolicy === "full-access") {
     return input.access.fullAccessSandbox === true ? WINDOWS_KEPT_SANDBOX_REFUSAL : undefined;
   }
@@ -254,6 +256,7 @@ export function windowsProviderLaunch(input: {
   readonly strict?: boolean | undefined;
 }): WindowsProviderLaunch {
   if (input.mode === "chat") return { status: "refused", reason: WINDOWS_CHAT_PROVIDER_REFUSAL };
+  if (input.strict === true) return { status: "refused", reason: WINDOWS_STRICT_REFUSAL };
   if (input.executionPolicy === "full-access") {
     return input.fullAccessSandbox === true
       ? { status: "refused", reason: WINDOWS_KEPT_SANDBOX_REFUSAL }
@@ -710,12 +713,24 @@ export function guardrailLowered(from: PermissionMode, to: PermissionMode): bool
  * else off (Full access stays open, as it always was).
  */
 export function defaultFullAccessSandboxFor(input: {
-  readonly project?: { readonly defaultFullAccessSandbox?: boolean | undefined } | undefined;
-  readonly settings?: { readonly defaultFullAccessSandbox?: boolean | undefined } | undefined;
+  readonly project?:
+    | {
+        readonly defaultStrict?: boolean | undefined;
+        readonly defaultFullAccessSandbox?: boolean | undefined;
+      }
+    | undefined;
+  readonly settings?:
+    | {
+        readonly defaultStrict?: boolean | undefined;
+        readonly defaultFullAccessSandbox?: boolean | undefined;
+      }
+    | undefined;
 }): boolean {
-  return (
-    input.project?.defaultFullAccessSandbox ?? input.settings?.defaultFullAccessSandbox ?? false
-  );
+  if (input.project?.defaultStrict !== undefined) return false;
+  if (input.project?.defaultFullAccessSandbox !== undefined)
+    return input.project.defaultFullAccessSandbox;
+  if (input.settings?.defaultStrict !== undefined) return false;
+  return input.settings?.defaultFullAccessSandbox ?? false;
 }
 
 /** Why the host refuses `octant agent --full-access` for a thread Strict covers. */

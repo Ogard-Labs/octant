@@ -2275,7 +2275,10 @@ describe("System Keychain read for fx", () => {
       // Only the server control-socket denial, which names no Keychain, follows it.
       const guard = SEATBELT_DENY_SERVER_CONTROL_SOCKETS.length;
       expect(lines.slice(-guard)).toEqual(SEATBELT_DENY_SERVER_CONTROL_SOCKETS);
-      expect(lines.at(-1 - guard)).toBe(allow);
+      expect(lines).toContain(allow);
+      expect(lines.lastIndexOf(allow)).toBeGreaterThan(
+        lines.lastIndexOf('(deny file-read* (subpath "/Library/Keychains"))'),
+      );
       expect(lines).toContain('(deny file-read* (subpath "/Library/Keychains"))');
       expect(
         lines.filter((line) => line.includes("Keychains/") && line.startsWith("(allow")),

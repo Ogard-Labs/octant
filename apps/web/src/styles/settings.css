@@ -790,6 +790,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="browser-hub-code"],
 .setrow[data-setting-id="browser-hub-claim"],
 .setrow[data-setting-id="skill-folders-added"],
+.setrow[data-setting-id="sandbox-policy-add-folder"],
 .setrow:has(> .setrow-control .settings-accent) {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -809,6 +810,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="browser-hub-code"] > .setrow-control,
 .setrow[data-setting-id="browser-hub-claim"] > .setrow-control,
 .setrow[data-setting-id="skill-folders-added"] > .setrow-control,
+.setrow[data-setting-id="sandbox-policy-add-folder"] > .setrow-control,
 .setrow:has(> .setrow-control .settings-accent) > .setrow-control {
   grid-column: 1;
   grid-row: auto;

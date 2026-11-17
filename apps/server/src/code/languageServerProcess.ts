@@ -1,3 +1,5 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
+import { sandboxToolPolicy, trackSandboxChild } from "../process/sandboxRuntimePolicy";
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { chmod, lstat, mkdir, readdir, rm } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
@@ -45,6 +47,7 @@ const STOP_GRACE_MS = 2_000;
 const MINIMAL_PATH = "/usr/bin:/bin";
 
 export interface LanguageServerLaunchInput {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   /** Stable owner of the receipt: one server per checkout, component, and class. */
   readonly ownerId: string;
   /** The class decides the confinement; a launch is never given a nearby one. */
@@ -162,6 +165,7 @@ export class LanguageServerProcessPort {
       executable: input.executable,
       args: input.args,
       boundRoot: input.checkoutRoot,
+      ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
       temporaryDirectory,
       additionalWriteRoots: [input.cacheDirectory],
       readRoots: [input.installRoot],
@@ -205,6 +209,7 @@ export class LanguageServerProcessPort {
       child = this.#spawn(launch.command, launch.args, {
         cwd: input.checkoutRoot,
         env: {
+          ...launch.environment,
           HOME: input.cacheDirectory,
           TMPDIR: temporaryDirectory,
           PATH: MINIMAL_PATH,
@@ -217,6 +222,7 @@ export class LanguageServerProcessPort {
       await closeNetwork();
       return { status: "failed" };
     }
+    trackSandboxChild(input.sandboxPolicy ?? sandboxToolPolicy(), child);
     const exited = new Promise<void>((resolve) => {
       if (child.exitCode !== null || child.signalCode !== null) resolve();
       else child.once("exit", () => resolve());

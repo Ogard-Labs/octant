@@ -959,13 +959,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const [accessChanging, setAccessChanging] = useState(false);
   // Work and Code share one set of levels; the composer moves this thread to
   // another one, and its next turn runs at it.
-  const changeAccess = async (
-    access: WorkAccess,
-    fullAccessSandbox?: boolean,
-    strict?: boolean,
-  ) => {
+  const changeAccess = async (access: WorkAccess, strict?: boolean | "inherit") => {
     if (thread === undefined || accessChanging) return;
-    if (access === thread.access && fullAccessSandbox === undefined && strict === undefined) return;
+    if (access === thread.access && strict === undefined) return;
     setAccessChanging(true);
     setErrorMessage(undefined);
     setToolCatalogHandoffRequired(false);
@@ -975,8 +971,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         threadId: thread.id,
         expectedVersion: thread.version,
         access,
-        ...(fullAccessSandbox === undefined ? {} : { fullAccessSandbox }),
-        ...(strict === undefined ? {} : { strict }),
+        ...(strict === undefined ? {} : { strict: strict === "inherit" ? null : strict }),
       });
       if (!("kind" in result) || result.kind !== "thread-updated") {
         setErrorMessage("This task’s mode could not be saved.");
@@ -3364,22 +3359,21 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     onChange={(mode) => void changeAccess(workAccessOfMode(mode))}
                     value={workModeOf(thread.access)}
                     warningScope={{ projectId: String(thread.projectId) }}
-                    fullAccessSandbox={thread.fullAccessSandbox === true}
+                    strict={
+                      thread.strict ??
+                      (thread.fullAccessSandbox === true && thread.access === "full-access"
+                        ? true
+                        : resolveStrict({
+                            project: project?.type === "work" ? project : undefined,
+                            settings: { defaultStrict: props.workDefaultStrict },
+                          }))
+                    }
+                    legacyStrict={thread.strict === undefined && thread.fullAccessSandbox === true}
                     fullAccessSandboxSupported={threadKeepsFullAccessSandbox(
                       props.providerGroups ?? [],
                       thread.providerInstanceId,
                     )}
-                    onFullAccessSandboxChange={(sandboxed) =>
-                      void changeAccess("full-access", sandboxed)
-                    }
-                    strict={
-                      thread.strict ??
-                      resolveStrict({
-                        project: project?.type === "work" ? project : undefined,
-                        settings: { defaultStrict: props.workDefaultStrict },
-                      })
-                    }
-                    onStrictChange={(strict) => void changeAccess(thread.access, undefined, strict)}
+                    onStrictChange={(strict) => void changeAccess(thread.access, strict)}
                   />
                 )}
               </>

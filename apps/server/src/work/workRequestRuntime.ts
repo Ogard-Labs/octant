@@ -165,6 +165,7 @@ export class WorkRequestRuntime {
       connection === undefined ||
       input.projectRoot === undefined ||
       event.kind !== "approval-request" ||
+      event.requiresUser === true ||
       // A level change is the person's to answer: Shield, like a provider's
       // own reviewer, never moves a thread into or out of Plan.
       event.levelChange !== undefined ||

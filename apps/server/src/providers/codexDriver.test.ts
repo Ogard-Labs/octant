@@ -1091,6 +1091,48 @@ describe("Codex driver probe and runtime lifecycle", () => {
     expect(f.authorities()).toEqual([{ kind: "catalog" }]);
   });
 
+  it.each(["approval-gated", "auto-accept-edits", "plan"] as const)(
+    "restates the selected %s boundary with Strict off on every turn",
+    async (executionPolicy) => {
+      const f = fixture();
+      const acquired = await acquireConnection(makeCodexDriver(f.options()));
+      try {
+        await Effect.runPromise(
+          acquired.connection.start({
+            sessionId,
+            modelId: "gpt-5.4" as never,
+            executionPolicy,
+            strict: false,
+          }),
+        );
+        expect(f.authorities().at(-1)).toMatchObject({
+          kind: "thread",
+          strict: false,
+          executionPolicy,
+        });
+        expect(f.calls.find((call) => call.method === "thread/start")?.input).toMatchObject({
+          sandbox: executionPolicy === "plan" ? "read-only" : "workspace-write",
+        });
+        await Effect.runPromise(
+          acquired.connection.send({ sessionId, prompt: "Inspect", attachments: [], tools: [] }),
+        );
+        expect(f.calls.find((call) => call.method === "turn/start")?.input).toMatchObject({
+          sandboxPolicy: {
+            type:
+              executionPolicy === "plan"
+                ? process.platform === "win32"
+                  ? "readOnly"
+                  : "externalSandbox"
+                : "workspaceWrite",
+          },
+          approvalPolicy: executionPolicy === "plan" ? "never" : "untrusted",
+        });
+      } finally {
+        await acquired.close();
+      }
+    },
+  );
+
   it("refuses to change the posture of a connection's confined process", async () => {
     const f = fixture();
     const acquired = await acquireConnection(makeCodexDriver(f.options()));

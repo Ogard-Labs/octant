@@ -102,6 +102,29 @@ describe("bundled process entry points", () => {
       "apps/desktop/src/unusedPreload.ts",
     ]);
   });
+
+  it("recognizes named server workers declared in a tsdown entry object", () => {
+    const files = [
+      {
+        path: "apps/server/tsdown.config.ts",
+        content:
+          'export default { entry: { main: "src/main.ts", policyWorker: "src/process/policyWorker.ts" } };',
+      },
+      { path: "apps/server/src/main.ts", content: 'console.log("server");' },
+      {
+        path: "apps/server/src/process/policyWorker.ts",
+        content: 'console.log("worker");',
+      },
+      {
+        path: "apps/server/src/process/unusedWorker.ts",
+        content: 'console.log("unused");',
+      },
+    ];
+    expect(collectReferencedPaths(files).has("apps/server/src/process/policyWorker.ts")).toBe(true);
+    expect(findUnreachableModules(files).map((item) => item.path)).toEqual([
+      "apps/server/src/process/unusedWorker.ts",
+    ]);
+  });
 });
 
 describe("extractSpecifiers", () => {

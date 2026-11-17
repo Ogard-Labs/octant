@@ -2107,7 +2107,13 @@ export class CodeService {
               }),
           // A change that leaves these out keeps what the person chose before.
           // Absent keeps the stored choice, as for the reviewer below.
-          ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
+          ...((command.defaultStrict ?? current.defaultStrict) === undefined
+            ? {}
+            : { defaultStrict: command.defaultStrict ?? current.defaultStrict }),
+          ...((command.defaultStrict ??
+            current.defaultStrict ??
+            command.defaultFullAccessSandbox ??
+            current.defaultFullAccessSandbox) === true
             ? { defaultFullAccessSandbox: true }
             : {}),
           ...((command.defaultStrict ?? current.defaultStrict) === true
@@ -2945,7 +2951,8 @@ export class CodeService {
                             : {}),
                           // Kept from the command, else from the thread; the
                           // guardrail stamp drops it below Full access.
-                          ...((command.fullAccessSandbox ?? current.fullAccessSandbox) === true
+                          ...(command.strict === undefined &&
+                          (command.fullAccessSandbox ?? current.fullAccessSandbox) === true
                             ? { fullAccessSandbox: true }
                             : {}),
                           // Strict holds at every level: kept from the
@@ -4888,7 +4895,11 @@ export class CodeService {
    * the request, on or off, always wins.
    */
   #withDefaultFullAccessSandbox(thread: CodeThread): CodeThread {
-    if (thread.executionPolicy !== "full-access" || thread.fullAccessSandbox !== undefined) {
+    if (
+      thread.executionPolicy !== "full-access" ||
+      thread.strict !== undefined ||
+      thread.fullAccessSandbox !== undefined
+    ) {
       return thread;
     }
     const project = this.#persistence.readProject?.(thread.projectId);
@@ -4909,7 +4920,8 @@ export class CodeService {
     return decodeCodeThread({
       ...rest,
       permissionPersistence: "project-default",
-      ...(fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+      // Keep the Full-access-only compatibility bit for older journal readers.
+      ...((rest.strict ?? fullAccessSandbox) === true ? { fullAccessSandbox: true } : {}),
       ...(fullAccessRunFlag === true ? { fullAccessRunFlag: true } : {}),
     });
   }

@@ -1,3 +1,4 @@
+import { SandboxRestrictionsNotice } from "../code/SandboxRestrictionsNotice";
 import { ComposerFollowUpSuggestions } from "../followUps/FollowUpSuggestionChips";
 import {
   ComposerNoticeSinkProvider,
@@ -340,6 +341,7 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
   }, [props.held]);
   const noticeCard = (
     <ComposerNoticeCard idPrefix={noticeIdPrefix} notices={cards}>
+      <SandboxRestrictionsNotice />
       {notice}
     </ComposerNoticeCard>
   );

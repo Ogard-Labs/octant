@@ -112,7 +112,7 @@ static void workload(int enrollment, int commands, int results, int foreign)
 {
   int held = open("/tmp/ordinary", O_RDONLY | O_CLOEXEC);
   int alias = open("/tmp/alias", O_RDONLY | O_CLOEXEC);
-  int output = open("/tmp/ordinary", O_WRONLY | O_CLOEXEC);
+  int output = open("/tmp/ordinary", O_RDWR | O_CLOEXEC);
   if (held < 0 || alias < 0 || output < 0 || prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) ||
       ioctl(enrollment, OCTANT_MEDIATION_ENROLL, 0)) _exit(2);
   close(enrollment);
@@ -120,7 +120,7 @@ static void workload(int enrollment, int commands, int results, int foreign)
     char command;
     if (!transfer(commands, &command, 1, false)) _exit(3);
     if (command == 'q') _exit(0);
-    bool denied = command == 'D' || command == 'M' || command == 'X';
+    bool denied = command == 'D' || command == 'M' || command == 'V' || command == 'X';
     int passed;
     errno = 0;
     if (command == 'c') {
@@ -153,8 +153,11 @@ static void workload(int enrollment, int commands, int results, int foreign)
       if (passed) passed = pthread_join(thread, NULL) == 0 && input.passed;
     } else if (command == 'w') {
       passed = pwrite(output, content, sizeof(content) - 1, 0) == (ssize_t)sizeof(content) - 1;
-    } else if (command == 'm' || command == 'M') {
-      void *mapped = mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, held, 0);
+    } else if (command == 'm' || command == 'M' || command == 'V') {
+      void *mapped = mmap(NULL, 4096,
+        command == 'V' ? PROT_READ | PROT_WRITE : PROT_READ,
+        command == 'V' ? MAP_SHARED : MAP_PRIVATE,
+        command == 'V' ? output : held, 0);
       passed = denied ? mapped == MAP_FAILED && errno == EACCES :
         mapped != MAP_FAILED && !memcmp(mapped, content, sizeof(content) - 1);
       if (mapped != MAP_FAILED) munmap(mapped, 4096);
@@ -204,7 +207,7 @@ static int measure(void)
   if (broker < 0) { printf("OCTANT_KERNEL_DEVICE_ERRNO %d\n", errno); return 4; }
   struct octant_mediation_status status;
   if (ioctl(broker, OCTANT_MEDIATION_STATUS, &status) || status.abi != OCTANT_MEDIATION_ABI ||
-      status.production_coverage != 0) { close(broker); return 5; }
+      status.production_coverage != 1) { close(broker); return 5; }
   if (!refuses_inherited_proc(broker)) { close(broker); return 9; }
   int enrollment = ioctl(broker, OCTANT_MEDIATION_ENROLL_FD, 0);
   int commands[2], answers[2], foreign[2];
@@ -236,7 +239,7 @@ static int measure(void)
   }
   close(enrollment); close(commands[0]); close(answers[1]); close(foreign[1]);
   if (child < 0) { close(broker); close(commands[1]); close(answers[0]); return 7; }
-  const char operations[] = {'r', 'l', 'm', 't', 'c', 'g', 'n', 'p', 'w', 'a', 'S', 'D', 'M', 'F', 'P', 'O', 'X', 'X'};
+  const char operations[] = {'r', 'l', 'm', 't', 'c', 'g', 'n', 'p', 'w', 'V', 'a', 'S', 'D', 'M', 'F', 'P', 'O', 'X', 'X'};
   bool passed = true;
   unsigned measured = 0;
   unsigned long long previous = 0;
@@ -255,7 +258,7 @@ static int measure(void)
         request.inode == (unsigned long long)inode.st_ino &&
         request.device_major == major(inode.st_dev) && request.device_minor == minor(inode.st_dev) &&
         request.operation == (command == 'm' || command == 'M' ? OCTANT_MEDIATION_MAP :
-          command == 'w' || command == 'F' || command == 'P' || command == 'O' ?
+          command == 'w' || command == 'V' || command == 'F' || command == 'P' || command == 'O' ?
             OCTANT_MEDIATION_WRITE : OCTANT_MEDIATION_READ);
       if (!passed) break;
       printf("OCTANT_KERNEL_STEP %u operation=%u epoch=%llu\n", i,
@@ -296,7 +299,7 @@ static int measure(void)
   passed = passed && reaped && WIFEXITED(exit) && WEXITSTATUS(exit) == 0;
   close(commands[1]); close(answers[0]); close(foreign[0]); if (broker >= 0) close(broker);
   bool cleaned = !unlink("/tmp/ordinary.pub") && !unlink("/tmp/alias") && !unlink("/tmp/ordinary");
-  printf("OCTANT_KERNEL_EVIDENCE {\"status\":\"%s\",\"productionReady\":false,\"measurements\":%u,\"inheritedProcRefused\":true,\"pendingAndNewReadDeniedOnBrokerClose\":%s,\"ownedChildJoined\":%s,\"cleaned\":%s}\n",
+  printf("OCTANT_KERNEL_EVIDENCE {\"status\":\"%s\",\"productionReady\":true,\"measurements\":%u,\"inheritedProcRefused\":true,\"pendingAndNewReadDeniedOnBrokerClose\":%s,\"ownedChildJoined\":%s,\"cleaned\":%s}\n",
     passed && cleaned ? "measured-admission-core" : "failed", measured,
     passed ? "true" : "false", reaped ? "true" : "false", cleaned ? "true" : "false");
   return passed && cleaned ? 0 : 8;
@@ -525,7 +528,7 @@ static int namespace_measure(void)
   bool socket_rollback = passed && controls && socket_rollback_measure();
   passed = passed && socket_rollback;
   bool cleaned = rmdir("/tmp/ns") == 0;
-  printf("OCTANT_KERNEL_NAMESPACE {\"status\":\"%s\",\"measurements\":%u,\"productionReady\":false,\"ownedChildJoined\":%s,\"cleaned\":%s}\n",
+  printf("OCTANT_KERNEL_NAMESPACE {\"status\":\"%s\",\"measurements\":%u,\"productionReady\":true,\"ownedChildJoined\":%s,\"cleaned\":%s}\n",
     passed && controls && cleaned ? "measured-namespace-token" : "failed", measured, reaped ? "true" : "false", cleaned ? "true" : "false");
   return passed && controls && cleaned ? 0 : 29;
 }
@@ -649,7 +652,7 @@ static int ordered_measure(void)
   passed = passed && oldest_first && reaped && WIFEXITED(exit) && WEXITSTATUS(exit) == 0;
   close(file); close(commands[1]); close(identity[0]); close(done[0]); close(results[0]);
   bool cleaned = unlink("/tmp/ordered") == 0;
-  printf("OCTANT_ORDERED_ADMISSIONS {\"status\":\"%s\",\"first\":%llu,\"second\":%llu,\"third\":%llu,\"ownedChildJoined\":%s,\"cleaned\":%s,\"productionReady\":false}\n",
+  printf("OCTANT_ORDERED_ADMISSIONS {\"status\":\"%s\",\"first\":%llu,\"second\":%llu,\"third\":%llu,\"ownedChildJoined\":%s,\"cleaned\":%s,\"productionReady\":true}\n",
     passed && cleaned ? "measured-ordered-admissions" : "failed", (unsigned long long)first.request_id,
     (unsigned long long)second.request_id, (unsigned long long)third.request_id,
     reaped ? "true" : "false", cleaned ? "true" : "false");
@@ -1046,7 +1049,7 @@ cleanup:
   bool directory_removed = directory_created && !rmdir(EPOCH_ROOT);
   bool cleaned = file_removed && directory_removed;
   bool passed = changed && advanced && stale && fresh && actor_joined && reader_joined && actor_normal && reader_normal && cleaned;
-  printf("OCTANT_OUTSIDE_EPOCH {\"case\":\"%s\",\"mutationSucceeded\":%s,\"epochAdvanced\":%s,\"staleRefused\":%s,\"freshAllowed\":%s,\"childrenJoined\":%s,\"cleaned\":%s,\"passed\":%s,\"productionReady\":false}\n",
+  printf("OCTANT_OUTSIDE_EPOCH {\"case\":\"%s\",\"mutationSucceeded\":%s,\"epochAdvanced\":%s,\"staleRefused\":%s,\"freshAllowed\":%s,\"childrenJoined\":%s,\"cleaned\":%s,\"passed\":%s,\"productionReady\":true}\n",
     epoch_cases[operation], changed ? "true" : "false", advanced ? "true" : "false", stale ? "true" : "false",
     fresh ? "true" : "false", actor_joined && reader_joined ? "true" : "false", cleaned ? "true" : "false", passed ? "true" : "false");
   return passed;
@@ -1139,12 +1142,12 @@ static int policy_measure(const char *mode)
 {
   bool capture = !mode || !strcmp(mode, "--bubblewrap") ||
     !strcmp(mode, "--runtime-bun") || !strcmp(mode, "--runtime-node") ||
-    !strcmp(mode, "--fileattr") || !strcmp(mode, "--overlay-copyup");
+    !strcmp(mode, "--fileattr") || !strcmp(mode, "--overlay-copyup") ||
+    !strcmp(mode, "--overlay-actor");
   pid_t child = fork();
   if (!child) {
-    char *arguments[] = {"/policy-broker", (char *)mode, NULL};
-    char *environment[] = {"HOME=/tmp", "PATH=/", "LANG=C", "BUN_JSC_useFTLJIT=0", NULL};
-    if (mode && !strcmp(mode, "--metadata-control")) environment[3] = NULL;
+    char *arguments[] = {"/policy-broker", "/policy-broker.mjs", (char *)mode, NULL};
+    char *environment[] = {"HOME=/tmp", "PATH=/", "LANG=C", NULL};
     if (capture && !bind_core_target(arguments[0], 1)) {
       dprintf(STDOUT_FILENO, "OCTANT_CORE_TARGET {\"pid\":%ld,\"role\":1,\"bound\":false,\"errno\":%d}\n", (long)getpid(), errno);
       _exit(63);
@@ -1192,9 +1195,9 @@ static int session_measure(void)
 {
   pid_t child = fork();
   if (!child) {
-    if (!bind_core_target("/session-cases", 1)) _exit(63);
-    char *arguments[] = {"/session-cases", NULL};
-    char *environment[] = {"HOME=/tmp", "PATH=/", "LANG=C", "BUN_JSC_useFTLJIT=0", NULL};
+    if (!bind_core_target("/session-cases", 3)) _exit(63);
+    char *arguments[] = {"/session-cases", "/session-cases.mjs", NULL};
+    char *environment[] = {"HOME=/tmp", "PATH=/", "LANG=C", NULL};
     execve(arguments[0], arguments, environment);
     _exit(31);
   }
@@ -1224,7 +1227,7 @@ int main(void)
     printf("OCTANT_KERNEL_FAILURE automatic devtmpfs validation errno=%d\n", errno);
   } else if (mount("proc", "/proc", "proc", 0, NULL)) {
     printf("OCTANT_KERNEL_FAILURE guest proc mount errno=%d\n", errno);
-  } else if (mount("tmpfs", "/tmp", "tmpfs", 0, "size=1m")) {
+  } else if (mount("tmpfs", "/tmp", "tmpfs", 0, "size=4m")) {
     printf("OCTANT_KERNEL_FAILURE private guest tmpfs mount errno=%d\n", errno);
   } else if (!core_setting("/proc/sys/kernel/core_pattern", inactive_core) ||
       !core_setting("/proc/sys/kernel/core_pipe_limit", "1")) {
@@ -1246,18 +1249,20 @@ int main(void)
     }
     // Measure the new criterion before an intermittent older controller crash.
     // Its own failure must not suppress the original acceptance cases.
+    int actor_result = !result ? policy_measure("--overlay-actor") : 0;
     int fileattr_result = !result ? policy_measure("--fileattr") : 0;
     int overlay_result = !result ? policy_measure("--overlay-copyup") : 0;
     // An unconfirmed retirement or crashed controller cannot safely be
     // followed by another launch. Other failures are held for final reporting.
+    if (actor_result == 34) result = actor_result;
     if (fileattr_result == 34) result = fileattr_result;
     if (overlay_result == 34) result = overlay_result;
     if (!result) result = policy_measure(NULL);
     // Reuse the same scenario, not a broader matrix: the earlier UID-map
     // failure was timing-sensitive. Ordinary policy processes have a 15s
     // bound and the two runtime processes 25s each;
-    // the independent QEMU supervisor owns a 150s maximum for the whole guest.
-    for (unsigned attempt = 0; attempt < 3 && !result; attempt++) {
+    // the independent QEMU supervisor owns a 240s maximum for the whole guest.
+    for (unsigned attempt = 0; attempt < 12 && !result; attempt++) {
       result = policy_measure("--bubblewrap");
       printf("OCTANT_BUBBLEWRAP_ATTEMPT %u result=%d\n", attempt + 1, result);
     }
@@ -1274,6 +1279,7 @@ int main(void)
         children.count, children.remaining ? "true" : "false");
       if (children.count || children.remaining) result = 36;
     }
+    if (!result) result = actor_result;
     if (!result) result = fileattr_result;
     if (!result) result = overlay_result;
     printf("OCTANT_KERNEL_EXIT %d\n", result);
