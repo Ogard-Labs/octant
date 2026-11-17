@@ -138,3 +138,77 @@ it("shows text as it arrives under reduced motion", () => {
   view.rerender({ body: "a " + words(50) });
   expect(view.result.current).toBe("a " + words(50));
 });
+
+it("reveals a steady stream of short words at the arrival rate without pausing", () => {
+  let body = "go ";
+  const view = renderHook((props) => useEvenReveal(props.body, true), {
+    initialProps: { body },
+  });
+  const lengths: number[] = [];
+  // Two characters of text every 20 ms is 0.1 characters a millisecond.
+  for (let tick = 0; tick < 150; tick += 1) {
+    body += "a ";
+    view.rerender({ body });
+    advance(20);
+    lengths.push(view.result.current.length);
+  }
+  // Each 100 ms window shows new text, so there is no stall once the buffer drains.
+  const windows = [];
+  for (let at = 50; at + 5 < lengths.length; at += 5) {
+    windows.push((lengths[at + 5] ?? 0) - (lengths[at] ?? 0));
+  }
+  expect(windows.every((grown) => grown > 0)).toBe(true);
+  expect(body.length - (lengths[lengths.length - 1] ?? 0)).toBeLessThan(60);
+});
+
+it("holds a long answer to its update interval while streaming", () => {
+  const start = "x ".repeat(8_100);
+  const view = renderHook((props) => useEvenReveal(props.body, props.streaming), {
+    initialProps: { body: start, streaming: true },
+  });
+  const seen: number[] = [];
+  let body = start;
+  for (let step = 0; step < 20; step += 1) {
+    body += "y ";
+    view.rerender({ body, streaming: true });
+    advance(16);
+    seen.push(view.result.current.length);
+  }
+  // At most one publish per 100 ms across the 320 ms advanced.
+  expect(new Set(seen).size).toBeLessThanOrEqual(5);
+});
+
+it("paces a modest burst after a long pause instead of jumping", () => {
+  const view = renderHook((props) => useEvenReveal(props.body, true), {
+    initialProps: { body: "start of the answer " },
+  });
+  advance(2_000);
+  const body = "start of the answer " + "abcd efgh ijkl mnop";
+  view.rerender({ body });
+  advance(32);
+  expect(view.result.current.length).toBeLessThan(body.length);
+  advance(1_000);
+  expect(view.result.current).toBe(body);
+});
+
+it("shows the finished answer on a timer when frames do not run", () => {
+  const body = "x " + words(60);
+  const view = renderHook((props) => useEvenReveal(props.body, props.streaming), {
+    initialProps: { body: "x ", streaming: true },
+  });
+  view.rerender({ body, streaming: true });
+  vi.stubGlobal("requestAnimationFrame", () => 0);
+  view.rerender({ body, streaming: false });
+  advance(200);
+  expect(view.result.current).toBe(body);
+});
+
+it("shows text as it arrives while the tab is hidden", () => {
+  vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+  const view = renderHook((props) => useEvenReveal(props.body, true), {
+    initialProps: { body: "a " },
+  });
+  view.rerender({ body: "a " + words(50) });
+  expect(view.result.current).toBe("a " + words(50));
+  vi.restoreAllMocks();
+});

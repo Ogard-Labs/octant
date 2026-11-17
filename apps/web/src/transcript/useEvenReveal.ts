@@ -12,6 +12,9 @@ const MAX_BUFFER_MS = 400;
 // Past this far behind the arrival (a reconnect, a large paste) the reveal
 // jumps ahead rather than spend seconds catching up.
 const SKIP_AHEAD_MS = 1_200;
+// The skip threshold never assumes a rate below this, so a modest burst after a
+// long pause is paced rather than jumped.
+const SKIP_FLOOR_RATE = 0.05;
 // The finished answer drains over this long instead of snapping.
 const DRAIN_MS = 100;
 // A backlog beyond the buffer is closed over this long, so the speed-up is
@@ -107,6 +110,9 @@ export function useEvenReveal(body: string, streaming: boolean): string {
   const frame = useRef<number | undefined>(undefined);
   // True while the answer streams and until its drain has finished.
   const live = useRef(streaming);
+  // Animation frames pause in a hidden tab, so a finished answer also drains on
+  // a timer.
+  const drainTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // A replacement or a first answer is current in this render, before the
   // effect has run.
@@ -119,6 +125,8 @@ export function useEvenReveal(body: string, streaming: boolean): string {
     const cancel = () => {
       if (frame.current !== undefined) cancelAnimationFrame(frame.current);
       frame.current = undefined;
+      if (drainTimer.current !== undefined) clearTimeout(drainTimer.current);
+      drainTimer.current = undefined;
     };
     const tick = () => {
       frame.current = undefined;
@@ -128,12 +136,13 @@ export function useEvenReveal(body: string, streaming: boolean): string {
       const elapsed = Math.min(at - state.lastFrame, 100);
       state.lastFrame = at;
       const backlog = available - state.position;
-      if (backlog <= 0) return;
       const bufferChars = Math.max(
         1,
         Math.min(Math.max(state.interval, MIN_BUFFER_MS), MAX_BUFFER_MS) * state.rate,
       );
-      if (state.drainBy !== undefined) {
+      if (backlog <= 0) {
+        // Caught up; only the publish interval can still hold text back.
+      } else if (state.drainBy !== undefined) {
         const remaining = state.drainBy - at;
         state.position =
           remaining <= 0
@@ -142,7 +151,7 @@ export function useEvenReveal(body: string, streaming: boolean): string {
                 available,
                 state.position + (backlog * elapsed) / Math.max(remaining, elapsed),
               );
-      } else if (backlog > state.rate * SKIP_AHEAD_MS) {
+      } else if (backlog > Math.max(state.rate, SKIP_FLOOR_RATE) * SKIP_AHEAD_MS) {
         state.position = available - bufferChars;
       } else {
         const speed =
@@ -154,19 +163,21 @@ export function useEvenReveal(body: string, streaming: boolean): string {
         state.position >= available
           ? available
           : settleOnWord(text, Math.floor(state.position), available);
-      state.position = Math.max(state.position, target);
+      // The pacing position stays fractional: rounding it up to a word end would
+      // credit later frames with text the arrival rate has not earned.
       const stepMs = available >= LONG_ANSWER_LENGTH ? LONG_STEP_MS : STEP_MS;
       if (
-        target !== shownRef.current.length &&
-        (target >= available || at - state.lastStep >= stepMs)
+        target > shownRef.current.length &&
+        ((target >= available && state.drainBy !== undefined) || at - state.lastStep >= stepMs)
       ) {
         state.lastStep = at;
         const next = text.slice(0, target);
         shownRef.current = next;
         setShown(next);
       }
-      if (state.position < available) frame.current = requestAnimationFrame(tick);
-      else if (state.drainBy !== undefined) {
+      if (state.position < available || shownRef.current.length < available) {
+        frame.current = requestAnimationFrame(tick);
+      } else if (state.drainBy !== undefined) {
         state.drainBy = undefined;
         live.current = false;
       }
@@ -178,6 +189,8 @@ export function useEvenReveal(body: string, streaming: boolean): string {
     live.current = streaming || (wasLive && shownRef.current.length < body.length);
     const replaced =
       reducedMotion ||
+      // Nobody watches a hidden tab, and its frames do not run.
+      document.hidden ||
       (!streaming && !wasLive) ||
       shownRef.current.length === 0 ||
       !body.startsWith(shownRef.current) ||
@@ -185,6 +198,7 @@ export function useEvenReveal(body: string, streaming: boolean): string {
     if (replaced) {
       cancel();
       pace.current = freshPace(body.length, now);
+      live.current = streaming;
       shownRef.current = body;
       setShown(body);
       return;
@@ -197,9 +211,22 @@ export function useEvenReveal(body: string, streaming: boolean): string {
       state.lastArrival = now;
       state.lastLength = body.length;
     }
-    if (streaming) state.drainBy = undefined;
-    else if (state.drainBy === undefined && shownRef.current.length < body.length) {
+    if (streaming) {
+      state.drainBy = undefined;
+      if (drainTimer.current !== undefined) clearTimeout(drainTimer.current);
+      drainTimer.current = undefined;
+    } else if (state.drainBy === undefined && shownRef.current.length < body.length) {
       state.drainBy = now + DRAIN_MS;
+      drainTimer.current = setTimeout(() => {
+        drainTimer.current = undefined;
+        if (frame.current !== undefined) cancelAnimationFrame(frame.current);
+        frame.current = undefined;
+        state.drainBy = undefined;
+        state.position = bodyRef.current.length;
+        live.current = false;
+        shownRef.current = bodyRef.current;
+        setShown(bodyRef.current);
+      }, DRAIN_MS + 50);
     }
     // A frame already waiting keeps its start, so a delta never costs the
     // reveal the time since the last frame.
@@ -212,6 +239,8 @@ export function useEvenReveal(body: string, streaming: boolean): string {
     () => () => {
       if (frame.current !== undefined) cancelAnimationFrame(frame.current);
       frame.current = undefined;
+      if (drainTimer.current !== undefined) clearTimeout(drainTimer.current);
+      drainTimer.current = undefined;
     },
     [],
   );
