@@ -428,8 +428,7 @@ struct octant_open_scope octant_open_begin(struct file *file)
 	open = &task->open;
 	context = current_context();
 	if (open->active) {
-		if (current_cred() == current_real_cred() || open->owner != current ||
-		    open->context != context || !open->prepared ||
+		if (open->owner != current || open->context != context || !open->prepared ||
 		    (operation == OCTANT_MEDIATION_WRITE && open->operation != OCTANT_MEDIATION_WRITE)) {
 			scope.error = -EACCES;
 			return scope;
@@ -495,9 +494,12 @@ void octant_open_end(struct octant_open_scope *scope)
 	scope->identity = 0;
 }
 
-/* A stacked filesystem's credential override may perform only kernel-internal
- * work inside the exact admitted open. It cannot mint a reusable metadata or
- * namespace decision, and an external or foreign mutation invalidates it. */
+/* A stacked filesystem may perform only kernel-internal work inside the exact
+ * admitted open. OverlayFS performs some verification under the caller's
+ * credentials and other backing work under its creator credentials, so the
+ * scope—not a credential transition—is the authority boundary. It cannot mint
+ * a reusable metadata or namespace decision, and an external or foreign
+ * mutation invalidates it. */
 static bool stacked_open_allows(u32 operation)
 {
 	struct octant_task *task = octant_task();
@@ -505,8 +507,8 @@ static bool stacked_open_allows(u32 operation)
 	struct octant_context *context = current_context();
 	unsigned long flags;
 	bool valid;
-	if (current_cred() == current_real_cred() || !open->active || !open->prepared ||
-	    open->owner != current || open->context != context ||
+	if (!open->active || !open->prepared || open->owner != current ||
+	    open->context != context ||
 	    (operation == OCTANT_MEDIATION_WRITE && open->operation != OCTANT_MEDIATION_WRITE))
 		return false;
 	spin_lock_irqsave(&context->lock, flags);
