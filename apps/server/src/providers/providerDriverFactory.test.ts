@@ -264,6 +264,34 @@ describe("makeProviderDriver", () => {
     expect(launch.environment?.CODEX_ACCESS_TOKEN).toBeUndefined();
   });
 
+  it("offers Settings sign-in for Codex and Claude subscription accounts and not for a Claude API key", () => {
+    const fixture = factoryFixture();
+    const apiKey = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000065",
+      displayName: "Claude API key",
+      driverKind: "claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/missing/claude",
+        authentication: "api-key",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-16T11:00:00.000Z",
+      updatedAt: "2026-07-16T11:00:00.000Z",
+    });
+
+    const codex = makeProviderDriver(provider("codex"), fixture.options);
+    const claude = makeProviderDriver(provider("claude"), fixture.options);
+    const keyed = makeProviderDriver(apiKey, { ...fixture.options, claudeInstances: [apiKey] });
+
+    expect(codex.beginAuthentication).toBeTypeOf("function");
+    expect(codex.completeAuthentication).toBeTypeOf("function");
+    expect(claude.beginAuthentication).toBeTypeOf("function");
+    expect(keyed.beginAuthentication).toBeUndefined();
+  });
+
   it("selects the injected Claude ports only for a Claude instance", async () => {
     const fixture = factoryFixture();
     const driver = makeProviderDriver(provider("claude"), fixture.options);

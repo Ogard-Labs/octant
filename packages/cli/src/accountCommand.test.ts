@@ -179,6 +179,33 @@ describe("octant account", () => {
     ]);
   });
 
+  it("adds a Codex account without a home, prints the assigned one and signs it in without host OpenAI keys", async () => {
+    const { sent, out, ran, run } = fixture([instance(CODEX_ID, "codex", "Codex")]);
+
+    expect(await run({ action: "add", agent: "codex", name: undefined, signIn: true })).toBe(0);
+
+    const create = sent.find((request) => request.method === "POST")?.body as Record<
+      string,
+      unknown
+    >;
+    expect(create).toMatchObject({
+      kind: "create-codex-provider",
+      expectedVersion: 0,
+      displayName: "Codex (2)",
+      binaryPath: "/bin/codex",
+    });
+    expect(create).not.toHaveProperty("codexHome");
+    const home = `/home/me/.codex-accounts/${String(create.instanceId)}`;
+    expect(out.join("")).toContain(home);
+    expect(ran).toEqual([
+      {
+        binary: "/bin/codex",
+        args: ["login"],
+        env: { PATH: "/usr/bin", CLAUDE_CODE_OAUTH_TOKEN: "host-token", CODEX_HOME: home },
+      },
+    ]);
+  });
+
   it("refuses to add an account for an agent that has none to copy the binary from", async () => {
     const { sent, err, ran, run } = fixture([HOME_CLAUDE]);
 

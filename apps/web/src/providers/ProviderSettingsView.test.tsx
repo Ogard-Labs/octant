@@ -808,6 +808,35 @@ describe("ProviderSettingsView", () => {
     expect(props.onProbe).toHaveBeenCalledWith(props.instances[0]?.id, { quiet: true });
   });
 
+  it("signs a Codex account in from its card without asking for a code", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: codexProvider() });
+    const onBegin = vi.fn(async () => ({
+      attemptId: "provider-attempt-1" as never,
+      signInUrl: "https://auth.openai.com/oauth/authorize",
+      expiresAt: new Date(Date.now() + 600_000).toISOString() as never,
+    }));
+    const onComplete = vi
+      .fn<ProviderSettingsViewProps["onCompleteProviderAuthentication"]>()
+      .mockResolvedValue("completed");
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...props}
+        onBeginProviderAuthentication={onBegin}
+        onCompleteProviderAuthentication={onComplete}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Details for Codex local" }));
+    await user.click(screen.getByRole("button", { name: "Sign in Codex local" }));
+    expect(await screen.findByText("Finish signing in in your browser.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Code from the sign-in page")).toBeNull();
+    expect(
+      await screen.findByText("Signed in.", undefined, { timeout: 5_000 }),
+    ).toBeInTheDocument();
+    expect(props.onProbe).toHaveBeenCalledWith(props.instances[0]?.id, { quiet: true });
+  });
+
   it("adds another Codex account from the Codex card through the same form", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: codexProvider() });
