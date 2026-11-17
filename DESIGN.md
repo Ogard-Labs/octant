@@ -536,16 +536,19 @@ Phosphor, imported only through the app's icon module (`apps/web/src/ui/icons`),
 which keeps the names call sites use. The family is drawn as filled outlines at
 fixed weights, chosen by the module, never by a call site's stroke:
 
-| State                                      | Weight  | Ink                                                 |
-| ------------------------------------------ | ------- | --------------------------------------------------- |
-| 12, 14 and 16px (regular stroke read weak) | bold    | the control's own ink                               |
-| 20 and 24px (bold there reads heavy)       | regular | the control's own ink                               |
-| A destination in the icon rail, at 16px    | regular | muted; the rail is glyphs with no words beside them |
-| The selected destination in the icon rail  | fill    | primary ink; muted at rest                          |
-| A pressed tool whose glyph is a toggle     | fill    | primary ink; muted at rest                          |
+| State                                      | Weight  | Ink                        |
+| ------------------------------------------ | ------- | -------------------------- |
+| 12, 14 and 16px (regular stroke read weak) | bold    | the control's own ink      |
+| 20 and 24px (bold there reads heavy)       | regular | the control's own ink      |
+| A pressed tool whose glyph is a toggle     | fill    | primary ink; muted at rest |
 
 A call site passes `weight="fill"` only to mark the selected or pressed state;
-everything else follows the size. A few glyphs have no exact match (a folder's
+everything else follows the size. The icon rail is the one exception: it draws
+its places as 16px Lucide line glyphs (an even stroke with round ends, through
+`ui/icons/railGlyphs.ts`, keyed by the app's own icon so call sites keep their
+names), muted at rest and in the primary ink on the current face, with the same
+glyph in both states (maintainer decision, 2026-11-17: filled outlines made the
+rail, a column of icons with no words, the heaviest column in the window). A few glyphs have no exact match (a folder's
 git badge, a plus on a branch or an image) and draw the plain glyph.
 
 Each destination or tool has its own silhouette. Pairs that read alike at 16px
@@ -776,7 +779,7 @@ coat), painted once on the shell. Neither has a fill or line of its own.
   fills only sometimes takes no room while empty.
 - **Icon rail**: `--oct-rail-w`, 52px (maintainer decision, 2026-11-14: it
   gives the stage the room). Its faces are 36px at the control radius with 16px
-  icons at the regular weight, 2px apart (the button's `rail` variant); the first face is centred on
+  Lucide line icons, 2px apart (the button's `rail` variant); the first face is centred on
   the band's centreline (4px down). The current face takes
   `--oct-wash-selected`, the pointed-at face `--oct-wash-hover`, no border.
   The foot is the person's account face: a round face holding their 24px

@@ -13,6 +13,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantContextMenu } from "../ui/base/OctantContextMenu";
 import { useActionShortcut } from "../keybindings/useActionShortcut";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
+import { railGlyph } from "../ui/icons/railGlyphs";
 import { iconForVisibleMode, modeLabels } from "./ModeSwitcher";
 import { visibleModeOf, visibleModes, type VisibleMode } from "./workKind";
 import { TILE_ICONS, type SidebarTile, type SidebarTileId } from "./SidebarCountTiles";
@@ -337,6 +338,7 @@ function RailButton(props: {
   readonly children?: ReactNode;
 }) {
   const Icon = props.icon;
+  const Glyph = Icon === undefined ? undefined : railGlyph(Icon);
   return (
     <OctantTooltip
       align="center"
@@ -356,10 +358,14 @@ function RailButton(props: {
         variant="rail"
       >
         <span aria-hidden="true" className="sidebar-rail__face">
-          {Icon === undefined ? null : (
-            // 16px at the regular stroke: the rail is a column of glyphs with no
-            // words beside them, and at 20px (or bold at 16) ten of them read as
-            // the heaviest column in the window.
+          {Glyph !== undefined ? (
+            // 16px stroked glyphs: the rail is a column of icons with no words
+            // beside them, and the filled outlines at 20px (or bold at 16) read
+            // as the heaviest column in the window. The current place keeps the
+            // same glyph and takes the face's fill and full ink, so nothing in
+            // the glyph changes shape when the place changes.
+            <Glyph aria-hidden="true" size={16} />
+          ) : Icon === undefined ? null : (
             <Icon size={16} weight={props.active === true ? "fill" : "regular"} />
           )}
           {props.children}
