@@ -320,6 +320,19 @@ Stop; Stop all asks first and names its managed scope. Headers and rows wrap at
 narrow widths, disclosures work with the keyboard and retain visible focus,
 and expanded lists have bounded height.
 
+Each subagent also shows in the transcript, under the activity of the turn
+that started it, as one quiet row like a tool row: its provider's logo, the
+task's first line, its latest line (an observed child's own progress, a
+managed run's result once it has one, else its state), the model and effort as
+the picker names them ("Sonnet 5.5 High"; nothing when the run reported no
+model), how long it has run (from its request or first sight to its last
+update, ticking while it works), and its state mark at the trailing edge, in a
+slot that keeps its width so nothing moves when a run finishes. A subagent
+belongs to the turn that was running when it started, because the host links
+a subagent to its thread and not to a turn: a turn owns the span from its start
+to the next turn's. The rows and the composer's card read one shared summary
+for the pane (maintainer request, 2026-11-17).
+
 A result the host delivers into the parent thread is a turn the person did
 not write, so it never renders as their right-aligned bubble. It is a
 left-aligned child-result card in the thread's measure: a status mark and

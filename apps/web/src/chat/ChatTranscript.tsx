@@ -1,4 +1,5 @@
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
+import { TurnSubagentRows } from "../agents/threadSubagents";
 import { DescribedImagesNote } from "../harness/DescribedImagesNote";
 import { useRetainQuestionnaireDrafts } from "../transcript/questionnaireDrafts";
 import { ConversationInputs } from "../continuity/ConversationInputs";
@@ -641,6 +642,13 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                     ? { onSnoozeAtReset: props.onSnoozeAtUsageReset }
                     : {})}
                   previousAttempt={turn.attempts[index - 1]}
+                  subagentsFrom={attempt.createdAt}
+                  {...subagentsUntil(
+                    turn.attempts[index + 1]?.createdAt ??
+                      turns
+                        .slice((turnIndexById.get(String(turn.id)) ?? turns.length) + 1)
+                        .find((later) => later.attempts.length > 0)?.attempts[0]?.createdAt,
+                  )}
                   providerGroups={props.providerGroups}
                   citations={citationsByAttempt.get(String(attempt.id)) ?? NO_CITATIONS}
                   tailAttempt={
@@ -849,6 +857,11 @@ function chatQuestionDraftRequestId(attempt: ChatAttempt): string {
 // memoized block a fresh array on every render of the transcript.
 const NO_CITATIONS: ChatThreadView["citations"] = [];
 
+/** The next attempt's start, as an optional prop: the latest attempt owns everything after it. */
+function subagentsUntil(at: string | undefined): { readonly subagentsUntil?: string } {
+  return at === undefined ? {} : { subagentsUntil: at };
+}
+
 const AttemptBlock = memo(function AttemptBlock(props: {
   readonly questionDraftScope: string;
   readonly attempt: ChatAttempt;
@@ -866,6 +879,9 @@ const AttemptBlock = memo(function AttemptBlock(props: {
   readonly onFork: (() => void) | undefined;
   readonly forkDisabled: boolean;
   readonly previousAttempt: ChatAttempt | undefined;
+  /** When this attempt started, and when the next one did: the subagents it started fall between. */
+  readonly subagentsFrom: string;
+  readonly subagentsUntil?: string;
   readonly providerGroups: ChatTranscriptProps["providerGroups"];
   /** This attempt is the conversation's tail — the only stop a resume can continue. */
   readonly tailAttempt: boolean;
@@ -974,7 +990,14 @@ const AttemptBlock = memo(function AttemptBlock(props: {
                 ]
           }
         />
-        {toolActivity === undefined ? null : (
+        {toolActivity === undefined ? (
+          <TurnSubagentRows
+            window={{
+              from: props.subagentsFrom,
+              ...(props.subagentsUntil === undefined ? {} : { until: props.subagentsUntil }),
+            }}
+          />
+        ) : (
           <TurnActivityRows
             activity={toolActivity}
             running={props.attempt.outcome === "queued" || props.attempt.outcome === "streaming"}
@@ -985,6 +1008,10 @@ const AttemptBlock = memo(function AttemptBlock(props: {
               props.attempt.outcome === "cancelled"
             }
             {...(toolCallRecords === undefined ? {} : { toolCallRecords })}
+            subagents={{
+              from: props.subagentsFrom,
+              ...(props.subagentsUntil === undefined ? {} : { until: props.subagentsUntil }),
+            }}
           />
         )}
         {props.attempt.tasks === undefined || props.attempt.tasks.length === 0 ? null : (

@@ -1,4 +1,5 @@
 import type { ThreadToolCallRecord } from "@octant/contracts";
+import { TurnSubagentRows, type TurnSubagentWindow } from "../agents/threadSubagents";
 import type { ToolOutsideContentMark } from "@octant/contracts/shield";
 import { SHIELD_WATCHER_LABEL_WORDS } from "@octant/domain/shield-watcher-policy";
 import { ChatRichText } from "../chat/ChatRichText";
@@ -75,6 +76,11 @@ export interface TurnActivityRowsProps {
    * tool row is first opened, never before.
    */
   readonly toolCallRecords?: ToolCallRecordsReader;
+  /**
+   * The span of the thread this turn owns, so the subagents it started are
+   * listed under its activity. Absent lists none.
+   */
+  readonly subagents?: TurnSubagentWindow;
 }
 
 /** Rejects when the records cannot be read from this window. */
@@ -259,7 +265,11 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   const settled = props.settled === true;
   const hasRows = activity.rows.length > 0;
   const hasReasoning = activity.reasoning.trim().length > 0;
-  if (!hasRows && !hasReasoning) return null;
+  // A turn whose subagents left no tool row (a provider's own child seen only
+  // through its observations) still lists them.
+  if (!hasRows && !hasReasoning) {
+    return props.subagents === undefined ? null : <TurnSubagentRows window={props.subagents} />;
+  }
 
   const pinnedRows = alwaysVisibleActivityRows(activity);
   const pinnedIds = new Set(pinnedRows.map(rowKey));
@@ -409,6 +419,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
       ) : (
         <>{activity.rows.map(renderDisclosure)}</>
       )}
+      {props.subagents === undefined ? null : <TurnSubagentRows window={props.subagents} />}
       {routineRows.length === 0 ? null : (
         <ul aria-label="Created automations" className="turn-activity__routines">
           {routineRows.map((row) => (

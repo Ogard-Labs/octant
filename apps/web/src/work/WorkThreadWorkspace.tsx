@@ -1,4 +1,5 @@
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
+import { TurnSubagentRows } from "../agents/threadSubagents";
 import { attachAllowingFiles, attachmentMediaType } from "../composer/attachmentMediaType";
 import {
   ProjectMemoryProposalPrompt,
@@ -448,8 +449,15 @@ function WorkTurnHeader(props: {
  * runs; a settled turn folds behind "N tool calls" and shows a tool it never
  * saw end as unfinished.
  */
+/** The next turn's start, as an optional prop: the latest turn owns everything after it. */
+function subagentsUntil(at: string | undefined): { readonly subagentsUntil?: string } {
+  return at === undefined ? {} : { subagentsUntil: at };
+}
+
 function WorkToolGroup(props: {
   readonly turn: WorkTurnState;
+  /** When the next turn started; the subagents this turn started fall before it. */
+  readonly subagentsUntil?: string;
   readonly canvasClient?: CanvasClient;
   readonly serverUrl?: string | undefined;
   readonly windowCapability?: string | undefined;
@@ -462,7 +470,12 @@ function WorkToolGroup(props: {
     threadId: String(props.turn.threadId),
     turnId: String(props.turn.requestId),
   });
-  if (activity === undefined) return null;
+  const subagents = {
+    from: props.turn.acceptedAt,
+    ...(props.subagentsUntil === undefined ? {} : { until: props.subagentsUntil }),
+  };
+  // A turn whose subagents left no tool row still lists them.
+  if (activity === undefined) return <TurnSubagentRows window={subagents} />;
   const status = props.turn.status;
   const canvasClient = props.canvasClient;
   const threadId = String(props.turn.threadId);
@@ -475,6 +488,7 @@ function WorkToolGroup(props: {
       running={status === "accepted" || status === "running"}
       settled={status === "completed" || status === "failed" || status === "cancelled"}
       {...(toolCallRecords === undefined ? {} : { toolCallRecords })}
+      subagents={subagents}
     />
   );
 }
@@ -890,6 +904,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   });
   const [loaded, setLoaded] = useState<WorkLoadedTurns>(NO_LOADED_TURNS);
   const turns = loaded.turns;
+  // Each turn owns the subagents started between its start and the next
+  // turn's: the host links a subagent to the thread, not to a turn.
+  const nextTurnStart = useMemo(
+    () => new Map(turns.map((turn, index) => [workTurnKey(turn), turns[index + 1]?.acceptedAt])),
+    [turns],
+  );
   const setTurns = useCallback(
     (update: (current: ReadonlyArray<WorkTurnState>) => ReadonlyArray<WorkTurnState>) =>
       setLoaded((current) => {
@@ -2682,6 +2702,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                           <WorkToolGroup
                             serverUrl={props.serverUrl}
                             turn={row.head}
+                            {...subagentsUntil(nextTurnStart.get(workTurnKey(row.head)))}
                             windowCapability={props.windowCapability}
                             {...(props.canvasClient === undefined
                               ? {}
@@ -2729,6 +2750,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     <WorkToolGroup
                       serverUrl={props.serverUrl}
                       turn={row.turn}
+                      {...subagentsUntil(nextTurnStart.get(workTurnKey(row.turn)))}
                       windowCapability={props.windowCapability}
                       {...(props.canvasClient === undefined
                         ? {}

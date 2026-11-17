@@ -22,7 +22,8 @@ import {
   type SubagentListItem,
   type SubagentRow,
 } from "./subagentRows";
-import { useChildRunStatus } from "./useChildRunStatus";
+import { useChildRunStatus, type ChildRunStatusController } from "./useChildRunStatus";
+import { ThreadSubagentsContext } from "./threadSubagents";
 import "./agent-hierarchy.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { ChildRunRequests, type ChildRunInteractionsClient } from "./ChildRunRequests";
@@ -42,13 +43,34 @@ export function ThreadSubagentsTray(props: {
   /** Opens the Agents tool; with a run id, on that subagent's conversation. */
   readonly onOpenSubagent?: (runId?: string) => void;
 }) {
-  // The thread already says its host connection is lost; the tray dims and
-  // disables its controls rather than saying so a second time.
-  const connectionLost = useContext(ThreadConnectionLostContext);
+  // The pane's shared read, when the pane holds one: the transcript's rows
+  // read the same one.
+  const shared = useContext(ThreadSubagentsContext);
+  return shared === undefined ? (
+    <OwnThreadSubagentsTray {...props} />
+  ) : (
+    <ThreadSubagentsTrayBody {...props} subagents={shared} />
+  );
+}
+
+/** A tray outside a pane that reads its thread's subagents reads them itself. */
+function OwnThreadSubagentsTray(props: Parameters<typeof ThreadSubagentsTray>[0]) {
   const subagents = useChildRunStatus({
     client: props.client,
     parentThreadId: decodeAgentRunParentThreadId(props.threadId),
   });
+  return <ThreadSubagentsTrayBody {...props} subagents={subagents} />;
+}
+
+function ThreadSubagentsTrayBody(
+  props: Parameters<typeof ThreadSubagentsTray>[0] & {
+    readonly subagents: ChildRunStatusController;
+  },
+) {
+  // The thread already says its host connection is lost; the tray dims and
+  // disables its controls rather than saying so a second time.
+  const connectionLost = useContext(ThreadConnectionLostContext);
+  const subagents = props.subagents;
   if (subagents.status !== "ready") return null;
   return (
     <>

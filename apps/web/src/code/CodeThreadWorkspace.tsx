@@ -87,6 +87,7 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeConversationMessage, CodeController } from "./useCodeController";
+import { TurnSubagentRows, type TurnSubagentWindow } from "../agents/threadSubagents";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import { CodeCheckoutBar } from "./CodeCheckoutBar";
 import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
@@ -984,6 +985,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   };
   const messages = props.controller.conversation;
+  const subagentWindows = codeSubagentWindows(messages);
   // Only a coordinator's worker carries a host move's reason.
   const continuedOnFallback =
     view?.thread.coordinatorThreadId === undefined || view.thread.coordinatorChoice === undefined
@@ -2229,7 +2231,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                               />
                             )}
                             {gallery}
-                            {activity === undefined ? null : (
+                            {activity === undefined ? (
+                              <CodeTurnSubagents window={subagentWindows.get(message.id)} />
+                            ) : (
                               <TurnActivityRows
                                 activity={activity}
                                 publishedSnapshotRuntime={(toolCallId) =>
@@ -2245,6 +2249,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                   message.status === "failed" ||
                                   message.status === "interrupted"
                                 }
+                                {...subagentWindowProp(subagentWindows.get(message.id))}
                               />
                             )}
                             {/* An assistant reply is markdown — a plan arrives as a
@@ -3531,4 +3536,52 @@ function continuedOnFallbackPlacement(
         String(message.operationId) === String(prompt.operationId),
     );
   return { afterId: (reply ?? prompt).id, reason };
+}
+
+/**
+ * The span each reply's turn owns: from its prompt's start until the next
+ * prompt's. A subagent belongs to the turn that was running when it started,
+ * because the host links a subagent to the thread, not to a turn. A reply
+ * whose turn has no recorded start owns none.
+ */
+function codeSubagentWindows(
+  messages: ReadonlyArray<CodeConversationMessage>,
+): ReadonlyMap<string, TurnSubagentWindow> {
+  const windows = new Map<string, TurnSubagentWindow>();
+  let from: string | undefined;
+  const replies: Array<{ readonly id: string; readonly from: string }> = [];
+  const close = (until: string | undefined) => {
+    for (const reply of replies.splice(0)) {
+      windows.set(
+        reply.id,
+        until === undefined ? { from: reply.from } : { from: reply.from, until },
+      );
+    }
+  };
+  for (const message of messages) {
+    if (message.role === "user") {
+      // A prompt still being composed here has no start yet, so it ends no span.
+      if (message.at !== undefined) close(message.at);
+      from = message.at;
+      continue;
+    }
+    const start = from ?? message.startedAt;
+    if (start === undefined) continue;
+    // A reply after a prompt with no recorded start begins its own span, which
+    // ends the earlier replies' so no subagent is listed under two turns.
+    if (from === undefined) close(start);
+    replies.push({ id: message.id, from: start });
+  }
+  close(undefined);
+  return windows;
+}
+
+function CodeTurnSubagents(props: { readonly window: TurnSubagentWindow | undefined }) {
+  return props.window === undefined ? null : <TurnSubagentRows window={props.window} />;
+}
+
+function subagentWindowProp(window: TurnSubagentWindow | undefined): {
+  readonly subagents?: TurnSubagentWindow;
+} {
+  return window === undefined ? {} : { subagents: window };
 }

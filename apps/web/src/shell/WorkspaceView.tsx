@@ -146,6 +146,7 @@ import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadSubagentsTray } from "../agents/ComposerSubagentsTray";
+import { ThreadSubagentsProvider } from "../agents/threadSubagents";
 import { ThreadHarnessCards } from "../harness/ThreadHarnessCards";
 import {
   CoordinatorWorkersPanelSlot,
@@ -940,41 +941,49 @@ export function WorkspaceView(props: WorkspaceViewProps) {
                 renderSurface={(surface, paneId) => (
                   <FollowUpSuggestionContext value={followUpOffersFor(surface)}>
                     <PaneSideTasks>
-                      <ComposerSubagentsContext value={subagentsTrayFor(surface, props)}>
-                        <ComposerNoticeProvider
-                          value={paneId === activePaneId && inlineNotice ? contextNotice : null}
-                        >
-                          <ComposerContextMeterGate
-                            enabled={
-                              paneId === props.workspace.activePaneIds[props.mode] &&
-                              offersThreadComposer(surface)
-                            }
+                      <PaneSubagents props={props} surface={surface}>
+                        <ComposerSubagentsContext value={subagentsTrayFor(surface, props)}>
+                          <ComposerNoticeProvider
+                            value={paneId === activePaneId && inlineNotice ? contextNotice : null}
                           >
-                            <SurfaceLinkActionsProvider
-                              {...(props.hostBridge === undefined
-                                ? {}
-                                : { hostBridge: props.hostBridge })}
-                              {...(props.onOpenLink === undefined
-                                ? {}
-                                : { onOpenLink: props.onOpenLink })}
-                              paneId={paneId}
-                              surface={surface}
+                            <ComposerContextMeterGate
+                              enabled={
+                                paneId === props.workspace.activePaneIds[props.mode] &&
+                                offersThreadComposer(surface)
+                              }
                             >
-                              <TaskAccessContext value={taskAccessFor(surface, props)}>
-                                <OutsideContentProvider
-                                  thread={outsideContentFor(surface, props.contextClient)}
-                                >
-                                  {onWelcomeGround(
-                                    surface,
-                                    props.welcomeGround === true,
-                                    renderTab(surface, props, paneId, canvasContext, newTaskDrafts),
-                                  )}
-                                </OutsideContentProvider>
-                              </TaskAccessContext>
-                            </SurfaceLinkActionsProvider>
-                          </ComposerContextMeterGate>
-                        </ComposerNoticeProvider>
-                      </ComposerSubagentsContext>
+                              <SurfaceLinkActionsProvider
+                                {...(props.hostBridge === undefined
+                                  ? {}
+                                  : { hostBridge: props.hostBridge })}
+                                {...(props.onOpenLink === undefined
+                                  ? {}
+                                  : { onOpenLink: props.onOpenLink })}
+                                paneId={paneId}
+                                surface={surface}
+                              >
+                                <TaskAccessContext value={taskAccessFor(surface, props)}>
+                                  <OutsideContentProvider
+                                    thread={outsideContentFor(surface, props.contextClient)}
+                                  >
+                                    {onWelcomeGround(
+                                      surface,
+                                      props.welcomeGround === true,
+                                      renderTab(
+                                        surface,
+                                        props,
+                                        paneId,
+                                        canvasContext,
+                                        newTaskDrafts,
+                                      ),
+                                    )}
+                                  </OutsideContentProvider>
+                                </TaskAccessContext>
+                              </SurfaceLinkActionsProvider>
+                            </ComposerContextMeterGate>
+                          </ComposerNoticeProvider>
+                        </ComposerSubagentsContext>
+                      </PaneSubagents>
                     </PaneSideTasks>
                   </FollowUpSuggestionContext>
                 )}
@@ -1167,6 +1176,30 @@ function taskAccessFor(
  * They mount, and read the host, only once that composer renders, so a thread
  * still loading asks for nothing.
  */
+/**
+ * One read of a thread's subagents for its whole pane, so the composer's tray
+ * and the rows under each turn share it rather than each polling the host.
+ */
+function PaneSubagents(props: {
+  readonly surface: WorkspaceTab;
+  readonly props: WorkspaceViewProps;
+  readonly children: ReactNode;
+}) {
+  const client = props.props.agentRunClient;
+  if (
+    client === undefined ||
+    !offersThreadComposer(props.surface) ||
+    !("threadId" in props.surface)
+  ) {
+    return <>{props.children}</>;
+  }
+  return (
+    <ThreadSubagentsProvider client={client} threadId={String(props.surface.threadId)}>
+      {props.children}
+    </ThreadSubagentsProvider>
+  );
+}
+
 function subagentsTrayFor(surface: WorkspaceTab, props: WorkspaceViewProps): ReactNode {
   if (!offersThreadComposer(surface)) return null;
   if (!("threadId" in surface)) return null;
