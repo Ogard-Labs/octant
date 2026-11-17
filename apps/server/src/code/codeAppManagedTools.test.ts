@@ -582,7 +582,12 @@ describe("Code app-managed tools", () => {
     const active = {
       ...snapshot,
       observation: { url: "https://example.com/", revision: 3, stale: false } as never,
-      context: { ...snapshot.context, presentation: "native-live" as const },
+      // A signed-in page: a Private page needs no site approval to run a script.
+      context: {
+        ...snapshot.context,
+        presentation: "native-live" as const,
+        policy: { ...snapshot.context.policy, profile: { kind: "personal" as const } },
+      },
     };
     const runScript = vi.fn(
       async (
@@ -726,13 +731,12 @@ describe("Code app-managed tools", () => {
       expect.objectContaining({
         windowId,
         threadId,
-        // At Full access a Private page needs no site approval and admits every site.
+        // A Private page needs no site approval and admits every site.
         policy: expect.objectContaining({
           profileMode: "isolated",
           allowedOrigins: ["*"],
           credentialFieldProtection: true,
         }),
-        fullAccessAgent: true,
       }),
     );
     expect(act).toHaveBeenCalledWith(
@@ -783,10 +787,6 @@ describe("Code app-managed tools", () => {
         executeOperation: vi.fn(),
         terminal: { read: vi.fn() },
         browserApproval: {
-          // The page was opened and approved by this thread before.
-          isApproved: () => true,
-          request,
-          remember: vi.fn(),
           forget: vi.fn(),
         },
         browser: {
@@ -824,29 +824,35 @@ describe("Code app-managed tools", () => {
       expect(f.create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual(["*"]);
     });
 
-    it("leaves a one-site page as it is below Full access, so another origin stays refused", async () => {
+    it("reopens a one-site page as an any-site page to reach another origin, below Full access too", async () => {
       const f = fixture("approval-gated", false);
-      await f.run({ operation: "navigate", url: "https://elsewhere.example/b" });
-      expect(f.releaseThread).not.toHaveBeenCalled();
-      expect(f.create).not.toHaveBeenCalled();
-      expect(f.act).toHaveBeenCalledOnce();
+      const result = await f.run({ operation: "navigate", url: "https://elsewhere.example/b" });
+      expect(result.isError).toBe(false);
+      expect(f.request).not.toHaveBeenCalled();
+      expect(f.releaseThread).toHaveBeenCalledOnce();
+      expect(f.create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual(["*"]);
     });
 
-    it("stops using a page that admits every site once the thread is below Full access", async () => {
+    it("keeps using a page that admits every site after the thread drops below Full access", async () => {
       const reading = fixture("approval-gated", true);
-      expect(await reading.run({ operation: "snapshot" })).toMatchObject({
-        isError: true,
-        result: { error: "browser-navigation-required" },
-      });
-      expect(reading.act).not.toHaveBeenCalled();
+      expect((await reading.run({ operation: "snapshot" })).isError).toBe(false);
+      expect(reading.act).toHaveBeenCalledOnce();
+      expect(reading.request).not.toHaveBeenCalled();
 
       const navigating = fixture("approval-gated", true);
-      await navigating.run({ operation: "navigate", url: "https://elsewhere.example/b" });
-      expect(navigating.releaseThread).toHaveBeenCalledOnce();
-      expect(navigating.request).toHaveBeenCalledWith("https://elsewhere.example", undefined);
-      expect(navigating.create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual([
-        "https://elsewhere.example",
-      ]);
+      const result = await navigating.run({
+        operation: "navigate",
+        url: "https://elsewhere.example/b",
+      });
+      expect(result.isError).toBe(false);
+      expect(navigating.request).not.toHaveBeenCalled();
+      expect(navigating.releaseThread).not.toHaveBeenCalled();
+      expect(navigating.create).not.toHaveBeenCalled();
+      expect(navigating.act).toHaveBeenCalledWith(
+        expect.objectContaining({
+          request: expect.objectContaining({ target: "https://elsewhere.example/b" }),
+        }),
+      );
     });
   });
 
@@ -893,7 +899,6 @@ describe("Code app-managed tools", () => {
       );
       const create = vi.fn(async (_input: { policy: { profile?: unknown } }) => active);
       const act = vi.fn(async () => active);
-      const privateRequest = vi.fn(async () => "approved" as const);
       const tools = createCodeAppManagedTools({
         windowId,
         thread: current,
@@ -917,11 +922,7 @@ describe("Code app-managed tools", () => {
           },
         },
         browserApproval: {
-          request: privateRequest,
-          isApproved: () => false,
-          remember: vi.fn(),
           forget: vi.fn(),
-          isOriginRemembered: () => true,
         },
         browser: {
           resolveAuthority: () => authority,
@@ -936,7 +937,7 @@ describe("Code app-managed tools", () => {
       });
       const run = (input: Record<string, unknown>) =>
         tools.execute({ name: CODE_BROWSER_TOOL_NAME, inputJson: JSON.stringify(input) });
-      return { run, request, privateRequest, create, act, bindings, active };
+      return { run, request, create, act, bindings, active };
     }
     it.each(["project", "personal"] as const)(
       "asks through the real profile policy for a %s default even at Full access",
@@ -950,7 +951,6 @@ describe("Code app-managed tools", () => {
             profile: expect.objectContaining({ kind: profile }),
           }),
         );
-        expect(f.privateRequest).not.toHaveBeenCalled();
         expect(f.create).toHaveBeenCalledWith(
           expect.objectContaining({
             policy: expect.objectContaining({
@@ -977,7 +977,6 @@ describe("Code app-managed tools", () => {
           policy: expect.objectContaining({ profile: { kind: "account", profileId } }),
         }),
       );
-      expect(f.privateRequest).not.toHaveBeenCalled();
     });
     it("accepts an explicit Private override without rewriting the task default", async () => {
       const f = fixture({ profile: "personal" });
@@ -1034,19 +1033,14 @@ describe("Code app-managed tools", () => {
         evidence: [],
       };
       const bound = new Set<string>();
-      const request = vi.fn(async () => "approved" as const);
-      const remember = vi.fn();
       const create = vi.fn(async () => {
         current = active;
         return active;
       });
       const act = vi.fn(async () => active);
       const browserApproval = {
-        isApproved: () => false,
         isBound: (contextId: string) => bound.has(contextId),
         rememberBinding: (contextId: string) => void bound.add(contextId),
-        request,
-        remember,
         forget: (contextId: string) => void bound.delete(contextId),
       };
       const tools = createCodeAppManagedTools({
@@ -1074,9 +1068,9 @@ describe("Code app-managed tools", () => {
         result: { error: "browser-navigation-required" },
       });
       await call({ operation: "navigate", url: "https://example.com" });
-      expect(request).toHaveBeenCalledTimes(executionPolicy === "full-access" ? 0 : 1);
-      expect(remember).toHaveBeenCalledTimes(executionPolicy === "full-access" ? 0 : 1);
+      // A Private page asks no one at any level; the open itself binds it.
       if (active.context === undefined) throw Error("Missing test context");
+      expect(bound.has(active.context.contextId)).toBe(true);
       current = {
         status: "stale",
         threadId: active.threadId,
@@ -1135,10 +1129,7 @@ describe("Code app-managed tools", () => {
         executeOperation: vi.fn(),
         terminal: { read: vi.fn() },
         browserApproval: {
-          isApproved: () => false,
           isBound: () => true,
-          request: vi.fn(),
-          remember: vi.fn(),
           forget: vi.fn(),
         },
         browser: {
@@ -1274,7 +1265,12 @@ describe("Code app-managed tools", () => {
       uuid: uuidFactory(),
       executeOperation: vi.fn(),
       terminal: { read: vi.fn() },
-      browserApproval: { isApproved: () => false, request: approve, remember, forget: vi.fn() },
+      browserProfiles: {
+        approvals: { request: approve },
+        readBinding: () => undefined,
+        rememberBinding: remember,
+        forgetBinding: vi.fn(),
+      },
       browser: {
         resolveAuthority: () => authority,
         inspectThread: () => ({ status: "ready", threadId: threadId as never, evidence: [] }),
@@ -1290,11 +1286,20 @@ describe("Code app-managed tools", () => {
 
     const result = await tools.execute({
       name: CODE_BROWSER_TOOL_NAME,
-      inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com/docs" }),
+      inputJson: JSON.stringify({
+        operation: "navigate",
+        url: "https://example.com/docs",
+        profile: "personal",
+      }),
     });
 
-    expect(approve).toHaveBeenCalledWith("https://example.com", undefined);
-    expect(remember).toHaveBeenCalledWith(active.context?.contextId);
+    expect(approve).toHaveBeenCalledWith(
+      expect.objectContaining({ origin: "https://example.com", profile: { kind: "personal" } }),
+    );
+    expect(remember).toHaveBeenCalledWith(
+      String(active.context?.contextId),
+      expect.objectContaining({ authority }),
+    );
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         windowId,
@@ -1318,9 +1323,7 @@ describe("Code app-managed tools", () => {
     });
   });
 
-  it("opens a remembered browser origin in a new context without asking again", async () => {
-    const approve = vi.fn(async () => "approved" as const);
-    const remember = vi.fn();
+  it("opens a Private page in a new context at approval-gated access without asking", async () => {
     const authority = browserAuthority();
     const active = browserSnapshot(authority);
     const create = vi.fn(async () => active);
@@ -1347,10 +1350,6 @@ describe("Code app-managed tools", () => {
       executeOperation: vi.fn(),
       terminal: { read: vi.fn() },
       browserApproval: {
-        isApproved: () => false,
-        isOriginRemembered: () => true,
-        request: approve,
-        remember,
         forget: vi.fn(),
       },
       browser: {
@@ -1371,8 +1370,6 @@ describe("Code app-managed tools", () => {
       inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com/docs" }),
     });
 
-    expect(approve).not.toHaveBeenCalled();
-    expect(remember).toHaveBeenCalledWith(active.context?.contextId);
     expect(create).toHaveBeenCalledOnce();
     expect(result).toMatchObject({
       isError: false,
@@ -1488,6 +1485,17 @@ describe("Code app-managed tools", () => {
       } = {},
     ) {
       let current = thread({ executionPolicy: options.startsAt ?? "plan" });
+      // A Private page asks no one; only a signed-in page can be unapproved.
+      const open: BrowserAutomationSnapshot =
+        options.approved === false && page.context !== undefined
+          ? {
+              ...page,
+              context: {
+                ...page.context,
+                policy: { ...page.context.policy, profile: { kind: "personal" as const } },
+              },
+            }
+          : page;
       const act = vi.fn(async (_input: { readonly request: { readonly kind: string } }) => page);
       const create = vi.fn(async () => page);
       const releaseThread = vi.fn(async () => page);
@@ -1502,10 +1510,13 @@ describe("Code app-managed tools", () => {
         executeOperation: vi.fn(),
         terminal: { read: vi.fn() },
         browserApproval: {
-          isApproved: () => options.approved ?? true,
-          request: ask,
-          remember: vi.fn(),
           forget: vi.fn(),
+        },
+        browserProfiles: {
+          approvals: { request: ask },
+          readBinding: () => undefined,
+          rememberBinding: vi.fn(),
+          forgetBinding: vi.fn(),
         },
         browserUpload: { root: "/checkout", approvals: { request: ask } },
         browserDownload: { root: "/checkout", approvals: { request: ask } },
@@ -1517,7 +1528,7 @@ describe("Code app-managed tools", () => {
         },
         browser: {
           resolveAuthority: () => browserAuthority(),
-          inspectThread: () => page,
+          inspectThread: () => open,
           create,
           act,
           saveDownload: saveDownload as never,
@@ -1584,7 +1595,7 @@ describe("Code app-managed tools", () => {
       expect(releaseThread).toHaveBeenCalledOnce();
     });
 
-    it("still asks before reading a page this thread was not approved for, and reads nothing declined", async () => {
+    it("still asks before reading a signed-in page this thread was not approved for, and reads nothing declined", async () => {
       const { tools, act, ask } = planTools({ approved: false });
       expect(await call(tools, { operation: "snapshot" })).toEqual({
         result: { error: "browser-approval-denied" },
@@ -1690,9 +1701,6 @@ describe("Code app-managed tools", () => {
         executeOperation: vi.fn(),
         terminal: { read: vi.fn() },
         browserApproval: {
-          isApproved: () => true,
-          request: vi.fn(),
-          remember: vi.fn(),
           forget: vi.fn(),
         },
         browserDownload: {
@@ -1894,9 +1902,6 @@ describe("Code app-managed tools", () => {
         executeOperation: vi.fn(),
         terminal: { read: vi.fn() },
         browserApproval: {
-          isApproved: () => true,
-          request: vi.fn(),
-          remember: vi.fn(),
           forget: vi.fn(),
         },
         browserProfiles: {
@@ -1984,9 +1989,6 @@ describe("Code app-managed tools", () => {
         executeOperation: vi.fn(),
         terminal: { read: vi.fn() },
         browserApproval: {
-          isApproved: () => true,
-          request: vi.fn(),
-          remember: vi.fn(),
           forget: vi.fn(),
         },
         browserUpload: {
@@ -2666,15 +2668,21 @@ describe("Code app-managed tools", () => {
       page: AbortSignal,
       extra: Partial<Parameters<typeof createCodeAppManagedTools>[0]>,
       live = false,
+      // A Private page asks no one, so a question needs a page in a stored profile.
+      signedIn = false,
     ) {
       const snapshot = browserSnapshot(browserAuthority());
       if (snapshot.context === undefined) throw new Error("expected Browser context");
       const active = {
         ...snapshot,
         observation: { url: "https://example.com/", revision: 3, stale: false } as never,
-        context: live
-          ? { ...snapshot.context, presentation: "native-live" as const }
-          : snapshot.context,
+        context: {
+          ...snapshot.context,
+          ...(live ? { presentation: "native-live" as const } : {}),
+          ...(signedIn
+            ? { policy: { ...snapshot.context.policy, profile: { kind: "personal" as const } } }
+            : {}),
+        },
       };
       const current = thread({ executionPolicy: "approval-gated" });
       return createCodeAppManagedTools({
@@ -2731,14 +2739,19 @@ describe("Code app-managed tools", () => {
 
     it("withdraws a site approval for the open page when the page closes", async () => {
       const { page, asked, answer } = closingPage();
-      const tools = pageTools(page.signal, {
-        browserApproval: {
-          isApproved: () => false,
-          request: vi.fn(async (_origin: string, signal?: AbortSignal) => answer(signal)),
-          remember: vi.fn(),
-          forget: vi.fn(),
+      const tools = pageTools(
+        page.signal,
+        {
+          browserProfiles: {
+            approvals: { request: vi.fn(async (request) => answer(request.signal)) },
+            readBinding: () => undefined,
+            rememberBinding: vi.fn(),
+            forgetBinding: vi.fn(),
+          },
         },
-      });
+        false,
+        true,
+      );
       expect(
         await tools.execute({
           name: CODE_BROWSER_TOOL_NAME,
@@ -2750,14 +2763,19 @@ describe("Code app-managed tools", () => {
 
     it("withdraws a site approval for a page bound to another model when the page closes", async () => {
       const { page, asked, answer } = closingPage();
-      const tools = pageTools(page.signal, {
-        browserProfiles: {
-          approvals: { request: vi.fn(async (request) => answer(request.signal)) },
-          readBinding: () => ({ modelId: "another-model", authority: browserAuthority() }),
-          rememberBinding: vi.fn(),
-          forgetBinding: vi.fn(),
+      const tools = pageTools(
+        page.signal,
+        {
+          browserProfiles: {
+            approvals: { request: vi.fn(async (request) => answer(request.signal)) },
+            readBinding: () => ({ modelId: "another-model", authority: browserAuthority() }),
+            rememberBinding: vi.fn(),
+            forgetBinding: vi.fn(),
+          },
         },
-      });
+        false,
+        true,
+      );
       expect(
         await tools.execute({
           name: CODE_BROWSER_TOOL_NAME,
@@ -2773,9 +2791,6 @@ describe("Code app-managed tools", () => {
         page.signal,
         {
           browserApproval: {
-            isApproved: () => true,
-            request: vi.fn(),
-            remember: vi.fn(),
             forget: vi.fn(),
           },
           browserSignIn: {
@@ -4898,9 +4913,8 @@ it("forwards an explicit reviewed download manifest through the Code routine bou
 });
 
 it.each([undefined, "private"] as const)(
-  "keeps routine navigation with profile %s on its ordinary remembered-origin path",
+  "keeps routine navigation with profile %s on its ordinary path and opens the Private page without asking",
   async (profile) => {
-    let remembered = false;
     const current = thread({ executionPolicy: "approval-gated" });
     const ready: BrowserAutomationSnapshot = {
       status: "ready",
@@ -4931,10 +4945,6 @@ it.each([undefined, "private"] as const)(
         },
       },
       browserApproval: {
-        isApproved: () => remembered,
-        isOriginRemembered: () => remembered,
-        request,
-        remember: () => {},
         forget: () => {},
       },
       browser: {
@@ -4962,16 +4972,9 @@ it.each([undefined, "private"] as const)(
         ...(profile === undefined ? {} : { profile }),
       }),
     };
-    expect(await tools.execute(call)).toMatchObject({
-      isError: true,
-      result: { error: "browser-approval-denied" },
-    });
-    expect(create).not.toHaveBeenCalled();
-    expect(request).toHaveBeenCalledOnce();
-    remembered = true;
     expect(await tools.execute(call)).toMatchObject({ isError: false });
     expect(create).toHaveBeenCalledOnce();
     expect(delegated).not.toHaveBeenCalled();
-    expect(request).toHaveBeenCalledOnce();
+    expect(request).not.toHaveBeenCalled();
   },
 );

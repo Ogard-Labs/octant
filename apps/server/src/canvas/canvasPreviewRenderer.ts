@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
+import type { Browser, BrowserContext, Page } from "playwright-core";
 import type { CanvasDefinition, CanvasDesignAssetResolution } from "@octant/contracts/canvas";
 import { DEFAULT_BROWSER_EXECUTABLE_CANDIDATES } from "../browser/playwrightBrowserRuntime";
 import { canvasDesignPageHeaders } from "./canvasDesignPage";
@@ -237,8 +237,15 @@ export function createPlaywrightCanvasPreviewRenderer(
   const previewRoot = resolve(options.webAssetsPath, CANVAS_PREVIEW_ASSET_FOLDER);
   const launch =
     options.launch ??
-    ((executablePath: string) =>
-      chromium.launch({ executablePath, headless: true, args: [...CANVAS_PREVIEW_BROWSER_ARGS] }));
+    (async (executablePath: string) => {
+      // Loaded at first render so host boot does not evaluate the browser driver.
+      const { chromium } = await import("playwright-core");
+      return chromium.launch({
+        executablePath,
+        headless: true,
+        args: [...CANVAS_PREVIEW_BROWSER_ARGS],
+      });
+    });
 
   async function resolveExecutable(): Promise<string | undefined> {
     for (const candidate of candidates) {

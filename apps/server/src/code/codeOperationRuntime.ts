@@ -630,11 +630,6 @@ export interface CodeOperationRuntimeOptions {
   readonly browserProfiles?: CodeAppManagedToolsOptions["browserProfiles"];
   /** The Project's Browser flows and the recorder; see the Code Browser tool. */
   readonly browserFlows?: CodeAppManagedToolsOptions["browserFlows"];
-  /**
-   * Whether an origin already holds a remembered "always allow" grant. Read
-   * live so a grant forgotten in Settings stops satisfying it at once.
-   */
-  readonly isBrowserOriginRemembered?: (origin: string) => boolean;
   /** The person's per-file Browser upload limit in bytes, read for each upload. */
   readonly browserUploadFileLimitBytes?: () => number;
   readonly browserUploadFileCountLimit?: () => number;
@@ -3445,7 +3440,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     Extract<CodeOperationCommand, { kind: "start-provider-turn" }>
   >();
   readonly #active: CodeActiveTurns;
-  readonly #approvedBrowserContexts = new Set<string>();
   // Full access may open without approval, but recovery still needs the
   // original controller identity. Keeping this separate never manufactures a grant.
   readonly #boundBrowserContexts = new Set<string>();
@@ -4944,19 +4938,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     ]);
   }
 
-  #askBrowserApproval(
-    active: ActiveTurn,
-    origin: string,
-    signal?: AbortSignal,
-  ): Promise<"approved" | "denied" | "cancelled" | "expired"> {
-    return this.#askToolApproval(
-      active,
-      `Allow this thread to use an isolated browser session at ${origin.slice(0, 512)}? Shell and file access stay unchanged.`,
-      origin.slice(0, 2048),
-      signal,
-    );
-  }
-
   /**
    * One device effect the thread's agent asked for, asked of the person in the
    * thread like a Browser session. An approval becomes the host's one-use
@@ -5901,29 +5882,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               this.#boundBrowserContexts.add(key);
               active.browserGrantKeys.add(key);
             },
-            isApproved: (contextId) => {
-              const key = this.#browserApprovalKey(active, contextId);
-              const approved = this.#approvedBrowserContexts.has(key);
-              if (approved) active.browserGrantKeys.add(key);
-              return approved;
-            },
-            request: (origin, signal) => this.#askBrowserApproval(active, origin, signal),
-            ...(this.#options.isBrowserOriginRemembered === undefined
-              ? {}
-              : { isOriginRemembered: this.#options.isBrowserOriginRemembered }),
-            remember: (contextId) => {
-              if (this.#approvedBrowserContexts.size >= 256) {
-                const oldest = this.#approvedBrowserContexts.values().next().value;
-                if (oldest !== undefined) this.#approvedBrowserContexts.delete(oldest);
-              }
-              const key = this.#browserApprovalKey(active, contextId);
-              this.#approvedBrowserContexts.add(key);
-              active.browserGrantKeys.add(key);
-            },
             forget: (contextId) => {
-              const key = this.#browserApprovalKey(active, contextId);
-              this.#approvedBrowserContexts.delete(key);
-              this.#boundBrowserContexts.delete(key);
+              this.#boundBrowserContexts.delete(this.#browserApprovalKey(active, contextId));
             },
           },
           ...(this.#options.browserSignIn === undefined
@@ -7205,10 +7165,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     for (const contextId of active.browserProfileContexts)
       this.#options.browserProfiles?.forgetBinding(contextId);
     active.browserProfileContexts.clear();
-    for (const key of active.browserGrantKeys) {
-      this.#approvedBrowserContexts.delete(key);
-      this.#boundBrowserContexts.delete(key);
-    }
+    for (const key of active.browserGrantKeys) this.#boundBrowserContexts.delete(key);
     active.browserGrantKeys.clear();
   }
 

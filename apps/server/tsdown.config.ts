@@ -28,7 +28,9 @@ export default defineConfig([
       onlyBundle: false,
     },
     entry: {
-      main: "src/main.ts",
+      // The packaged entry enables the compile cache, then loads the host.
+      main: "src/bootstrap.ts",
+      server: "src/main.ts",
       dbMaintenance: "src/maintenanceCli.ts",
       canvasExportWorker: "src/canvas/canvasExportWorker.mjs",
     },

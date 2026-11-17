@@ -283,31 +283,36 @@ the page, the workspace, or the person is reached.
     redirect the same way adds no reach for the agent. Approving the final
     site as if it had been typed was rejected: it would hand the agent a site
     the person never named.
-- At Full access a Private page needs no site approval and may navigate
-  across origins, so this refusal is left there to profile pages, which keep
-  their site approval ([the Full access rule](../architecture.md#security-and-authority);
-  maintainer request, 2026-11-12). Stated plainly (maintainer decision,
-  2026-11-16): at Full access a Private page asks nothing per origin and
-  nothing about it expires into a refusal. Built, in Work and Code, and a
-  site approval that waits for an answer runs on no clock:
-  - The agent tool opens the page with one allowlist entry, `*`, which stands
-    for every http and https site. The browser service admits that entry only
-    from the agent tool of a thread at Full access, alone, and never beside a
-    stored profile; a window, a paired device, and a profile switch cannot
-    open such a page. Credential-field protection, Take over and Hand back,
-    and the paired-device reach are the same on it as on any page.
-  - A Private page opened below Full access holds its one site. When the
-    thread is at Full access and the agent navigates it to another origin, the
-    tool closes it and opens the any-site page there instead of refusing; a
-    link or redirect on the one-site page that leaves its origin is still
-    refused until then.
-  - A page that admits every site has no site approval to stand on below Full
-    access. When the thread's level drops, the agent's next `navigate` closes
-    it and opens a one-site page through the ordinary approval, and every
-    other operation answers `browser-navigation-required`. Plan still reads
-    it, because Plan cannot move it.
-  - At Full access a different model or a person-switched Private page needs
-    no approval either; the ask that rebinding raises is a site approval.
+- A Private page needs no site approval at any level and may navigate across
+  origins (maintainer decision, 2026-11-17; before, only at Full access), so
+  this refusal is left to profile pages, which keep their site approval at
+  every level ([the Full access rule](../architecture.md#security-and-authority)).
+  Below Full access a Private page now asks nothing per origin either. Built,
+  in Work and Code:
+  - The agent tool, the desktop app's Browser pane and the Zen research dock
+    open a Private page with one allowlist entry, `*`, which stands for every http and https
+    site, this computer and its network included. The browser service admits
+    that entry from any caller, alone, and never beside a stored profile. A
+    local server opened with its own self-signed certificate keeps its one
+    origin, because that acceptance is bounded to it, and the agent's
+    navigation elsewhere is refused on it rather than closing it. On the
+    headless Browser the person's own page holds the site they typed, because
+    that Browser cannot keep a typed address's redirect off this computer's
+    network. A page the agent opened admits every site there too, and its
+    redirects are followed wherever they go. Credential-field
+    protection, Take over and Hand back, and the paired-device reach are the
+    same on it as on any page.
+  - A Private page opened for one site (before this rule, or for a local
+    server's certificate) holds that site; when the agent navigates it to
+    another origin, the tool closes it and opens the any-site page there
+    instead of refusing, at every level.
+  - A different model or a person-switched Private page needs no approval
+    either; the ask that rebinding raises is a site approval, which only a
+    profile page has.
+  - Plan is unchanged: it reads the page already open and moves nothing.
+  - A typed address's redirect is still never followed onto this computer or
+    its network, unless that is where the person typed; the agent's own
+    navigation is not held to that.
 - After a page expires, ordinary agent calls answer `context-expired` and name
   its former Private, Project, or Personal profile, rather than claiming it
   never opened. Reopening requires an explicit `navigate`; a stored profile
@@ -1154,19 +1159,25 @@ packaged, personal-account or cross-platform acceptance evidence.
 
 - While a page is open, the Browser pane's toolbar carries **Take over** as an icon
   button after the address field (in the More menu when the trailing icons do not fit), on the desktop and the headless Browser alike. One click
-  holds every agent Browser call on that page for the person: the sign-in
-  hold, under another name (`waitingForPerson` is `take-over`), not a second
-  mechanism. The status icon then reads "You have the page" and the toolbar shows **Hand back**
+  gives that page to the person: the sign-in hold, under another name
+  (`waitingForPerson` is `take-over`), not a second mechanism. The status icon then reads "You have the page" and the toolbar shows **Hand back**
   in place of Take over. Hand back releases the hold.
-- While held, an agent Browser call is refused with `browser-person-took-over`
-  and a message saying the person took over and that it should say it is
-  waiting rather than retry. The check runs again right before an action
-  runs, as it does for a sign-in. `stop` still works and ends the page and
-  the hold with it.
-- The hold is checked again inside the page's action queue, after a call is
-  dequeued and before it is admitted, so a call that was already waiting
-  behind another action when the person took over never runs; it is answered
-  as the hold.
+- The agent takes the page back (maintainer decision, 2026-11-17; before,
+  its calls waited until the person handed the page back). The agent tool's
+  next call ends the hold as **Hand back** would and runs, and the person can
+  take the page over again at any time; the button's tooltip says so. The
+  check runs again inside the page's action queue, after a call is dequeued,
+  so a call that was waiting behind another action when the person took over
+  takes the page back there. The tool takes it back before it checks the call,
+  so a call it then refuses still ends the hold. What follows is the same as
+  after Hand back (below).
+- Not taken back: the agent's own sign-in ask, a page a paired owner device
+  controls, and a caller that is not the agent tool (a terminal CLI under a
+  grant, a saved flow's steps, whether the agent replays it with `flow-run`
+  or the person runs it after review). A call from one of these while the page is held is refused with
+  `browser-person-took-over` and a message saying the person took over and
+  that it should say it is waiting rather than retry. `stop` still works and
+  ends the page and the hold with it.
 - The person's own relayed actions are not held: on the headless Browser they
   are how the person drives the page. Every one counts as the person using it.
 - After **Hand back**, the first agent call that would click, type, press,
@@ -1182,8 +1193,9 @@ packaged, personal-account or cross-platform acceptance evidence.
   Take over is the same one. The page stays open while the person holds it, and
   for as long as they keep using it; with no input for 11 minutes it ends like
   any page whose session ran out.
-- Taking over changes no authority. It keeps the agent out and adds nothing for
-  anyone to do on the page, so it is not journaled, as the sign-in hold is not.
+- Taking over changes no authority. It pauses the agent until its next call
+  and adds nothing for anyone to do on the page, so it is not journaled, as the
+  sign-in hold is not.
 - **Who may.** Take over and Hand back are the person's, from a window of this
   computer that can see the thread, through `/api/browser/contexts/take-over`
   and `/api/browser/contexts/hand-back`. The route checks the window's

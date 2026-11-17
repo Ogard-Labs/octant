@@ -1792,8 +1792,9 @@ carries a count while the agent drives the page; the status icon and the
 Browser card name a stored profile while the agent drives it. **Take over.**
 While a page is open, the toolbar carries a **Take over** icon button after the
 address field (in the More menu when the trailing icons do not fit). One click
-holds every agent Browser call on the page; the status icon then reads "You have
-the page" and **Hand back** replaces Take over. While the agent's own sign-in ask is open,
+gives the person the page until they hand it back or the agent's next call takes
+it back; the status icon then reads "You have the page" and **Hand back**
+replaces Take over. While the agent's own sign-in ask is open,
 neither shows. While a remote owner holds the page, **Reclaim locally** is the trailing
 button in place of Take over and Hand back, which moves into the More menu. The person's typing and clicking in the page while the agent
 acts is delivered, never dropped, and the indicator keeps saying "Agent active".

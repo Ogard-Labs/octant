@@ -191,7 +191,7 @@ function isExemptByShape(path: string): boolean {
   if (isTestScaffolding(path)) return true;
   if (path.endsWith(".d.ts")) return true;
   // Process entry points are launched by path or config, never imported.
-  if (/(^|\/)(main|bin|index|preload)\.(ts|tsx)$/.test(path)) return true;
+  if (/(^|\/)(main|bootstrap|bin|index|preload)\.(ts|tsx)$/.test(path)) return true;
   if (path.endsWith("Cli.ts")) return true;
   // Platform variants are selected by the bundler from the base specifier.
   if (/\.(web|native|ios|android)\.(ts|tsx)$/.test(path)) return true;

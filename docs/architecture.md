@@ -1031,13 +1031,15 @@ showed. A remembered origin covers Private pages only; a page in a Project or
 Personal Browser profile asks for each origin and remembers the pair (origin,
 profile), never one without the other
 ([Browser profiles](design/browser-profiles.md#the-agent-on-a-signed-in-page)).
-At Full access a Private page needs no site approval and may navigate across
-origins; a profile page keeps its site approval at every level, which the
-person can remember or widen to "Allow all sites in this profile"
-([the Full access rule](#security-and-authority); maintainer request,
-2026-11-12). Built: the agent tool opens that Private page with the any-site
-entry in its allowlist, which the browser service admits from no other caller
-and never beside a stored profile
+A Private page needs no site approval at any level and may navigate across
+origins, this computer and its network included (maintainer decision,
+2026-11-17; before, only at Full access); a profile page keeps its site
+approval at every level, which the person can remember or widen to "Allow all
+sites in this profile" ([the Full access rule](#security-and-authority)). A
+remembered origin therefore matters only on a profile page now. Built: the
+agent tool and the person's Browser open a Private page with the any-site
+entry in its allowlist, which the browser service admits alone and never
+beside a stored profile
 ([Browser for agents](design/browser-agent-tool.md#refusal-and-expiry-recovery)).
 Plan admits only the Browser operations that read the page already open in
 the thread's own Browser (`audit` among them) and `stop`, and refuses every
@@ -5469,6 +5471,17 @@ flowchart LR
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
   verify are `unknown`; the map never carries secret values.
+- **Compiled code cache.** The host and the desktop app keep V8's compiled
+  code in a `compile-cache` folder inside the host data folder (for the
+  desktop, the folder its `main` later makes `userData`, resolved by the entry
+  without creating anything, so a test data folder never writes to the default
+  one; skipped on Windows), listed in
+  the host data map. It is enabled only when that data folder already exists,
+  is owned by the current user and is writable by nobody else, and only when
+  `compile-cache` itself is owned by the user, not a symlink and not writable
+  by others; neither process creates the data folder for it, and it is never
+  placed inside the signed app bundle.
+
 - **Streamed output and a full disk.** Text and reasoning deltas are exempt
   from a turn's event budget, so each turn also has a streamed-output budget
   of 32 MiB (`MAX_TURN_STREAMED_OUTPUT_BYTES`, far past any real answer). A
@@ -14298,11 +14311,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     moves to Plan from its own mode picker, as a Code thread does.
   - **Computer keeps its first-action ask** at every level, Full access
     included: it asks at the first action in each application, once per
-    thread. The Browser asks at Full access only on a signed-in profile; a
-    Private page asks nothing there. Both are entries in the Full access
-    rule above (maintainer request, 2026-11-12, replacing the earlier
-    decision that both asked at every level). Not built yet: the Browser
-    still asks for each site on a Private page.
+    thread. The Browser asks only on a signed-in profile, at every level; a
+    Private page asks nothing at any level (maintainer decision, 2026-11-17;
+    before, only at Full access). Both are entries in the Full access rule
+    above (maintainer request, 2026-11-12, replacing the earlier decision
+    that both asked at every level). Built.
   - **Plan is an overlay,** not a level: a mode of a thread at any level,
     always read-only.
   - **Lowering is journaled and shown.** Each change records who lowered it,

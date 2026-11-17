@@ -55,7 +55,6 @@ import {
   MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS,
 } from "@octant/contracts/browser-automation";
 import { browserDownloadHoldRoot, prepareBrowserDownloadHoldRoot } from "@octant/host-runtime";
-import { chromium } from "playwright-core";
 import {
   DownloadFolderWatch,
   PlaywrightDownloadHold,
@@ -2105,6 +2104,9 @@ export function createPlaywrightBrowserRuntime(
     downloadFolder: browserDownloadHoldRoot("headless"),
     launch: async (executablePath, onProcessStarted) => {
       const downloadsPath = await prepareBrowserDownloadHoldRoot("headless");
+      // Loaded at first launch: evaluating it costs boot time a host that never
+      // opens a browser should not pay.
+      const { chromium } = await import("playwright-core");
       const browser = await chromium.launch({
         executablePath,
         headless: true,
