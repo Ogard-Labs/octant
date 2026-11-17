@@ -415,7 +415,9 @@ the fail-closed option.
   serves every mode and no one thread) a Linux driver is `host-prohibited`:
   `resolveOutsideDriverActivation` takes the value, and the admission reads
   it at each listing and use, so a driver already running is refused at its
-  next use (built).
+  next use (built). A start decides admission once more after the host
+  verifies the driver's files and just before the process starts, so Strict
+  turning on or trust withdrawn during that read starts nothing (built).
 - **One process per instance.** The supervisor keys a driver's runtime by its
   instance, so two instances of one driver never share a process. A second
   start for an instance whose process is running is refused as

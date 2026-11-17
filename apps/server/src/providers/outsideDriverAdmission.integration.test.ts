@@ -176,6 +176,8 @@ async function host(
     readonly crashingDriver?: boolean;
     /** The host's Strict, read at each admission; off unless a test turns it on. */
     readonly strict?: () => boolean;
+    /** Runs while the host verifies the driver's files, before it returns the entry. */
+    readonly duringVerification?: () => Promise<void>;
   } = {},
 ) {
   const dataDirectory = await mkdtemp(join(tmpdir(), "octant-outside-admission-"));
@@ -253,8 +255,8 @@ async function host(
     platform: options.platform ?? "darwin",
     packages: () => lifecycle.snapshot().packages,
     isCompatible: () => true,
-    entry: (driver) =>
-      store.verifiedDriverEntry(
+    entry: async (driver) => {
+      const located = await store.verifiedDriverEntry(
         {
           extensionId: String(driver.extensionId),
           packageId: String(driver.packageId),
@@ -262,7 +264,10 @@ async function host(
           digest: String(driver.digest),
         },
         String(driver.componentId),
-      ),
+      );
+      await options.duringVerification?.();
+      return located;
+    },
     processes:
       options.crashingDriver === true
         ? processOwner()
@@ -934,6 +939,63 @@ describe("outside driver admission end to end", () => {
 
     strict = true;
     await expect(context.providers.probe(windowId, instanceId)).rejects.toThrow(/not available/);
+    expect(context.starts).toHaveLength(1);
+  });
+
+  it("starts no Linux driver when Strict turns on while its files are verified", async () => {
+    let strict = false;
+    let verifying = async () => undefined;
+    const context = await host({
+      platform: "linux",
+      strict: () => strict,
+      duringVerification: () => verifying(),
+    });
+    const entry = await context.install();
+    await context.admit(entry.extensionId);
+    await context.addProvider(entry);
+    await context.turnOn();
+
+    verifying = async () => {
+      strict = true;
+    };
+    await expect(context.providers.probe(windowId, instanceId)).rejects.toThrow(/not available/);
+    expect(context.starts).toEqual([]);
+  });
+
+  it("starts no driver when its trust is withdrawn while its files are verified", async () => {
+    let verifying = async () => undefined;
+    const context = await host({
+      platform: "linux",
+      duringVerification: () => verifying(),
+    });
+    const entry = await context.install();
+    await context.admit(entry.extensionId);
+    await context.addProvider(entry);
+    await context.turnOn();
+
+    verifying = async () => {
+      await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: false });
+    };
+    await expect(context.providers.probe(windowId, instanceId)).rejects.toThrow(/not available/);
+    expect(context.starts).toEqual([]);
+  });
+
+  it("starts a Linux driver as before when Strict stays off through its file verification", async () => {
+    let verified = 0;
+    const context = await host({
+      platform: "linux",
+      strict: () => false,
+      duringVerification: async () => {
+        verified += 1;
+      },
+    });
+    const entry = await context.install();
+    await context.admit(entry.extensionId);
+    await context.addProvider(entry);
+    await context.turnOn();
+
+    await context.providers.probe(windowId, instanceId);
+    expect(verified).toBe(1);
     expect(context.starts).toHaveLength(1);
   });
 

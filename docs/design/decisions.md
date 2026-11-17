@@ -1579,7 +1579,7 @@ Octant's tools reach OpenCode and ACP agents on Linux as on macOS, and outside p
 
 - Built: app-managed tools are reported for OpenCode and ACP agents on Linux as on macOS. A Linux launch reaches the tool bridge on the shared host network a provider launch has by default, or through the egress forwarder's loopback relay, for the bridge's port alone, when Network limits proxy it; Windows is not offered them.
 - Built: an outside driver is admitted on Linux under the same installation, trust and enablement steps; until a Linux extension-process confinement exists it runs without one, with the same fixed environment, and its provider row reads "Runs without confinement". Windows stays `host-prohibited`.
-- Built: Strict keeps an outside driver `host-prohibited` on Linux. A provider instance serves every mode and no one thread, so the host's Strict decides (Strict as the Code or Work default in Settings, as a Chat thread reads it), read at each listing, admission and use; a driver already running is refused at its next use.
+- Built: Strict keeps an outside driver `host-prohibited` on Linux. A provider instance serves every mode and no one thread, so the host's Strict decides (Strict as the Code or Work default in Settings, as a Chat thread reads it), read at each listing, admission and use; a driver already running is refused at its next use, and a start decides again after the driver's files are verified, just before the process starts.
 
 Status: Built. Since: 2026-11-16. Detail: [Provider runtimes: What an ACP agent cannot do](provider-runtimes.md#what-an-acp-agent-cannot-do), [Provider runtimes: Codex](provider-runtimes.md#codex) and [Outside provider drivers: Maintainer decisions](outside-provider-drivers.md#maintainer-decisions).
 
