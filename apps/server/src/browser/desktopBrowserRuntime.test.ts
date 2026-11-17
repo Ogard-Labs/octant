@@ -248,6 +248,26 @@ describe("DesktopBrowserRuntime", () => {
     });
   });
 
+  it("forwards the person-started mark on a navigation", async () => {
+    const fetch = vi.fn(async () => Response.json({}));
+    const runtime = new DesktopBrowserRuntime({
+      brokerUrl: "http://127.0.0.1:41234/",
+      token: "broker-token",
+      fetch,
+    });
+    await runtime.act(
+      contextId,
+      { kind: "navigate", target: "https://example.com/", startedBy: "person" },
+      new AbortController().signal,
+    );
+    const sent = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(sent[1].body)).request).toEqual({
+      kind: "navigate",
+      target: "https://example.com/",
+      startedBy: "person",
+    });
+  });
+
   it("forwards the hold flag and claims or discards a held download by id", async () => {
     const fetch = vi.fn(async (url: string | URL | Request) =>
       String(url).endsWith("download-claim")

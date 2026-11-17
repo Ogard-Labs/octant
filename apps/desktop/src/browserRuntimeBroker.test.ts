@@ -601,6 +601,33 @@ describe("BrowserRuntimeBroker", () => {
     }
   });
 
+  it("passes the person-started mark through on a navigation and refuses it on anything else", async () => {
+    const surface = host();
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    try {
+      const navigate = { kind: "navigate", target: "https://example.com/", startedBy: "person" };
+      const passed = await broker.fetchForTest(
+        request(broker.url, broker.token, { contextId, request: navigate }),
+      );
+      expect(passed.status).toBe(200);
+      expect(surface.act).toHaveBeenCalledWith(contextId, navigate);
+
+      for (const refused of [
+        { kind: "click", target: "#go", startedBy: "person" },
+        { kind: "navigate", target: "https://example.com/", startedBy: "agent" },
+        { kind: "navigate", target: "https://example.com/", startedBy: true },
+      ]) {
+        const response = await broker.fetchForTest(
+          request(broker.url, broker.token, { contextId, request: refused }),
+        );
+        expect(response.status).toBe(400);
+      }
+      expect(surface.act).toHaveBeenCalledOnce();
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("accepts the diagnostics read as a bounded action", async () => {
     const surface = host();
     const broker = await startBrowserRuntimeBroker(surface as never);
