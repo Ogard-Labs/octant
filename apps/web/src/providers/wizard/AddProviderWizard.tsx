@@ -255,6 +255,13 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
                 data-unavailable={card.unavailable === undefined ? undefined : "true"}
                 key={card.type}
                 onClick={() => {
+                  // The key field outlives Back and Next, so a key typed for
+                  // one provider would otherwise be stored against the next
+                  // one chosen and handed to its runtime (review finding,
+                  // 2026-11-17).
+                  if (card.type !== type && credentialInput.current !== null) {
+                    credentialInput.current.value = "";
+                  }
                   setType(card.type);
                   setProblem(undefined);
                 }}
