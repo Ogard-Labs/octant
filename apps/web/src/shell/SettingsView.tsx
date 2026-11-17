@@ -1421,6 +1421,9 @@ function ActiveSectionContent({
             ? {}
             : { providerSnapshot: props.providerController.snapshot })}
           {...(props.isNarrow === undefined ? {} : { isNarrow: props.isNarrow })}
+          focusedSetting={focusedSetting}
+          settings={props.settings}
+          onSettingsChange={props.onSettingsChange}
           {...(props.localUsageHistoryClient === undefined
             ? {}
             : { historyClient: props.localUsageHistoryClient })}
@@ -3401,6 +3404,9 @@ function UsageSettingsSection(props: {
   readonly limits?: ReactNode;
   readonly providers?: ReadonlyArray<ProviderInstance>;
   readonly onOpenSubject?: (subjectType: string, subjectId: string) => void;
+  readonly focusedSetting: SettingsSettingId | undefined;
+  readonly settings: ShellSettings;
+  readonly onSettingsChange: SettingsViewProps["onSettingsChange"];
 }) {
   const [source, setSource] = useState<"provider" | "octant" | "diagnostics" | "benchmarks">(
     props.historyClient === undefined ? "octant" : "provider",
@@ -3428,6 +3434,22 @@ function UsageSettingsSection(props: {
   );
   return (
     <div className="settings-usage-stack" id="settings-usage">
+      <div className="setgroup">
+        <SettingRow
+          description="Show the spend ceiling row on threads and Projects. A ceiling that is set always shows."
+          focused={props.focusedSetting === settingId("spend-ceiling-shown")}
+          label="Show spend ceiling"
+          scope="app"
+          settingId="spend-ceiling-shown"
+        >
+          <OctantSwitch
+            checked={props.settings.spendCeilingShown}
+            describedBy="spend-ceiling-shown-description"
+            label="Show spend ceiling"
+            onCheckedChange={(checked) => props.onSettingsChange({ spendCeilingShown: checked })}
+          />
+        </SettingRow>
+      </div>
       {source === "diagnostics" ? (
         <TurnDiagnosticsWorkspace
           client={props.client}

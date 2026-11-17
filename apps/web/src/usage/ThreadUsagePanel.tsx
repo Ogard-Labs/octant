@@ -33,6 +33,11 @@ export interface ThreadUsagePanelProps {
   readonly subjectType: SpendCeilingThreadType | string;
   readonly subjectId: string;
   readonly projectId?: string;
+  /**
+   * Whether the spend ceiling row shows when no ceiling is set. A ceiling that
+   * is set always shows, so the way to lower or clear it is never hidden.
+   */
+  readonly spendCeilingShown?: boolean;
   /** Opens the global Usage destination with this thread already filtered. */
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
 }
@@ -99,29 +104,12 @@ export function ThreadUsagePanel(props: ThreadUsagePanelProps) {
         ) : null}
 
         {summary === undefined || summary.totals.totalRequests === 0 ? null : (
-          // Label and figure on one line each, the same list the checkout facts
-          // use. As four boxed tiles the numbers read as a dashboard inside the
-          // rail, and a count of zero unreported requests took a tile to say so.
-          <dl className="thread-usage__totals">
-            <div>
-              <dt>Requests</dt>
-              <dd>{summary.totals.totalRequests.toLocaleString("en")}</dd>
-            </div>
-            <div>
-              <dt>Input tokens</dt>
-              <dd>{summary.totals.totalInputTokens.toLocaleString("en")}</dd>
-            </div>
-            <div>
-              <dt>Output tokens</dt>
-              <dd>{summary.totals.totalOutputTokens.toLocaleString("en")}</dd>
-            </div>
-            {summary.requestsWithUnavailableUsage === 0 ? null : (
-              <div>
-                <dt>Requests without reported usage</dt>
-                <dd>{summary.requestsWithUnavailableUsage.toLocaleString("en")}</dd>
-              </div>
-            )}
-          </dl>
+          // The head already says the token total, so the body keeps only what
+          // the head cannot: how many requests, and how many left no usage. The
+          // input and output split stays in the dashboard.
+          <p className="thread-usage__totals">
+            {requestsReading(summary.totals.totalRequests, summary.requestsWithUnavailableUsage)}
+          </p>
         )}
         {props.spendCeilingClient === undefined ? null : (
           <SpendCeilingControls
@@ -130,6 +118,7 @@ export function ThreadUsagePanel(props: ThreadUsagePanelProps) {
             subjectId={props.subjectId}
             subjectType={props.subjectType}
             {...(props.projectId === undefined ? {} : { projectId: props.projectId })}
+            shown={props.spendCeilingShown === true}
           />
         )}
         {/* The way to the full dashboard closes the section it expands: on the
@@ -137,7 +126,7 @@ export function ThreadUsagePanel(props: ThreadUsagePanelProps) {
             toggle. */}
         {props.onOpenUsageDashboard === undefined ? null : (
           <OctantButton
-            aria-label="Open in Usage dashboard"
+            aria-label="Open Usage dashboard"
             className="thread-usage__dashboard"
             onClick={() => props.onOpenUsageDashboard?.(filter)}
             size="sm"
@@ -150,6 +139,13 @@ export function ThreadUsagePanel(props: ThreadUsagePanelProps) {
       </section>
     </EnvironmentGroup>
   );
+}
+
+function requestsReading(requests: number, withoutUsage: number): string {
+  const count = `${requests.toLocaleString("en")} ${requests === 1 ? "request" : "requests"}`;
+  return withoutUsage === 0
+    ? count
+    : `${count} · ${withoutUsage.toLocaleString("en")} without usage`;
 }
 
 /** "29.9k" for a head that has room for one short figure. */
@@ -176,6 +172,7 @@ function SpendCeilingControls(props: {
   readonly subjectType: string;
   readonly subjectId: string;
   readonly projectId?: string;
+  readonly shown: boolean;
 }) {
   const threadType = isThreadType(props.subjectType) ? props.subjectType : undefined;
   const [snapshot, setSnapshot] = useState<SpendCeilingSnapshot | undefined>(undefined);
@@ -276,6 +273,12 @@ function SpendCeilingControls(props: {
   const value =
     remaining === undefined ? "None" : remaining.length === 0 ? "Cannot be measured" : reading;
   const [open, setOpen] = useState(false);
+  // Hidden by the setting, but the snapshot is still read: a ceiling that is
+  // set (on the thread or its Project) or has refused a turn must stay
+  // reachable, or a person who hits an exhausted ceiling has nowhere to look.
+  const ceilingInEffect =
+    snapshot?.thread !== undefined || snapshot?.project !== undefined || refusal !== undefined;
+  if (!props.shown && !ceilingInEffect) return null;
   const messageAlert =
     message === undefined ? null : (
       <OctantAlert className="thread-usage__status" tone="warning">

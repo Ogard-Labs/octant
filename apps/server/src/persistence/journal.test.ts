@@ -255,6 +255,7 @@ describe("Journal", () => {
         sidebarPinnedProjects: [],
         sidebarMoreEnabled: true,
         sidebarCountTiles: true,
+        spendCeilingShown: false,
         sidebarSearchPresentation: "icon",
         sidebarCollapsedPresentation: "rail",
         agentBrowserDownloads: false,

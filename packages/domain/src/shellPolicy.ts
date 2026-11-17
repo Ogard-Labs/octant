@@ -191,6 +191,7 @@ export function defaultShellSettings(): ShellSettings {
     sidebarPinnedProjects: [],
     sidebarMoreEnabled: true,
     sidebarCountTiles: true,
+    spendCeilingShown: false,
     sidebarSearchPresentation: "icon",
     sidebarCollapsedPresentation: "always",
     environmentPresentationByMode: defaultEnvironmentPresentationByMode(),

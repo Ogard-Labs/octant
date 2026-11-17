@@ -233,6 +233,8 @@ export interface EnvironmentGroupProps {
    * opened body that only repeats the value.
    */
   readonly expandable?: boolean;
+  /** A tooltip on the header row for what the row cannot hold (a caveat the body leaves out). */
+  readonly hint?: string;
   readonly defaultOpen?: boolean;
   readonly open?: boolean;
   /** Lets a parent react to open/close, e.g. to pause polling while collapsed. */
@@ -286,6 +288,7 @@ export function EnvironmentGroup(props: EnvironmentGroupProps) {
           className="environment-group__header window-no-drag"
           onClick={toggle}
           ref={props.headerRef}
+          title={props.hint}
           type="button"
           variant="bare"
         >

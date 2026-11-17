@@ -618,6 +618,34 @@ describe("CodeThreadEnvironment", () => {
     );
   });
 
+  it("changes what the task delivers from one Delivers row's menu, with the version it read", async () => {
+    const user = userEvent.setup();
+    const onExecute = vi.fn(async () => ({ kind: "thread-updated" as const }));
+    render(
+      <CodeThreadEnvironment
+        deliveryOutcome="opened-pr"
+        environmentOpen
+        onExecute={onExecute as never}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+
+    await user.click(await screen.findByRole("button", { name: "Delivers, Opened PR" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Local change" }));
+
+    expect(onExecute).toHaveBeenCalledWith({
+      kind: "confirm-code-delivery-outcome",
+      threadId: codeThreadId,
+      expectedVersion: 1,
+      outcomeKind: "local-implementation",
+    });
+  });
+
   it("keeps keyboard focus on the Working folder row when applying re-reads the checkout", async () => {
     const user = userEvent.setup();
     const initial = readyObservation();

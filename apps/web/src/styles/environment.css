@@ -705,8 +705,9 @@ html[data-octant-increased-contrast="true"]
   border-top-color: var(--octant-border-strong);
 }
 
-/* Routines: the ones this thread's agent proposed, one block per routine with
-   its schedule under the name and its two actions beneath. */
+/* Routines: one row per routine, its name with the schedule as one quiet line
+   under it, and a "…" menu in a slot of its own at the end. The slot is drawn
+   at rest, so nothing moves when a row is pointed at. */
 .environment-routines__list {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -717,31 +718,26 @@ html[data-octant-increased-contrast="true"]
 }
 
 .environment-routine {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.environment-routine__text {
   display: grid;
+  flex: 1 1 auto;
   min-width: 0;
   gap: 2px;
 }
 
-.environment-routine__head {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  gap: var(--oct-space-2);
-  font-size: var(--oct-text-xs);
-}
-
 .environment-routine__name {
-  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.environment-routines__state {
-  flex: none;
-  color: var(--oct-muted);
 }
 
 .environment-routine__schedule {
@@ -788,15 +784,8 @@ html[data-octant-increased-contrast="true"]
   font-size: var(--oct-text-xs);
 }
 
-/* Routines list every routine of the Project; a small line under the name says
-   how one relates to this thread, in the schedule's type. The New routine form
-   borrows the Automation Center editor's fields at the row's smaller size. */
-.environment-routine__place {
-  margin: 0;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-}
-
+/* The New routine form borrows the Automation Center editor's fields at the
+   row's smaller size. */
 .environment-routine-form {
   display: grid;
   min-width: 0;

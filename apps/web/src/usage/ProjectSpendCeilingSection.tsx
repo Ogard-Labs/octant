@@ -177,3 +177,31 @@ export function ProjectSpendCeilingSection(props: {
     </section>
   );
 }
+
+/**
+ * Whether this Project has a spend ceiling set, read once while the row is
+ * switched off. A ceiling set before the switch existed must keep its row, or
+ * nothing on the Project page could raise or clear it (review finding,
+ * 2026-11-17). A read that fails leaves the row hidden, as the switch says.
+ */
+export function useProjectSpendCeilingSet(
+  client: SpendCeilingClient | undefined,
+  projectId: string,
+  skip: boolean,
+): boolean {
+  const [set, setSet] = useState(false);
+  useEffect(() => {
+    if (client === undefined || skip) return;
+    let cancelled = false;
+    client.snapshot({ projectId }).then(
+      (next) => {
+        if (!cancelled) setSet(next.project !== undefined);
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [client, projectId, skip]);
+  return set;
+}

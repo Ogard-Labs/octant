@@ -26,6 +26,7 @@ import type { OpenInApplicationId } from "@octant/contracts/shell";
 import { deriveCodeEnvironmentProjection } from "@octant/domain/shell-policy";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  ChevronRight,
   FolderOpen,
   GitCommitHorizontal,
   GitFork,
@@ -40,7 +41,12 @@ import { CodeAttachmentGallery, type CodeAttachmentReader } from "../code/CodeAt
 import type { CodeAttachmentReference } from "@octant/contracts";
 import { CodeCheckoutProvider } from "./CodeCheckoutContext";
 import { EnvironmentGitGroup } from "./EnvironmentGitGroup";
-import { EnvironmentCard, EnvironmentGroup, EnvironmentRow } from "./EnvironmentGroup";
+import {
+  EnvironmentCard,
+  EnvironmentGroup,
+  EnvironmentRow,
+  EnvironmentTile,
+} from "./EnvironmentGroup";
 import { EnvironmentRunningReport } from "./environmentSections";
 import { EnvironmentExtraFolders } from "./EnvironmentExtraFolders";
 import { EnvironmentPullRequests } from "./EnvironmentPullRequests";
@@ -65,10 +71,7 @@ import { EnvironmentSubagents } from "./EnvironmentSubagents";
 import { EnvironmentRoutines } from "./EnvironmentRoutines";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
 import { OctantMenu } from "../ui/base/OctantMenu";
-import {
-  CODE_DELIVERY_OUTCOME_OPTIONS,
-  CodeDeliveryOutcomeSelector,
-} from "../code/composer/CodeDeliveryOutcomeSelector";
+import { CODE_DELIVERY_OUTCOME_OPTIONS } from "../code/composer/CodeDeliveryOutcomeSelector";
 
 type CodeThreadWorkspaceTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
 
@@ -163,6 +166,8 @@ export interface CodeThreadEnvironmentProps {
   readonly sourceClient?: CodeAttachmentReader;
   readonly usageDashboardClient?: UsageDashboardClient;
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
+  /** Whether the Usage group shows its spend ceiling row when no ceiling is set. */
+  readonly spendCeilingShown?: boolean;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
 }
 
@@ -515,26 +520,48 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
             {props.deliveryOutcome === undefined ||
             threadVersion === undefined ||
             props.onExecute === undefined ? null : (
-              <EnvironmentGroup
-                icon={Target}
-                summary={deliveryOutcomeLabel(props.deliveryOutcome)}
-                title="Delivers"
-              >
-                {/* The outcome is the reader's to confirm, and the
-                host has accepted a confirmation all along — nothing ever sent
-                one, so a thread carried whatever its first prompt read as. */}
-                <CodeDeliveryOutcomeSelector
-                  onChange={(outcomeKind) => {
-                    void props.onExecute?.({
-                      kind: "confirm-code-delivery-outcome",
-                      threadId: props.tab.threadId,
-                      expectedVersion: threadVersion,
-                      outcomeKind,
-                    });
-                  }}
-                  value={props.deliveryOutcome}
-                />
-              </EnvironmentGroup>
+              /* One row, "Delivers" and the current outcome, that opens the same
+                 four choices as a menu: a whole group had stood here for one
+                 decision. The outcome is the reader's to confirm, and the host
+                 has accepted a confirmation all along; picking one sends it
+                 (maintainer request 2026-11-17: quieter Environment panel). */
+              <OctantMenu
+                items={CODE_DELIVERY_OUTCOME_OPTIONS.map((option) => ({
+                  value: option.id,
+                  label: option.label,
+                  description: option.detail,
+                  icon: <option.icon aria-hidden="true" size={14} />,
+                }))}
+                onValueChange={(value) => {
+                  const outcomeKind = CODE_DELIVERY_OUTCOME_OPTIONS.find(
+                    (option) => option.id === value,
+                  )?.id;
+                  if (outcomeKind === undefined) return;
+                  void props.onExecute?.({
+                    kind: "confirm-code-delivery-outcome",
+                    threadId: props.tab.threadId,
+                    expectedVersion: threadVersion,
+                    outcomeKind,
+                  });
+                }}
+                trigger={
+                  <>
+                    <EnvironmentTile icon={Target} />
+                    <span className="environment-row__title">Delivers</span>
+                    <span className="environment-row__detail">
+                      {deliveryOutcomeLabel(props.deliveryOutcome)}
+                    </span>
+                    <ChevronRight
+                      aria-hidden="true"
+                      className="environment-row__trailing"
+                      size={14}
+                    />
+                  </>
+                }
+                triggerClassName="environment-row environment-link"
+                triggerLabel={`Delivers, ${deliveryOutcomeLabel(props.deliveryOutcome)}`}
+                value={props.deliveryOutcome}
+              />
             )}
             {workingDirectory === undefined ||
             threadVersion === undefined ||
@@ -548,6 +575,14 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                     : `${readyObservation?.workingFolder?.label ?? workingFolderLabel(workingDirectory)}${String(workingDirectory) === "." || readyObservation?.workingFolder === undefined ? "" : ` / ${workingDirectory}`}`
                 }
                 title="Working folder"
+                {...(readyObservation?.workingFolder?.kind === "extra"
+                  ? {
+                      // The caveat that used to open the body; the body is now one
+                      // line, so the tooltip keeps what it said (maintainer
+                      // request 2026-11-17).
+                      hint: "Shared approved folder; it is outside this task's child worktree. Git, changed-file receipts, Review and PR operations cover the Code checkout only.",
+                    }
+                  : {})}
               >
                 {readyObservation?.workingFolderUnavailable === true ? (
                   <p>
@@ -577,12 +612,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                     }}
                   />
                 ) : (
-                  <p>
-                    {readyObservation.workingFolder.kind === "extra"
-                      ? "Shared approved folder; it is outside this task's child worktree. Git, changed-file receipts, Review and PR operations cover the Code checkout only. "
-                      : ""}
-                    Start a new task to choose another working folder or subfolder.
-                  </p>
+                  <p>Fixed for this task. Start a new task to change it.</p>
                 )}
               </EnvironmentGroup>
             )}
@@ -599,6 +629,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                 {...(props.spendCeilingClient === undefined
                   ? {}
                   : { spendCeilingClient: props.spendCeilingClient })}
+                {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
                 {...(props.onOpenUsageDashboard === undefined
                   ? {}
                   : { onOpenUsageDashboard: props.onOpenUsageDashboard })}

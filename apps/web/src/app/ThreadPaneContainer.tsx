@@ -793,6 +793,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   }}
                   usageDashboardClient={usageDashboardClient}
                   spendCeilingClient={spendCeilingClient}
+                  {...(settings.spendCeilingShown ? { spendCeilingShown: true } : {})}
                   onOpenUsageDashboard={(filter) => {
                     setPendingUsageFilter(filter);
                     setUsageOpen(true);

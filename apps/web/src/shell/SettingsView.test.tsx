@@ -1593,6 +1593,27 @@ describe("SettingsView", () => {
     expect(screen.getAllByRole("heading", { name: "Usage" })).toHaveLength(1);
   });
 
+  it("shows the spend ceiling row switch off in Usage and saves it when turned on", async () => {
+    const user = userEvent.setup();
+    const usageClient = { query: vi.fn(), export: vi.fn(), reset: vi.fn(), retain: vi.fn() };
+    const localUsageHistoryClient = {
+      load: vi.fn(async () => {
+        throw new Error("history unavailable in this test");
+      }),
+    };
+    const { props } = renderSettings({
+      usageClient: usageClient as never,
+      localUsageHistoryClient: localUsageHistoryClient as never,
+    });
+    navigateTo("Usage");
+
+    const toggle = await screen.findByRole("switch", { name: "Show spend ceiling" });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ spendCeilingShown: true });
+  });
+
   it("offers Diagnostics in Usage and leaves Settings for the thread of a failed turn", async () => {
     const threadId = "66000000-0000-4000-8000-0000000000d1";
     const report = buildTurnDiagnosticsReport(

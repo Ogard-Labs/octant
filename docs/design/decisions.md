@@ -1626,6 +1626,7 @@ Every runner feeds provider events to one pure policy that times turns and journ
 - Cost is fixed when usage is journaled, from the provider's figure or the checked-in price table. Projections never price, so a later price change does not re-price history.
 - Unpriced usage refuses a money ceiling as unknown-spend. A provider that never reports usage is left out and shown as Not measured.
 - Child run spend counts against its parent thread's ceiling and that thread's current Project ceiling.
+- The spend ceiling rows on threads and the Project page show only when the person turns on Show spend ceiling (off by default) or a ceiling is set, so a set ceiling always stays reachable.
 
 Status: Built. Since: —. Detail: [Architecture: Stop reasons](../architecture.md#stop-reasons) and [Architecture: Context and usage accounting](../architecture.md#context-and-usage-accounting).
 

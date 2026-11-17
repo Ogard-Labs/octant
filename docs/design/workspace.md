@@ -1891,14 +1891,19 @@ later** and **New routine**, and then lists every active and paused routine of
 the thread's Project, not only those this thread created, in this order: this
 thread's pending follow-ups, then routines created from this thread, then the
 rest of the Project's routines (another thread's follow-up among them); within
-each group, soonest next run first. The header shows the count. Each entry has
-its name, Active or Paused, a small line saying how it relates to the thread
-("Follow-up here", "From this thread", "Follow-up in another thread", or
-nothing for the rest), the schedule in plain words with the next run (and the
-time zone of a weekly one), and **Open in Automation Center**. A follow-up here
-has **Change time** and **Cancel**, because a one-time turn is moved or
-cancelled rather than paused; every other entry has **Pause** or **Resume**.
-These are the ordinary Automation commands. Past five entries the row shows
+each group, soonest next run first. The header shows the count. Each entry is
+its name over one quiet line joining how it relates to the thread ("Follow-up
+here", "From this thread", "Follow-up in another thread", or nothing for the
+rest), the schedule in plain words with the next run (and the time zone of a
+weekly one), and Paused when it is paused. Its actions sit in a "…" menu in a
+fixed slot at the row's end: **Change time** and **Cancel follow-up** for a
+follow-up here, because a one-time turn is moved or cancelled rather than
+paused, **Pause** or **Resume** for every other entry, and **Open in
+Automations** (maintainer request, 2026-11-17). These are the ordinary
+Automation commands. In Work the "+" menu also offers **Set a goal…** while the
+thread has no goal; Work's Goal group appears only once a goal exists or one is
+being set, and a thread without one re-reads it while the window is visible,
+stopping once a read is refused. Past five entries the row shows
 the first five and **Show all**. A Project with no routines shows only the two
 actions. The row reads the Project's whole list, page by page, so a busy
 Project cannot push this thread's older routine out of it.
@@ -3276,7 +3281,11 @@ two equal buttons. The rows follow in two cards, Running (Local servers, open by
 default only when this checkout is serving something; Subagents; Computer use) and Delivery (Pull requests,
 Sources, Delivers, Working folder, and Usage, closed by default; totals, one
 Spend ceiling row whose popover holds the form for tokens, turns, hours, and US
-dollars, and Open Usage dashboard inside). A card with no
+dollars, and Open Usage dashboard inside). Delivers is one row that opens its
+choices as a menu. A fixed Working folder says "Fixed for this task. Start a
+new task to change it." and keeps the longer caveat in the row's tooltip. Chat
+shows a Memory row only when memory is unavailable (maintainer request,
+2026-11-17). A card with no
 rows to show is omitted with its caption. Every row has one grammar: a 26px
 glyph tile, the name, the row's state as a small neutral chip, and a trailing
 chevron where the row opens (a row's own action, such as All pull requests,
@@ -3346,8 +3355,14 @@ with nothing to open it is a plain row with no chevron and no button, as is any
 group whose opened body would only repeat its value. Pull requests is absent
 when the Project is not on GitHub (Delivery's summary says "Not on GitHub");
 when it is, "All pull requests" is the last row of its opened body and the
-count is not said again. Usage's own value is the total, or "No usage yet".
-Its Spend ceiling is one row (label, and "None" or a short reading such as
+count is not said again. Usage's own value is the total, or "No usage yet";
+its body is one line of the request count ("· N without usage" when some
+requests reported none) and Open Usage dashboard, and the input and output
+split lives in the dashboard. Its Spend ceiling row shows only when Settings
+› Usage › Show spend ceiling is on (off by default) or a ceiling is set on the
+thread or its Project, or has refused a turn; the Project page's row follows
+the same rule, so a ceiling set earlier always keeps a place to raise or clear
+it (maintainer request, 2026-11-17). Its Spend ceiling is one row (label, and "None" or a short reading such as
 "2M tokens · $5") that opens a popover under it holding the four fields, Set,
 Raise and Clear, the money note and every refusal message, with the same
 handlers; Escape or a press outside closes it and leaves the ceiling as it was.

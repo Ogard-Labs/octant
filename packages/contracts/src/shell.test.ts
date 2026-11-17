@@ -88,6 +88,7 @@ const settings = {
   sidebarPinnedProjects: [],
   sidebarMoreEnabled: true,
   sidebarCountTiles: true,
+  spendCeilingShown: false,
   sidebarSearchPresentation: "icon",
   sidebarCollapsedPresentation: "rail",
   environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
@@ -1463,6 +1464,19 @@ describe("sidebar pinned Projects", () => {
         ],
       }),
     ).toThrow();
+  });
+});
+
+describe("spend ceiling row preference", () => {
+  it("decodes a store that predates it with the row hidden", () => {
+    const { spendCeilingShown: _shown, ...predatesIt } = settings;
+    expect(decodeShellSettings(predatesIt).spendCeilingShown).toBe(false);
+  });
+
+  it("keeps the row shown once it is turned on", () => {
+    expect(decodeShellSettings({ ...settings, spendCeilingShown: true }).spendCeilingShown).toBe(
+      true,
+    );
   });
 });
 

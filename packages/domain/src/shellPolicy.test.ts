@@ -206,6 +206,7 @@ describe("shell settings policy", () => {
       // The More row is part of the sidebar until the person turns it off.
       sidebarMoreEnabled: true,
       sidebarCountTiles: true,
+      spendCeilingShown: false,
       sidebarSearchPresentation: "icon",
       sidebarCollapsedPresentation: "always",
       environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },

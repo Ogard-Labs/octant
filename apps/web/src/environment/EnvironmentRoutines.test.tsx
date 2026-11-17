@@ -116,6 +116,15 @@ async function choose(item: "New routine" | "Follow up later"): Promise<void> {
   await userEvent.click(await screen.findByRole("menuitem", { name: item }));
 }
 
+/** A routine's actions live in the "…" menu at the end of its row. */
+async function chooseFromRow(
+  routineName: string,
+  item: "Pause" | "Resume" | "Change time" | "Cancel follow-up" | "Open in Automations",
+): Promise<void> {
+  await userEvent.click(screen.getByRole("button", { name: `Actions for ${routineName}` }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: item }));
+}
+
 function listedNames(): ReadonlyArray<string> {
   const list = screen.getByRole("list", { name: "Routines in this Project" });
   return within(list)
@@ -217,7 +226,7 @@ describe("EnvironmentRoutines", () => {
     renderRoutines(fake);
     await userEvent.click(await screen.findByRole("button", { name: "Routines 1 routine" }));
 
-    await userEvent.click(screen.getByRole("button", { name: "Pause Friday digest" }));
+    await chooseFromRow("Friday digest", "Pause");
 
     expect(fake.execute).toHaveBeenCalledWith({
       kind: "pause-automation",
@@ -225,7 +234,44 @@ describe("EnvironmentRoutines", () => {
       expectedVersion: 1,
     });
     expect(await screen.findByText("Paused")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Resume Friday digest" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Friday digest" }));
+    expect(await screen.findByRole("menuitem", { name: "Resume" })).toBeInTheDocument();
+  });
+
+  it("keeps a routine to its name and one quiet schedule line, with every action behind its menu", async () => {
+    renderRoutines(client([routine()]), { onOpenRoutine: vi.fn() });
+    await userEvent.click(await screen.findByRole("button", { name: "Routines 1 routine" }));
+
+    const row = screen.getByRole("listitem", { name: "Friday digest" });
+    expect(within(row).getAllByRole("button")).toHaveLength(1);
+    expect(within(row).queryByText("Active")).not.toBeInTheDocument();
+    await userEvent.click(within(row).getByRole("button", { name: "Actions for Friday digest" }));
+    expect(await screen.findByRole("menuitem", { name: "Pause" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Open in Automations" })).toBeInTheDocument();
+  });
+
+  it("offers Set a goal in the plus menu only when the thread can still take one", async () => {
+    const onSetGoal = vi.fn();
+    const fake = client([]);
+    const { unmount } = render(
+      <EnvironmentRoutines
+        client={fake}
+        mode="work"
+        onSetGoal={onSetGoal}
+        projectId={AUTOMATION_UI_TEST_IDS.project}
+        threadId={thisThread}
+      />,
+    );
+    await waitFor(() => expect(fake.list).toHaveBeenCalled());
+    await userEvent.click(screen.getByRole("button", { name: "Add a routine" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Set a goal…" }));
+    expect(onSetGoal).toHaveBeenCalledTimes(1);
+    unmount();
+
+    renderRoutines(fake);
+    await userEvent.click(screen.getByRole("button", { name: "Add a routine" }));
+    expect(await screen.findByRole("menuitem", { name: "New routine" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Set a goal…" })).not.toBeInTheDocument();
   });
 
   it("says so when a pause did not reach the host", async () => {
@@ -234,20 +280,18 @@ describe("EnvironmentRoutines", () => {
     renderRoutines(fake);
     await userEvent.click(await screen.findByRole("button", { name: "Routines 1 routine" }));
 
-    await userEvent.click(screen.getByRole("button", { name: "Pause Friday digest" }));
+    await chooseFromRow("Friday digest", "Pause");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("did not reach the host");
-    expect(screen.getByText("Active")).toBeInTheDocument();
+    expect(screen.queryByText("Paused")).not.toBeInTheDocument();
   });
 
-  it("opens a routine in the Automation Center", async () => {
+  it("opens a routine in Automations from its menu", async () => {
     const onOpenRoutine = vi.fn();
     renderRoutines(client([routine()]), { onOpenRoutine });
     await userEvent.click(await screen.findByRole("button", { name: "Routines 1 routine" }));
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Open Friday digest in Automation Center" }),
-    );
+    await chooseFromRow("Friday digest", "Open in Automations");
 
     expect(onOpenRoutine).toHaveBeenCalledWith(AUTOMATION_UI_TEST_IDS.automation);
   });
@@ -350,7 +394,7 @@ describe("EnvironmentRoutines", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Routines 1 routine" }));
     expect(screen.getByText(/^Follows up tomorrow at/)).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Change time" }));
+    await chooseFromRow("Check for the reply", "Change time");
     await userEvent.click(screen.getByRole("button", { name: "In 1 hour" }));
     await userEvent.click(screen.getByRole("button", { name: "Move follow-up" }));
 
@@ -367,9 +411,7 @@ describe("EnvironmentRoutines", () => {
     renderRoutines(fake);
     await userEvent.click(await screen.findByRole("button", { name: "Routines 1 routine" }));
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Cancel follow-up Check for the reply" }),
-    );
+    await chooseFromRow("Check for the reply", "Cancel follow-up");
 
     expect(fake.execute).toHaveBeenCalledWith({
       kind: "archive-automation",
@@ -395,6 +437,8 @@ describe("EnvironmentRoutines", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Routines 1 routine" }));
 
     expect(screen.getByText("Follow-up in another thread")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Change time" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Check for the reply" }));
+    expect(await screen.findByRole("menuitem", { name: "Pause" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Change time" })).not.toBeInTheDocument();
   });
 });

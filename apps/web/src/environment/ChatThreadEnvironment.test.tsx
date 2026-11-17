@@ -137,6 +137,9 @@ describe("the Chat thread environment summary", () => {
       expect(screen.getAllByRole("region", { name: "Environment details" })).toHaveLength(1),
     );
     expect(screen.getByText("1 attachment")).toBeVisible();
+    // Project-scoped memory is the constant case and is left unsaid; only an
+    // unfiled Chat, where memory is unavailable, gets a row.
+    expect(screen.queryByText("Memory")).not.toBeInTheDocument();
     expect(screen.getByText("First view")).toBeVisible();
     expect(screen.getByText("Second view")).toBeVisible();
   });

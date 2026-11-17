@@ -1069,27 +1069,71 @@ html[data-octant-increased-contrast="true"] .turn-action-menu__more .shell-icon-
   flex-wrap: wrap;
 }
 
-/* The budget sits on its own row so its three limits read as one decision. */
-.thread-goal__budget {
+/* The budget is one row, label at the left and what is set at the right,
+   like the spend ceiling's. The row is a button a popover opens from, filled
+   only by the pointer; the chevron keeps its slot so nothing shifts. Doubled
+   onto the form so the trigger's utility classes cannot win on sheet order.
+   (Maintainer request 2026-11-17: quieter Environment panel.) */
+.thread-goal__revise .thread-goal__budget-row {
   display: flex;
   flex-basis: 100%;
-  flex-wrap: wrap;
+  width: 100%;
+  min-height: 28px;
   align-items: center;
-  gap: 8px;
-  min-width: 0;
-  margin: 0;
+  justify-content: flex-start;
+  gap: var(--oct-space-3);
   padding: 0;
   border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+  text-align: left;
 }
 
-.thread-goal__budget legend {
-  padding: 0;
-  font-size: var(--oct-text-xs);
+.thread-goal__revise .thread-goal__budget-row:hover {
+  background: var(--octant-control-hover);
+}
+
+.thread-goal__revise .thread-goal__budget-row:active {
+  background: var(--octant-control-pressed);
+}
+
+.thread-goal__budget-value {
+  min-width: 0;
+  margin: 0 0 0 auto;
+  overflow: hidden;
   color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-goal__budget-chevron {
+  flex: none;
+  color: var(--oct-muted);
+  opacity: 0;
+}
+
+.thread-goal__budget-row:hover .thread-goal__budget-chevron,
+.thread-goal__budget-row[data-popup-open] .thread-goal__budget-chevron {
+  opacity: 1;
+}
+
+.thread-goal__popover {
+  width: 280px;
+  max-width: calc(100vw - var(--oct-space-6));
+}
+
+.thread-goal__budget-sheet {
+  display: grid;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-1);
 }
 
 .thread-goal__budget-note {
-  flex-basis: 100%;
   margin: 0;
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
@@ -1104,14 +1148,13 @@ html[data-octant-increased-contrast="true"] .turn-action-menu__more .shell-icon-
 }
 
 .thread-goal__budget-field input {
-  inline-size: 8rem;
+  inline-size: 100%;
 }
 
 .thread-goal__status,
 .thread-goal__empty,
 .thread-goal__command-error,
-.thread-goal__history,
-.thread-goal__retention {
+.thread-goal__history {
   display: flex;
   align-items: center;
   gap: var(--oct-space-1);

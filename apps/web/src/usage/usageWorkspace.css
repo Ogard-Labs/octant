@@ -369,30 +369,10 @@
   font-size: var(--oct-text-xs);
 }
 
-/* Label left, figure right, one line each: the checkout facts' list. */
+/* One line: how many requests, and how many left no usage. */
 .thread-usage__totals {
-  display: grid;
-  margin: 0;
-}
-
-.thread-usage__totals div {
-  display: flex;
-  min-height: 28px;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--oct-space-3);
-}
-
-.thread-usage__totals dt {
   margin: 0;
   color: var(--oct-fg-2);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-regular);
-}
-
-.thread-usage__totals dd {
-  margin: 0;
-  color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   font-variant-numeric: tabular-nums;
 }

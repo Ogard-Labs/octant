@@ -784,6 +784,12 @@ export const ShellSettings = Schema.Struct({
    */
   sidebarCountTiles: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   /**
+   * Whether the spend ceiling row shows on threads and Projects. A ceiling that
+   * is set always shows, so this only hides the way to set the first one. A
+   * store persisted before the setting shipped decodes to off.
+   */
+  spendCeilingShown: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
    * The sidebar's thread filter: an icon that opens a field, or a field that
    * is always there. A store persisted before the choice decodes to the icon.
    */

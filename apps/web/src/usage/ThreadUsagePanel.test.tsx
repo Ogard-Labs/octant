@@ -57,7 +57,7 @@ describe("ThreadUsagePanel", () => {
     });
   });
 
-  it("shows the host totals for the thread", async () => {
+  it("shows the request count on one line and leaves the token split to the dashboard", async () => {
     const load = vi.fn().mockResolvedValue(dashboard(4));
     await renderOpen(
       <ThreadUsagePanel
@@ -67,9 +67,64 @@ describe("ThreadUsagePanel", () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByText("800")).toBeInTheDocument());
-    expect(screen.getByText("4")).toBeInTheDocument();
-    expect(screen.getByText("Requests without reported usage")).toBeInTheDocument();
+    expect(await screen.findByText("4 requests · 1 without usage")).toBeInTheDocument();
+    expect(screen.queryByText("Input tokens")).not.toBeInTheDocument();
+    expect(screen.queryByText("Output tokens")).not.toBeInTheDocument();
+  });
+
+  it("names the without-usage count only when some requests left none", async () => {
+    const load = vi.fn().mockResolvedValue(dashboard(4, 0));
+    await renderOpen(
+      <ThreadUsagePanel
+        client={{ load } as UsageDashboardClient}
+        subjectId="thread-1"
+        subjectType="chat-thread"
+      />,
+    );
+
+    expect(await screen.findByText("4 requests")).toBeInTheDocument();
+  });
+
+  it("hides the spend ceiling row when the setting is off and no ceiling is set", async () => {
+    const load = vi.fn().mockResolvedValue(dashboard(4));
+    const snapshot = vi.fn().mockResolvedValue({});
+    await renderOpen(
+      <ThreadUsagePanel
+        client={{ load } as UsageDashboardClient}
+        spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        subjectId="73000000-0000-4000-8000-000000000001"
+        subjectType="chat-thread"
+      />,
+    );
+
+    await waitFor(() => expect(snapshot).toHaveBeenCalled());
+    expect(await screen.findByText("4 requests · 1 without usage")).toBeInTheDocument();
+    expect(screen.queryByText("Spend ceiling")).not.toBeInTheDocument();
+  });
+
+  it("shows a ceiling that is set even when the setting is off", async () => {
+    const load = vi.fn().mockResolvedValue(dashboard(4));
+    const snapshot = vi.fn().mockResolvedValue({
+      thread: { version: 2, policy: { tokenBudget: 2_000_000 } },
+      threadRemaining: {
+        ceilingTokens: 2_000_000,
+        remainingTokens: 1_500_000,
+        window: { kind: "lifetime" },
+        version: 2,
+      },
+    });
+    await renderOpen(
+      <ThreadUsagePanel
+        client={{ load } as UsageDashboardClient}
+        spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        subjectId="73000000-0000-4000-8000-000000000001"
+        subjectType="chat-thread"
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "Spend ceiling, 2M tokens" }),
+    ).toBeInTheDocument();
   });
 
   it("totals the thread's tokens on the folded section only when every request reported usage", async () => {
@@ -111,8 +166,10 @@ describe("ThreadUsagePanel", () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByText("800")).toBeInTheDocument());
-    await userEvent.click(screen.getByRole("button", { name: "Open in Usage dashboard" }));
+    await waitFor(() =>
+      expect(screen.getByText("4 requests · 1 without usage")).toBeInTheDocument(),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Open Usage dashboard" }));
     expect(onOpenUsageDashboard).toHaveBeenCalledWith({
       subjectAggregateType: "chat-thread",
       subjectAggregateId: "thread-1",
@@ -144,6 +201,7 @@ describe("ThreadUsagePanel", () => {
       <ThreadUsagePanel
         client={{ load } as UsageDashboardClient}
         spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        spendCeilingShown
         subjectId="73000000-0000-4000-8000-000000000001"
         subjectType="chat-thread"
       />,
@@ -177,6 +235,7 @@ describe("ThreadUsagePanel", () => {
       <ThreadUsagePanel
         client={{ load } as UsageDashboardClient}
         spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        spendCeilingShown
         subjectId="73000000-0000-4000-8000-000000000001"
         subjectType="chat-thread"
       />,
@@ -194,6 +253,7 @@ describe("ThreadUsagePanel", () => {
         client={{ load } as UsageDashboardClient}
         onOpenUsageDashboard={vi.fn()}
         spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        spendCeilingShown
         subjectId="73000000-0000-4000-8000-000000000001"
         subjectType="chat-thread"
       />,
@@ -231,6 +291,7 @@ describe("ThreadUsagePanel", () => {
       <ThreadUsagePanel
         client={{ load } as UsageDashboardClient}
         spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        spendCeilingShown
         subjectId="73000000-0000-4000-8000-000000000001"
         subjectType="chat-thread"
       />,
@@ -249,6 +310,7 @@ describe("ThreadUsagePanel", () => {
       <ThreadUsagePanel
         client={{ load } as UsageDashboardClient}
         spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        spendCeilingShown
         subjectId={subjectId}
         subjectType="chat-thread"
       />
@@ -282,6 +344,7 @@ describe("ThreadUsagePanel", () => {
       <ThreadUsagePanel
         client={{ load } as UsageDashboardClient}
         spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        spendCeilingShown
         subjectId="thread-1"
         subjectType="chat-thread"
       />,
@@ -319,6 +382,7 @@ describe("ThreadUsagePanel", () => {
       <ThreadUsagePanel
         client={{ load } as UsageDashboardClient}
         spendCeilingClient={{ snapshot, execute } as never}
+        spendCeilingShown
         subjectId="73000000-0000-4000-8000-000000000001"
         subjectType="chat-thread"
       />,
@@ -358,6 +422,7 @@ describe("ThreadUsagePanel", () => {
       <ThreadUsagePanel
         client={{ load } as UsageDashboardClient}
         spendCeilingClient={{ snapshot, execute } as never}
+        spendCeilingShown
         subjectId="73000000-0000-4000-8000-000000000001"
         subjectType="chat-thread"
       />,
@@ -396,6 +461,7 @@ describe("ThreadUsagePanel", () => {
       <ThreadUsagePanel
         client={{ load } as UsageDashboardClient}
         spendCeilingClient={{ snapshot, execute } as never}
+        spendCeilingShown
         subjectId="73000000-0000-4000-8000-000000000001"
         subjectType="chat-thread"
       />,
@@ -448,6 +514,7 @@ describe("ThreadUsagePanel", () => {
       <ThreadUsagePanel
         client={{ load } as UsageDashboardClient}
         spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        spendCeilingShown
         subjectId="73000000-0000-4000-8000-000000000001"
         subjectType="chat-thread"
       />,
@@ -485,6 +552,7 @@ describe("ThreadUsagePanel", () => {
       <ThreadUsagePanel
         client={{ load } as UsageDashboardClient}
         spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        spendCeilingShown
         subjectId="73000000-0000-4000-8000-000000000001"
         subjectType="chat-thread"
       />,

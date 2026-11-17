@@ -32,6 +32,8 @@ export interface ChatThreadEnvironmentProps {
   readonly environmentOpen?: boolean;
   readonly usageDashboardClient?: UsageDashboardClient;
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
+  /** Whether the Usage group shows its spend ceiling row when no ceiling is set. */
+  readonly spendCeilingShown?: boolean;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
 }
 
@@ -100,6 +102,7 @@ export function ChatThreadEnvironment(props: ChatThreadEnvironmentProps) {
               {...(props.spendCeilingClient === undefined
                 ? {}
                 : { spendCeilingClient: props.spendCeilingClient })}
+              {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
               {...(props.onOpenUsageDashboard === undefined
                 ? {}
                 : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
@@ -176,7 +179,10 @@ function ChatEnvironmentCounts(props: {
   };
   const facts: ReadonlyArray<readonly [label: string, value: string | undefined]> = [
     ["Project", props.project?.name ?? "Unfiled Chat"],
-    ["Memory", props.project === undefined ? "Unavailable for unfiled Chat" : "Project-scoped"],
+    // Project-scoped memory is the constant case, so it stays unsaid; only the
+    // unfiled thread, where memory is unavailable, is worth a row (maintainer
+    // request 2026-11-17: quieter Environment panel).
+    ["Memory", props.project === undefined ? "Unavailable for unfiled Chat" : undefined],
     [
       "Attachments",
       count(

@@ -79,6 +79,41 @@ describe("ProjectOverview", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("hides the spend ceiling row while the switch is off, unless the Project has a ceiling set", async () => {
+    const project = {
+      id: "20000000-0000-4000-8000-000000000009",
+      name: "Octant",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      updatedAt: "2026-07-21T12:00:00.000Z",
+      type: "code",
+      binding: { canonicalRoot: "/opaque/repository" },
+      codeAccessPersistence: "current-session",
+    } as unknown as ProjectSummary;
+    const page = (snapshot: object) => (
+      <ProjectOverview
+        onArchive={vi.fn()}
+        onNewThread={vi.fn()}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        project={project}
+        spendCeilingClient={{ snapshot: vi.fn(async () => snapshot) } as never}
+        spendCeilingShown={false}
+      />
+    );
+    const { unmount } = render(page({}));
+    await waitFor(() => expect(screen.queryByText("Spend ceiling")).toBeNull());
+    unmount();
+
+    // A ceiling set before the switch existed must stay reachable, or nothing
+    // on the page could raise or clear it.
+    render(page({ project: { version: 1 } }));
+    expect(await screen.findByText("Spend ceiling")).toBeVisible();
+  });
+
   it("offers a Work Project an off-by-default status file switch, but not the default folder", async () => {
     const user = userEvent.setup();
     const onWorkStatusFileChange = vi.fn(async () => true);

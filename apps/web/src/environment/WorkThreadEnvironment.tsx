@@ -3,8 +3,8 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { WorkThread, ProjectSummary, WorkspaceTab } from "@octant/contracts";
 import { deriveWorkEnvironmentProjection } from "@octant/domain/shell-policy";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { FolderOpen, Repeat } from "../ui/icons";
-import { EnvironmentCard, EnvironmentGroup } from "./EnvironmentGroup";
+import { FolderOpen, Target } from "../ui/icons";
+import { EnvironmentCard, EnvironmentGroup, EnvironmentRow } from "./EnvironmentGroup";
 import { EnvironmentExtraFolders } from "./EnvironmentExtraFolders";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
 import {
@@ -14,7 +14,9 @@ import {
 import { ChangeWorkingFolder, workingFolderLabel } from "./WorkingDirectoryControl";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
 import { EnvironmentRoutines } from "./EnvironmentRoutines";
-import { ThreadGoalPanel } from "../goal/ThreadGoalPanel";
+import { GOAL_REFRESH_INTERVAL_MS, ThreadGoalPanel } from "../goal/ThreadGoalPanel";
+import { useGoalController } from "../goal/useGoalController";
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
 import type { GoalClient } from "@octant/client-runtime/goal-client";
 import type { GoalLoopClient } from "@octant/client-runtime/goal-loop-client";
@@ -47,6 +49,8 @@ export interface WorkThreadEnvironmentProps {
   readonly goalLoopClient?: GoalLoopClient;
   readonly usageDashboardClient?: UsageDashboardClient;
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
+  /** Whether the Usage group shows its spend ceiling row when no ceiling is set. */
+  readonly spendCeilingShown?: boolean;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
 }
 
@@ -98,6 +102,30 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
     };
   }, [props.initialThread, props.projects, props.tab.threadId, props.threadClient]);
 
+  // The goal group exists only once there is a goal (or one is being set), so a
+  // task without one reads the host once and shows nothing for it. Until then
+  // the read repeats while the window is visible, because the lead can set a
+  // goal mid-thread.
+  const goalController = useGoalController({
+    client: props.goalClient,
+    enabled: props.goalClient !== undefined,
+    threadId: String(props.tab.threadId),
+  });
+  const [settingGoal, setSettingGoal] = useState(false);
+  const goalShown = goalController.goal !== null || settingGoal;
+  const { reload: reloadGoal } = goalController;
+  // A refused or unavailable read will not change on its own, so asking again
+  // every few seconds would only repeat the refusal.
+  const goalReadRefused =
+    goalController.status === "unauthorized" || goalController.status === "unavailable";
+  useEffect(() => {
+    if (props.goalClient === undefined || goalShown || goalReadRefused) return;
+    const stop = scheduleVisibleInterval(reloadGoal, GOAL_REFRESH_INTERVAL_MS);
+    return () => stop();
+  }, [goalReadRefused, goalShown, props.goalClient, reloadGoal]);
+  const routinesShown = props.automationClient !== undefined && project !== undefined;
+  const showGoalFallback = props.goalClient !== undefined && !goalShown && !routinesShown;
+
   const projection = deriveWorkEnvironmentProjection({
     projectName: project?.name ?? "Work",
     ...(project === undefined ? {} : { boundRoot: project.binding.canonicalRoot }),
@@ -140,6 +168,9 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
             <EnvironmentRoutines
               client={props.automationClient}
               mode="work"
+              {...(props.goalClient === undefined || goalShown
+                ? {}
+                : { onSetGoal: () => setSettingGoal(true) })}
               {...(props.onOpenRoutine === undefined ? {} : { onOpenRoutine: props.onOpenRoutine })}
               projectId={String(project.id)}
               threadId={String(props.tab.threadId)}
@@ -155,17 +186,19 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
               {...(props.spendCeilingClient === undefined
                 ? {}
                 : { spendCeilingClient: props.spendCeilingClient })}
+              {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
               {...(props.onOpenUsageDashboard === undefined
                 ? {}
                 : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
             />
           )}
-          {props.goalClient === undefined ? null : (
+          {props.goalClient === undefined || !goalShown ? null : (
             /* Setting a Goal has no effect on an ordinary turn: nothing reads the
-             objective until a loop runs it as the prompt of each round. It is
-             an autopilot control, so it lives behind a disclosure that mounts
-             only when opened rather than greeting every new task with a form. */
-            <EnvironmentGroup icon={Repeat} title="Keep working on this unattended">
+             objective until a loop runs it as the prompt of each round. So the
+             group shows only once a goal exists, or while one is being set from
+             the "+" menu, and carries the one heading "Goal" like Code's does
+             (maintainer request 2026-11-17: quieter Environment panel). */
+            <EnvironmentGroup defaultOpen icon={Target} title="Goal">
               <ThreadGoalPanel
                 client={props.goalClient}
                 {...(props.goalLoopClient === undefined
@@ -175,6 +208,15 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
               />
             </EnvironmentGroup>
           )}
+          {showGoalFallback ? (
+            /* Without a routines row there is no "+" to set a goal from, and the
+               goal must stay reachable. */
+            <EnvironmentRow
+              icon={Target}
+              label="Set a goal…"
+              onClick={() => setSettingGoal(true)}
+            />
+          ) : null}
           {thread === undefined ? null : (
             <EnvironmentGroup
               headerRef={workingFolderRow}
@@ -185,6 +227,13 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
                   : `${project?.workingFolders?.find((folder) => folder.id === thread.workingFolderId)?.label ?? "Working folder unavailable"}${String(thread.workingDirectory ?? ".") === "." ? "" : ` / ${thread.workingDirectory}`}`
               }
               title="Working folder"
+              {...(thread.workingFolderId === undefined
+                ? {}
+                : {
+                    // The long form of the fixed-folder note, kept where a person
+                    // can still read it (maintainer request 2026-11-17).
+                    hint: "This task's provider, terminal, actions and new artifacts use its recorded folder. Existing artifacts keep their own recorded destination.",
+                  })}
             >
               {thread.workingFolderId === undefined ? (
                 <ChangeWorkingFolder
@@ -205,11 +254,7 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
                   }}
                 />
               ) : (
-                <p>
-                  This task's provider, terminal, actions and new artifacts use its recorded folder.
-                  Start a new task to choose another root or subfolder. Existing artifacts keep
-                  their own recorded destination.
-                </p>
+                <p>Fixed for this task. Start a new task to change it.</p>
               )}
             </EnvironmentGroup>
           )}

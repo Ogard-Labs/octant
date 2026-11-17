@@ -48,7 +48,10 @@ import {
   projectColorFromMenuValue,
   projectColorMenuValue,
 } from "./ProjectTile";
-import { ProjectSpendCeilingSection } from "../usage/ProjectSpendCeilingSection";
+import {
+  ProjectSpendCeilingSection,
+  useProjectSpendCeilingSet,
+} from "../usage/ProjectSpendCeilingSection";
 import { ProjectInstructionsSettings } from "../settings/OctantInstructionsSettings";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
@@ -152,6 +155,8 @@ export interface ProjectOverviewProps {
   /** The person's instructions for this Project, beside its memory. */
   readonly octantInstructionsClient?: OctantInstructionsClient;
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
+  /** Off hides the Project's spend ceiling row, unless a ceiling is set. */
+  readonly spendCeilingShown?: boolean;
   /** Absent when the window cannot reach the host's model roles; the Models section is then not shown. */
   readonly modelRoles?: Omit<ProjectModelRolesSectionProps, "projectId" | "disabled">;
 }
@@ -170,6 +175,11 @@ function ProjectPageMark(props: { readonly project: ProjectOverviewProps["projec
 }
 
 export function ProjectOverview(props: ProjectOverviewProps) {
+  const projectCeilingSet = useProjectSpendCeilingSet(
+    props.spendCeilingClient,
+    String(props.project.id),
+    props.spendCeilingShown === true,
+  );
   const alive = useRef(true);
   const nameInput = useRef<HTMLInputElement>(null);
   const relinkGeneration = useRef(0);
@@ -823,7 +833,8 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 />
               </ProjectOverviewInspector>
             ) : null}
-            {props.spendCeilingClient === undefined ? null : (
+            {props.spendCeilingClient === undefined ||
+            (props.spendCeilingShown !== true && !projectCeilingSet) ? null : (
               <ProjectOverviewInspector
                 key={`${String(props.project.id)}-ceiling`}
                 label="Spend ceiling"

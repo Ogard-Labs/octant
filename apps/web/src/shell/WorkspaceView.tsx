@@ -335,6 +335,7 @@ export interface WorkspaceViewProps {
   readonly planClient?: PlanClient;
   readonly usageDashboardClient?: UsageDashboardClient;
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
+  readonly spendCeilingShown?: boolean;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
   readonly workCreateThreadAvailable?: boolean;
   readonly onCommitResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
@@ -1837,6 +1838,7 @@ function renderCodeTab(
             {...(props.spendCeilingClient === undefined
               ? {}
               : { spendCeilingClient: props.spendCeilingClient })}
+            {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
             {...(props.onOpenUsageDashboard === undefined
               ? {}
               : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
@@ -2141,6 +2143,7 @@ function renderNonCodeTab(
         {...(props.spendCeilingClient === undefined
           ? {}
           : { spendCeilingClient: props.spendCeilingClient })}
+        {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
         {...(props.onOpenUsageDashboard === undefined
           ? {}
           : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
@@ -2240,6 +2243,7 @@ function renderNonCodeTab(
             {...(props.spendCeilingClient === undefined
               ? {}
               : { spendCeilingClient: props.spendCeilingClient })}
+            {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
             {...(props.onOpenUsageDashboard === undefined
               ? {}
               : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
@@ -2520,6 +2524,7 @@ function renderNonCodeTab(
         {...(props.spendCeilingClient === undefined
           ? {}
           : { spendCeilingClient: props.spendCeilingClient })}
+        {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
         {...(props.onMemoryChanged === undefined ? {} : { onMemoryChanged: props.onMemoryChanged })}
         {...(props.onNewThreadInProject === undefined || project.lifecycle !== "active"
           ? {}
@@ -3187,6 +3192,7 @@ function ChatThreadWorkspace(props: {
   readonly onTurnRevealed?: () => void;
   readonly usageDashboardClient?: UsageDashboardClient;
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
+  readonly spendCeilingShown?: boolean;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
 }) {
   const controller = useChatController({
@@ -3229,6 +3235,7 @@ function ChatThreadWorkspace(props: {
       {...(props.spendCeilingClient === undefined
         ? {}
         : { spendCeilingClient: props.spendCeilingClient })}
+      {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
       {...(props.onOpenUsageDashboard === undefined
         ? {}
         : { onOpenUsageDashboard: props.onOpenUsageDashboard })}

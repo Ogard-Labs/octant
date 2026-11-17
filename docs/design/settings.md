@@ -454,6 +454,11 @@ dialog; cancellation leaves the key untouched.
 
 ## Usage
 
+The Usage Settings page leads with **Show spend ceiling**, off by default: on,
+every thread's Usage group and every Project page show the spend ceiling row;
+off, a row shows only where a ceiling is set or has refused a turn. A settings
+store from before the switch reads as off (maintainer request, 2026-11-17).
+
 The Usage destination opens local provider history by default when that host
 supports it. Octant records remain a separate source; the two totals are never
 added. A period change replaces the query, cancels the previous read, and cannot
