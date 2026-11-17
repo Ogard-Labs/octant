@@ -791,7 +791,8 @@ end run`;
       // face, whose name carries their profile and plan usage, so the smoke
       // reads that name from the tree before pressing it.
       const openSettings = async () => {
-        const accountMenuName = /AXButton \|  \| (Account menu[^|]*?) \|/;
+        // The face opens a menu, so it reads as a pop-up button, not a button.
+        const accountMenuName = /AXPopUpButton \|  \| (Account menu[^|]*?) \|/;
         const snapshot = await wait("app-account-menu", (s) => accountMenuName.test(s));
         const name = accountMenuName.exec(snapshot)?.[1];
         if (name === undefined) throw Error("Native account menu has no name.");
@@ -842,7 +843,11 @@ end run`;
           await native("click", "Skip setup");
           await wait("skip", (s) => s.includes("AXButton") && !s.includes("Skip setup"));
         } else
-          await wait("restarted-window", (s) => s.includes("AXButton |  | Account menu"), 45_000);
+          await wait(
+            "restarted-window",
+            (s) => s.includes("AXPopUpButton |  | Account menu"),
+            45_000,
+          );
         if (phase === "provider") {
           if (provider === undefined) throw Error("No owned provider fixture.");
           await openSettings();
@@ -1357,7 +1362,7 @@ end run`;
                 "Pre-Dock exact bundle census found unknown or outside-group task ownership.",
               );
             await native("dock-click");
-            await wait("dock-reopened", (s) => s.includes("AXButton |  | Account menu"));
+            await wait("dock-reopened", (s) => s.includes("AXPopUpButton |  | Account menu"));
             snapshot = await settings();
             await recordPersisted("initial-reopened", true);
             await capture("reopened", snapshot);
