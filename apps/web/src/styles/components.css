@@ -1675,7 +1675,8 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 }
 
 .turn-header__elapsed {
-  min-width: 6ch;
+  /* Wide enough for the longest form, "59m 59s" and "10h 05m". */
+  min-width: 8ch;
   font-variant-numeric: tabular-nums;
 }
 

@@ -2189,9 +2189,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                               {...(message.startedAt === undefined
                                 ? {}
                                 : { startedAt: message.startedAt })}
-                              step={
-                                message.text.length > 0 ? undefined : runningStepTitle(activity)
-                              }
+                              step={runningStepTitle(activity)}
                               provider={
                                 message.providerInstanceId === undefined ||
                                 message.modelId === undefined
@@ -2201,7 +2199,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                       modelId: message.modelId,
                                     })
                               }
-                              {...(message.status === undefined || message.status === "completed"
+                              {...(message.status === undefined ||
+                              message.status === "completed" ||
+                              // The running line is the header's own: "Working · 12s · step".
+                              message.status === "incomplete"
                                 ? {}
                                 : {
                                     label: turnStatusLabel(

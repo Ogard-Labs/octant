@@ -440,6 +440,30 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByRole("button", { name: "Thread info" })).toHaveFocus();
   });
 
+  it("counts a running Code turn's time from its own start and names no clock when it has none", async () => {
+    const startedAt = new Date(Date.now() - 65_000).toISOString();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "running",
+              role: "assistant",
+              text: "",
+              status: "incomplete",
+              startedAt,
+              at: startedAt,
+            },
+          ],
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(await screen.findByText("Working")).toBeVisible();
+    expect(screen.getByText(/^1m \d+s$/)).toBeVisible();
+  });
+
   it("shows how long a completed Code turn worked and leaves unsettled turns without a duration", async () => {
     render(
       <CodeThreadWorkspace

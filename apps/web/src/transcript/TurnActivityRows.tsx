@@ -267,18 +267,27 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
     disclosures.choose(id, !isOpen(id));
   };
 
-  const renderGroup = (item: Extract<ActivityItem, { readonly kind: "group" }>) => (
-    <ExploreGroup
-      key={item.id}
-      item={item}
-      onKeyDown={onSummaryKeyDown(item.id)}
-      onToggle={onToggle(item.id)}
-      open={disclosures.isOpen(item.id, opening.toolCalls)}
-      settled={settled && !running}
-    >
-      {item.rows.map(renderDisclosure)}
-    </ExploreGroup>
-  );
+  const renderGroup = (item: Extract<ActivityItem, { readonly kind: "group" }>) => {
+    // A lone read becomes a group when the next look arrives; it keeps the
+    // open state the person gave that row.
+    const first = item.rows[0];
+    const seeded =
+      first === undefined
+        ? opening.toolCalls
+        : disclosures.isOpen(rowKey(first), opening.toolCalls);
+    return (
+      <ExploreGroup
+        key={item.id}
+        item={item}
+        onKeyDown={onSummaryKeyDown(item.id)}
+        onToggle={onToggle(item.id)}
+        open={disclosures.isOpen(item.id, seeded)}
+        settled={settled && !running}
+      >
+        {item.rows.map(renderDisclosure)}
+      </ExploreGroup>
+    );
+  };
 
   const renderRows = (rows: ReadonlyArray<TurnActivityRow>) =>
     groupActivityRows(rows).map((item) =>
@@ -418,18 +427,31 @@ function ExploreGroup(props: {
   const running =
     !props.settled && item.rows.some((row) => row.state === "started" || row.state === "running");
   const failed = item.rows.filter((row) => row.state === "failed").length;
-  const outcome = running ? "running" : failed > 0 ? `${failed} failed` : "done";
-  const StateIcon = running ? LoaderCircle : failed > 0 ? CircleX : Check;
+  // A settled turn never saw these calls end, so the group is not done.
+  const unfinished =
+    props.settled && item.rows.some((row) => row.state === "started" || row.state === "running");
+  const outcome = running
+    ? "running"
+    : unfinished
+      ? "unfinished"
+      : failed > 0
+        ? `${failed} failed`
+        : "done";
+  const StateIcon = running ? LoaderCircle : unfinished ? Circle : failed > 0 ? CircleX : Check;
+  // A failed call stays in view, as a failed row does, whatever the level.
+  const open = props.open || failed > 0;
   return (
     <details
       className="turn-activity__disclosure turn-activity__disclosure--group"
       data-kind="group"
-      data-state={running ? "running" : failed > 0 ? "failed" : "completed"}
+      data-state={
+        running ? "running" : unfinished ? "unfinished" : failed > 0 ? "failed" : "completed"
+      }
       onToggle={props.onToggle}
-      open={props.open}
+      open={open}
     >
       <summary
-        aria-expanded={props.open}
+        aria-expanded={open}
         aria-label={`${item.label}, ${outcome}`}
         onKeyDown={props.onKeyDown}
         role="button"

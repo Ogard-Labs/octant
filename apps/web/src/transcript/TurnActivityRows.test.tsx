@@ -874,6 +874,52 @@ describe("a run of reads and searches", () => {
     expect(within(group).getAllByRole("button", { name: /^(Read|Grep), done$/ })).toHaveLength(3);
   });
 
+  it("reads unfinished in a settled turn when its calls never ended", () => {
+    const cut: TurnActivity = {
+      reasoning: "",
+      rows: [
+        { kind: "tool", id: "a", toolName: "Read", state: "running" },
+        { kind: "tool", id: "b", toolName: "Grep", state: "started" },
+      ],
+    };
+    render(<TurnActivityRows activity={cut} running={false} settled />);
+    expect(
+      screen.getByRole("button", { name: "Read 1 file, searched 1 time, unfinished" }),
+    ).toBeVisible();
+  });
+
+  it("stays open while one of its calls failed", () => {
+    const failedLook: TurnActivity = {
+      reasoning: "",
+      rows: [
+        { kind: "tool", id: "a", toolName: "Read", state: "completed" },
+        { kind: "tool", id: "b", toolName: "Read", state: "failed" },
+      ],
+    };
+    render(<TurnActivityRows activity={failedLook} running={false} />);
+    expect(disclosure("Read 2 files, 1 failed").open).toBe(true);
+  });
+
+  it("keeps the open state a lone read had when a second look joins it", async () => {
+    const user = userEvent.setup();
+    const one: TurnActivity = {
+      reasoning: "",
+      rows: [{ kind: "tool", id: "a", toolName: "Read", state: "completed", summary: "a.ts" }],
+    };
+    const { rerender } = render(<TurnActivityRows activity={one} running />);
+    await user.click(screen.getByRole("button", { name: "Read, done" }));
+    rerender(
+      <TurnActivityRows
+        activity={{
+          reasoning: "",
+          rows: [...one.rows, { kind: "tool", id: "b", toolName: "Grep", state: "running" }],
+        }}
+        running
+      />,
+    );
+    expect(disclosure("Read 1 file, searched 1 time, running").open).toBe(true);
+  });
+
   it("lists its rows at medium", () => {
     render(
       <ReplyDetailContext.Provider value="medium">

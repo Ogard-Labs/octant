@@ -968,11 +968,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
             : {})}
           {...(workedFor === undefined || workedForInFold ? {} : { workedFor })}
           startedAt={props.attempt.createdAt}
-          step={
-            responseBody !== undefined && responseBody.length > 0
-              ? undefined
-              : runningStepTitle(toolActivity)
-          }
+          step={runningStepTitle(toolActivity)}
         />
         <HarnessRetryStatus
           events={

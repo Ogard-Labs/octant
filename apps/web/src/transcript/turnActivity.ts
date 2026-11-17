@@ -225,25 +225,15 @@ const EXPLORE_KINDS: Readonly<Record<string, ExploreKind>> = {
   read: "read",
   read_file: "read",
   readfile: "read",
-  view: "read",
-  cat: "read",
   notebookread: "read",
-  fetch: "read",
-  web_fetch: "read",
-  webfetch: "read",
   grep: "search",
   glob: "search",
-  search: "search",
-  find: "search",
   rg: "search",
   ripgrep: "search",
   file_search: "search",
   codebase_search: "search",
   search_files: "search",
-  web_search: "search",
-  websearch: "search",
   ls: "list",
-  list: "list",
   list_dir: "list",
   listdir: "list",
   list_files: "list",
@@ -251,9 +241,11 @@ const EXPLORE_KINDS: Readonly<Record<string, ExploreKind>> = {
 };
 
 /**
- * Whether a tool only looks (reads a file or page, searches, lists a folder),
- * from the tool's name: the transcript holds no kind beside it. A name this does
- * not know stays a plain row, so a mistake never hides work that changes things.
+ * Whether a tool only looks (reads a file, searches files, lists a folder),
+ * from the tool's name: the transcript holds no kind beside it. Only the
+ * providers' known built-in names count; a generic name such as `search`, `list`
+ * or `fetch` may be a tool with side effects, and a web read brings outside
+ * content in, so those stay plain rows.
  */
 export function exploreKind(toolName: string): ExploreKind | undefined {
   return EXPLORE_KINDS[

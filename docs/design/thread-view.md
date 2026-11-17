@@ -12,7 +12,7 @@ right edge. While a turn runs and has a start time, the line reads "Working ·
 12s · Read": the clock counts from the turn's own start (not from when the row
 mounted) once a second in tabular digits with a fixed minimum width, so a tick
 moves nothing; the step is the title of the newest running tool, left out when
-none runs and while the reply text streams, and clips to an ellipsis. The live
+none runs (a reply that spoke before a tool ran still names it), and clips to an ellipsis. The live
 region holds the step alone, so a change of step is announced politely and the
 clock is never read; the timer stops when the turn settles and when the row
 unmounts. A finished turn's duration ("Worked for 1m 5s") is drawn once: at the

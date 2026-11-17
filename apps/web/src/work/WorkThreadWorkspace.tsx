@@ -370,8 +370,6 @@ function WorkTurnHeader(props: {
   readonly copyValue?: string;
   readonly turn: WorkTurnState;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
-  /** The reply's text is arriving, so the running line names no step. */
-  readonly replyStreaming?: boolean;
   /** Puts the stopped turn's prompt back in the composer to send again. */
   readonly onRestorePrompt?: (prompt: string) => void;
   readonly usageResume?: UsageResumeThreadState;
@@ -393,7 +391,7 @@ function WorkTurnHeader(props: {
         outcome={outcome}
         provider={providerModelLabel(props.providerGroups, props.turn.authority)}
         startedAt={props.turn.acceptedAt}
-        step={props.replyStreaming === true ? undefined : runningStepTitle(activity)}
+        step={runningStepTitle(activity)}
         {...(workedFor === undefined ||
         (activity !== undefined && settledTurnFoldsActivity(activity))
           ? {}
@@ -2671,7 +2669,6 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                             serverUrl={props.serverUrl}
                             windowCapability={props.windowCapability}
                             copyValue={row.entry.text}
-                            replyStreaming={row.entry.text !== ""}
                             onRestorePrompt={composerDraft.setDraft}
                             onCancelResume={cancelUsageResume}
                             onScheduleResume={scheduleUsageResume}

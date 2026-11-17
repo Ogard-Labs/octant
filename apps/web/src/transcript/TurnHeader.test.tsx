@@ -96,6 +96,13 @@ describe("TurnHeader", () => {
       expect(screen.getByText("4s")).toBeVisible();
     });
 
+    it("names a step again once a later tool runs, whatever the reply said before", () => {
+      runningAt(3);
+      const { rerender } = render(<TurnHeader outcome="running" startedAt={startedAt} />);
+      rerender(<TurnHeader outcome="running" startedAt={startedAt} step="Bash" />);
+      expect(screen.getByRole("status")).toHaveTextContent("Bash");
+    });
+
     it("keeps the plain line for a turn with no start time", () => {
       render(<TurnHeader outcome="running" />);
       expect(screen.getByText("Working…")).toBeVisible();
