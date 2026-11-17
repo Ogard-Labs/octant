@@ -7,7 +7,7 @@ import { lstat, realpath } from "node:fs/promises";
 import { Schema } from "effect";
 import type { ProcessConfinementPrepareInput } from "./seatbeltProfile";
 import { secretGuardConfiguration, type SecretGuardMediationPolicy } from "./secretGuard";
-import { LinuxMediationWorkerConfig, MEDIATION_CONFIG_BYTES } from "./linuxMediationWorker";
+import { LinuxMediationWorkerConfig, MEDIATION_CONFIG_BYTES } from "./linuxMediationConfig";
 import {
   persistProcessReceipt,
   readProcessIdentity,
@@ -15,6 +15,7 @@ import {
   type OwnedProcessReceiptHandle,
 } from "./nodeOwnedProcessReceipt";
 import type { LinuxMediationBrokerResult } from "./linuxMediationBroker";
+import { LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS } from "./linuxMediationBroker";
 
 const IO_BYTES = 65_536;
 const INPUT_BYTES = IO_BYTES * 4;
@@ -40,8 +41,14 @@ export interface LinuxMediationSession {
   readonly close: () => Promise<LinuxMediationSessionResult>;
 }
 const Message = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("ready"), relayPid: Schema.Int.pipe(Schema.positive()) }),
-  Schema.Struct({ status: Schema.Literal("command"), pid: Schema.Int.pipe(Schema.positive()) }),
+  Schema.Struct({
+    status: Schema.Literal("ready"),
+    relayPid: Schema.Int.pipe(Schema.positive()),
+  }),
+  Schema.Struct({
+    status: Schema.Literal("command"),
+    pid: Schema.Int.pipe(Schema.positive()),
+  }),
   Schema.Struct({
     status: Schema.Literal("result"),
     cleanup: Schema.Literal("confirmed", "uncertain"),
@@ -85,35 +92,51 @@ async function within(promise: Promise<unknown>, maximumMs: number): Promise<boo
 export async function prepareLinuxMediationSession(input: {
   readonly ownerId: string;
   readonly signal: AbortSignal;
-  /** Includes preparation; this candidate refuses durations above the native 180s ceiling. */
+  /** Includes preparation and the owned command lifetime. */
   readonly maximumMs: number;
   readonly receiptDirectory: string;
   readonly brokerExecutable: string;
   /** Fixed server-owned worker module when its runtime is a separate executable. */
   readonly brokerScript?: string;
   readonly nativeExecutable: string;
+  /** Production selection requires a kernel reporting complete production coverage. */
+  readonly production?: boolean;
+  /** Keep the caller's exact stdio descriptors, including a terminal PTY. */
+  readonly inheritStdio?: boolean;
   readonly launch: ProcessConfinementPrepareInput;
   readonly policy: SecretGuardMediationPolicy;
   readonly environment: Readonly<Record<string, string>>;
 }): Promise<
   | { readonly status: "ready"; readonly session: LinuxMediationSession }
-  | { readonly status: "unavailable"; readonly reason: string; readonly cleanup: Cleanup }
+  | {
+      readonly status: "unavailable";
+      readonly reason: string;
+      readonly cleanup: Cleanup;
+    }
 > {
   const entered = Date.now();
   const secretGuard = secretGuardConfiguration();
   if (process.platform !== "linux")
-    return { status: "unavailable", reason: "unsupported-platform", cleanup: "confirmed" };
+    return {
+      status: "unavailable",
+      reason: "unsupported-platform",
+      cleanup: "confirmed",
+    };
   if (
     input.signal.aborted ||
     !Number.isSafeInteger(input.maximumMs) ||
     input.maximumMs < 1 ||
-    input.maximumMs > 180_000 ||
+    input.maximumMs > LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS ||
     input.ownerId.length < 1 ||
     input.ownerId.length > 256 ||
     ![input.receiptDirectory, input.brokerExecutable, input.nativeExecutable].every(isAbsolute) ||
     (input.brokerScript !== undefined && !isAbsolute(input.brokerScript))
   )
-    return { status: "unavailable", reason: "invalid-configuration", cleanup: "confirmed" };
+    return {
+      status: "unavailable",
+      reason: "invalid-configuration",
+      cleanup: "confirmed",
+    };
   const deadline = entered + input.maximumMs;
   let prepTimer: ReturnType<typeof setTimeout> | undefined;
   let prepAbort: (() => void) | undefined;
@@ -131,6 +154,9 @@ export async function prepareLinuxMediationSession(input: {
           throw new Error("Receipt directory must be canonical, private and owned.");
         const config = {
           nativeExecutable: input.nativeExecutable,
+          ...(input.production === undefined ? {} : { production: input.production }),
+          maximumMs: input.maximumMs,
+          ...(input.inheritStdio === undefined ? {} : { inheritStdio: input.inheritStdio }),
           launch: {
             ...input.launch,
             ...(input.launch.interpreterSearchPath === undefined &&
@@ -181,20 +207,29 @@ export async function prepareLinuxMediationSession(input: {
     [...(input.brokerScript === undefined ? [] : [input.brokerScript]), "--linux-mediation-worker"],
     {
       detached: true,
-      stdio: ["pipe", "pipe", "pipe", "ipc"],
+      stdio:
+        input.inheritStdio === true
+          ? ["inherit", "inherit", "inherit", "ipc"]
+          : ["pipe", "pipe", "pipe", "ipc"],
       serialization: "json",
       env: {
         PATH: "/usr/bin:/bin",
         HOME: homedir(),
         LANG: "C",
         TMPDIR: input.launch.temporaryDirectory,
+        ...(process.env.ELECTRON_RUN_AS_NODE === "1" ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
       },
     },
   );
   const stdout = new PassThrough({ highWaterMark: IO_BYTES });
   const stderr = new PassThrough({ highWaterMark: IO_BYTES });
-  child.stdout?.pipe(stdout);
-  child.stderr?.pipe(stderr);
+  if (input.inheritStdio === true) {
+    stdout.end();
+    stderr.end();
+  } else {
+    child.stdout?.pipe(stdout);
+    child.stderr?.pipe(stderr);
+  }
   const receipts: Array<{
     readonly pid: number;
     readonly identity: string;
@@ -211,8 +246,8 @@ export async function prepareLinuxMediationSession(input: {
   let nativeCleanup: Cleanup = "uncertain";
   let cleanupAcknowledged = false;
   let ipcDisconnected = false;
-  let stdoutEnded = false;
-  let stderrEnded = false;
+  let stdoutEnded = input.inheritStdio === true;
+  let stderrEnded = input.inheritStdio === true;
   let pendingControl = 0;
   let queued = 0;
   let pendingInput = 0;
@@ -364,7 +399,10 @@ export async function prepareLinuxMediationSession(input: {
       }
       phase = "exited";
       settleExited({
-        result: result ?? { status: "unavailable", reason: "native-unavailable" },
+        result: result ?? {
+          status: "unavailable",
+          reason: "native-unavailable",
+        },
         cleanup,
       });
     })();
@@ -510,6 +548,7 @@ export async function prepareLinuxMediationSession(input: {
       },
       writeInput: (bytes) => {
         if (
+          input.inheritStdio === true ||
           phase !== "running" ||
           child.stdin === null ||
           child.stdin.destroyed ||
@@ -523,7 +562,9 @@ export async function prepareLinuxMediationSession(input: {
         )
           return { status: "refused" };
         pendingInput += bytes.length;
-        const drained = new Promise<{ readonly status: "drained" | "uncertain" }>((resolve) => {
+        const drained = new Promise<{
+          readonly status: "drained" | "uncertain";
+        }>((resolve) => {
           const settle = (status: "drained" | "uncertain") => {
             if (!inputWrites.delete(settle)) return;
             pendingInput -= bytes.length;
@@ -541,6 +582,7 @@ export async function prepareLinuxMediationSession(input: {
         return { status: "accepted", drained };
       },
       endInput: () => {
+        if (input.inheritStdio === true) return;
         inputEnded = true;
         child.stdin?.end();
       },

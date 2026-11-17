@@ -13,9 +13,15 @@ const fixture = vi.hoisted(() => ({
   dead: new Set<number>(),
 }));
 vi.mock("node:child_process", () => ({ spawn: fixture.spawn }));
-vi.mock("node:fs/promises", () => ({ lstat: fixture.lstat, realpath: fixture.realpath }));
+vi.mock("node:fs/promises", () => ({
+  lstat: fixture.lstat,
+  realpath: fixture.realpath,
+}));
 vi.mock("./linuxConfinement", () => ({
-  buildBubblewrapLaunch: () => ({ command: "/usr/bin/bwrap", args: ["--unshare-all"] }),
+  buildBubblewrapLaunch: () => ({
+    command: "/usr/bin/bwrap",
+    args: ["--unshare-all"],
+  }),
 }));
 vi.mock("./nodeOwnedProcessReceipt", () => ({
   readProcessIdentity: fixture.identity,
@@ -38,7 +44,11 @@ const input = (signal: AbortSignal, maximumMs = 1_000) => ({
     temporaryDirectory: "/temporary",
     networkEgress: "none" as const,
   },
-  policy: { entries: [], ownAccountPaths: [], sshCompanionDirectory: undefined },
+  policy: {
+    entries: [],
+    ownAccountPaths: [],
+    sshCompanionDirectory: undefined,
+  },
 });
 
 function worker(
@@ -96,7 +106,10 @@ function worker(
 }
 
 beforeEach(() => {
-  Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+  Object.defineProperty(process, "platform", {
+    value: "linux",
+    configurable: true,
+  });
   fixture.spawn.mockReset();
   fixture.lstat.mockReset();
   fixture.realpath.mockReset();
@@ -115,9 +128,10 @@ beforeEach(() => {
   fixture.terminate.mockReset().mockImplementation(async (pid: number) => {
     fixture.dead.add(pid);
   });
-  fixture.receipt
-    .mockReset()
-    .mockResolvedValue({ ready: Promise.resolve(), remove: async () => undefined });
+  fixture.receipt.mockReset().mockResolvedValue({
+    ready: Promise.resolve(),
+    remove: async () => undefined,
+  });
 });
 afterEach(() => {
   if (originalPlatform !== undefined) Object.defineProperty(process, "platform", originalPlatform);
@@ -133,7 +147,11 @@ describe("owned mediation session admission and input", () => {
         }),
     );
     const result = await prepareLinuxMediationSession(input(new AbortController().signal, 5));
-    expect(result).toEqual({ status: "unavailable", reason: "deadline", cleanup: "confirmed" });
+    expect(result).toEqual({
+      status: "unavailable",
+      reason: "deadline",
+      cleanup: "confirmed",
+    });
     complete({ isDirectory: () => true, uid: process.getuid?.(), mode: 0o700 });
     await new Promise((resolve) => setImmediate(resolve));
     expect(fixture.spawn).not.toHaveBeenCalled();
@@ -201,6 +219,32 @@ describe("owned mediation session admission and input", () => {
       await prepared.session.close();
     }
   });
+  it("inherits the caller's exact stdio descriptors for production PTY launches", async () => {
+    const write = vi.fn((done: (error?: Error | null) => void) => done());
+    fixture.spawn.mockReturnValue(worker(write));
+    const prepared = await prepareLinuxMediationSession({
+      ...input(new AbortController().signal),
+      inheritStdio: true,
+    });
+    expect(fixture.spawn).toHaveBeenCalledWith(
+      "/fixed-worker",
+      ["--linux-mediation-worker"],
+      expect.objectContaining({
+        stdio: ["inherit", "inherit", "inherit", "ipc"],
+      }),
+    );
+    if (prepared.status !== "ready") throw new Error("Session unavailable");
+    try {
+      expect(await prepared.session.launch()).toEqual({ status: "released" });
+      expect(
+        prepared.session.writeInput(Buffer.from("owned directly by the inherited PTY")),
+      ).toEqual({ status: "refused" });
+      prepared.session.endInput();
+      expect(write).not.toHaveBeenCalled();
+    } finally {
+      await prepared.session.close();
+    }
+  });
   it("bounds undrained input, admits it after draining, and settles pending owner loss without replay", async () => {
     const owner = new AbortController();
     const callbacks: Array<(error?: Error | null) => void> = [];
@@ -219,7 +263,9 @@ describe("owned mediation session admission and input", () => {
         "accepted",
         "accepted",
       ]);
-      expect(prepared.session.writeInput(Buffer.alloc(65_536))).toEqual({ status: "refused" });
+      expect(prepared.session.writeInput(Buffer.alloc(65_536))).toEqual({
+        status: "refused",
+      });
       const complete = callbacks.shift();
       const first = writes[0];
       if (complete === undefined || first?.status !== "accepted")
@@ -319,7 +365,10 @@ describe("owned mediation session admission and input", () => {
     });
     fixture.receipt.mockImplementation(async (_options: unknown, _owner: string, pid: number) => {
       if (pid === 1003) entered();
-      return { ready: pid === 1003 ? gate : Promise.resolve(), remove: async () => undefined };
+      return {
+        ready: pid === 1003 ? gate : Promise.resolve(),
+        remove: async () => undefined,
+      };
     });
     const child = worker((done) => done());
     const sent = vi.spyOn(child, "send");

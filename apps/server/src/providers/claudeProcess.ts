@@ -1457,6 +1457,7 @@ function confineClaudeLaunch(
               ? { CLAUDE_CODE_SHELL: CLAUDE_PLAN_SHELL, ...CLAUDE_PLAN_GIT_ENVIRONMENT }
               : {}),
           ...(searchPath === undefined ? {} : { PATH: searchPath }),
+          ...launch.environment,
         },
       },
       release,

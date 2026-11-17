@@ -22,6 +22,22 @@ export function buildLinuxSandboxLaunch(): void {
     { stdio: "inherit" },
   );
   chmodSync(destination, 0o755);
+  const mediation = resolve(root, "apps/server/dist/native/octant-mediation");
+  execFileSync(
+    "cc",
+    [
+      "-static",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-o",
+      mediation,
+      resolve(root, "apps/server/native/linux-mediation/broker.c"),
+    ],
+    { stdio: "inherit" },
+  );
+  chmodSync(mediation, 0o755);
 }
 
 if (import.meta.main) buildLinuxSandboxLaunch();

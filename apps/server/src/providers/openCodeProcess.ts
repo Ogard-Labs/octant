@@ -1573,7 +1573,7 @@ function prepareOpenCodeLaunch(
             }
           : {}),
       });
-      return { ...launch, cwd: root, environment };
+      return { ...launch, cwd: root, environment: { ...environment, ...launch.environment } };
     },
     catch: (error) =>
       failure(

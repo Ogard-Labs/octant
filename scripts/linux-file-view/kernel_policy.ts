@@ -35,7 +35,9 @@ if (process.argv[2] === "--metadata-control") {
   try {
     assert(!Object.keys(process.env).some((name) => name.startsWith("BUN_JSC_")));
     await mkdir(`${control}/.ssh`, { mode: 0o700 });
-    await writeFile(`${control}/.ssh/deployment`, "synthetic control", { mode: 0o600 });
+    await writeFile(`${control}/.ssh/deployment`, "synthetic control", {
+      mode: 0o600,
+    });
     await writeFile(`${control}/.ssh/deployment.pub`, "synthetic public control");
     await symlink("synthetic missing target", `${control}/.ssh/id_control`);
     const secret = linuxMediationObjectKey(
@@ -106,6 +108,9 @@ const workload = overlayCopyup
 const root = fileattr ? "/octant-fileattr" : "/tmp/octant-policy-broker";
 const home = `${root}/home`;
 const key = `${home}/.ssh/deployment`;
+const readOnlyRoot = `${root}/read-only`;
+const selectedReadOnly = `${root}/selected-read-only`;
+const selectedDeny = `${root}/selected-deny`;
 const stage = overlayCopyup ? `${root}/overlay-copyup-stage` : `${root}/stage`;
 const owner = new AbortController();
 const maximum = setTimeout(() => owner.abort(), runtime === undefined ? 15_000 : 25_000);
@@ -173,19 +178,47 @@ try {
     await writeFile(`${home}/.ssh/id_independent`, "synthetic independently protected", {
       mode: 0o600,
     });
-    await writeFile(`${home}/.ssh/id_independent.pub`, "public independent", { mode: 0o600 });
+    await writeFile(`${home}/.ssh/id_independent.pub`, "public independent", {
+      mode: 0o600,
+    });
     await symlink("synthetic protected link text", `${home}/.ssh/id_link`);
     await symlink("deployment.pub", `${home}/.ssh/link.pub`);
+    await Promise.all([
+      mkdir(readOnlyRoot, { mode: 0o700 }),
+      mkdir(selectedReadOnly, { mode: 0o700 }),
+      mkdir(selectedDeny, { mode: 0o700 }),
+    ]);
+    await writeFile(`${readOnlyRoot}/document`, "synthetic read-only bytes", {
+      mode: 0o600,
+    });
+    await link(`${readOnlyRoot}/document`, `${root}/read-only-write-alias`);
+    await link(`${readOnlyRoot}/document`, `${root}/read-only-removable-alias`);
+    await writeFile(`${selectedReadOnly}/settings`, "synthetic selected read-only bytes", {
+      mode: 0o600,
+    });
+    await writeFile(`${selectedDeny}/secret`, "synthetic selected denied bytes", {
+      mode: 0o600,
+    });
   }
+  const basePolicy = secretGuardMediationPolicy({
+    platform: "linux",
+    homeDirectory: home,
+    ownAccountPaths: [],
+  });
   running = runLinuxMediationBroker({
     nativeExecutable: "/octant-mediation",
     command: launch.command,
     args: launch.args,
-    policy: secretGuardMediationPolicy({
-      platform: "linux",
-      homeDirectory: home,
-      ownAccountPaths: [],
-    }),
+    policy: overlayCopyup
+      ? basePolicy
+      : {
+          ...basePolicy,
+          readOnlyRoots: [readOnlyRoot],
+          protectedPaths: [
+            { path: selectedReadOnly, mode: "read-only" },
+            { path: selectedDeny, mode: "deny" },
+          ],
+        },
     signal: owner.signal,
   });
   const deadline = performance.now() + (runtime === undefined ? 10_000 : 20_000);
@@ -229,12 +262,16 @@ try {
             }
           });
       if (overlayCopyupBeforeTransition) {
-        await writeFile(`${key}.pub`, "synthetic public companion", { mode: 0o600 });
+        await writeFile(`${key}.pub`, "synthetic public companion", {
+          mode: 0o600,
+        });
       } else {
         owner.abort();
       }
     } else {
-      await writeFile(`${root}/unrelated.pub`, "synthetic public companion", { mode: 0o600 });
+      await writeFile(`${root}/unrelated.pub`, "synthetic public companion", {
+        mode: 0o600,
+      });
       // Publish the companion last so the client sees both names atomically
       // with respect to its synchronization condition.
       await link(`${root}/unrelated.pub`, `${key}.pub`);
@@ -277,6 +314,7 @@ try {
       ended.code === 0 &&
       (await readFile(`${root}/ordinary`, "utf8")) === "permitted after" &&
       (await readFile(key, "utf8")) === "synthetic original-policy bytes" &&
+      (await readFile(`${readOnlyRoot}/document`, "utf8")) === "synthetic read-only bytes" &&
       metadataVerified;
   }
 } finally {

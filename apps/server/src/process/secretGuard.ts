@@ -91,7 +91,11 @@ function serverPatternInForce(fullAccess: boolean): ServerPattern {
   const text = serverProtectedPathPattern(
     fullAccess ? fullAccessChoice(state.choice) : state.choice,
   );
-  const built = { choice: state.choice, text, expression: new RegExp(text, "imu") };
+  const built = {
+    choice: state.choice,
+    text,
+    expression: new RegExp(text, "imu"),
+  };
   if (fullAccess) fullAccessServerPattern = built;
   else serverPattern = built;
   return built;
@@ -179,6 +183,12 @@ export interface SecretGuardMediationPolicy {
   readonly entries: ReadonlyArray<ResolvedProtectedEntry>;
   readonly ownAccountPaths: ReadonlyArray<string>;
   readonly sshCompanionDirectory: string | undefined;
+  /** Optional Strict additions consumed only by the access-time backend. */
+  readonly readOnlyRoots?: ReadonlyArray<string>;
+  readonly protectedPaths?: ReadonlyArray<{
+    readonly path: string;
+    readonly mode: "read-only" | "deny";
+  }>;
 }
 
 /** Original structured rules, before startup enumeration or mount covers. */
@@ -306,7 +316,10 @@ const WINDOWS_UNSPELLED_HOME =
  */
 export function isProtectedSecretPath(
   path: string,
-  options: { readonly platform?: NodeJS.Platform; readonly homeDirectory?: string } = {},
+  options: {
+    readonly platform?: NodeJS.Platform;
+    readonly homeDirectory?: string;
+  } = {},
 ): boolean {
   const homeDirectory = options.homeDirectory ?? homedir();
   const home = /^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/.exec(path);
@@ -575,7 +588,10 @@ function entryRules(
   ownWrite: ReadonlyArray<string>,
   readable: ReadonlyArray<string>,
   profile: SecretGuardSeatbeltInput["profile"],
-): { readonly denials: ReadonlyArray<string>; readonly exceptions: ReadonlyArray<string> } {
+): {
+  readonly denials: ReadonlyArray<string>;
+  readonly exceptions: ReadonlyArray<string>;
+} {
   const denials: string[] = [];
   const exceptions: string[] = [];
   if (entry.kind === "path") {

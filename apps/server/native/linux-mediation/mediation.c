@@ -459,11 +459,6 @@ struct octant_open_scope octant_open_begin(struct file *file)
 	open->depth = 1;
 	open->active = true;
 	scope.error = admit_inode_request(inode, operation, &logical);
-	real_inode = d_real_inode(file->f_path.dentry);
-	if (!scope.error && guarded_inode(real_inode) && real_inode != inode)
-		scope.error = admit_inode_request(real_inode, operation, &real);
-	if (!scope.error && real.namespace_epoch && real.namespace_epoch != logical.namespace_epoch)
-		scope.error = -EAGAIN;
 	if (!scope.error) {
 		open->epoch = logical.namespace_epoch;
 		spin_lock_irqsave(&context->lock, flags);
@@ -475,6 +470,18 @@ struct octant_open_scope octant_open_begin(struct file *file)
 			scope.error = -EACCES;
 		else
 			open->prepared = true;
+	}
+	/* d_real_inode() can itself perform OverlayFS metacopy verification. The
+	 * admitted logical object therefore has to establish the exact open scope
+	 * before resolving its backing object. The backing identity is still
+	 * independently admitted before ovl_open() may use it. */
+	if (!scope.error) {
+		real_inode = d_real_inode(file->f_path.dentry);
+		if (guarded_inode(real_inode) && real_inode != inode)
+			scope.error = admit_inode_request(real_inode, operation, &real);
+		if (!scope.error && real.namespace_epoch &&
+		    real.namespace_epoch != logical.namespace_epoch)
+			scope.error = -EAGAIN;
 	}
 	return scope;
 }
@@ -986,12 +993,14 @@ static int octant_file_ioctl_compat(struct file *file, unsigned int command, uns
 static int mmap_file(struct file *file, unsigned long requested, unsigned long prot,
 		     unsigned long flags)
 {
-	return admit_file(file, OCTANT_MEDIATION_MAP);
+	return admit_file(file, (prot & PROT_WRITE) && (flags & MAP_SHARED) ?
+		OCTANT_MEDIATION_WRITE : OCTANT_MEDIATION_MAP);
 }
 
 static int protect_mapping(struct vm_area_struct *vma, unsigned long requested, unsigned long prot)
 {
-	return admit_file(vma->vm_file, OCTANT_MEDIATION_MAP);
+	return admit_file(vma->vm_file, (prot & PROT_WRITE) && (vma->vm_flags & VM_SHARED) ?
+		OCTANT_MEDIATION_WRITE : OCTANT_MEDIATION_MAP);
 }
 
 static int check_exec(struct linux_binprm *bprm)

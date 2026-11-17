@@ -85,6 +85,7 @@ export async function classifyLinuxMediationCreation(
     if (final.activeMutations !== 0 || final.epoch !== snapshot.epoch) return unavailable;
     const refused =
       snapshot.proposedEntryProtected !== false ||
+      snapshot.proposedEntryWriteProtected !== false ||
       (creation.operation === "link" && snapshot.protectedObjects.has(creation.sourceObject));
     return { status: refused ? "refused" : "allowed", epoch: snapshot.epoch };
   } catch {
@@ -126,11 +127,15 @@ export async function classifyLinuxMediationMutation(
     }
     const before = await readLinuxMediationPolicy(policy, readNamespace);
     if (before.status !== "ready") return unavailable;
-    const sourceParent = await stat(Buffer.from(mutation.source.parent), { bigint: true });
+    const sourceParent = await stat(Buffer.from(mutation.source.parent), {
+      bigint: true,
+    });
     const destinationParent =
       mutation.destination === undefined
         ? undefined
-        : await stat(Buffer.from(mutation.destination.parent), { bigint: true });
+        : await stat(Buffer.from(mutation.destination.parent), {
+            bigint: true,
+          });
     if (
       !sourceParent.isDirectory() ||
       (destinationParent !== undefined && !destinationParent.isDirectory())
@@ -146,6 +151,37 @@ export async function classifyLinuxMediationMutation(
       mutation.destination === undefined || destinationName === undefined
         ? undefined
         : append(bytePath(mutation.destination.parent), destinationName);
+    const selected = [
+      ...(policy.readOnlyRoots ?? []),
+      ...(policy.protectedPaths ?? []).map((entry) => entry.path),
+    ].map(bytePath);
+    const selectedPath = (path: string) =>
+      selected.some((root) => path === root || path.startsWith(`${root}/`));
+    const selectedBoundary = async (path: string) => {
+      const split = path.lastIndexOf("/");
+      const parent = path.slice(0, split) || "/";
+      return {
+        parent: linuxMediationObjectKey(await stat(native(parent), { bigint: true })),
+        name: path.slice(split + 1),
+      };
+    };
+    const boundaries = await Promise.all(selected.map(selectedBoundary));
+    const selectedEntry = (parent: string | undefined, name: string | undefined) =>
+      parent !== undefined &&
+      name !== undefined &&
+      boundaries.some((entry) => entry.parent === parent && entry.name === name);
+    if (
+      before.protectedObjects.has(sourceKey) ||
+      before.writeProtectedObjects.has(sourceKey) ||
+      (destinationKey !== undefined &&
+        (before.protectedObjects.has(destinationKey) ||
+          before.writeProtectedObjects.has(destinationKey))) ||
+      selectedEntry(sourceKey, sourceName) ||
+      selectedEntry(destinationKey, destinationName) ||
+      selectedPath(sourceBacking) ||
+      (destinationBacking !== undefined && selectedPath(destinationBacking))
+    )
+      return { status: "refused", epoch: before.epoch };
     const unchanged = async (): Promise<MutationResult> => {
       const current = await readNamespace();
       return current.activeMutations === 0 && current.epoch === before.epoch
@@ -205,7 +241,11 @@ export async function classifyLinuxMediationMutation(
       return undefined;
     };
     const cache = new Map<string, Node>();
-    const root: Node = { path: "/", backing: "/", identity: await lstat("/", { bigint: true }) };
+    const root: Node = {
+      path: "/",
+      backing: "/",
+      identity: await lstat("/", { bigint: true }),
+    };
     cache.set("/", root);
     const resolve = (path: Buffer, followFinal = true): Node => {
       budget();
@@ -229,16 +269,18 @@ export async function classifyLinuxMediationMutation(
           if (replacement === null) throw absent();
           const entry = replacement ?? {
             backing: append(parent.backing, name),
-            identity: lstatSync(native(append(parent.backing, name)), { bigint: true }),
+            identity: lstatSync(native(append(parent.backing, name)), {
+              bigint: true,
+            }),
           };
           next = { ...entry, path: logical };
           cache.set(logical, next);
         }
         if (next.identity.isSymbolicLink() && (followFinal || index < segments.length - 1)) {
           if (++followed > 40) throw Error("Symbolic link budget exhausted");
-          const target = readlinkSync(native(next.backing), { encoding: "buffer" }).toString(
-            "latin1",
-          );
+          const target = readlinkSync(native(next.backing), {
+            encoding: "buffer",
+          }).toString("latin1");
           if (target.startsWith("/")) stack.splice(1);
           // Relative targets start at the new logical parent, so moving a
           // symlink never assumes its old target survives the operation.
@@ -257,7 +299,9 @@ export async function classifyLinuxMediationMutation(
         const node = resolve(path);
         const key = linuxMediationObjectKey(node.identity);
         const names = new Set<string>();
-        const directory = opendirSync(native(node.backing), { encoding: "latin1" });
+        const directory = opendirSync(native(node.backing), {
+          encoding: "latin1",
+        });
         try {
           for (;;) {
             const entry = directory.readSync();
@@ -283,6 +327,9 @@ export async function classifyLinuxMediationMutation(
     if (after.status !== "ready" || after.epoch !== before.epoch) return unavailable;
     for (const object of before.protectedObjects)
       if (!after.protectedObjects.has(object)) return { status: "refused", epoch: after.epoch };
+    for (const object of before.writeProtectedObjects)
+      if (!after.writeProtectedObjects.has(object))
+        return { status: "refused", epoch: after.epoch };
     return { status: "allowed", epoch: after.epoch };
   } catch {
     return unavailable;

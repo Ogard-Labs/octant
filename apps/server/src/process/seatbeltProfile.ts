@@ -1,5 +1,9 @@
 import { macosSandboxScopeLaunchArguments } from "./macosSandboxScope";
 import { pinLinuxLaunch } from "./linuxPinnedLaunch";
+import {
+  linuxMediationProductionAvailable,
+  prepareLinuxMediatedLaunch,
+} from "./linuxMediationProduction";
 import { prepareMacosSandboxScope } from "./macosSandboxScope";
 import {
   recordSandboxLaunch,
@@ -625,7 +629,10 @@ const privateDenyRulesCache = new Map<
   string,
   {
     readonly rules: ReadonlyArray<string>;
-    readonly watched: ReadonlyArray<{ readonly directory: string; readonly mtimeMs: number }>;
+    readonly watched: ReadonlyArray<{
+      readonly directory: string;
+      readonly mtimeMs: number;
+    }>;
   }
 >();
 const PRIVATE_DENY_RULES_CACHE_LIMIT = 32;
@@ -660,7 +667,10 @@ export function privateHomeDenyReadRules(
     privateDenyRulesCache.delete(key);
   }
   const rules: string[] = [];
-  const watched: Array<{ readonly directory: string; readonly mtimeMs: number }> = [];
+  const watched: Array<{
+    readonly directory: string;
+    readonly mtimeMs: number;
+  }> = [];
   const visit = (directory: string) => {
     const descendants = allowed.filter(
       (path) => path === directory || path.startsWith(`${directory}${sep}`),
@@ -1107,7 +1117,11 @@ export function makeProcessConfinementLive(
                   ? (toolNetwork?.networkEgress ?? input.networkEgress)
                   : input.networkEgress,
             };
-      const compilation = compileSandboxLaunchPolicy(policyInput, platform);
+      const authority = platform === "linux" ? sandboxAuthorityDirectory() : undefined;
+      const accessTimeMediation = linuxMediationProductionAvailable(authority);
+      const compilation = compileSandboxLaunchPolicy(policyInput, platform, {
+        accessTimeMediation,
+      });
       if (compilation.status === "refused") {
         throw new ProcessConfinementError(
           compilation.code === "sandbox-policy-unsupported"
@@ -1130,7 +1144,7 @@ export function makeProcessConfinementLive(
               .slice(0, 64);
           recordSandboxLaunch(selectedPolicy, {
             provider: selectedPolicy.context.provider,
-            backend: `${platform === "linux" ? "Bubblewrap" : "Seatbelt"} · ${release()}`,
+            backend: `${platform === "linux" ? (accessTimeMediation ? "Linux mediation + Bubblewrap" : "Bubblewrap") : "Seatbelt"} · ${release()}`,
             reads: paths([
               ...(platform === "linux"
                 ? ["/bin", "/sbin", "/usr", "/lib", "/lib64", "/etc", "/opt", "/sys"]
@@ -1184,7 +1198,10 @@ export function makeProcessConfinementLive(
         };
       };
       if (platform === "darwin") {
-        const launch = prepareSeatbeltLaunch(prepared, { ...options, sandboxPath });
+        const launch = prepareSeatbeltLaunch(prepared, {
+          ...options,
+          sandboxPath,
+        });
         const authorityDirectory = sandboxAuthorityDirectory();
         // Pure native profile probes have no host authority. Enrolled policy
         // launches always have private storage and receive a kernel scope.
@@ -1204,8 +1221,31 @@ export function makeProcessConfinementLive(
         return withReceipt(launch);
       }
       if (platform === "linux") {
-        const launch = buildBubblewrapLaunch(prepared, { bwrapPath: sandboxPath });
-        const authority = sandboxAuthorityDirectory();
+        if (
+          selectedPolicy !== undefined &&
+          (accessTimeMediation ||
+            selectedPolicy.policy.filesystem.protectedPaths.length > 0 ||
+            selectedPolicy.policy.credentials === "isolated")
+        ) {
+          if (authority === undefined)
+            throw new ProcessConfinementError(
+              "incompatible",
+              "Linux access-time protections require private host storage.",
+            );
+          try {
+            return withReceipt(prepareLinuxMediatedLaunch(prepared, selectedPolicy, authority));
+          } catch (error) {
+            throw new ProcessConfinementError(
+              "incompatible",
+              error instanceof Error
+                ? error.message
+                : "Linux access-time mediation is unavailable.",
+            );
+          }
+        }
+        const launch = buildBubblewrapLaunch(prepared, {
+          bwrapPath: sandboxPath,
+        });
         return withReceipt(
           selectedPolicy !== undefined && authority !== undefined
             ? pinLinuxLaunch(launch, authority, selectedPolicy)

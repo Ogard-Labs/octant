@@ -521,9 +521,11 @@ describe("desktop packaging boundary", () => {
     expect(PACKAGED_LINUX_EXECUTABLE_FILES).toEqual([
       "app/apps/server/node_modules/@typescript/typescript-linux-x64/lib/tsc",
       "app/apps/server/dist/native/octant-sandbox-launch",
+      "app/apps/server/dist/native/octant-mediation",
     ]);
     expect(PACKAGED_LINUX_NATIVE_FILES).toEqual([
       "app/apps/server/dist/native/octant-sandbox-launch",
+      "app/apps/server/dist/native/octant-mediation",
       "native/octant-desktop-peer-linux.node",
       "app/apps/server/node_modules/node-pty/build/Release/pty.node",
       "app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",

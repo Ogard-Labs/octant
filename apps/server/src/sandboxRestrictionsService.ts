@@ -1,5 +1,6 @@
 import { claudeSandboxToolchainReads } from "./providers/claudeSandboxToolchain";
 import { linuxPinnedLaunchAvailable } from "./process/linuxPinnedLaunch";
+import { linuxMediationProductionAvailable } from "./process/linuxMediationProduction";
 import {
   resolveStrictPolicy,
   type StrictPreferences,
@@ -71,7 +72,11 @@ const refused = (
   reason: "stale-version" | "binding-changed" | "unavailable" | "not-grantable",
   message: string,
 ): SandboxRestrictionsResult =>
-  decodeSandboxRestrictionsResult({ kind: "sandbox-restrictions-refused", reason, message });
+  decodeSandboxRestrictionsResult({
+    kind: "sandbox-restrictions-refused",
+    reason,
+    message,
+  });
 
 export function registerSandboxRestrictionsEvents(registry: EventRegistry): EventRegistry {
   return registry.register(SANDBOX_POLICY_CHANGED, 1, SandboxPolicyChanged);
@@ -112,7 +117,10 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
       readonly launches: SandboxPolicyLaunchDetails[];
       readonly nonce: string;
       readonly parentThreadId?: string;
-      readonly identities?: ReadonlyArray<{ readonly path: string; readonly identity: string }>;
+      readonly identities?: ReadonlyArray<{
+        readonly path: string;
+        readonly identity: string;
+      }>;
       ending: boolean;
       readonly cleanups: Map<string, () => Promise<void>>;
     }
@@ -137,7 +145,10 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
       );
     }
   }
-  #identity(path: string): { readonly path: string; readonly identity: string } {
+  #identity(path: string): {
+    readonly path: string;
+    readonly identity: string;
+  } {
     const canonical = realpathSync(path);
     const stat = statSync(canonical, { bigint: true });
     if (!stat.isDirectory() || canonical === "/")
@@ -233,10 +244,14 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
       (record) => record?.policy !== undefined && record.requiresStrict !== true,
     );
     return resolveStrictPolicy({
-      ...(this.#dependencies.strictPreferences?.(scope) ?? { executionPolicy: "approval-gated" }),
+      ...(this.#dependencies.strictPreferences?.(scope) ?? {
+        executionPolicy: "approval-gated",
+      }),
       ...(legacy === undefined
         ? {}
-        : { legacyPolicyScope: legacy.scope.kind === "session" ? "thread" : legacy.scope.kind }),
+        : {
+            legacyPolicyScope: legacy.scope.kind === "session" ? "thread" : legacy.scope.kind,
+          }),
     });
   }
   #validate(record: StoredPolicy): void {
@@ -298,6 +313,8 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
     const backendReady =
       (platform === "linux" && linuxPinnedLaunchAvailable(this.#dependencies.dataDirectory)) ||
       (platform === "darwin" && macosSandboxScopeAvailable());
+    const accessTimeReady =
+      platform === "linux" && linuxMediationProductionAvailable(this.#dependencies.dataDirectory);
     const threadId = scope.kind === "session" ? scope.threadId : undefined;
     const projectId =
       scope.kind === "project"
@@ -321,15 +338,17 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
             "New policy enrollment is in maintainer preview. Existing saved restrictions remain enforced.",
           ]
         : []),
-      ...(platform === "linux" || platform === "darwin"
+      ...((platform === "linux" && !accessTimeReady) || platform === "darwin"
         ? [
             "Read-only folders on the same filesystem as a writable root are unsupported until access-time alias mediation is available; the launch refuses rather than allowing writes through hard links.",
           ]
         : []),
       "Claude Strict withholds native startup hooks, MCP servers, Project startup code, REPL, Workflow scripts and worktree creation outside its command sandbox. Native web tools are withheld when tool networking is filtered; brokered Octant tools keep their own policy checks.",
       `Claude Strict command toolchain reads: ${claudeSandboxToolchainReads(platform).join(", ")}. No home/account folder is added by that toolchain grant; writes remain confined to allowed folders.`,
-      "Protected project paths require a proven backend and are unavailable on this host.",
-      "Local-service grants permit only the named loopback address and port through the scoped proxy; service effects are a separate authority. Fixed credential commands use their separate one-use recipient/account review. General credential isolation remains unavailable; protected-file rules remain enforced.",
+      ...(accessTimeReady
+        ? []
+        : ["Protected project paths require a proven backend and are unavailable on this host."]),
+      `Local-service grants permit only the named loopback address and port through the scoped proxy; service effects are a separate authority. Fixed credential commands use their separate one-use recipient/account review.${accessTimeReady ? " Credential isolation is enforced by this host's opted-in access-time backend." : " General credential isolation remains unavailable; protected-file rules remain enforced."}`,
     ];
     try {
       if (effective !== undefined) this.#validate(effective);
@@ -405,8 +424,8 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
       limitations,
       capabilities: {
         folders: backendReady,
-        protectedPaths: false,
-        isolatedCredentials: false,
+        protectedPaths: accessTimeReady,
+        isolatedCredentials: accessTimeReady,
         blockedHostServices: backendReady,
       },
       denials: [...this.#denials.values()].filter(
@@ -512,7 +531,10 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
     let record: StoredPolicy;
     try {
       if (policy !== undefined)
-        policy = decodeSandboxPolicy({ ...policy, revision: this.#version + 1 });
+        policy = decodeSandboxPolicy({
+          ...policy,
+          revision: this.#version + 1,
+        });
       const roots =
         policy === undefined
           ? []
@@ -544,7 +566,10 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
       };
       if (scope.kind !== "session")
         this.#dependencies.journal.append({
-          aggregate: { aggregateType: SANDBOX_POLICY_AGGREGATE_TYPE, aggregateId },
+          aggregate: {
+            aggregateType: SANDBOX_POLICY_AGGREGATE_TYPE,
+            aggregateId,
+          },
           expectedVersion: this.#journalVersion,
           events: [
             {
@@ -577,7 +602,11 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
       const denial = this.#denials.get(command.denialId);
       if (denial !== undefined) this.#denials.set(denial.id, { ...denial, dismissed: true });
     }
-    this.#recordAudit({ operation: command.kind, scope: scope.kind, revision: this.#version });
+    this.#recordAudit({
+      operation: command.kind,
+      scope: scope.kind,
+      revision: this.#version,
+    });
     return this.snapshot(scope);
   }
   beginTurn(request: SandboxTurnRequest): SandboxTurnAdmission {
@@ -590,7 +619,10 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
     let selection: SandboxPolicySelection | undefined;
     let strictEnabled = false;
     let legacyStrict = false;
-    let policyScope: SandboxRestrictionsScope = { kind: "session", threadId: request.threadId };
+    let policyScope: SandboxRestrictionsScope = {
+      kind: "session",
+      threadId: request.threadId,
+    };
     try {
       policyScope =
         request.executionRoute === "terminal"
@@ -618,6 +650,9 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
         )
           this.#validate(parentRecord);
         const platform = this.#dependencies.platform ?? process.platform;
+        const accessTimeReady =
+          platform === "linux" &&
+          linuxMediationProductionAvailable(this.#dependencies.dataDirectory);
         if (platform === "linux" && !linuxPinnedLaunchAvailable(this.#dependencies.dataDirectory))
           throw new Error(
             "Linux Strict requires the installed native launch helper, private runtime storage and a kernel supporting openat2 and close_range. Rebuild the host runtime before enabling Strict.",
@@ -633,10 +668,10 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
           throw new Error("This platform cannot enforce the selected sandbox restrictions.");
         const admission = admitSandboxPolicy(selectedPolicy, {
           allowedFolders: true,
-          protectedPaths: false,
+          protectedPaths: accessTimeReady,
           networkDeny: true,
           unrestrictedNetwork: true,
-          isolatedCredentials: false,
+          isolatedCredentials: accessTimeReady,
           blockedHostServices: true,
         });
         if (admission.status === "refused")
@@ -1043,7 +1078,10 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
     // paths, commands, file contents or credential values.
     const temporary = join(data, `sandbox-audit-${randomUUID()}.tmp`);
     try {
-      writeFileSync(temporary, JSON.stringify(this.#audit), { mode: 0o600, flag: "wx" });
+      writeFileSync(temporary, JSON.stringify(this.#audit), {
+        mode: 0o600,
+        flag: "wx",
+      });
       renameSync(temporary, join(data, "sandbox-audit.json"));
     } catch {
       /* Audit diagnostics never change a policy decision. */

@@ -1032,7 +1032,7 @@ export function prepareCodexLaunch(input: {
       launch: {
         ...launch,
         cwd: root,
-        environment,
+        environment: { ...environment, ...launch.environment },
         release,
         ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined
           ? { sandboxPolicy: authority.sandboxPolicy }

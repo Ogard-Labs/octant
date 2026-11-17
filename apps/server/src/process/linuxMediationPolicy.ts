@@ -12,7 +12,9 @@ export type LinuxMediationPolicySnapshot =
       readonly status: "ready";
       readonly epoch: bigint;
       readonly protectedObjects: ReadonlySet<string>;
+      readonly writeProtectedObjects: ReadonlySet<string>;
       readonly proposedEntryProtected?: boolean;
+      readonly proposedEntryWriteProtected?: boolean;
     }
   | {
       readonly status: "unavailable";
@@ -27,6 +29,17 @@ export function linuxMediationObjectKey(identity: {
   const major = ((identity.dev >> 8n) & 0xfffn) | ((identity.dev >> 32n) & 0xfffff000n);
   const minor = (identity.dev & 0xffn) | ((identity.dev >> 12n) & 0xffffff00n);
   return `${major}:${minor}:${identity.ino}`;
+}
+
+/** Data-effect decision shared by the broker and focused policy tests. */
+export function linuxMediationObjectAllowed(
+  snapshot: LinuxMediationPolicySnapshot,
+  operation: number,
+  object: string,
+): boolean {
+  if (snapshot.status !== "ready" || operation < 1 || operation > 4) return false;
+  if (snapshot.protectedObjects.has(object)) return false;
+  return operation !== 2 || !snapshot.writeProtectedObjects.has(object);
 }
 
 export interface LinuxMediationMetadata {
@@ -99,7 +112,9 @@ export async function readLinuxMediationPolicy(
       return complete;
     };
     const objects = new Set<string>();
+    const writeObjects = new Set<string>();
     let proposedEntryProtected = false;
+    let proposedEntryWriteProtected = false;
     // Directory entries may contain arbitrary non-NUL bytes on Linux. A
     // one-byte representation preserves identity and ASCII rule syntax; UTF-8
     // replacement decoding could silently omit a protected id_<invalid> name.
@@ -118,15 +133,38 @@ export async function readLinuxMediationPolicy(
       own.push(path);
       if (!checkBudget()) return { status: "unavailable", reason: "metadata-unavailable" };
     }
-    const inspect = (path: string, forced = false) => {
+    const selected = [
+      ...(policy.readOnlyRoots ?? []).map((path) => ({
+        path: bytePath(path),
+        mode: "read-only" as const,
+      })),
+      ...(policy.protectedPaths ?? []).map((entry) => ({
+        path: bytePath(entry.path),
+        mode: entry.mode,
+      })),
+    ];
+    for (const entry of selected)
+      if (!entry.path.startsWith("/") || entry.path.includes("\0") || entry.path === "/")
+        return { status: "unavailable", reason: "metadata-unavailable" };
+    const selectedMode = (forms: ReadonlyArray<string>) => {
+      let mode: "read-only" | "deny" | undefined;
+      for (const entry of selected)
+        if (forms.some((form) => form === entry.path || form.startsWith(`${entry.path}/`))) {
+          if (entry.mode === "deny") return "deny" as const;
+          mode = "read-only";
+        }
+      return mode;
+    };
+    const inspect = (path: string, forced?: "read-only" | "deny") => {
       if (!checkBudget()) return undefined;
       try {
         const link = metadata.lstat(nativePath(path));
         // A protected dangling link still has readable link text/metadata.
         // Record its own inode before following, without turning a missing
         // target into an omitted protected object or an account exemption.
-        if (forced || protectedEntryFor([path], entries, own) !== undefined)
+        if (forced === "deny" || protectedEntryFor([path], entries, own) !== undefined)
           objects.add(linuxMediationObjectKey(link));
+        if (forced === "read-only") writeObjects.add(linuxMediationObjectKey(link));
         if (!checkBudget()) return undefined;
         const identity = link.isSymbolicLink() ? metadata.stat(nativePath(path)) : link;
         if (!checkBudget()) return undefined;
@@ -138,12 +176,19 @@ export async function readLinuxMediationPolicy(
         ) {
           const name = proposedEntry.name.toString("latin1");
           const forms = name === "" ? [path, actual] : [join(path, name), join(actual, name)];
-          if (forced || protectedEntryFor(forms, entries, own) !== undefined)
+          if (forced === "deny" || protectedEntryFor(forms, entries, own) !== undefined)
             proposedEntryProtected = true;
+          const selectedEntry = selectedMode(forms);
+          if (selectedEntry === "deny") proposedEntryProtected = true;
+          else if (selectedEntry === "read-only") proposedEntryWriteProtected = true;
         }
-        if (forced || protectedEntryFor([path, actual], entries, own) !== undefined) {
+        if (forced === "deny" || protectedEntryFor([path, actual], entries, own) !== undefined) {
           objects.add(linuxMediationObjectKey(link));
           objects.add(linuxMediationObjectKey(identity));
+        }
+        if (forced === "read-only") {
+          writeObjects.add(linuxMediationObjectKey(link));
+          writeObjects.add(linuxMediationObjectKey(identity));
         }
         return identity;
       } catch (error) {
@@ -167,7 +212,12 @@ export async function readLinuxMediationPolicy(
         throw error;
       }
     };
-    const visit = (path: string, remaining: number, level: number, forced = false): void => {
+    const visit = (
+      path: string,
+      remaining: number,
+      level: number,
+      forced?: "read-only" | "deny",
+    ): void => {
       const identity = inspect(path, forced);
       if (identity === undefined || !identity.isDirectory() || remaining === 0) return;
       if (level >= MAX_DIRECTORY_DEPTH) {
@@ -188,6 +238,10 @@ export async function readLinuxMediationPolicy(
       if (proposedEntry !== undefined && entry.kind === "path") inspect(dirname(path));
       visit(path, entry.kind === "path" ? MAX_DIRECTORY_DEPTH + 1 : entry.depth, 0);
     }
+    for (const entry of selected) {
+      if (proposedEntry !== undefined) inspect(dirname(entry.path));
+      visit(entry.path, MAX_DIRECTORY_DEPTH + 1, 0, entry.mode);
+    }
     if (policy.sshCompanionDirectory !== undefined) {
       if (!checkBudget()) return { status: "unavailable", reason: "metadata-unavailable" };
       const directory = bytePath(policy.sshCompanionDirectory);
@@ -207,7 +261,7 @@ export async function readLinuxMediationPolicy(
       }
       for (const name of names)
         if (!name.endsWith(".pub") && present.has(`${name}.pub`))
-          visit(join(directory, name), MAX_DIRECTORY_DEPTH + 1, 0, true);
+          visit(join(directory, name), MAX_DIRECTORY_DEPTH + 1, 0, "deny");
     }
     if (!checkBudget()) return { status: "unavailable", reason: "metadata-unavailable" };
     const after = await readNamespace();
@@ -217,7 +271,9 @@ export async function readLinuxMediationPolicy(
       status: "ready",
       epoch: after.epoch,
       protectedObjects: objects,
+      writeProtectedObjects: writeObjects,
       ...(proposedEntry === undefined ? {} : { proposedEntryProtected }),
+      ...(proposedEntry === undefined ? {} : { proposedEntryWriteProtected }),
     };
   } catch {
     return { status: "unavailable", reason: "metadata-unavailable" };

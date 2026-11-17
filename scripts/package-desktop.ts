@@ -552,6 +552,7 @@ export async function installTerminalLauncher(
 export const PACKAGED_LINUX_EXECUTABLE_FILES = [
   LINUX_LANGUAGE_SERVER_BINARY,
   "app/apps/server/dist/native/octant-sandbox-launch",
+  "app/apps/server/dist/native/octant-mediation",
 ] as const;
 export const PACKAGED_ARM64_FILES = [
   "native/octant-desktop-peer-status.node",
@@ -569,6 +570,7 @@ export const PACKAGED_ARM64_FILES = [
 ] as const;
 export const PACKAGED_LINUX_NATIVE_FILES = [
   "app/apps/server/dist/native/octant-sandbox-launch",
+  "app/apps/server/dist/native/octant-mediation",
   `native/${DESKTOP_PEER_LINUX_FILENAME}`,
   "app/apps/server/node_modules/node-pty/build/Release/pty.node",
   "app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",

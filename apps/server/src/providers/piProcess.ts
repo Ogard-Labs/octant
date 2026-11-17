@@ -1014,12 +1014,15 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
           command: launch.command,
           args: launch.args,
           cwd: root,
-          environment: withServerAccess(
-            input.network === undefined
-              ? environment
-              : { ...environment, ...input.network.environment },
-            input.servers,
-          ),
+          environment: {
+            ...withServerAccess(
+              input.network === undefined
+                ? environment
+                : { ...environment, ...input.network.environment },
+              input.servers,
+            ),
+            ...launch.environment,
+          },
         };
       }),
   };

@@ -107,6 +107,55 @@ static bool metadata_controls(int held, int public)
   return passed;
 }
 
+static bool advanced_policy_controls(void)
+{
+  char bytes[64];
+  int readonly = open(ROOT "/read-only/document", O_RDONLY | O_CLOEXEC);
+  bool readable = readonly >= 0 && read(readonly, bytes, sizeof(bytes)) > 0;
+  if (readonly >= 0) close(readonly);
+  errno = 0;
+  int direct_write = open(ROOT "/read-only/document", O_WRONLY | O_CLOEXEC);
+  bool direct_refused = direct_write < 0 && errno == EACCES;
+  if (direct_write >= 0) close(direct_write);
+  errno = 0;
+  int alias_write = open(ROOT "/read-only-write-alias", O_WRONLY | O_CLOEXEC);
+  bool alias_refused = alias_write < 0 && errno == EACCES;
+  if (alias_write >= 0) close(alias_write);
+  errno = 0;
+  int selected_write = open(ROOT "/selected-read-only/settings", O_WRONLY | O_CLOEXEC);
+  bool selected_write_refused = selected_write < 0 && errno == EACCES;
+  if (selected_write >= 0) close(selected_write);
+  errno = 0;
+  int denied = open(ROOT "/selected-deny/secret", O_RDONLY | O_CLOEXEC);
+  bool deny_read_refused = denied < 0 && errno == EACCES;
+  if (denied >= 0) close(denied);
+  errno = 0;
+  int created = open(ROOT "/read-only/late", O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
+  bool readonly_create_refused = created < 0 && errno == EACCES;
+  if (created >= 0) close(created);
+  errno = 0;
+  created = open(ROOT "/selected-deny/late", O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
+  bool deny_create_refused = created < 0 && errno == EACCES;
+  if (created >= 0) close(created);
+  errno = 0;
+  bool readonly_rename_refused =
+    rename(ROOT "/read-only/document", ROOT "/read-only/renamed") == -1 && errno == EACCES;
+  bool outside_alias_removed = !unlink(ROOT "/read-only-removable-alias");
+  bool passed = readable && direct_refused && alias_refused && selected_write_refused &&
+    deny_read_refused && readonly_create_refused && deny_create_refused &&
+    readonly_rename_refused && outside_alias_removed;
+  printf("OCTANT_ADVANCED_POLICY_CASE {\"readable\":%s,\"directWriteRefused\":%s,"
+    "\"hardlinkWriteRefused\":%s,\"selectedWriteRefused\":%s,\"denyReadRefused\":%s,"
+    "\"readOnlyCreateRefused\":%s,\"denyCreateRefused\":%s,\"renameRefused\":%s,"
+    "\"outsideHardlinkRemoved\":%s}\n",
+    readable ? "true" : "false", direct_refused ? "true" : "false",
+    alias_refused ? "true" : "false", selected_write_refused ? "true" : "false",
+    deny_read_refused ? "true" : "false", readonly_create_refused ? "true" : "false",
+    deny_create_refused ? "true" : "false", readonly_rename_refused ? "true" : "false",
+    outside_alias_removed ? "true" : "false");
+  return passed;
+}
+
 /* The unconfined owner runs this only after the enrolled command has exited.
  * It verifies refusals before effects rather than trusting an errno alone. */
 static int verify_metadata(void)
@@ -243,8 +292,9 @@ int main(int argc, char **argv)
   }
   if (!refused) return 17;
   bool metadata = metadata_controls(held, public);
+  bool advanced = advanced_policy_controls();
   close(public); close(alias); close(held);
-  if (!metadata) return 18;
+  if (!metadata || !advanced) return 18;
   puts("OCTANT_ORIGINAL_POLICY_WORKLOAD passed");
   return 0;
 }

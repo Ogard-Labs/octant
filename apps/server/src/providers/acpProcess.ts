@@ -749,6 +749,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
               ...input.environment,
               ...hostAuthentication.environment,
               ...input.network?.environment,
+              ...launch.environment,
             },
             input.servers,
           ),

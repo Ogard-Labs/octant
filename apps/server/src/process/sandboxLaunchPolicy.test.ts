@@ -60,7 +60,10 @@ function fixture() {
 describe("sandbox launch policy", () => {
   it("leaves every legacy launch unchanged when no policy is selected", () => {
     const { input } = fixture();
-    expect(compileSandboxLaunchPolicy(input, "linux")).toEqual({ status: "legacy", input });
+    expect(compileSandboxLaunchPolicy(input, "linux")).toEqual({
+      status: "legacy",
+      input,
+    });
   });
 
   it("admits explicit folders and binds its receipt to the whole process authority", () => {
@@ -79,18 +82,30 @@ describe("sandbox launch policy", () => {
     expect(compile()).toEqual(result);
     for (const changed of [
       { ...selection, policy: { ...selection.policy, revision: 2 } },
-      { ...selection, context: { ...selection.context, sessionId: "new-epoch:session" } },
       {
         ...selection,
-        context: { ...selection.context, projectId: "20000000-0000-4000-8000-000000000002" },
+        context: { ...selection.context, sessionId: "new-epoch:session" },
       },
-      { ...selection, context: { ...selection.context, provider: "another-provider" } },
+      {
+        ...selection,
+        context: {
+          ...selection.context,
+          projectId: "20000000-0000-4000-8000-000000000002",
+        },
+      },
+      {
+        ...selection,
+        context: { ...selection.context, provider: "another-provider" },
+      },
     ]) {
       const next = compile(changed);
       expect(next.status).toBe("admitted");
       expect(next.status === "admitted" && next.receipt.reuseKey).not.toBe(result.receipt.reuseKey);
     }
-    const changedLaunch = compile(selection, { ...input, allowProcessExec: false });
+    const changedLaunch = compile(selection, {
+      ...input,
+      allowProcessExec: false,
+    });
     expect(changedLaunch.status).toBe("admitted");
     expect(changedLaunch.status === "admitted" && changedLaunch.receipt.reuseKey).not.toBe(
       result.receipt.reuseKey,
@@ -112,7 +127,10 @@ describe("sandbox launch policy", () => {
           ...selection,
           policy: {
             ...selection.policy,
-            filesystem: { ...selection.policy.filesystem, readWriteRoots: [folder] },
+            filesystem: {
+              ...selection.policy.filesystem,
+              readWriteRoots: [folder],
+            },
           },
           context: { ...selection.context, rootIdentities: identities },
         },
@@ -149,7 +167,10 @@ describe("sandbox launch policy", () => {
             ...selection,
             policy: {
               ...selection.policy,
-              filesystem: { ...selection.policy.filesystem, readWriteRoots: [account] },
+              filesystem: {
+                ...selection.policy.filesystem,
+                readWriteRoots: [account],
+              },
             },
           },
         },
@@ -160,7 +181,11 @@ describe("sandbox launch policy", () => {
     symlinkSync(join(base, "missing", "outside"), dangling);
     expect(
       compileSandboxLaunchPolicy(
-        { ...input, additionalWriteRoots: [dangling], sandboxPolicy: selection },
+        {
+          ...input,
+          additionalWriteRoots: [dangling],
+          sandboxPolicy: selection,
+        },
         "linux",
       ).status,
     ).toBe("refused");
@@ -184,7 +209,10 @@ describe("sandbox launch policy", () => {
       },
       "linux",
     );
-    expect(result).toMatchObject({ status: "refused", rules: ["filesystem.hostAdministration"] });
+    expect(result).toMatchObject({
+      status: "refused",
+      rules: ["filesystem.hostAdministration"],
+    });
   });
 
   it("keeps folder grants separate from provider sign-in exemptions", () => {
@@ -228,7 +256,12 @@ describe("sandbox launch policy", () => {
                 credentials: "isolated",
                 filesystem: {
                   ...selection.policy.filesystem,
-                  protectedPaths: [{ path: join(input.boundRoot, "late-secret"), mode: "deny" }],
+                  protectedPaths: [
+                    {
+                      path: join(input.boundRoot, "late-secret"),
+                      mode: "deny",
+                    },
+                  ],
                 },
               },
             },
@@ -246,6 +279,41 @@ describe("sandbox launch policy", () => {
     ).toMatchObject({ status: "refused", code: "sandbox-policy-unsupported" });
   });
 
+  it("admits advanced Linux protections only for the access-time mediation backend", () => {
+    const { base, input, selection } = fixture();
+    const advanced = {
+      ...input,
+      sandboxPolicy: {
+        ...selection,
+        policy: {
+          ...selection.policy,
+          credentials: "isolated" as const,
+          filesystem: {
+            ...selection.policy.filesystem,
+            readOnlyRoots: [join(base, "shared")],
+            protectedPaths: [
+              {
+                path: join(input.boundRoot, "late-secret"),
+                mode: "deny" as const,
+              },
+            ],
+          },
+        },
+      },
+    };
+    expect(compileSandboxLaunchPolicy(advanced, "linux")).toMatchObject({
+      status: "refused",
+      code: "sandbox-policy-unsupported",
+    });
+    const admitted = compileSandboxLaunchPolicy(advanced, "linux", {
+      accessTimeMediation: true,
+    });
+    expect(admitted).toMatchObject({
+      status: "admitted",
+      receipt: { backend: "linux-mediation-v1" },
+    });
+  });
+
   it("refuses a read-only folder with a writable alias or ancestor", () => {
     const { base, input, selection } = fixture();
     symlinkSync(input.boundRoot, join(base, "alias"));
@@ -258,7 +326,10 @@ describe("sandbox launch policy", () => {
               ...selection,
               policy: {
                 ...selection.policy,
-                filesystem: { ...selection.policy.filesystem, readOnlyRoots: [path] },
+                filesystem: {
+                  ...selection.policy.filesystem,
+                  readOnlyRoots: [path],
+                },
               },
             },
           },
@@ -275,7 +346,10 @@ describe("sandbox launch policy", () => {
             ...selection,
             policy: {
               ...selection.policy,
-              filesystem: { ...selection.policy.filesystem, readOnlyRoots: [join(base, "shared")] },
+              filesystem: {
+                ...selection.policy.filesystem,
+                readOnlyRoots: [join(base, "shared")],
+              },
             },
           },
         },
@@ -327,7 +401,10 @@ describe("sandbox launch policy", () => {
     ).toMatchObject({ status: "refused", code: "sandbox-policy-unavailable" });
     const invalid = {
       ...input,
-      sandboxPolicy: { ...selection, policy: { ...selection.policy, schemaVersion: 2 } },
+      sandboxPolicy: {
+        ...selection,
+        policy: { ...selection.policy, schemaVersion: 2 },
+      },
     };
     expect(compileSandboxLaunchPolicy(invalid, "linux")).toMatchObject({
       status: "refused",
@@ -344,12 +421,18 @@ describe("sandbox launch policy", () => {
             ...selection,
             policy: {
               ...selection.policy,
-              filesystem: { ...selection.policy.filesystem, readWriteRoots: ["/etc"] },
+              filesystem: {
+                ...selection.policy.filesystem,
+                readWriteRoots: ["/etc"],
+              },
             },
           },
         },
         "linux",
       ),
-    ).toMatchObject({ status: "refused", rules: ["filesystem.hostAdministration"] });
+    ).toMatchObject({
+      status: "refused",
+      rules: ["filesystem.hostAdministration"],
+    });
   });
 });

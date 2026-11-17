@@ -278,6 +278,7 @@ def main():
     runtime_joins = []
     outside = []
     fileattr_cases, fileattr_owners, fileattr_filesystems, fileattr_brokers = [], [], [], []
+    advanced_policy_cases = []
     overlay_reproductions, overlay_actors, overlay_actor_workloads, overlay_actor_owners = [], [], [], []
     probe_addresses, probe_exits, core_notes, core_targets, core_retirements, processes = [], [], [], [], [], []
     for line in log.splitlines():
@@ -305,6 +306,8 @@ def main():
             fileattr_owners.append(json.loads(line.split(" ", 1)[1]))
         elif line.startswith("OCTANT_FILEATTR_FILESYSTEM "):
             fileattr_filesystems.append(json.loads(line.split(" ", 1)[1]))
+        elif line.startswith("OCTANT_ADVANCED_POLICY_CASE "):
+            advanced_policy_cases.append(json.loads(line.split(" ", 1)[1]))
         elif line.startswith("OCTANT_ORDERED_ADMISSIONS "):
             ordered.append(json.loads(line.split(" ", 1)[1]))
         elif line.startswith("OCTANT_OUTSIDE_EPOCH "):
@@ -427,6 +430,8 @@ def main():
         raise SystemExit("Every original-policy case needs an actual exit/join/cleanup receipt.")
     if any(case.get("metadataUnchanged") is not True for case in [*capsules, *direct]):
         raise SystemExit("The independent owner must verify private xattrs and mode unchanged.")
+    if len(advanced_policy_cases) != 13 or any(not all(case.values()) for case in advanced_policy_cases):
+        raise SystemExit("Selected deny and same-filesystem read-only policy controls did not all pass.")
     expected = {"bun", "node"}
     if {case.get("runtime") for case in runtime_receipts} != expected or len(runtime_receipts) != 2 or any(
             case.get("jitDefaults") is not True for case in runtime_receipts) or any(

@@ -25,11 +25,14 @@ const POSIX_LAUNCH_CAPABILITIES: SandboxPolicyCapabilities = {
   isolatedCredentials: false,
   blockedHostServices: true,
 };
+export interface SandboxLaunchBackendCapabilities {
+  readonly accessTimeMediation?: boolean;
+}
 export interface SandboxLaunchPolicyReceipt {
   readonly policyDigest: string;
   /** Every cached process must match this key before it may serve this selection. */
   readonly reuseKey: string;
-  readonly backend: "seatbelt-v1" | "bubblewrap-v1";
+  readonly backend: "seatbelt-v1" | "bubblewrap-v1" | "linux-mediation-v1";
 }
 
 export interface SandboxLaunchPolicyRefusal {
@@ -47,7 +50,10 @@ type LaunchInput = Omit<ProcessConfinementPrepareInput, "sandboxPolicy"> & {
 };
 
 type Compilation =
-  | { readonly status: "legacy"; readonly input: ProcessConfinementPrepareInput }
+  | {
+      readonly status: "legacy";
+      readonly input: ProcessConfinementPrepareInput;
+    }
   | SandboxLaunchPolicyRefusal
   | {
       readonly status: "admitted";
@@ -72,6 +78,7 @@ function overlaps(left: string, right: string): boolean {
 export function compileSandboxLaunchPolicy(
   input: LaunchInput,
   platform: NodeJS.Platform,
+  backend: SandboxLaunchBackendCapabilities = {},
 ): Compilation {
   const { sandboxPolicy: rawSelection, ...launch } = input;
   if (
@@ -90,12 +97,24 @@ export function compileSandboxLaunchPolicy(
   try {
     selection = decodeSandboxPolicySelection(rawSelection);
   } catch {
-    return { status: "refused", code: "sandbox-policy-malformed", rules: ["schema"] };
+    return {
+      status: "refused",
+      code: "sandbox-policy-malformed",
+      rules: ["schema"],
+    };
   }
   if (platform !== "darwin" && platform !== "linux") {
-    return { status: "refused", code: "sandbox-policy-unsupported", rules: ["platform"] };
+    return {
+      status: "refused",
+      code: "sandbox-policy-unsupported",
+      rules: ["platform"],
+    };
   }
-  const admission = admitSandboxPolicy(selection.policy, POSIX_LAUNCH_CAPABILITIES);
+  const admission = admitSandboxPolicy(selection.policy, {
+    ...POSIX_LAUNCH_CAPABILITIES,
+    protectedPaths: backend.accessTimeMediation === true,
+    isolatedCredentials: backend.accessTimeMediation === true,
+  });
   if (admission.status === "refused") return admission;
 
   try {
@@ -103,14 +122,22 @@ export function compileSandboxLaunchPolicy(
       const canonical = realpathSync(path);
       const stat = statSync(canonical, { bigint: true });
       if (!stat.isDirectory() || canonical === "/") throw new Error("Not a grantable directory");
-      return { path: canonical, device: String(stat.dev), inode: String(stat.ino) };
+      return {
+        path: canonical,
+        device: String(stat.dev),
+        inode: String(stat.ino),
+      };
     };
     const privateWrite = (path: string) => {
       try {
         const canonical = realpathSync(path);
         const stat = statSync(canonical, { bigint: true });
         if (!stat.isDirectory() && !stat.isFile()) throw new Error("Invalid private storage");
-        return { path: canonical, device: String(stat.dev), inode: String(stat.ino) };
+        return {
+          path: canonical,
+          device: String(stat.dev),
+          inode: String(stat.ino),
+        };
       } catch (error) {
         if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
         // Providers name exact transcripts before creating them. Pin their existing
@@ -257,7 +284,11 @@ export function compileSandboxLaunchPolicy(
     const readRoots = (launch.readRoots ?? []).map((path) => {
       const canonical = realpathSync(path);
       const stat = statSync(canonical, { bigint: true });
-      return { path: canonical, device: String(stat.dev), inode: String(stat.ino) };
+      return {
+        path: canonical,
+        device: String(stat.dev),
+        inode: String(stat.ino),
+      };
     });
     if (
       readOnly.some((root) =>
@@ -273,7 +304,8 @@ export function compileSandboxLaunchPolicy(
       };
     }
     if (
-      (platform === "linux" || sandboxAuthorityDirectory() !== undefined) &&
+      ((platform === "linux" && backend.accessTimeMediation !== true) ||
+        (platform !== "linux" && sandboxAuthorityDirectory() !== undefined)) &&
       readOnly.some((read) =>
         [...writable, ...readWrite].some((write) => read.device === write.device),
       )
@@ -354,7 +386,11 @@ export function compileSandboxLaunchPolicy(
         (launch.loopbackRelayPorts?.length ?? 0) > 0 ||
         (launch.serverRelays?.length ?? 0) > 0)
     ) {
-      return { status: "refused", code: "sandbox-policy-conflict", rules: ["network.relays"] };
+      return {
+        status: "refused",
+        code: "sandbox-policy-conflict",
+        rules: ["network.relays"],
+      };
     }
     const effective: ProcessConfinementPrepareInput = {
       ...launch,
@@ -372,7 +408,12 @@ export function compileSandboxLaunchPolicy(
       policyFolderRoots: [...readOnly, ...readWrite].map((root) => root.path),
       networkEgress,
     };
-    const backend = platform === "darwin" ? "seatbelt-v1" : "bubblewrap-v1";
+    const receiptBackend =
+      platform === "darwin"
+        ? "seatbelt-v1"
+        : backend.accessTimeMediation === true
+          ? "linux-mediation-v1"
+          : "bubblewrap-v1";
     const policyDigest = digest({
       policy: selection.policy,
       context: selection.context,
@@ -384,11 +425,11 @@ export function compileSandboxLaunchPolicy(
       input: effective,
       receipt: Object.freeze({
         policyDigest,
-        backend,
+        backend: receiptBackend,
         reuseKey: digest({
           runtimeEpoch,
           policyDigest,
-          backend,
+          backend: receiptBackend,
           launch: effective,
           boundRoots,
           readRoots,

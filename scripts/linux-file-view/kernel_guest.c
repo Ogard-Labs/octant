@@ -112,7 +112,7 @@ static void workload(int enrollment, int commands, int results, int foreign)
 {
   int held = open("/tmp/ordinary", O_RDONLY | O_CLOEXEC);
   int alias = open("/tmp/alias", O_RDONLY | O_CLOEXEC);
-  int output = open("/tmp/ordinary", O_WRONLY | O_CLOEXEC);
+  int output = open("/tmp/ordinary", O_RDWR | O_CLOEXEC);
   if (held < 0 || alias < 0 || output < 0 || prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) ||
       ioctl(enrollment, OCTANT_MEDIATION_ENROLL, 0)) _exit(2);
   close(enrollment);
@@ -120,7 +120,7 @@ static void workload(int enrollment, int commands, int results, int foreign)
     char command;
     if (!transfer(commands, &command, 1, false)) _exit(3);
     if (command == 'q') _exit(0);
-    bool denied = command == 'D' || command == 'M' || command == 'X';
+    bool denied = command == 'D' || command == 'M' || command == 'V' || command == 'X';
     int passed;
     errno = 0;
     if (command == 'c') {
@@ -153,8 +153,11 @@ static void workload(int enrollment, int commands, int results, int foreign)
       if (passed) passed = pthread_join(thread, NULL) == 0 && input.passed;
     } else if (command == 'w') {
       passed = pwrite(output, content, sizeof(content) - 1, 0) == (ssize_t)sizeof(content) - 1;
-    } else if (command == 'm' || command == 'M') {
-      void *mapped = mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, held, 0);
+    } else if (command == 'm' || command == 'M' || command == 'V') {
+      void *mapped = mmap(NULL, 4096,
+        command == 'V' ? PROT_READ | PROT_WRITE : PROT_READ,
+        command == 'V' ? MAP_SHARED : MAP_PRIVATE,
+        command == 'V' ? output : held, 0);
       passed = denied ? mapped == MAP_FAILED && errno == EACCES :
         mapped != MAP_FAILED && !memcmp(mapped, content, sizeof(content) - 1);
       if (mapped != MAP_FAILED) munmap(mapped, 4096);
@@ -236,7 +239,7 @@ static int measure(void)
   }
   close(enrollment); close(commands[0]); close(answers[1]); close(foreign[1]);
   if (child < 0) { close(broker); close(commands[1]); close(answers[0]); return 7; }
-  const char operations[] = {'r', 'l', 'm', 't', 'c', 'g', 'n', 'p', 'w', 'a', 'S', 'D', 'M', 'F', 'P', 'O', 'X', 'X'};
+  const char operations[] = {'r', 'l', 'm', 't', 'c', 'g', 'n', 'p', 'w', 'V', 'a', 'S', 'D', 'M', 'F', 'P', 'O', 'X', 'X'};
   bool passed = true;
   unsigned measured = 0;
   unsigned long long previous = 0;
@@ -255,7 +258,7 @@ static int measure(void)
         request.inode == (unsigned long long)inode.st_ino &&
         request.device_major == major(inode.st_dev) && request.device_minor == minor(inode.st_dev) &&
         request.operation == (command == 'm' || command == 'M' ? OCTANT_MEDIATION_MAP :
-          command == 'w' || command == 'F' || command == 'P' || command == 'O' ?
+          command == 'w' || command == 'V' || command == 'F' || command == 'P' || command == 'O' ?
             OCTANT_MEDIATION_WRITE : OCTANT_MEDIATION_READ);
       if (!passed) break;
       printf("OCTANT_KERNEL_STEP %u operation=%u epoch=%llu\n", i,

@@ -22,6 +22,8 @@ export default defineConfig({
     main: "src/main.ts",
     dbMaintenance: "src/maintenanceCli.ts",
     canvasExportWorker: "src/canvas/canvasExportWorker.mjs",
+    linuxMediationWorker: "src/process/linuxMediationWorker.ts",
+    linuxMediationSupervisor: "src/process/linuxMediationSupervisor.ts",
   },
   format: ["esm"],
   platform: "node",
