@@ -32,6 +32,11 @@ int main(void)
     if (fcntl(fd, F_GETFD) >= 0 || errno != EBADF) return 2;
   bool direct = refused(ROOT "/overlay/lower/.ssh/deployment");
   bool alias = refused(ROOT "/home/.ssh/deployment");
+  errno = 0;
+  int private_write = open(ROOT "/home/.ssh/deployment", O_WRONLY | O_CLOEXEC | O_NOFOLLOW);
+  int private_write_error = errno;
+  bool write_refused = private_write < 0 && private_write_error == EACCES;
+  if (private_write >= 0) close(private_write);
   char bytes[sizeof(original)];
   memset(bytes, 0xa5, sizeof(bytes));
   errno = 0;
@@ -43,8 +48,9 @@ int main(void)
   bool ordinary = file >= 0 && read_result == (ssize_t)sizeof(original) - 1 &&
     !memcmp(bytes, original, sizeof(original) - 1);
   if (file >= 0) close(file);
-  printf("{\"status\":\"overlayfs-actor-workload\",\"directPrivateRefused\":%s,\"overlayPrivateRefused\":%s,\"ordinaryOverlayRead\":%s,\"ordinaryOpenResult\":%d,\"ordinaryOpenErrno\":%d,\"ordinaryReadResult\":%zd,\"ordinaryReadErrno\":%d}\n",
-    direct ? "true" : "false", alias ? "true" : "false", ordinary ? "true" : "false",
+  printf("{\"status\":\"overlayfs-actor-workload\",\"directPrivateRefused\":%s,\"overlayPrivateRefused\":%s,\"overlayPrivateWriteRefused\":%s,\"ordinaryOverlayRead\":%s,\"ordinaryOpenResult\":%d,\"ordinaryOpenErrno\":%d,\"ordinaryReadResult\":%zd,\"ordinaryReadErrno\":%d}\n",
+    direct ? "true" : "false", alias ? "true" : "false", write_refused ? "true" : "false",
+    ordinary ? "true" : "false",
     file < 0 ? -1 : 0, open_error, read_result, read_error);
-  return direct && alias && ordinary ? 0 : 3;
+  return direct && alias && write_refused && ordinary ? 0 : 3;
 }

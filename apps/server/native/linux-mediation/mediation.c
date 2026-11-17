@@ -95,11 +95,24 @@ struct octant_creation {
 	bool prepared;
 };
 
+struct octant_open {
+	u64 next_scope;
+	u64 scope;
+	struct task_struct *owner;
+	struct octant_context *context;
+	u64 epoch;
+	u32 operation;
+	u32 depth;
+	bool active;
+	bool prepared;
+};
+
 /* Per-task rather than per-credential: same-policy threads may propose
  * concurrent namespace operations without replacing each other's token. */
 struct octant_task {
 	struct octant_metadata metadata;
 	struct octant_creation creation;
+	struct octant_open open;
 	struct octant_mediation_request approved;
 	u64 mutation_base;
 	u64 own_changes;
@@ -190,8 +203,17 @@ void octant_namespace_end(void)
 		else {
 			task->mutation_depth--;
 			task->own_changes++;
-			if (!task->mutation_depth)
+			if (!task->mutation_depth) {
 				task->has_approved = false;
+				/* An admitted stacked open may require several consecutive
+				 * internal mutations. Advance it only across this task's exact
+				 * completed mutation, with no overlapping foreign change. */
+				if (task->open.active && task->open.prepared && !active_mutations &&
+				    task->open.epoch == task->mutation_base &&
+				    namespace_epoch >= task->mutation_base &&
+				    namespace_epoch - task->mutation_base == task->own_changes)
+					task->open.epoch = namespace_epoch;
+			}
 		}
 	}
 	spin_unlock_irqrestore(&namespace_lock, flags);
@@ -364,6 +386,137 @@ static int admit_inode(struct inode *inode, u32 operation)
 	return admit_inode_request(inode, operation, &request);
 }
 
+static bool scope_epoch_valid(u64 epoch, struct octant_task *task)
+{
+	if (namespace_overflow)
+		return false;
+	if (!task->mutation_depth)
+		return !active_mutations && epoch == namespace_epoch;
+	return active_mutations == task->mutation_depth && epoch == task->mutation_base &&
+		namespace_epoch >= task->mutation_base &&
+		namespace_epoch - task->mutation_base == task->own_changes;
+}
+
+static void clear_open(struct octant_open *open)
+{
+	u64 next = open->next_scope;
+	*open = (struct octant_open) { .next_scope = next };
+}
+
+/* Admit both the stacked inode and its current real data inode before the
+ * filesystem open callback can copy up or inspect backing metadata. The scope
+ * remains private to this one kernel call and is never a userspace authority. */
+struct octant_open_scope octant_open_begin(struct file *file)
+{
+	struct octant_open_scope scope = {};
+	struct octant_task *task;
+	struct octant_open *open;
+	struct octant_context *context;
+	struct inode *inode, *real_inode;
+	struct octant_mediation_request logical = {}, real = {};
+	unsigned long flags;
+	u32 operation;
+	bool valid;
+	if (!octant_mediation_restricted())
+		return scope;
+	inode = d_inode(file->f_path.dentry);
+	if (!guarded_inode(inode))
+		return scope;
+	operation = ((file->f_flags & O_ACCMODE) != O_RDONLY ||
+		(file->f_mode & FMODE_WRITE)) ? OCTANT_MEDIATION_WRITE : OCTANT_MEDIATION_READ;
+	task = octant_task();
+	open = &task->open;
+	context = current_context();
+	if (open->active) {
+		if (current_cred() == current_real_cred() || open->owner != current ||
+		    open->context != context || !open->prepared ||
+		    (operation == OCTANT_MEDIATION_WRITE && open->operation != OCTANT_MEDIATION_WRITE)) {
+			scope.error = -EACCES;
+			return scope;
+		}
+		spin_lock_irqsave(&context->lock, flags);
+		spin_lock(&namespace_lock);
+		valid = !context->dead && broker_alive(context) && scope_epoch_valid(open->epoch, task);
+		spin_unlock(&namespace_lock);
+		spin_unlock_irqrestore(&context->lock, flags);
+		if (!valid || open->depth == U32_MAX) {
+			scope.error = -EACCES;
+			return scope;
+		}
+		open->depth++;
+		scope.identity = open->scope;
+		scope.nested = true;
+		return scope;
+	}
+	if (open->next_scope == U64_MAX) {
+		scope.error = -EACCES;
+		return scope;
+	}
+	scope.identity = ++open->next_scope;
+	open->scope = scope.identity;
+	open->owner = current;
+	open->context = context;
+	open->operation = operation;
+	open->depth = 1;
+	open->active = true;
+	scope.error = admit_inode_request(inode, operation, &logical);
+	real_inode = d_real_inode(file->f_path.dentry);
+	if (!scope.error && guarded_inode(real_inode) && real_inode != inode)
+		scope.error = admit_inode_request(real_inode, operation, &real);
+	if (!scope.error && real.namespace_epoch && real.namespace_epoch != logical.namespace_epoch)
+		scope.error = -EAGAIN;
+	if (!scope.error) {
+		open->epoch = logical.namespace_epoch;
+		spin_lock_irqsave(&context->lock, flags);
+		spin_lock(&namespace_lock);
+		valid = !context->dead && broker_alive(context) && scope_epoch_valid(open->epoch, task);
+		spin_unlock(&namespace_lock);
+		spin_unlock_irqrestore(&context->lock, flags);
+		if (!valid)
+			scope.error = -EACCES;
+		else
+			open->prepared = true;
+	}
+	return scope;
+}
+
+void octant_open_end(struct octant_open_scope *scope)
+{
+	struct octant_open *open;
+	if (!scope->identity || !initialized)
+		return;
+	open = &octant_task()->open;
+	if (!open->active || open->scope != scope->identity || open->owner != current)
+		return;
+	if (scope->nested && open->depth > 1)
+		open->depth--;
+	else if (!scope->nested)
+		clear_open(open);
+	scope->identity = 0;
+}
+
+/* A stacked filesystem's credential override may perform only kernel-internal
+ * work inside the exact admitted open. It cannot mint a reusable metadata or
+ * namespace decision, and an external or foreign mutation invalidates it. */
+static bool stacked_open_allows(u32 operation)
+{
+	struct octant_task *task = octant_task();
+	struct octant_open *open = &task->open;
+	struct octant_context *context = current_context();
+	unsigned long flags;
+	bool valid;
+	if (current_cred() == current_real_cred() || !open->active || !open->prepared ||
+	    open->owner != current || open->context != context ||
+	    (operation == OCTANT_MEDIATION_WRITE && open->operation != OCTANT_MEDIATION_WRITE))
+		return false;
+	spin_lock_irqsave(&context->lock, flags);
+	spin_lock(&namespace_lock);
+	valid = !context->dead && broker_alive(context) && scope_epoch_valid(open->epoch, task);
+	spin_unlock(&namespace_lock);
+	spin_unlock_irqrestore(&context->lock, flags);
+	return valid;
+}
+
 static void clear_metadata(struct octant_metadata *metadata)
 {
 	u64 next = metadata->next_scope;
@@ -447,15 +600,11 @@ static int check_metadata(struct dentry *dentry, u32 operation)
 	return check_metadata_decision(dentry, operation, true);
 }
 
-/* Temporary native-fixture diagnostic: identify which stacked-filesystem
- * metadata route refused while an enrolled actor's real credentials survived
- * a filesystem override. It records no path, name or content. */
-static int check_metadata_hook(struct dentry *dentry, u32 operation, const char *route)
+static int check_metadata_hook(struct dentry *dentry, u32 operation)
 {
-	int result = check_metadata(dentry, operation);
-	if (result && current_cred() != current_real_cred())
-		pr_info("OCTANT_STACKED_METADATA_DENIAL route=%s operation=%u\n", route, operation);
-	return result;
+	if (stacked_open_allows(operation))
+		return 0;
+	return check_metadata(dentry, operation);
 }
 
 int octant_metadata_check_read(struct dentry *dentry)
@@ -495,49 +644,49 @@ static void octant_creation_task_free(struct task_struct *task)
 
 static int octant_metadata_getattr(const struct path *path)
 {
-	return check_metadata_hook(path->dentry, OCTANT_MEDIATION_READ, "getattr");
+	return check_metadata_hook(path->dentry, OCTANT_MEDIATION_READ);
 }
 
 static int octant_metadata_readlink(struct dentry *dentry)
 {
-	return check_metadata_hook(dentry, OCTANT_MEDIATION_READ, "readlink");
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_READ);
 }
 
 static int octant_metadata_getxattr(struct dentry *dentry, const char *name)
 {
-	return check_metadata_hook(dentry, OCTANT_MEDIATION_READ, "getxattr");
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_READ);
 }
 
 static int octant_metadata_listxattr(struct dentry *dentry)
 {
-	return check_metadata_hook(dentry, OCTANT_MEDIATION_READ, "listxattr");
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_READ);
 }
 
 static int octant_metadata_get_acl(struct mnt_idmap *idmap, struct dentry *dentry, const char *name)
 {
-	return check_metadata_hook(dentry, OCTANT_MEDIATION_READ, "get-acl");
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_READ);
 }
 
 static int octant_metadata_setxattr(struct mnt_idmap *idmap, struct dentry *dentry,
 	const char *name, const void *value, size_t size, int flags)
 {
-	return check_metadata_hook(dentry, OCTANT_MEDIATION_WRITE, "setxattr");
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_WRITE);
 }
 
 static int octant_metadata_removexattr(struct mnt_idmap *idmap, struct dentry *dentry, const char *name)
 {
-	return check_metadata_hook(dentry, OCTANT_MEDIATION_WRITE, "removexattr");
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_WRITE);
 }
 
 static int octant_metadata_set_acl(struct mnt_idmap *idmap, struct dentry *dentry, const char *name,
 	struct posix_acl *acl)
 {
-	return check_metadata_hook(dentry, OCTANT_MEDIATION_WRITE, "set-acl");
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_WRITE);
 }
 
 static int octant_metadata_remove_acl(struct mnt_idmap *idmap, struct dentry *dentry, const char *name)
 {
-	return check_metadata_hook(dentry, OCTANT_MEDIATION_WRITE, "remove-acl");
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_WRITE);
 }
 
 static int copy_name(struct octant_mediation_name *output, struct inode *parent,
@@ -638,7 +787,7 @@ int octant_creation_check(u32 operation, struct inode *parent, struct dentry *na
 	unsigned long flags;
 	bool valid;
 	int result;
-	if (!octant_mediation_restricted())
+	if (!octant_mediation_restricted() || stacked_open_allows(OCTANT_MEDIATION_WRITE))
 		return 0;
 	task = octant_task();
 	creation = &task->creation;
@@ -727,7 +876,7 @@ static int check_namespace(u32 operation, struct inode *source, struct dentry *n
 	unsigned long flags;
 	bool valid;
 	int result;
-	if (!octant_mediation_restricted())
+	if (!octant_mediation_restricted() || stacked_open_allows(OCTANT_MEDIATION_WRITE))
 		return 0;
 	task = octant_task();
 	result = copy_name(&actual.source, source, &name->d_name);
@@ -791,17 +940,20 @@ struct octant_metadata_scope octant_seek_begin(struct file *file, unsigned int w
 
 static int truncate_file(struct file *file)
 {
-	return admit_file(file, OCTANT_MEDIATION_WRITE);
+	return stacked_open_allows(OCTANT_MEDIATION_WRITE) ? 0 :
+		admit_file(file, OCTANT_MEDIATION_WRITE);
 }
 
 static int truncate_path(const struct path *path)
 {
-	return admit_inode(d_inode(path->dentry), OCTANT_MEDIATION_WRITE);
+	return stacked_open_allows(OCTANT_MEDIATION_WRITE) ? 0 :
+		admit_inode(d_inode(path->dentry), OCTANT_MEDIATION_WRITE);
 }
 
 static int octant_file_permission(struct file *file, int mask)
 {
-	return admit_file(file, mask & MAY_WRITE ? OCTANT_MEDIATION_WRITE : OCTANT_MEDIATION_READ);
+	u32 operation = mask & MAY_WRITE ? OCTANT_MEDIATION_WRITE : OCTANT_MEDIATION_READ;
+	return stacked_open_allows(operation) ? 0 : admit_file(file, operation);
 }
 
 /* The pinned native and compat syscall entries call these hooks before

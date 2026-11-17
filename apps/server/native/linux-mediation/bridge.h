@@ -26,6 +26,12 @@ struct octant_creation_scope {
 	int error;
 };
 
+struct octant_open_scope {
+	u64 identity;
+	bool nested;
+	int error;
+};
+
 /* Exported namei entry points keep the admission lifetime in their caller. */
 struct dentry *octant_start_creating_path(int dfd, const char *pathname,
 	struct path *parent, unsigned int flags, struct octant_creation_scope *scope);
@@ -42,6 +48,8 @@ void octant_namespace_discard(void);
 int octant_namespace_check_rename(const struct renamedata *operation);
 bool octant_mediation_restricted(void);
 struct octant_metadata_scope octant_seek_begin(struct file *file, unsigned int whence);
+struct octant_open_scope octant_open_begin(struct file *file);
+void octant_open_end(struct octant_open_scope *scope);
 int octant_mediation_receive_scm(const struct cred *sender);
 struct octant_metadata_scope octant_metadata_begin(struct dentry *dentry, u32 operation);
 void octant_metadata_end(struct octant_metadata_scope *scope);
@@ -67,6 +75,11 @@ static inline struct octant_metadata_scope octant_seek_begin(struct file *file, 
 {
 	return (struct octant_metadata_scope) {};
 }
+static inline struct octant_open_scope octant_open_begin(struct file *file)
+{
+	return (struct octant_open_scope) {};
+}
+static inline void octant_open_end(struct octant_open_scope *scope) {}
 static inline int octant_mediation_receive_scm(const struct cred *sender) { return 0; }
 static inline struct octant_metadata_scope octant_metadata_begin(struct dentry *dentry, u32 operation)
 {
@@ -98,6 +111,14 @@ static inline int octant_creation_check(u32 operation, struct inode *parent,
 		__attribute__((cleanup(octant_metadata_end))) = octant_metadata_begin(dentry, operation); \
 	if (octant_metadata_admission.error) \
 		return octant_metadata_admission.error
+
+/* An audited stacked-filesystem open calls this after pathname locks and
+ * before backing metadata, copy-up or backing-file open. */
+#define octant_open_scope(file) \
+	struct octant_open_scope octant_open_admission \
+		__attribute__((cleanup(octant_open_end))) = octant_open_begin(file); \
+	if (octant_open_admission.error) \
+		return octant_open_admission.error
 
 static inline void octant_namespace_scope_end(bool *entered)
 {
