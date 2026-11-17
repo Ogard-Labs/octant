@@ -850,3 +850,46 @@ describe("a tool row's kept input and output", () => {
     expect(screen.queryByText(/kept/)).toBeNull();
   });
 });
+
+describe("a run of reads and searches", () => {
+  const looks: TurnActivity = {
+    reasoning: "",
+    rows: [
+      { kind: "tool", id: "a", toolName: "Read", state: "completed", summary: "a.ts" },
+      { kind: "tool", id: "b", toolName: "Read", state: "completed", summary: "b.ts" },
+      { kind: "tool", id: "c", toolName: "Grep", state: "completed", summary: "needle" },
+      { kind: "tool", id: "d", toolName: "Edit", state: "completed", summary: "changed" },
+    ],
+  };
+
+  it("draws as one row that opens onto the individual rows, shut at low", async () => {
+    const user = userEvent.setup();
+    render(<TurnActivityRows activity={looks} running={false} />);
+
+    const group = disclosure("Read 2 files, searched 1 time, done");
+    expect(group.open).toBe(false);
+    expect(screen.getByRole("button", { name: "Edit, done" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Read 2 files, searched 1 time, done" }));
+    expect(group.open).toBe(true);
+    expect(within(group).getAllByRole("button", { name: /^(Read|Grep), done$/ })).toHaveLength(3);
+  });
+
+  it("lists its rows at medium", () => {
+    render(
+      <ReplyDetailContext.Provider value="medium">
+        <TurnActivityRows activity={looks} running={false} />
+      </ReplyDetailContext.Provider>,
+    );
+    expect(disclosure("Read 2 files, searched 1 time, done").open).toBe(true);
+  });
+
+  it("states the duration once in the settled fold's summary", () => {
+    render(
+      <TurnActivityRows activity={looks} running={false} settled workedFor="Worked for 1m 5s" />,
+    );
+    expect(screen.getAllByText(/Worked for/)).toHaveLength(1);
+    expect(
+      screen.getByRole("button", { name: "Worked for 1m 5s · 4 tool calls · 1 file edited" }),
+    ).toBeVisible();
+  });
+});

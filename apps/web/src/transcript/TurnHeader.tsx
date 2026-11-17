@@ -1,3 +1,4 @@
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Ban,
   Circle,
@@ -35,6 +36,16 @@ export interface TurnHeaderProps {
   readonly label?: string;
   /** "Worked for 6s"; only a finished turn has one. */
   readonly workedFor?: string;
+  /**
+   * When the turn started, ISO 8601. With it, a running turn reads "Working ·
+   * 12s · step" and counts from this moment, not from when the row mounted.
+   */
+  readonly startedAt?: string;
+  /**
+   * The title of the step the turn is on, for the running line. Omitted when
+   * no step is running, and while the reply text streams.
+   */
+  readonly step?: string | undefined;
   /** When the turn last changed, ISO 8601. */
   readonly at?: string;
   readonly copyValue?: string | undefined;
@@ -89,6 +100,10 @@ function outcomeIcon(outcome: TurnHeaderOutcome) {
  */
 export function TurnHeader(props: TurnHeaderProps) {
   const Icon = outcomeIcon(props.outcome);
+  const liveLine =
+    props.startedAt !== undefined &&
+    (props.outcome === "running" || props.outcome === "streaming") &&
+    props.label === undefined;
   const hoverDetails = [props.provider, turnTimeTitle(props.at)]
     .filter((value): value is string => value !== undefined)
     .join(" · ");
@@ -99,7 +114,13 @@ export function TurnHeader(props: TurnHeaderProps) {
         data-outcome={props.outcome}
         {...(hoverDetails.length === 0 ? {} : { title: hoverDetails })}
       >
-        {props.outcome === "completed" ? null : (
+        {props.outcome === "completed" ? null : liveLine ? (
+          <LiveTurnStatus
+            icon={Icon === undefined ? undefined : <Icon aria-hidden="true" size={12} />}
+            startedAt={props.startedAt ?? ""}
+            step={props.step}
+          />
+        ) : (
           <span
             className="turn-header__status"
             // Only a turn still in flight, or paused on the person, is a live
@@ -136,6 +157,59 @@ export function TurnHeader(props: TurnHeaderProps) {
       {props.reason === undefined ? null : <p className="turn-header__reason">{props.reason}</p>}
     </>
   );
+}
+
+/**
+ * "Working · 12s · Read", with the clock outside the live region: only a change
+ * of step is announced, politely, never each second. The live region is always
+ * present so the first step is announced when it fills it.
+ */
+function LiveTurnStatus(props: {
+  readonly icon: ReactNode;
+  readonly startedAt: string;
+  readonly step: string | undefined;
+}) {
+  const seconds = useElapsedSeconds(props.startedAt);
+  const step = props.step === undefined || props.step.length === 0 ? undefined : props.step;
+  return (
+    <span className="turn-header__status turn-header__status--live">
+      {props.icon}
+      <span>Working</span>
+      {seconds === undefined ? null : (
+        <>
+          <span aria-hidden="true">·</span>
+          <span className="turn-header__elapsed">{formatDuration(seconds)}</span>
+        </>
+      )}
+      {step === undefined ? null : <span aria-hidden="true">·</span>}
+      <span aria-live="polite" className="turn-header__step" role="status">
+        {step}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * Whole seconds since the turn started, once a second while the line is
+ * mounted; the timer goes with it. Absent for a start time that is not a date.
+ */
+function useElapsedSeconds(startedAt: string): number | undefined {
+  const start = Date.parse(startedAt);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (Number.isNaN(start)) return undefined;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [start]);
+  return Number.isNaN(start) ? undefined : Math.max(0, Math.floor((now - start) / 1000));
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
 /**
@@ -214,9 +288,7 @@ export function turnWorkedFor(
   if (Number.isNaN(started) || Number.isNaN(ended)) return undefined;
   const seconds = Math.floor((ended - started) / 1000);
   if (seconds < 1) return undefined;
-  if (seconds < 60) return `Worked for ${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  return `Worked for ${minutes}m ${seconds % 60}s`;
+  return `Worked for ${formatDuration(seconds)}`;
 }
 
 /** Clock time for today, date and time for anything older. */

@@ -1486,7 +1486,7 @@ describe("WorkThreadWorkspace", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "2 tool calls" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: /2 tool calls$/ })).toBeVisible();
     expect(screen.getByRole("button", { name: "Search, unfinished" })).toBeInTheDocument();
     expect(screen.getByText("Done.")).toBeVisible();
   });
@@ -2399,7 +2399,7 @@ describe("WorkThreadWorkspace", () => {
       );
 
       await act(async () => vi.advanceTimersByTimeAsync(0));
-      expect(screen.getByText("Working…")).toBeInTheDocument();
+      expect(screen.getByText("Working")).toBeInTheDocument();
       await act(async () => {
         frame.resolve({
           kind: "response-delta",
@@ -2461,8 +2461,8 @@ describe("WorkThreadWorkspace", () => {
     );
 
     // Both calls show: the second frame added its step and kept the first.
-    expect(await screen.findByText(/Read/)).toBeInTheDocument();
-    expect(await screen.findByText(/Bash/)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^Read,/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^Bash,/ })).toBeInTheDocument();
     hold.resolve();
   });
 

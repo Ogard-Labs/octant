@@ -30,7 +30,9 @@ import { PublishedSnapshot } from "./PublishedSnapshot";
 import type { DesignRunRuntime } from "../canvas/blocks/designRunningFrame";
 import {
   alwaysVisibleActivityRows,
+  groupActivityRows,
   settledTurnActivitySummary,
+  type ActivityItem,
   type TurnActivity,
   type TurnActivityRow,
 } from "./turnActivity";
@@ -44,6 +46,11 @@ export interface TurnActivityRowsProps {
    * pending work and diffs remain visible.
    */
   readonly settled?: boolean;
+  /**
+   * "Worked for 1m 5s", for the fold's summary line. A caller passes it only
+   * where the turn header leaves it out, so the duration is shown once.
+   */
+  readonly workedFor?: string;
   /**
    * How a published page's snapshot runs its script, by the tool call that
    * published it. Absent leaves such a snapshot unable to run here.
@@ -224,8 +231,12 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   const pinnedRows = alwaysVisibleActivityRows(activity);
   const pinnedIds = new Set(pinnedRows.map(rowKey));
   const foldableRows = activity.rows.filter((row) => !pinnedIds.has(rowKey(row)));
-  const summary = settledTurnActivitySummary(activity);
-  const foldSettledToolchain = settled && !running && summary.length > 0 && foldableRows.length > 0;
+  const foldSettledToolchain =
+    settled &&
+    !running &&
+    settledTurnActivitySummary(activity).length > 0 &&
+    foldableRows.length > 0;
+  const summary = settledTurnActivitySummary(activity, props.workedFor);
   // A published page is what the turn delivered, so it stays in view below the
   // rows even when the settled toolchain folds away.
   const routineRows = activity.rows.filter(
@@ -256,7 +267,25 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
     disclosures.choose(id, !isOpen(id));
   };
 
-  const renderDisclosure = (row: TurnActivityRow) => {
+  const renderGroup = (item: Extract<ActivityItem, { readonly kind: "group" }>) => (
+    <ExploreGroup
+      key={item.id}
+      item={item}
+      onKeyDown={onSummaryKeyDown(item.id)}
+      onToggle={onToggle(item.id)}
+      open={disclosures.isOpen(item.id, opening.toolCalls)}
+      settled={settled && !running}
+    >
+      {item.rows.map(renderDisclosure)}
+    </ExploreGroup>
+  );
+
+  const renderRows = (rows: ReadonlyArray<TurnActivityRow>) =>
+    groupActivityRows(rows).map((item) =>
+      item.kind === "group" ? renderGroup(item) : renderDisclosure(item.row),
+    );
+
+  function renderDisclosure(row: TurnActivityRow) {
     const id = rowKey(row);
     if (row.kind === "review") return <ShieldReviewLine key={id} row={row} />;
     return (
@@ -274,7 +303,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
         onReveal={() => setRevealedSummaryIds((current) => setHas(current, id, true))}
       />
     );
-  };
+  }
 
   const thinkingOpen = isOpen(THINKING_ID);
   const thinkingPreview =
@@ -322,7 +351,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
       {thinkingDisclosure}
       {foldSettledToolchain ? (
         <>
-          {pinnedRows.map(renderDisclosure)}
+          {renderRows(pinnedRows)}
           <details
             className="turn-activity__disclosure turn-activity__disclosure--toolchain"
             onToggle={onToggle(TOOL_CALLS_ID)}
@@ -337,11 +366,11 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
               <ChevronRight aria-hidden="true" className="turn-activity__chevron" size={14} />
               <span className="turn-activity__name">{summary}</span>
             </summary>
-            <div className="turn-activity__toolchain">{foldableRows.map(renderDisclosure)}</div>
+            <div className="turn-activity__toolchain">{renderRows(foldableRows)}</div>
           </details>
         </>
       ) : (
-        <>{activity.rows.map(renderDisclosure)}</>
+        <>{renderRows(activity.rows)}</>
       )}
       {routineRows.length === 0 ? null : (
         <ul aria-label="Created automations" className="turn-activity__routines">
@@ -369,6 +398,49 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
         </ul>
       )}
     </div>
+  );
+}
+
+/**
+ * A run of reads, searches, and listings as one row. Its rows stay inside,
+ * opened by the Reply detail level the way the settled fold is: shut at Low,
+ * listed at Medium and High.
+ */
+function ExploreGroup(props: {
+  readonly item: Extract<ActivityItem, { readonly kind: "group" }>;
+  readonly open: boolean;
+  readonly settled: boolean;
+  readonly onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
+  readonly onToggle: (event: ToggleEvent<HTMLDetailsElement>) => void;
+  readonly children: ReactNode;
+}) {
+  const { item } = props;
+  const running =
+    !props.settled && item.rows.some((row) => row.state === "started" || row.state === "running");
+  const failed = item.rows.filter((row) => row.state === "failed").length;
+  const outcome = running ? "running" : failed > 0 ? `${failed} failed` : "done";
+  const StateIcon = running ? LoaderCircle : failed > 0 ? CircleX : Check;
+  return (
+    <details
+      className="turn-activity__disclosure turn-activity__disclosure--group"
+      data-kind="group"
+      data-state={running ? "running" : failed > 0 ? "failed" : "completed"}
+      onToggle={props.onToggle}
+      open={props.open}
+    >
+      <summary
+        aria-expanded={props.open}
+        aria-label={`${item.label}, ${outcome}`}
+        onKeyDown={props.onKeyDown}
+        role="button"
+      >
+        <ChevronRight aria-hidden="true" className="turn-activity__chevron" size={14} />
+        <span className="turn-activity__name">{item.label}</span>
+        <span className="turn-activity__outcome">{outcome}</span>
+        <StateIcon aria-hidden="true" className="turn-activity__status-icon" size={12} />
+      </summary>
+      <div className="turn-activity__toolchain">{props.children}</div>
+    </details>
   );
 }
 

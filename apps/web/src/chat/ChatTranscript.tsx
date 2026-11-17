@@ -43,7 +43,11 @@ import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
-import { toolStepsActivity } from "../transcript/turnActivity";
+import {
+  runningStepTitle,
+  settledTurnFoldsActivity,
+  toolStepsActivity,
+} from "../transcript/turnActivity";
 import { useToolCallRecordsReader } from "../transcript/toolCallRecordsReader";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
@@ -879,6 +883,14 @@ const AttemptBlock = memo(function AttemptBlock(props: {
       ? undefined
       : responseContents.map((content) => content!.body).join("");
   const toolActivity = toolStepsActivity(props.attempt.toolSteps, props.attempt.toolStepsTruncated);
+  const workedFor = turnWorkedFor(
+    props.attempt.outcome,
+    props.attempt.createdAt,
+    props.attempt.updatedAt,
+  );
+  // The duration lives in the fold's summary when the turn folds; otherwise in the header.
+  const workedForInFold =
+    workedFor !== undefined && toolActivity !== undefined && settledTurnFoldsActivity(toolActivity);
   const toolCallRecords = useToolCallRecordsReader({
     serverUrl: props.serverUrl,
     windowCapability: props.windowCapability,
@@ -954,14 +966,13 @@ const AttemptBlock = memo(function AttemptBlock(props: {
                 onRegenerate: () => props.onRetryAttempt?.(props.attempt.turnId, props.attempt.id),
               }
             : {})}
-          {...(() => {
-            const workedFor = turnWorkedFor(
-              props.attempt.outcome,
-              props.attempt.createdAt,
-              props.attempt.updatedAt,
-            );
-            return workedFor === undefined ? {} : { workedFor };
-          })()}
+          {...(workedFor === undefined || workedForInFold ? {} : { workedFor })}
+          startedAt={props.attempt.createdAt}
+          step={
+            responseBody !== undefined && responseBody.length > 0
+              ? undefined
+              : runningStepTitle(toolActivity)
+          }
         />
         <HarnessRetryStatus
           events={
@@ -984,6 +995,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
         {toolActivity === undefined ? null : (
           <TurnActivityRows
             activity={toolActivity}
+            {...(workedForInFold && workedFor !== undefined ? { workedFor } : {})}
             running={props.attempt.outcome === "queued" || props.attempt.outcome === "streaming"}
             settled={
               props.attempt.outcome === "completed" ||
