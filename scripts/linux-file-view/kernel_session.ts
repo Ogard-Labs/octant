@@ -90,6 +90,7 @@ export async function measureProductionLaunch(root: string): Promise<{
         status: "failed-production-preparation",
         runtimeAssets: {
           broker: broker !== undefined,
+          launcher: runtimeEntries.some((name) => name.startsWith("launcher-")),
           worker: runtimeEntries.some((name) => name.startsWith("worker-")),
           supervisor: runtimeEntries.some((name) => name.startsWith("supervisor-")),
         },
@@ -106,9 +107,12 @@ export async function measureProductionLaunch(root: string): Promise<{
   const supervisor = prepared.args[0] as string;
   const configuration = prepared.args[1] as string;
   const runtimeEntries = await readdir(runtimeDirectory);
+  const launcher = runtimeEntries.find((name) => name.startsWith("launcher-"));
   const privateRuntime =
     (await stat(runtimeDirectory)).mode % 0o1000 === 0o700 &&
     (await stat(supervisor)).mode % 0o1000 === 0o400 &&
+    launcher !== undefined &&
+    (await stat(`${runtimeDirectory}/${launcher}`)).mode % 0o1000 === 0o500 &&
     runtimeEntries.some((name) => name.startsWith("broker-")) &&
     runtimeEntries.some((name) => name.startsWith("worker-")) &&
     runtimeEntries.some((name) => name.startsWith("supervisor-"));

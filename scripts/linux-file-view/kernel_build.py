@@ -155,6 +155,7 @@ def main():
     run("gcc", "-static", "-pthread", "-std=c11", "-Wall", "-Wextra", "-Werror",
         str(repository / "scripts/linux-file-view/kernel_guest.c"), "-o", str(init_binary), timeout=30)
     relay = root / "octant-mediation"
+    sandbox_launcher = root / "octant-sandbox-launch"
     workload = root / "policy-workload"
     policy = root / "policy-broker"
     session_cases = root / "session-cases"
@@ -169,13 +170,16 @@ def main():
     overlayfs_fixture = root / "overlayfs-fixture"
     overlayfs_actor = root / "overlayfs-actor-workload"
     for source, target in ((native / "broker.c", relay),
+                           (repository / "apps/server/native/sandbox-launch/OctantSandboxLaunch.c",
+                            sandbox_launcher),
                            (repository / "scripts/linux-file-view/kernel_policy_workload.c", workload),
                            (repository / "scripts/linux-file-view/kernel_core_probe.c", core_probe),
                            (repository / "scripts/linux-file-view/kernel_fileattr_workload.c", fileattr_workload),
                            (repository / "scripts/linux-file-view/overlayfs_workload.c", overlayfs_workload),
                            (repository / "scripts/linux-file-view/overlayfs_fixture.c", overlayfs_fixture),
                            (repository / "scripts/linux-file-view/overlayfs_actor_workload.c", overlayfs_actor)):
-        run("gcc", "-static", "-std=c11", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(target), timeout=30)
+        run("gcc", "-static", "-std=c11", "-Wall", "-Wextra", "-Werror",
+            str(source), "-o", str(target), timeout=30)
     core_check = root / "core-notes-check"
     run("gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-DOCTANT_CORE_NOTES_TEST=1",
         str(repository / "scripts/linux-file-view/kernel_core_notes.c"), "-o", str(core_check), timeout=30)
@@ -221,6 +225,7 @@ def main():
                    "policy-broker": policy, "session-cases": session_cases,
                    "policy-broker.mjs": policy_module, "session-cases.mjs": session_module,
                    "dist/native/octant-mediation": relay,
+                   "dist/native/octant-sandbox-launch": sandbox_launcher,
                    "dist/linuxMediationWorker.mjs": production_worker,
                    "dist/linuxMediationSupervisor.mjs": production_supervisor,
                    "usr/bin/bwrap": Path("/usr/bin/bwrap"),
