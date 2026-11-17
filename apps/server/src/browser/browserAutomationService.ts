@@ -585,6 +585,11 @@ export class BrowserAutomationService {
     /** True when this Open needs a context of its own. See `OwnedContext`. */
     readonly dedicated?: boolean | undefined;
     /**
+     * True when this Open is the thread's shared context if there is none, and
+     * a context of its own if there is one. See the create command.
+     */
+    readonly ownPageWhenShared?: boolean | undefined;
+    /**
      * Who is behind the request, for a page in a stored profile. A paired device
      * and a terminal grant name themselves; anything else is the person at a
      * local window unless the scope is the host acting alone.
@@ -606,7 +611,6 @@ export class BrowserAutomationService {
         },
         "failed",
       );
-    const dedicated = input.dedicated === true;
     const current = this.#current(input.windowId, input.threadId);
     if (
       !this.#authority.canAccessWindow(input.windowId, input.threadId, input.action.authority.mode)
@@ -638,27 +642,36 @@ export class BrowserAutomationService {
         { category: "stale", message: "Browser flow custody changed before opening the page." },
         "failed",
       );
+    // An Open that takes a page of its own only when the shared one is live is
+    // judged here, against the thread as it stands now: nothing below awaits
+    // before the new context is registered, so of two such Opens that arrive
+    // together exactly one becomes the shared page. Read earlier, both saw no
+    // shared page and the second was handed the first's.
+    const shared =
+      input.ownPageWhenShared === true ? this.#current(input.windowId, input.threadId) : current;
+    const dedicated =
+      input.dedicated === true || (input.ownPageWhenShared === true && shared !== undefined);
     // A dedicated Open never reconciles against the thread's shared context: it
     // must neither inherit that context's origin nor stop it to take the slot.
-    if (!dedicated && current !== undefined) {
-      if (!this.#authorityIsActive(current)) {
-        this.#revokeAuthority(current);
+    if (!dedicated && shared !== undefined) {
+      if (!this.#authorityIsActive(shared)) {
+        this.#revokeAuthority(shared);
         return failedSnapshot(
           input.threadId,
           { category: "unauthorized", message: "Browser context authority is no longer active." },
           "failed",
         );
       }
-      if (current.record.state === "creating") await current.creation;
-      if (!this.#authorityIsActive(current)) {
-        this.#revokeAuthority(current);
+      if (shared.record.state === "creating") await shared.creation;
+      if (!this.#authorityIsActive(shared)) {
+        this.#revokeAuthority(shared);
         return failedSnapshot(
           input.threadId,
           { category: "unauthorized", message: "Browser context authority is no longer active." },
           "failed",
         );
       }
-      return snapshot(current);
+      return snapshot(shared);
     }
     if (!dedicated) this.#forgetExpiry(input.windowId, input.threadId);
     const contextId = this.#uuid() as BrowserContextId;
