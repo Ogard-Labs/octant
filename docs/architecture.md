@@ -18760,7 +18760,10 @@ cards; general Azure CLI credentials remain unavailable by design.
   Separate-filesystem folder rules remain supported. The refusal names the
   unsupported rule before any file effect; path checks are never presented as
   alias-safe kernel enforcement. An active Strict selection also keeps the full
-  protected-file guard on those host-owned reads at Full access.
+  protected-file guard on those host-owned reads at Full access. Agent language
+  diagnostics are another host-owned read: when protected-path denial or isolated
+  credentials require object mediation, that tool route refuses before opening
+  the saved file or starting a language server.
 - **Admission follows the effect.** One-use enrollment begins only after
   `no_new_privs`; inherited proc-memory/pidfd and asynchronous contexts refuse.
   Blocking broker work happens before native locks. The final LSM checks compare

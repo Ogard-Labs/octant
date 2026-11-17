@@ -52,6 +52,7 @@ import {
   type PrincipalKind,
 } from "@octant/domain";
 import { readConfinedCodeFile } from "./codeConfinedFileRead";
+import { secretGuardRefusal } from "../process/secretGuard";
 import { languageEditPreview } from "./languageEditPreview";
 import { CodeFileListingService } from "./codeFileListingService";
 import { boundedDiagnosticMessage } from "./languageServerResults";
@@ -1072,16 +1073,28 @@ export class CodeLanguageService {
     const contained = await this.#containedRoot(caller, authorized, request.path);
     if (contained.status === "refused") return contained;
     const { root } = contained;
+    const sandbox = sandboxToolPolicy() ?? activeSandboxPolicy(String(authorized.thread.id));
+    const needsObjectMediation =
+      sandbox?.policy.credentials === "isolated" ||
+      sandbox?.policy.filesystem.protectedPaths.some((rule) => rule.mode === "deny") === true;
+    const fullAccess = authorized.thread.executionPolicy === "full-access" && sandbox === undefined;
+    if (needsObjectMediation) {
+      return { status: "refused", reason: "sandbox-read-denied" };
+    }
     const saved = await readConfinedCodeFile({
       port: this.#files,
       canonicalRoot: root.rootPath,
       relativePath: pathInResolvedRoot(root, request.path),
       maximumBytes: LANGUAGE_SERVER_FRAME_CAP_BYTES,
+      allowResolved: (canonicalPath) =>
+        secretGuardRefusal(canonicalPath, { fullAccess }) === undefined,
     });
     if (saved.status === "refused") {
-      return saved.reason === "too-large"
-        ? { status: "too-large" }
-        : { status: "refused", reason: "path-outside-checkout" };
+      if (saved.reason === "too-large") return { status: "too-large" };
+      return {
+        status: "refused",
+        reason: saved.reason === "access-denied" ? "sandbox-read-denied" : "path-outside-checkout",
+      };
     }
     const text = Buffer.from(saved.bytes).toString("utf8");
     if (text.length > MAX_CODE_LANGUAGE_DOCUMENT_TEXT_LENGTH || !fitsFrame(text)) {
