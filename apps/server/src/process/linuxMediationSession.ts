@@ -15,7 +15,10 @@ import {
   type OwnedProcessReceiptHandle,
 } from "./nodeOwnedProcessReceipt";
 import type { LinuxMediationBrokerResult } from "./linuxMediationBroker";
-import { LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS } from "./linuxMediationBroker";
+import {
+  LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS,
+  scheduleLinuxMediationDeadline,
+} from "./linuxMediationBroker";
 
 const IO_BYTES = 65_536;
 const INPUT_BYTES = IO_BYTES * 4;
@@ -138,7 +141,7 @@ export async function prepareLinuxMediationSession(input: {
       cleanup: "confirmed",
     };
   const deadline = entered + input.maximumMs;
-  let prepTimer: ReturnType<typeof setTimeout> | undefined;
+  let clearPrepDeadline: () => void = () => undefined;
   let prepAbort: (() => void) | undefined;
   const prepared = await Promise.race([
     (async () => {
@@ -180,7 +183,7 @@ export async function prepareLinuxMediationSession(input: {
       }
     })(),
     new Promise<{ readonly status: "deadline" | "cancelled" }>((resolve) => {
-      prepTimer = setTimeout(
+      clearPrepDeadline = scheduleLinuxMediationDeadline(
         () => resolve({ status: "deadline" }),
         Math.max(0, deadline - Date.now()),
       );
@@ -189,7 +192,7 @@ export async function prepareLinuxMediationSession(input: {
       if (input.signal.aborted) prepAbort();
     }),
   ]);
-  clearTimeout(prepTimer);
+  clearPrepDeadline();
   if (prepAbort !== undefined) input.signal.removeEventListener("abort", prepAbort);
   if (prepared.status !== "configured" || input.signal.aborted || Date.now() >= deadline)
     return {
@@ -317,7 +320,7 @@ export async function prepareLinuxMediationSession(input: {
       phase = "stopping";
       settleReady(false);
       releaseCommand(false);
-      clearTimeout(maximum);
+      clearMaximum();
       input.signal.removeEventListener("abort", abort);
       send("X");
       inputEnded = true;
@@ -413,7 +416,7 @@ export async function prepareLinuxMediationSession(input: {
     result = { status: "unavailable", reason: "cancelled" };
     void finish();
   };
-  const maximum = setTimeout(
+  const clearMaximum = scheduleLinuxMediationDeadline(
     () => {
       result = { status: "unavailable", reason: "deadline" };
       void finish();

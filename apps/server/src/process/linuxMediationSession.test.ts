@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { PassThrough, Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS } from "./linuxMediationBroker";
 import { prepareLinuxMediationSession } from "./linuxMediationSession";
 
 const fixture = vi.hoisted(() => ({
@@ -243,6 +244,23 @@ describe("owned mediation session admission and input", () => {
       expect(write).not.toHaveBeenCalled();
     } finally {
       await prepared.session.close();
+    }
+  });
+  it("segments the full production preparation and lifetime deadlines", async () => {
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    fixture.spawn.mockReturnValue(worker((done) => done()));
+    const prepared = await prepareLinuxMediationSession({
+      ...input(new AbortController().signal, LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS),
+      production: true,
+    });
+    try {
+      expect(prepared.status).toBe("ready");
+      expect(
+        timers.mock.calls.every(([, delay]) => delay === undefined || delay <= 2_147_483_647),
+      ).toBe(true);
+    } finally {
+      if (prepared.status === "ready") await prepared.session.close();
+      timers.mockRestore();
     }
   });
   it("bounds undrained input, admits it after draining, and settles pending owner loss without replay", async () => {
