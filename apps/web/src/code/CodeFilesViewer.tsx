@@ -251,7 +251,7 @@ export function CodeFilesViewer(props: CodeFilesViewerProps) {
               label={treeOpen ? "Hide file tree" : "Show file tree"}
               onClick={toggleTree}
             >
-              <ListTree aria-hidden="true" size={16} weight={treeOpen ? "fill" : "bold"} />
+              <ListTree aria-hidden="true" size={16} weight={treeOpen ? "fill" : "regular"} />
             </OctantIconButton>
           )}
         </div>

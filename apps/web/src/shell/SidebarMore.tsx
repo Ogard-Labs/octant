@@ -11,7 +11,6 @@ import {
 } from "../ui/base/OctantMenu";
 import type { SidebarNavigationDescriptorId } from "./navigationModel";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
-import { railGlyph } from "../ui/icons/railGlyphs";
 import { secondaryIcons, type SidebarSecondaryAction } from "./SidebarProfile";
 
 export interface SidebarMoreProps {
@@ -28,9 +27,6 @@ export interface SidebarMoreProps {
  * sidebar does not list, in a popup beside the rail instead of the account
  * menu they wait in when the More row is off.
  */
-/** More in the rail is drawn in the rail's own family, as every rail place is. */
-const RailEllipsis = railGlyph(Ellipsis) ?? Ellipsis;
-
 export function SidebarMore(props: SidebarMoreProps) {
   const holdsActive = props.items.some((item) => item.id === props.activeDestination);
   return (
@@ -45,7 +41,7 @@ export function SidebarMore(props: SidebarMoreProps) {
             className="sidebar-rail__button window-no-drag"
           >
             <span aria-hidden="true" className="sidebar-rail__face">
-              <RailEllipsis aria-hidden="true" size={16} />
+              <Ellipsis aria-hidden="true" size={16} />
             </span>
           </OctantMenuTrigger>
         </OctantTooltip>

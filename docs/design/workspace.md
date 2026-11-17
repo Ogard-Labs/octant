@@ -2761,10 +2761,7 @@ so the account face stays in the window), More (the menu-only destinations and C
 account face. The sidebar keeps its header (modes, search, new thread,
 hide), the Project list with its view, filter, and Activity controls, and the
 threads; its profile row is not drawn beside the rail, whose account face is
-the same control, so nothing is offered twice. Rail icons are 16px Lucide line
-glyphs on a 36px face (filled outlines at 20px, or bold at 16, made the rail the
-heaviest column in the window; maintainer decision, 2026-11-17, after comparing
-ten families in the rail), and a selected place keeps its glyph and takes the
+the same control, so nothing is offered twice. Rail icons are 16px on a 36px face, and a selected place keeps its glyph and takes the
 face's fill and the primary ink; every rail control names itself in its accessible name and in a
 label that opens beside the rail on hover or keyboard focus. Destinations
 have their own marks: Inbox a tray, Running a spinner, To review a checked

@@ -96,7 +96,7 @@ describe("SidebarRail", () => {
     expect(screen.getByRole("button", { name: "To-dos, 3 open" })).toHaveTextContent("3");
   });
 
-  it("draws Work with the same mark as the sidebar's mode switcher, in the rail's stroked family", () => {
+  it("draws Work with the same mark as the sidebar's mode switcher", () => {
     render(
       <SidebarRail
         activeMode="work"
@@ -111,9 +111,8 @@ describe("SidebarRail", () => {
     );
 
     const work = screen.getByRole("button", { name: "Work" });
-    // The rail draws its own stroked family, but the same glyph the switcher names.
-    expect(work.querySelector("svg.lucide-message-square")).not.toBeNull();
-    expect(work.querySelector("svg.lucide-folder-open")).toBeNull();
+    expect(work.querySelector("svg.octant-icon-message-square")).not.toBeNull();
+    expect(work.querySelector("svg.octant-icon-folder-open")).toBeNull();
   });
 
   describe("pinned Projects", () => {

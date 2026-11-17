@@ -21,7 +21,6 @@
     "@octant/plugin-api": "workspace:*",
     "@octant/plugin-host": "workspace:*",
     "@octant/theme": "workspace:*",
-    "@phosphor-icons/react": "2.1.10",
     "@tanstack/react-virtual": "3.14.10",
     "@xterm/addon-fit": "catalog:",
     "@xterm/addon-webgl": "catalog:",

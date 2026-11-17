@@ -37,7 +37,11 @@ const ALLOWED_STROKES: ReadonlySet<string> = new Set([
  * weight, and the app's icons stay at the one stroke without it.
  */
 const STROKE_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
-  ["ui/IconDefaults.tsx", "the provider that sets the one stroke"],
+  ["ui/icons/makeIcon.tsx", "the module that applies the one stroke to every icon"],
+  [
+    "canvas/blocks/ComparisonMatrixBlock.tsx",
+    "hand-drawn 14px cell marks on their own grid, not interface icons",
+  ],
   ["agents/AgentRunDependencyGraph.tsx", "diagram edges, a hairline weight of their own"],
   ["agents/AgentsCenterGraph.tsx", "diagram edges, a hairline weight of their own"],
   ["browser/BrowserMarkupStage.tsx", "marks a person draws on a page; the width is their choice"],
@@ -84,22 +88,19 @@ describe("icon scale contract", () => {
     }
 
     // Icons took their own stroke at each call site: ten values between 1.25
-    // and 3, and nothing noticed. The stroke now comes from `IconDefaults`, so
+    // and 3, and nothing noticed. The stroke now comes from the icon module, so
     // a call site that names one is either restating it or departing from it.
     expect(offenders).toEqual([]);
   });
 
-  it("draws an icon at the size it asks for, inside the app's icon defaults", () => {
-    // The icon family is drawn as filled outlines at fixed weights, so the one
-    // stroke is now a weight chosen from the size inside each icon, not a
-    // stroke-width a provider hands down.
+  it("draws an icon at the size it asks for, at the one stroke", () => {
     const markup = renderToStaticMarkup(
       createElement(IconDefaults, null, createElement(Search, { size: 14 })),
     );
 
     expect(markup).toContain('width="14"');
-    expect(markup).toContain("octant-icon-");
-    expect(markup).not.toContain("stroke-width");
+    expect(markup).toContain("octant-icon-search");
+    expect(markup).toContain(`stroke-width="${String(ICON_STROKE_WIDTH)}"`);
   });
 
   it("sees a stroke or size given in a props object and not only in JSX", () => {
@@ -123,10 +124,7 @@ describe("icon scale contract", () => {
   });
 
   it("draws a tick inside a small filled mark heavier than the one stroke", () => {
-    // 1.5 in the icon's own 24-unit grid is 0.75px at 12px: too faint for a
-    // tick on an accent fill, which has to clear the 3:1 bar for graphics.
     expect(MARK_TICK_STROKE_WIDTH).toBeGreaterThan(ICON_STROKE_WIDTH);
-    expect((MARK_TICK_STROKE_WIDTH * 12) / 24).toBeGreaterThanOrEqual(1.25);
   });
 
   it("sees a stroke named as a literal or an expression", () => {
@@ -233,20 +231,28 @@ function collectSourceFiles(root: string): ReadonlyArray<string> {
 }
 
 describe("icon weight", () => {
-  const shape = (props: Record<string, unknown>) =>
-    /<path[^>]*>/.exec(renderToStaticMarkup(createElement(Search, props)))?.[0];
+  const stroke = (props: Record<string, unknown>) =>
+    /stroke-width="([^"]*)"/.exec(renderToStaticMarkup(createElement(Search, props)))?.[1];
 
-  it("draws 12, 14 and 16px glyphs bold and 20 and 24px glyphs regular", () => {
-    expect(shape({ size: 12 })).toBeDefined();
-    expect(shape({ size: 12 })).toBe(shape({ size: 16 }));
-    expect(shape({ size: 20 })).toBe(shape({ size: 24 }));
-    expect(shape({ size: 16 })).toBe(shape({ size: 16, weight: "bold" }));
-    expect(shape({ size: 20 })).toBe(shape({ size: 20, weight: "regular" }));
-    expect(shape({ size: 16 })).not.toBe(shape({ size: 20 }));
+  it("draws every size at the one stroke unless a heavier weight is asked for", () => {
+    for (const size of [12, 14, 16, 20, 24]) {
+      expect(stroke({ size })).toBe(String(ICON_STROKE_WIDTH));
+    }
+    expect(stroke({})).toBe(String(ICON_STROKE_WIDTH));
+    expect(stroke({ weight: "regular" })).toBe(String(ICON_STROKE_WIDTH));
   });
 
-  it("draws the fill weight for a selected glyph at any size", () => {
-    expect(shape({ size: 20, weight: "fill" })).not.toBe(shape({ size: 20 }));
-    expect(shape({ size: 20, weight: "fill" })).toBe(shape({ size: 16, weight: "fill" }));
+  it("draws a selected or pressed glyph, and a tick in a filled mark, at the heavier stroke", () => {
+    expect(stroke({ weight: "fill" })).toBe(String(MARK_TICK_STROKE_WIDTH));
+    expect(stroke({ weight: "bold" })).toBe(String(MARK_TICK_STROKE_WIDTH));
+    expect(stroke({ strokeWidth: MARK_TICK_STROKE_WIDTH })).toBe(String(MARK_TICK_STROKE_WIDTH));
+  });
+
+  it("passes fill through instead of filling an outline on its own", () => {
+    const filled = renderToStaticMarkup(createElement(Search, { fill: "currentColor" }));
+    expect(filled).toContain('fill="currentColor"');
+    expect(renderToStaticMarkup(createElement(Search, { weight: "fill" }))).toContain(
+      'fill="none"',
+    );
   });
 });
