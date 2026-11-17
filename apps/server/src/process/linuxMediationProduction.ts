@@ -14,13 +14,14 @@ import {
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { secretGuardMediationPolicy } from "./secretGuard";
+import { secretGuardConfiguration, secretGuardMediationPolicy } from "./secretGuard";
 import type { ConfinedProcessLaunch, ProcessConfinementPrepareInput } from "./seatbeltProfile";
 import {
   LinuxMediationSupervisorConfig,
   type LinuxMediationSupervisorConfig as SupervisorConfig,
 } from "./linuxMediationConfig";
 import { LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS } from "./linuxMediationBroker";
+import { installedLinuxSandboxLaunchImage } from "./linuxPinnedLaunch";
 import { processConfinementAccountRoots } from "./processConfinementAccountRoots";
 
 function installed(paths: ReadonlyArray<string>): Buffer | undefined {
@@ -51,6 +52,7 @@ const supervisorImage =
         fileURLToPath(new URL("./linuxMediationSupervisor.mjs", import.meta.url)),
       ])
     : undefined;
+const launcherImage = process.platform === "linux" ? installedLinuxSandboxLaunchImage() : undefined;
 
 function privateAsset(directory: string, name: string, image: Buffer, mode: number): string {
   const digest = createHash("sha256").update(image).digest("hex");
@@ -76,10 +78,16 @@ function runtime(authority: string): {
   readonly native: string;
   readonly worker: string;
   readonly supervisor: string;
+  readonly launcher: string;
   readonly configurations: string;
   readonly receipts: string;
 } {
-  if (nativeImage === undefined || workerImage === undefined || supervisorImage === undefined)
+  if (
+    nativeImage === undefined ||
+    workerImage === undefined ||
+    supervisorImage === undefined ||
+    launcherImage === undefined
+  )
     throw new Error("The installed Linux mediation runtime is unavailable.");
   const directory = join(realpathSync(authority), "linux-mediation-runtime");
   mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -110,6 +118,7 @@ function runtime(authority: string): {
     native: privateAsset(directory, "broker", nativeImage, 0o500),
     worker: privateAsset(directory, "worker", workerImage, 0o400),
     supervisor: privateAsset(directory, "supervisor", supervisorImage, 0o400),
+    launcher: privateAsset(directory, "launcher", launcherImage, 0o500),
     configurations,
     receipts,
   };
@@ -149,6 +158,7 @@ export function prepareLinuxMediatedLaunch(
       "Linux access-time protections require explicit host opt-in and a compatible custom kernel; Octant never installs or reboots that kernel.",
     );
   const installed = runtime(authority);
+  const secretGuard = secretGuardConfiguration();
   const policy = {
     ...secretGuardMediationPolicy({
       platform: "linux",
@@ -172,6 +182,22 @@ export function prepareLinuxMediatedLaunch(
       workerScript: installed.worker,
       nativeExecutable: installed.native,
       launch: input,
+      launchPin: {
+        helper: installed.launcher,
+        rootIdentities: (selection.context.rootIdentities ?? []).map((entry) => ({ ...entry })),
+      },
+      secretGuard: {
+        ...(secretGuard.dataDirectory === undefined
+          ? {}
+          : { dataDirectory: secretGuard.dataDirectory }),
+        ...(secretGuard.runtimeDirectory === undefined
+          ? {}
+          : { runtimeDirectory: secretGuard.runtimeDirectory }),
+        choice: {
+          added: [...secretGuard.choice.added],
+          removed: [...secretGuard.choice.removed],
+        },
+      },
       policy,
     },
     { onExcessProperty: "error" },

@@ -13,6 +13,10 @@ const text = Schema.String.pipe(Schema.filter((value) => !value.includes("\0")))
 const optionalPaths = Schema.optionalWith(Schema.Array(path), { exact: true });
 const optionalBoolean = Schema.optionalWith(Schema.Boolean, { exact: true });
 const port = Schema.Int.pipe(Schema.between(1, 65_535));
+const rootIdentity = Schema.Struct({
+  path,
+  identity: Schema.String.pipe(Schema.pattern(/^\d+:\d+$/)),
+});
 const meta = {
   ruleId: Schema.Union(BuiltInProtectedFilesId, Schema.Literal("added")),
   label: Schema.String,
@@ -103,22 +107,32 @@ export const LinuxMediationPolicyConfig = Schema.Struct({
   ),
 });
 
+export const LinuxMediationLaunchPinConfig = Schema.Struct({
+  helper: path,
+  rootIdentities: Schema.Array(rootIdentity).pipe(Schema.maxItems(256)),
+});
+export type LinuxMediationLaunchPinConfig = typeof LinuxMediationLaunchPinConfig.Type;
+
+export const LinuxMediationSecretGuardConfig = Schema.Struct({
+  dataDirectory: Schema.optional(path),
+  runtimeDirectory: Schema.optional(path),
+  choice: Schema.Struct({
+    added: Schema.Array(text),
+    removed: Schema.Array(BuiltInProtectedFilesId),
+  }),
+});
+export type LinuxMediationSecretGuardConfig = typeof LinuxMediationSecretGuardConfig.Type;
+
 export const LinuxMediationWorkerConfig = Schema.Struct({
   nativeExecutable: path,
   production: Schema.optionalWith(Schema.Boolean, { exact: true }),
   maximumMs: Schema.Int.pipe(Schema.between(1, LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS)),
   inheritStdio: Schema.optionalWith(Schema.Boolean, { exact: true }),
   launch: LinuxMediationLaunchConfig,
+  launchPin: Schema.optionalWith(LinuxMediationLaunchPinConfig, { exact: true }),
   receiptDirectory: path,
   environment: Schema.Record({ key: text, value: text }),
-  secretGuard: Schema.Struct({
-    dataDirectory: Schema.optional(path),
-    runtimeDirectory: Schema.optional(path),
-    choice: Schema.Struct({
-      added: Schema.Array(text),
-      removed: Schema.Array(BuiltInProtectedFilesId),
-    }),
-  }),
+  secretGuard: LinuxMediationSecretGuardConfig,
   policy: LinuxMediationPolicyConfig,
 });
 export type LinuxMediationWorkerConfig = typeof LinuxMediationWorkerConfig.Type;
@@ -130,6 +144,8 @@ export const LinuxMediationSupervisorConfig = Schema.Struct({
   workerScript: path,
   nativeExecutable: path,
   launch: LinuxMediationLaunchConfig,
+  launchPin: LinuxMediationLaunchPinConfig,
+  secretGuard: LinuxMediationSecretGuardConfig,
   policy: LinuxMediationPolicyConfig,
 });
 export type LinuxMediationSupervisorConfig = typeof LinuxMediationSupervisorConfig.Type;

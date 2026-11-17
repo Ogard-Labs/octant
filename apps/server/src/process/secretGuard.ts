@@ -28,7 +28,7 @@ import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, win32 } from "node:path";
 
-interface SecretGuardState {
+export interface SecretGuardState {
   readonly dataDirectory?: string | undefined;
   readonly runtimeDirectory?: string | undefined;
   readonly choice: ProtectedFilesChoice;

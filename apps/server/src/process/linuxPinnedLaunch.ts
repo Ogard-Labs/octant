@@ -24,6 +24,10 @@ const installed =
     : undefined;
 const trustedImage = installed === undefined ? undefined : readFileSync(installed);
 
+export function installedLinuxSandboxLaunchImage(): Buffer | undefined {
+  return trustedImage === undefined ? undefined : Buffer.from(trustedImage);
+}
+
 function prepareLinuxSandboxRuntime(authority: string): string {
   if (trustedImage === undefined)
     throw new Error(
@@ -70,6 +74,20 @@ export function pinLinuxLaunch(
   trustedNativeOwner = false,
 ): ConfinedProcessLaunch {
   const helper = prepareLinuxSandboxRuntime(authority);
+  return pinPreparedLinuxLaunch(
+    launch,
+    helper,
+    selection?.context.rootIdentities,
+    trustedNativeOwner,
+  );
+}
+
+export function pinPreparedLinuxLaunch(
+  launch: ConfinedProcessLaunch,
+  helper: string,
+  rootIdentities?: SandboxPolicySelection["context"]["rootIdentities"],
+  trustedNativeOwner = false,
+): ConfinedProcessLaunch {
   let executable = launch.command;
   let args = [...launch.args];
   // Earlier process-denial launches used a shell solely to open this filter.
@@ -114,11 +132,11 @@ export function pinLinuxLaunch(
   );
   args.splice(remount < 0 ? payload : remount, 0, "--ro-bind", helper, "/octant-strict-launch");
   const pins: string[] = [];
-  const addPin = (index: number, path: string) => {
+  const addPin = (index: number, path: string, target?: string) => {
     const canonical = realpathSync(path);
     const stat = statSync(canonical, { bigint: true });
-    const admitted = selection?.context.rootIdentities?.find(
-      (entry) => entry.path === path || entry.path === canonical,
+    const admitted = rootIdentities?.find(
+      (entry) => entry.path === path || entry.path === canonical || entry.path === target,
     );
     const expected = admitted?.identity.split(":");
     if (
@@ -147,8 +165,10 @@ export function pinLinuxLaunch(
       ].includes(option ?? "")
     ) {
       const source = args[i + 1];
-      if (source === undefined) throw new Error("Invalid prepared Linux mount.");
-      addPin(i + 1, source);
+      const target = args[i + 2];
+      if (source === undefined || target === undefined)
+        throw new Error("Invalid prepared Linux mount.");
+      addPin(i + 1, source, target);
       i += 2;
     } else if (option === "--symlink" || option === "--setenv") i += 2;
     else if (

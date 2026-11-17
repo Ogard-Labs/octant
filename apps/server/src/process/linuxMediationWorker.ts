@@ -1,6 +1,7 @@
 /** Private, separately owned policy worker. This is not a provider entry point. */
 import { Schema } from "effect";
 import { buildBubblewrapLaunch } from "./linuxConfinement";
+import { pinPreparedLinuxLaunch } from "./linuxPinnedLaunch";
 import { applyProtectedFilesChoice, configureSecretGuardLocations } from "./secretGuard";
 import { runLinuxMediationBroker, scheduleLinuxMediationDeadline } from "./linuxMediationBroker";
 import { LinuxMediationWorkerConfig, MEDIATION_CONFIG_BYTES } from "./linuxMediationConfig";
@@ -106,7 +107,7 @@ export async function runLinuxMediationWorker(): Promise<void> {
         throw new Error("Invalid host setup.");
       // Synchronous filesystem preparation stays in this owned process, where
       // a cancelled host can stop it without blocking its own request loop.
-      const prepared = buildBubblewrapLaunch({
+      const bubblewrap = buildBubblewrapLaunch({
         ...config.launch,
         additionalDenyReadPaths: [
           ...(config.launch.additionalDenyReadPaths ?? []),
@@ -117,6 +118,14 @@ export async function runLinuxMediationWorker(): Promise<void> {
           config.receiptDirectory,
         ],
       });
+      const prepared =
+        config.launchPin === undefined
+          ? bubblewrap
+          : pinPreparedLinuxLaunch(
+              bubblewrap,
+              config.launchPin.helper,
+              config.launchPin.rootIdentities,
+            );
       if (owner.signal.aborted) return;
       cleanup = "uncertain";
       const result = await runLinuxMediationBroker({

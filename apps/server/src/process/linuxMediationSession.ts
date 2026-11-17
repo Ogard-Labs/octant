@@ -6,8 +6,16 @@ import { homedir } from "node:os";
 import { lstat, realpath } from "node:fs/promises";
 import { Schema } from "effect";
 import type { ProcessConfinementPrepareInput } from "./seatbeltProfile";
-import { secretGuardConfiguration, type SecretGuardMediationPolicy } from "./secretGuard";
-import { LinuxMediationWorkerConfig, MEDIATION_CONFIG_BYTES } from "./linuxMediationConfig";
+import {
+  secretGuardConfiguration,
+  type SecretGuardMediationPolicy,
+  type SecretGuardState,
+} from "./secretGuard";
+import {
+  LinuxMediationWorkerConfig,
+  MEDIATION_CONFIG_BYTES,
+  type LinuxMediationLaunchPinConfig,
+} from "./linuxMediationConfig";
 import {
   persistProcessReceipt,
   readProcessIdentity,
@@ -107,6 +115,8 @@ export async function prepareLinuxMediationSession(input: {
   /** Keep the caller's exact stdio descriptors, including a terminal PTY. */
   readonly inheritStdio?: boolean;
   readonly launch: ProcessConfinementPrepareInput;
+  readonly launchPin?: LinuxMediationLaunchPinConfig;
+  readonly secretGuard?: Readonly<SecretGuardState>;
   readonly policy: SecretGuardMediationPolicy;
   readonly environment: Readonly<Record<string, string>>;
 }): Promise<
@@ -118,7 +128,7 @@ export async function prepareLinuxMediationSession(input: {
     }
 > {
   const entered = Date.now();
-  const secretGuard = secretGuardConfiguration();
+  const secretGuard = input.secretGuard ?? secretGuardConfiguration();
   if (process.platform !== "linux")
     return {
       status: "unavailable",
@@ -167,6 +177,7 @@ export async function prepareLinuxMediationSession(input: {
               ? { interpreterSearchPath: input.environment.PATH }
               : {}),
           },
+          ...(input.launchPin === undefined ? {} : { launchPin: input.launchPin }),
           receiptDirectory: input.receiptDirectory,
           policy: input.policy,
           environment: input.environment,

@@ -246,6 +246,31 @@ describe("owned mediation session admission and input", () => {
       await prepared.session.close();
     }
   });
+  it("carries admitted root identities and host protected-file settings into the worker", async () => {
+    const child = worker((done) => done());
+    const sent = vi.spyOn(child, "send");
+    fixture.spawn.mockReturnValue(child);
+    const launchPin = {
+      helper: "/private/launcher",
+      rootIdentities: [{ path: "/project", identity: "7:11" }],
+    };
+    const secretGuard = {
+      dataDirectory: "/private/data",
+      runtimeDirectory: "/private/runtime",
+      choice: { added: ["/person/extra"], removed: ["ssh-private-keys" as const] },
+    };
+    const prepared = await prepareLinuxMediationSession({
+      ...input(new AbortController().signal),
+      launchPin,
+      secretGuard,
+    });
+    if (prepared.status !== "ready") throw new Error("Session unavailable");
+    try {
+      expect(sent.mock.calls[0]?.[0]).toMatchObject({ launchPin, secretGuard });
+    } finally {
+      await prepared.session.close();
+    }
+  });
   it("segments the full production preparation and lifetime deadlines", async () => {
     const timers = vi.spyOn(globalThis, "setTimeout");
     fixture.spawn.mockReturnValue(worker((done) => done()));

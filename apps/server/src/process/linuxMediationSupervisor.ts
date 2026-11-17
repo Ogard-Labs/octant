@@ -56,6 +56,8 @@ async function supervise(path: string): Promise<number> {
       production: true,
       inheritStdio: true,
       launch: config.launch,
+      launchPin: config.launchPin,
+      secretGuard: config.secretGuard,
       policy: {
         ...config.policy,
         sshCompanionDirectory: config.policy.sshCompanionDirectory,
