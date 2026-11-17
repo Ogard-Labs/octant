@@ -537,6 +537,13 @@ function ProjectMenu(props: ComposerProjectSelectorProps & { readonly close: () 
                         {...(reason === undefined
                           ? {}
                           : { "aria-describedby": reasonId, "aria-labelledby": nameId })}
+                        // A create row's whole name is its label. Named from its
+                        // contents alone, macOS reported the option with no
+                        // title, so neither assistive technology nor the
+                        // packaged smoke could find it (2026-11-17).
+                        {...(entry.kind === "add-folder" || entry.kind === "add-github"
+                          ? { "aria-label": label }
+                          : {})}
                         onClick={() => activate(entry)}
                         {...(entry.kind === "default-folder" && reason === undefined
                           ? { title: entry.rootPath }
