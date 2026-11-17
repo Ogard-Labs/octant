@@ -15,6 +15,7 @@ import {
   desktopIdentityForPackage,
   desktopWindowStorageDirectory,
 } from "@octant/host-runtime/desktop-identity";
+import { enableCompileCacheBeneath } from "@octant/host-runtime/paths";
 import { createWindowsDesktopLauncher } from "@octant/host-runtime/windows-desktop-launcher";
 import {
   loadWindowsHostProfileNative,
@@ -39,17 +40,16 @@ const identity = app.isPackaged
     )
   : desktopIdentity("stable");
 // The large desktop module is compiled by V8 on every launch. A cache beside
-// the app's own data (never inside the signed bundle) reuses that work; any
-// failure starts the app as it would without one. It must precede the imports
+// the app's own data (never inside the signed bundle) reuses that work. It
+// never creates the data folder, and any failure starts the app as it would
+// without one. It must precede the imports
 // of main.mjs below.
 try {
-  enableCompileCache(
-    join(
-      identity.flavor === "stable"
-        ? app.getPath("userData")
-        : desktopWindowStorageDirectory(identity, "", app.getPath("appData")),
-      "compile-cache",
-    ),
+  enableCompileCacheBeneath(
+    identity.flavor === "stable"
+      ? app.getPath("userData")
+      : desktopWindowStorageDirectory(identity, "", app.getPath("appData")),
+    enableCompileCache,
   );
 } catch {
   // Missing or refused: start without the cache.

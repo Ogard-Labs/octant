@@ -388,3 +388,58 @@ function isMissing(error: unknown): boolean {
 function safeError(error: unknown): string {
   return error instanceof Error ? error.message : "unknown filesystem failure";
 }
+
+/** What the compile cache decision needs to know about the folder that would hold it. */
+export interface CompileCacheParentFacts {
+  readonly isDirectory: boolean;
+  readonly ownerId: number;
+  readonly mode: number;
+}
+
+/**
+ * The cache may live only in a folder that already exists, belongs to this
+ * user and admits nobody else. Node creates missing parents with the default
+ * mode, so enabling it on a data folder the host has not prepared yet would
+ * leave a folder the host then refuses as unsafe.
+ */
+export function mayEnableCompileCache(facts: CompileCacheParentFacts, uid: number): boolean {
+  return facts.isDirectory && facts.ownerId === uid && (facts.mode & 0o077) === 0;
+}
+
+/**
+ * Turns on V8's compiled-code cache in `<parent>/compile-cache` when
+ * `mayEnableCompileCache` allows it, creating only that last folder, owner-only.
+ * Returns whether it was enabled; a skipped launch gets the cache on the next
+ * one, after the host has prepared its folder.
+ */
+export function enableCompileCacheBeneath(
+  parent: string,
+  enable: (directory: string) => unknown,
+): boolean {
+  if (process.platform === "win32") return false;
+  const uid = process.getuid?.();
+  if (uid === undefined) return false;
+  let folder;
+  try {
+    folder = lstatSync(parent);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+  if (
+    !mayEnableCompileCache(
+      { isDirectory: folder.isDirectory(), ownerId: folder.uid, mode: folder.mode },
+      uid,
+    )
+  ) {
+    return false;
+  }
+  const directory = join(parent, "compile-cache");
+  try {
+    mkdirSync(directory, { recursive: false, mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  enable(directory);
+  return true;
+}
