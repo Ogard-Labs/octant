@@ -382,6 +382,8 @@ const REFUSAL_MESSAGES: Readonly<
   "checkout-mismatch": "This thread's window is now on another checkout.",
   "file-outside-thread": "The file is not one this thread can read.",
   "path-outside-checkout": "The path is not a file inside this thread's checkout.",
+  "sandbox-read-denied":
+    "Sandbox restrictions block this host-owned file read. Continue without language diagnostics for it.",
   "no-reach": "This thread cannot read its checkout from here.",
   "turned-off": "Language services are turned off in Settings › Code.",
   "no-language-server": "No language server reads this kind of file.",

@@ -1,3 +1,5 @@
+import { trackSandboxChild } from "../process/sandboxRuntimePolicy";
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { spawn, type ChildProcess } from "node:child_process";
 import { stopWindowsProcessTree } from "../process/windowsProcessTree";
 import { isAtLeastRelease } from "./releaseVersion";
@@ -20,6 +22,7 @@ import { Effect, type Scope } from "effect";
 
 import {
   WINDOWS_SANDBOX_MISSING_REASON,
+  WINDOWS_STRICT_REFUSAL,
   windowsProviderLaunch,
   type WindowsProviderLaunch,
 } from "@octant/domain/guardrail-policy";
@@ -107,6 +110,7 @@ export type CodexLaunchAuthority =
        * deny-default profile and proxied egress instead of running unwrapped.
        */
       readonly fullAccessSandbox?: boolean;
+      readonly sandboxPolicy?: SandboxPolicySelection;
       /**
        * The person let Codex run its own subagents. Their requests reach the
        * parent's approval path on their own thread ids, at every level.
@@ -122,7 +126,7 @@ export type CodexLaunchAuthority =
        * Strict is off for this lease. Absent is Strict, so a caller that never
        * resolved it keeps Octant's profile and never loosens a launch.
        */
-      readonly strict?: false;
+      readonly strict?: boolean;
     };
 
 /**
@@ -198,6 +202,26 @@ export interface CodexProcessOptions {
 const CODEX_WINDOWS_PROGRAM_HINT =
   "the codex.exe the @openai/codex package carries in its vendor folder";
 
+const UNCONFINED: ProcessConfinementPort = {
+  prepare: ({ executable, args }) => ({ command: executable, args }),
+};
+
+/** Native provider execution and account metadata never attest a Strict boundary. */
+function runsWithoutOctantConfinement(
+  authority: CodexLaunchAuthority,
+  platform: NodeJS.Platform,
+): boolean {
+  if (authority.kind === "catalog") return true;
+  return (
+    authority.strict !== true &&
+    authority.fullAccessSandbox !== true &&
+    authority.sandboxPolicy === undefined &&
+    (authority.strict === false ||
+      authority.executionPolicy === "full-access" ||
+      platform === "win32")
+  );
+}
+
 /**
  * How one launch runs on Windows, from that launch's own authority. Windows
  * has no Octant sandbox, so a launch there runs unconfined (Full access, or a
@@ -210,6 +234,8 @@ function codexWindowsLaunch(authority: CodexLaunchAuthority): WindowsProviderLau
       ? { status: "unconfined", approvals: "none" }
       : { status: "refused", reason: WINDOWS_SANDBOX_MISSING_REASON };
   }
+  if (authority.sandboxPolicy !== undefined)
+    return { status: "refused", reason: WINDOWS_STRICT_REFUSAL };
   return windowsProviderLaunch({
     mode: authority.mode,
     executionPolicy: authority.executionPolicy,
@@ -825,6 +851,7 @@ const CODEX_SEATBELT_SERVICE_RULES = [
 ] as const;
 
 interface CodexLaunch {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly command: string;
   readonly args: ReadonlyArray<string>;
   readonly cwd: string | undefined;
@@ -872,8 +899,10 @@ export function prepareCodexLaunch(input: {
   if (input.platform === "win32") return prepareWindowsCodexLaunch({ ...input, authority });
   if (
     authority.kind === "thread" &&
-    authority.executionPolicy === "full-access" &&
-    authority.fullAccessSandbox !== true
+    (authority.executionPolicy === "full-access" || threadRunsNativeSandbox(authority)) &&
+    authority.strict !== true &&
+    authority.fullAccessSandbox !== true &&
+    authority.sandboxPolicy === undefined
   ) {
     return {
       status: "prepared",
@@ -881,7 +910,7 @@ export function prepareCodexLaunch(input: {
         command: input.binaryPath,
         args: input.args,
         cwd: authority.root,
-        environment: input.environment,
+        environment: { ...input.environment, ...input.network?.environment },
         release: () => undefined,
       },
     };
@@ -956,6 +985,10 @@ export function prepareCodexLaunch(input: {
       executable: input.binaryPath,
       args: input.args,
       boundRoot: root,
+      sandboxProviderChannel: true,
+      ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined
+        ? { sandboxPolicy: authority.sandboxPolicy }
+        : {}),
       extraBoundRoots: extraFolders,
       temporaryDirectory,
       networkEgress,
@@ -996,7 +1029,15 @@ export function prepareCodexLaunch(input: {
     });
     return {
       status: "prepared",
-      launch: { ...launch, cwd: root, environment, release },
+      launch: {
+        ...launch,
+        cwd: root,
+        environment: { ...environment, ...launch.environment },
+        release,
+        ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined
+          ? { sandboxPolicy: authority.sandboxPolicy }
+          : {}),
+      },
     };
   } catch (error) {
     release();
@@ -1108,6 +1149,7 @@ function acquireCodexAppServer(
       env: launch.environment,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    trackSandboxChild(launch.sandboxPolicy, child);
     const terminateGroup = makeProcessTerminator(child, options.shutdownTimeoutMs);
     const rpc = makeCodexRpcClient({
       stdin: child.stdin,
@@ -1268,6 +1310,11 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
           options.windowsCatalogUnconfined?.() === true
             ? { kind: "catalog", unconfinedOnWindows: true }
             : requested;
+        // A native launch probes its executable natively. Metadata and version
+        // results never authorize a restricted launch; Strict admits it afresh.
+        const versionProbeConfinement = runsWithoutOctantConfinement(authority, platform)
+          ? UNCONFINED
+          : resolved.versionProbeConfinement;
         // On Windows a launch that runs unconfined (Full access, a level below
         // it outside Strict, or a catalog read made for such a host) reads its
         // version unconfined too: the runtime it precedes has the same reach,
@@ -1307,9 +1354,9 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
               shutdownTimeoutMs: resolved.shutdownTimeoutMs,
               ...(onProcessStarted === undefined ? {} : { onProcessStarted }),
               ...(windowsLaunch === undefined
-                ? resolved.versionProbeConfinement === undefined
+                ? versionProbeConfinement === undefined
                   ? {}
-                  : { confinement: resolved.versionProbeConfinement }
+                  : { confinement: versionProbeConfinement }
                 : {
                     confinement: windowsUnconfinedLaunch({
                       displayName: "Codex",
@@ -1335,6 +1382,9 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
               (runtimePolicy === "full-access" && !keepsSandbox) || windowsLaunch !== undefined
                 ? undefined
                 : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                    ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined
+                      ? { sandboxPolicy: authority.sandboxPolicy }
+                      : {}),
                     runtime: "codex",
                     root: authority.kind === "thread" ? authority.root : "",
                     executionPolicy: keepsSandbox ? "auto-accept-edits" : runtimePolicy,
@@ -1347,13 +1397,19 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
               authority.kind === "thread" &&
               !threadRunsNativeSandbox(authority) &&
               windowsLaunch === undefined
-                ? yield* acquireProviderServerAccess(options.serverAccess, {
-                    root: authority.root,
-                    // Inside Octant's profile the person's own SSH setup is
-                    // out of reach, so a sandboxed launch gets the server
-                    // folder the guarded levels get.
-                    executionPolicy: keepsSandbox ? "auto-accept-edits" : runtimePolicy,
-                  })
+                ? yield* acquireProviderServerAccess(
+                    authority.kind === "thread" &&
+                      authority.sandboxPolicy?.policy.hostServices === "blocked"
+                      ? undefined
+                      : options.serverAccess,
+                    {
+                      root: authority.root,
+                      // Inside Octant's profile the person's own SSH setup is
+                      // out of reach, so a sandboxed launch gets the server
+                      // folder the guarded levels get.
+                      executionPolicy: keepsSandbox ? "auto-accept-edits" : runtimePolicy,
+                    },
+                  )
                 : undefined;
             const prepared = prepareCodexLaunch({
               binaryPath,

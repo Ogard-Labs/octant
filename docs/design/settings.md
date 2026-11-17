@@ -302,6 +302,49 @@ a text field and an **Add** button; a refused path is said in the section's
 feedback line. A paired device edits the section as a local window does
 (maintainer decision, 2026-11-12; not built yet: today a paired device sees the
 section as set on the host machine).
+**Configure protections** in Settings › Permissions uses the shared **Strict**
+control at thread, Project and Settings scopes, independent of access level.
+Saving a policy does not enable Strict. With Strict off the saved configuration
+is inactive. Project can inherit Settings; an explicit Off overrides an inherited
+On. Existing Full-access-only sandbox choices remain visibly marked as previous
+choices until the person chooses Strict or Off; no silent broadening is described
+as migration. There is no second Keep the sandbox switch.
+
+The panel shows effective Strict state and source, full folder paths, supported
+read/write grants and recorded Safe networks settings. Private caches, scratch,
+toolchain reads, provider authentication and host-owned control channels appear
+separately in expanded details. Unsupported requirements and enrollment limits
+are explicit. Configuration cannot disable mandatory Strict limits or reset the
+person's Network limits choice. Full access · Strict says that some actions still
+require approval; Claude's native escape asks for each command and is never a
+remembered folder or session grant.
+
+Local service exceptions accept an exact `127.0.0.1:port` or `[::1]:port` and
+enable ambient host-service blocking. The entered endpoint remains a draft
+until Save; invalid input keeps focus and an associated error, and stale saves
+retain the draft. Each endpoint can be removed. The description and inline
+denial card identify the service's effects as a separate authority, rather than
+claiming that a host service can affect only Project files. Credential-command
+approval shows the effective Strict boundary, including at Full access, while
+the existing fixed recipient/account/reference review and one-use consent stay
+in Secret stores.
+
+Running protection and requested changes are distinct. **Changes pending** means
+the old admitted policy remains in effect; stop the turn and start a new run to
+apply the change. Merely editing a setting cannot alter a running process.
+Views in Settings and Projects include their matching running sessions and
+personal terminals. When those sessions use different admitted policies the
+panel says so, rather than presenting one saved default as already active.
+Scope changes retain drafts; stale-version refusals preserve them, Reload discards only
+the current draft, and denial refreshes never replace it. One grouped composer
+card explains the exact resource, operation and scope before **Allow for this
+session**, **Remember for this Project**, or **Keep blocked**. Only supported
+grantable dimensions offer those actions. Mandatory denials and per-command
+native escapes do not offer remembered bypasses. The host checks and journals a
+local person's or host-person-paired device's changes; agents and unpaired callers
+cannot authorize themselves. Backend coverage and rollout are owned by the
+[security specification](../architecture.md#security-and-authority).
+
 **Worktrees** in Settings › Code, above Open in applications, lists the managed
 worktrees archived threads still keep, largest first: the thread's title, then
 a line of Project, branch in mono, and size ("more than" when the count stopped

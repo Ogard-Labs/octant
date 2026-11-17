@@ -19,6 +19,7 @@
     "./chat-provider-fallback-policy": "./src/chatProviderFallbackPolicy.ts",
     "./chat-message-parts": "./src/chatMessageParts.ts",
     "./code-policy": "./src/codePolicy.ts",
+    "./sandbox-policy": "./src/sandboxPolicy.ts",
     "./guardrail-policy": "./src/guardrailPolicy.ts",
     "./person-memory-policy": "./src/personMemoryPolicy.ts",
     "./todo-policy": "./src/todoPolicy.ts",
@@ -144,7 +145,8 @@
     "./turn-metrics-display": "./src/turnMetricsDisplay.ts",
     "./local-usage-pricing": "./src/localUsagePricing.ts",
     "./command-credential-policy": "./src/commandCredentialPolicy.ts",
-    "./thread-wakeup-policy": "./src/threadWakeupPolicy.ts"
+    "./thread-wakeup-policy": "./src/threadWakeupPolicy.ts",
+    "./strict-policy": "./src/strictPolicy.ts"
   },
   "scripts": {
     "fmt": "oxfmt",

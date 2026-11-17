@@ -1,3 +1,8 @@
+import {
+  registerSandboxCleanup,
+  trackSandboxChild,
+  sandboxToolPolicy,
+} from "../process/sandboxRuntimePolicy";
 import { execFile as nodeExecFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
@@ -96,6 +101,11 @@ const liveDependencies: GitMutationDependencies = {
           stdout: "pipe",
           stderr: "pipe",
         });
+        const removeSandboxOwner = registerSandboxCleanup(sandboxToolPolicy(), async () => {
+          child.kill("SIGKILL");
+          await child.exited;
+        });
+        void child.exited.then(removeSandboxOwner, removeSandboxOwner);
         const read = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
           const reader = stream.getReader();
           const chunks: Uint8Array[] = [];
@@ -142,6 +152,7 @@ const liveDependencies: GitMutationDependencies = {
           });
         },
       );
+      trackSandboxChild(sandboxToolPolicy(), child);
       if (stdin !== undefined) {
         child.stdin?.on("error", () => {});
         child.stdin?.end(stdin);
@@ -1179,7 +1190,7 @@ export class GitMutationPort {
       return await this.#dependencies.execFile(
         launch.command,
         launch.args,
-        createGitCommandEnvironment(process.env),
+        { ...createGitCommandEnvironment(process.env), ...launch.environment },
         signal,
       );
     });
@@ -1242,7 +1253,7 @@ export class GitMutationPort {
         launch.args,
         // The overlay is named by this port, never inherited, so widening it
         // cannot leak a caller's environment past the allowlist.
-        { ...createGitCommandEnvironment(process.env), ...environment },
+        { ...createGitCommandEnvironment(process.env), ...environment, ...launch.environment },
         signal,
         stdin,
       );

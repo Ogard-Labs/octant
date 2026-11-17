@@ -1,6 +1,5 @@
 import { protectedEntryFor } from "@octant/domain/secret-guard-policy";
-import type { BigIntStats } from "node:fs";
-import { lstat, opendir, realpath, stat } from "node:fs/promises";
+import { lstatSync, opendirSync, realpathSync, statSync, type BigIntStats } from "node:fs";
 import { dirname, join } from "node:path";
 import type { SecretGuardMediationPolicy } from "./secretGuard";
 
@@ -13,7 +12,9 @@ export type LinuxMediationPolicySnapshot =
       readonly status: "ready";
       readonly epoch: bigint;
       readonly protectedObjects: ReadonlySet<string>;
+      readonly writeProtectedObjects: ReadonlySet<string>;
       readonly proposedEntryProtected?: boolean;
+      readonly proposedEntryWriteProtected?: boolean;
     }
   | {
       readonly status: "unavailable";
@@ -30,11 +31,22 @@ export function linuxMediationObjectKey(identity: {
   return `${major}:${minor}:${identity.ino}`;
 }
 
+/** Data-effect decision shared by the broker and focused policy tests. */
+export function linuxMediationObjectAllowed(
+  snapshot: LinuxMediationPolicySnapshot,
+  operation: number,
+  object: string,
+): boolean {
+  if (snapshot.status !== "ready" || operation < 1 || operation > 4) return false;
+  if (snapshot.protectedObjects.has(object)) return false;
+  return operation !== 2 || !snapshot.writeProtectedObjects.has(object);
+}
+
 export interface LinuxMediationMetadata {
-  readonly lstat: (path: Buffer) => Promise<BigIntStats>;
-  readonly stat: (path: Buffer) => Promise<BigIntStats>;
-  readonly realpath: (path: Buffer) => Promise<Buffer>;
-  readonly names: (path: Buffer) => AsyncIterable<string>;
+  readonly lstat: (path: Buffer) => BigIntStats;
+  readonly stat: (path: Buffer) => BigIntStats;
+  readonly realpath: (path: Buffer) => Buffer;
+  readonly names: (path: Buffer) => Iterable<string>;
 }
 export interface LinuxMediationProposedEntry {
   readonly parentObject: string;
@@ -42,12 +54,20 @@ export interface LinuxMediationProposedEntry {
   readonly name: Buffer;
 }
 const HOST_METADATA: LinuxMediationMetadata = {
-  lstat: (path) => lstat(path, { bigint: true }),
-  stat: (path) => stat(path, { bigint: true }),
-  realpath: (path) => realpath(path, { encoding: "buffer" }),
-  async *names(path) {
-    const directory = await opendir(path, { encoding: "latin1" });
-    for await (const entry of directory) yield entry.name;
+  lstat: (path) => lstatSync(path, { bigint: true }),
+  stat: (path) => statSync(path, { bigint: true }),
+  realpath: (path) => realpathSync(path, { encoding: "buffer" }),
+  *names(path) {
+    const directory = opendirSync(path, { encoding: "latin1" });
+    try {
+      for (;;) {
+        const entry = directory.readSync();
+        if (entry === null) return;
+        yield entry.name;
+      }
+    } finally {
+      directory.closeSync();
+    }
   },
 };
 
@@ -60,6 +80,8 @@ const SNAPSHOT_BUDGET_MS = 1_000;
  * must still send the returned epoch to the kernel's final atomic admission;
  * this optimistic scan cannot itself authorize a workload operation. It runs
  * in the owned broker process, not under a VFS lock or in the app request loop.
+ * The bounded scan is synchronous there: only the surrounding namespace reads
+ * schedule asynchronous work, rather than one microtask for every path entry.
  */
 export async function readLinuxMediationPolicy(
   policy: SecretGuardMediationPolicy,
@@ -90,7 +112,9 @@ export async function readLinuxMediationPolicy(
       return complete;
     };
     const objects = new Set<string>();
+    const writeObjects = new Set<string>();
     let proposedEntryProtected = false;
+    let proposedEntryWriteProtected = false;
     // Directory entries may contain arbitrary non-NUL bytes on Linux. A
     // one-byte representation preserves identity and ASCII rule syntax; UTF-8
     // replacement decoding could silently omit a protected id_<invalid> name.
@@ -109,19 +133,42 @@ export async function readLinuxMediationPolicy(
       own.push(path);
       if (!checkBudget()) return { status: "unavailable", reason: "metadata-unavailable" };
     }
-    const inspect = async (path: string, forced = false) => {
+    const selected = [
+      ...(policy.readOnlyRoots ?? []).map((path) => ({
+        path: bytePath(path),
+        mode: "read-only" as const,
+      })),
+      ...(policy.protectedPaths ?? []).map((entry) => ({
+        path: bytePath(entry.path),
+        mode: entry.mode,
+      })),
+    ];
+    for (const entry of selected)
+      if (!entry.path.startsWith("/") || entry.path.includes("\0") || entry.path === "/")
+        return { status: "unavailable", reason: "metadata-unavailable" };
+    const selectedMode = (forms: ReadonlyArray<string>) => {
+      let mode: "read-only" | "deny" | undefined;
+      for (const entry of selected)
+        if (forms.some((form) => form === entry.path || form.startsWith(`${entry.path}/`))) {
+          if (entry.mode === "deny") return "deny" as const;
+          mode = "read-only";
+        }
+      return mode;
+    };
+    const inspect = (path: string, forced?: "read-only" | "deny") => {
       if (!checkBudget()) return undefined;
       try {
-        const link = await metadata.lstat(nativePath(path));
+        const link = metadata.lstat(nativePath(path));
         // A protected dangling link still has readable link text/metadata.
         // Record its own inode before following, without turning a missing
         // target into an omitted protected object or an account exemption.
-        if (forced || protectedEntryFor([path], entries, own) !== undefined)
+        if (forced === "deny" || protectedEntryFor([path], entries, own) !== undefined)
           objects.add(linuxMediationObjectKey(link));
+        if (forced === "read-only") writeObjects.add(linuxMediationObjectKey(link));
         if (!checkBudget()) return undefined;
-        const identity = link.isSymbolicLink() ? await metadata.stat(nativePath(path)) : link;
+        const identity = link.isSymbolicLink() ? metadata.stat(nativePath(path)) : link;
         if (!checkBudget()) return undefined;
-        const actual = (await metadata.realpath(nativePath(path))).toString("latin1");
+        const actual = metadata.realpath(nativePath(path)).toString("latin1");
         if (
           proposedEntry !== undefined &&
           identity.isDirectory() &&
@@ -129,12 +176,19 @@ export async function readLinuxMediationPolicy(
         ) {
           const name = proposedEntry.name.toString("latin1");
           const forms = name === "" ? [path, actual] : [join(path, name), join(actual, name)];
-          if (forced || protectedEntryFor(forms, entries, own) !== undefined)
+          if (forced === "deny" || protectedEntryFor(forms, entries, own) !== undefined)
             proposedEntryProtected = true;
+          const selectedEntry = selectedMode(forms);
+          if (selectedEntry === "deny") proposedEntryProtected = true;
+          else if (selectedEntry === "read-only") proposedEntryWriteProtected = true;
         }
-        if (forced || protectedEntryFor([path, actual], entries, own) !== undefined) {
+        if (forced === "deny" || protectedEntryFor([path, actual], entries, own) !== undefined) {
           objects.add(linuxMediationObjectKey(link));
           objects.add(linuxMediationObjectKey(identity));
+        }
+        if (forced === "read-only") {
+          writeObjects.add(linuxMediationObjectKey(link));
+          writeObjects.add(linuxMediationObjectKey(identity));
         }
         return identity;
       } catch (error) {
@@ -142,13 +196,13 @@ export async function readLinuxMediationPolicy(
         throw error;
       }
     };
-    const namesIn = async (path: string): Promise<ReadonlyArray<string> | undefined> => {
+    const namesIn = (path: string): ReadonlyArray<string> | undefined => {
       if (!checkBudget()) return undefined;
       try {
         const names: string[] = [];
         // Stream entries: a hostile large directory must not allocate an
         // unbounded readdir result before its metadata budget is checked.
-        for await (const name of metadata.names(nativePath(path))) {
+        for (const name of metadata.names(nativePath(path))) {
           if (!checkBudget()) return undefined;
           names.push(name);
         }
@@ -158,13 +212,13 @@ export async function readLinuxMediationPolicy(
         throw error;
       }
     };
-    const visit = async (
+    const visit = (
       path: string,
       remaining: number,
       level: number,
-      forced = false,
-    ): Promise<void> => {
-      const identity = await inspect(path, forced);
+      forced?: "read-only" | "deny",
+    ): void => {
+      const identity = inspect(path, forced);
       if (identity === undefined || !identity.isDirectory() || remaining === 0) return;
       if (level >= MAX_DIRECTORY_DEPTH) {
         complete = false;
@@ -173,25 +227,29 @@ export async function readLinuxMediationPolicy(
       if (!checkBudget()) return;
       // A link may lead to the real store. The lexical form remains beside its
       // target; depth and metadata bounds turn cycles into refusal, not omission.
-      const children = await namesIn(path);
+      const children = namesIn(path);
       if (children === undefined) return;
-      for (const name of children) await visit(join(path, name), remaining - 1, level + 1, forced);
+      for (const name of children) visit(join(path, name), remaining - 1, level + 1, forced);
     };
     for (const entry of entries) {
       const path = entry.kind === "path" ? entry.path : entry.directory;
       // An absent exact file has no inode to visit. Its real parent still
       // binds a proposed name, including another path to that same directory.
-      if (proposedEntry !== undefined && entry.kind === "path") await inspect(dirname(path));
-      await visit(path, entry.kind === "path" ? MAX_DIRECTORY_DEPTH + 1 : entry.depth, 0);
+      if (proposedEntry !== undefined && entry.kind === "path") inspect(dirname(path));
+      visit(path, entry.kind === "path" ? MAX_DIRECTORY_DEPTH + 1 : entry.depth, 0);
+    }
+    for (const entry of selected) {
+      if (proposedEntry !== undefined) inspect(dirname(entry.path));
+      visit(entry.path, MAX_DIRECTORY_DEPTH + 1, 0, entry.mode);
     }
     if (policy.sshCompanionDirectory !== undefined) {
       if (!checkBudget()) return { status: "unavailable", reason: "metadata-unavailable" };
       const directory = bytePath(policy.sshCompanionDirectory);
-      const names = await namesIn(directory);
+      const names = namesIn(directory);
       if (names === undefined) return { status: "unavailable", reason: "metadata-unavailable" };
       const present = new Set(names);
       if (proposedEntry !== undefined && proposedEntry.name.length > 0) {
-        const identity = await inspect(directory);
+        const identity = inspect(directory);
         const name = proposedEntry.name.toString("latin1");
         if (
           identity !== undefined &&
@@ -203,7 +261,7 @@ export async function readLinuxMediationPolicy(
       }
       for (const name of names)
         if (!name.endsWith(".pub") && present.has(`${name}.pub`))
-          await visit(join(directory, name), MAX_DIRECTORY_DEPTH + 1, 0, true);
+          visit(join(directory, name), MAX_DIRECTORY_DEPTH + 1, 0, "deny");
     }
     if (!checkBudget()) return { status: "unavailable", reason: "metadata-unavailable" };
     const after = await readNamespace();
@@ -213,7 +271,9 @@ export async function readLinuxMediationPolicy(
       status: "ready",
       epoch: after.epoch,
       protectedObjects: objects,
+      writeProtectedObjects: writeObjects,
       ...(proposedEntry === undefined ? {} : { proposedEntryProtected }),
+      ...(proposedEntry === undefined ? {} : { proposedEntryWriteProtected }),
     };
   } catch {
     return { status: "unavailable", reason: "metadata-unavailable" };

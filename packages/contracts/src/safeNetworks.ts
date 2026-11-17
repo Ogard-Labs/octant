@@ -141,6 +141,7 @@ export const RuntimeNetworkRuntime = Schema.Literal(
   "opencode",
   "acp",
   "pi",
+  "terminal",
 );
 export type RuntimeNetworkRuntime = typeof RuntimeNetworkRuntime.Type;
 

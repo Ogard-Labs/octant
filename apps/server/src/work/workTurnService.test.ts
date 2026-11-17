@@ -210,7 +210,7 @@ describe("WorkTurnService", () => {
   });
 
   it("refuses a Strict Windows turn on a Full access thread when its caller's ceiling lowers the turn below Full access", async () => {
-    const fixture = serviceFixture({ threadAccess: "full-access" });
+    const fixture = serviceFixture({ threadAccess: "full-access", resolveStrict: () => true });
     vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
     try {
       await expect(
@@ -225,7 +225,7 @@ describe("WorkTurnService", () => {
   });
 
   it("starts a Windows Work turn at Full access and reaches its provider", async () => {
-    const fixture = serviceFixture({ threadAccess: "full-access" });
+    const fixture = serviceFixture({ threadAccess: "full-access", resolveStrict: () => false });
     vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
     try {
       await expect(
@@ -6415,6 +6415,7 @@ function serviceFixture(
     readonly readProviderModel?: WorkTurnServiceDependencies["persistence"]["readProviderModel"];
     readonly readProjectMemory?: WorkTurnServiceDependencies["persistence"]["readProjectMemory"];
     readonly threadAccess?: WorkAccess;
+    readonly strict?: boolean;
     readonly fullAccessSandbox?: boolean;
     readonly resolveStrict?: WorkTurnServiceDependencies["resolveStrict"];
     readonly documentDelivery?: "canvas" | "native-artifacts";
@@ -6553,6 +6554,7 @@ function serviceFixture(
         workingDirectory: ".",
         ...(options.threadAccess === undefined ? {} : { access: options.threadAccess }),
         ...(options.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+        ...(options.strict === undefined ? {} : { strict: options.strict }),
         ...(options.completionConfirmed?.() === true ? { completionConfirmed: true } : {}),
         ...(options.documentDelivery === undefined
           ? {}

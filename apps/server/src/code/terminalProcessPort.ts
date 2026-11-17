@@ -1,3 +1,4 @@
+import { registerSandboxCleanup, sandboxToolPolicy } from "../process/sandboxRuntimePolicy";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
@@ -20,6 +21,7 @@ import {
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import type { OsNetworkEgress } from "../process/threadEgressPolicy";
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { stopWindowsProcessTree, type WindowsProcessTreeStop } from "../process/windowsProcessTree";
 import { WINDOWS_SANDBOX_MISSING_REASON } from "@octant/domain/guardrail-policy";
 import { windowsShellArguments } from "./terminalShell";
@@ -87,6 +89,9 @@ export interface TerminalProcessHandle {
 }
 
 export interface TerminalLaunchInput {
+  readonly sandboxPolicy?: SandboxPolicySelection;
+  readonly strict?: boolean;
+  readonly networkEgress?: OsNetworkEgress;
   readonly command?: string;
   readonly shell: string;
   readonly cwd: string;
@@ -359,6 +364,8 @@ export class TerminalProcessPort {
   }
 
   start(input: TerminalLaunchInput): TerminalProcessHandle {
+    const selection = input.sandboxPolicy ?? sandboxToolPolicy();
+    const effective = selection === undefined ? input : { ...input, sandboxPolicy: selection };
     validateLaunch(input, this.#dependencies.platform);
     if (input.executionPolicy === "plan") {
       throw new ProcessConfinementError(
@@ -367,10 +374,27 @@ export class TerminalProcessPort {
       );
     }
     this.#dependencies.ensurePtyHelperExecutable();
+    if (
+      this.#dependencies.platform === "win32" &&
+      (selection !== undefined || input.strict === true)
+    )
+      throw new ProcessConfinementError("incompatible", WINDOWS_SANDBOX_MISSING_REASON);
     const pty =
       this.#dependencies.platform === "win32"
         ? this.#spawnWindowsShell(input)
-        : this.#spawnConfinedShell(input);
+        : input.strict === false && selection === undefined
+          ? this.#dependencies.spawn(
+              input.shell,
+              input.command === undefined ? ["-l"] : ["-lc", input.command],
+              {
+                name: "xterm-256color",
+                cwd: input.cwd,
+                env: { ...input.environment },
+                cols: input.columns,
+                rows: input.rows,
+              },
+            )
+          : this.#spawnConfinedShell(effective);
     const rootIdentity = (this.#dependencies.processIdentity ?? readProcessIdentity)(pty.pid).catch(
       () => undefined,
     );
@@ -421,6 +445,11 @@ export class TerminalProcessPort {
       void this.#removeReceiptWhenReleased(pty, receiptReady, () => receipt);
     });
     let closeOperation: Promise<void> | undefined;
+    const removeSandboxOwner = registerSandboxCleanup(
+      selection,
+      () => (closeOperation ??= this.#close(pty, () => shellExited)),
+    );
+    pty.onExit(removeSandboxOwner);
     return {
       write: (data) => {
         if (Buffer.byteLength(data, "utf8") > MAX_TERMINAL_INPUT_BYTES) {
@@ -494,10 +523,15 @@ export class TerminalProcessPort {
         mode: 0o600,
       });
     }
-    let launch: { readonly command: string; readonly args: readonly string[] };
+    let launch: {
+      readonly command: string;
+      readonly args: readonly string[];
+      readonly environment?: Readonly<Record<string, string>>;
+    };
     try {
       const shellDirectory = dirname(input.shell);
       launch = this.#dependencies.confinement.prepare({
+        ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
         executable: input.shell,
         // A login shell, as the platform's own terminal opens one: the login
         // files are where PATH is assembled, and without them the tools a
@@ -509,7 +543,7 @@ export class TerminalProcessPort {
           : { extraBoundRoots: input.extraFolders }),
         temporaryDirectory: this.#dependencies.temporaryDirectory,
         additionalWriteRoots: [shellState],
-        networkEgress: this.#dependencies.networkEgress,
+        networkEgress: input.networkEgress ?? this.#dependencies.networkEgress,
         allowFileReadStar: true,
         terminal: { shellStateDirectory: shellState },
         // Deny the whole shared base, not the siblings that happen to exist
@@ -557,6 +591,7 @@ export class TerminalProcessPort {
       env: {
         ...baseEnv,
         ...input.environment,
+        ...launch.environment,
         ...(this.#dependencies.platform === "darwin" ? {} : { HOME: shellState }),
       },
       cols: input.columns,

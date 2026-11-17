@@ -1,3 +1,4 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { compactAcpConversation } from "./acpCompaction";
 import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
 import { readAcpFileReview } from "./acpFileReview";
@@ -131,6 +132,7 @@ export interface AcpClientPort {
 }
 
 export interface AcpDriverOptions {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly profile: AcpProviderProfile;
   readonly instanceId: ProviderInstanceId;
   readonly binaryPath: string;
@@ -902,7 +904,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
         return listed;
       });
     },
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], sandboxPolicy }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
@@ -924,7 +926,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
         );
       }
       return makeConnection(
-        options,
+        { ...options, ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }) },
         projectRoot,
         mode === "chat" ? [] : extraFolders,
         mode,
@@ -1408,6 +1410,9 @@ function makeConnection(
         const processConnection = await Effect.runPromise(
           options.process
             .start({
+              ...(options.sandboxPolicy === undefined
+                ? {}
+                : { sandboxPolicy: options.sandboxPolicy }),
               profile,
               binaryPath: options.binaryPath,
               root: runtimeRoot,
@@ -1540,6 +1545,7 @@ function makeConnection(
           let removeCommands = () => {};
           let runtime: AcpRetainedRuntime | undefined;
           const compatibility = JSON.stringify([
+            options.sandboxPolicy ?? null,
             profile.kind,
             input.sessionId,
             options.binaryPath,
@@ -2281,6 +2287,7 @@ function makeConnection(
                   .catch(() => undefined);
               }
               if (
+                options.sandboxPolicy === undefined &&
                 state.completed &&
                 profile.retainedSessionVersions?.includes(state.runtime.version) === true &&
                 state.approvals.size === 0 &&

@@ -1,5 +1,7 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
+import { activeSandboxPolicy, trackSandboxChild } from "../process/sandboxRuntimePolicy";
 import { unlink, writeFile } from "node:fs/promises";
-import { accessSync, constants, statSync } from "node:fs";
+import { accessSync, constants, statSync, mkdtempSync, rmSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
 import { basename, delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -116,12 +118,17 @@ const terminalDefinitions = [
 export interface CodeAcpTerminalConfinement {
   readonly environment: Readonly<Record<string, string>>;
   readonly prepare: (input: {
+    readonly sandboxPolicy?: SandboxPolicySelection;
     readonly executable: string;
     readonly args: ReadonlyArray<string>;
     readonly boundRoot: string;
     readonly extraBoundRoots?: ReadonlyArray<string>;
     readonly temporaryDirectory: string;
-  }) => { readonly command: string; readonly args: ReadonlyArray<string> };
+  }) => {
+    readonly command: string;
+    readonly args: ReadonlyArray<string>;
+    readonly environment?: Readonly<Record<string, string>>;
+  };
 }
 
 export interface CodeAcpClientToolsOptions {
@@ -132,7 +139,8 @@ export interface CodeAcpClientToolsOptions {
    * The secret guard's refusal for a path, or undefined; defaults to this
    * host's protected list. Checked at every posture; at Full access
    * (`fullAccess`, read from `readExecutionPolicy` on each call) only the
-   * provider sign-ins stay refused (`secretGuardRefusal`).
+   * provider sign-ins stay refused (`secretGuardRefusal`). An active sandbox
+   * selection always keeps the complete protected-file guard.
    */
   readonly protectedFileRefusal?: (path: string, fullAccess: boolean) => string | undefined;
   readonly checkoutRoot: string;
@@ -265,12 +273,20 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
       ? [readDefinition]
       : [readDefinition, writeDefinition, ...terminalDefinitions];
   const terminals = new Map<string, TerminalRecord>();
+  let privateScratch: string | undefined;
+  const scratch = () => (privateScratch ??= mkdtempSync(join(tmpdir(), "octant-acp-tools-")));
 
   // The checkout first, then each extra folder that still exists: a folder
   // missing on disk is left out rather than failing the call.
   const folderRoots = async (): Promise<ReadonlyArray<string>> => {
     const roots: string[] = [];
-    for (const candidate of [options.checkoutRoot, ...(options.extraFolders ?? [])]) {
+    const policy = activeSandboxPolicy(String(options.thread.id))?.policy;
+    for (const candidate of [
+      options.checkoutRoot,
+      ...(options.extraFolders ?? []),
+      ...(policy?.filesystem.readOnlyRoots ?? []),
+      ...(policy?.filesystem.readWriteRoots ?? []),
+    ]) {
       const real = await options.pathPort.realpath(candidate).catch(() => undefined);
       if (real !== undefined) roots.push(real);
     }
@@ -296,7 +312,9 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
     ((path: string, fullAccess: boolean) => secretGuardRefusal(path, { fullAccess }));
   /** The refusal names the rule and the channel, never a bare unreadable file. */
   const protectedResult = (...paths: ReadonlyArray<string>) => {
-    const fullAccess = options.readExecutionPolicy() === "full-access";
+    const fullAccess =
+      options.readExecutionPolicy() === "full-access" &&
+      activeSandboxPolicy(String(options.thread.id)) === undefined;
     for (const path of paths) {
       const message = protectedFileRefusal(path, fullAccess);
       if (message !== undefined) {
@@ -369,6 +387,13 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
       return errorResult("path-outside-checkout");
     const { root, roots, resolved: parent } = folder;
     const target = joinCodePath(parent.canonical, basename(input.path));
+    const sandbox = activeSandboxPolicy(String(options.thread.id));
+    if (
+      sandbox?.policy.filesystem.readOnlyRoots.some(
+        (readOnly) => target === readOnly || target.startsWith(`${readOnly}/`),
+      )
+    )
+      return errorResult("sandbox-write-denied");
     const guarded = protectedResult(input.path, target);
     if (guarded !== undefined) return guarded;
     const current = await resolveContainedPath(options.pathPort, root, target);
@@ -378,7 +403,7 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
         ? 0o666 & ~process.umask()
         : (await options.pathPort.lstat(current.canonical).catch(() => undefined))?.mode;
     if (mode === undefined) return errorResult("file-unreadable");
-    const baseTmpDir = options.terminalConfinement.environment.TMPDIR ?? tmpdir();
+    const baseTmpDir = scratch();
     const staging = join(baseTmpDir, `octant-acp-${options.uuid()}.txt`);
     const temporaryInParent = join(parent.canonical, `.octant-${options.uuid()}.tmp`);
     const runConfined = async (
@@ -386,16 +411,25 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
       args: ReadonlyArray<string>,
     ): Promise<boolean> => {
       try {
+        const sandboxPolicy = activeSandboxPolicy(String(options.thread.id));
         const launch = options.terminalConfinement.prepare({
           executable,
           args,
-          boundRoot: root,
-          ...extraBoundRoots(roots, root),
+          ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }),
+          boundRoot: options.checkoutRoot,
+          ...extraBoundRoots(
+            roots.filter(
+              (candidate) => !sandboxPolicy?.policy.filesystem.readOnlyRoots.includes(candidate),
+            ),
+            options.checkoutRoot,
+          ),
           temporaryDirectory: baseTmpDir,
         });
         const child = spawn(launch.command, [...launch.args], {
           stdio: "ignore",
+          env: { ...options.terminalConfinement.environment, ...launch.environment },
         });
+        trackSandboxChild(sandboxPolicy, child);
         return await new Promise((resolve) => {
           let settled = false;
           const finish = (value: boolean) => {
@@ -457,8 +491,11 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
       const folder = await containingFolder(input.cwd ?? options.checkoutRoot);
       if (folder === undefined || !folder.resolved.stat.isDirectory)
         return errorResult("cwd-outside-checkout");
-      const { root, roots, resolved } = folder;
-      const env = { ...options.terminalConfinement.environment };
+      const { roots, resolved } = folder;
+      const env: Record<string, string> = {
+        ...options.terminalConfinement.environment,
+        TMPDIR: scratch(),
+      };
       if (input.env !== undefined) {
         if (input.env.length > MAX_ENVIRONMENT_ENTRIES) return errorResult("invalid-environment");
         for (const entry of input.env) {
@@ -484,19 +521,27 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
       if (outputLimit < 1) return errorResult("invalid-input");
       let child: ChildProcess;
       try {
+        const sandboxPolicy = activeSandboxPolicy(String(options.thread.id));
         const launch = options.terminalConfinement.prepare({
           executable,
+          ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }),
           args: usesShell ? ["-c", input.command] : input.args,
-          boundRoot: root,
-          ...extraBoundRoots(roots, root),
-          temporaryDirectory: options.terminalConfinement.environment.TMPDIR ?? "/tmp",
+          boundRoot: options.checkoutRoot,
+          ...extraBoundRoots(
+            roots.filter(
+              (candidate) => !sandboxPolicy?.policy.filesystem.readOnlyRoots.includes(candidate),
+            ),
+            options.checkoutRoot,
+          ),
+          temporaryDirectory: scratch(),
         });
         child = spawn(launch.command, [...launch.args], {
           cwd: resolved.canonical,
-          env,
+          env: { ...env, ...launch.environment },
           stdio: ["ignore", "pipe", "pipe"],
           detached: true,
         });
+        trackSandboxChild(sandboxPolicy, child);
       } catch {
         return errorResult("terminal-unavailable");
       }
@@ -587,6 +632,7 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
     close: async () => {
       await Promise.all([...terminals.keys()].map((id) => kill(id, true)));
       terminals.clear();
+      if (privateScratch !== undefined) rmSync(privateScratch, { recursive: true, force: true });
     },
     execute: async ({ name, inputJson, signal }) => {
       if (name === ACP_CLIENT_TOOL_NAMES.readTextFile) {

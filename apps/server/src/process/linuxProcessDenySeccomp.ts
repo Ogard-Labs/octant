@@ -29,12 +29,13 @@ const AUDIT_ARCH = {
 } as const;
 
 const SYSCALLS = {
-  x64: { clone: 56, fork: 57, vfork: 58, execveat: 322, clone3: 435 },
-  arm64: { clone: 220, execveat: 281, clone3: 435 },
+  x64: { socket: 41, clone: 56, fork: 57, vfork: 58, execveat: 322, clone3: 435 },
+  arm64: { socket: 198, clone: 220, execveat: 281, clone3: 435 },
 } as const;
 
 export interface LinuxProcessDenySeccompInput {
   readonly arch: "x64" | "arm64";
+  readonly denyHostSockets?: boolean;
   readonly denyFork: boolean;
   readonly denyExec: boolean;
 }
@@ -49,7 +50,7 @@ type FilterOp =
 export function buildLinuxProcessDenySeccompFilter(
   input: LinuxProcessDenySeccompInput,
 ): Uint8Array {
-  if (!input.denyFork && !input.denyExec) {
+  if (!input.denyFork && !input.denyExec && !input.denyHostSockets) {
     throw new Error("Linux process-deny filter requires denyFork or denyExec.");
   }
 
@@ -59,6 +60,32 @@ export function buildLinuxProcessDenySeccompFilter(
     { op: "label", name: "nr" },
     { op: "ld", offset: SECCOMP_DATA_NR },
   ];
+
+  if (input.denyHostSockets && input.arch === "x64") {
+    ops.push(
+      { op: "and", k: 0x40000000 },
+      { op: "jeq", k: 0x40000000, match: "kill", miss: "native_nr" },
+      { op: "label", name: "native_nr" },
+      { op: "ld", offset: SECCOMP_DATA_NR },
+    );
+  }
+  if (input.denyHostSockets) {
+    ops.push(
+      { op: "jeq", k: 425, match: "eperm", miss: "after_uring_setup" },
+      { op: "label", name: "after_uring_setup" },
+      { op: "jeq", k: 426, match: "eperm", miss: "after_uring_enter" },
+      { op: "label", name: "after_uring_enter" },
+      { op: "jeq", k: 427, match: "eperm", miss: "after_uring_register" },
+      { op: "label", name: "after_uring_register" },
+      {
+        op: "jeq",
+        k: SYSCALLS[input.arch].socket,
+        match: "check_socket_domain",
+        miss: "after_socket",
+      },
+      { op: "label", name: "after_socket" },
+    );
+  }
 
   if (input.denyFork) {
     ops.push(
@@ -93,6 +120,14 @@ export function buildLinuxProcessDenySeccompFilter(
       { op: "jeq", k: CLONE_THREAD, match: "allow", miss: "eperm" },
       { op: "label", name: "enosys" },
       { op: "ret", k: SECCOMP_RET_ERRNO | ENOSYS },
+    );
+  }
+
+  if (input.denyHostSockets) {
+    ops.push(
+      { op: "label", name: "check_socket_domain" },
+      { op: "ld", offset: SECCOMP_DATA_ARGS0 },
+      { op: "jeq", k: 1, match: "eperm", miss: "allow" },
     );
   }
 

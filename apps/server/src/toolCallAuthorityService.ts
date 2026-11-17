@@ -1,3 +1,9 @@
+import {
+  activeSandboxPolicy,
+  recordSandboxDenial,
+  recordSandboxNetworkDenial,
+} from "./process/sandboxRuntimePolicy";
+import { lookupClosedToolCatalogEntry } from "@octant/contracts";
 import type {
   ExtensionCapability,
   ProviderCapabilitySupport,
@@ -152,6 +158,71 @@ export class ToolCallAuthorityService {
       });
     }
 
+    const sandbox = activeSandboxPolicy(input.threadId);
+    if (sandbox !== undefined) {
+      const entry = lookupClosedToolCatalogEntry(input.request.capability);
+      const unsupportedClass =
+        entry !== undefined &&
+        ["mcp", "computer-use", "external-application", "hooks", "apple-development"].includes(
+          entry.requiredCapabilityClass,
+        );
+      const networkDenied =
+        sandbox.policy.network === "deny" &&
+        (sandbox.policy.approvedDestinations?.length ?? 0) === 0 &&
+        (sandbox.policy.localServices?.length ?? 0) === 0 &&
+        entry?.requiredCapabilityClass === "network";
+      if (
+        networkDenied &&
+        entry?.name === "web-fetch" &&
+        typeof input.arguments === "object" &&
+        input.arguments !== null &&
+        "url" in input.arguments &&
+        typeof input.arguments.url === "string"
+      ) {
+        try {
+          const url = new URL(input.arguments.url);
+          recordSandboxNetworkDenial(
+            input.threadId,
+            url.hostname,
+            url.port === "" ? (url.protocol === "https:" ? 443 : 80) : Number(url.port),
+          );
+        } catch {
+          /* Malformed URLs never become exceptions. */
+        }
+        return this.#deny({
+          step: "host-policy",
+          reason: "network.deny",
+          capability: input.request.capability,
+          mode,
+          executionPolicy: live.executionPolicy,
+        });
+      }
+      if (input.request.authority.extension.kind !== "core" || unsupportedClass || networkDenied) {
+        const ruleId = networkDenied ? "network.deny" : "executionRoute.unsupported";
+        recordSandboxDenial({
+          threadId: input.threadId,
+          projectId: sandbox.context.projectId,
+          code: networkDenied ? "sandbox-network-denied" : "sandbox-host-service-denied",
+          ruleId,
+          operation: networkDenied ? "network" : "host-service",
+          resource: String(input.request.capability.id),
+          message: networkDenied
+            ? "Network access is blocked by this sandbox."
+            : "This host tool cannot carry the selected sandbox policy and was not started.",
+          remedy:
+            "Use a confined shell or a supported provider-native tool, or review the sandbox restrictions.",
+          grantable: false,
+        });
+        return this.#deny({
+          step: "host-policy",
+          reason: ruleId,
+          capability: input.request.capability,
+          mode,
+          executionPolicy: live.executionPolicy,
+        });
+      }
+    }
+
     const matched = authorizeToolAction(input.request, granted);
     if (matched.kind !== "allowed") {
       return this.#deny({
@@ -223,7 +294,7 @@ export class ToolCallAuthorityService {
   }
 
   #deny(input: {
-    readonly step: "granted-authority" | "authority-match";
+    readonly step: ToolCallPolicyStep | "granted-authority" | "authority-match";
     readonly reason: string;
     readonly capability: ToolActionRequest["capability"];
     readonly mode: ToolActionAuthority["mode"];

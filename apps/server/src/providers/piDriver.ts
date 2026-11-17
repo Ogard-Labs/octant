@@ -1,3 +1,4 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import {
   CorrelationId,
@@ -67,6 +68,7 @@ export interface PiClientPort {
 }
 
 export interface PiDriverOptions {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly instanceId: ProviderInstanceId;
   readonly binaryPath: string;
   readonly piHome: string;
@@ -403,7 +405,7 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
         return result;
       });
     },
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], sandboxPolicy }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
@@ -425,7 +427,7 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
         );
       }
       return makeConnection(
-        options,
+        { ...options, ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }) },
         projectRoot,
         mode === "chat" ? [] : extraFolders,
         mode,
@@ -885,6 +887,7 @@ function makeConnection(
           // that named a tool refused as unsupported.
           const tools = input.tools;
           const compatibility = JSON.stringify([
+            options.sandboxPolicy ?? null,
             "pi",
             options.binaryPath,
             options.piHome,
@@ -962,6 +965,9 @@ function makeConnection(
               const processConnection = await Effect.runPromise(
                 options.process
                   .start({
+                    ...(options.sandboxPolicy === undefined
+                      ? {}
+                      : { sandboxPolicy: options.sandboxPolicy }),
                     binaryPath: options.binaryPath,
                     root: mode === "chat" ? options.piHome : projectRoot,
                     ...(extraFolders.length === 0 ? {} : { extraFolders }),
@@ -1352,6 +1358,7 @@ function makeConnection(
                 await state.client.request("abort").catch(() => undefined);
               }
               if (
+                options.sandboxPolicy === undefined &&
                 state.completed &&
                 state.runtime.version === PI_WARM_REUSE_VERSION &&
                 state.approvals.size === 0 &&

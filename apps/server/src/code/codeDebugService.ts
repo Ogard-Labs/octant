@@ -1,3 +1,9 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
+import {
+  sandboxToolPolicy,
+  activeSandboxPolicy,
+  registerSandboxCleanup,
+} from "../process/sandboxRuntimePolicy";
 import type { EventActor } from "@octant/contracts";
 import { createHash } from "node:crypto";
 import { connect as connectSocket, createServer, type Socket } from "node:net";
@@ -260,6 +266,8 @@ interface ChildRecord extends DebugTarget {
 }
 
 interface SessionRecord extends DebugTarget {
+  readonly sandboxPolicy?: SandboxPolicySelection;
+  readonly sandboxSessionId?: string;
   readonly sessionId: CodeDebugSessionId;
   readonly projectId: ProjectId;
   readonly threadId: CodeThreadId;
@@ -536,7 +544,9 @@ export class CodeDebugService {
     // ends only the sessions it can see, so a Start it cannot see launches
     // nothing.
     if (this.#closed) return { status: "failed", reason: "launch-failed" };
-    const network = decision.shape.network === "allow" ? "allow" : "proxied";
+    const sandbox = sandboxToolPolicy() ?? activeSandboxPolicy(String(thread.id));
+    const network =
+      sandbox !== undefined || decision.shape.network !== "allow" ? "proxied" : "allow";
     if (network === "proxied" && !this.#processes.proxies) {
       return refused("confinement-unavailable");
     }
@@ -548,6 +558,9 @@ export class CodeDebugService {
     }
     const sessionId = decodeCodeDebugSessionId(this.#uuid());
     const record = newRecord({
+      ...(sandbox === undefined
+        ? {}
+        : { sandboxSessionId: sandbox.context.sessionId, sandboxPolicy: sandbox }),
       sessionId,
       projectId: thread.projectId,
       threadId: thread.id,
@@ -564,6 +577,8 @@ export class CodeDebugService {
     // Held from here, so a second Start on the thread is busy while this one
     // is still launching.
     this.#sessions.set(String(sessionId), record);
+    if (sandbox !== undefined)
+      registerSandboxCleanup(sandbox, () => this.#end(record, "thread-inactive"));
     const executable = await adapter.executable().catch(() => undefined);
     if (executable === undefined) {
       this.#sessions.delete(String(sessionId));
@@ -606,7 +621,12 @@ export class CodeDebugService {
       await record.ending;
       return { status: "failed", reason: "launch-failed" };
     }
+    if (sandbox !== undefined && activeSandboxPolicy(String(thread.id)) !== sandbox) {
+      await this.#end(record, "thread-inactive");
+      return { status: "failed", reason: "launch-failed" };
+    }
     const outcome = await this.#processes.launch({
+      ...(sandbox === undefined ? {} : { sandboxPolicy: sandbox }),
       sessionId: String(sessionId),
       executable,
       installRoot: adapter.installRoot,
@@ -663,7 +683,12 @@ export class CodeDebugService {
     const authorized = this.#authorize(caller, call.threadId, call.checkoutId);
     if (authorized.status === "refused") return authorized;
     const record = this.#sessions.get(String(call.sessionId));
-    if (record === undefined || !sameThread(record, call.threadId)) {
+    if (
+      record === undefined ||
+      !sameThread(record, call.threadId) ||
+      (sandboxToolPolicy() !== undefined &&
+        record.sandboxSessionId !== sandboxToolPolicy()?.context.sessionId)
+    ) {
       return this.#endedAnswer(call);
     }
     // A session that is ending answers as ended once it has.
@@ -896,7 +921,11 @@ export class CodeDebugService {
   /** The thread's session that is running and not already ending. */
   #runningFor(threadId: CodeThreadId): SessionRecord | undefined {
     return [...this.#sessions.values()].find(
-      (record) => sameThread(record, threadId) && record.ending === undefined,
+      (record) =>
+        sameThread(record, threadId) &&
+        record.ending === undefined &&
+        (sandboxToolPolicy() === undefined ||
+          record.sandboxSessionId === sandboxToolPolicy()?.context.sessionId),
     );
   }
 
@@ -1355,12 +1384,18 @@ export class CodeDebugService {
    * the person answered for this session in the thread.
    */
   #endReasonFor(record: SessionRecord): CodeDebugSessionEndReason | undefined {
+    if (
+      record.sandboxSessionId !== undefined &&
+      activeSandboxPolicy(String(record.threadId))?.context.sessionId !== record.sandboxSessionId
+    )
+      return "thread-inactive";
     const stored = this.#authority.readThread(record.threadId);
     if (stored === undefined || !isActiveThread(stored)) return "thread-inactive";
     const thread = this.#authority.effectiveThread(record.startedBy, stored);
     if (thread.executionPolicy === "plan") return "plan-read-only";
     const network = thread.executionPolicy === "full-access" ? "allow" : "proxied";
-    if (network !== record.network) return "network-changed";
+    if (record.sandboxSessionId === undefined && network !== record.network)
+      return "network-changed";
     const checkout = this.#authority.readCheckout(record.checkoutId);
     if (
       String(thread.checkoutId) !== String(record.checkoutId) ||
@@ -1654,6 +1689,8 @@ const STEP_COMMANDS = {
 } as const;
 
 function newRecord(input: {
+  readonly sandboxPolicy?: SandboxPolicySelection;
+  readonly sandboxSessionId?: string;
   readonly sessionId: CodeDebugSessionId;
   readonly projectId: ProjectId;
   readonly threadId: CodeThreadId;

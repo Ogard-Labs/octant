@@ -1578,7 +1578,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   }
 
-  async function changeStrict(strict: boolean) {
+  async function changeStrict(strict: boolean | "inherit") {
     props.controller.setAccessNotice(undefined);
     setAccessChanging(true);
     try {
@@ -1588,25 +1588,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         expectedVersion: thread.version,
         executionPolicy: thread.executionPolicy,
         permissionPersistence: thread.permissionPersistence,
-        ...(thread.autoApprove === true ? { autoApprove: true } : {}),
-        strict,
-      });
-    } finally {
-      setAccessChanging(false);
-    }
-  }
-
-  async function changeFullAccessSandbox(sandboxed: boolean) {
-    props.controller.setAccessNotice(undefined);
-    setAccessChanging(true);
-    try {
-      await props.controller.execute({
-        kind: "change-code-thread-access",
-        threadId: thread.id,
-        expectedVersion: thread.version,
-        executionPolicy: "full-access",
-        permissionPersistence: thread.permissionPersistence,
-        fullAccessSandbox: sandboxed,
+        strict: strict === "inherit" ? null : strict,
       });
     } finally {
       setAccessChanging(false);
@@ -2959,13 +2941,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   {...(profileName === undefined ? {} : { profileName })}
                   warningScope={{ projectId: String(thread.projectId) }}
                   value={permissionModeOf(thread)}
-                  fullAccessSandbox={thread.fullAccessSandbox === true}
+                  strict={
+                    thread.strict ??
+                    (thread.fullAccessSandbox === true && thread.executionPolicy === "full-access"
+                      ? true
+                      : props.strictDefault === true)
+                  }
+                  legacyStrict={thread.strict === undefined && thread.fullAccessSandbox === true}
                   fullAccessSandboxSupported={threadKeepsFullAccessSandbox(
                     providerGroups,
                     thread.providerInstanceId,
                   )}
-                  onFullAccessSandboxChange={(sandboxed) => void changeFullAccessSandbox(sandboxed)}
-                  strict={thread.strict ?? props.strictDefault === true}
                   onStrictChange={(strict) => void changeStrict(strict)}
                 />
               </>

@@ -1,3 +1,4 @@
+import { activeSandboxPolicy } from "../process/sandboxRuntimePolicy";
 import {
   decodeNativeHarnessContextRemaining,
   WEB_SEARCH_TOOL_DEFINITION,
@@ -797,7 +798,7 @@ export function createNativeHarnessComposition(
       const confirmed =
         input.callId === undefined ? undefined : confirmedCommandHosts.get(input.callId);
       if (input.callId !== undefined) confirmedCommandHosts.delete(input.callId);
-      if (network === "proxied") {
+      if (network === "proxied" || activeSandboxPolicy(tagScope.threadId) !== undefined) {
         return proxied.run(
           confirmed === undefined ? input : { ...input, confirmedHosts: confirmed },
         );
@@ -930,7 +931,9 @@ export function createNativeHarnessComposition(
       : resolveDefaultThreadEgressPolicy({
           mode: "code",
           executionPolicy,
-          fullAccessSandbox: options.readFullAccessSandbox?.(threadId),
+          fullAccessSandbox:
+            activeSandboxPolicy(threadId) !== undefined ||
+            options.readFullAccessSandbox?.(threadId),
         });
   };
   const codeShell = (
@@ -960,7 +963,9 @@ export function createNativeHarnessComposition(
       : resolveDefaultThreadEgressPolicy({
           mode: "work",
           executionPolicy,
-          fullAccessSandbox: options.readFullAccessSandbox?.(threadId),
+          fullAccessSandbox:
+            activeSandboxPolicy(threadId) !== undefined ||
+            options.readFullAccessSandbox?.(threadId),
         });
   };
   // Work and Code share the shell at the thread's level, so a Work thread's
@@ -1181,6 +1186,8 @@ export function createNativeHarnessComposition(
             boundRoot: projectRoot,
           }),
           filesystem: new NativeHarnessFileSystem({
+            threadId,
+            sandboxPolicy: () => activeSandboxPolicy(threadId),
             root: projectRoot,
             ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
             fullAccess: () => options.readWorkExecutionPolicy?.(threadId) === "full-access",
@@ -1241,6 +1248,8 @@ export function createNativeHarnessComposition(
             ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
           }),
           filesystem: new NativeHarnessFileSystem({
+            threadId,
+            sandboxPolicy: () => activeSandboxPolicy(threadId),
             root: checkoutRoot,
             ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
             fullAccess: () =>
@@ -1500,7 +1509,11 @@ export function createNativeHarnessComposition(
             ? {
                 filesystem: new NativeHarnessFileSystem({
                   root: projectRoot,
-                  fullAccess: () => authority.executionPolicy === "full-access",
+                  threadId: runId,
+                  sandboxPolicy: () => activeSandboxPolicy(runId),
+                  fullAccess: () =>
+                    authority.executionPolicy === "full-access" &&
+                    activeSandboxPolicy(runId) === undefined,
                 }),
                 readsImages: () => options.readsImages?.(target) === true,
               }

@@ -2317,6 +2317,51 @@ describe("CodeService commands", () => {
       expect("thread" in back ? back.thread : undefined).not.toHaveProperty("planReturnPolicy");
     });
 
+    it.each([true, false])(
+      "preserves the Full-access compatibility boundary when migrating a kept sandbox to Strict %s",
+      async (strict) => {
+        const f = serviceFixture({
+          threads: [thread({ executionPolicy: "full-access", fullAccessSandbox: true })],
+          approve: false,
+        });
+        const result = await f.service.execute(ids.window, {
+          kind: "change-code-thread-access",
+          threadId: ids.thread,
+          expectedVersion: 1 as never,
+          executionPolicy: "full-access",
+          permissionPersistence: "current-session",
+          strict,
+        });
+        if (!("thread" in result)) throw new Error("No updated thread");
+        expect(result.thread.strict).toBe(strict);
+        expect(result.thread.fullAccessSandbox === true).toBe(strict);
+        // An older reader that ignores Strict still sees the retained wall.
+        const { strict: _newPreference, ...olderReader } = result.thread;
+        expect(olderReader.fullAccessSandbox === true).toBe(strict);
+      },
+    );
+
+    it("clears an explicit Strict and legacy choice when the person returns a Code thread to inheritance", async () => {
+      const f = serviceFixture({
+        threads: [
+          thread({ executionPolicy: "full-access", strict: true, fullAccessSandbox: true }),
+        ],
+        approve: false,
+      });
+      const result = await f.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "full-access",
+        permissionPersistence: "current-session",
+        strict: null,
+      });
+      if (!("thread" in result)) throw new Error("No updated thread");
+      expect(result.thread).not.toHaveProperty("strict");
+      expect(result.thread).not.toHaveProperty("fullAccessSandbox");
+      expect(result.thread).toMatchObject({ executionPolicy: "full-access" });
+    });
+
     it("keeps a Code thread's sandbox at Full access, takes a new choice with the mode, and drops it below Full access", async () => {
       const raised = serviceFixture({
         threads: [thread({ executionPolicy: "full-access" })],

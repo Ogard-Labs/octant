@@ -17,7 +17,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NO_PROTECTED_FILES_CHANGES } from "@octant/domain/secret-guard-policy";
 import { applyProtectedFilesChoice, secretGuardMediationPolicy } from "./secretGuard";
-import { linuxMediationObjectKey, readLinuxMediationPolicy } from "./linuxMediationPolicy";
+import {
+  linuxMediationObjectAllowed,
+  linuxMediationObjectKey,
+  readLinuxMediationPolicy,
+} from "./linuxMediationPolicy";
 
 import {
   classifyLinuxMediationCreation,
@@ -37,7 +41,11 @@ async function fixture() {
   await mkdir(join(home, ".ssh"), { recursive: true });
   const readNamespace = async () => ({ epoch: 1n, activeMutations: 0 });
   const policy = (ownAccountPaths: ReadonlyArray<string> = []) =>
-    secretGuardMediationPolicy({ platform: "linux", homeDirectory: home, ownAccountPaths });
+    secretGuardMediationPolicy({
+      platform: "linux",
+      homeDirectory: home,
+      ownAccountPaths,
+    });
   const key = async (path: string) => linuxMediationObjectKey(await stat(path, { bigint: true }));
   return { directory, home, readNamespace, policy, key };
 }
@@ -52,7 +60,10 @@ it("refuses protected future names through directory aliases while preserving pe
   const decide = (name: string) =>
     classifyLinuxMediationCreation(
       f.policy(),
-      { operation: "create", destination: { parent: alias, name: Buffer.from(name) } },
+      {
+        operation: "create",
+        destination: { parent: alias, name: Buffer.from(name) },
+      },
       f.readNamespace,
     );
   for (const name of ["id_created", "deployment"])
@@ -66,7 +77,10 @@ it("refuses protected future names through directory aliases while preserving pe
   expect(
     await classifyLinuxMediationCreation(
       f.policy(),
-      { operation: "create", destination: { parent: awsAlias, name: Buffer.from("credentials") } },
+      {
+        operation: "create",
+        destination: { parent: awsAlias, name: Buffer.from("credentials") },
+      },
       f.readNamespace,
     ),
   ).toEqual({ status: "refused", epoch: 1n });
@@ -81,7 +95,11 @@ it("binds a new hardlink to its actual source inode and permits an unnamed unpro
   const decide = (sourceObject: string, name: string, parent = f.home) =>
     classifyLinuxMediationCreation(
       f.policy(),
-      { operation: "link", sourceObject, destination: { parent, name: Buffer.from(name) } },
+      {
+        operation: "link",
+        sourceObject,
+        destination: { parent, name: Buffer.from(name) },
+      },
       f.readNamespace,
     );
   expect(await decide(await f.key(secret), "public-alias")).toEqual({
@@ -134,14 +152,20 @@ it("keeps captured account exceptions and refuses changed epochs or unsafe creat
   expect(
     await classifyLinuxMediationCreation(
       policy,
-      { ...creation, destination: { parent: account, name: Buffer.from("../escape") } },
+      {
+        ...creation,
+        destination: { parent: account, name: Buffer.from("../escape") },
+      },
       f.readNamespace,
     ),
   ).toEqual({ status: "unavailable", epoch: 0n });
   expect(
     await classifyLinuxMediationCreation(
       policy,
-      { operation: "tmpfile", destination: { parent: f.directory, name: Buffer.alloc(0) } },
+      {
+        operation: "tmpfile",
+        destination: { parent: f.directory, name: Buffer.alloc(0) },
+      },
       f.readNamespace,
     ),
   ).toEqual({ status: "allowed", epoch: 1n });
@@ -176,6 +200,106 @@ it("classifies a late companion and its existing hardlink by the actual inode wi
   await writeFile(join(f.home, ".ssh", "config"), "Host example");
   expect(await readFile(join(f.home, ".ssh", "config"), "utf8")).toBe("Host example");
   expect(await f.key(alias)).toBe(await f.key(candidate));
+});
+
+it("classifies selected deny paths and same-filesystem read-only objects through every hardlink", async () => {
+  const f = await fixture();
+  const readOnly = join(f.directory, "read-only");
+  const selectedDeny = join(f.directory, "selected-deny");
+  const selectedReadOnly = join(f.directory, "selected-read-only");
+  await Promise.all([mkdir(readOnly), mkdir(selectedDeny), mkdir(selectedReadOnly)]);
+  const readOnlyFile = join(readOnly, "document.txt");
+  const denyFile = join(selectedDeny, "secret.txt");
+  const selectedReadOnlyFile = join(selectedReadOnly, "settings.json");
+  await writeFile(readOnlyFile, "synthetic read-only bytes");
+  await writeFile(denyFile, "synthetic denied bytes");
+  await writeFile(selectedReadOnlyFile, "synthetic selected read-only bytes");
+  const alias = join(f.directory, "writable-alias");
+  await link(readOnlyFile, alias);
+  const policy = {
+    ...f.policy(),
+    readOnlyRoots: [readOnly],
+    protectedPaths: [
+      { path: selectedDeny, mode: "deny" as const },
+      { path: selectedReadOnly, mode: "read-only" as const },
+    ],
+  };
+  const snapshot = await readLinuxMediationPolicy(policy, f.readNamespace);
+  if (snapshot.status !== "ready") throw Error("Missing selected-path policy snapshot");
+  expect(snapshot.protectedObjects.has(await f.key(denyFile))).toBe(true);
+  expect(snapshot.writeProtectedObjects.has(await f.key(readOnlyFile))).toBe(true);
+  expect(snapshot.writeProtectedObjects.has(await f.key(alias))).toBe(true);
+  expect(snapshot.writeProtectedObjects.has(await f.key(selectedReadOnlyFile))).toBe(true);
+  expect(snapshot.protectedObjects.has(await f.key(readOnlyFile))).toBe(false);
+  const readOnlyObject = await f.key(alias);
+  expect(linuxMediationObjectAllowed(snapshot, 1, readOnlyObject)).toBe(true);
+  expect(linuxMediationObjectAllowed(snapshot, 2, readOnlyObject)).toBe(false);
+  expect(linuxMediationObjectAllowed(snapshot, 3, readOnlyObject)).toBe(true);
+  expect(linuxMediationObjectAllowed(snapshot, 4, readOnlyObject)).toBe(true);
+  const deniedObject = await f.key(denyFile);
+  for (const operation of [1, 2, 3, 4])
+    expect(linuxMediationObjectAllowed(snapshot, operation, deniedObject)).toBe(false);
+});
+
+it("refuses namespace changes inside selected roots while preserving an outside hardlink", async () => {
+  const f = await fixture();
+  const readOnly = join(f.directory, "read-only");
+  const denied = join(f.directory, "denied");
+  await Promise.all([mkdir(readOnly), mkdir(denied)]);
+  const readOnlyFile = join(readOnly, "document.txt");
+  const deniedFile = join(denied, "secret.txt");
+  await writeFile(readOnlyFile, "synthetic read-only bytes");
+  await writeFile(deniedFile, "synthetic denied bytes");
+  const alias = join(f.directory, "read-only-alias");
+  await link(readOnlyFile, alias);
+  const policy = {
+    ...f.policy(),
+    readOnlyRoots: [readOnly],
+    protectedPaths: [{ path: denied, mode: "deny" as const }],
+  };
+  expect(
+    await classifyLinuxMediationCreation(
+      policy,
+      {
+        operation: "create",
+        destination: { parent: readOnly, name: Buffer.from("new.txt") },
+      },
+      f.readNamespace,
+    ),
+  ).toEqual({ status: "refused", epoch: 1n });
+  expect(
+    await classifyLinuxMediationCreation(
+      policy,
+      {
+        operation: "create",
+        destination: { parent: denied, name: Buffer.from("late.txt") },
+      },
+      f.readNamespace,
+    ),
+  ).toEqual({ status: "refused", epoch: 1n });
+  expect(
+    await classifyLinuxMediationMutation(
+      policy,
+      {
+        operation: "unlink",
+        source: { parent: f.directory, name: Buffer.from("read-only-alias") },
+        flags: 0,
+      },
+      f.readNamespace,
+    ),
+  ).toEqual({ status: "allowed", epoch: 1n });
+  expect(
+    await classifyLinuxMediationMutation(
+      policy,
+      {
+        operation: "rename",
+        source: { parent: readOnly, name: Buffer.from("document.txt") },
+        destination: { parent: readOnly, name: Buffer.from("renamed.txt") },
+        flags: 0,
+      },
+      f.readNamespace,
+    ),
+  ).toEqual({ status: "refused", epoch: 1n });
 });
 
 it("retains exact original name rules, symlink target identity, account exceptions and added paths", async () => {
@@ -216,7 +340,10 @@ it("retains exact original name rules, symlink target identity, account exceptio
   expect(snapshot.protectedObjects.has(await f.key(publicTarget))).toBe(false);
   expect(snapshot.protectedObjects.has(await f.key(nested))).toBe(true);
   expect(snapshot.protectedObjects.has(await f.key(account))).toBe(false);
-  applyProtectedFilesChoice({ added: [account, custom], removed: ["ssh-private-keys"] });
+  applyProtectedFilesChoice({
+    added: [account, custom],
+    removed: ["ssh-private-keys"],
+  });
   const changed = await readLinuxMediationPolicy(f.policy([own]), f.readNamespace);
   if (changed.status !== "ready") throw Error("Missing changed policy snapshot");
   expect(changed.protectedObjects.has(await f.key(target))).toBe(false);
@@ -248,9 +375,15 @@ it("never treats a scan concurrent with an outside namespace mutation as a valid
     epoch: ++reads === 1 ? 1n : 2n,
     activeMutations: 0,
   }));
-  expect(changed).toEqual({ status: "unavailable", reason: "namespace-changed" });
+  expect(changed).toEqual({
+    status: "unavailable",
+    reason: "namespace-changed",
+  });
   expect(
-    await readLinuxMediationPolicy(f.policy(), async () => ({ epoch: 2n, activeMutations: 1 })),
+    await readLinuxMediationPolicy(f.policy(), async () => ({
+      epoch: 2n,
+      activeMutations: 1,
+    })),
   ).toEqual({
     status: "unavailable",
     reason: "namespace-changing",

@@ -1,3 +1,9 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
+import {
+  sandboxToolPolicy,
+  registerSandboxCleanup,
+  activeSandboxPolicy,
+} from "../process/sandboxRuntimePolicy";
 import type { EventActor } from "@octant/contracts";
 import {
   INTELLIGENCE_METHODS,
@@ -46,6 +52,7 @@ import {
   type PrincipalKind,
 } from "@octant/domain";
 import { readConfinedCodeFile } from "./codeConfinedFileRead";
+import { secretGuardRefusal } from "../process/secretGuard";
 import { languageEditPreview } from "./languageEditPreview";
 import { CodeFileListingService } from "./codeFileListingService";
 import { boundedDiagnosticMessage } from "./languageServerResults";
@@ -357,6 +364,7 @@ interface OpenDocument {
 }
 
 interface ServerRecord {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly key: string;
   readonly checkoutId: CodeCheckoutId;
   readonly projectId: ProjectId;
@@ -1065,16 +1073,28 @@ export class CodeLanguageService {
     const contained = await this.#containedRoot(caller, authorized, request.path);
     if (contained.status === "refused") return contained;
     const { root } = contained;
+    const sandbox = sandboxToolPolicy() ?? activeSandboxPolicy(String(authorized.thread.id));
+    const needsObjectMediation =
+      sandbox?.policy.credentials === "isolated" ||
+      sandbox?.policy.filesystem.protectedPaths.some((rule) => rule.mode === "deny") === true;
+    const fullAccess = authorized.thread.executionPolicy === "full-access" && sandbox === undefined;
+    if (needsObjectMediation) {
+      return { status: "refused", reason: "sandbox-read-denied" };
+    }
     const saved = await readConfinedCodeFile({
       port: this.#files,
       canonicalRoot: root.rootPath,
       relativePath: pathInResolvedRoot(root, request.path),
       maximumBytes: LANGUAGE_SERVER_FRAME_CAP_BYTES,
+      allowResolved: (canonicalPath) =>
+        secretGuardRefusal(canonicalPath, { fullAccess }) === undefined,
     });
     if (saved.status === "refused") {
-      return saved.reason === "too-large"
-        ? { status: "too-large" }
-        : { status: "refused", reason: "path-outside-checkout" };
+      if (saved.reason === "too-large") return { status: "too-large" };
+      return {
+        status: "refused",
+        reason: saved.reason === "access-denied" ? "sandbox-read-denied" : "path-outside-checkout",
+      };
     }
     const text = Buffer.from(saved.bytes).toString("utf8");
     if (text.length > MAX_CODE_LANGUAGE_DOCUMENT_TEXT_LENGTH || !fitsFrame(text)) {
@@ -1516,7 +1536,8 @@ export class CodeLanguageService {
     const chosen = this.#componentFor(path, authorized.thread.projectId);
     if (chosen.status === "refused") return chosen;
     const { component } = chosen;
-    const key = serverKey(authorized.checkout.id, component, extraFolder ? rootPath : undefined);
+    const sandbox = sandboxToolPolicy() ?? activeSandboxPolicy(String(authorized.thread.id));
+    const key = `${serverKey(authorized.checkout.id, component, extraFolder ? rootPath : undefined)}${sandbox === undefined ? "" : `:sandbox:${sandbox.context.sessionId}`}`;
     if (intent === "agent-read" && component.launchClass === "repo-tooling") {
       // An agent reads through this class only as it stands: nothing here
       // starts, restarts, or retargets a server, so one that is stopped,
@@ -1573,6 +1594,7 @@ export class CodeLanguageService {
       if (rootPath === undefined || resolved === undefined)
         return { status: "refused", reason: "file-outside-thread" };
       record = {
+        ...(sandbox === undefined ? {} : { sandboxPolicy: sandbox }),
         key,
         checkoutId: authorized.checkout.id,
         projectId: authorized.thread.projectId,
@@ -1598,6 +1620,10 @@ export class CodeLanguageService {
         lastActivity: this.#now(),
       };
       this.#servers.set(key, record);
+      if (sandbox !== undefined) {
+        const owned = record;
+        registerSandboxCleanup(sandbox, () => this.#retire(owned));
+      }
     }
     // A server whose output has ended is gone even before its exit is
     // reported; counting that now keeps a request from being served by the
@@ -1765,7 +1791,13 @@ export class CodeLanguageService {
     const executable = await record.component.executable(record.rootPath).catch(() => undefined);
     if (record.generation !== generation) return "crashed";
     if (executable === undefined) return this.#crash(record, generation);
+    if (
+      record.sandboxPolicy !== undefined &&
+      activeSandboxPolicy(String(record.watchThreadId)) !== record.sandboxPolicy
+    )
+      return "crashed";
     const outcome = await this.#processes.launch({
+      ...(record.sandboxPolicy === undefined ? {} : { sandboxPolicy: record.sandboxPolicy }),
       ownerId: record.key,
       launchClass: record.component.launchClass,
       ...(record.component.launchClass === "repo-tooling"
@@ -1948,6 +1980,8 @@ export class CodeLanguageService {
     const reference = this.#documents.get(String(request.fileId));
     if (
       reference === undefined ||
+      (sandboxToolPolicy() !== undefined &&
+        !reference.serverKey.endsWith(`:sandbox:${sandboxToolPolicy()?.context.sessionId}`)) ||
       String(reference.threadId) !== String(request.threadId) ||
       String(reference.checkoutId) !== String(request.checkoutId)
     ) {

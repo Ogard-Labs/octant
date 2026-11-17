@@ -3186,6 +3186,8 @@ export const ProviderRuntimeEvent = Schema.Union(
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("approval-request"),
+    /** This action always needs the person; an automatic reviewer cannot answer. */
+    requiresUser: Schema.optional(Schema.Boolean),
     requestId: Schema.NonEmptyTrimmedString,
     action: Schema.NonEmptyTrimmedString,
     description: Schema.NonEmptyTrimmedString,
