@@ -29,7 +29,11 @@ import {
   loadDesktopPeerStatus,
   type DesktopPeerStart,
 } from "./desktopPeerStatus";
-import { resolveDesktopHostRuntimePaths, WINDOWS_HOST_OWNER_FILENAME } from "./runtimePaths";
+import {
+  desktopUserDataDirectory,
+  resolveDesktopHostRuntimePaths,
+  WINDOWS_HOST_OWNER_FILENAME,
+} from "./runtimePaths";
 import { resolveStartupHostRole } from "./nightlyTestData";
 import { createNightlyLaunchLinks } from "./nightlyLaunchLinks";
 
@@ -44,12 +48,18 @@ const identity = app.isPackaged
 // never creates the data folder, and any failure starts the app as it would
 // without one. It must precede the imports of main.mjs below.
 try {
-  enableCompileCacheBeneath(
+  // The folder main.ts will make userData, not Electron's default one, which
+  // differs whenever OCTANT_DATA_DIR names another data folder.
+  const cacheParent =
     identity.flavor === "stable"
-      ? app.getPath("userData")
-      : desktopWindowStorageDirectory(identity, "", app.getPath("appData")),
-    enableCompileCache,
-  );
+      ? desktopUserDataDirectory({
+          identity,
+          appDataDirectory: app.getPath("appData"),
+          platform: process.platform,
+          env: process.env,
+        })
+      : desktopWindowStorageDirectory(identity, "", app.getPath("appData"));
+  if (cacheParent !== undefined) enableCompileCacheBeneath(cacheParent, enableCompileCache);
 } catch {
   // Missing or refused: start without the cache.
 }

@@ -2,7 +2,12 @@ import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  desktopWindowStorageDirectory,
+  type DesktopIdentity,
+} from "@octant/host-runtime/desktop-identity";
 import { resolveHostRuntimePaths, type HostRuntimePaths } from "@octant/host-runtime/paths";
+import { resolveHostOwningStartup } from "./nightlyTestData";
 
 export const BROWSER_EDITABLE_PRELOAD_FILENAME = "browserEditablePreload.cjs" as const;
 export const DESKTOP_PRELOAD_FILENAME = "preload.cjs" as const;
@@ -118,6 +123,7 @@ export function resolveDesktopHostRuntimePaths(
   appDataDirectory: string,
   platform: NodeJS.Platform = process.platform,
   env: Readonly<Record<string, string | undefined>> = process.env,
+  options: { readonly createDataDirectory?: boolean } = {},
 ): HostRuntimePaths {
   if (platform !== "darwin" && platform !== "linux") {
     throw new Error(`Octant desktop does not support host paths on ${platform}.`);
@@ -127,21 +133,55 @@ export function resolveDesktopHostRuntimePaths(
   // synthetic appData without depending on the process home.
   const home =
     platform === "darwin" ? resolve(appDataDirectory, "..", "..") : resolve(appDataDirectory, "..");
-  return resolveHostRuntimePaths({
-    env: {
-      OCTANT_DATA_DIR: configuredDirectory,
-      // Linux XDG overrides must reach the host-runtime resolver; otherwise a
-      // user with XDG_DATA_HOME set still lands under the default home path.
-      XDG_DATA_HOME: env.XDG_DATA_HOME,
-      XDG_CONFIG_HOME: env.XDG_CONFIG_HOME,
-      XDG_STATE_HOME: env.XDG_STATE_HOME,
-      OCTANT_LOGS_DIR: env.OCTANT_LOGS_DIR,
+  return resolveHostRuntimePaths(
+    {
+      env: {
+        OCTANT_DATA_DIR: configuredDirectory,
+        // Linux XDG overrides must reach the host-runtime resolver; otherwise a
+        // user with XDG_DATA_HOME set still lands under the default home path.
+        XDG_DATA_HOME: env.XDG_DATA_HOME,
+        XDG_CONFIG_HOME: env.XDG_CONFIG_HOME,
+        XDG_STATE_HOME: env.XDG_STATE_HOME,
+        OCTANT_LOGS_DIR: env.OCTANT_LOGS_DIR,
+      },
+      platform,
+      home,
+      temporaryDirectory: canonicalTemporaryDirectory(),
+      uid: process.getuid?.() ?? 0,
     },
-    platform,
-    home,
-    temporaryDirectory: canonicalTemporaryDirectory(),
-    uid: process.getuid?.() ?? 0,
+    options,
+  );
+}
+
+/**
+ * The folder Electron's `userData` becomes for Octant (the host-owning app),
+ * resolved the way `main.ts` resolves it but without creating anything, so the
+ * entry can place the compile cache before `main.ts` runs. Undefined where the
+ * native Windows profile owns the path or the launch would be refused.
+ */
+export function desktopUserDataDirectory(input: {
+  readonly identity: DesktopIdentity;
+  readonly appDataDirectory: string;
+  readonly platform: NodeJS.Platform;
+  readonly env: Readonly<Record<string, string | undefined>>;
+}): string | undefined {
+  if (input.platform !== "darwin" && input.platform !== "linux") return undefined;
+  const startup = resolveHostOwningStartup({
+    identity: input.identity,
+    role: { kind: "octant-host" },
+    platform: input.platform,
+    appDataDirectory: input.appDataDirectory,
+    env: input.env,
   });
+  if (startup.kind !== "start") return undefined;
+  const paths = resolveDesktopHostRuntimePaths(
+    startup.configuredDataDirectory,
+    input.appDataDirectory,
+    input.platform,
+    input.env,
+    { createDataDirectory: false },
+  );
+  return desktopWindowStorageDirectory(input.identity, paths.dataDirectory, input.appDataDirectory);
 }
 
 function canonicalTemporaryDirectory(): string {

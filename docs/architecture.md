@@ -5451,8 +5451,10 @@ flowchart LR
   this host stores without opening a document. Categories the host cannot
   verify are `unknown`; the map never carries secret values.
 - **Compiled code cache.** The host and the desktop app keep V8's compiled
-  code in a `compile-cache` folder inside the host data folder (the desktop's
-  `userData` folder, which is the same folder for the stable app), listed in
+  code in a `compile-cache` folder inside the host data folder (for the
+  desktop, the folder its `main` later makes `userData`, resolved by the entry
+  without creating anything, so a test data folder never writes to the default
+  one; skipped on Windows), listed in
   the host data map. It is enabled only when that data folder already exists,
   is owned by the current user and is writable by nobody else, and only when
   `compile-cache` itself is owned by the user, not a symlink and not writable
