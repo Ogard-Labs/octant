@@ -438,6 +438,10 @@ export class OutsideDriverAdmission {
     const driver = instance.configuration.driver;
     const located = await this.#entry(driver);
     if (located === undefined) throw notAdmitted();
+    // Strict can turn on, or trust be withdrawn, while the files are read;
+    // no instance change follows a Strict change, so decide once more with
+    // the values as they are now, before the process exists.
+    if (!this.isAdmitted(instance)) throw notAdmitted();
     if (running.ended) throw refusalFailure("start-failed");
     const started = await this.#processes.start({
       instanceId: instance.id,
