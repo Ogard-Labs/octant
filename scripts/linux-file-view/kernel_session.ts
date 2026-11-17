@@ -1,7 +1,7 @@
 /** Actual candidate-session lifecycle inside the owned networkless guest. */
 import assert from "node:assert/strict";
 import { decodeSandboxPolicySelection } from "@octant/contracts/sandbox-policy";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, statfs, writeFile } from "node:fs/promises";
 import { setTimeout as pause } from "node:timers/promises";
 import {
   prepareLinuxMediationSession,
@@ -13,7 +13,7 @@ import {
   readOwnedProcessReceipts,
   readProcessIdentity,
 } from "../../apps/server/src/process/nodeOwnedProcessReceipt";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 export async function measureProductionLaunch(root: string): Promise<{
   readonly privateRuntime: boolean;
@@ -59,23 +59,52 @@ export async function measureProductionLaunch(root: string): Promise<{
     },
   });
   const receiptDirectory = `${authority}/linux-mediation-runtime/receipts`;
-  const prepared = prepareLinuxMediatedLaunch(
-    {
-      executable: "/policy-workload",
-      args: ["--session-exit", project, receiptDirectory],
-      boundRoot: project,
-      temporaryDirectory: temporary,
-      networkEgress: "none",
-      ownAccountAccess: "none",
-    },
-    selection,
-    authority,
-  );
+  const runtimeDirectory = `${authority}/linux-mediation-runtime`;
+  let prepared: ReturnType<typeof prepareLinuxMediatedLaunch>;
+  try {
+    prepared = prepareLinuxMediatedLaunch(
+      {
+        executable: "/policy-workload",
+        args: ["--session-exit", project, receiptDirectory],
+        boundRoot: project,
+        temporaryDirectory: temporary,
+        networkEgress: "none",
+        ownAccountAccess: "none",
+      },
+      selection,
+      authority,
+    );
+  } catch (error) {
+    const runtimeEntries = await readdir(runtimeDirectory).catch(() => []);
+    const broker = runtimeEntries.find((name) => name.startsWith("broker-"));
+    const probe =
+      broker === undefined
+        ? undefined
+        : spawnSync(`${runtimeDirectory}/${broker}`, ["--check"], {
+            timeout: 1_000,
+            stdio: "ignore",
+          });
+    const filesystem = await statfs(productionRoot);
+    console.log(
+      JSON.stringify({
+        status: "failed-production-preparation",
+        runtimeAssets: {
+          broker: broker !== undefined,
+          worker: runtimeEntries.some((name) => name.startsWith("worker-")),
+          supervisor: runtimeEntries.some((name) => name.startsWith("supervisor-")),
+        },
+        availableBytes: filesystem.bavail * filesystem.bsize,
+        probeStatus: probe?.status,
+        probeSignal: probe?.signal,
+        probeError: (probe?.error as NodeJS.ErrnoException | undefined)?.code,
+      }),
+    );
+    throw error;
+  }
   assert.equal(prepared.command, process.execPath);
   assert.equal(prepared.args.length, 2);
   const supervisor = prepared.args[0] as string;
   const configuration = prepared.args[1] as string;
-  const runtimeDirectory = `${authority}/linux-mediation-runtime`;
   const runtimeEntries = await readdir(runtimeDirectory);
   const privateRuntime =
     (await stat(runtimeDirectory)).mode % 0o1000 === 0o700 &&

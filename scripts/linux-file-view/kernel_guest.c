@@ -1227,7 +1227,7 @@ int main(void)
     printf("OCTANT_KERNEL_FAILURE automatic devtmpfs validation errno=%d\n", errno);
   } else if (mount("proc", "/proc", "proc", 0, NULL)) {
     printf("OCTANT_KERNEL_FAILURE guest proc mount errno=%d\n", errno);
-  } else if (mount("tmpfs", "/tmp", "tmpfs", 0, "size=1m")) {
+  } else if (mount("tmpfs", "/tmp", "tmpfs", 0, "size=4m")) {
     printf("OCTANT_KERNEL_FAILURE private guest tmpfs mount errno=%d\n", errno);
   } else if (!core_setting("/proc/sys/kernel/core_pattern", inactive_core) ||
       !core_setting("/proc/sys/kernel/core_pipe_limit", "1")) {
