@@ -785,21 +785,6 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         setMessage("This thread has no Project profile.");
         return;
       }
-      // Every Browser tab opened from the tool row starts fresh, the first one
-      // too. The first becomes the thread's shared page, which the agent's
-      // tool uses; a tab opened while that page is live asks for a page of its
-      // own. An ordinary Open answers with the shared page, so a second tab
-      // that asked the ordinary way showed the first tab's page and was
-      // refused the site it had been asked to open.
-      // A tool-row tab decides by what the thread holds, a profile switch
-      // included: the tab that held the shared page has just stopped it, so
-      // its new page is the shared one again.
-      const threadId = props.tab.threadId;
-      const own =
-        props.startFresh === true
-          ? threadId !== undefined &&
-            sharedPageIsLive(await props.client.inspectThread({ threadId, freshPicture: false }))
-          : switchingProfile.current;
       const next = await props.client.create({
         threadId: props.tab.threadId!,
         action,
@@ -812,11 +797,23 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           sessionTimeoutMs: 300_000,
           ...(prepared?.acceptsLocalCertificate === true ? { acceptsLocalCertificate: true } : {}),
         },
+        // Every Browser tab opened from the tool row starts fresh, the first
+        // one too. The first becomes the thread's shared page, which the
+        // agent's tool uses; a tab opened while that page is live gets a page
+        // of its own. The host decides which as it opens the page: an ordinary
+        // Open answers with the shared page, so a second tab that asked the
+        // ordinary way showed the first tab's page and was refused its site,
+        // and a tab that looked first and then asked could lose a race.
         // A tab bound to one context is replaced by a context of its own, never by
         // whatever shared context the thread already holds.
-        ...(own ? { dedicated: true } : {}),
+        ...(props.startFresh === true
+          ? { ownPageWhenShared: true }
+          : switchingProfile.current
+            ? { dedicated: true }
+            : {}),
       });
-      if (props.startFresh === true) setOwnPage(own);
+      // The host chose; the tab asks which page it now holds.
+      if (props.startFresh === true) setOwnPage(undefined);
       setScope(resolved);
       update(next);
       if (next.context !== undefined) {

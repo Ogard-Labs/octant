@@ -2526,9 +2526,11 @@ site it had been given (found 2026-11-16). A page of its own is the person's
 alone, and its start screen says so. Such a page offers no Take over or Hand
 back: those hold the thread's shared page, so asked from it they would hold
 that page and show it there. Every Browser tab opened from the tool row is
-opened the same way, the first one too, so the pane asks the host whether the
-shared page is live before it opens a page, and a tab the dock restores asks
-once which of the two it holds.
+opened the same way, the first one too, so the tab does not choose: it asks the
+host for the shared page if the thread has none and a page of its own if it
+has, and the host decides as it registers the page. Two tabs that open at the
+same moment, or a tab and the agent, therefore never end up on one page. A tab
+asks once which of the two it holds.
 Files, Document, Review, Agents, Canvas,
 Plan, Delivery, Simulator, and Side chat are singleton destinations. One instance
 still appears in only one region at a time.
