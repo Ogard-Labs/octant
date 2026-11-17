@@ -787,9 +787,20 @@ end run`;
         );
         visualStateImages.push(`${phase}-${name}.png`);
       };
-      const settings = async () => {
-        await wait("app-settings-entry", (s) => s.includes("AXButton |  | Settings |"));
+      // Settings opens from the account menu: the rail's foot is the person's
+      // face, whose name carries their profile and plan usage, so the smoke
+      // reads that name from the tree before pressing it.
+      const openSettings = async () => {
+        const accountMenuName = /AXButton \|  \| (Account menu[^|]*?) \|/;
+        const snapshot = await wait("app-account-menu", (s) => accountMenuName.test(s));
+        const name = accountMenuName.exec(snapshot)?.[1];
+        if (name === undefined) throw Error("Native account menu has no name.");
+        await native("click", name);
+        await wait("app-settings-entry", (s) => s.includes("| Settings |"));
         await native("click", "Settings");
+      };
+      const settings = async () => {
+        await openSettings();
         await wait("settings", (s) => s.includes("Data & storage"));
         await native("reveal", "Data & storage");
         await native("click", "Data & storage");
@@ -831,11 +842,10 @@ end run`;
           await native("click", "Skip setup");
           await wait("skip", (s) => s.includes("AXButton") && !s.includes("Skip setup"));
         } else
-          await wait("restarted-window", (s) => s.includes("AXButton |  | Settings |"), 45_000);
+          await wait("restarted-window", (s) => s.includes("AXButton |  | Account menu"), 45_000);
         if (phase === "provider") {
           if (provider === undefined) throw Error("No owned provider fixture.");
-          await wait("app-settings-entry", (s) => s.includes("AXButton |  | Settings |"));
-          await native("click", "Settings");
+          await openSettings();
           await wait("settings-harness", (s) => s.includes("Octant Harness"));
           await native("reveal", "Octant Harness");
           await native("click", "Octant Harness");
@@ -1347,7 +1357,7 @@ end run`;
                 "Pre-Dock exact bundle census found unknown or outside-group task ownership.",
               );
             await native("dock-click");
-            await wait("dock-reopened", (s) => s.includes("AXButton |  | Settings |"));
+            await wait("dock-reopened", (s) => s.includes("AXButton |  | Account menu"));
             snapshot = await settings();
             await recordPersisted("initial-reopened", true);
             await capture("reopened", snapshot);
