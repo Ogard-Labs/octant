@@ -309,6 +309,16 @@ a suggested name ("<card name> (2)", the next free number) focused for editing.
 It adds no route and no authority: the host still assigns the account directory
 and the form shows the sign-in guidance for an additional account. A created
 account closes the form again, so the suggested name is not offered twice.
+
+Every Claude Code subscription card and every Codex card also offers **Sign
+in** beside Check connection. The host runs the account's own sign-in command,
+which opens the browser; the card then says to finish signing in there, offers
+the sign-in page again, and checks every two seconds until the CLI is done,
+when it says Signed in and checks the connection. A Claude card also takes the
+code a Claude sign-in page shows when the browser could not reach the CLI. A
+failed sign-in shows the CLI's own last line. The same account steps work from
+the person's own terminal on the host with `octant account add`, `list`,
+`sign-in`, `status` and `remove`; Octant's own terminals do not carry them.
 Cards for other drivers, and the single runtime card on a provider's own
 page, have no Add account.
 

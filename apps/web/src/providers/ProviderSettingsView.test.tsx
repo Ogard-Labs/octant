@@ -740,6 +740,45 @@ describe("ProviderSettingsView", () => {
     });
   });
 
+  it("signs a Claude account in from its card and takes a pasted code", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: claudeProvider() });
+    const onBegin = vi.fn(async () => ({
+      attemptId: "provider-attempt-1" as never,
+      signInUrl: "https://claude.com/cai/oauth/authorize",
+      expiresAt: new Date(Date.now() + 600_000).toISOString() as never,
+      codeEntry: true as const,
+    }));
+    const onComplete = vi
+      .fn<ProviderSettingsViewProps["onCompleteProviderAuthentication"]>()
+      .mockResolvedValueOnce("pending")
+      .mockResolvedValue("completed");
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...props}
+        onBeginProviderAuthentication={onBegin}
+        onCompleteProviderAuthentication={onComplete}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Details for Claude local" }));
+    await user.click(screen.getByRole("button", { name: "Sign in Claude local" }));
+    expect(onBegin).toHaveBeenCalledWith(props.instances[0]?.id);
+    expect(await screen.findByText("Finish signing in in your browser.")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Code from the sign-in page"), "abc#def");
+    await user.click(screen.getByRole("button", { name: "Use code" }));
+    expect(onComplete).toHaveBeenCalledWith(
+      props.instances[0]?.id,
+      "provider-attempt-1",
+      "abc#def",
+    );
+    expect(
+      await screen.findByText("Signed in.", undefined, { timeout: 5_000 }),
+    ).toBeInTheDocument();
+    expect(props.onProbe).toHaveBeenCalledWith(props.instances[0]?.id, { quiet: true });
+  });
+
   it("adds another Codex account from the Codex card through the same form", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: codexProvider() });
@@ -5586,7 +5625,7 @@ function fixture(
       signInUrl: "https://auth.mistral.example/attempt",
       expiresAt: "2026-07-17T11:00:00.000Z" as never,
     })),
-    onCompleteProviderAuthentication: vi.fn(async () => true),
+    onCompleteProviderAuthentication: vi.fn(async () => "completed" as const),
     onChangeOpenAiCompatibleConfiguration: vi.fn(async (_id, _configuration, credential) => {
       credential.clear();
       return true;

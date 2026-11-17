@@ -2854,6 +2854,21 @@ html[data-octant-increased-contrast="true"]
   gap: var(--oct-space-2);
 }
 
+/* The sign-in that waits for the browser takes its own line in the actions. */
+.account-sign-in {
+  display: flex;
+  flex-basis: 100%;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}
+
+.account-sign-in__code {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
 .provider-card__facts {
   margin-top: var(--oct-space-1);
   color: var(--octant-text-muted);

@@ -54,7 +54,9 @@ describe("account sign-in through the account's own CLI", () => {
   it("runs the unmodified sign-in command under the account directory and offers the page it prints", async () => {
     const cli = fakeCli();
     const started = startAccountSignIn(command, cli.spawn);
-    cli.print("Opening browser to sign in…\nIf the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true\n");
+    cli.print(
+      "Opening browser to sign in…\nIf the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true\n",
+    );
     await expect(started).resolves.toMatchObject({
       status: "started",
       signInUrl: "https://claude.com/cai/oauth/authorize?code=true",

@@ -235,7 +235,8 @@ export interface ProviderSettingsViewProps {
   readonly onCompleteProviderAuthentication: (
     instanceId: ProviderInstanceId,
     attemptId: ProviderAuthenticationAttempt["attemptId"],
-  ) => Promise<boolean>;
+    code?: string,
+  ) => Promise<"completed" | "pending" | "failed">;
   readonly onUpdateProviderCli?: (instanceId: ProviderInstanceId) => Promise<boolean>;
   readonly onProviderCredentialStatus: (
     instanceId: ProviderInstanceId,

@@ -6,10 +6,7 @@ import {
   type ProviderFailure,
   type ProviderInstanceId,
 } from "@octant/contracts";
-import type {
-  ProviderAuthenticationProgress,
-  ProviderDriver,
-} from "@octant/provider-sdk/driver";
+import type { ProviderAuthenticationProgress, ProviderDriver } from "@octant/provider-sdk/driver";
 
 /**
  * Signing a Claude Code or Codex subscription account in from Settings.
@@ -167,7 +164,8 @@ export function startAccountSignIn(
     };
     attempts.set(attemptId, attempt);
     const pageWait = setTimeout(
-      () => settle({ status: "failed", message: "The sign-in command did not offer a sign-in page." }),
+      () =>
+        settle({ status: "failed", message: "The sign-in command did not offer a sign-in page." }),
       SIGN_IN_PAGE_WAIT_MS,
     );
     child.onOutput((chunk) => {

@@ -7097,9 +7097,18 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `~/.codex-accounts`, and
   deleting it is the person's step. An accent is presentation only:
   changing it alone neither stops a running session nor resets the
-  account's readiness. Sign-in is the unmodified CLI command in a
-  terminal for that account. Connection check uses what the CLI or
-  SDK reports. Two instances of the same driver cannot share one
+  account's readiness. Sign-in is the unmodified CLI command for that
+  account, run under its directory: by the person in their own
+  terminal (`octant account sign-in <account>` runs it there), or by
+  the host from the account's Settings card. There the host starts
+  the command with no terminal, the CLI opens the browser and keeps
+  its login as it always does, and Octant reads only the sign-in page
+  address the CLI prints and hands a code the person pastes on to the
+  CLI's input. One sign-in runs per account; it stops after ten
+  minutes, when another starts, and when the host exits. An extra
+  Claude account's sign-in gets the account's isolated environment,
+  so an inherited Claude credential cannot sign it in. Connection
+  check uses what the CLI or SDK reports. Two instances of the same driver cannot share one
   effective state directory after trailing-slash identity, including
   when a host overlay points two instances at the same existing
   directory. A relative inherited overlay refuses only that implicit

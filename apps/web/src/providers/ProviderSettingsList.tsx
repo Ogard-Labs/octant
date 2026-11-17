@@ -27,6 +27,7 @@ import {
 import { CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ProviderToolVerification } from "./ProviderToolVerification";
+import { AccountSignIn } from "./AccountSignIn";
 import { ClaudeArtifactDeliverySetting } from "./ClaudeArtifactDeliverySetting";
 import {
   ProviderNativeSetupSetting,
@@ -776,6 +777,19 @@ interface ProviderRowProps {
   readonly startSignIn: boolean;
 }
 
+/**
+ * A Claude Code subscription account or a Codex account: the host signs it in
+ * with the account's own CLI command. API-key Claude accounts have no sign-in.
+ */
+function signsInWithOwnCli(instance: ProviderInstance): boolean {
+  if (instance.driverKind === "codex") return true;
+  return (
+    instance.driverKind === "claude" &&
+    "authentication" in instance.configuration &&
+    instance.configuration.authentication === "subscription"
+  );
+}
+
 function latestVersionProp(
   latestVersions: ReadonlyMap<ProviderInstanceId, string> | undefined,
   instanceId: ProviderInstanceId,
@@ -1223,6 +1237,19 @@ function ProviderRow(props: ProviderRowProps) {
                 {props.probing ? "Checking…" : "Check connection"}
               </OctantButton>
             )}
+            {props.instance.enabled && signsInWithOwnCli(props.instance) ? (
+              <AccountSignIn
+                disabled={disabled}
+                displayName={name}
+                instanceId={props.instance.id}
+                onBegin={props.onBeginProviderAuthentication}
+                onComplete={props.onCompleteProviderAuthentication}
+                onSignedIn={() => void props.onProbe(props.instance.id, { quiet: true })}
+                {...(props.onOpenExternalUrl === undefined
+                  ? {}
+                  : { onOpenExternalUrl: props.onOpenExternalUrl })}
+              />
+            ) : null}
             {props.onLocateBinary !== undefined &&
             canLocateRuntimeBinary(props.instance.driverKind) ? (
               <OctantButton
