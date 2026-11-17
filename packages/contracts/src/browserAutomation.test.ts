@@ -299,6 +299,14 @@ describe("BrowserAutomationFailure", () => {
         message: "Stop, then navigate.",
       }),
     ).toMatchObject({ reason: "origin-not-approved" });
+    expect(
+      decodeBrowserAutomationFailure({
+        category: "policy-denied",
+        reason: "origin-not-approved",
+        refusedOrigin: "https://elsewhere.example",
+        message: "Stop, then navigate.",
+      }),
+    ).toMatchObject({ refusedOrigin: "https://elsewhere.example" });
     expect(() =>
       decodeBrowserAutomationFailure({
         category: "unavailable",

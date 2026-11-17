@@ -3960,6 +3960,8 @@ describe("BrowserAutomationService", () => {
     expect(failed.failure).toMatchObject({
       category: "policy-denied",
       reason: "origin-not-approved",
+      // The origin alone, for a window's own notice: no path or query.
+      refusedOrigin: "https://www.example.com",
       message: expect.stringContaining("Call stop, then navigate"),
     });
     expect(failed.failure?.message).toContain("sign-in");

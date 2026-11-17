@@ -7,6 +7,7 @@ export function browserOriginRefusal(origin?: string): BrowserAutomationFailure 
   return {
     category: "policy-denied",
     reason: "origin-not-approved",
+    ...(origin === undefined ? {} : { refusedOrigin: origin }),
     message: `${origin === undefined ? "The requested site" : `The page moved to ${origin}, which`} is outside this page's approved origins. ${ORIGIN_RECOVERY}`,
   };
 }

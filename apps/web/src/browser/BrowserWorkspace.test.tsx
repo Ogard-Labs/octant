@@ -458,6 +458,185 @@ describe("BrowserWorkspace", () => {
     await waitFor(() => expect(onContextCreated).toHaveBeenCalledWith(context.contextId));
   });
 
+  it("gives a repeated Browser tab its own page, address and title beside the first tab's", async () => {
+    // A stand-in that answers as the host does: an ordinary Open returns the
+    // thread's shared page when it has one, and only an Open that asks for a
+    // page of its own gets a new one. A page moves only to a site it was
+    // opened for.
+    type Page = { readonly context: typeof context; url?: string; title?: string };
+    const pages = new Map<string, Page>();
+    let shared: string | undefined;
+    const snapshotOf = (contextId: string, failure?: object) => {
+      const page = pages.get(contextId)!;
+      return {
+        status: failure === undefined ? "running" : "failed",
+        threadId,
+        context: page.context,
+        ...(page.url === undefined
+          ? {}
+          : {
+              observation: {
+                contextId,
+                actionId: context.actionId,
+                correlationId: context.correlationId,
+                authority,
+                url: page.url,
+                title: page.title,
+                observedAt: "2026-07-27T20:01:00.000Z",
+                stale: false,
+              },
+            }),
+        ...(failure === undefined ? {} : { failure }),
+        evidence: [],
+      } as any;
+    };
+    const browser = client();
+    vi.mocked(browser.create).mockImplementation(async (input) => {
+      if (input.dedicated !== true && shared !== undefined) return snapshotOf(shared);
+      const contextId = `60000000-0000-4000-8000-00000000010${String(pages.size + 1)}`;
+      pages.set(contextId, { context: { ...context, contextId, policy: input.policy as any } });
+      if (input.dedicated !== true) shared = contextId;
+      return snapshotOf(contextId);
+    });
+    vi.mocked(browser.act).mockImplementation(async (request) => {
+      const contextId = String(request.contextId);
+      const page = pages.get(contextId)!;
+      if (request.kind !== "navigate" || request.target === undefined) return snapshotOf(contextId);
+      const target = new URL(request.target);
+      if (!page.context.policy.allowedOrigins.includes(target.origin)) {
+        return snapshotOf(contextId, {
+          category: "policy-denied",
+          reason: "origin-not-approved",
+          message: "The requested site is outside this page's approved origins.",
+        });
+      }
+      page.url = target.href;
+      page.title = `Page on port ${target.port}`;
+      return snapshotOf(contextId);
+    });
+    vi.mocked(browser.inspect).mockImplementation(async (input) =>
+      snapshotOf(String(input.contextId)),
+    );
+    vi.mocked(browser.inspectThread).mockImplementation(async () =>
+      shared === undefined
+        ? ({ status: "ready", threadId, evidence: [] } as any)
+        : snapshotOf(shared),
+    );
+    const onContextCreated = vi.fn();
+    const first = render(
+      <BrowserWorkspace
+        client={browser}
+        tab={{
+          kind: "browser",
+          id: "90000000-0000-4000-8000-000000000001" as any,
+          mode: "code",
+          title: "Browser",
+          threadId: threadId as any,
+        }}
+      />,
+    );
+    const second = render(
+      <BrowserWorkspace
+        client={browser}
+        onContextCreated={onContextCreated}
+        startFresh
+        tab={{
+          kind: "browser",
+          id: "90000000-0000-4000-8000-000000000099" as any,
+          mode: "code",
+          title: "Browser 2",
+          threadId: threadId as any,
+        }}
+      />,
+    );
+    const open = async (pane: typeof first, address: string) => {
+      const view = within(pane.container);
+      fireEvent.change(view.getByRole("textbox", { name: "Browser URL" }), {
+        target: { value: address },
+      });
+      fireEvent.click(await view.findByRole("button", { name: "Start browser" }));
+    };
+
+    await open(first, "http://127.0.0.1:4101/");
+    await within(first.container).findByText("Page on port 4101");
+    await open(second, "http://127.0.0.1:4102/");
+    await within(second.container).findByText("Page on port 4102");
+
+    // The second tab asked for a page of its own and is bound to it.
+    expect(vi.mocked(browser.create).mock.calls.map(([input]) => input.dedicated)).toEqual([
+      undefined,
+      true,
+    ]);
+    expect(pages.size).toBe(2);
+    const own = [...pages.keys()].find((contextId) => contextId !== shared);
+    expect(onContextCreated).toHaveBeenCalledWith(own);
+    // Each tab shows its own page: address, title, and no refusal over either.
+    for (const [pane, port, other] of [
+      [first, "4101", "4102"],
+      [second, "4102", "4101"],
+    ] as const) {
+      const view = within(pane.container);
+      expect(view.getByRole("textbox", { name: "Browser URL" })).toHaveValue(
+        `http://127.0.0.1:${port}/`,
+      );
+      expect(view.getByText(`Page on port ${port}`)).toBeInTheDocument();
+      expect(view.queryByText(`Page on port ${other}`)).toBeNull();
+      expect(view.queryByText(/approved origins/)).toBeNull();
+    }
+  });
+
+  it.each([
+    {
+      name: "a move to another site",
+      failure: {
+        category: "policy-denied",
+        reason: "origin-not-approved",
+        refusedOrigin: "https://www.elsewhere.example",
+        message:
+          "The page moved to https://www.elsewhere.example, which is outside this page's approved origins. Call stop, then navigate to the intended URL, keeping the same profile argument if one was used, to request that site's approval. For SSO in the Octant app's Browser, call sign-in so the person can finish signing in.",
+      },
+      shown:
+        "This address leads to www.elsewhere.example, a different site, so it was not opened. To go there, type www.elsewhere.example in the address bar.",
+    },
+    {
+      name: "a request for another site",
+      failure: {
+        category: "policy-denied",
+        reason: "origin-not-approved",
+        message:
+          "The requested site is outside this page's approved origins. Call stop, then navigate to the intended URL, keeping the same profile argument if one was used, to request that site's approval. For SSO in the Octant app's Browser, call sign-in so the person can finish signing in.",
+      },
+      shown:
+        "This page is open for one site only, so a request for another site was refused. To browse another site here, type its address in the address bar.",
+    },
+  ])("tells the person about $name in their own words, never the agent's", async (row) => {
+    const browser = client();
+    vi.mocked(browser.inspectThread).mockResolvedValue(
+      decodeBrowserAutomationSnapshot({
+        status: "failed",
+        threadId,
+        context,
+        failure: row.failure,
+        evidence: [],
+      }),
+    );
+    render(
+      <BrowserWorkspace
+        client={browser}
+        tab={{
+          kind: "browser",
+          id: "90000000-0000-4000-8000-000000000001" as any,
+          mode: "code",
+          title: "Browser",
+          threadId: threadId as any,
+        }}
+      />,
+    );
+
+    expect(await screen.findByText(row.shown)).toBeVisible();
+    expect(screen.queryByText(/Call stop|approved origins|call sign-in/)).toBeNull();
+  });
+
   it("refreshes when an agent creates or changes the thread-owned Browser context", async () => {
     const browser = client();
     vi.mocked(browser.inspectThread)
@@ -1985,6 +2164,33 @@ describe("BrowserWorkspace", () => {
         expect(screen.getByRole("button", { name: "Take over" })).toBeVisible();
         expect(screen.getByRole("img", { name: /idle/ })).toBeVisible();
         expect(await moreActionNames()).not.toContain("Take over");
+      } finally {
+        restore();
+      }
+    });
+
+    it("offers no Take over on a repeated tab's own page, which no agent reaches", async () => {
+      const restore = widthOfToolbar(640);
+      try {
+        const browser = holdingClient();
+        render(
+          <BrowserWorkspace
+            client={browser}
+            startFresh
+            tab={{
+              kind: "browser",
+              id: "90000000-0000-4000-8000-000000000032" as any,
+              mode: "work",
+              title: "Browser 2",
+              threadId: threadId as any,
+              contextId: context.contextId as any,
+            }}
+          />,
+        );
+        await screen.findByRole("button", { name: "More Browser actions" });
+        expect(screen.queryByRole("button", { name: "Take over" })).toBeNull();
+        expect(await moreActionNames()).not.toContain("Take over");
+        expect(browser.takeOver).not.toHaveBeenCalled();
       } finally {
         restore();
       }
