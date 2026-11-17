@@ -6,17 +6,22 @@ import { enableCompileCacheBeneath, resolveHostRuntimePaths } from "@octant/host
 
 // V8 spends a large share of host boot compiling the bundled server. A cache
 // in the host's own data folder (owner-only, never the app bundle, which is
-// signed and read-only) lets later launches reuse that work. It never creates
-// the data folder: the host prepares that with its own permissions. Any
-// failure leaves the host starting exactly as it would without a cache.
+// signed and read-only) lets later launches reuse that work. This runs before
+// main.ts decides whether to refuse the launch, so it has no side effect on a
+// folder that is missing: the path is resolved without creating anything, and
+// the first launch simply goes without a cache. Any failure leaves the host
+// starting exactly as it would without one.
 try {
-  const { dataDirectory } = resolveHostRuntimePaths({
-    env: process.env,
-    platform: process.platform,
-    home: homedir(),
-    temporaryDirectory: canonicalTemporaryDirectory(),
-    uid: process.getuid?.() ?? 0,
-  });
+  const { dataDirectory } = resolveHostRuntimePaths(
+    {
+      env: process.env,
+      platform: process.platform,
+      home: homedir(),
+      temporaryDirectory: canonicalTemporaryDirectory(),
+      uid: process.getuid?.() ?? 0,
+    },
+    { createDataDirectory: false },
+  );
   enableCompileCacheBeneath(dataDirectory, enableCompileCache);
 } catch {
   // Missing folder, unsupported platform or runtime: start without the cache.

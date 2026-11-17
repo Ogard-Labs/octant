@@ -5450,6 +5450,15 @@ flowchart LR
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
   verify are `unknown`; the map never carries secret values.
+- **Compiled code cache.** The host and the desktop app keep V8's compiled
+  code in a `compile-cache` folder inside the host data folder (the desktop's
+  `userData` folder, which is the same folder for the stable app), listed in
+  the host data map. It is enabled only when that data folder already exists,
+  is owned by the current user and is writable by nobody else, and only when
+  `compile-cache` itself is owned by the user, not a symlink and not writable
+  by others; neither process creates the data folder for it, and it is never
+  placed inside the signed app bundle.
+
 - **Streamed output and a full disk.** Text and reasoning deltas are exempt
   from a turn's event budget, so each turn also has a streamed-output budget
   of 32 MiB (`MAX_TURN_STREAMED_OUTPUT_BYTES`, far past any real answer). A

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstatSync, mkdirSync, realpathSync } from "node:fs";
+import { lstatSync, mkdirSync, realpathSync, type Stats } from "node:fs";
 import { lstat, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, parse, resolve, sep } from "node:path";
@@ -61,7 +61,10 @@ export interface HostRuntimePaths {
   readonly serviceLogPath: string;
 }
 
-export function resolveHostRuntimePaths(input: HostRuntimePathInput): HostRuntimePaths {
+export function resolveHostRuntimePaths(
+  input: HostRuntimePathInput,
+  options: { readonly createDataDirectory?: boolean } = {},
+): HostRuntimePaths {
   if (input.platform !== "darwin" && input.platform !== "linux") {
     throw new HostRuntimePathError(
       "unsupported-platform",
@@ -87,7 +90,8 @@ export function resolveHostRuntimePaths(input: HostRuntimePathInput): HostRuntim
             join(home, ".local", "share"),
           "octant",
         ));
-  const createCanonicalDataDirectory = explicitData !== undefined || isCurrentMacHome(home);
+  const createCanonicalDataDirectory =
+    options.createDataDirectory !== false && (explicitData !== undefined || isCurrentMacHome(home));
   const dataDirectory = canonicalDataDirectory(
     requestedDataDirectory,
     input.platform,
@@ -389,28 +393,42 @@ function safeError(error: unknown): string {
   return error instanceof Error ? error.message : "unknown filesystem failure";
 }
 
-/** What the compile cache decision needs to know about the folder that would hold it. */
-export interface CompileCacheParentFacts {
+/** What the compile cache decision needs to know about a folder. */
+export interface CompileCacheFolderFacts {
   readonly isDirectory: boolean;
   readonly ownerId: number;
   readonly mode: number;
 }
 
 /**
- * The cache may live only in a folder that already exists, belongs to this
- * user and admits nobody else. Node creates missing parents with the default
- * mode, so enabling it on a data folder the host has not prepared yet would
- * leave a folder the host then refuses as unsafe.
+ * A folder may hold or contain the cache only when it is a real directory this
+ * user owns and nobody else can write to. Reading is harmless (the cache holds
+ * compiled code of the signed bundle, nothing secret); a writer could plant
+ * code the next launch would run.
  */
-export function mayEnableCompileCache(facts: CompileCacheParentFacts, uid: number): boolean {
-  return facts.isDirectory && facts.ownerId === uid && (facts.mode & 0o077) === 0;
+export function mayEnableCompileCache(facts: CompileCacheFolderFacts, uid: number): boolean {
+  return facts.isDirectory && facts.ownerId === uid && (facts.mode & 0o022) === 0;
+}
+
+function compileCacheFacts(stats: Stats): CompileCacheFolderFacts {
+  return { isDirectory: stats.isDirectory(), ownerId: stats.uid, mode: stats.mode };
+}
+
+function lstatIfPresent(path: string): Stats | undefined {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    if (isMissing(error)) return undefined;
+    throw error;
+  }
 }
 
 /**
- * Turns on V8's compiled-code cache in `<parent>/compile-cache` when
- * `mayEnableCompileCache` allows it, creating only that last folder, owner-only.
- * Returns whether it was enabled; a skipped launch gets the cache on the next
- * one, after the host has prepared its folder.
+ * Turns on V8's compiled-code cache in `<parent>/compile-cache` when the parent
+ * already exists and `mayEnableCompileCache` accepts it, creating only that
+ * last folder (owner-only) and refusing an existing one that is a symlink,
+ * foreign, or writable by others. Returns whether it was enabled; a skipped
+ * launch gets the cache on the next one, after the host has prepared its folder.
  */
 export function enableCompileCacheBeneath(
   parent: string,
@@ -419,26 +437,20 @@ export function enableCompileCacheBeneath(
   if (process.platform === "win32") return false;
   const uid = process.getuid?.();
   if (uid === undefined) return false;
-  let folder;
-  try {
-    folder = lstatSync(parent);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-  if (
-    !mayEnableCompileCache(
-      { isDirectory: folder.isDirectory(), ownerId: folder.uid, mode: folder.mode },
-      uid,
-    )
-  ) {
-    return false;
-  }
+  const folder: Stats | undefined = lstatIfPresent(parent);
+  if (folder === undefined || !mayEnableCompileCache(compileCacheFacts(folder), uid)) return false;
   const directory = join(parent, "compile-cache");
-  try {
-    mkdirSync(directory, { recursive: false, mode: 0o700 });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  let existing: Stats | undefined = lstatIfPresent(directory);
+  if (existing === undefined) {
+    try {
+      mkdirSync(directory, { recursive: false, mode: 0o700 });
+    } catch (error) {
+      if ((error as { readonly code?: unknown }).code !== "EEXIST") throw error;
+    }
+    existing = lstatIfPresent(directory);
+  }
+  if (existing === undefined || !mayEnableCompileCache(compileCacheFacts(existing), uid)) {
+    return false;
   }
   enable(directory);
   return true;

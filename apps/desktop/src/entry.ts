@@ -42,8 +42,7 @@ const identity = app.isPackaged
 // The large desktop module is compiled by V8 on every launch. A cache beside
 // the app's own data (never inside the signed bundle) reuses that work. It
 // never creates the data folder, and any failure starts the app as it would
-// without one. It must precede the imports
-// of main.mjs below.
+// without one. It must precede the imports of main.mjs below.
 try {
   enableCompileCacheBeneath(
     identity.flavor === "stable"
