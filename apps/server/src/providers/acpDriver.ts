@@ -804,7 +804,10 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
             if (invalid !== undefined) return Effect.fail(invalid);
             return managedHomeClient.pipe(
               Effect.flatMap(({ client }) =>
-                request(() => client.completeBrowserAuthentication(attemptId)),
+                request(async () => {
+                  await client.completeBrowserAuthentication(attemptId);
+                  return "completed" as const;
+                }),
               ),
             );
           },

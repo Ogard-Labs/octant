@@ -801,14 +801,21 @@ export class ProviderService implements ProviderServiceApi {
           if (driver.completeAuthentication === undefined) {
             throw this.#unsupported("This provider does not support browser authentication.");
           }
-          await runProviderEffect(
+          const progress = await runProviderEffect(
             Effect.scoped(
               driver.completeAuthentication({
                 instanceId: instance.id,
                 attemptId: command.attemptId,
+                ...(command.code === undefined ? {} : { code: command.code }),
               }),
             ),
           );
+          if (progress === "pending") {
+            return decodeProviderRegistryCommandResult({
+              kind: "provider-authentication-pending",
+              instanceId: instance.id,
+            });
+          }
           this.#invalidateCatalog(
             instance.id,
             { kind: "authentication" },

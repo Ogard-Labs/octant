@@ -3401,7 +3401,7 @@ describe("ProviderService", () => {
         expiresAt: "2026-07-17T11:00:00.000Z" as never,
       }),
     );
-    const completeAuthentication = vi.fn(() => Effect.void);
+    const completeAuthentication = vi.fn(() => Effect.succeed("completed" as const));
     const service = new ProviderService({
       persistence: fixture.persistence,
       runtimeRegistry: fixture.runtime,
@@ -3479,7 +3479,7 @@ describe("ProviderService", () => {
       withCatalogPersistence: true,
       initialCatalog: persistedCatalog(),
     });
-    const completeAuthentication = vi.fn(() => Effect.void);
+    const completeAuthentication = vi.fn(() => Effect.succeed("completed" as const));
     const service = new ProviderService({
       persistence: fixture.persistence,
       runtimeRegistry: fixture.runtime,

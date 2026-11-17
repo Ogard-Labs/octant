@@ -7,6 +7,7 @@ import {
   type ProviderInstanceId,
 } from "@octant/contracts";
 import {
+  CLAUDE_ACCOUNT_PROFILE,
   CODEX_ACCOUNT_PROFILE,
   defaultProviderAccountDirectory,
   effectiveClaudeAccountConfigDirectory,
@@ -34,6 +35,8 @@ import {
 } from "../network/providerRuntimeNetwork";
 import type { ClaudeProcessPort } from "./claudeProcess";
 import { makeCodexDriver } from "./codexDriver";
+import { withAccountSignIn } from "./accountSignIn";
+import { isolatedClaudeAccountEnvironment } from "./claudeAccountIsolation";
 import type { CodexProcessPort } from "./codexProcess";
 import { makeAcpDriver } from "./acpDriver";
 import type { AcpProcessPort } from "./acpProcess";
@@ -206,7 +209,13 @@ export function makeProviderDriver(
       }
       const codexHome = effectiveCodexAccountHome(instance, hostEnvironment, homedir());
       const readCodexOwnMemory = options.providerOwnMemory;
-      return makeCodexDriver({
+      const codexEnvironment = codexAccountProcessEnvironment({
+        binaryPath: instance.configuration.binaryPath,
+        hostEnvironment,
+        codexHome,
+        ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
+      });
+      const codexDriver = makeCodexDriver({
         ...(readPlanMcpServers === undefined
           ? {}
           : { planMcpServers: () => readPlanMcpServers("codex") }),
@@ -218,12 +227,7 @@ export function makeProviderDriver(
         process: options.codexProcess,
         runtimeRegistry: options.runtimeRegistry,
         permissionPersistence: options.permissionPersistence,
-        environment: codexAccountProcessEnvironment({
-          binaryPath: instance.configuration.binaryPath,
-          hostEnvironment,
-          codexHome,
-          ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
-        }),
+        environment: codexEnvironment,
         openEnvironment: codexAccountProcessEnvironment({
           binaryPath: instance.configuration.binaryPath,
           hostEnvironment,
@@ -235,8 +239,16 @@ export function makeProviderDriver(
           ? {}
           : { credentialResolver: options.credentialResolver }),
       });
+      // Settings signs the account in with its own `codex login`, under its home.
+      return withAccountSignIn(codexDriver, {
+        instanceId: instance.id,
+        binaryPath: instance.configuration.binaryPath,
+        args: CODEX_ACCOUNT_PROFILE.signInArgv,
+        environment: codexEnvironment,
+        codeEntry: false,
+      });
     }
-    case "claude":
+    case "claude": {
       if (
         options.claudeProcess === undefined ||
         options.claudeSdk === undefined ||
@@ -286,7 +298,7 @@ export function makeProviderDriver(
       const configDirectory = effectiveClaudeAccountConfigDirectory(instance, homedir());
       const readArtifactDelivery = options.claudeArtifactDelivery;
       const readClaudeOwnMemory = options.providerOwnMemory;
-      return makeClaudeDriver({
+      const claudeDriver = makeClaudeDriver({
         ...(readPlanMcpServers === undefined
           ? {}
           : { planMcpServers: () => readPlanMcpServers("claude") }),
@@ -323,6 +335,26 @@ export function makeProviderDriver(
           ? {}
           : { credentialResolver: options.credentialResolver }),
       });
+      // An API-key account has nothing to sign in. A subscription account signs
+      // in with its own `claude auth login`: an extra account under its
+      // directory with inherited Claude credentials dropped, the implicit
+      // first account as the person's own terminal would run it.
+      if (instance.configuration.authentication !== "subscription") return claudeDriver;
+      return withAccountSignIn(claudeDriver, {
+        instanceId: instance.id,
+        binaryPath: instance.configuration.binaryPath,
+        args: CLAUDE_ACCOUNT_PROFILE.signInArgv,
+        environment:
+          configDirectory === undefined
+            ? hostEnvironment
+            : isolatedClaudeAccountEnvironment({
+                hostEnvironment,
+                configDirectory,
+                authentication: "subscription",
+              }),
+        codeEntry: true,
+      });
+    }
     case "pi":
       if (options.piProcess === undefined || options.piHome === undefined) {
         throw new ProviderDriverConfigurationError();
