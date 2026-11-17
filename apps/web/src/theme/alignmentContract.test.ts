@@ -10,7 +10,6 @@ const settings = read("settings.css");
 const octant = read("octant.css");
 const surface = read("surface.css");
 const chat = read("chat.css");
-const usage = read("usage.css");
 const projectThreads = read("project-threads.css");
 const components = read("components.css");
 const code = read("code.css");
@@ -72,7 +71,6 @@ describe("the shell's edges and gaps", () => {
     // The rail variant of the button draws no border, so the button is its
     // face and no negative margin gives a border back.
     expect(rule(shell, ".sidebar-rail__button")).not.toMatch(/margin/);
-    expect(rule(usage, ".rail-usage__ring")).not.toMatch(/margin/);
     expect(source("ui/shadcn/button.tsx")).toMatch(/rail:\s*"[^"]*border-0/);
     const scroll = rule(shell, ".sidebar-rail__scroll");
     expect(scroll).toMatch(

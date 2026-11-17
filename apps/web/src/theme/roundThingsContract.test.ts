@@ -36,6 +36,8 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   // Avatars and monogram glyphs.
   ".avatar",
   ".user-avatar",
+  // The rail's account face is the avatar's hover and focus ring.
+  ".rail-account__face",
   ".skeleton-circle",
   ".canvas-mockup__avatar",
   ".provider-glyph--monogram",
@@ -137,7 +139,6 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".environment-move__bar",
   ".environment-context__meter, .environment-context__mini",
   ".thread-move-frozen__progress",
-  ".rail-usage__bar",
   ".plan-usage__bar--smooth",
   ".provider-limits__window meter",
   ".provider-limits__window meter::-webkit-meter-bar",

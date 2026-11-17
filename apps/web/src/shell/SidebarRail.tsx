@@ -69,8 +69,11 @@ export interface SidebarRailProps {
   readonly projectsActive?: boolean;
   readonly onOpenActivity?: () => void;
   readonly onOpenSettings: () => void;
-  /** Plan usage rings, drawn at the foot above Settings. */
-  readonly usage?: ReactNode;
+  /**
+   * The person's face, which opens the account menu (Settings among it) and
+   * rings their plan usage. Without it the foot is a plain Settings button.
+   */
+  readonly account?: ReactNode;
   /** The More menu: destinations the rail does not list, and Customize sidebar. */
   readonly more?: ReactNode;
 }
@@ -264,7 +267,7 @@ export function SidebarRail(props: SidebarRailProps) {
                     </span>
                   }
                   projectId={String(project.id)}
-                  size={20}
+                  size={16}
                 />
               </RailButton>
             );
@@ -296,8 +299,9 @@ export function SidebarRail(props: SidebarRailProps) {
           {props.more}
         </div>
         <div className="sidebar-rail__foot">
-          {props.usage}
-          <RailButton icon={Settings} label="Settings" onSelect={props.onOpenSettings} />
+          {props.account ?? (
+            <RailButton icon={Settings} label="Settings" onSelect={props.onOpenSettings} />
+          )}
         </div>
       </nav>
     </aside>
@@ -353,7 +357,10 @@ function RailButton(props: {
       >
         <span aria-hidden="true" className="sidebar-rail__face">
           {Icon === undefined ? null : (
-            <Icon size={20} weight={props.active === true ? "fill" : "regular"} />
+            // 16px at the regular stroke: the rail is a column of glyphs with no
+            // words beside them, and at 20px (or bold at 16) ten of them read as
+            // the heaviest column in the window.
+            <Icon size={16} weight={props.active === true ? "fill" : "regular"} />
           )}
           {props.children}
           {props.badge === undefined || props.badge === 0 ? null : (

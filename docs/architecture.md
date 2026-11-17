@@ -7062,7 +7062,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   refresh keeps the last snapshot and shows its age. Every provider
   instance's last plan-limit reading, whatever its source, is also saved
   in `providers/usage-readings.json` (owner-only, listed in the host data
-  map), so the usage rings show it after a host restart as a past
+  map), so the rail's account face shows it after a host restart as a past
   observation with its original `observedAt`. A restored reading is
   never refreshed by starting a provider: the launch pass and the
   schedule leave it as it is, and the first fresh evidence (a turn's

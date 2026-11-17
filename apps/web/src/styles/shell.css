@@ -474,8 +474,8 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
 /* The shared button recipe sizes every glyph inside a button to 1rem, which
    drew the rail's icons at 13px; the rail keeps the size it asks for. */
 .sidebar-rail__face > svg {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
 }
 
 .sidebar-rail__button:hover .sidebar-rail__face,
@@ -511,13 +511,55 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   text-align: center;
 }
 
+/* The person's face at the foot of the icon rail, ringed with what is left of
+   their tightest plan window in the meta ink. A window near or at its limit
+   takes the danger ink so a spent week reads at a glance. */
+.rail-account__face {
+  border-radius: var(--oct-radius-pill);
+}
+
+.rail-account__face > .rail-account__ring {
+  position: absolute;
+  inset: 1px;
+  width: 34px;
+  height: 34px;
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+
+.rail-account__track,
+.rail-account__arc {
+  fill: none;
+  stroke-width: 1.5;
+}
+
+.rail-account__track {
+  stroke: color-mix(in oklab, var(--oct-fg) 12%, transparent);
+}
+
+.rail-account__arc {
+  stroke: color-mix(in oklab, var(--oct-fg) 50%, transparent);
+  stroke-linecap: round;
+}
+
+.rail-account__arc:is([data-level="near"], [data-level="spent"]),
+.rail-account__left:is([data-level="near"], [data-level="spent"]) {
+  stroke: var(--oct-danger);
+  color: var(--oct-danger);
+}
+
+.rail-account__left {
+  color: var(--oct-meta);
+  font-variant-numeric: tabular-nums;
+}
+
 /* A Project letter is drawn at icon size, as an outline in the icons' muted
    ink. Filled 28px tiles in full ink were the loudest thing in the rail, five
    bright blocks that outweighed the places above them. */
 .sidebar-rail__project {
   display: flex;
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   box-sizing: border-box;
   align-items: center;
   justify-content: center;
@@ -1238,16 +1280,13 @@ html[data-octant-native-host="true"] .sidebar__chrome {
 .sidebar-rail__button[data-tile="inbox"] {
   --sidebar-tile-hue: var(--oct-colour-inbox, var(--octant-palette-blue, currentColor));
 }
-.sidebar-tile[data-tile="running"],
-.sidebar-rail__button[data-tile="running"] {
+.sidebar-tile[data-tile="running"] {
   --sidebar-tile-hue: var(--oct-colour-running, var(--octant-palette-orange, currentColor));
 }
-.sidebar-tile[data-tile="review"],
-.sidebar-rail__button[data-tile="review"] {
+.sidebar-tile[data-tile="review"] {
   --sidebar-tile-hue: var(--oct-colour-review, var(--octant-palette-purple, currentColor));
 }
-.sidebar-tile[data-tile="done"],
-.sidebar-rail__button[data-tile="done"] {
+.sidebar-tile[data-tile="done"] {
   --sidebar-tile-hue: var(--oct-colour-done, var(--octant-palette-green, currentColor));
 }
 

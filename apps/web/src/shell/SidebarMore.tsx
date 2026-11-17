@@ -41,7 +41,7 @@ export function SidebarMore(props: SidebarMoreProps) {
             className="sidebar-rail__button window-no-drag"
           >
             <span aria-hidden="true" className="sidebar-rail__face">
-              <Ellipsis size={16} />
+              <Ellipsis size={16} weight="regular" />
             </span>
           </OctantMenuTrigger>
         </OctantTooltip>

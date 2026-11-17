@@ -819,7 +819,7 @@ describe("App", () => {
     expect(screen.queryByRole("complementary", { name: "Octant sidebar" })).not.toBeInTheDocument();
     const rail = screen.getByRole("complementary", { name: "Octant sidebar, collapsed" });
     expect(within(rail).getByRole("button", { name: "New task" })).toBeVisible();
-    expect(within(rail).getByRole("button", { name: /^Running, \d+$/ })).toBeVisible();
+    expect(within(rail).getByRole("button", { name: /^Inbox, \d+$/ })).toBeVisible();
     // Show sidebar sits in the title band, not the rail, and only once.
     expect(within(rail).queryByRole("button", { name: "Show sidebar" })).toBeNull();
     expect(screen.getAllByRole("button", { name: "Show sidebar" })).toHaveLength(1);

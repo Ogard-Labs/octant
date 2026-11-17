@@ -1138,7 +1138,11 @@ describe("ShellSidebar", () => {
     );
     await user.click(within(rail).getByRole("button", { name: "Work" }));
     expect(onSelectMode).toHaveBeenCalledWith("work");
-    await user.click(within(rail).getByRole("button", { name: "Running, 2" }));
+    // The rail lists places: the Board stands for Running, To review and
+    // Done today, which stay as tiles in the open sidebar.
+    expect(within(rail).queryByRole("button", { name: /^Running/ })).toBeNull();
+    expect(within(rail).queryByRole("button", { name: /^Done today/ })).toBeNull();
+    await user.click(within(rail).getByRole("button", { name: "Board" }));
     expect(actions["thread-board"]).toHaveBeenCalledOnce();
     expect(within(rail).getByRole("button", { name: "Inbox, 3" })).toHaveTextContent("3");
     await user.click(within(rail).getByRole("button", { name: "octant" }));
@@ -1154,6 +1158,37 @@ describe("ShellSidebar", () => {
     fireEvent.keyDown(document.body, { key: "Tab" });
     more.focus();
     expect(await screen.findByRole("tooltip")).toHaveTextContent("More");
+  });
+
+  it("draws one account control beside the rail, its face, and returns focus there when the update card leaves", async () => {
+    const user = userEvent.setup();
+    const onDismiss = vi.fn();
+    render(
+      <ShellSidebar
+        codeNavigation={{ actions: { "new-code-thread": vi.fn(), inbox: vi.fn() } }}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={<nav aria-label="Projects">Project navigation</nav>}
+        railBeside={{}}
+        settings={defaultShellSettings()}
+        whatsNew={{
+          content: { version: "1.2.0", headline: "Quieter rail" },
+          onDismiss,
+          onOpenNotes: vi.fn(),
+        }}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+    const accounts = screen.getAllByRole("button", { name: /^Account menu/ });
+    expect(accounts).toHaveLength(1);
+    const rail = screen.getByRole("complementary", { name: "Destinations" });
+    expect(within(rail).getByRole("button", { name: /^Account menu/ })).toBe(accounts[0]);
+    expect(within(rail).queryByRole("button", { name: "Settings" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(onDismiss).toHaveBeenCalledOnce();
+    expect(accounts[0]).toHaveFocus();
   });
 
   it("stands the rail beside the open sidebar, with Projects and More, and leaves the sidebar its header, Project list, and threads", async () => {

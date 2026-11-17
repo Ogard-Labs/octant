@@ -4,7 +4,8 @@ import type { LinearIssueRow } from "@octant/contracts/linear-issues";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { ComposerPlanUsage } from "../usage/ComposerPlanUsage";
-import { RailUsageRings } from "../usage/RailUsageRings";
+import { defaultShellSettings } from "@octant/domain/shell-policy";
+import { RailAccount } from "../shell/SidebarProfile";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -720,19 +721,31 @@ describe("InboxView page", () => {
       updatedAt: observedAt,
     });
     const list = vi.fn(() => Promise.resolve(snapshot));
+    const onOpenSettings = vi.fn();
     render(
       <PlanUsageProvider
         barStyle="smooth"
         client={{ list } as unknown as ProviderUsageLimitsClient}
         instances={[account]}
       >
-        <RailUsageRings instances={[account]} />
+        <RailAccount
+          onOpenNavigator={vi.fn()}
+          onOpenSettings={onOpenSettings}
+          profile={{ ...defaultShellSettings().userProfile, displayName: "Ada" }}
+        />
         <ComposerPlanUsage providerInstanceId={accountId} />
         <InboxView attentionItems={[]} onClose={vi.fn()} onOpenThread={vi.fn()} />
       </PlanUsageProvider>,
     );
     expect(await screen.findByRole("region", { name: "Plan usage" })).toHaveTextContent("60%");
     expect(screen.getAllByLabelText("Plan usage left").length).toBeGreaterThan(1);
+    // The rail's face rings the tightest window and lists each account's
+    // reading in its menu, which leads to Settings › Usage.
+    await userEvent.click(
+      screen.getByRole("button", { name: "Account menu, Ada, 60% of plan usage left" }),
+    );
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Claude Max, 5h 60% left" }));
+    expect(onOpenSettings).toHaveBeenCalledWith({ section: "usage" });
     expect(list).toHaveBeenCalledTimes(1);
   });
 

@@ -30,7 +30,7 @@ import { SidebarCountTiles, type SidebarTile } from "./SidebarCountTiles";
 import { SidebarRail, type SidebarRailProject } from "./SidebarRail";
 import type { VisibleMode } from "./workKind";
 import { SidebarMore } from "./SidebarMore";
-import { SidebarProfile } from "./SidebarProfile";
+import { RailAccount, SidebarProfile } from "./SidebarProfile";
 import { SidebarWhatsNew, type SidebarWhatsNewProps } from "./SidebarWhatsNew";
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
 import {
@@ -149,8 +149,6 @@ export interface ShellSidebarProps {
    * of its own and leaving it used to strand the person.
    */
   readonly home?: { readonly onOpen: () => void; readonly active: boolean };
-  /** Plan usage rings for the icon rail, in either placement. */
-  readonly railUsage?: ReactNode;
   /** Absent leaves the card out; the collapsed rail never draws it either way. */
   readonly whatsNew?: SidebarWhatsNewProps;
   /**
@@ -330,7 +328,15 @@ export function ShellSidebar(props: ShellSidebarProps) {
     const action = navigationActions[descriptor.id];
     return action === undefined ? [] : [{ ...descriptor, onSelect: action }];
   });
-  const railDestinations = destinationRows.flatMap((id) => {
+  // The rail lists places only. Running, To review and Done today are views of
+  // the Board, and three look-alike count icons made the rail the busiest
+  // column in the window, so the rail keeps the Inbox tile and draws the Board
+  // as the one place those statuses live. The open sidebar keeps all four.
+  const railTiles = tiles.filter((tile) => tile.id === "inbox");
+  const railRows = destinationLayout.rows.filter(
+    (id) => !NEW_THREAD_DESTINATIONS.has(id) && !(tilesShown && id === "inbox"),
+  );
+  const railDestinations = railRows.flatMap((id) => {
     const action = navigationActions[id];
     return id === "projects" || action === undefined
       ? []
@@ -368,6 +374,16 @@ export function ShellSidebar(props: ShellSidebarProps) {
     props.railPins === undefined
       ? {}
       : { pinnedProjects: props.railPins.projects, onUnpinProject: props.railPins.onUnpin };
+  const accountProps = {
+    navigatorAvailable: props.navigatorAvailable === true,
+    ...(props.onOpenArchive === undefined ? {} : { onOpenArchive: props.onOpenArchive }),
+    onOpenNavigator: props.onOpenNavigator,
+    onOpenSettings: props.onOpenSettings,
+    ...(props.onOpenZen === undefined ? {} : { onOpenZen: props.onOpenZen }),
+    profile: props.settings?.userProfile ?? defaultShellSettings().userProfile,
+    secondaryActions,
+  };
+  const railAccount = <RailAccount {...accountProps} />;
   const besideRail =
     props.railBeside === undefined ? null : (
       <SidebarRail
@@ -387,12 +403,12 @@ export function ShellSidebar(props: ShellSidebarProps) {
           : {})}
         {...(railMore === undefined ? {} : { more: railMore })}
         onOpenSettings={() => props.onOpenSettings()}
-        usage={props.railUsage}
+        account={railAccount}
         onSelectMode={props.onSelectMode}
         placement="beside"
         projects={[]}
         {...railPinProps}
-        tiles={tiles}
+        tiles={railTiles}
       />
     );
   // Beside the rail the sidebar would repeat what the rail already shows:
@@ -406,7 +422,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
       <SidebarRail
         activeMode={activeMode}
         {...(props.home === undefined ? {} : { home: props.home })}
-        destinations={destinationRows.flatMap((id) => {
+        destinations={railRows.flatMap((id) => {
           const action = navigationActions[id];
           return id === "projects" || action === undefined
             ? []
@@ -434,11 +450,11 @@ export function ShellSidebar(props: ShellSidebarProps) {
         {...(props.onOpenSearch === undefined ? {} : { onOpenSearch: props.onOpenSearch })}
         {...(railMore === undefined ? {} : { more: railMore })}
         onOpenSettings={() => props.onOpenSettings()}
-        usage={props.railUsage}
+        account={railAccount}
         onSelectMode={props.onSelectMode}
         projects={props.rail.projects}
         {...railPinProps}
-        tiles={tiles}
+        tiles={railTiles}
       />
     );
   }
@@ -668,15 +684,9 @@ export function ShellSidebar(props: ShellSidebarProps) {
               </div>
             )}
             {props.whatsNew === undefined ? null : <SidebarWhatsNew {...props.whatsNew} />}
-            <SidebarProfile
-              navigatorAvailable={props.navigatorAvailable === true}
-              {...(props.onOpenArchive === undefined ? {} : { onOpenArchive: props.onOpenArchive })}
-              onOpenNavigator={props.onOpenNavigator}
-              onOpenSettings={props.onOpenSettings}
-              {...(props.onOpenZen === undefined ? {} : { onOpenZen: props.onOpenZen })}
-              profile={props.settings?.userProfile ?? defaultShellSettings().userProfile}
-              secondaryActions={secondaryActions}
-            />
+            {/* Beside the rail the person's face is the rail's foot; a second
+                one here said the same thing twice. */}
+            {besideRail === null ? <SidebarProfile {...accountProps} /> : null}
           </div>
         </div>
         {props.projectsDirectory === undefined ? null : (

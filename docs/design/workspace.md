@@ -2745,21 +2745,26 @@ own; the framed panel (the sidebar and the stage, one outline) begins at its
 right edge. In the desktop app the traffic lights sit in the title band above
 it, and the sidebar's head, or with the sidebar hidden the window chrome,
 keeps the rest of their width clear. Beside the sidebar it
-carries the places: the count tiles as icons with badges (under Colour the
-four icons take the tiles' hues, Inbox blue, Running amber, To review purple,
-and Done green, from the same palette roles; the hover and current fills and the
-count badge stay neutral, and under Mono and increased contrast the icons stay
-grey), the destination
+carries the places only: Home, the Inbox as an icon with its count badge (under
+Colour the icon takes the Inbox tile's blue; the hover and current fills and
+the badge stay neutral, and under Mono and increased contrast the icon stays
+grey), the Board, which stands for Running, To review and Done today (three
+look-alike count icons made the rail the busiest column in the window; they
+stay as tiles in a sidebar with no rail beside it, maintainer request,
+2026-11-17), the destination
 rows the person keeps shown (Settings › Sidebar › Sidebar destinations decides
 which and in what order, for the rail as for the sidebar), the Activity feed,
 Projects, a tile for each Project the person pinned (its icon or initial on the
 same 32px face, after the divider; a context menu on the tile unpins it; the
 collapsed rail lists pinned Projects first and draws six Project tiles at most
-so Settings and the rings stay in the window), More (the menu-only destinations and Customize sidebar), the usage
-rings, and Settings. The sidebar keeps its header (modes, search, new thread,
-hide), the Project list with its view, filter, and Activity controls, the
-threads, and the profile, so nothing is offered twice. Rail icons are 16px on
-a 32px face; every rail control names itself in its accessible name and in a
+so the account face stays in the window), More (the menu-only destinations and Customize sidebar), and the
+account face. The sidebar keeps its header (modes, search, new thread,
+hide), the Project list with its view, filter, and Activity controls, and the
+threads; its profile row is not drawn beside the rail, whose account face is
+the same control, so nothing is offered twice. Rail icons are 16px at the
+regular weight on a 36px face (at 20px, or bold at 16, ten of them read as the
+heaviest column in the window; maintainer request, 2026-11-17), and a selected
+place takes the filled glyph; every rail control names itself in its accessible name and in a
 label that opens beside the rail on hover or keyboard focus. Destinations
 have their own marks: Inbox a tray, Running a spinner, To review a checked
 clipboard, Done today a double check, Board a kanban, Issues the issue dot,
@@ -2777,18 +2782,20 @@ under the tray instead of sliding beneath it. The tray's row stays first at the
 top of the sidebar, and the header keeps its full wrapped height however long
 the thread list is, so the list always starts under both rows.
 
-**Usage rings.** Above Settings, at the foot of either rail, each provider
-that reports a plan window with a figure gets a ring in its identity colour
-around its 12px logo:
-the outer arc is what is left of the longest window (the week), the inner arc
-what is left of the shortest (five hours), chosen by each window's length, and
-a window near or at its limit takes the danger ink. Hovering or focusing a
-ring opens a card with every window, its share left, and when it resets;
-clicking opens Settings › Usage. A provider with no figure gets no ring,
-because an empty ring would claim a limit nobody reported. The rings read the
-host's last observation every few minutes, never a fresh provider call. The
-host keeps that observation across restarts, so the rings are there on launch;
-when the reading is more than a few hours old the card says "Last read 5h ago".
+**Account face.** The foot of either rail is one round face: the person's
+picture, else the initials of the name they gave, else a person glyph (24px).
+A thin ring around it shows what is left of their tightest plan window across
+every provider that reports one, in the meta ink, or the danger ink when that
+window is near or at its limit; with no reported figure there is no ring,
+because an empty ring would claim a limit nobody reported. Its accessible name
+says the share left. It opens the account menu, the same one the sidebar's
+profile row opens, beside the rail: a Plan usage group first (each account that
+reports a window, with its lowest window's share and when it resets; a row
+opens Settings › Usage), then the Workspace and Octant groups (Settings among
+them). It replaced a Settings gear and one ring per provider, two kinds of
+thing at the foot where one does (maintainer request, 2026-11-17). The reading
+is the host's last observation, the one the composer and the Inbox read, never
+a fresh provider call, and it survives a restart.
 
 **Back and forward.** Back and Forward sit in the title band beside the
 sidebar control (beside Show sidebar while the sidebar is hidden, with or
@@ -3739,7 +3746,7 @@ through it.
 | 2    | The Projects list in the sidebar (or the rail's button) | Each Project keeps its threads, files and settings together             |
 | 3    | The Tools buttons in the thread's header                | Environment, Terminal, Review, Browser and Files open beside the thread |
 | 4    | The composer                                            | Attach files, choose the mode, see what the agent may do                |
-| 5    | Settings (the rail's button, else the account menu)     | Providers, look and feel, and permissions                               |
+| 5    | The account face or row, whose menu holds Settings      | Providers, look and feel, and permissions                               |
 
 A step whose control is not drawn (a hidden sidebar, a narrow window, a Chat
 thread with no tool buttons, a hidden tool) is skipped, and the label counts

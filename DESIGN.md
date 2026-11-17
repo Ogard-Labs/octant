@@ -536,12 +536,13 @@ Phosphor, imported only through the app's icon module (`apps/web/src/ui/icons`),
 which keeps the names call sites use. The family is drawn as filled outlines at
 fixed weights, chosen by the module, never by a call site's stroke:
 
-| State                                      | Weight  | Ink                        |
-| ------------------------------------------ | ------- | -------------------------- |
-| 12, 14 and 16px (regular stroke read weak) | bold    | the control's own ink      |
-| 20 and 24px (bold there reads heavy)       | regular | the control's own ink      |
-| The selected destination in the icon rail  | fill    | primary ink; muted at rest |
-| A pressed tool whose glyph is a toggle     | fill    | primary ink; muted at rest |
+| State                                      | Weight  | Ink                                                 |
+| ------------------------------------------ | ------- | --------------------------------------------------- |
+| 12, 14 and 16px (regular stroke read weak) | bold    | the control's own ink                               |
+| 20 and 24px (bold there reads heavy)       | regular | the control's own ink                               |
+| A destination in the icon rail, at 16px    | regular | muted; the rail is glyphs with no words beside them |
+| The selected destination in the icon rail  | fill    | primary ink; muted at rest                          |
+| A pressed tool whose glyph is a toggle     | fill    | primary ink; muted at rest                          |
 
 A call site passes `weight="fill"` only to mark the selected or pressed state;
 everything else follows the size. A few glyphs have no exact match (a folder's
@@ -774,10 +775,13 @@ coat), painted once on the shell. Neither has a fill or line of its own.
   toggled. A slot a Project
   fills only sometimes takes no room while empty.
 - **Icon rail**: `--oct-rail-w`, 52px (maintainer decision, 2026-11-14: it
-  gives the stage the room). Its faces are 36px at the control radius with 20px
-  icons, 2px apart (the button's `rail` variant); the first face is centred on
+  gives the stage the room). Its faces are 36px at the control radius with 16px
+  icons at the regular weight, 2px apart (the button's `rail` variant); the first face is centred on
   the band's centreline (4px down). The current face takes
   `--oct-wash-selected`, the pointed-at face `--oct-wash-hover`, no border.
+  The foot is the person's account face: a round face holding their 24px
+  avatar, ringed 3px out by a 1.5px arc of their tightest plan window
+  ([Workspace: Account face](docs/design/workspace.md#presentation)).
 - **Desktop title bar**: Electron's native frame with `titleBarStyle:
 hiddenInset` and no custom `trafficLightPosition` (it would grow the native
   overlay and eat clicks; if a packaged run shows the lights off the band's
