@@ -510,7 +510,7 @@ describe("CodeComposerAdapter", () => {
       <CodeComposerAdapter {...defaultProps} projectAvailable={false} />,
     );
 
-    expect(html).toContain("The selected Project is unavailable. Choose another Project.");
+    expect(html).toContain("That Project is unavailable. Pick another.");
     expect(html).toContain('aria-label="Create thread"');
     expect(html).toContain("disabled");
   });
@@ -1154,9 +1154,7 @@ describe("CodeComposerAdapter interactions", () => {
     fireEvent.paste(screen.getByLabelText("First message"), {
       clipboardData: { files: [file], items: [] },
     });
-    const refusal = await screen.findByText(
-      "The selected model does not accept images. Choose an image-capable model.",
-    );
+    const refusal = await screen.findByText("This model cannot read images. Pick one that can.");
     expect(refusal.closest(".composer-notices")).not.toBeNull();
     expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
   });
@@ -1386,5 +1384,5 @@ it("refuses a native folder as an attachment when the desktop extraction bridge 
   render(<CodeComposerAdapter {...defaultProps} />);
   const input = screen.getByRole("textbox", { name: "First message" });
   fireEvent.drop(input, { dataTransfer: nativeFolderTransfer() });
-  expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+  expect(await screen.findByText(/Folder drops need the desktop app/)).toBeVisible();
 });

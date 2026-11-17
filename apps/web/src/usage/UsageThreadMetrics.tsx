@@ -46,8 +46,8 @@ export function UsageThreadMetrics(props: {
       label="Threads"
       note={
         reading.listedTurnsOnly
-          ? "Older turns are not in this reading, so a thread's figures here cover only the turns still listed."
-          : "The same figures as the line under the composer. A figure the provider did not report is left out."
+          ? "Older turns are missing, so these figures cover only the turns listed."
+          : "Same figures as the line under the composer. Figures the provider did not report are left out."
       }
     >
       <div className="usage-table-scroll">

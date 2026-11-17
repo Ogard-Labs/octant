@@ -162,7 +162,7 @@ export function ArchiveView(props: ArchiveViewProps) {
 
       {chatArchive.kind === "unavailable" ? (
         <p className="oct-meta" role="status">
-          Chat archive is temporarily unavailable. Work and Code results are still shown.
+          Chat archive is unavailable for now. Work and Code results still show.
         </p>
       ) : null}
     </Surface>

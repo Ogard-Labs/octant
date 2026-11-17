@@ -323,9 +323,7 @@ describe("thread utility dock content", () => {
     expect(
       await screen.findByText("Pull requests is unavailable", undefined, { timeout: 5_000 }),
     ).toBeVisible();
-    expect(
-      screen.getByText("This thread has no Project whose pull requests could be listed."),
-    ).toBeVisible();
+    expect(screen.getByText("This thread has no Project to list pull requests for.")).toBeVisible();
   });
 
   it("uses a loading state while Code utility data is still arriving", async () => {

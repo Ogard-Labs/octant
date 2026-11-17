@@ -90,7 +90,7 @@ describe("compact message queue controls", () => {
       retry: async () => {},
     };
     const { rerender } = render(<ThreadMessageQueue queue={lost} showUnavailable />);
-    expect(screen.getByText(/host message queue is unavailable/i)).toBeVisible();
+    expect(screen.getByText(/message queue is unavailable/i)).toBeVisible();
     expect(screen.getByRole("button", { name: "Check queue" })).toBeVisible();
 
     rerender(<ThreadMessageQueue connectionLost queue={lost} showUnavailable />);
@@ -302,7 +302,7 @@ describe("compact message queue controls", () => {
       );
     }
     render(<Harness />);
-    expect(await screen.findByText(/The host restarted/)).toBeVisible();
+    expect(await screen.findByText(/The server restarted/)).toBeVisible();
     expect(screen.getByRole("button", { name: "0 queued" })).toHaveAttribute(
       "aria-expanded",
       "false",

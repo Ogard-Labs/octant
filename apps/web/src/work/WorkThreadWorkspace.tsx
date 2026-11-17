@@ -1850,7 +1850,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       if (decision === "approved" && remember !== undefined) announceShellSettingsWritten();
     } catch {
       setBrowserApprovalMessage(
-        "Browser approval could not be sent. Keep this request open and retry.",
+        "Could not send the browser approval. Keep this open and try again.",
       );
     } finally {
       setBrowserApprovalBusy(false);
@@ -1900,9 +1900,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             : "Model options saved for the next Work turn.",
         );
       } catch {
-        setErrorMessage(
-          "The selected Work provider could not be applied. Choose a ready provider and model.",
-        );
+        setErrorMessage("Could not use that provider. Pick a ready provider and model.");
       } finally {
         setProviderChanging(false);
       }
@@ -2002,7 +2000,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         props.turnClient !== undefined
       ) {
         setErrorMessage(
-          "This task must be rebound before sending a follow-up. Its Project folder is no longer authorized.",
+          "The Project folder is no longer approved. Rebind this task before sending.",
         );
         return false;
       }
@@ -2021,7 +2019,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       );
       if (composerDraft.sideChatReturnsInvalid) {
         setErrorMessage(
-          "The saved Side Chat reference is unreadable. Clear this draft and return the reply again before sending.",
+          "The Side Chat link is broken. Clear this draft and return the reply again before sending.",
         );
         return false;
       }
@@ -2216,7 +2214,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       setStatus(`Created ${reply.outcome.artifact.displayName} in the bound folder.`);
       textareaRef.current?.focus();
     } catch {
-      setErrorMessage("The artifact could not be created. Review the Work project status.");
+      setErrorMessage("Could not create the artifact. Check the Project status.");
     } finally {
       setCreating(false);
     }
@@ -2329,7 +2327,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (items === null) return false;
     if (!clipboardHasImage(items)) return false;
     if (imageSupport === false) {
-      images.refuse("The selected model does not accept images. Choose an image-capable model.");
+      images.refuse("This model cannot read images. Pick one that can.");
       return true;
     }
     return images.consumePaste(items);
@@ -2610,7 +2608,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               if (row.kind === "empty") {
                 return (
                   <p className="work-thread-workspace__opening">
-                    Describe what you want made. Files this task writes stay inside its folder.
+                    Describe what to make. Files stay in this task’s folder.
                   </p>
                 );
               }
@@ -2785,8 +2783,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         {/* "More changed" claims a file changed. A watcher that
                         failed establishes no such thing. */}
                         {row.wrote.paths.length === 0
-                          ? "Octant could not watch the folder while this ran. Open Files for the folder itself."
-                          : "More changed than Octant could record. Open Files for the folder itself."}
+                          ? "Octant could not watch the folder during this run. Open Files to see it."
+                          : "More changed than Octant could record. Open Files to see it."}
                       </p>
                     ) : null}
                   </section>
@@ -2943,8 +2941,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               busy={rewind?.busy === true}
               files={{
                 kind: "unavailable",
-                reason:
-                  "Work takes no file checkpoints, so only the conversation can be rewound. Files stay as they are.",
+                reason: "Work keeps no file checkpoints. Rewind changes the conversation only.",
               }}
               {...(rewind?.message === undefined ? {} : { message: rewind.message })}
               onClose={() => {
@@ -3324,7 +3321,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       imageSupport,
                       images.attach,
                       images.refuse,
-                      "The selected model does not accept images. Choose an image-capable model.",
+                      "This model cannot read images. Pick one that can.",
                     )
                   }
                   threadActions={taskActions}

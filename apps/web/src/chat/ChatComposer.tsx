@@ -1047,7 +1047,7 @@ function composeStatus(input: {
   } else if (input.isSending) {
     // The Stop control already says a response is running.
     progress = {
-      text: "Response is streaming. Submit to add a message to the host queue.",
+      text: "Response is streaming. Sending adds your message to the queue.",
       quiet: true,
     };
   } else if (input.sendDisabledReason !== undefined) {

@@ -1662,7 +1662,7 @@ that serves several threads from one process (Codex, OpenCode) reports
 Chat, its Stop still waits for the runtime to confirm the turn ended before the
 attempt reads `cancelled`; if no confirmation arrives within ten seconds, the
 attempt is recorded `interrupted` with `stop-unconfirmed` ("Stop was not
-confirmed. The provider may still be running this response."), which frees the
+confirmed. The provider may still be working."), which frees the
 thread without claiming the work stopped. While a Stop is unanswered the
 composer's Stop reads "Stopping response…" and cannot be pressed again. For a provider that supports it, a
 Stop keeps the attempt running until the runtime really ends it, so a Stop that
@@ -5769,7 +5769,7 @@ flowchart LR
     effect, that is below Full access. In the composer's row, a 16px globe in
     the warning ink with no words immediately before the mode control, only
     below Full access, named "This thread read outside content, so risky
-    actions ask first. Review in Environment." Neither opens a popover: both
+    actions ask first. See Environment." Neither opens a popover: both
     open the one Review dialog. The mark is read when the thread opens and
     again when a turn starts or settles. Review ("Outside content in this
     thread") lists the sources in plain words with their counts and times (a
@@ -8971,8 +8971,9 @@ watched has ended.
   If the compaction-state read fails while a compaction runs, the window keeps
   the running answer and asks again, more slowly each time; after five failed
   reads in a row (a host that went away, or a window that lost the thread) it
-  stops holding send and reads "Compaction state unknown: the host stopped
-  answering. It may still be compacting, and refuses a send until it ends."
+  stops holding send and reads "The host stopped answering, so compaction
+  status is unknown. It may still be running, and sending is blocked until it
+  ends."
 - The result line, in the popover and the inspector (and on the
   timeline divider): "Compacted · 41.2K freed · summary by Codex", "Compacted ·
   freed amount shows after the next reply · summary by Codex", "Compacted ·

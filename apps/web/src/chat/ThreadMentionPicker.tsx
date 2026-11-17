@@ -155,7 +155,7 @@ export function ThreadMentionTypeahead(props: {
         <p className="thread-mention__empty" role="status">
           {props.busy === true
             ? "Searching threads you can open…"
-            : "No matching thread you can open. Leaving this as ordinary text."}
+            : "No thread you can open matches. Kept as plain text."}
         </p>
       ) : (
         <ul

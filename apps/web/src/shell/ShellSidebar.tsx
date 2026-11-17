@@ -606,7 +606,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
                     }
                   }}
                   placeholder="Filter threads"
-                  title="Type to filter this list. Enter searches every thread."
+                  title="Type to filter. Press Enter to search all threads."
                   ref={searchField}
                   type="search"
                   value={filter.query}

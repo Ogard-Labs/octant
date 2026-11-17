@@ -62,7 +62,7 @@ function ObservedChildSteering(props: {
           : STEERING_REFUSALS[result.reason],
       );
     } catch {
-      setNotice("The subagent could not be sent to the background. Try again.");
+      setNotice("Could not move the helper to the background. Try again.");
     } finally {
       setBusy(false);
     }
@@ -274,7 +274,7 @@ export function ObservedChildDetail(props: {
           </>
         ) : (
           <p className="agent-run-detail__fact">
-            Started by its provider. Octant observes it and has no controls for it.
+            Started by its provider. Octant can watch it but not control it.
           </p>
         )}
         <p className="agent-run-detail__fact">Provider: {child.providerInstanceId}</p>
@@ -309,7 +309,7 @@ export function ObservedChildDetail(props: {
             ? "Conflicting observations; the child's current state is unknown."
             : child.historyStatus === "truncated"
               ? "Observation history is truncated."
-              : "Only reported activity is available; observation history is partial."}
+              : "Only reported activity is shown. History is incomplete."}
         </p>
         {child.history.length === 0 ? (
           <p className="agent-run-detail__note">No earlier activity retained.</p>

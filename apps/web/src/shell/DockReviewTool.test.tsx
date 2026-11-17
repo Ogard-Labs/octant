@@ -468,7 +468,7 @@ it("refuses receipt navigation whose recorded checkout is no longer current", ()
       }}
     />,
   );
-  expect(screen.getByText(/earlier checkout binding/)).toBeVisible();
+  expect(screen.getByText(/belongs to an earlier checkout/)).toBeVisible();
   expect(props.client.executeOperation).not.toHaveBeenCalled();
 });
 

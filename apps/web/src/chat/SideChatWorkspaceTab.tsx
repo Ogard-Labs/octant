@@ -233,13 +233,13 @@ function SideChatSidecarSurface(props: {
                     saved.status === "refused"
                       ? saved.message
                       : saved.status === "unpersisted"
-                        ? "Added to the source draft in this window, but it could not be saved. Nothing was sent."
-                        : "Added to the source’s saved draft. Existing text is kept. Open the source to review and edit it; nothing was sent or queued.",
+                        ? "Added to the draft in this window, but not saved. Nothing was sent."
+                        : "Added to the saved draft. Your text is kept. Nothing was sent or queued.",
                   );
                 } catch {
                   if (live.current)
                     setReturnNotice(
-                      "This reply could not be added to its source draft. Reopen the source and Side Chat, then try again. Nothing was sent.",
+                      "Could not add this reply to the draft. Reopen the thread and Side Chat, then try again. Nothing was sent.",
                     );
                 } finally {
                   clearTimeout(deadline);

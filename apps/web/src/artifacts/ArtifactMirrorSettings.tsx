@@ -27,7 +27,7 @@ const TIERS = [
   {
     kind: "internal-only" as const,
     label: "Keep artifacts in Octant only",
-    detail: "The default. Artifacts are versioned and readable; no files are written.",
+    detail: "Default. Artifacts keep their history; no files are written.",
   },
   {
     kind: "global-folder" as const,
@@ -39,7 +39,7 @@ const TIERS = [
     kind: "project-repository" as const,
     label: "Mirror into the Project's repository",
     detail:
-      "Written to the working tree only. Committing stays your decision, and nothing is ever pushed automatically.",
+      "Written to the working folder only. You decide what to commit. Nothing is pushed automatically.",
   },
 ];
 
@@ -68,7 +68,7 @@ export function ArtifactMirrorSettings(props: ArtifactMirrorSettingsProps) {
             {TIERS.find((tier) => tier.kind === current)?.label}
           </span>
           <span className="oct-row-detail">
-            Artifacts stay versioned in Octant; a mirrored file is a copy for other tools.
+            Octant keeps artifact history. A mirrored file is a copy for other tools.
           </span>
         </div>
         <div className="surface-row__control">

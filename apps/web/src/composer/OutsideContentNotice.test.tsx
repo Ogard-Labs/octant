@@ -72,8 +72,7 @@ function fakeClient(
   return { client, readExternalContent, clearExternalContent };
 }
 
-const MARK_NAME =
-  "This thread read outside content, so risky actions ask first. Review in Environment.";
+const MARK_NAME = "This thread read outside content, so risky actions ask first. See Environment.";
 
 /** What the composer's row and the Environment panel share, as one thread's panes. */
 function Surfaces(props: { readonly busy: boolean; readonly fullAccess: boolean }) {
@@ -254,9 +253,7 @@ describe("outside content notice", () => {
     const user = userEvent.setup();
     await user.click(within(dialog).getByRole("button", { name: "Clear mark" }));
 
-    expect(
-      await within(dialog).findByText(/New outside content arrived since you looked/),
-    ).toBeVisible();
+    expect(await within(dialog).findByText(/New outside content arrived/)).toBeVisible();
     expect(within(dialog).getByText("A Linear issue")).toBeVisible();
     expect(within(dialog).queryByText("A GitHub issue")).not.toBeInTheDocument();
     expect(screen.getByRole("dialog")).toBe(dialog);
@@ -284,7 +281,7 @@ describe("outside content notice", () => {
     const dialog = await openReview();
     const user = userEvent.setup();
     await user.click(within(dialog).getByRole("button", { name: "Clear mark" }));
-    await within(dialog).findByText(/New outside content arrived since you looked/);
+    await within(dialog).findByText(/New outside content arrived/);
     await user.click(within(dialog).getByRole("button", { name: "Clear mark" }));
     await waitFor(() => expect(clearExternalContent).toHaveBeenCalledTimes(2));
     expect(clearExternalContent).toHaveBeenLastCalledWith({
@@ -295,10 +292,10 @@ describe("outside content notice", () => {
   });
 
   it.each([
-    ["turn-active", /This thread is busy\. Try again once its turn and any queued messages/],
-    ["turn-unconfirmed", /last turn did not finish cleanly/],
+    ["turn-active", /This thread is busy\. Try again once its turn and queued messages/],
+    ["turn-unconfirmed", /last turn did not end cleanly/],
     ["unauthorized", /cannot be cleared from this window/],
-    ["thread-unavailable", /cannot be reached from this window/],
+    ["thread-unavailable", /This window cannot reach the thread/],
   ])("tells the person why a %s refusal kept the mark", async (reason, sentence) => {
     const { client } = fakeClient({ clear: async () => refused(reason, stateOf()) });
     renderNotice(client);

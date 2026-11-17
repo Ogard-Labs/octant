@@ -94,7 +94,7 @@ function ChatProjectCreateDialog(props: ProjectCreateDialogProps) {
         props.onCreated(projectId, "chat", normalized);
         props.onClose();
       } else {
-        setStatus("Project could not be created. Review the Project status and retry.");
+        setStatus("Could not create the Project. Check its status and try again.");
       }
     } catch {
       if (!alive.current || operation !== operationGeneration.current) return;
@@ -248,7 +248,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
         props.onCreated(projectId, mode, projectName);
         props.onClose();
       } else {
-        setStatus("Project could not be created. Review the Project status and retry.");
+        setStatus("Could not create the Project. Check its status and try again.");
       }
     } catch {
       if (!alive.current || operation !== operationGeneration.current) return;
@@ -418,8 +418,8 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
       <>
         <p>
           {mode === "code"
-            ? "One folder, bound as this Code Project. Octant records the binding."
-            : "One folder, bound as this Project's root. Octant records the binding."}
+            ? "One folder for this Code Project. Octant records it."
+            : "One folder for this Project. Octant records it."}
         </p>
         <div className="project-dialog__actions project-dialog__actions--leading">
           <OctantButton
@@ -475,8 +475,8 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
           </div>
           <p>
             {mode === "code"
-              ? "One folder, bound as this Code Project. Initialize Git here so a Code thread can start immediately."
-              : "One folder, bound as this Project's root. Octant records the binding."}
+              ? "One folder for this Code Project. Set up Git here so Code threads can start now."
+              : "One folder for this Project. Octant records it."}
           </p>
           {folderBody}
           <p aria-live="polite" className="project-dialog__status">
@@ -522,8 +522,8 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
           </OctantButton>
         </div>
         <OctantAlert tone="warning">
-          Folder selection is unavailable. Authenticated web needs the host folder browser; Electron
-          needs the native picker bridge.
+          You cannot pick a folder here. The signed-in web app needs the host folder browser;
+          Electron needs the native picker bridge.
         </OctantAlert>
         <div className="project-dialog__actions">
           <OctantButton onClick={props.onClose} type="button" variant="outline">
@@ -616,7 +616,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
             client={props.folderBrowseClient}
             {...(browsing === "destination"
               ? {
-                  hint: "Pick the folder Octant clones the repository into; it creates a new folder inside it.",
+                  hint: "Pick where to clone the repository. Octant makes a new folder there.",
                   title: "Choose clone destination",
                 }
               : {})}

@@ -341,7 +341,7 @@ function statusMessage(
 ): string {
   // A failed refresh of the same query has not made usage unreadable; saying so
   // beside the figures it left on screen would contradict them.
-  if (stale) return "Usage could not be refreshed, so this is the last successful read.";
+  if (stale) return "Could not refresh usage. Showing the last result.";
   switch (status) {
     case "loading":
       return "Loading usage…";
@@ -443,7 +443,7 @@ function SummarySection({ dashboard }: { readonly dashboard: UsageDashboardRespo
     <SurfaceSection label="Summary">
       {dashboard.scanTruncated ? (
         <p className="usage-workspace__truncated" role="note">
-          This range holds more records than one read returns. Every total below is a floor, not a
+          This range has more records than could be read. Every total below is a minimum, not a
           complete figure. Narrow the range or the filters to read the rest.
         </p>
       ) : null}
@@ -501,7 +501,7 @@ function SummarySection({ dashboard }: { readonly dashboard: UsageDashboardRespo
             </>
           )}
         </li>
-        <li>Monetary cost: Unavailable — no reviewed or user-supplied pricing is configured.</li>
+        <li>Cost: unavailable. No pricing is set.</li>
       </ul>
 
       {summary.excludedRecordCount > 0 ? (
@@ -747,7 +747,7 @@ function BreakdownSection(props: {
           </div>
           {group.truncated ? (
             <p className="usage-workspace__note">
-              Showing the highest-usage rows only; narrow the filters to see the rest.
+              Showing the highest-usage rows. Narrow the filters to see more.
             </p>
           ) : null}
         </div>
@@ -838,8 +838,7 @@ function DetailSection(props: {
       </div>
       {props.truncated ? (
         <p className="usage-workspace__note">
-          Showing the most recent requests in this range; narrow the range or filters to see older
-          ones.
+          Showing the latest requests. Narrow the range or filters to see older ones.
         </p>
       ) : null}
     </SurfaceSection>
@@ -872,8 +871,8 @@ function HostSection({ hosts }: { readonly hosts: ReadonlyArray<UsageHostCoverag
         </ul>
       )}
       <p className="usage-workspace__note">
-        This host reports only its own recorded usage. Another host's usage is excluded until
-        multi-host composition is authorized, so an absent host is not a host with zero usage.
+        This host reports only its own usage. Other hosts are left out until multi-host composition
+        is authorized, so an absent host is not a host with zero usage.
       </p>
     </SurfaceSection>
   );

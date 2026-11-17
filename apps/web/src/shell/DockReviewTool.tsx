@@ -79,7 +79,7 @@ export function DockReviewTool(props: DockReviewToolProps) {
       <OctantEmpty
         state="warning"
         title="Receipt checkout unavailable"
-        message="This receipt belongs to an earlier checkout binding. Open its original checkout to review it; its files cannot be retargeted here."
+        message="This belongs to an earlier checkout. Open that checkout to review it. Its files cannot be moved here."
       />
     );
   if (props.requestedCodeReviewFile?.turnCapture !== undefined)
@@ -237,7 +237,7 @@ function BoundReview(props: {
         createOperationId={() => nextUuid() as never}
         defaultLayout={props.defaultDiffLayout ?? "unified"}
         diff={projection}
-        info="Checkout changes only. Edits in extra Project folders are not included. Review is local only: GitHub review mutation is unavailable."
+        info="Checkout changes only. Edits in extra Project folders are left out. Review is local; it cannot change anything on GitHub."
         onRefresh={() => {
           setRefreshTick((value) => value + 1);
           void observe();

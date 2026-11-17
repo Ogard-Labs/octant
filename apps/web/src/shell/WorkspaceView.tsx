@@ -2380,7 +2380,7 @@ function renderNonCodeTab(
         eyebrow="Settings moved"
         message="Settings now opens from the app sidebar without changing this workspace."
         state="neutral"
-        title="Open the dedicated Settings view"
+        title="Open Settings"
       />
     );
   }

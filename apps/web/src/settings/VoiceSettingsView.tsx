@@ -88,7 +88,7 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
           <SettingsSection title="Text to speech">
             <div className="setgroup">
               <SettingRow
-                description="Choose a provider voice, or use this computer's voices without a provider call."
+                description="Pick a provider voice, or use this computer's voices with no provider call."
                 focused={props.focusedSetting === settingId("synthesis")}
                 label="Speech"
                 scope="app"

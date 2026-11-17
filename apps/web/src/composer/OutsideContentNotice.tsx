@@ -154,7 +154,7 @@ export function useReportOutsideContentBusy(busy: boolean): void {
 }
 
 const MARK_TOOLTIP =
-  "This thread read outside content, so risky actions ask first. Review in Environment.";
+  "This thread read outside content, so risky actions ask first. See Environment.";
 
 /**
  * The mark in the composer's row, immediately before the access control: a
@@ -340,14 +340,11 @@ function readSummary(sources: ReadonlyArray<ThreadExternalContentSource>): strin
 }
 
 const REFUSAL_COPY: Record<ThreadExternalContentClearRefusal, string> = {
-  stale:
-    "New outside content arrived since you looked. The list is updated; review it, then clear.",
-  "turn-active":
-    "This thread is busy. Try again once its turn and any queued messages have finished.",
-  "turn-unconfirmed":
-    "This thread's last turn did not finish cleanly, so Octant cannot tell whether it has stopped. Check the thread, then try again.",
+  stale: "New outside content arrived. Review the updated list, then clear.",
+  "turn-active": "This thread is busy. Try again once its turn and queued messages have finished.",
+  "turn-unconfirmed": "The last turn did not end cleanly. Check the thread, then try again.",
   unauthorized: "The mark cannot be cleared from this window.",
-  "thread-unavailable": "This thread cannot be reached from this window, so its mark stays.",
+  "thread-unavailable": "This window cannot reach the thread, so its mark stays.",
 };
 
 /** How often and when a source was read; a row recorded before times were kept shows none. */

@@ -41,13 +41,12 @@ const REFUSAL_COPY: Readonly<
   Record<Extract<DesignSystemWriteResult, { status: "refused" }>["reason"], string>
 > = {
   exists: "A DESIGN.md is already there. Open it from the list instead.",
-  stale:
-    "The file changed since you opened it, perhaps in an editor or by an agent. Reload it, then make your change again.",
+  stale: "The file changed since you opened it. Reload it and make your change again.",
   missing: "The file is gone. Create it again to keep your text.",
-  "too-large": "The design system is larger than Octant edits; use your editor.",
+  "too-large": "This design system is too large to edit here. Use your editor.",
   "not-a-file": "That name is not a regular file, so Octant leaves it alone.",
   "folder-unavailable":
-    "That folder is not in this Project, or it is a link Octant does not follow.",
+    "That folder is not in this Project, or it is a link Octant will not follow.",
   unwritable: "The folder refused the write.",
 };
 
@@ -266,12 +265,12 @@ export function ProjectDesignSystemSection(props: ProjectDesignSystemSectionProp
         </ul>
       ) : list.status === "ready" ? (
         <p className="project-provider-policy__hint">
-          No DESIGN.md yet. Create one to give this Project&apos;s code and documents one look.
+          No DESIGN.md yet. Create one to give this Project&apos;s code and documents a single look.
         </p>
       ) : null}
       {list.status === "ready" && list.value.truncated ? (
         <p className="project-provider-policy__hint">
-          The search stopped early; deeper files are not listed.
+          The search stopped early. Deeper files are not listed.
         </p>
       ) : null}
 
@@ -421,7 +420,7 @@ function DesignSystemView(props: {
       </div>
       {reading.frontMatter === "invalid" ? (
         <OctantAlert tone="warning">
-          The front matter between the --- lines could not be read, so no tokens reach Canvas.
+          The header between the --- lines could not be read, so Canvas gets no tokens.
         </OctantAlert>
       ) : null}
       {reading.frontMatter === "absent" ? (
@@ -523,13 +522,13 @@ function FollowsLine(props: {
   const choice = props.list.choice;
   const follows =
     choice?.kind === "none"
-      ? "Design systems are off for this Project: turns get no design system and Canvas uses the brand kit or the workspace colours."
+      ? "Design systems are off for this Project. Turns get none, and Canvas uses the brand kit or workspace colours."
       : props.list.choiceMissing === true && choice?.kind === "file"
         ? `The chosen ${placeOf(choice, props.mainFolder)} is missing, so this Project follows no design system until it is back or another is chosen.`
         : primary === undefined
           ? props.list.systems.length === 0
             ? undefined
-            : "No design system speaks for the whole Project. Choose one, or add a DESIGN.md at the top."
+            : "No design system covers the whole Project. Choose one, or add a DESIGN.md at the top."
           : `This Project follows ${primary.name} (${placeOf(primary, props.mainFolder)})${choice === undefined ? ", the top-level file" : ""}.`;
   if (follows === undefined && choice === undefined) return null;
   return (

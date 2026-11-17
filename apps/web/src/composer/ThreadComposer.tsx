@@ -569,7 +569,7 @@ function ComposerSendCell(props: {
         <OctantButton
           onClick={stop.forceStop.onForceStop}
           size="sm"
-          title="Kill this response's process. Use it when Stop did not end the response."
+          title="Force-stop this response. Use it when Stop does not work."
           type="button"
           variant="secondary"
         >

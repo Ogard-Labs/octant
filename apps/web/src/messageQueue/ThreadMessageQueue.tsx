@@ -8,20 +8,19 @@ import "./thread-message-queue.css";
 
 const holdMessage: Readonly<Record<ThreadMessageQueueHoldReason, string>> = {
   paused: "The queue is paused.",
-  "host-restart": "The host restarted. The queue continues when it safely can, or resume it now.",
+  "host-restart": "The server restarted. The queue continues when it safely can, or resume it now.",
   "delivery-unknown":
-    "The host is checking whether the message started. It will not send another copy.",
-  "binding-changed": "Thread settings changed. Restore them or remove and queue the message again.",
+    "The server is checking whether the message started. It will not be sent twice.",
+  "binding-changed": "Thread settings changed. Restore them, or remove and requeue the message.",
   "authority-revoked": "This window no longer has permission to continue the queue.",
   cancelled: "The last turn was stopped. Review the queue before resuming.",
   failed: "The last turn failed. Review the queue before resuming.",
   "thread-unavailable": "This thread is unavailable.",
-  "content-unavailable":
-    "Queued content is unavailable. Remove the affected message and write it again.",
-  "admission-refused": "The host refused to start the message. Review the thread before resuming.",
+  "content-unavailable": "A queued message cannot be read. Remove it and write it again.",
+  "admission-refused": "The server refused to start the message. Check the thread before resuming.",
 };
 
-const QUEUE_UNAVAILABLE = "The host message queue is unavailable. Your draft stays here.";
+const QUEUE_UNAVAILABLE = "The message queue is unavailable. Your draft stays here.";
 
 export function ThreadMessageQueue({
   queue,

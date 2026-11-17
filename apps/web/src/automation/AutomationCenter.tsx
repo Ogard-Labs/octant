@@ -590,7 +590,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
           role="status"
         >
           {deliveryStatus.providerDelivery === "unavailable"
-            ? "Notification delivery is unavailable until APNs/FCM credentials are configured."
+            ? "Notifications need push credentials. Add them to turn this on."
             : deliveryStatus.deliveryEnabled
               ? "Notification delivery is enabled for this host."
               : "Notification delivery is currently unavailable."}
@@ -678,7 +678,7 @@ function AutomationListBody(props: {
             Clear filters
           </OctantButton>
         }
-        detail="Clear or adjust the active filters to see other automations."
+        detail="Clear or change the filters to see other automations."
         icon={<CalendarClock size={20} />}
         title="No automations match these filters"
       />

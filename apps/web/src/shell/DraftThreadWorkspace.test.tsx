@@ -785,9 +785,7 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByRole("button", { name: /^Where this thread works/ })).not.toHaveTextContent(
       "New worktree",
     );
-    expect(
-      screen.queryByText("The selected Project is unavailable. Choose another Project."),
-    ).toBeNull();
+    expect(screen.queryByText("That Project is unavailable. Pick another.")).toBeNull();
   });
 
   it("offers a Work Project on a server in a Work draft, and only there", async () => {

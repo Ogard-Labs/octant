@@ -506,7 +506,7 @@ describe("ThreadComposer", () => {
     const { container, rerender } = render(composerAt("ask-first"));
 
     const mark = await screen.findByRole("button", {
-      name: "This thread read outside content, so risky actions ask first. Review in Environment.",
+      name: "This thread read outside content, so risky actions ask first. See Environment.",
     });
     // The globe stands in the row under the box, immediately before the mode
     // control; nothing of it is in the box or in a card above it.
@@ -523,9 +523,7 @@ describe("ThreadComposer", () => {
 
     rerender(composerAt("full-access"));
     await waitFor(() =>
-      expect(
-        screen.queryByRole("button", { name: /Review in Environment/ }),
-      ).not.toBeInTheDocument(),
+      expect(screen.queryByRole("button", { name: /See Environment/ })).not.toBeInTheDocument(),
     );
   });
 

@@ -233,7 +233,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
                 and cannot be resumed.
               </p>
               <p className="composer-subagents__confirm-scope">
-                Only this thread&apos;s managed subagents are affected.
+                Only this thread&apos;s helpers are affected.
               </p>
               <div className="composer-subagents__confirm-actions">
                 <OctantButton

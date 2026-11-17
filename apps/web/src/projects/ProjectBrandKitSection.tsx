@@ -105,7 +105,7 @@ export function ProjectBrandKitSection(props: ProjectBrandKitSectionProps) {
         <div>
           <h2 id={`brand-kit-${props.project.id}`}>Brand kit</h2>
           <p>
-            Set your colours and fonts once. Designs this Project makes can use them with the brand
+            Set your colours and fonts once. Designs in this Project can use them with the brand
             theme. Fonts are system faces or generic families; nothing is downloaded.
             {props.project.type === "chat"
               ? null

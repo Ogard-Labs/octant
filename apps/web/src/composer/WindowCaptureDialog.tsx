@@ -238,7 +238,7 @@ function descriptionFor(phase: Phase): string {
     case "capturing":
       return phase.windows.length === 0
         ? "No windows are open to capture."
-        : "Choose the window to attach as an image. Nothing is captured until you choose.";
+        : "Pick a window to attach as an image. Nothing is captured until you pick.";
   }
 }
 

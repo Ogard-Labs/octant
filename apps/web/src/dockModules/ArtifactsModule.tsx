@@ -151,7 +151,7 @@ export default function ArtifactsModule(props: Props) {
       <div className="dock-artifacts__body">
         {entries.length === 0 && claudePages.length === 0 ? (
           <OctantEmpty
-            detail="Canvas documents and pages published to claude.ai from this Project appear here."
+            detail="Canvas documents and pages published to claude.ai from this Project show here."
             icon={<Compass size={16} />}
             layout="line"
             title="No artifacts yet"

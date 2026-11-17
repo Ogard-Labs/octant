@@ -155,7 +155,7 @@ export function PersonMemorySettings(props: PersonMemorySettingsProps) {
             />
           </SettingRow>
           <SettingRow
-            description="Agents can look up what earlier threads in other Projects did. They get short excerpts from memory, never files or whole conversations."
+            description="Agents can look up what earlier threads in other Projects did. They see short excerpts, never files or whole conversations."
             focused={props.focusedSetting === "past-thread-search"}
             label="Search past threads"
             scope="host"
@@ -170,7 +170,7 @@ export function PersonMemorySettings(props: PersonMemorySettingsProps) {
           </SettingRow>
         </div>
         <SettingGroup
-          description="Nothing is learned from these Projects, and what was learned only there is not shown to other threads."
+          description="Nothing is learned from these Projects. What was learned only there is not shared with other threads."
           label="Projects kept out of memory"
         >
           {settings.excludedProjectIds.map((projectId) => (
@@ -230,7 +230,7 @@ export function PersonMemorySettings(props: PersonMemorySettingsProps) {
         </SettingGroup>
         {view.untracedThreads.length === 0 ? null : (
           <SettingGroup
-            description="Threads you marked to leave no trace: nothing is learned from them, and they get no memory."
+            description="Threads you marked to leave no trace. Nothing is learned from them, and they get no memory."
             label="Threads that leave no trace"
           >
             {view.untracedThreads.map((thread) => (
@@ -371,7 +371,7 @@ export function PersonMemorySettings(props: PersonMemorySettingsProps) {
         )}
         <div className="setgroup">
           <SettingRow
-            description="Erases every entry and every remembered thread. Your threads themselves are not touched."
+            description="Erases every entry and remembered thread. Your threads are not touched."
             focused={props.focusedSetting === "person-memory-forget"}
             label="Forget everything"
             scope="host"

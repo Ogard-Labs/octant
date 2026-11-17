@@ -355,7 +355,7 @@ export function TodosView(props: TodosPageProps) {
           </p>
         ) : view === undefined ? null : pageIsEmpty ? (
           <OctantEmpty
-            detail="Write down what you mean to do. A to-do can be handed to an agent as a thread when you are ready."
+            detail="Write down what you want to do. Hand a to-do to an agent when you are ready."
             icon={<SquareCheck size={20} />}
             layout="line"
             title="No to-dos yet"

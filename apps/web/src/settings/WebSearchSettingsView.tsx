@@ -229,7 +229,7 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
   return (
     <>
       <SettingsSection
-        description="Where Octant's own web search may send a query. Octant cannot read your contracts, so it relies on what you state about each vendor."
+        description="Where Octant's web search may send a query. Octant cannot read your contracts, so it relies on what you say about each vendor."
         title="Data policy"
       >
         <div className="setgroup">
@@ -276,7 +276,7 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
       >
         {draft.backends.length === 0 ? (
           <SettingsState kind="empty">
-            No backends. With none, Octant offers no web search of its own.
+            No search backends. Octant offers no web search of its own.
           </SettingsState>
         ) : null}
         <div className="setgroup">

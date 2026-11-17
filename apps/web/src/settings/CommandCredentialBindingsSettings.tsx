@@ -106,7 +106,7 @@ export function CommandCredentialBindingsSettings(props: {
   return (
     <SettingsSection
       title="Credential commands"
-      description="Save a fixed command for a Code Project. Every run needs a fresh credential approval and the task’s ordinary command approval. Strict keeps the recipient confined, including at Full access. Plan refuses runs."
+      description="Save a fixed command for a Code Project. Every run needs a new credential approval and the usual command approval. Strict keeps the recipient confined, including at Full access. Plan refuses runs."
     >
       <div className="credential-requests">
         {bindings.map((binding) => (

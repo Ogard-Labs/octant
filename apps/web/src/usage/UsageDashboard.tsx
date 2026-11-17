@@ -304,8 +304,7 @@ export function UsageDashboard(props: UsageDashboardProps) {
 
       {hasUnavailableUsage ? (
         <p className="usage-dashboard__unavailable-note" role="status">
-          Some usage is unavailable or estimated and shown as measurement quality, never as zero
-          cost.
+          Some usage is unavailable or estimated. It is labelled as such, never shown as zero cost.
         </p>
       ) : null}
 
@@ -913,7 +912,7 @@ function UsageControls(props: UsageControlsProps) {
         }
         className="usage-dashboard__section"
         label="Export"
-        note="Only safe reference fields are included; no prompts, file contents, credentials, or account identifiers."
+        note="Includes no prompts, file contents, credentials, or account IDs."
       >
         {props.message !== undefined ? (
           <p className="usage-dashboard__action-message" role="status">
@@ -926,9 +925,7 @@ function UsageControls(props: UsageControlsProps) {
           <li className="surface-row">
             <div className="surface-row__copy">
               <span className="oct-row-label">Older than 30 days</span>
-              <span className="oct-row-detail">
-                Removes durable usage records older than the retention threshold.
-              </span>
+              <span className="oct-row-detail">Removes usage records older than 30 days.</span>
             </div>
             <div className="surface-row__control">
               {/* These two delete records; they were styled exactly like the
@@ -942,7 +939,7 @@ function UsageControls(props: UsageControlsProps) {
             <div className="surface-row__copy">
               <span className="oct-row-label">All usage</span>
               <span className="oct-row-detail">
-                Clears the local usage projection. This cannot be undone.
+                Clears all usage records. This cannot be undone.
               </span>
             </div>
             <div className="surface-row__control">
@@ -994,12 +991,12 @@ function ConfirmDialog({ action, onCancel, onConfirm }: ConfirmDialogProps) {
 
 function confirmMessageFor(action: ConfirmDialogProps["action"]): string {
   if (action.kind === "export") {
-    return `Export usage data as ${action.format.toUpperCase()}? Only safe reference fields are included; no prompts, file contents, credentials, or account identifiers.`;
+    return `Export usage data as ${action.format.toUpperCase()}? Includes no prompts, file contents, credentials, or account IDs.`;
   }
   if (action.kind === "reset") {
-    return "Reset all usage records? This permanently clears the local usage projection and cannot be undone.";
+    return "Reset all usage records? This clears them for good and cannot be undone.";
   }
-  return "Purge usage records older than 30 days? This removes durable usage records older than the retention threshold.";
+  return "Purge usage records older than 30 days? This cannot be undone.";
 }
 
 function UsageTotal(props: { readonly label: string; readonly value: number | undefined }) {

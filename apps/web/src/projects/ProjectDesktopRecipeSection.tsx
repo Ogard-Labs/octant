@@ -538,7 +538,7 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
     savedKey.status !== "loaded" ? savedKey.status : keyCarries ? savedKey.key : "none";
   const providerName = draftProvider?.displayName ?? "the provider";
   const keyMessage = keyStoreUnavailable
-    ? "This host has no credential store Octant can reach, so it can't keep a key. Desktops on this provider can't start until it does."
+    ? "Octant cannot reach a credential store here, so it cannot keep a key. Desktops on this provider will not start until it can."
     : keyState === "loading"
       ? "Checking the key…"
       : keyState === "failed"
@@ -614,7 +614,7 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
         </p>
       ) : offered.status === "failed" ? (
         <p className="project-provider-policy__empty" role="status">
-          This window can't ask the host which desktop providers it offers.
+          This window cannot list the desktop providers.
         </p>
       ) : providers.length === 0 ? (
         <p className="project-provider-policy__empty" role="status">
@@ -787,9 +787,9 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
                 />
               </label>
               <p className="project-provider-policy__hint">
-                What an hour of this desktop costs on your account, in US dollars. Before each
-                desktop starts, Octant estimates its most from this and checks it against your
-                monthly cap in Settings › Computer use.
+                What an hour of this desktop costs you, in US dollars. Before each desktop starts,
+                Octant estimates its most from this and checks it against your monthly cap in
+                Settings › Computer use.
               </p>
             </>
           ) : null}

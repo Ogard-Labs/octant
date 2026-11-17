@@ -175,7 +175,7 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
           if (active) {
             setWorkspace({
               status: "error",
-              message: "The pull-request detail could not be refreshed from GitHub.",
+              message: "Could not refresh this pull request from GitHub.",
             });
           }
         },
@@ -211,7 +211,7 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
     } catch {
       setWorkspace((previous) => ({
         status: "error",
-        message: "The pull-request detail could not be refreshed from GitHub.",
+        message: "Could not refresh this pull request from GitHub.",
         ...(previous.status === "ready" || previous.status === "refreshing"
           ? { view: previous.view }
           : previous.status === "error" && previous.view !== undefined

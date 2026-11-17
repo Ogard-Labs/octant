@@ -677,8 +677,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           ...(props.mode === "code" && props.codeDefaultFolderThreads !== true
             ? {
                 disabled: true,
-                disabledReason:
-                  "Code needs a Git repository. You can change that in Code settings.",
+                disabledReason: "Code needs a Git repository. Change this in Code settings.",
               }
             : {}),
         } satisfies ComposerProjectEntry)
@@ -1568,7 +1567,7 @@ function CoordinatorDraftHeading(props: { readonly coordinator: CoordinatorDraft
       <Network aria-hidden="true" className="welcome__mark" size={20} />
       <h1 className="oct-title oct-title--hero welcome__question">New coordinator</h1>
       <p className="oct-row-detail welcome__status">
-        One thread that plans the work and hands it to worker threads.
+        One thread plans the work and hands it to workers.
       </p>
       <p className="oct-row-detail welcome__status">
         <OctantButton onClick={props.coordinator.onCancel} type="button" variant="link">

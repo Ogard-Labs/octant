@@ -53,7 +53,7 @@ export function AutomationEventSourceStatus(props: {
         definition,
         rearmEvents: true,
       },
-      "Held events skipped. Routine re-armed with a fresh baseline.",
+      "Held events skipped. The routine is ready again with a fresh baseline.",
     );
     setBusy(false);
     if (result.kind === "automation-updated") {
@@ -80,22 +80,22 @@ export function AutomationEventSourceStatus(props: {
           {source.reason === "busy-input"
             ? "Events arrived during routine activity and need review."
             : source.reason === "activity-history-limit"
-              ? "Unsettled routine activity cannot be proven quiet. Finish and review tasks and children, then archive this routine and configure a new one if its retained history is full."
+              ? "This routine may still be active. Finish and review its tasks and helpers. If its history is full, archive it and make a new one."
               : source.reason === "routine-output"
                 ? "Events may come from routine output and need review."
                 : source.reason === "automatic-start-limit"
                   ? "The automatic allowance is used up."
                   : source.reason === "source-limit"
-                    ? "The bounded source observation is incomplete. Narrow the source or review and re-arm."
+                    ? "Octant could not see everything from this source. Narrow it, or review and re-arm."
                     : source.reason === "source-changed"
-                      ? "The selected source changed. Review its connection and create a new routine for a different account or source."
-                      : "The selected source is unavailable. Its cursor and allowance are retained."}
+                      ? "The source changed. Check its connection, and make a new routine for a different account or source."
+                      : "The source is unavailable. Its place and allowance are kept."}
         </p>
       )}
       {source?.coverageGap ? (
         <p>
-          The host observed a coverage gap. Only surviving observed events are known; unseen
-          intermediate assignments and CI attempts cannot be reconstructed.
+          Octant missed some events. Only the events it saw are known; unseen intermediate
+          assignments and CI attempts cannot be reconstructed.
         </p>
       ) : null}
       {source?.pending.length ? (

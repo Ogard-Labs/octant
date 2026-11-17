@@ -302,7 +302,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     if (items === null) return false;
     if (!clipboardHasImage(items)) return false;
     if (imageSupport === false) {
-      images.refuse("The selected model does not accept images. Choose an image-capable model.");
+      images.refuse("This model cannot read images. Pick one that can.");
       return true;
     }
     return images.consumePaste(items);
@@ -403,7 +403,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                         key: "project-required",
                         tone: "danger" as const,
                         role: "alert" as const,
-                        text: "Choose a Project to work in before sending. Work needs a confined folder.",
+                        text: "Pick a Project before sending. Work stays inside its Project folder.",
                       },
                     ]
                   : []),
@@ -554,7 +554,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                       imageSupport,
                       images.attach,
                       images.refuse,
-                      "The selected model does not accept images. Choose an image-capable model.",
+                      "This model cannot read images. Pick one that can.",
                     )
                   }
                 />

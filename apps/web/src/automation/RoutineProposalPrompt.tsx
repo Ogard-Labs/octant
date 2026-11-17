@@ -175,7 +175,7 @@ function RoutineChangeCard(props: {
         : "Archive routine";
   const summary =
     request.change === "pause"
-      ? "It stops running until you resume it in Automation Center."
+      ? "It stops until you resume it in Automation Center."
       : followUp
         ? "Its scheduled turn will not be sent."
         : "It stops for good. Its run history stays in Automation Center.";

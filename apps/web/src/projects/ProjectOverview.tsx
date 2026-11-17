@@ -313,7 +313,9 @@ export function ProjectOverview(props: ProjectOverviewProps) {
         setPicking(false);
       } else {
         setRelinkFailed(true);
-        setRelinkStatus("Project root could not be relinked. Review the Project status and retry.");
+        setRelinkStatus(
+          "Could not relink the Project folder. Check the Project status and try again.",
+        );
       }
     } catch {
       if (!alive.current || operation !== relinkGeneration.current) return;
@@ -654,7 +656,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 summary={
                   props.project.type === "chat"
                     ? "Colours and fonts your designs can use"
-                    : "Colours and fonts designs use when no DESIGN.md sets them"
+                    : "Colours and fonts for designs without a DESIGN.md"
                 }
               >
                 <ProjectBrandKitSection
@@ -697,7 +699,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               <ProjectOverviewInspector
                 key={`${String(props.project.id)}-native-providers`}
                 label="Trusted providers"
-                summary="Let a provider load this Project's own hooks, MCP servers, and plugins"
+                summary="Hooks, MCP servers, and plugins a provider may load"
               >
                 <ProjectNativeProvidersSection
                   disabled={archived || connectionStale}
@@ -738,7 +740,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               <ProjectOverviewInspector
                 key={`${String(props.project.id)}-actions`}
                 label="Actions"
-                summary="Run, Test, Dev and other commands for this Project's terminal"
+                summary="Run, Test, Dev and other named commands"
               >
                 <ProjectActionsSection
                   {...(projectTerminalClient === undefined
@@ -825,7 +827,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               <ProjectOverviewInspector
                 key={`${String(props.project.id)}-models`}
                 label="Models"
-                summary="Which models this Project's coordinators and helper agents use for each role"
+                summary="Models this Project's coordinators and helpers use"
               >
                 <ProjectModelRolesSection
                   {...props.modelRoles}
@@ -839,7 +841,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               <ProjectOverviewInspector
                 key={`${String(props.project.id)}-ceiling`}
                 label="Spend ceiling"
-                summary="Optional Project limits on tokens, turns, agent run time, and money"
+                summary="Optional limits on tokens, turns, run time, and money"
               >
                 <ProjectSpendCeilingSection
                   client={props.spendCeilingClient}
@@ -855,10 +857,10 @@ export function ProjectOverview(props: ProjectOverviewProps) {
 }
 
 const STATUS_FILE_RULE =
-  "Keep a STATUS.md in this folder. Every task reads it and updates where the work stands, and its dated follow-ups and deadlines become reminders. When off, Octant writes nothing into the folder.";
+  "Keep a STATUS.md in this folder. Tasks read it and update it, and dated follow-ups become reminders. Off: Octant writes nothing to the folder.";
 
 const DEVELOPER_TOOLS_RULE =
-  "Show this Project's terminal and its Run, Test and Dev actions. Tasks here can run commands and Git at their mode either way; this only changes what you see.";
+  "Show this Project's terminal and its Run, Test and Dev actions. Tasks can still run commands and Git either way; this only changes what you see.";
 
 /**
  * The opt-in for the STATUS.md Octant keeps in a Work folder. Not offered for
@@ -918,10 +920,10 @@ function AgentMemoryWritesSetting(props: {
       <div className="project-overview-inspector__row">
         <div>
           <h3>Agent memory writes</h3>
+          {/* The limits stay on screen: they are what make the switch safe. */}
           <p id={descriptionId}>
-            Below Full access, an agent asks before each change to this Project&apos;s memory. Turn
-            this on to let agents write it without asking; each entry is marked as written by an
-            agent. At Full access agents never ask, and Plan never writes.
+            Below Full access, agents write memory without asking. Each entry is marked as written
+            by an agent. Full access never asks. Plan never writes.
           </p>
         </div>
         <OctantSwitch
@@ -1111,8 +1113,7 @@ function label(type: ProjectSummary["type"]): string {
 
 function authorityCopy(type: ProjectSummary["type"]): string {
   if (type === "chat")
-    return "Virtual organization with approved memory and no implicit host access.";
-  if (type === "work")
-    return "Confined to the Project's folders. Knowledge-work stays inside them.";
+    return "A virtual organization with approved memory. No automatic host access.";
+  if (type === "work") return "Stays inside the Project's folders.";
   return "New Code work starts approval-gated.";
 }

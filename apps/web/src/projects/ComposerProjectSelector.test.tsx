@@ -59,7 +59,7 @@ describe("ComposerProjectSelector", () => {
   it("shows Code's refused default folder with its whole reason, dimmed, and refuses the start", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
-    const reason = "Code needs a Git repository. You can change that in Code settings.";
+    const reason = "Code needs a Git repository. Change this in Code settings.";
     render(
       <ComposerProjectSelector
         entries={[

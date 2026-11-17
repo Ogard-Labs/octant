@@ -349,7 +349,7 @@ export function BrowserHubSection(props: BrowserHubSectionProps) {
             </SettingRow>
             {phase.kind === "comparing" ? (
               <SettingRow
-                description="Compare the code below with the one the hub shows, then approve there."
+                description="Compare this code with the one on the hub, then approve there."
                 label={`Joining ${phase.hubName}`}
                 scope="app"
                 settingId="browser-hub-claim"
@@ -407,9 +407,7 @@ export function BrowserHubSection(props: BrowserHubSectionProps) {
                     {entry.here ? (
                       <span>This page</span>
                     ) : entry.webOrigin === undefined ? (
-                      <span>
-                        No web app to open. It needs a Tailscale name and its Tailscale certificate.
-                      </span>
+                      <span>No web app to open. It needs a Tailscale name and certificate.</span>
                     ) : (
                       <>
                         <a href={entry.webOrigin} rel="noopener noreferrer" target="_blank">

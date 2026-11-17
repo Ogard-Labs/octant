@@ -580,7 +580,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                       // The caveat that used to open the body; the body is now one
                       // line, so the tooltip keeps what it said (maintainer
                       // request 2026-11-17).
-                      hint: "Shared approved folder; it is outside this task's child worktree. Git, changed-file receipts, Review and PR operations cover the Code checkout only.",
+                      hint: "Shared folder, outside this task's worktree. Git, changed files, Review and pull requests cover the Code checkout only.",
                     }
                   : {})}
               >

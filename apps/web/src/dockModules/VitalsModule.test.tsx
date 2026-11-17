@@ -94,7 +94,7 @@ it("says a server that is not Linux does not report load and stops asking", asyn
   );
   await waitFor(() =>
     expect(
-      screen.getByText("This server does not report load. Vitals works on Linux servers."),
+      screen.getByText("This server does not report load. Vitals needs a Linux server."),
     ).toBeVisible(),
   );
 });
@@ -113,7 +113,7 @@ it("reads no host while the server Project catalog has not answered, instead of 
     </ServerCodeProjectsContext.Provider>,
   );
   expect(
-    await screen.findByText("Server Projects could not be read, so this thread's host is unknown."),
+    await screen.findByText("Could not read server Projects, so this thread's host is unknown."),
   ).toBeVisible();
   expect(fetchMock).not.toHaveBeenCalled();
 });

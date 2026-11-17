@@ -130,7 +130,7 @@ describe("updated native session tools", () => {
     fireEvent.drop(screen.getByLabelText("Follow-up message"), {
       dataTransfer: nativeFolderTransfer(),
     });
-    expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+    expect(await screen.findByText(/Folder drops need the desktop app/)).toBeVisible();
     expect(screen.getByLabelText("Follow-up message")).toHaveValue("Use updated tools");
     expect(action).toBeVisible();
     expect(code.sendFollowUp).not.toHaveBeenCalled();
@@ -4274,7 +4274,7 @@ it.each(["legacy", "rebound", "source-thread"] as const)(
         kind === "legacy"
           ? /older receipt did not record its checkout/
           : kind === "rebound"
-            ? /earlier checkout binding/
+            ? /belongs to an earlier checkout/
             : /original source thread/,
       ),
     ).toBeVisible();
@@ -4291,5 +4291,5 @@ it("refuses a native folder as an attachment when the desktop extraction bridge 
   );
   const input = screen.getByRole("textbox", { name: "Follow-up message" });
   fireEvent.drop(input, { dataTransfer: nativeFolderTransfer() });
-  expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+  expect(await screen.findByText(/Folder drops need the desktop app/)).toBeVisible();
 });

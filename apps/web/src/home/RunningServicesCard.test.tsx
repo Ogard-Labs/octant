@@ -346,9 +346,7 @@ describe("the Running services card", () => {
     await user.click(await screen.findByRole("button", { name: "Stop vite on port 3000" }));
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("Stop node on port 3000 in /Users/example/octant/apps/web?");
-    expect(dialog).toHaveTextContent(
-      "Octant does not own this server and cannot tell who started it.",
-    );
+    expect(dialog).toHaveTextContent("Octant did not start this server and cannot say who did.");
     expect(dialog).not.toHaveTextContent("Octant started this server");
     expect(commands.some((command) => command.kind === "stop-running-service")).toBe(false);
 

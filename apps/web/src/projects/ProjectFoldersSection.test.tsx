@@ -112,7 +112,7 @@ describe("Project folders", () => {
 
     expect(
       screen.getByText(
-        "Extra folders get the same access as the main folder. Checkouts and Git stay in the main folder; a terminal or a saved action can start in any of them.",
+        "Extra folders get the same access as the main folder. Checkouts and Git stay in the main folder. A terminal or action can start in any of them.",
       ),
     ).toBeVisible();
   });

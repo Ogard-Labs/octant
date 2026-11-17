@@ -792,7 +792,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     if (items === null) return false;
     if (!clipboardHasImage(items)) return false;
     if (imageSupport === false) {
-      images.refuse("The selected model does not accept images. Choose an image-capable model.");
+      images.refuse("This model cannot read images. Pick one that can.");
       return true;
     }
     return images.consumePaste(items);
@@ -934,7 +934,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     {
                       key: "project-unavailable",
                       tone: "warning" as const,
-                      text: "The selected Project is unavailable. Choose another Project.",
+                      text: "That Project is unavailable. Pick another.",
                     },
                   ]
                 : []),
@@ -1113,7 +1113,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                       imageSupport,
                       images.attach,
                       images.refuse,
-                      "The selected model does not accept images. Choose an image-capable model.",
+                      "This model cannot read images. Pick one that can.",
                     )
                   }
                 />

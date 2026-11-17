@@ -26,9 +26,7 @@ describe("AgentRunSettingsPanel", () => {
     };
     render(<AgentRunSettingsPanel client={client} />);
     await waitFor(() => expect(toggle()).toBeChecked());
-    expect(
-      screen.getByText(/hand part of its work to a helper and get the result back/),
-    ).toBeVisible();
+    expect(screen.getByText(/hand work to a helper/)).toBeVisible();
   });
 
   it("offers only on or off, with no choice to start helper agents by hand", async () => {

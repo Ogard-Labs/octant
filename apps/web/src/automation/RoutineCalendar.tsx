@@ -98,8 +98,7 @@ export function RoutineCalendar(props: {
 
       {month.truncated ? (
         <p className="routine-calendar__note" role="status">
-          Some routines run more often than this month can show. Their rows in the list say how
-          often.
+          Some routines run more often than this calendar can show. The list says how often.
         </p>
       ) : null}
     </section>

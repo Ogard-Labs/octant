@@ -134,9 +134,9 @@ export function ProjectActionsSection(props: ProjectActionsSectionProps) {
         <div>
           <h2 id={headingId}>Actions</h2>
           <p>
-            Named commands such as Run, Test, or Dev. Each appears as a button in this Project's
-            header and in the command palette. Review its folder and branch before starting a
-            dedicated run with output, exit status and Stop beside the task.
+            Named commands like Run, Test, or Dev. Each shows as a button in this Project's header
+            and in the command palette. Review its folder and branch before starting a dedicated run
+            with output, exit status and Stop beside the task.
           </p>
         </div>
       </div>
@@ -206,7 +206,7 @@ export function ProjectActionsSection(props: ProjectActionsSectionProps) {
       ))}
       {changed && draft === undefined ? (
         <OctantFieldError>
-          Each action needs a unique name and a one-line command, and a folder inside the Project.
+          Each action needs a unique name, a one-line command, and a folder in the Project.
         </OctantFieldError>
       ) : null}
       {offered.length === 0 ? (

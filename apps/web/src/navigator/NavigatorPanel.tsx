@@ -226,8 +226,8 @@ function ReadyNavigator(props: {
           <strong>Images unavailable</strong>
           <p>
             {snapshot.visionReviewer === null
-              ? "The Navigator model is not known to read images, and no vision reviewer is configured."
-              : "The Navigator model is not known to read images; the configured vision reviewer covers them."}
+              ? "The Navigator model may not read images, and no image reviewer is set."
+              : "The Navigator model may not read images. The image reviewer covers them."}
           </p>
           <OctantButton
             onClick={() => props.onOpenSettings(navigatorSettingsTarget(snapshot.settingsTarget))}

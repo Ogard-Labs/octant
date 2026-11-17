@@ -135,7 +135,7 @@ export function AgentRunDetail(props: {
         )}
         {row.nativeReadOnly ? (
           <p className="agent-run-detail__fact">
-            Runs inside the provider itself; Octant can read it but not step into it.
+            Runs inside the provider. Octant can read it but not steer it.
           </p>
         ) : null}
         {row.executionKind !== "octant-managed" ? null : (
@@ -167,7 +167,7 @@ export function AgentRunDetail(props: {
         {props.conversation?.inputManifest === undefined ? null : (
           <div className="agent-run-detail__brief" aria-label="Original inputs">
             <span className="agent-run-detail__label">Original inputs</span>
-            <p>Source inputs selected for this child, separate from its brief and report.</p>
+            <p>Inputs picked for this helper, apart from its brief and report.</p>
             {props.conversation.inputManifest.sourceMetadataUnavailable === true ? (
               <p>
                 Some original input details were unavailable and explicitly omitted; their names and
@@ -395,16 +395,16 @@ function usageLimitFact(row: AgentHierarchyRow): string {
   const resetPhrase = resetsAt === undefined ? undefined : `resets ${relativeTimeLabel(resetsAt)}`;
   if (kind === "billing") {
     return resetPhrase === undefined
-      ? "Provider reports the account's plan is exhausted; it can run again after the plan recovers."
+      ? "The provider says this plan is used up. It can run again when the plan resets."
       : `Provider reports the account's plan is exhausted; it ${resetPhrase}.`;
   }
   if (kind === "exhausted") {
     return resetPhrase === undefined
-      ? "Provider usage limit is exhausted; the run can try again once quota recovers."
+      ? "The provider's usage limit is reached. Try again when it resets."
       : `Provider usage limit is exhausted; it ${resetPhrase}.`;
   }
   return resetPhrase === undefined
-    ? "Provider hit a temporary usage limit; the run can try again once it clears."
+    ? "The provider hit a short usage limit. Try again soon."
     : `Provider hit a temporary usage limit; it ${resetPhrase}.`;
 }
 

@@ -59,7 +59,7 @@ export function BackgroundHostSettings(props: {
   return (
     <>
       <SettingRow
-        description="Starts Octant's host when you log in, without a window, and starts it again if it stops unexpectedly. Quitting Octant still stops it."
+        description="Starts Octant when you log in, without a window, and restarts it if it stops unexpectedly. Quitting Octant still stops it."
         focused={props.focused === true}
         label="Keep Octant running in the background"
         scope="app"

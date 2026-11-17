@@ -109,9 +109,9 @@ export function ProjectSpendCeilingSection(props: {
       <h3>Spend ceiling</h3>
       {remaining === undefined ? (
         <p role="note">
-          No spend ceiling is set on this Project. A turn must also stay under any thread ceiling.
-          Setting one is a host owner command. Tokens, turns, total agent run time, and money each
-          count over the calendar window you choose.
+          No spend ceiling on this Project. A turn must still stay under any thread ceiling. Setting
+          one is a host owner command. Tokens, turns, total agent run time, and money each count
+          over the calendar window you choose.
         </p>
       ) : phrases.length === 0 ? null : (
         <p role="status">{phrases.map((phrase) => `${phrase} this ${windowPeriod}`).join(" · ")}</p>

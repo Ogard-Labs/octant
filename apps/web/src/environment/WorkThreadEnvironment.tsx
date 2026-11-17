@@ -232,7 +232,7 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
                 : {
                     // The long form of the fixed-folder note, kept where a person
                     // can still read it (maintainer request 2026-11-17).
-                    hint: "This task's provider, terminal, actions and new artifacts use its recorded folder. Existing artifacts keep their own recorded destination.",
+                    hint: "This task's provider, terminal, actions and new artifacts use its saved folder. Existing artifacts keep their own recorded destination.",
                   })}
             >
               {thread.workingFolderId === undefined ? (

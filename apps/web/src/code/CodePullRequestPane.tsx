@@ -176,7 +176,7 @@ function ReviewWindow(
               type="button"
               variant="ghost"
             >
-              Go to thread
+              Open thread
             </OctantButton>
           )}
           {props.onNavigateWorktree === undefined ? null : (

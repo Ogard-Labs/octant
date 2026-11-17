@@ -335,9 +335,7 @@ describe("WorkComposerAdapter interactions", () => {
 
     pasteImage(screen.getByLabelText("First message"));
     // The refusal is a card above the box, not a line among the chips.
-    const refusal = await screen.findByText(
-      "The selected model does not accept images. Choose an image-capable model.",
-    );
+    const refusal = await screen.findByText("This model cannot read images. Pick one that can.");
     expect(refusal.closest(".composer-notices")).not.toBeNull();
     expect(screen.queryByLabelText("Attached images")).toBeNull();
     expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
@@ -354,7 +352,7 @@ describe("WorkComposerAdapter interactions", () => {
 
     expect(onCreateThread).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Choose a Project to work in before sending. Work needs a confined folder.",
+      "Pick a Project before sending. Work stays inside its Project folder.",
     );
 
     rerender(
@@ -495,5 +493,5 @@ it("refuses a native folder as an attachment when the desktop extraction bridge 
   render(<WorkComposerAdapter {...baseProps} />);
   const input = screen.getByRole("textbox", { name: "First message" });
   fireEvent.drop(input, { dataTransfer: nativeFolderTransfer() });
-  expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+  expect(await screen.findByText(/Folder drops need the desktop app/)).toBeVisible();
 });

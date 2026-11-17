@@ -345,7 +345,7 @@ describe("WorkThreadWorkspace", () => {
     const row = await screen.findByRole("group", { name: "Browser origin approval" });
     await user.click(within(row).getByRole("button", { name: "Approve once" }));
     expect(await within(row).findByRole("alert")).toHaveTextContent(
-      "Browser approval could not be sent. Keep this request open and retry.",
+      "Could not send the browser approval. Keep this open and try again.",
     );
     expect(screen.getByRole("group", { name: "Browser origin approval" })).toBeInTheDocument();
   });
@@ -879,7 +879,7 @@ describe("WorkThreadWorkspace", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Rewind to here…" }));
     const dialog = await screen.findByRole("dialog", { name: "Rewind to here" });
     // Work keeps no copies of files, so the conversation is the only choice.
-    expect(within(dialog).getByText(/Work takes no file checkpoints/)).toBeVisible();
+    expect(within(dialog).getByText(/Work keeps no file checkpoints/)).toBeVisible();
     expect(within(dialog).queryByRole("button", { name: "Files only" })).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Rewind" }));
 
@@ -2150,7 +2150,7 @@ describe("WorkThreadWorkspace", () => {
       transcript: vi.fn(),
       transcriptWindow: vi.fn(() => firstPage.promise),
     };
-    const prompt = /Describe what you want made/;
+    const prompt = /Describe what to make/;
     const seen: boolean[] = [];
     const watcher = new MutationObserver(() => seen.push(screen.queryByText(prompt) !== null));
     render(
@@ -2201,7 +2201,7 @@ describe("WorkThreadWorkspace", () => {
       />,
     );
     await waitFor(() => expect(turnClient.transcriptWindow).toHaveBeenCalledOnce());
-    expect(screen.queryByText(/Describe what you want made/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Describe what to make/)).not.toBeInTheDocument();
 
     await act(async () => {
       firstPage.resolve(
@@ -2215,7 +2215,7 @@ describe("WorkThreadWorkspace", () => {
         }),
       );
     });
-    expect(await screen.findByText(/Describe what you want made/)).toBeVisible();
+    expect(await screen.findByText(/Describe what to make/)).toBeVisible();
   });
 
   it("starts transcript and pending-request reads together from the navigation thread", async () => {
@@ -3033,7 +3033,7 @@ describe("WorkThreadWorkspace", () => {
     expect(composer).toHaveValue("Use the updated tools");
     expect(startFirstTurn).toHaveBeenCalledTimes(1);
     fireEvent.drop(composer, { dataTransfer: nativeFolderTransfer() });
-    expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+    expect(await screen.findByText(/Folder drops need the desktop app/)).toBeVisible();
     expect(composer).toHaveValue("Use the updated tools");
     expect(action).toBeVisible();
     expect(startFirstTurn).toHaveBeenCalledTimes(1);
@@ -3155,9 +3155,7 @@ describe("WorkThreadWorkspace", () => {
 
     expect(mutate).not.toHaveBeenCalled();
     expect(startFirstTurn).not.toHaveBeenCalled();
-    expect(
-      await screen.findByText(/must be rebound before sending a follow-up/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/Rebind this task before sending/)).toBeInTheDocument();
   });
 
   it("offers a file picker on an existing Work thread that can send images", async () => {
@@ -3294,9 +3292,7 @@ describe("WorkThreadWorkspace", () => {
       clipboardData: { files: [file], items: [] },
     });
     // The refusal is a card above the box, not a line among the chips.
-    const refusal = await screen.findByText(
-      "The selected model does not accept images. Choose an image-capable model.",
-    );
+    const refusal = await screen.findByText("This model cannot read images. Pick one that can.");
     expect(refusal.closest(".composer-notices")).not.toBeNull();
     expect(screen.queryByLabelText("Attached images")).toBeNull();
     expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
@@ -3728,7 +3724,7 @@ it("refuses a native folder as an attachment when the desktop extraction bridge 
   );
   const input = screen.getByRole("textbox", { name: "Work prompt" });
   fireEvent.drop(input, { dataTransfer: nativeFolderTransfer() });
-  expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+  expect(await screen.findByText(/Folder drops need the desktop app/)).toBeVisible();
 });
 
 it("offers an empty Work thread its folder's outside sessions and shows live tasks with Stop above the composer", async () => {

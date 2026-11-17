@@ -62,7 +62,7 @@ describe("a saved action beside its task", () => {
     expect(screen.getByText(/Task policy approval-gated/)).toBeVisible();
     expect(execute.mock.calls.filter(([c]) => c.kind === "start-action")).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "Run action" }));
-    expect(await screen.findByText(/Server connection lost/)).toBeVisible();
+    expect(await screen.findByText(/Lost the server connection/)).toBeVisible();
     expect(execute).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "start-action",

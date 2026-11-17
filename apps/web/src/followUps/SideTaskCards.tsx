@@ -155,7 +155,7 @@ export function SideTaskProvider(props: SideTaskProviderProps) {
           if (result.kind === "side-task-started" && !result.sent) {
             setMessage(
               id,
-              "The thread was created, but its first message did not go out. It is ready to send there.",
+              "The thread was created, but its first message was not sent. Send it from there.",
             );
           } else if (result.kind === "side-task-continued-here") {
             setDeliveries((current) => new Map(current).set(id, result.delivery));
@@ -308,7 +308,7 @@ function SideTaskCard(props: { readonly task: SideTask; readonly running: boolea
             </>
           ) : task.status === "continued-here" ? (
             delivery === "unconfirmed" ? (
-              "Delivery is unconfirmed. Check this thread and its queued messages before sending the prompt yourself."
+              "Not sure it was delivered. Check this thread and its queue before sending it yourself."
             ) : delivery === "queued" ? (
               "Queued here, runs after the current reply"
             ) : (
@@ -343,7 +343,7 @@ function SideTaskCard(props: { readonly task: SideTask; readonly running: boolea
   const hint = props.running
     ? "Available when this reply finishes."
     : task.offer.mode === "code"
-      ? "Including the conversation starts a new worktree from where this reply left the files."
+      ? "Including the conversation starts a new worktree from the files as this reply left them."
       : undefined;
   return (
     <article aria-label={`Side task: ${task.offer.title}`} className="side-task">

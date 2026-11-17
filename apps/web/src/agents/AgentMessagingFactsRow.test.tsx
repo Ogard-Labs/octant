@@ -153,7 +153,7 @@ describe("AgentMessagingFactsRow", () => {
         await vi.advanceTimersByTimeAsync(15_000);
       });
       expect(client.facts).toHaveBeenCalledTimes(2);
-      expect(screen.getByText(/Showing the last host report/)).toBeVisible();
+      expect(screen.getByText(/Showing the last known state/)).toBeVisible();
     } finally {
       vi.useRealTimers();
     }

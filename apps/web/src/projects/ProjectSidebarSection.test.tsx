@@ -2039,9 +2039,7 @@ describe("ProjectSidebarSection code project views", () => {
     );
 
     expect(
-      screen.getByText(
-        "No threads match the current filters. Nothing was deleted — clear search or filters to see more.",
-      ),
+      screen.getByText("No threads match. Nothing was deleted. Clear the search or filters."),
     ).toBeVisible();
     expect(screen.queryByRole("button", { name: /Old/i })).not.toBeInTheDocument();
   });
@@ -2285,7 +2283,7 @@ describe("ProjectSidebarSection search", () => {
 
     const empty = screen.getByRole("status");
     expect(empty).toHaveTextContent(/nothing was deleted/i);
-    expect(empty).toHaveTextContent(/clear search or filters/i);
+    expect(empty).toHaveTextContent(/clear the search or filters/i);
     expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Collapse No Project" })).not.toBeInTheDocument();
   });
@@ -2337,7 +2335,7 @@ describe("ProjectSidebarSection search", () => {
 
     const empty = screen.getByRole("status");
     expect(empty).toHaveTextContent(/nothing was deleted/i);
-    expect(empty).toHaveTextContent(/clear search or filters/i);
+    expect(empty).toHaveTextContent(/clear the search or filters/i);
     expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
   });
 
@@ -2385,7 +2383,7 @@ describe("ProjectSidebarSection search", () => {
 
     const empty = screen.getByRole("status");
     expect(empty).toHaveTextContent(/nothing was deleted/i);
-    expect(empty).toHaveTextContent(/clear search or filters/i);
+    expect(empty).toHaveTextContent(/clear the search or filters/i);
     expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
   });
 

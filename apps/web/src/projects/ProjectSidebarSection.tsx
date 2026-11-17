@@ -240,7 +240,7 @@ function CodeProjectViewGlyph(props: {
  * read as data loss.
  */
 const FILTERED_THREADS_EMPTY_MESSAGE =
-  "No threads match the current filters. Nothing was deleted — clear search or filters to see more.";
+  "No threads match. Nothing was deleted. Clear the search or filters.";
 
 /** Why Pin to rail is disabled once the rail holds as many Projects as it draws. */
 const RAIL_FULL_REASON = `The rail holds ${RAIL_PROJECT_LIMIT} Projects`;
@@ -2456,7 +2456,7 @@ function CodeProjectViewEditorDialog(props: {
         </OctantButton>
       </div>
       <p id={descriptionId}>
-        Choose which saved Code Projects appear in this sidebar view. A view changes only what the
+        Choose which saved Code Projects this sidebar view shows. A view changes only what the
         sidebar lists.
       </p>
       <form noValidate onSubmit={submit}>

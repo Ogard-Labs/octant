@@ -432,7 +432,7 @@ export function AgentRunHierarchy(props: {
             ? {
                 steerNotice:
                   steer.phase === "sending"
-                    ? "Sending the steering note. The subagent takes it at its next step."
+                    ? "Sending your note. The helper reads it at its next step."
                     : "Steering note delivered.",
               }
             : {})}

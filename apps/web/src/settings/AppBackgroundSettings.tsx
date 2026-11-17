@@ -314,7 +314,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
     <>
       <div className="setgroup">
         <SettingRow
-          description="What sits behind Octant: a built-in picture, your own photo, the ASCII field, the pixel ground, flowing colour, or none."
+          description="What sits behind Octant: a built-in picture, your photo, ASCII, pixels, flowing colour, or none."
           focused={props.focused === true}
           label="Background"
           labelledBySection
@@ -338,7 +338,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
         </SettingRow>
         {field ? (
           <SettingRow
-            description="Layered ridges with a sun on the horizon, a burst of rays, drifting streaks, or your own photo in the same two tones."
+            description="Ridges with a sun, rays, drifting streaks, or your photo, in the same two tones."
             label="Scene"
             scope="app"
             settingId="app-background-scene"

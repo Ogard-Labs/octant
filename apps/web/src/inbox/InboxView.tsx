@@ -126,7 +126,7 @@ export function InboxView(props: InboxViewProps) {
         } else {
           setGithub({
             kind: "failed",
-            message: "GitHub returned a response Octant could not read. Refresh to try again.",
+            message: "Octant could not read GitHub's reply. Refresh to try again.",
           });
         }
       },
@@ -390,7 +390,7 @@ export function InboxView(props: InboxViewProps) {
                 <>
                   {github.page.freshness.status === "stale" ? (
                     <p className="oct-row-detail inbox-card__note" role="status">
-                      Showing the last loaded list; GitHub could not be reached.
+                      Showing the last list. GitHub could not be reached.
                     </p>
                   ) : null}
                   <ul className="surface-list">

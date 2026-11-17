@@ -55,8 +55,7 @@ const NEAR_LIMIT_PERCENT = 80;
  * be one. Said wherever the meter would otherwise wait for a window, whether
  * the thread is provider-run (Code) or planned by Octant (Work, Chat).
  */
-const NO_USAGE_REPORTED =
-  "This runtime reports no usage, so this thread has no context window to show.";
+const NO_USAGE_REPORTED = "This provider reports no usage, so there is no context meter.";
 
 export function ComposerContextMeterShortcut() {
   const { requestOpen } = useComposerContextMeterScope();
@@ -796,7 +795,7 @@ function ContextUsagePopover(props: {
         <p className="context-window-popover__source">
           {props.usageReporting === "not-reported"
             ? NO_USAGE_REPORTED
-            : "No model has reported a context-window maximum for this thread, so there is no share of a window to show."}
+            : "No model has reported a context size for this thread, so there is nothing to show."}
         </p>
       ) : (
         <SegmentBar

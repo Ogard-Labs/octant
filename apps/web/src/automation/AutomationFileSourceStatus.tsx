@@ -95,7 +95,7 @@ export function AutomationFileSourceStatus(props: {
     const failure =
       outcome.kind === "automation-command-failed" || outcome.kind === "automation-transport-failed"
         ? outcome.message
-        : "The input could not be re-armed. Refresh its details and try again.";
+        : "Could not re-arm this input. Refresh and try again.";
     setMessage(failure);
     setRequiresRefresh(
       outcome.kind === "automation-transport-failed" ||
@@ -146,9 +146,7 @@ export function AutomationFileSourceStatus(props: {
         </p>
       ) : null}
       {source?.coverageGap ? (
-        <p>
-          Observation had a coverage gap; only net changed files that still exist can be recovered.
-        </p>
+        <p>Octant missed some changes. Only changed files that still exist can be recovered.</p>
       ) : null}
       <p>
         Any matching change through a busy activity window is held for review. Existing files are
@@ -156,7 +154,7 @@ export function AutomationFileSourceStatus(props: {
         the input.
       </p>
       {source?.phase === "held" ? (
-        <p>Run now is a separate manual task; it does not clear or re-arm this held input.</p>
+        <p>Run now starts a separate task. It does not clear or re-arm this held input.</p>
       ) : null}
       <div className="automation-detail__actions">
         <OctantButton type="button" variant="secondary" onClick={props.refresh}>
@@ -170,7 +168,7 @@ export function AutomationFileSourceStatus(props: {
             onClick={() => {
               setMessage(
                 requiresRefresh
-                  ? "Refresh details and run history before choosing again; the previous review is unconfirmed."
+                  ? "Refresh before choosing again. Your last review was not confirmed."
                   : undefined,
               );
               setReview({ automation, source });
@@ -261,7 +259,7 @@ export function AutomationFileSourceStatus(props: {
               </p>
             ) : null}
             {review?.source.heldFiles.length === 0 ? (
-              <p>No changed surviving files remain; choose Skip to re-arm without a run.</p>
+              <p>No changed files remain. Choose Skip to re-arm without a run.</p>
             ) : null}
             {stale ? (
               <p role="alert">

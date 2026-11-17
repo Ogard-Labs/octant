@@ -88,7 +88,7 @@ function useHandoversContent(source: HandoversCardSource): HomeCardContent {
 const REFUSALS: Readonly<Record<string, string>> = {
   refused: "This handover is no longer here.",
   "no-eligible-project": "No Code Project here is bound to that repository.",
-  "no-matching-provider": "This computer has no provider of the kind the thread ran on.",
+  "no-matching-provider": "This computer has no matching provider.",
   "transfer-failed": "The branch or its note couldn't be fetched.",
 };
 

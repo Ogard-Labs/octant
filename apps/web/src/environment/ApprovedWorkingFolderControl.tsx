@@ -59,7 +59,7 @@ export function ApprovedWorkingFolderControl(props: {
       : selected === undefined
         ? "Working folder unavailable. Choose a current Project folder."
         : selected.kind === "extra" && props.code
-          ? "Shared folder: outside the child worktree. Git, changed files and Review cover the Code checkout only."
+          ? "Shared folder, outside the helper's worktree. Git, changed files and Review cover the Code checkout only."
           : props.inline === true
             ? "Use . for the whole folder, or a path inside it."
             : "Provider, terminal, saved actions and new Work artifacts use this folder. Choose another root in a new task.";
@@ -104,9 +104,7 @@ export function ApprovedWorkingFolderControl(props: {
         }}
       />
       {!valid && props.inline !== true ? (
-        <OctantAlert tone="danger">
-          Use . or a relative subfolder without .. before starting this task.
-        </OctantAlert>
+        <OctantAlert tone="danger">Before you start, use . or a subfolder without ..</OctantAlert>
       ) : null}
       <small
         {...(!valid && props.inline === true ? { "data-invalid": true, role: "alert" } : {})}

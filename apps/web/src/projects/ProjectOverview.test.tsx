@@ -141,7 +141,7 @@ describe("ProjectOverview", () => {
 
     const toggle = screen.getByRole("switch", { name: "Keep a status file" });
     expect(toggle).not.toBeChecked();
-    expect(toggle).toHaveAccessibleDescription(/When off, Octant writes nothing into the folder/);
+    expect(toggle).toHaveAccessibleDescription(/Off: Octant writes nothing to the folder/);
     await user.click(toggle);
     expect(onWorkStatusFileChange).toHaveBeenCalledWith(workProject.id, true);
 
@@ -243,7 +243,7 @@ describe("ProjectOverview", () => {
       name: "Agents may write Project memory without asking",
     });
     expect(toggle).not.toBeChecked();
-    expect(toggle).toHaveAccessibleDescription(/At Full access agents never ask/);
+    expect(toggle).toHaveAccessibleDescription(/Full access never asks/);
     await user.click(toggle);
     expect(onAgentMemoryWritesChange).toHaveBeenCalledWith(chatProject.id, true);
 
@@ -613,9 +613,7 @@ describe("ProjectOverview", () => {
     );
     expect(screen.queryByRole("heading", { name: "Project workspace" })).not.toBeInTheDocument();
     expect(screen.queryByText(/Git|worktree|pull request/i)).not.toBeInTheDocument();
-    expect(
-      screen.getByText("Confined to the Project's folders. Knowledge-work stays inside them."),
-    ).toBeVisible();
+    expect(screen.getByText("Stays inside the Project's folders.")).toBeVisible();
   });
 
   it("offers ordinary authenticated-web relink for an available bound Project", async () => {
@@ -730,7 +728,7 @@ describe("ProjectOverview", () => {
     await user.click(await screen.findByRole("button", { name: "Select" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Project root could not be relinked. Review the Project status and retry.",
+      "Could not relink the Project folder. Check the Project status and try again.",
     );
     expect(screen.getByRole("dialog", { name: "Add Work folder" })).toBeVisible();
   });

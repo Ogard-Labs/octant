@@ -40,7 +40,7 @@ export function CodeWorktreeSourceControl(props: CodeWorktreeSourceControlProps)
   const disclosure = describeWorktreeSource(props.resolution, now);
 
   const supportingCopy = !remoteAvailable
-    ? "No usable remote is configured for this branch. It starts from the local commit."
+    ? "This branch has no usable remote. It starts from the local commit."
     : props.startFromOrigin
       ? `Fetch and start from ${activeRemote ?? "origin"}/${branchDisplayName(props.branch)}`
       : `Start from the local ${branchDisplayName(props.branch)} commit.`;

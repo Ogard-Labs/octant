@@ -149,7 +149,7 @@ function RunningServiceListItem(props: {
           >
             Stop {service.processName} on port {String(service.port)}
             {service.workingDirectory === undefined ? "" : ` in ${service.workingDirectory}`}?
-            Octant does not own this server and cannot tell who started it.
+            Octant did not start this server and cannot say who did.
           </OctantConfirmDialog>
         ) : null}
       </OctantDialogPresence>

@@ -256,7 +256,7 @@ describe("the To-dos page layout", () => {
     expect(await screen.findByText("No to-dos yet")).toBeVisible();
     expect(
       screen.getByText(
-        "Write down what you mean to do. A to-do can be handed to an agent as a thread when you are ready.",
+        "Write down what you want to do. Hand a to-do to an agent when you are ready.",
       ),
     ).toBeVisible();
     expect(screen.getByRole("textbox", { name: "New to-do" })).toBeVisible();
@@ -438,7 +438,7 @@ describe("a change made elsewhere", () => {
   it("shows a to-do another device added as soon as the host says the list changed", async () => {
     const host = fakeHost();
     const view = render(<Page client={host.client} revision={0} />);
-    expect(await screen.findByText(/Write down what you mean to do/)).toBeVisible();
+    expect(await screen.findByText(/Write down what you want to do/)).toBeVisible();
 
     host.apply({ kind: "add-todo", todoId: crypto.randomUUID(), title: "Added on the phone" });
     view.rerender(<Page client={host.client} revision={1} />);

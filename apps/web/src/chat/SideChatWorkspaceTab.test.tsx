@@ -349,7 +349,7 @@ it("returns one selected finished answer to the source's editable saved draft wi
   await screen.findByText("Chosen answer");
   await user.click(screen.getByRole("button", { name: "Reply actions" }));
   await user.click(await screen.findByRole("menuitem", { name: "Use in source draft" }));
-  await screen.findByText(/Added to the source’s saved draft/);
+  await screen.findByText(/Added to the saved draft/);
   expect(prepare).toHaveBeenCalledWith(
     expect.objectContaining({
       kind: "prepare-side-chat-return",
@@ -507,7 +507,7 @@ it("bounds a held prepare read, permits explicit retry and suppresses its late a
       deadline();
     });
     expect(prepare.mock.calls[0]![1].aborted).toBe(true);
-    expect(await screen.findByText(/This reply could not be added/)).toBeVisible();
+    expect(await screen.findByText(/Could not add this reply to the draft/)).toBeVisible();
     expect(composerThreadDrafts.read("work", sourceThreadId)).toBeUndefined();
     await act(async () => {
       held.resolve(result);
@@ -518,7 +518,7 @@ it("bounds a held prepare read, permits explicit retry and suppresses its late a
     const retry = await screen.findByRole("menuitem", { name: "Use in source draft" });
     expect(retry).not.toHaveAttribute("aria-disabled", "true");
     await user.click(retry);
-    await screen.findByText(/Added to the source’s saved draft/);
+    await screen.findByText(/Added to the saved draft/);
     expect(prepare).toHaveBeenCalledTimes(2);
     expect(composerThreadDrafts.read("work", sourceThreadId)?.text).toBe("Chosen returned answer");
   } finally {

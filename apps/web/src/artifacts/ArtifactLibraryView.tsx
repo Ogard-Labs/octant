@@ -455,7 +455,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
               ? "Artifacts you share will appear here."
               : hasActiveFilters
                 ? "Clear or adjust the active filters to see other artifacts."
-                : "Artifacts are the pages, documents and files a thread makes. Each one is kept here to open again or share."
+                : "Artifacts are the pages, documents and files threads make. Open or share them from here."
           }
           title={
             filters.tab === "shared"

@@ -401,7 +401,7 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
       {report === undefined ? null : report.turns === 0 ? (
         <OctantEmpty
           layout="line"
-          detail="Turns are recorded when they end, on every provider. Widen the range or clear a filter."
+          detail="Turns are recorded when they end. Widen the range or clear a filter."
           title="No turns in this range"
         />
       ) : (

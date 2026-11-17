@@ -93,7 +93,7 @@ export function DockDocumentTool(props: DockDocumentToolProps) {
         } catch {
           return {
             kind: "unavailable" as const,
-            message: "This file is not UTF-8 text and cannot be shown as a document.",
+            message: "This file is not plain text, so it cannot be shown.",
           };
         }
       })

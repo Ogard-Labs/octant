@@ -23,7 +23,7 @@ describe("WorkSettingsView", () => {
     const work = controller();
     const { rerender } = render(<WorkSettingsView controller={work} />);
 
-    expect(screen.getByText(/asks before it runs a command or changes a file/)).toBeVisible();
+    expect(screen.getByText(/Asks before running a command or changing a file/)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Accept edits" }));
     expect(work.update).toHaveBeenCalledWith({ defaultAccess: "auto-accept-edits" });
 
@@ -38,7 +38,7 @@ describe("WorkSettingsView", () => {
         })}
       />,
     );
-    expect(screen.getByText(/Anything outside the folder is still refused/)).toBeVisible();
+    expect(screen.getByText(/Anything outside the folder is refused/)).toBeVisible();
   });
 
   it("offers Auto and Full access as the Work default, warning once before Full access", () => {

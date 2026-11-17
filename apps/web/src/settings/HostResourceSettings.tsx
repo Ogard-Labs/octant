@@ -162,7 +162,7 @@ export function HostResourceSettings({
   return (
     <SettingsSection
       title="Computer resources"
-      description="Limit new work on this host using its hardware and current load. Running work is allowed to finish; use its Stop control to end it."
+      description="Limit new work using this host's hardware and load. Running work finishes; use Stop to end it."
     >
       <fieldset
         aria-busy={loading || undefined}
@@ -173,7 +173,7 @@ export function HostResourceSettings({
       >
         <SettingRow
           label="Automatic limits"
-          description="Adjust concurrency to CPU load and available RAM, including other apps. Turn off to use your ceilings without load-based adjustment."
+          description="Adjust to CPU load and free RAM, including other apps. Turn off to use your limits as set."
           scope="host"
           settingId="resource-limits"
           focused={focusedSetting === "resource-limits"}
@@ -210,7 +210,7 @@ export function HostResourceSettings({
         ))}
         <SettingRow
           label="Apply limits"
-          description="Settings are kept on this host and apply to the next managed launch."
+          description="Saved on this host. Applies to the next launch."
           scope="host"
           settingId="resource-save"
           focused={focusedSetting === "resource-save"}
@@ -221,7 +221,7 @@ export function HostResourceSettings({
         </SettingRow>
         <SettingRow
           label="New work"
-          description="Pause stops admission of new managed commands and helpers. It does not suspend running processes."
+          description="Pause blocks new commands and helpers. Running ones keep going."
           scope="host"
           settingId="resource-pause"
           focused={focusedSetting === "resource-pause"}

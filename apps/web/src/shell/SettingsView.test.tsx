@@ -573,14 +573,14 @@ describe("SettingsView", () => {
     expect(section).toHaveTextContent(/^Managed in Octant\./);
     expect(within(section).getAllByRole("paragraph")).toHaveLength(1);
     expect(within(section).queryByRole("button")).toBeNull();
-    expect(section).not.toHaveTextContent(/happen on the host machine/);
+    expect(section).not.toHaveTextContent(/on the host computer/);
   });
 
   it("keeps pairing codes on the host: a client without the local administration bridge gets none", () => {
     renderSettings({ initialDeepLink: { section: "remote-access" } });
 
     const section = screen.getByRole("region", { name: "Remote access" });
-    expect(section).toHaveTextContent(/happen on the host machine/);
+    expect(section).toHaveTextContent(/on the host computer/);
     expect(screen.queryByRole("button", { name: "Create pairing code" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Create pairing link" })).toBeNull();
     expect(screen.queryByRole("img", { name: "Pairing code QR" })).toBeNull();
@@ -1046,7 +1046,7 @@ describe("SettingsView", () => {
     expect(control).toHaveAttribute("aria-checked", "true");
     expect(control).toHaveAttribute("aria-describedby", "sidebar-more-description");
     expect(document.getElementById("sidebar-more-description")).toHaveTextContent(
-      "Reveal the menu-only destinations and Customize sidebar",
+      "Put menu-only destinations and Customize sidebar",
     );
     await user.click(control);
     expect(onSettingsChange).toHaveBeenLastCalledWith({ sidebarMoreEnabled: false });
@@ -1262,7 +1262,9 @@ describe("SettingsView", () => {
     expect(screen.getByRole("combobox", { name: "Sidebar background type" })).toBeDisabled();
     expect(screen.getByLabelText("Sidebar overlay color")).toBeDisabled();
     expect(screen.getByRole("slider", { name: "Sidebar overlay opacity" })).toBeDisabled();
-    expect(screen.getByText(/background is behind everything, the sidebar included/)).toBeVisible();
+    expect(
+      screen.getByText(/background sits behind everything, including the sidebar/),
+    ).toBeVisible();
     expect(applyPatch).not.toHaveBeenCalled();
   });
 
@@ -1286,7 +1288,7 @@ describe("SettingsView", () => {
       navigateTo("Sidebar");
       expect(screen.getByRole("combobox", { name: "Sidebar background type" })).toBeEnabled();
       expect(
-        screen.queryByText(/background is behind everything, the sidebar included/),
+        screen.queryByText(/background sits behind everything, including the sidebar/),
       ).not.toBeInTheDocument();
     },
   );
@@ -1524,9 +1526,7 @@ describe("SettingsView", () => {
     );
     expect(screen.getByRole("heading", { name: "Host" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toHaveFocus();
-    expect(
-      screen.getByText(/Restores the current mode's pane arrangement.*Threads and data are kept/i),
-    ).toBeVisible();
+    expect(screen.getByText(/Resets this mode's panes.*Threads and data are kept/i)).toBeVisible();
     expect(onDeepLinkApplied).toHaveBeenCalledOnce();
   });
 
@@ -2040,7 +2040,7 @@ describe("SettingsView", () => {
     const control = screen.getByRole("switch", { name: "Let agents download files" });
     expect(control).toHaveAttribute("aria-checked", "false");
     expect(
-      screen.getByText(/a download you start yourself goes to your Downloads folder/),
+      screen.getByText(/Downloads you start yourself go to your Downloads folder/),
     ).toBeVisible();
     await userEvent.setup().click(control);
     expect(onSettingsChange).toHaveBeenLastCalledWith({ agentBrowserDownloads: true });
@@ -2238,7 +2238,7 @@ describe("SettingsView", () => {
   it("explains that the GitHub connection stays on the host when no client is available", () => {
     renderSettings();
     navigateTo("GitHub");
-    expect(screen.getByText(/managed on the owning host/i)).toBeInTheDocument();
+    expect(screen.getByText(/set up on the computer that owns it/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Refresh status" })).not.toBeInTheDocument();
   });
 

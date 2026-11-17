@@ -600,7 +600,7 @@ describe("ChatTranscript", () => {
   it.each([
     ["timed-out", "The provider stopped responding and the turn timed out."],
     ["unavailable", "The provider is unavailable."],
-    ["tool-timed-out", "An app-managed tool call did not return before the turn deadline."],
+    ["tool-timed-out", "A tool call did not finish before the time limit."],
   ] as const)("states why a %s turn failed in Octant's own words", (code, sentence) => {
     const failed = viewFixture().turns[0]!.attempts[0]!;
     render(

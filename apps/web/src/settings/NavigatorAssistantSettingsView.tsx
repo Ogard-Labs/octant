@@ -70,17 +70,16 @@ export function NavigatorAssistantSettingsView(props: NavigatorAssistantSettings
     <section aria-label="Navigator" id="settings-navigator-assistant">
       {noProviders ? (
         <p className="provider-settings__hint" role="status">
-          No ready providers are available. Connect one in Providers &amp; Models to configure
-          Navigator.
+          No provider is ready. Connect one in Providers &amp; Models to set up Navigator.
         </p>
       ) : null}
       <SettingsSection
-        description="The models Navigator uses to converse and to review images."
+        description="The models Navigator uses to chat and to review images."
         title="Navigator"
       >
         <div className="setgroup">
           <SettingRow
-            description="The model Navigator uses. Without one, Navigator stays unavailable rather than silently picking a model."
+            description="The model Navigator uses. Without one, Navigator is off; it never picks a model for you."
             focused={props.focusedSetting === settingId("default-model")}
             label="Default model"
             scope="app"
@@ -119,7 +118,7 @@ export function NavigatorAssistantSettingsView(props: NavigatorAssistantSettings
             )}
           </SettingRow>
           <SettingRow
-            description="Used only when the default model cannot read images: it describes the image as text for the default model, and never becomes the conversation model."
+            description="Used only when the default model cannot read images. It describes the image in text for the default model, and never chats itself."
             focused={props.focusedSetting === settingId("vision-reviewer")}
             label="Vision reviewer"
             scope="app"
@@ -151,8 +150,8 @@ export function NavigatorAssistantSettingsView(props: NavigatorAssistantSettings
             )}
             {props.settings.visionReviewer === undefined ? (
               <p className="settings-view__effective-note" role="status">
-                No vision reviewer is configured. Images are refused when the default model cannot
-                read them.
+                No image reviewer is set. Images are refused when the default model cannot read
+                them.
               </p>
             ) : (
               <OctantButton
