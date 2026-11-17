@@ -1228,9 +1228,9 @@ export class BrowserAutomationService {
     /** Set by the agent tool for a turn at Full access; no route can name it. */
     readonly fullAccess?: true;
     /**
-     * Set only by the Work and Code agent tools' wiring: this call takes back a
-     * page the person took over. A flow, a terminal grant and a route never
-     * set it, so their calls keep waiting for Hand back.
+     * Set only by the Work and Code agent tools, for their own calls: this call
+     * takes back a page the person took over. A replayed flow step, a terminal
+     * grant and a route never set it, so their calls keep waiting for Hand back.
      */
     readonly takesBack?: true;
     /**
@@ -1407,7 +1407,13 @@ export class BrowserAutomationService {
     // have taken the page while it waited behind another action. Checked again
     // here, after dequeuing: the agent tool's own call takes back a page the
     // person took over, and any other hold, or another caller, is refused.
-    if (input.takesBack === true && owned.waitingForPerson === "take-over") {
+    // A reviewed flow run holds the page under its own custody and waits for
+    // the person, whoever's port carried its step.
+    if (
+      input.takesBack === true &&
+      input.flowRun === undefined &&
+      owned.waitingForPerson === "take-over"
+    ) {
       this.#takeBack(owned);
     }
     if (activityBy === "agent" && owned.waitingForPerson !== undefined) {

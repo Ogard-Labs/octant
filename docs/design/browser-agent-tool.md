@@ -1173,7 +1173,8 @@ packaged, personal-account or cross-platform acceptance evidence.
   after Hand back (below).
 - Not taken back: the agent's own sign-in ask, a page a paired owner device
   controls, and a caller that is not the agent tool (a terminal CLI under a
-  grant, a recorded flow). A call from one of these while the page is held is refused with
+  grant, a saved flow's steps, whether the agent replays it with `flow-run`
+  or the person runs it after review). A call from one of these while the page is held is refused with
   `browser-person-took-over` and a message saying the person took over and
   that it should say it is waiting rather than retry. `stop` still works and
   ends the page and the hold with it.

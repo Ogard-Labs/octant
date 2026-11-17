@@ -572,6 +572,11 @@ export interface CodeAppManagedToolsOptions {
       readonly refuseStaleRevision?: boolean;
       readonly holdDownloads?: boolean;
       readonly fullAccess?: true;
+      /**
+       * This call takes back a page the person took over. The agent tool sets
+       * it for its own calls, never for a flow's replayed steps.
+       */
+      readonly takesBack?: true;
     }) => Promise<BrowserAutomationSnapshot>;
     /** Saves a download the thread's Browser holds; see the service. */
     readonly saveDownload?: (input: {
@@ -1318,6 +1323,8 @@ async function browserTool(
   options: CodeAppManagedToolsOptions,
   input: BrowserToolInput | undefined,
   signal?: AbortSignal,
+  // A saved flow's replayed step; see Work's tool.
+  replaying = false,
 ): Promise<BrowserToolAnswer> {
   if (input === undefined || options.browser === undefined) return failure("invalid-browser-input");
   // The stop runs without the turn's signal, so a turn that ends mid-call
@@ -1332,7 +1339,7 @@ async function browserTool(
   };
   if (input.operation === "steps") {
     const batch = () =>
-      runBrowserToolSteps(input.steps, (step) => browserTool(options, step, signal));
+      runBrowserToolSteps(input.steps, (step) => browserTool(options, step, signal, replaying));
     return input.record === true ? runRecordedBrowserCall(batch, record) : batch();
   }
   const browser = options.browser;
@@ -1357,7 +1364,7 @@ async function browserTool(
         actor: () => browserFlowAgentActor(flowAuthority, String(threadId)),
         contextId,
         refs,
-        run: (step) => browserTool(options, step, signal),
+        run: (step) => browserTool(options, step, signal, true),
       });
     return input.operation === "flow-run" && input.record === true
       ? runRecordedBrowserCall(replay, record)
@@ -1370,7 +1377,7 @@ async function browserTool(
     flows,
     refs,
     contextId,
-    run: () => browserToolOne(options, input, signal),
+    run: () => browserToolOne(options, input, signal, false, replaying),
   });
 }
 
@@ -1379,6 +1386,7 @@ async function browserToolOne(
   input: Exclude<BrowserToolInput, { readonly operation: "steps" }>,
   signal?: AbortSignal,
   afterSignIn = false,
+  replaying = false,
 ): Promise<BrowserToolAnswer> {
   if (options.browser === undefined) return failure("invalid-browser-input");
   const threadId = browserThreadIdOf(options);
@@ -1397,8 +1405,12 @@ async function browserToolOne(
   if (postureFailure !== undefined) return failure(postureFailure);
   const browser = options.browser;
   // The agent takes back a page the person took over; see Work's tool.
+  // A flow's replayed step waits for the person's Hand back instead.
+  const reclaims = replaying ? {} : browser;
+  // Only a port that may take the page back asks the service to.
+  const takesBack = !replaying && browser.takeBack !== undefined;
   let snapshot = takenBack(
-    browser,
+    reclaims,
     options.windowId,
     threadId,
     browser.inspectThread(options.windowId, threadId),
@@ -1738,6 +1750,7 @@ async function browserToolOne(
             threadId,
             request: declaredRead,
             capturedBy: "agent",
+            ...(takesBack ? { takesBack: true as const } : {}),
           }),
         );
         if (read.kind === "snapshot") return read.snapshot;
@@ -1817,7 +1830,7 @@ async function browserToolOne(
   }
   // The page may have been handed to the person while an approval waited.
   const heldNow = takenBack(
-    options.browser,
+    reclaims,
     options.windowId,
     threadId,
     options.browser.inspectThread(options.windowId, threadId),
@@ -1834,6 +1847,7 @@ async function browserToolOne(
       threadId,
       request,
       capturedBy: "agent",
+      ...(takesBack ? { takesBack: true as const } : {}),
       ...(input.operation === "record-stop" && input.discard === true
         ? { discardRecording: true }
         : {}),

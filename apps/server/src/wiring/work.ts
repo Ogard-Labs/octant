@@ -732,8 +732,7 @@ export function wireWork(deps: WorkDependencies) {
                 inspectThread: (ownerWindowId, threadId) =>
                   browserAutomationService.inspectThread(ownerWindowId, threadId),
                 create: (command) => browserAutomationService.create(command),
-                // Only the agent tool's own calls take a page back from the person.
-                act: (command) => browserAutomationService.act({ ...command, takesBack: true }),
+                act: (command) => browserAutomationService.act(command),
                 saveDownload: (command) => browserAutomationService.saveDownload(command),
                 releaseThread: (ownerWindowId, threadId) =>
                   browserAutomationService.releaseThread(ownerWindowId, threadId),

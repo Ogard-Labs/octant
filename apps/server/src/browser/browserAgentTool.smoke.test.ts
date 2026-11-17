@@ -379,6 +379,11 @@ function agentTool(
     readonly holdSite?: boolean;
     /** The thread runs at Full access. */
     readonly fullAccess?: boolean;
+    /**
+     * Whether the port may take the page back from the person, as the agent
+     * tools' ports may; a terminal grant's and a reviewed run's may not.
+     */
+    readonly canTakeBack?: boolean;
     /** How the person answers a declared tool's call; approved when absent. */
     readonly pageToolAnswer?: "approved" | "denied";
     /** Where the thread keeps captures; absent, none are kept. */
@@ -460,6 +465,16 @@ function agentTool(
       saveDownload: (input) => service.saveDownload(input),
       releaseThread: (window, thread) => service.releaseThread(window, thread),
       holdForPerson: (window, thread) => service.holdForPerson(window, thread),
+      ...(options.canTakeBack === false
+        ? {}
+        : {
+            // A reviewed run's steps reach the tool under its custody; that
+            // caller's port has no take-back, so it answers with the page as is.
+            takeBack: (window: typeof windowId, thread: typeof threadId) =>
+              flowCustody === undefined
+                ? service.takeBack(window, thread)
+                : service.inspectThread(window, thread),
+          }),
     },
     approvals: {
       isUnattendedScope: () => options.unattended === true,
@@ -1404,8 +1419,8 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     await declined.stop();
   });
 
-  it("holds the agent while the person has the page, keeps the person's typing, and resumes with a fresh snapshot", async () => {
-    const tool = agentTool();
+  it("holds a caller that cannot take the page back while the person has it, keeps the person's typing, and resumes with a fresh snapshot", async () => {
+    const tool = agentTool({ canTakeBack: false });
     await tool.call({ operation: "navigate", url: `${origin}/form` });
     const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot;
     const nameRef = refFor(outline, /"Name"/);
@@ -1962,6 +1977,31 @@ describe.skipIf(!available)("recording and replaying a Browser flow on a real pa
     await tool.stop();
     return saved;
   }
+
+  it("takes the page back for the agent's own call, but a replayed flow waits for the person's Hand back", async () => {
+    const flows = flowPort();
+    await recordOrderCheck(flows);
+    const tool = agentTool({ flows });
+    await tool.call({ operation: "navigate", url: `${origin}/form` });
+
+    // The person takes the page; a replay does not take it from them.
+    expect(tool.service.takeOver(windowId, threadId).waitingForPerson).toBe("take-over");
+    const replayed = await tool.call({ operation: "flow-run", name: "Order check" });
+    expect(replayed).toMatchObject({
+      isError: true,
+      result: {
+        completed: [],
+        failedStep: { step: 1, answer: { error: "browser-person-took-over" } },
+      },
+    });
+    expect(tool.service.inspectThread(windowId, threadId).waitingForPerson).toBe("take-over");
+
+    // The agent's own call does take it back, and runs.
+    const read = await tool.call({ operation: "read-page" });
+    expect(read.isError).toBe(false);
+    expect(tool.service.inspectThread(windowId, threadId).waitingForPerson).toBeUndefined();
+    await tool.stop();
+  });
 
   it("saves a run without snapshots, reads, or ref ids, and replays it on a fresh page", async () => {
     const flows = flowPort();

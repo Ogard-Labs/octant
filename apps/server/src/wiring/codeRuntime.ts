@@ -1313,8 +1313,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           inspectThread: (windowId, threadId) =>
             browserAutomationService.inspectThread(windowId, threadId),
           create: (input) => browserAutomationService.create(input),
-          // Only the agent tool's own calls take a page back from the person.
-          act: (input) => browserAutomationService.act({ ...input, takesBack: true }),
+          act: (input) => browserAutomationService.act(input),
           saveDownload: (input) => browserAutomationService.saveDownload(input),
           releaseThread: (windowId, threadId) =>
             browserAutomationService.releaseThread(windowId, threadId),

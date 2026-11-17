@@ -127,6 +127,11 @@ export interface BrowserAppManagedToolsOptions {
       readonly holdDownloads?: boolean;
       /** The turn runs at Full access, where a download is held whatever the switch says. */
       readonly fullAccess?: true;
+      /**
+       * This call takes back a page the person took over. The agent tool sets
+       * it for its own calls, never for a flow's replayed steps.
+       */
+      readonly takesBack?: true;
     }) => Promise<BrowserAutomationSnapshot>;
     /**
      * Saves a download the thread's Browser holds into the workspace once
@@ -289,7 +294,13 @@ export function createBrowserAppManagedTools(
     input: Exclude<BrowserToolInput, { readonly operation: "steps" }>,
     signal: AbortSignal | undefined,
     afterSignIn = false,
+    // A saved flow's replayed step: it waits for the person's Hand back
+    // rather than taking the page back, as a flow's own call would.
+    replaying = false,
   ): Promise<BrowserToolAnswer> => {
+    const reclaims = replaying ? {} : options.browser;
+    // Only a port that may take the page back asks the service to.
+    const takesBack = !replaying && options.browser.takeBack !== undefined;
     const authority = options.resolveAuthority(options.threadId, options.mode);
     if (authority === undefined) return failure("browser-authority-unavailable");
     // Every question about the open page is withdrawn when that page ends.
@@ -311,7 +322,7 @@ export function createBrowserAppManagedTools(
       if (scoped && script.strict()) return failure("script-needs-full-access");
       if (!modelIsCurrent(options)) return failure("browser-model-stale");
       const opened = takenBack(
-        options.browser,
+        reclaims,
         options.windowId,
         options.threadId,
         options.browser.inspectThread(options.windowId, options.threadId),
@@ -409,7 +420,7 @@ export function createBrowserAppManagedTools(
     // signs in, the page is theirs: no other agent action reaches it until
     // they press Continue or the ask ends.
     let snapshot = takenBack(
-      options.browser,
+      reclaims,
       options.windowId,
       options.threadId,
       options.browser.inspectThread(options.windowId, options.threadId),
@@ -726,6 +737,7 @@ export function createBrowserAppManagedTools(
             threadId: options.threadId,
             request: declaredRead,
             capturedBy: "agent",
+            ...(takesBack ? { takesBack: true as const } : {}),
           }),
         // A CLI in a terminal is not the person who would be asked.
         ask:
@@ -848,6 +860,7 @@ export function createBrowserAppManagedTools(
     // later action, so the service keeps the copies until the page closes.
     const acted = await options.browser.act({
       windowId: options.windowId,
+      ...(takesBack ? { takesBack: true as const } : {}),
       // The service refuses a context that is another thread's, even when the
       // two threads share a Project and so an authority.
       threadId: options.threadId,
@@ -923,13 +936,14 @@ export function createBrowserAppManagedTools(
   const runRecorded = (
     step: Exclude<BrowserToolInput, { readonly operation: "steps" }>,
     signal: AbortSignal | undefined,
+    replaying = false,
   ): Promise<BrowserToolAnswer> =>
     runRecordingFlow({
       step,
       flows: options.browser.snapshotRefs === undefined ? undefined : options.flows,
       refs: refsOfLatestSnapshot,
       contextId: activeContextId,
-      run: () => runOne(step, signal),
+      run: () => runOne(step, signal, false, replaying),
     });
   const runFlow = async (
     input: Extract<
@@ -958,7 +972,7 @@ export function createBrowserAppManagedTools(
       actor: () => browserFlowAgentActor(authority, String(options.threadId)),
       contextId: activeContextId,
       refs: refsOfLatestSnapshot,
-      run: (step) => runRecorded(step, signal),
+      run: (step) => runRecorded(step, signal, true),
     });
   };
   const tools: AppManagedToolSet = {
