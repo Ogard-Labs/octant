@@ -25,20 +25,32 @@ import {
   type ListSort,
   type ListStatusFilter,
 } from "@octant/client-runtime/list-arrangement";
-import { CalendarClock, ChevronDown, Pencil, Plus, Search, Sparkles } from "../ui/icons";
+import {
+  CalendarClock,
+  Ellipsis,
+  FolderInput,
+  History,
+  Pencil,
+  Plus,
+  Search,
+  Sparkles,
+  Webhook,
+  type IconComponent,
+} from "../ui/icons";
+import { OctantSwitch } from "../ui/base/OctantSwitch";
+import {
+  automationTotalsLine,
+  nextRunCell,
+  runStripCells,
+  runStripSummary,
+} from "./automationTable";
 import { RoutineCalendar } from "./RoutineCalendar";
 import { RoutineComposer } from "./RoutineComposer";
 import { ROUTINE_REQUEST_SUGGESTIONS, type RoutineRequestDraft } from "./routineRequestDraft";
-import {
-  routineCadence,
-  routineCadenceLabel,
-  routineHasCompleted,
-  routineScheduleLine,
-} from "./routinePresentation";
+import { routineHasCompleted, routineScheduleLabel } from "./routinePresentation";
 import { useEffect, useRef, useState } from "react";
 import { FilterMenu, FilterMenuGroup } from "../surface/FilterMenu";
 import { Surface, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
-import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import {
   OctantMenu,
@@ -314,6 +326,10 @@ export function AutomationCenter(props: AutomationCenterProps) {
     return "The automation was not saved.";
   }
 
+  const listTotals =
+    controller.list.status === "ready" || controller.list.status === "refreshing"
+      ? controller.list.totals
+      : undefined;
   return (
     <Surface ariaLabel="Automations" className="automation-center" measure="wide">
       <SurfaceHeader
@@ -348,7 +364,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
                 New automation
               </>
             }
-            triggerClassName={octantButtonClassName({ variant: "secondary", size: "sm" })}
+            triggerClassName={octantButtonClassName({ variant: "default", size: "sm" })}
             triggerLabel="New automation"
             value=""
           />
@@ -419,6 +435,11 @@ export function AutomationCenter(props: AutomationCenterProps) {
                     value={controller.search}
                   />
                 </label>
+                {listTotals === undefined ? null : (
+                  <span className="oct-meta automation-center__totals">
+                    {automationTotalsLine(listTotals)}
+                  </span>
+                )}
                 <OctantToggleGroup<typeof view>
                   aria-label="Choose a view"
                   className="automation-center__views segmented"
@@ -598,6 +619,19 @@ function AutomationListBody(props: {
   readonly generateId: () => string;
 }) {
   const { controller } = props;
+  const [switching, setSwitching] = useState<ReadonlySet<string>>(() => new Set());
+  const switchRoutine = async (id: string, command: () => Promise<void>) => {
+    setSwitching((current) => new Set([...current, id]));
+    try {
+      await command();
+    } finally {
+      setSwitching((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
   if (controller.list.status === "loading") {
     return (
       <OctantEmpty
@@ -656,6 +690,15 @@ function AutomationListBody(props: {
       className="automation-center__groups"
       ref={props.listRef}
     >
+      {/* The column names, drawn once over every group. Each row says the
+          same things in its own accessible name, so this line is for the eye. */}
+      <div aria-hidden="true" className="automation-table__head">
+        <span>Automation</span>
+        <span>Last 7 runs</span>
+        <span>Next run</span>
+        <span>On</span>
+        <span />
+      </div>
       {groups.map((group) => (
         <section className="automation-center__group" key={group.heading}>
           {group.heading === "" ? null : (
@@ -665,158 +708,178 @@ function AutomationListBody(props: {
             aria-label={group.heading === "" ? "Automations" : `Automations in ${group.heading}`}
             className="automation-center__rows"
           >
-            {group.items.map((summary) => (
-              <li
-                aria-label={summary.displayName}
-                className="automation-row"
-                key={String(summary.id)}
-              >
-                <OctantButton
-                  className="automation-row__open"
-                  data-automation-row={String(summary.id)}
-                  onClick={() => props.onSelect(String(summary.id))}
-                  type="button"
-                  variant="bare"
+            {group.items.map((summary) => {
+              const KindIcon = triggerKindIcon(summary.trigger);
+              const rowId = `automation-row-${String(summary.id)}`;
+              const cells = runStripCells(summary.recentRuns);
+              const next = nextRunCell(summary, props.now, props.format);
+              const projectName = props.projectNames.get(String(summary.projectId)) ?? "Project";
+              const sentence =
+                summary.trigger.kind === "file-arrival"
+                  ? `${routineFileSourceLabel(summary.fileSource)} · ${String(
+                      summary.fileSource?.remainingStarts ?? summary.trigger.automaticStartLimit,
+                    )} starts remaining`
+                  : routineScheduleLabel(summary.trigger, props.format);
+              return (
+                <li
+                  aria-label={summary.displayName}
+                  className="automation-row"
+                  data-lifecycle={summary.lifecycle}
+                  key={String(summary.id)}
                 >
-                  <span className="automation-row__name">{summary.displayName}</span>
-                </OctantButton>
-                <div className="automation-row__meta">
-                  {summary.trigger.kind === "file-arrival" ? (
-                    <span>
-                      {routineFileSourceLabel(summary.fileSource)} ·{" "}
-                      {summary.fileSource?.remainingStarts ?? summary.trigger.automaticStartLimit}{" "}
-                      starts remaining
-                    </span>
-                  ) : null}
-                  <span className="automation-row__project">
-                    {props.projectNames.get(String(summary.projectId)) ?? "Project"}
-                  </span>
-                  <span className="automation-row__mode">{automationModeLabel(summary.mode)}</span>
-                  <span className="automation-row__schedule">
-                    {routineScheduleLine(
-                      summary.trigger,
-                      summary.nextDueAt,
-                      props.now,
-                      props.format,
-                    )}
-                  </span>
-                  <OctantBadge
-                    className="automation-row__cadence"
-                    data-cadence={routineCadence(summary.trigger)}
-                    variant={
-                      routineCadence(summary.trigger) === "one-time" ? "dashed" : "secondary"
-                    }
+                  <OctantButton
+                    // Named for the routine alone; what it runs on, how its last
+                    // runs went and when it runs next are its description, so a
+                    // screen reader hears the name first and the rest after.
+                    aria-describedby={`${rowId}-schedule ${rowId}-runs ${rowId}-next`}
+                    aria-label={summary.displayName}
+                    className="automation-row__open"
+                    data-automation-row={String(summary.id)}
+                    onClick={() => props.onSelect(String(summary.id))}
+                    type="button"
+                    variant="bare"
                   >
-                    {routineCadenceLabel(routineCadence(summary.trigger))}
-                  </OctantBadge>
-                  {String(summary.hostId) === props.localHostId ? null : (
-                    // Only a routine that belongs somewhere else is badged. Badging
-                    // every row would make the machine you are sitting at look like
-                    // one more remote environment.
-                    <OctantBadge className="automation-row__environment" variant="secondary">
-                      {props.environmentLabel(String(summary.hostId))}
-                    </OctantBadge>
-                  )}
-                  <span className="automation-row__state" data-lifecycle={summary.lifecycle}>
-                    {automationLifecycleLabel(summary.lifecycle)}
-                  </span>
-                  {summary.latestRunLifecycle === undefined ? null : (
-                    <span
-                      className="automation-row__status"
-                      data-run-lifecycle={summary.latestRunLifecycle}
-                    >
-                      {`Last run: ${automationRunStatusLabel(summary.latestRunLifecycle)}`}
+                    <span className="automation-row__routine">
+                      <span aria-hidden="true" className="automation-row__kind">
+                        <KindIcon size={16} />
+                      </span>
+                      <span className="automation-row__text">
+                        <span className="automation-row__name">{summary.displayName}</span>
+                        <span className="automation-row__schedule" id={`${rowId}-schedule`}>
+                          {`${sentence} · ${projectName}`}
+                          {String(summary.hostId) === props.localHostId ? null : (
+                            // Only a routine that belongs somewhere else names its
+                            // machine; naming every row's would make the machine you
+                            // sit at look like one more remote environment.
+                            <span className="automation-row__environment">
+                              {` · ${props.environmentLabel(String(summary.hostId))}`}
+                            </span>
+                          )}
+                        </span>
+                      </span>
                     </span>
-                  )}
-                </div>
-                <div className="automation-row__menu-wrap">
-                  <OctantMenuRoot>
-                    <OctantMenuTrigger
-                      aria-label={`Actions for ${summary.displayName}`}
-                      className="automation-row__menu-toggle"
+                    <span
+                      aria-label={runStripSummary(summary.recentRuns)}
+                      className="automation-row__runs"
+                      id={`${rowId}-runs`}
+                      role="img"
                     >
-                      <span>Actions</span>
-                      <ChevronDown aria-hidden="true" size={14} />
-                    </OctantMenuTrigger>
-                    <OctantMenuPortal>
-                      <OctantMenuPositioner align="end">
-                        <OctantMenuPopup aria-label={`Actions for ${summary.displayName}`}>
-                          {summary.lifecycle === "enabled" ? (
-                            <OctantMenuItem
-                              onClick={() =>
-                                void props.onRunCommand(
-                                  summary,
-                                  {
+                      {cells.map((cell, index) => (
+                        <span
+                          className="automation-row__run"
+                          data-tone={cell.tone}
+                          // The cells have no identity beyond their place.
+                          // oxlint-disable-next-line react/no-array-index-key
+                          key={index}
+                          {...(cell.lifecycle === undefined || cell.at === undefined
+                            ? {}
+                            : {
+                                title: `${automationRunStatusLabel(cell.lifecycle)} · ${formatAutomationInstant(cell.at, props.format)}`,
+                              })}
+                        />
+                      ))}
+                    </span>
+                    <span
+                      className="automation-row__next"
+                      data-tone={next.tone}
+                      id={`${rowId}-next`}
+                    >
+                      <span className="automation-row__next-primary">{next.primary}</span>
+                      <span className="automation-row__next-secondary">{next.secondary ?? ""}</span>
+                    </span>
+                  </OctantButton>
+                  <span className="automation-row__toggle">
+                    {/* Only a routine that is on or paused can be switched: a
+                        finished one-time routine or an archived one has
+                        nothing to resume, and a stray click must not re-arm
+                        it. The switch rests while its command is in flight, so
+                        a quick second press cannot send a stale version. */}
+                    {summary.lifecycle !== "enabled" && summary.lifecycle !== "paused" ? null : (
+                      <OctantSwitch
+                        checked={summary.lifecycle === "enabled"}
+                        disabled={switching.has(String(summary.id))}
+                        label={`${summary.displayName} on`}
+                        onCheckedChange={(on) =>
+                          void switchRoutine(String(summary.id), () =>
+                            props.onRunCommand(
+                              summary,
+                              on
+                                ? {
+                                    kind: "resume-automation",
+                                    automationId: summary.id,
+                                    expectedVersion: summary.version,
+                                  }
+                                : {
                                     kind: "pause-automation",
                                     automationId: summary.id,
                                     expectedVersion: summary.version,
                                   },
-                                  "Automation paused.",
-                                )
-                              }
-                            >
-                              Pause
+                              on ? "Automation resumed." : "Automation paused.",
+                            ),
+                          )
+                        }
+                      />
+                    )}
+                  </span>
+                  <div className="automation-row__menu-wrap">
+                    <OctantMenuRoot>
+                      <OctantMenuTrigger
+                        aria-label={`Actions for ${summary.displayName}`}
+                        className="automation-row__menu-toggle"
+                      >
+                        <Ellipsis aria-hidden="true" size={16} />
+                      </OctantMenuTrigger>
+                      <OctantMenuPortal>
+                        <OctantMenuPositioner align="end">
+                          <OctantMenuPopup aria-label={`Actions for ${summary.displayName}`}>
+                            <OctantMenuItem onClick={() => props.onSelect(String(summary.id))}>
+                              Open details
                             </OctantMenuItem>
-                          ) : summary.lifecycle === "paused" ? (
-                            <OctantMenuItem
-                              onClick={() =>
-                                void props.onRunCommand(
-                                  summary,
-                                  {
-                                    kind: "resume-automation",
-                                    automationId: summary.id,
-                                    expectedVersion: summary.version,
-                                  },
-                                  "Automation resumed.",
-                                )
-                              }
-                            >
-                              Resume
-                            </OctantMenuItem>
-                          ) : null}
-                          {summary.lifecycle === "archived" ? null : (
-                            <>
-                              <OctantMenuItem
-                                onClick={() =>
-                                  void props.onRunCommand(
-                                    summary,
-                                    {
-                                      kind: "run-now-automation",
-                                      automationId: summary.id,
-                                      expectedVersion: summary.version,
-                                      runNowRequestId: props.generateId(),
-                                    } as unknown as AutomationClientCommand,
-                                    "Run requested.",
-                                  )
-                                }
-                              >
-                                Run now
-                              </OctantMenuItem>
-                              <OctantMenuItem
-                                destructive
-                                onClick={() =>
-                                  void props.onRunCommand(
-                                    summary,
-                                    {
-                                      kind: "archive-automation",
-                                      automationId: summary.id,
-                                      expectedVersion: summary.version,
-                                    },
-                                    "Automation archived.",
-                                  )
-                                }
-                              >
-                                Archive
-                              </OctantMenuItem>
-                            </>
-                          )}
-                        </OctantMenuPopup>
-                      </OctantMenuPositioner>
-                    </OctantMenuPortal>
-                  </OctantMenuRoot>
-                </div>
-              </li>
-            ))}
+                            {summary.lifecycle === "archived" ? null : (
+                              <>
+                                <OctantMenuItem
+                                  onClick={() =>
+                                    void props.onRunCommand(
+                                      summary,
+                                      {
+                                        kind: "run-now-automation",
+                                        automationId: summary.id,
+                                        expectedVersion: summary.version,
+                                        runNowRequestId: props.generateId(),
+                                      } as unknown as AutomationClientCommand,
+                                      "Run requested.",
+                                    )
+                                  }
+                                >
+                                  Run now
+                                </OctantMenuItem>
+                                <OctantMenuSeparator />
+                                <OctantMenuItem
+                                  destructive
+                                  onClick={() =>
+                                    void props.onRunCommand(
+                                      summary,
+                                      {
+                                        kind: "archive-automation",
+                                        automationId: summary.id,
+                                        expectedVersion: summary.version,
+                                      },
+                                      "Automation archived.",
+                                    )
+                                  }
+                                >
+                                  Archive
+                                </OctantMenuItem>
+                              </>
+                            )}
+                          </OctantMenuPopup>
+                        </OctantMenuPositioner>
+                      </OctantMenuPortal>
+                    </OctantMenuRoot>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </section>
       ))}
@@ -1390,3 +1453,10 @@ function ThreadLink(props: {
 }
 
 export type { AutomationDefinition };
+
+/** What starts the routine, as the mark leading its row: a time, an event, or files. */
+function triggerKindIcon(trigger: AutomationSummary["trigger"]): IconComponent {
+  if (trigger.kind === "integration-event") return Webhook;
+  if (trigger.kind === "file-arrival") return FolderInput;
+  return trigger.kind === "once" ? CalendarClock : History;
+}

@@ -58,6 +58,12 @@
   min-height: 0;
 }
 
+/* The table drops its runs column by the list's own width, not the window's:
+   the list shares the window with a detail pane. */
+.automation-center__list-pane {
+  container-type: inline-size;
+}
+
 /* The suggestions are independently actionable objects, so they keep their
    lift: each is a button drawn as a card with its one hairline. Without it, in light, the card fill is the
    page's own white and the card read as loose text. The sections around them
@@ -134,10 +140,35 @@
   clip-path: inset(50%);
 }
 
+/* The list is one table: the routine (its kind, name and plain schedule), its
+   last seven runs, when it runs next, its on switch and a "…" menu. Every row
+   shares the head's columns, and the trailing columns have fixed widths, so a
+   run arriving, a switch flipping or a time ticking changes a cell's words and
+   never moves a column. */
+.automation-center__groups {
+  --automation-columns: minmax(0, 1fr) 7.5rem 7.5rem 2.75rem 2rem;
+}
+
+.automation-table__head {
+  display: grid;
+  grid-template-columns: var(--automation-columns);
+  align-items: center;
+  column-gap: var(--oct-space-4);
+  height: var(--oct-space-8);
+  padding-inline: var(--oct-space-3);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.automation-center__totals {
+  flex: none;
+  white-space: nowrap;
+}
+
 .automation-center__rows {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -145,34 +176,188 @@
 
 .automation-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.25rem 0.5rem;
-  padding: 0.5rem 0.65rem;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
+  grid-template-columns: var(--automation-columns);
+  align-items: center;
+  column-gap: var(--oct-space-4);
+  min-height: 3.5rem;
+  padding-inline: var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-hairline);
 }
 
+.automation-row:hover {
+  background: var(--oct-wash-hover);
+}
+
+/* The open button spans the routine, runs and next-run columns, so a click
+   anywhere on them opens the routine, while the switch and the menu stay
+   their own controls. */
 .automation-row__open {
-  justify-self: start;
-  border: none;
-  background: transparent;
+  grid-column: 1 / span 3;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  /* The shared button recipe gives a button one line's height; a row of two
+     lines needs its own. */
+  height: auto;
+  min-height: 0;
+  min-width: 0;
+  padding-block: var(--oct-space-2);
   color: inherit;
-  padding: 0;
+  text-align: start;
+  cursor: default;
+}
+
+.automation-row__routine {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-3);
+  min-width: 0;
+}
+
+.automation-row__kind {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--oct-radius-sm);
+  background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
+  color: var(--oct-muted);
+}
+
+.automation-row__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.automation-row__name,
+.automation-row__schedule {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automation-row__name {
+  color: var(--oct-fg);
   font-size: var(--oct-text-base);
   font-weight: var(--oct-weight-medium);
-  cursor: default;
-  text-align: start;
 }
 
-.automation-row__meta {
-  grid-column: 1;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.25rem 0.75rem;
+.automation-row__schedule {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+}
+
+.automation-row__runs {
+  display: flex;
+  gap: var(--oct-space-1);
+}
+
+.automation-row__run {
+  width: 0.625rem;
+  height: 1rem;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--oct-fg) 10%, transparent);
+}
+
+.automation-row__run[data-tone="success"] {
+  background: var(--oct-success);
+}
+
+.automation-row__run[data-tone="failure"] {
+  background: var(--oct-danger);
+}
+
+.automation-row__run[data-tone="active"] {
+  background: color-mix(in oklab, var(--oct-fg) 45%, transparent);
+}
+
+.automation-row__run[data-tone="quiet"] {
+  background: color-mix(in oklab, var(--oct-fg) 22%, transparent);
+}
+
+.automation-row__run[data-tone="empty"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--oct-hairline);
+}
+
+.automation-row__next {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.automation-row__next-primary {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.automation-row__next-secondary {
+  min-height: 1lh;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+}
+
+.automation-row__next[data-tone="paused"] .automation-row__next-primary {
+  color: var(--oct-warn-fg);
+}
+
+.automation-row__next[data-tone="quiet"] .automation-row__next-primary {
+  color: var(--oct-meta);
+}
+
+/* A paused or archived routine reads as resting: its name, runs and times
+   step back, and the switch beside them stays at full strength because it is
+   the way back. */
+.automation-row:is([data-lifecycle="paused"], [data-lifecycle="archived"])
+  :is(.automation-row__kind, .automation-row__name, .automation-row__runs) {
+  opacity: 0.55;
+}
+
+.automation-row__toggle {
+  display: inline-flex;
+  justify-content: center;
+}
+
+.automation-row__menu-wrap {
+  display: inline-flex;
+  justify-content: center;
+}
+
+.automation-row__menu-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-muted);
+}
+
+.automation-row__menu-toggle:hover {
+  background: var(--oct-wash-hover);
+  color: var(--oct-fg);
+}
+
+/* In a narrow pane the runs give way first: the name, next run, switch and
+   menu are what a row must keep. */
+@container (max-width: 620px) {
+  .automation-center__groups {
+    --automation-columns: minmax(0, 1fr) 6.5rem 2.75rem 2rem;
+  }
+
+  .automation-table__head > :nth-child(2),
+  .automation-row__runs {
+    display: none;
+  }
+
+  .automation-row__open {
+    grid-column: 1 / span 2;
+  }
 }
 
 .routine-composer {
@@ -224,32 +409,6 @@
 .routine-composer__draft-work {
   margin: 0;
   color: var(--oct-muted);
-}
-
-.automation-row__state[data-lifecycle="paused"],
-.automation-row__status[data-run-lifecycle="failed"] {
-  color: var(--oct-warn-fg);
-}
-
-.automation-row__menu-wrap {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  position: relative;
-  align-self: start;
-}
-
-/* .menu paints the surface; this places it against the row's edge and
-   stacks the actions it holds. */
-.automation-row__menu {
-  position: absolute;
-  inset-inline-end: 0;
-  display: flex;
-  flex-direction: column;
-  min-width: 9rem;
-}
-
-.automation-row__menu > * {
-  justify-content: flex-start;
 }
 
 .automation-detail {

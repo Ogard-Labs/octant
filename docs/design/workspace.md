@@ -1093,7 +1093,26 @@ gone. The toolbar is search, the List and Calendar switch, and one Filter menu
 ("Filter, 2 active"), and its menu ends with Reset filters while anything is on.
 The Automations notice about notification delivery sits under the list, and the
 suggested templates are a three-column grid of equal-height cards, kept in the
-empty state beside the same single button.
+empty state beside the same single button. The Automations list query carries
+each Automation's last seven runs (oldest first) and the 30-day totals over the
+caller's visible Automations, so the page shows a run strip per row and a header
+summary without a request per Automation (maintainer request, 2026-11-17).
+
+The Automations list is one table under a quiet head of column names
+(Automation, Last 7 runs, Next run, On). A row leads with a mark for what
+starts the routine (a clock for a schedule, a hook for an event, a folder for
+new files), then its name and one plain line of what it runs on and its
+Project, the last seven runs as small blocks (green completed, red failed or
+interrupted, grey running or skipped, outlined where there is no run yet, oldest
+on the left), the next run as a day and time with "in 21h 55m" under it ("On
+event", "On new files", "Paused" or "Done" where there is no time, with when it
+last ran), its on switch, which pauses and resumes it, and a "…" menu (Open
+details, Run now, Archive). A paused routine's name, mark and runs step back
+while its switch stays at full strength. The toolbar shows the 30-day totals
+("25 of 100 enabled · 299 runs in 30 days · 49.8% succeeded") and New
+automation is the page's primary button. In a narrow list the runs column gives
+way first; the trailing columns have fixed widths, so nothing moves when a run
+arrives or the switch flips (maintainer request, 2026-11-17).
 
 ### Inbox page
 

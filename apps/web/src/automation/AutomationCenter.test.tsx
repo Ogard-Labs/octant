@@ -127,22 +127,25 @@ describe("AutomationCenter default surface", () => {
     expect(screen.getAllByRole("button", { name: "New automation" })).toHaveLength(1);
 
     const workRow = within(rows).getByRole("listitem", { name: "Weekly summary" });
-    expect(within(workRow).getByText("Docs Project")).toBeVisible();
-    // A row says what the routine does and when it next does it, in one line.
-    expect(
-      within(workRow).getByText("Weekly on Mon at 9:00 · Next run on Sep 1 at 9:00"),
-    ).toBeVisible();
-    expect(within(workRow).getByText("Recurring")).toBeVisible();
-    // A routine on this machine carries no environment badge: badging every row
-    // would make the machine you are sitting at look like one more remote one.
-    expect(within(workRow).queryByText("Local")).toBeNull();
-    expect(within(workRow).getByText("Enabled")).toBeVisible();
-    expect(within(workRow).getByText("Last run: Completed")).toBeVisible();
+    // A row is one line of a table: what the routine runs on and for which
+    // Project, its last runs, when it runs next, and its switch.
+    expect(within(workRow).getByText("Weekly on Mon at 9:00 · Docs Project")).toBeVisible();
+    expect(within(workRow).getByText("in 21d 21h")).toBeVisible();
+    expect(within(workRow).getByRole("img", { name: "No runs yet" })).toBeVisible();
+    expect(within(workRow).getByRole("switch", { name: "Weekly summary on" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    // A routine on this machine names no environment: naming every row's would
+    // make the machine you are sitting at look like one more remote one.
+    expect(within(workRow).queryByText(/Local/)).toBeNull();
 
     const codeRow = within(rows).getByRole("listitem", { name: "Nightly build check" });
-    expect(within(codeRow).getByText("Weekly on Mon at 9:00 · Not scheduled")).toBeVisible();
     expect(within(codeRow).getByText("Paused")).toBeVisible();
-    expect(within(codeRow).getByText("Last run: Failed")).toBeVisible();
+    expect(within(codeRow).getByRole("switch", { name: "Nightly build check on" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
   });
 
   it("re-queries the server when the mode filter or search change", async () => {
@@ -220,13 +223,12 @@ describe("AutomationCenter default surface", () => {
 });
 
 describe("AutomationCenter row actions", () => {
-  it("pauses, runs now, and archives from the row overflow menu with exact versions", async () => {
+  it("pauses from the row's switch, and runs now and archives from its menu, with exact versions", async () => {
     const { client } = renderCenter();
     const rows = await screen.findByRole("list", { name: "Automations" });
     const row = within(rows).getByRole("listitem", { name: "Weekly summary" });
 
-    await userEvent.click(within(row).getByText("Actions"));
-    await userEvent.click(await screen.findByRole("menuitem", { name: "Pause" }));
+    await userEvent.click(within(row).getByRole("switch", { name: "Weekly summary on" }));
     await waitFor(() =>
       expect(client.execute).toHaveBeenLastCalledWith({
         kind: "pause-automation",
@@ -236,7 +238,7 @@ describe("AutomationCenter row actions", () => {
     );
     expect(await screen.findByText("Automation paused.")).toBeVisible();
 
-    await userEvent.click(within(row).getByText("Actions"));
+    await userEvent.click(within(row).getByRole("button", { name: "Actions for Weekly summary" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Run now" }));
     await waitFor(() =>
       expect(client.execute).toHaveBeenLastCalledWith({
@@ -247,7 +249,7 @@ describe("AutomationCenter row actions", () => {
       }),
     );
 
-    await userEvent.click(within(row).getByText("Actions"));
+    await userEvent.click(within(row).getByRole("button", { name: "Actions for Weekly summary" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
     await waitFor(() =>
       expect(client.execute).toHaveBeenLastCalledWith({
@@ -258,13 +260,32 @@ describe("AutomationCenter row actions", () => {
     );
   });
 
-  it("offers Resume instead of Pause for a paused automation", async () => {
-    renderCenter();
+  it("offers no switch for a routine that has run out, so a click cannot re-arm it", async () => {
+    renderCenter({
+      client: fakeClient({
+        list: vi.fn(async () => ({
+          kind: "automation-list" as const,
+          items: [{ ...workSummary, lifecycle: "exhausted", nextDueAt: null }],
+        })) as never,
+      }),
+    });
+    const rows = await screen.findByRole("list", { name: "Automations" });
+    const row = within(rows).getByRole("listitem", { name: "Weekly summary" });
+    expect(within(row).queryByRole("switch")).toBeNull();
+  });
+
+  it("resumes a paused automation from its switch", async () => {
+    const { client } = renderCenter();
     const rows = await screen.findByRole("list", { name: "Automations" });
     const row = within(rows).getByRole("listitem", { name: "Nightly build check" });
-    await userEvent.click(within(row).getByText("Actions"));
-    expect(await screen.findByRole("menuitem", { name: "Resume" })).toBeVisible();
-    expect(within(row).queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
+    await userEvent.click(within(row).getByRole("switch", { name: "Nightly build check on" }));
+    await waitFor(() =>
+      expect(client.execute).toHaveBeenLastCalledWith({
+        kind: "resume-automation",
+        automationId: codeSummary.id,
+        expectedVersion: codeSummary.version,
+      }),
+    );
   });
 });
 
@@ -593,8 +614,7 @@ describe("AutomationCenter narrow layout, keyboard, and focus", () => {
     renderCenter();
     const rows = await screen.findByRole("list", { name: "Automations" });
     const row = within(rows).getByRole("listitem", { name: "Weekly summary" });
-    await userEvent.click(within(row).getByText("Actions"));
-    await userEvent.click(await screen.findByRole("menuitem", { name: "Pause" }));
+    await userEvent.click(within(row).getByRole("switch", { name: "Weekly summary on" }));
 
     const notice = await screen.findByText("Automation paused.");
     expect(notice.closest("[role='status']")).not.toBeNull();
@@ -703,7 +723,7 @@ describe("AutomationCenter arranging", () => {
     const rows = await screen.findByRole("list", { name: "Automations" });
 
     const remote = within(rows).getByRole("listitem", { name: "Devbox nightly" });
-    expect(within(remote).getByText("Devbox")).toBeVisible();
+    expect(within(remote).getByText("· Devbox", { exact: false })).toBeVisible();
     const local = within(rows).getByRole("listitem", { name: "Weekly summary" });
     expect(within(local).queryByText("Local")).toBeNull();
   });
