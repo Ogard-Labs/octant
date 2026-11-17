@@ -2068,6 +2068,26 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
   max-width: 160px;
 }
 
+/* With many pages the tabs shrink together, and below this width a title cut
+   to one letter ("N", "\\") said nothing and read as noise beside the page's
+   icon (2026-11-17). A tab that narrow shows the icon alone; the title stays
+   the tab's name and its tooltip. The close button stays where it is, so
+   choosing a tab moves nothing. */
+.dock-browser-pages > .content-tab {
+  container-type: inline-size;
+}
+
+@container (max-width: 88px) {
+  .content-tab__select > .content-tab__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
 .dock-browser-pages > .content-tab > .content-tab__select,
 .dock-tile__lead .dock-browser-pages > .content-tab > .content-tab__select {
   flex: 1 1 auto;

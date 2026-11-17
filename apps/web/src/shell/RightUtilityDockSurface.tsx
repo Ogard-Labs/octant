@@ -382,6 +382,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
               key={page.id}
               label={label}
               onClose={() => props.onCloseTab(page.id)}
+              title={label}
               onSelect={() => props.onSelectSurface(page.id)}
               roving={
                 page.id === (pages.some((tab) => tab.id === selectedId) ? selectedId : pages[0]?.id)
