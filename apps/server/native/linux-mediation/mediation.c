@@ -23,6 +23,7 @@
 #include <linux/lsm_hooks.h>
 #include <linux/magic.h>
 #include <linux/miscdevice.h>
+#include <linux/mman.h>
 #include <linux/mm.h>
 #include <linux/mutex.h>
 #include <linux/poll.h>
