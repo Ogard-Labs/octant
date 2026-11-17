@@ -224,6 +224,60 @@ the page, the workspace, or the person is reached.
   is open for one site only. The agent's recovery text was shown in the
   window as it stood until 2026-11-16. The pane's words change nothing about
   what was refused.
+- A navigation the person starts from the address bar of a window of this
+  computer is their own browsing, as a link they click on the page already is
+  (maintainer decision, 2026-11-17). On the desktop Browser its redirects are
+  followed, and a site it reaches outside the approved origins joins the
+  origins the person's own view may show. Before, the address bar went through
+  the agent's gate, so an address that moved to another site stopped on the
+  refusal above.
+  - It approves nothing. The agent cannot read or act on that page: every
+    operation but `navigate` is refused there, as on any page approval never
+    covered. The answer the server keeps for that navigation holds no address,
+    title, text, hash, picture, or dialog of the page, and says only that the
+    person took the page outside its approved origins; a dialog that load
+    raised is not kept for a later answer either. Typing that site's address
+    still opens it as an approved page, as it always did.
+  - The preview's read of a page outside the approved origins answers with
+    nothing, whether the person reached it by a typed address or a click. That
+    read fills the observation an agent's results are built from, and it
+    carried such a page's address, title, and picture until 2026-11-17.
+  - Such a page leaves nothing in the diagnostics an agent reads: its console
+    messages, failed requests, and error responses are not recorded, and what
+    the hops of a typed address logged on the way there is dropped when the
+    navigation ends outside the approved origins or fails. They were recorded
+    until 2026-11-17, and a later `observe-diagnostics` on an approved page
+    returned them.
+  - A typed address is not a click on a download: while it loads, a download
+    a page starts is not saved to the person's Downloads folder. When the load
+    ends the page is nobody's to move until the person touches it, as after any
+    navigation through this route, so a page that redirects itself later is
+    refused as before.
+  - While that navigation loads, a hop to this computer or its network is
+    refused: a private, loopback, or link-local IP address, `localhost`, a name
+    under `.localhost`, `.local`, `.internal`, `.lan`, or `.home.arpa`, or a
+    bare name with no dot. An address the page was opened for, or one the
+    person already reached, is not a hop. The check reads the address as
+    written; a public name that resolves to a private address is not caught,
+    and the page it reaches is still one only the person's view shows.
+  - The server marks the navigation, and only its action route does, for a
+    local window. A paired device is left out: it reaches the page only
+    through that route, which acts on approved origins alone, so a followed
+    redirect would leave it unable to act. The service drops the mark for an
+    agent's call or a flow's, and the desktop host accepts it on `navigate`
+    alone.
+  - Unchanged: a navigation the agent, a flow, a terminal grant, or a paired
+    device asks for refuses the redirect as before; a page under remote owner
+    control keeps to its approved origins; an extension's load and a held page
+    script grant nothing; a page's popup is still refused; profile site
+    approvals, Plan, and sign-in are as they were. The headless Browser has no
+    view of the person's own, so it refuses the redirect for everyone and the
+    pane tells the person which site to type.
+  - Rationale: the person's view already reached new sites by a click, and
+    the agent was already kept off them, so following a typed address's
+    redirect the same way adds no reach for the agent. Approving the final
+    site as if it had been typed was rejected: it would hand the agent a site
+    the person never named.
 - At Full access a Private page needs no site approval and may navigate
   across origins, so this refusal is left there to profile pages, which keep
   their site approval ([the Full access rule](../architecture.md#security-and-authority);

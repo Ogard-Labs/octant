@@ -3901,6 +3901,43 @@ describe("BrowserAutomationService", () => {
     await fixture.service.close();
   });
 
+  it("marks a navigation as the person's only for a caller that is not the agent, and keeps nothing of a page the Browser withheld", async () => {
+    const { runtime, service } = harness();
+    await service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const lastAction = () => vi.mocked(runtime.act).mock.calls.at(-1)?.[1];
+
+    // The desktop Browser followed the person's redirect to a site approval
+    // never covered and answered with nothing of that page.
+    vi.mocked(runtime.act).mockResolvedValueOnce({});
+    const moved = await service.act({ windowId, request: request(), startedBy: "person" });
+    expect(lastAction()).toMatchObject({ kind: "navigate", startedBy: "person" });
+    expect(moved.failure).toBeUndefined();
+    expect(moved.observation).not.toHaveProperty("url");
+    expect(moved.observation).not.toHaveProperty("title");
+    expect(moved.observation).not.toHaveProperty("screenshotDataUrl");
+    expect(moved.observation?.change).toBe(
+      "The person took this page to a site outside its approved origins. Nothing of that page was read.",
+    );
+
+    // The mark is a navigation's, and never the agent's.
+    await service.act({
+      windowId,
+      request: request({ kind: "extract-text", target: undefined }),
+      startedBy: "person",
+    });
+    expect(lastAction()).not.toHaveProperty("startedBy");
+    await service.act({
+      windowId,
+      threadId: threadOne,
+      request: request(),
+      startedBy: "person",
+      capturedBy: "agent",
+    });
+    expect(lastAction()).toMatchObject({ kind: "navigate" });
+    expect(lastAction()).not.toHaveProperty("startedBy");
+    await service.close();
+  });
+
   it("names the refused origin when a navigation redirects outside the allowlist", async () => {
     const { runtime, service } = harness();
     vi.mocked(runtime.act).mockRejectedValueOnce(
