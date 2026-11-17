@@ -39,6 +39,24 @@ export function AccountSignIn(props: {
   latest.current = props;
 
   const attempt = state.kind === "waiting" ? state.attempt : undefined;
+
+  // One way out of waiting for both the regular check and a pasted code, so
+  // a sign-in the code finished is not lost to a later check that finds the
+  // attempt already gone. Only the first answer for an attempt counts.
+  const finishedAttempt = useRef<string | undefined>(undefined);
+  const finish = (attemptId: string, outcome: "completed" | "pending" | "failed") => {
+    if (outcome === "pending" || finishedAttempt.current === attemptId) return;
+    finishedAttempt.current = attemptId;
+    if (outcome === "completed") {
+      setState({ kind: "signed-in" });
+      latest.current.onSignedIn();
+    } else {
+      setState({ kind: "idle" });
+    }
+  };
+  const finishRef = useRef(finish);
+  finishRef.current = finish;
+
   useEffect(() => {
     if (attempt === undefined) return undefined;
     let stopped = false;
@@ -52,13 +70,7 @@ export function AccountSignIn(props: {
       checking = true;
       const outcome = await latest.current.onComplete(props.instanceId, attempt.attemptId);
       checking = false;
-      if (stopped || outcome === "pending") return;
-      if (outcome === "completed") {
-        setState({ kind: "signed-in" });
-        latest.current.onSignedIn();
-      } else {
-        setState({ kind: "idle" });
-      }
+      if (!stopped) finishRef.current(attempt.attemptId, outcome);
     };
     const timer = setInterval(() => void check(), CHECK_INTERVAL_MS);
     return () => {
@@ -84,7 +96,7 @@ export function AccountSignIn(props: {
     if (attempt === undefined || value.length === 0) return;
     setCode("");
     // The CLI takes the code on its input; whether it worked shows on the next check.
-    await props.onComplete(props.instanceId, attempt.attemptId, value);
+    finish(attempt.attemptId, await props.onComplete(props.instanceId, attempt.attemptId, value));
   };
 
   if (state.kind !== "waiting") {

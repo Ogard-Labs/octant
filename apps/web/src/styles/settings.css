@@ -2863,6 +2863,11 @@ html[data-octant-increased-contrast="true"]
   gap: var(--oct-space-2);
 }
 
+.account-sign-in > [role="status"] {
+  flex-basis: 100%;
+  margin: 0;
+}
+
 .account-sign-in__code {
   display: flex;
   align-items: center;

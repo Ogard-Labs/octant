@@ -94,6 +94,9 @@ const spawnSignIn: AccountSignInSpawn = (binaryPath, args, environment) => {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });
+  // A code pasted just as the CLI exits meets a closed input; that is the
+  // CLI's answer, not a host failure, so the write error is dropped here.
+  child.stdin?.on("error", () => undefined);
   return {
     onOutput: (listener) => {
       child.stdout?.on("data", (chunk: Buffer) => listener(chunk.toString("utf8")));
@@ -104,7 +107,11 @@ const spawnSignIn: AccountSignInSpawn = (binaryPath, args, environment) => {
       child.on("exit", (code) => listener(code));
     },
     writeLine: (line) => {
-      child.stdin?.write(`${line}\n`);
+      try {
+        child.stdin?.write(`${line}\n`);
+      } catch {
+        // The CLI already closed its input; the next check reads its exit.
+      }
     },
     stop: () => {
       child.kill("SIGTERM");
@@ -158,7 +165,8 @@ export function startAccountSignIn(
     const attempt: Attempt = {
       instanceId: String(command.instanceId),
       process: child,
-      timer: setTimeout(() => forget(attemptId), ACCOUNT_SIGN_IN_LIFETIME_MS),
+      // Unreferenced: a sign-in nobody checks again never keeps the host running.
+      timer: setTimeout(() => forget(attemptId), ACCOUNT_SIGN_IN_LIFETIME_MS).unref(),
       output: "",
       exitCode: undefined,
     };
@@ -167,7 +175,7 @@ export function startAccountSignIn(
       () =>
         settle({ status: "failed", message: "The sign-in command did not offer a sign-in page." }),
       SIGN_IN_PAGE_WAIT_MS,
-    );
+    ).unref();
     child.onOutput((chunk) => {
       if (attempt.output.length < OUTPUT_LIMIT) attempt.output += chunk;
       const page = SIGN_IN_PAGE.exec(attempt.output)?.[0];
