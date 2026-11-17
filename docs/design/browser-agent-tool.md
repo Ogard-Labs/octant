@@ -1497,8 +1497,9 @@ paired, routine, managed-subagent and terminal-grant callers are refused. Work
 below Full access asks Code's one-use script permission below (under
 [Octant adds no restrictions of its own unless Strict is on](../architecture.md#security-and-authority);
 built): both tools ask through one shared function, so the card, who may be
-asked and what invalidates the answer cannot differ, and Work's
-`oneUsePermission` is where Strict will keep Work refused. A Work turn runs a
+asked and what invalidates the answer cannot differ, and under the thread's
+Strict, read at the call, Work below Full access is refused as before
+(`script-needs-full-access`). A Work turn runs a
 script only while the thread still holds the level its turn began with: a
 level changed mid-turn, either way, refuses the script and withholds a result
 already on its way. Scripts cannot enter `steps` or saved/replayed flows.
