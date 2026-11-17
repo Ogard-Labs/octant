@@ -5,7 +5,7 @@
   "scripts": {
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "build": "tsdown && bun ../../scripts/build-linux-sandbox-launch.ts",
+    "build": "tsdown && bun ../../scripts/build-linux-sandbox-launch.ts --verify-relocatable-bundles",
     "browser:uploads:smoke": "bun src/browser/browserUploadFiles.smoke.ts",
     "browser:smoke": "bun src/browser/browserRuntime.smoke.ts",
     "desktop:cloud:smoke": "bun src/computerUse/cloudDesktop.smoke.ts",

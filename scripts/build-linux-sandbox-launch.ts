@@ -27,7 +27,9 @@ export function verifyRelocatableLinuxMediationBundles(root: string): void {
   }
 }
 
-export function buildLinuxSandboxLaunch(): void {
+export function buildLinuxSandboxLaunch(options: {
+  readonly verifyRelocatableBundles: boolean;
+}): void {
   if (process.platform !== "linux") return;
   const root = resolve(import.meta.dirname, "..");
   const destination = resolve(root, "apps/server/dist/native/octant-sandbox-launch");
@@ -63,7 +65,10 @@ export function buildLinuxSandboxLaunch(): void {
     { stdio: "inherit" },
   );
   chmodSync(mediation, 0o755);
-  verifyRelocatableLinuxMediationBundles(root);
+  if (options.verifyRelocatableBundles) verifyRelocatableLinuxMediationBundles(root);
 }
 
-if (import.meta.main) buildLinuxSandboxLaunch();
+if (import.meta.main)
+  buildLinuxSandboxLaunch({
+    verifyRelocatableBundles: process.argv.includes("--verify-relocatable-bundles"),
+  });
