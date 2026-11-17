@@ -3047,7 +3047,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         // The address bar reaches the page through this route too. A navigation
         // the server marks as the person's is driven by them, not by the agent.
         const personNavigation = request.kind === "navigate" && request.startedBy === "person";
+        // Set together: the person's control without the mark would let the
+        // page already open start a download in their name, or move to this
+        // computer's network, while the dialog guard below is still attaching.
         owned.control = personNavigation ? "user" : "agent";
+        owned.personNavigation = personNavigation;
         owned.blockedNavigationUrl = undefined;
         publish(contextId, owned);
         // Dialogs an earlier action answered before it failed come first.
@@ -3056,12 +3060,19 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         const carriedDialogs = dialogs.length;
         const diagnosticsAtStart = owned.diagnosticSeq;
         let withheld = false;
-        const releaseDialogs = await guardDialogs(contentsView(owned), dialogs, request.dialog);
+        let releaseDialogs: () => Promise<void>;
+        try {
+          releaseDialogs = await guardDialogs(contentsView(owned), dialogs, request.dialog);
+        } catch (error) {
+          // The action never began, so the `finally` below never runs: nothing
+          // may be left reading the next hops as the person's.
+          owned.personNavigation = false;
+          owned.control = "idle";
+          publish(contextId, owned);
+          throw error;
+        }
         if (request.downloads === "hold") owned.downloads.begin(request.downloadLimits);
         try {
-          // Set inside the block whose `finally` clears it, so no failure
-          // above can leave the next action's hops read as the person's.
-          owned.personNavigation = personNavigation;
           checkObservation();
           throwIfAborted(signal);
           const observed = await (async (): Promise<BrowserSurfaceRuntimeObservation> => {
@@ -3302,6 +3313,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 break;
             }
             if (SETTLING_ACTIONS.has(request.kind)) await settlePage(contentsView(owned));
+            // The typed address has loaded. What the page does from here on is
+            // nobody's action, so a move it makes during the reads below
+            // grants no site.
+            if (personNavigation) owned.control = "idle";
             // The person's own navigation may end on a site only their view
             // shows. Nothing of that page goes into the answer, which the
             // server keeps as the observation an agent's results are built
@@ -3354,6 +3369,16 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 ? undefined
                 : await captureScreenshot(contentsView(owned));
             const outline = include.has("snapshot") ? await snapshotOf(owned) : {};
+            // The reads above await, and a page can move itself meanwhile to a
+            // site only the person's view may show (one they reached before).
+            // What was read may describe that page, so none of it goes back.
+            if (!originAllowed(contents.getURL(), owned.policy.allowedOrigins)) {
+              if (personNavigation) {
+                withheld = true;
+                return {};
+              }
+              refuseUnapprovedPage(owned, contents);
+            }
             return {
               ...outline,
               ...(contents.getURL() === ""

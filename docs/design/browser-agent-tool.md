@@ -249,10 +249,15 @@ the page, the workspace, or the person is reached.
     until 2026-11-17, and a later `observe-diagnostics` on an approved page
     returned them.
   - A typed address is not a click on a download: while it loads, a download
-    a page starts is not saved to the person's Downloads folder. When the load
-    ends the page is nobody's to move until the person touches it, as after any
-    navigation through this route, so a page that redirects itself later is
-    refused as before.
+    a page starts is not saved to the person's Downloads folder. Once the
+    address has loaded the page is nobody's to move until the person touches
+    it, as after any navigation through this route, so a page that redirects
+    itself later, or while its answer is being read, is granted no site.
+  - An answer is read over several steps, and a page can move itself between
+    them to a site the person reached earlier. If the page is outside the
+    approved origins when the reading ends, nothing of it is returned: the
+    person's navigation answers with nothing, and an agent's action is
+    refused.
   - While that navigation loads, a hop to this computer or its network is
     refused: a private, loopback, or link-local IP address, `localhost`, a name
     under `.localhost`, `.local`, `.internal`, `.lan`, or `.home.arpa`, or a

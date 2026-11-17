@@ -2098,6 +2098,80 @@ describe("BrowserSurfaceHost", () => {
       });
     });
 
+    it("grants nothing in the person's name before the load starts or after it has settled", async () => {
+      const { created, host, hop, download } = await opened();
+      vi.mocked(created.webContents.getURL).mockReturnValue("https://short.example/");
+      // While the dialog guard attaches, the page already open acts on its own.
+      const early: boolean[] = [];
+      vi.mocked(created.webContents.debugger.sendCommand).mockImplementation(async (method) => {
+        if (method === "Page.enable") early.push(download(), hop("http://192.168.1.1/"));
+        return undefined;
+      });
+      // After the typed address has loaded, the page moves itself during the reads.
+      let late: boolean | undefined;
+      vi.mocked(created.webContents.capturePage).mockImplementationOnce(async () => {
+        late = hop("https://late.example.net/");
+        return { isEmpty: () => false, toJPEG: () => Uint8Array.from([1, 2, 3]) };
+      });
+
+      const answer = await host.act(contextId, {
+        kind: "navigate",
+        target: "https://short.example/",
+        startedBy: "person",
+        include: ["screenshot"],
+      });
+
+      expect(early).toEqual([false, false]);
+      expect(late).toBe(false);
+      expect(answer).toMatchObject({ url: "https://short.example/" });
+    });
+
+    it("answers with nothing when the page moves to a site the person reached before while it is read", async () => {
+      const { created, host, hop } = await opened();
+      // The person's earlier typed address ended on another site.
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+        expect(hop("https://moved.example.net/")).toBe(true);
+        vi.mocked(created.webContents.getURL).mockReturnValue("https://moved.example.net/");
+      });
+      await host.act(contextId, {
+        kind: "navigate",
+        target: "https://short.example/",
+        startedBy: "person",
+      });
+
+      // A later typed address loads the approved page, which then moves itself
+      // back to that site while the answer is being read.
+      vi.mocked(created.webContents.getURL).mockReturnValue("https://short.example/");
+      vi.mocked(created.webContents.capturePage).mockImplementationOnce(async () => {
+        expect(hop("https://moved.example.net/")).toBe(true);
+        vi.mocked(created.webContents.getURL).mockReturnValue("https://moved.example.net/");
+        return { isEmpty: () => false, toJPEG: () => Uint8Array.from([1, 2, 3]) };
+      });
+      const answer = await host.act(contextId, {
+        kind: "navigate",
+        target: "https://short.example/",
+        startedBy: "person",
+        include: ["screenshot"],
+      });
+      expect(answer).toEqual({});
+
+      // The agent's own navigation that ends the same way is refused, not answered.
+      vi.mocked(created.webContents.getURL).mockReturnValue("https://short.example/");
+      vi.mocked(created.webContents.capturePage).mockImplementationOnce(async () => {
+        vi.mocked(created.webContents.getURL).mockReturnValue("https://moved.example.net/");
+        return { isEmpty: () => false, toJPEG: () => Uint8Array.from([1, 2, 3]) };
+      });
+      await expect(
+        host.act(contextId, {
+          kind: "navigate",
+          target: "https://short.example/",
+          include: ["screenshot"],
+        }),
+      ).rejects.toThrow(
+        "Octant Browser will not act on a page outside this context's allowed origins.",
+      );
+    });
+
     it("still refuses the same redirect when the agent asked for the navigation", async () => {
       const { created, host, hop } = await opened();
       vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
