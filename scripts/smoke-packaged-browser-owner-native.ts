@@ -951,13 +951,13 @@ end run`;
               12_000,
               500,
             );
-            // Work's compact sidebar deliberately has no Add folder button.
-            // Its normal welcome screen offers the same Project root chooser.
-            await native("reveal", "Home");
-            await native("click", "Home");
-            await wait("work-folder-welcome", (s) => s.includes("Choose a folder…"));
-            await native("reveal", "Choose a folder…");
-            await native("click", "Choose a folder…");
+            // Work's compact sidebar deliberately has no Add folder button,
+            // and the start screen has no welcome card: the composer's Project
+            // picker offers the same Project root chooser.
+            await native("click", "Project: Choose a Project");
+            await wait("work-folder-picker", (s) => s.includes("New Project from folder…"));
+            await native("reveal", "New Project from folder…");
+            await native("click", "New Project from folder…");
             await wait(
               "project-choose-folder",
               (s) => s.includes("Project name") && s.includes("Choose a folder"),
