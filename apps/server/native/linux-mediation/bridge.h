@@ -49,6 +49,7 @@ int octant_namespace_check_rename(const struct renamedata *operation);
 bool octant_mediation_restricted(void);
 struct octant_metadata_scope octant_seek_begin(struct file *file, unsigned int whence);
 struct octant_open_scope octant_open_begin(struct file *file);
+int octant_open_backing(struct inode *inode);
 void octant_open_end(struct octant_open_scope *scope);
 int octant_mediation_receive_scm(const struct cred *sender);
 struct octant_metadata_scope octant_metadata_begin(struct dentry *dentry, u32 operation);
@@ -79,6 +80,7 @@ static inline struct octant_open_scope octant_open_begin(struct file *file)
 {
 	return (struct octant_open_scope) {};
 }
+static inline int octant_open_backing(struct inode *inode) { return 0; }
 static inline void octant_open_end(struct octant_open_scope *scope) {}
 static inline int octant_mediation_receive_scm(const struct cred *sender) { return 0; }
 static inline struct octant_metadata_scope octant_metadata_begin(struct dentry *dentry, u32 operation)

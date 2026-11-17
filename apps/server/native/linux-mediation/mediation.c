@@ -404,17 +404,19 @@ static void clear_open(struct octant_open *open)
 	*open = (struct octant_open) { .next_scope = next };
 }
 
-/* Admit both the stacked inode and its current real data inode before the
- * filesystem open callback can copy up or inspect backing metadata. The scope
- * remains private to this one kernel call and is never a userspace authority. */
+/* Admit the stacked inode before the filesystem open callback can copy up or
+ * inspect backing metadata. Audited stacked filesystems explicitly admit each
+ * backing inode at the point where they can resolve it without side effects.
+ * The scope remains private to this one kernel call and is never a userspace
+ * authority. */
 struct octant_open_scope octant_open_begin(struct file *file)
 {
 	struct octant_open_scope scope = {};
 	struct octant_task *task;
 	struct octant_open *open;
 	struct octant_context *context;
-	struct inode *inode, *real_inode;
-	struct octant_mediation_request logical = {}, real = {};
+	struct inode *inode;
+	struct octant_mediation_request logical = {};
 	unsigned long flags;
 	u32 operation;
 	bool valid;
@@ -472,19 +474,41 @@ struct octant_open_scope octant_open_begin(struct file *file)
 		else
 			open->prepared = true;
 	}
-	/* d_real_inode() can itself perform OverlayFS metacopy verification. The
-	 * admitted logical object therefore has to establish the exact open scope
-	 * before resolving its backing object. The backing identity is still
-	 * independently admitted before ovl_open() may use it. */
-	if (!scope.error) {
-		real_inode = d_real_inode(file->f_path.dentry);
-		if (guarded_inode(real_inode) && real_inode != inode)
-			scope.error = admit_inode_request(real_inode, operation, &real);
-		if (!scope.error && real.namespace_epoch &&
-		    real.namespace_epoch != logical.namespace_epoch)
-			scope.error = -EAGAIN;
-	}
 	return scope;
+}
+
+/* OverlayFS calls this before copy-up for the current data inode and after
+ * resolving the final real path. Do not use d_real_inode() here: resolving an
+ * OverlayFS metacopy through that generic helper performs backing metadata I/O
+ * before the backing object has been admitted. */
+int octant_open_backing(struct inode *inode)
+{
+	struct octant_task *task;
+	struct octant_open *open;
+	struct octant_context *context;
+	struct octant_mediation_request request = {};
+	unsigned long flags;
+	bool valid;
+	int error;
+	if (!octant_mediation_restricted() || !guarded_inode(inode))
+		return 0;
+	task = octant_task();
+	open = &task->open;
+	context = open->context;
+	if (!open->active || !open->prepared || open->owner != current || !context ||
+	    current_context() != context)
+		return -EACCES;
+	error = admit_inode_request(inode, open->operation, &request);
+	if (error)
+		return error;
+	if (request.namespace_epoch != open->epoch)
+		return -EAGAIN;
+	spin_lock_irqsave(&context->lock, flags);
+	spin_lock(&namespace_lock);
+	valid = !context->dead && broker_alive(context) && scope_epoch_valid(open->epoch, task);
+	spin_unlock(&namespace_lock);
+	spin_unlock_irqrestore(&context->lock, flags);
+	return valid ? 0 : -EACCES;
 }
 
 void octant_open_end(struct octant_open_scope *scope)

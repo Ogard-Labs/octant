@@ -160,6 +160,8 @@ def main():
     session_cases = root / "session-cases"
     policy_module = root / "policy-broker.mjs"
     session_module = root / "session-cases.mjs"
+    production_worker = root / "linuxMediationWorker.mjs"
+    production_supervisor = root / "linuxMediationSupervisor.mjs"
     core_notes_binary = root / "core-notes"
     core_probe = root / "core-probe"
     fileattr_workload = root / "fileattr-workload"
@@ -190,6 +192,10 @@ def main():
     for source, target in (("kernel_policy.ts", policy_module), ("kernel_session.ts", session_module)):
         run("bun", "build", "--target=node", "--format=esm",
             str(repository / "scripts/linux-file-view" / source), "--outfile", str(target), timeout=120, cwd=repository)
+    for source, target in (("linuxMediationWorker.ts", production_worker),
+                           ("linuxMediationSupervisor.ts", production_supervisor)):
+        run("bun", "build", "--target=node", "--format=esm",
+            str(repository / "apps/server/src/process" / source), "--outfile", str(target), timeout=120, cwd=repository)
     run(str(policy), str(policy_module), "--metadata-control", timeout=15, cwd=root)
     # Copy only this task-owned public executable's dynamic loader/libraries
     # into the disposable initramfs. Nothing is mounted from the runner home.
@@ -214,6 +220,9 @@ def main():
                    "core-probe": core_probe,
                    "policy-broker": policy, "session-cases": session_cases,
                    "policy-broker.mjs": policy_module, "session-cases.mjs": session_module,
+                   "dist/native/octant-mediation": relay,
+                   "dist/linuxMediationWorker.mjs": production_worker,
+                   "dist/linuxMediationSupervisor.mjs": production_supervisor,
                    "usr/bin/bwrap": Path("/usr/bin/bwrap"),
                    "kernel-runtime.mjs": repository / "scripts/linux-file-view/kernel_runtime.mjs",
                    **runtime_files}

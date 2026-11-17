@@ -149,8 +149,8 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
 
     it("reads the catalog only for a host whose new threads run with no Octant sandbox", async () => {
       const refused = await startAndStop(fakeCodex ?? "", { kind: "catalog" }, false);
-      if (Either.isLeft(refused)) throw new Error(refused.left.message);
-      expect(refused.right.version).toBe("0.144.4");
+      expect(Either.isLeft(refused)).toBe(true);
+      if (Either.isLeft(refused)) expect(refused.left.message).toMatch(/sandbox Windows doesn't/);
       const read = await startAndStop(fakeCodex ?? "", { kind: "catalog" }, true);
       if (Either.isLeft(read)) throw new Error(read.left.message);
       expect(read.right.version).toBe("0.144.4");

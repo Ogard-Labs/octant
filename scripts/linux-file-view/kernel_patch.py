@@ -180,9 +180,33 @@ def install_stacked_open_scopes(kernel: Path) -> None:
     path = kernel / "fs/overlayfs/file.c"
     source = path.read_text()
     declaration = "static int ovl_open(struct inode *inode, struct file *file)\n{"
-    if source.count(declaration) != 1 or source.count("octant_open_scope(") != 0:
+    declarations = (declaration + "\n"
+                    "\tstruct dentry *dentry = file_dentry(file);\n"
+                    "\tstruct file *realfile;\n"
+                    "\tstruct path realpath;\n"
+                    "\tstruct ovl_file *of;\n"
+                    "\tint err;\n\n")
+    admission = "\toctant_open_scope(file);\n\n"
+    verified = ("\terr = ovl_verify_lowerdata(dentry);\n"
+                "\tif (err)\n"
+                "\t\treturn err;\n\n")
+    backing = ("\tif (S_ISREG(inode->i_mode)) {\n"
+               "\t\terr = octant_open_backing(ovl_inode_realdata(inode));\n"
+               "\t\tif (err)\n"
+               "\t\t\treturn err;\n"
+               "\t}\n\n")
+    resolved = ("\tif (!realpath.dentry)\n"
+                "\t\treturn -EIO;\n\n"
+                "\terr = octant_open_backing(d_inode(realpath.dentry));\n"
+                "\tif (err)\n"
+                "\t\treturn err;\n")
+    original_resolved = "\tif (!realpath.dentry)\n\t\treturn -EIO;\n"
+    if (source.count(declarations) != 1 or source.count("octant_open_scope(") != 0 or
+            source.count(verified) != 1 or source.count(original_resolved) != 1):
         raise ValueError("Pinned OverlayFS open scope entry differs")
-    source = source.replace(declaration, declaration + "\n\toctant_open_scope(file);", 1)
+    source = source.replace(declarations, declarations + admission, 1)
+    source = source.replace(verified, verified + backing, 1)
+    source = source.replace(original_resolved, resolved, 1)
     path.write_text(include_bridge(source))
 
 

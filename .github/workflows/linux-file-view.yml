@@ -28,6 +28,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  strict-performance:
+    name: Measure reconciled Strict warm overhead
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - name: Prepare the disposable namespace runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Measure paired warm workload and policy preparation
+        run: bun scripts/sandbox-policy-performance.ts | tee "$RUNNER_TEMP/strict-performance.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reconciled-strict-performance
+          path: ${{ runner.temp }}/strict-performance.json
+          if-no-files-found: error
+          retention-days: 7
+
   kernel-admission:
     name: Compile and boot owned kernel admission core
     if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'kernel-admission'
