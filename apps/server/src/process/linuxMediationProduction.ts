@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { secretGuardMediationPolicy } from "./secretGuard";
 import type { ConfinedProcessLaunch, ProcessConfinementPrepareInput } from "./seatbeltProfile";
@@ -21,6 +21,7 @@ import {
   type LinuxMediationSupervisorConfig as SupervisorConfig,
 } from "./linuxMediationConfig";
 import { LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS } from "./linuxMediationBroker";
+import { processConfinementAccountRoots } from "./processConfinementAccountRoots";
 
 function installed(paths: ReadonlyArray<string>): Buffer | undefined {
   const path = paths.find(existsSync);
@@ -138,18 +139,6 @@ export function linuxMediationProductionAvailable(authority: string | undefined)
   return value;
 }
 
-function ownAccountPaths(input: ProcessConfinementPrepareInput): ReadonlyArray<string> {
-  const excluded = new Set([resolve(input.boundRoot), resolve(input.temporaryDirectory)]);
-  return [
-    ...(input.ownAccountPaths ?? []),
-    ...(input.privateHomeAllowPaths ?? []),
-    ...(input.readRoots ?? []),
-    ...(input.additionalWriteRoots ?? []),
-  ]
-    .map((path) => resolve(path))
-    .filter((path, index, paths) => !excluded.has(path) && paths.indexOf(path) === index);
-}
-
 export function prepareLinuxMediatedLaunch(
   input: ProcessConfinementPrepareInput,
   selection: SandboxPolicySelection,
@@ -164,7 +153,11 @@ export function prepareLinuxMediatedLaunch(
     ...secretGuardMediationPolicy({
       platform: "linux",
       homeDirectory: homedir(),
-      ownAccountPaths: ownAccountPaths(input),
+      ownAccountPaths: processConfinementAccountRoots(
+        input,
+        input.readRoots ?? [],
+        input.additionalWriteRoots ?? [],
+      ),
     }),
     readOnlyRoots: [...(input.policyReadOnlyRoots ?? selection.policy.filesystem.readOnlyRoots)],
     protectedPaths: selection.policy.filesystem.protectedPaths.map((entry) => ({

@@ -53,6 +53,7 @@ import {
 import { homedir, release } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { buildBubblewrapLaunch, DEFAULT_BWRAP_PATH } from "./linuxConfinement";
+import { processConfinementAccountRoots } from "./processConfinementAccountRoots";
 import {
   protectedAtLevel,
   secretGuardEntries,
@@ -1024,18 +1025,7 @@ export function ownAccountRoots(
   readRoots: ReadonlyArray<string>,
   additionalWriteRoots: ReadonlyArray<string>,
 ): ReadonlyArray<string> {
-  if (input.ownAccountAccess === "none") return [];
-  const shared = new Set([
-    ...resolvedRootForms(input.boundRoot),
-    ...resolvedRootForms(input.temporaryDirectory),
-    ...(input.policyFolderRoots ?? []).flatMap((path) => resolvedRootForms(path)),
-  ]);
-  return uniqueAbsolutePaths([
-    ...(input.ownAccountPaths ?? []),
-    ...[...readRoots, ...additionalWriteRoots].filter(
-      (path) => !resolvedRootForms(path).some((form) => shared.has(form)),
-    ),
-  ]);
+  return processConfinementAccountRoots(input, readRoots, additionalWriteRoots);
 }
 
 export function wrapCommandInSandboxExec(

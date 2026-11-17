@@ -264,13 +264,20 @@ describe("sandbox launch policy", () => {
     );
     expect(compiled.status).toBe("admitted");
     if (compiled.status !== "admitted") throw new Error("Expected admission");
+    const roots = ownAccountRoots(
+      compiled.input,
+      compiled.input.readRoots ?? [],
+      compiled.input.additionalWriteRoots ?? [],
+    );
+    expect(roots).toEqual([account]);
+    expect(roots).not.toContain(selection.policy.filesystem.readWriteRoots[0]);
     expect(
       ownAccountRoots(
-        compiled.input,
+        { ...compiled.input, ownAccountAccess: "none" },
         compiled.input.readRoots ?? [],
         compiled.input.additionalWriteRoots ?? [],
       ),
-    ).toEqual([account]);
+    ).toEqual([]);
   });
 
   it("refuses bypassing admission through the Linux backend", () => {
