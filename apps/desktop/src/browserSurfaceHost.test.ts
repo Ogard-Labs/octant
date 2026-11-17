@@ -2172,6 +2172,59 @@ describe("BrowserSurfaceHost", () => {
       );
     });
 
+    it("refuses a hop to this computer or its network on a page that admits every site, except where the person typed", async () => {
+      const created = view();
+      const host = createBrowserSurfaceHost({ createView: () => created });
+      await host.createContext({
+        contextId,
+        owner: { windowId: "window-a", threadId },
+        policy: { ...policy, allowedOrigins: ["*"] },
+      });
+      const redirectGuard = vi
+        .mocked(created.webContents.on)
+        .mock.calls.find(([event]) => event === "will-redirect")?.[1];
+      const hop = (url: string): boolean => {
+        const preventDefault = vi.fn();
+        redirectGuard?.({ preventDefault, isMainFrame: true, url });
+        return preventDefault.mock.calls.length === 0;
+      };
+      const followed: boolean[] = [];
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+        followed.push(hop("https://moved.example.net/"), hop("http://192.168.1.1/"));
+        throw new Error("ERR_ABORTED (-3) loading 'https://short.example/'");
+      });
+      await expect(
+        host.act(contextId, {
+          kind: "navigate",
+          target: "https://short.example/",
+          startedBy: "person",
+        }),
+      ).rejects.toMatchObject({ name: "BrowserNavigationBlockedError" });
+      expect(followed).toEqual([true, false]);
+
+      // The person typed a local address themself: its own hops are followed.
+      vi.mocked(created.webContents.getURL).mockReturnValue("http://127.0.0.1:4101/next");
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+        expect(hop("http://127.0.0.1:4101/next")).toBe(true);
+      });
+      await expect(
+        host.act(contextId, {
+          kind: "navigate",
+          target: "http://127.0.0.1:4101/",
+          startedBy: "person",
+        }),
+      ).resolves.toMatchObject({ url: "http://127.0.0.1:4101/next" });
+
+      // The agent's own navigation on such a page reaches any site, a local one too.
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+        expect(hop("http://192.168.1.1/")).toBe(true);
+      });
+      vi.mocked(created.webContents.getURL).mockReturnValue("http://192.168.1.1/");
+      await expect(
+        host.act(contextId, { kind: "navigate", target: "https://short.example/" }),
+      ).resolves.toMatchObject({ url: "http://192.168.1.1/" });
+    });
+
     it("still refuses the same redirect when the agent asked for the navigation", async () => {
       const { created, host, hop } = await opened();
       vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {

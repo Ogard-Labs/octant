@@ -594,12 +594,6 @@ export class BrowserAutomationService {
      * local window unless the scope is the host acting alone.
      */
     readonly profileCaller?: Extract<BrowserProfileCaller, "remote-device" | "terminal-grant">;
-    /**
-     * Set only by the agent tool for a thread at Full access, whose Private
-     * page needs no site approval. No route sets it, so a window or a paired
-     * device cannot open a page that admits every site.
-     */
-    readonly fullAccessAgent?: true;
   }): Promise<BrowserAutomationSnapshot> {
     if (!this.#flowRunAllows(input.threadId, input.flowRun))
       return failedSnapshot(
@@ -621,12 +615,7 @@ export class BrowserAutomationService {
         "failed",
       );
     }
-    const denied = this.#authorizeCreate(
-      input.action,
-      input.policy,
-      input.threadId,
-      input.fullAccessAgent === true,
-    );
+    const denied = this.#authorizeCreate(input.action, input.policy, input.threadId);
     if (denied !== undefined) {
       if (current !== undefined && !this.#authorityIsActive(current)) {
         this.#revokeAuthority(current);
@@ -751,12 +740,7 @@ export class BrowserAutomationService {
           };
           return;
         }
-        const refreshedDenial = this.#authorizeCreate(
-          input.action,
-          input.policy,
-          input.threadId,
-          input.fullAccessAgent === true,
-        );
+        const refreshedDenial = this.#authorizeCreate(input.action, input.policy, input.threadId);
         if (refreshedDenial !== undefined) {
           owned.status = "failed";
           owned.failure = refreshedDenial;
@@ -1244,6 +1228,12 @@ export class BrowserAutomationService {
     /** Set by the agent tool for a turn at Full access; no route can name it. */
     readonly fullAccess?: true;
     /**
+     * Set only by the Work and Code agent tools' wiring: this call takes back a
+     * page the person took over. A flow, a terminal grant and a route never
+     * set it, so their calls keep waiting for Hand back.
+     */
+    readonly takesBack?: true;
+    /**
      * Set only by the action route, for a window of this computer: the person
      * typed the address. A `navigate` so marked is their browsing, as a link
      * they click on the page is, and the desktop Browser follows its redirects
@@ -1395,6 +1385,7 @@ export class BrowserAutomationService {
       readonly refuseStaleRevision?: boolean;
       readonly holdDownloads?: boolean;
       readonly fullAccess?: true;
+      readonly takesBack?: true;
       readonly startedBy?: "person";
     },
   ): Promise<BrowserAutomationSnapshot> {
@@ -1414,7 +1405,11 @@ export class BrowserAutomationService {
     }
     // The tool checked the hold before it queued this call, but the person may
     // have taken the page while it waited behind another action. Checked again
-    // here, after dequeuing, so a queued agent call never runs under a hold.
+    // here, after dequeuing: the agent tool's own call takes back a page the
+    // person took over, and any other hold, or another caller, is refused.
+    if (input.takesBack === true && owned.waitingForPerson === "take-over") {
+      this.#takeBack(owned);
+    }
     if (activityBy === "agent" && owned.waitingForPerson !== undefined) {
       return this.#failure(
         owned,
@@ -3096,7 +3091,6 @@ export class BrowserAutomationService {
     request: ToolActionRequest,
     policy: BrowserContextPolicy,
     threadId: BrowserThreadId,
-    fullAccessAgent: boolean,
   ): BrowserAutomationFailure | undefined {
     if (this.#executionOwner !== undefined && !this.#executionOwner.isCurrent())
       return { category: "unauthorized", message: "Browser execution owner is no longer current." };
@@ -3112,14 +3106,13 @@ export class BrowserAutomationService {
     if (decision.kind === "deny" || decision.kind === "prompt") {
       return mapToolCallDenial(decision.reason, request);
     }
-    // Every site is the reach of one page only: the Private page the agent
-    // opens at Full access. A stored profile keeps its site approval per
-    // origin at every level, so it never carries the any-site entry.
+    // A Private page admits every site at every level (maintainer decision,
+    // 2026-11-17; before, only the agent's page at Full access did). A stored
+    // profile keeps its site approval per origin, so it never carries the
+    // any-site entry, and the entry stands alone.
     if (
       policy.allowedOrigins.includes(ANY_BROWSER_ORIGIN) &&
-      (!fullAccessAgent ||
-        policy.allowedOrigins.length !== 1 ||
-        storedBrowserProfile(policy.profile) !== undefined)
+      (policy.allowedOrigins.length !== 1 || storedBrowserProfile(policy.profile) !== undefined)
     ) {
       return { category: "policy-denied", message: "Browser context policy exceeds host limits." };
     }
@@ -3323,6 +3316,41 @@ export class BrowserAutomationService {
     // person's to change.
     this.#notePersonInput(owned);
     return snapshot(owned);
+  }
+
+  /**
+   * The agent takes the page back from the person's Take over and carries on
+   * (maintainer decision, 2026-11-17; before, its calls waited until the
+   * person handed the page back). It ends the hold as Hand back does, and the
+   * person can take the page over again at any time. A sign-in ask and a page
+   * a paired owner device controls are not taken back: the first is the
+   * agent's own request, the second the person's from another computer.
+   */
+  takeBack(windowId: WindowId, threadId: BrowserThreadId): BrowserAutomationSnapshot {
+    const owned = this.#current(windowId, threadId);
+    if (owned === undefined || owned.record.state !== "active") {
+      return failedSnapshot(
+        threadId,
+        { category: "unavailable", message: "There is no page to take back." },
+        "failed",
+      );
+    }
+    this.#takeBack(owned);
+    return snapshot(owned);
+  }
+
+  #takeBack(owned: OwnedContext): void {
+    if (
+      owned.waitingForPerson !== "take-over" ||
+      owned.releaseTakeOver === undefined ||
+      owned.credentialFill !== undefined ||
+      this.#ownerControllers.has(owned.record.contextId)
+    )
+      return;
+    owned.releaseTakeOver();
+    // What the person did while they held the page is still theirs to have
+    // done: the agent's next reading is a fresh one, as after Hand back.
+    owned.handedBack = true;
   }
 
   /** Hand the page back: the agent's next call gets a fresh reading. Same rules as `takeOver`. */

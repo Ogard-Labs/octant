@@ -2092,7 +2092,7 @@ describe("BrowserAutomationService", () => {
       expect(next.personUsedPage).toBeUndefined();
     });
 
-    it("never runs an agent call that was queued when the person took over", async () => {
+    it("takes back a page the person took over for a queued agent call and runs it", async () => {
       const fixture = harness();
       await snapshotted(fixture);
       let finish!: () => void;
@@ -2113,14 +2113,36 @@ describe("BrowserAutomationService", () => {
         windowId,
         request: request({ kind: "extract-text", target: undefined }),
         ...agent,
+        takesBack: true,
+      });
+      // A flow's call, also the agent's but not the agent tool's own, queued too.
+      const flowCall = fixture.service.act({
+        windowId,
+        request: request({ kind: "extract-text", target: undefined }),
+        ...agent,
       });
       fixture.service.takeOver(windowId, threadOne);
       finish();
       await running;
-      const refused = await queued;
-      expect(refused.failure?.category).toBe("unavailable");
-      expect(refused.failure?.message).toMatch(/took over the page, so this call did not run/);
-      expect(fixture.runtime.act).toHaveBeenCalledTimes(2);
+      const answered = await queued;
+      expect(answered.failure).toBeUndefined();
+      // By then the hold is gone, so the flow's call runs; a flow's call alone
+      // under a hold is refused (below).
+      await flowCall;
+      expect(fixture.runtime.act).toHaveBeenCalledTimes(4);
+      expect(fixture.service.inspectThread(windowId, threadOne).waitingForPerson).toBeUndefined();
+
+      // A call that does not take back, a flow's, waits under the hold.
+      fixture.service.takeOver(windowId, threadOne);
+      const held = await fixture.service.act({
+        windowId,
+        request: request({ kind: "extract-text", target: undefined }),
+        ...agent,
+      });
+      expect(held.failure?.message).toBe(
+        "The person took over the page, so this call did not run.",
+      );
+      expect(fixture.service.inspectThread(windowId, threadOne).waitingForPerson).toBe("take-over");
     });
 
     it("refuses to take over with no page, from another window, for a routine, or under a sign-in ask", async () => {
@@ -3867,25 +3889,12 @@ describe("BrowserAutomationService", () => {
     });
   });
 
-  it("opens a page that admits every site only for the agent at Full access, and never in a profile", async () => {
+  it("opens a Private page that admits every site for any caller, but never in a profile or beside another site", async () => {
     const everySite = { ...policy, allowedOrigins: ["*"] };
     const denied = {
       category: "policy-denied",
       message: "Browser context policy exceeds host limits.",
     };
-    // A window's own create names no Full access agent.
-    const fromWindow = harness();
-    expect(
-      (
-        await fromWindow.service.create({
-          windowId,
-          threadId: threadOne,
-          action: action(),
-          policy: everySite,
-        })
-      ).failure,
-    ).toEqual(denied);
-
     const inProfile = harness();
     expect(
       (
@@ -3894,23 +3903,33 @@ describe("BrowserAutomationService", () => {
           threadId: threadOne,
           action: action(),
           policy: { ...everySite, profile: { kind: "personal" } },
-          fullAccessAgent: true,
+        })
+      ).failure,
+    ).toEqual(denied);
+    const beside = harness();
+    expect(
+      (
+        await beside.service.create({
+          windowId,
+          threadId: threadOne,
+          action: action(),
+          policy: { ...policy, allowedOrigins: ["*", "https://example.com"] },
         })
       ).failure,
     ).toEqual(denied);
 
-    const agent = harness();
-    const opened = await agent.service.create({
+    // A window's own create, at no particular level, opens one.
+    const fromWindow = harness();
+    const opened = await fromWindow.service.create({
       windowId,
       threadId: threadOne,
       action: action(),
       policy: everySite,
-      fullAccessAgent: true,
     });
     expect(opened.context?.state).toBe("active");
     const context = opened.context;
     if (context === undefined) throw new Error("Missing context");
-    const moved = await agent.service.act({
+    const moved = await fromWindow.service.act({
       windowId,
       request: {
         ...action(),
@@ -3920,6 +3939,51 @@ describe("BrowserAutomationService", () => {
       } as never,
     });
     expect(moved.failure).toBeUndefined();
+  });
+
+  it("lets the agent take back a page the person took over, but not one the agent's own sign-in ask holds", async () => {
+    const { service } = harness();
+    const created = await service.create({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      policy,
+    });
+    const contextId = created.context!.contextId;
+    expect(service.takeOver(windowId, threadOne).waitingForPerson).toBe("take-over");
+
+    // The agent's own call ends the hold and runs; it is answered with a fresh
+    // reading, as after Hand back, because the person used the page.
+    const acted = await service.act({
+      windowId,
+      threadId: threadOne,
+      request: request({ contextId, kind: "click", target: "#go" }),
+      capturedBy: "agent",
+      takesBack: true,
+    });
+    expect(acted.failure).toBeUndefined();
+    expect(acted.waitingForPerson).toBeUndefined();
+    expect(service.inspectThread(windowId, threadOne).waitingForPerson).toBeUndefined();
+
+    // The person can take it over again, and the tool's port ends that too.
+    expect(service.takeOver(windowId, threadOne).waitingForPerson).toBe("take-over");
+    expect(service.takeBack(windowId, threadOne).waitingForPerson).toBeUndefined();
+
+    // A sign-in ask is the agent's own request: it is not taken back.
+    const release = service.holdForPerson(windowId, threadOne, "sign-in");
+    expect(release).toBeDefined();
+    expect(service.takeBack(windowId, threadOne).waitingForPerson).toBe("sign-in");
+    const held = await service.act({
+      windowId,
+      threadId: threadOne,
+      request: request({ contextId, kind: "click", target: "#go" }),
+      capturedBy: "agent",
+    });
+    expect(held.failure?.message).toBe(
+      "The page is waiting for the person, so this call did not run.",
+    );
+    release?.();
+    await service.close();
   });
 
   it("explains a new site's approval without navigating outside the existing origin", async () => {

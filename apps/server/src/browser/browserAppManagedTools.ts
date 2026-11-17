@@ -30,6 +30,7 @@ import {
   browserPageToolCallArguments,
   handBrowserToPerson,
   heldForPersonAnswer,
+  takenBack,
   heldWhileQueued,
   isBrowserToolFlowInput,
   runBrowserToolSteps,
@@ -92,8 +93,8 @@ export interface BrowserAppManagedToolsOptions {
   ) => ToolActionAuthority | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
   /**
-   * Whether the thread's turn runs at Full access now, where a Private page
-   * needs no site approval. A Work turn's level is its `access`, which the
+   * Whether the thread's turn runs at Full access now, where uploads, saved
+   * downloads and page scripts ask nothing. A Work turn's level is its `access`, which the
    * composed `executionPolicy` does not carry; absent, that policy decides.
    */
   readonly fullAccess?: () => boolean;
@@ -109,8 +110,6 @@ export interface BrowserAppManagedToolsOptions {
       readonly action: ToolActionRequest;
       readonly policy: BrowserContextPolicy;
       readonly profileCaller?: "terminal-grant";
-      /** The agent's own open at Full access; only it may ask for every site. */
-      readonly fullAccessAgent?: true;
     }) => Promise<BrowserAutomationSnapshot>;
     readonly act: (input: {
       readonly windowId: WindowId;
@@ -187,6 +186,14 @@ export interface BrowserAppManagedToolsOptions {
       windowId: WindowId,
       threadId: BrowserThreadId,
     ) => { readonly release: () => void; readonly signal?: AbortSignal };
+    /**
+     * Ends the person's Take over so the agent's call can run. Absent, the
+     * call waits for Hand back as before.
+     */
+    readonly takeBack?: (
+      windowId: WindowId,
+      threadId: BrowserThreadId,
+    ) => BrowserAutomationSnapshot;
   };
   /**
    * Lent only to a Work thread's own tool: the bounded script runner, and the
@@ -303,7 +310,12 @@ export function createBrowserAppManagedTools(
       const scoped = level !== "full-access";
       if (scoped && script.strict()) return failure("script-needs-full-access");
       if (!modelIsCurrent(options)) return failure("browser-model-stale");
-      const opened = options.browser.inspectThread(options.windowId, options.threadId);
+      const opened = takenBack(
+        options.browser,
+        options.windowId,
+        options.threadId,
+        options.browser.inspectThread(options.windowId, options.threadId),
+      );
       if (opened.waitingForPerson !== undefined) {
         return heldForPersonAnswer(opened.waitingForPerson);
       }
@@ -393,9 +405,15 @@ export function createBrowserAppManagedTools(
     if (options.executionPolicy === "plan" && browserOperationRefusedInPlan(input.operation)) {
       return failure("plan-mode-read-only");
     }
-    let snapshot = options.browser.inspectThread(options.windowId, options.threadId);
-    // While the person signs in, the page is theirs: no other agent action
-    // reaches it until they press Continue or the ask ends.
+    // The agent takes back a page the person took over. While the person
+    // signs in, the page is theirs: no other agent action reaches it until
+    // they press Continue or the ask ends.
+    let snapshot = takenBack(
+      options.browser,
+      options.windowId,
+      options.threadId,
+      options.browser.inspectThread(options.windowId, options.threadId),
+    );
     if (snapshot.waitingForPerson !== undefined) {
       return heldForPersonAnswer(snapshot.waitingForPerson);
     }
@@ -438,18 +456,13 @@ export function createBrowserAppManagedTools(
     if (existing !== undefined) {
       const reach = browserPageReach({
         existing,
-        fullAccess,
-        plan: options.executionPolicy === "plan",
         privateNavigation:
           input.operation === "navigate" &&
           (input.profile ?? defaultChoice ?? "private") === "private"
             ? input.url
             : undefined,
       });
-      if (reach !== "kept") {
-        if (reach === "navigation-required" && input.operation !== "navigate") {
-          return failure("browser-navigation-required");
-        }
+      if (reach === "reopen") {
         // The same stop and navigate the refusal would have asked the agent for.
         options.modelBindings.delete(String(existing.contextId));
         snapshot = await options.browser.releaseThread(options.windowId, options.threadId);
@@ -521,9 +534,9 @@ export function createBrowserAppManagedTools(
     const remembered =
       (existing === undefined || (identityMatches && existingBinding?.approval === "pending")) &&
       options.approvals?.isRemembered?.(origin, profile) === true;
-    // At Full access a Private page needs no site approval; a page in a
+    // A Private page needs no site approval at any level; a page in a
     // signed-in profile keeps its own at every level.
-    const needsNoSiteApproval = fullAccess && profile === undefined;
+    const needsNoSiteApproval = profile === undefined;
     if ((existing === undefined || !contextApproved) && !remembered && !needsNoSiteApproval) {
       if (options.approvals === undefined) return failure("browser-approval-required");
       const approvals = options.approvals;
@@ -572,7 +585,6 @@ export function createBrowserAppManagedTools(
           allowedOrigins: [needsNoSiteApproval ? ANY_BROWSER_ORIGIN : origin],
         },
         ...(options.profileCaller === undefined ? {} : { profileCaller: options.profileCaller }),
-        ...(needsNoSiteApproval ? { fullAccessAgent: true as const } : {}),
       });
       snapshot = created;
       if (created.context?.state === "active") {

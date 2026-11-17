@@ -28,6 +28,7 @@ import {
   browserPageToolCallArguments,
   handBrowserToPerson,
   heldForPersonAnswer,
+  takenBack,
   heldWhileQueued,
   isBrowserToolFlowInput,
   runBrowserToolSteps,
@@ -558,8 +559,6 @@ export interface CodeAppManagedToolsOptions {
         readonly maxConcurrentTabs: number;
         readonly sessionTimeoutMs: number;
       };
-      /** The agent's own open at Full access; only it may ask for every site. */
-      readonly fullAccessAgent?: true;
     }) => Promise<BrowserAutomationSnapshot>;
     readonly act: (input: {
       readonly windowId: WindowId;
@@ -621,6 +620,14 @@ export interface CodeAppManagedToolsOptions {
       windowId: WindowId,
       threadId: BrowserThreadId,
     ) => { readonly release: () => void; readonly signal?: AbortSignal };
+    /**
+     * Ends the person's Take over so the agent's call can run. Absent, the
+     * call waits for Hand back as before.
+     */
+    readonly takeBack?: (
+      windowId: WindowId,
+      threadId: BrowserThreadId,
+    ) => BrowserAutomationSnapshot;
   };
   /** The Project's flows and the recorder of this host; absent, flows are unavailable. */
   readonly browserFlows?: BrowserFlowToolPort;
@@ -1388,8 +1395,14 @@ async function browserToolOne(
   }
   const postureFailure = browserAuthorityFailure(options, input.operation);
   if (postureFailure !== undefined) return failure(postureFailure);
-  let snapshot = options.browser.inspectThread(options.windowId, threadId);
   const browser = options.browser;
+  // The agent takes back a page the person took over; see Work's tool.
+  let snapshot = takenBack(
+    browser,
+    options.windowId,
+    threadId,
+    browser.inspectThread(options.windowId, threadId),
+  );
   // Every question about the open page is withdrawn when that page ends.
   const pageHold = () => browser.holdForAsk?.(options.windowId, threadId);
   // While the person signs in, the page is theirs; see Work's tool.
@@ -1421,10 +1434,8 @@ async function browserToolOne(
           binding.modelId === String(options.thread.modelId) &&
           sameToolActionAuthority(binding.authority, authority)
         );
-      return (
-        profile === undefined &&
-        options.browserApproval?.isApproved(String(context.contextId)) === true
-      );
+      // A Private page needs no site approval at any level.
+      return profile === undefined;
     };
     const callerIsCurrent = () => {
       const latest = options.browser?.inspectThread(options.windowId, threadId);
@@ -1513,8 +1524,6 @@ async function browserToolOne(
   if (existing !== undefined) {
     const reach = browserPageReach({
       existing,
-      fullAccess: currentAuthorityFailure(options) === undefined,
-      plan: currentPosture(options) === "plan",
       privateNavigation:
         input.operation === "navigate" &&
         (input.profile ??
@@ -1523,10 +1532,7 @@ async function browserToolOne(
           ? input.url
           : undefined,
     });
-    if (reach !== "kept") {
-      if (reach === "navigation-required" && input.operation !== "navigate") {
-        return failure("browser-navigation-required");
-      }
+    if (reach === "reopen") {
       // The same stop and navigate the refusal would have asked the agent for.
       options.browserApproval?.forget(String(existing.contextId));
       options.browserProfiles?.forgetBinding(String(existing.contextId));
@@ -1587,11 +1593,10 @@ async function browserToolOne(
     const remembered =
       (existing === undefined || (boundIdentity && binding?.approval === "pending")) &&
       profiles.approvals.isRemembered?.(origin, profile) === true;
-    // At Full access a Private page needs no site approval, a person-switched
+    // A Private page needs no site approval at any level, a person-switched
     // one included. It never grants a stored profile.
-    const privateAtFullAccess =
-      profile === undefined && currentAuthorityFailure(options) === undefined;
-    if (!approved && !remembered && !privateAtFullAccess) {
+    const needsNoSiteApproval = profile === undefined;
+    if (!approved && !remembered && !needsNoSiteApproval) {
       // The first navigate's question has no page yet, so only the call's
       // signal withdraws it.
       const outcome = await askWhilePageLives(
@@ -1624,36 +1629,11 @@ async function browserToolOne(
         authority,
       });
   }
-  const requiresApproval = currentAuthorityFailure(options) !== undefined;
-  const remembered =
-    existing === undefined &&
-    options.browserApproval?.isOriginRemembered !== undefined &&
-    options.browserApproval.isOriginRemembered(origin);
-  if (
-    !usesProfileBinding &&
-    requiresApproval &&
-    (existing === undefined ||
-      options.browserApproval?.isApproved(String(existing.contextId)) !== true) &&
-    !remembered
-  ) {
-    if (options.browserApproval === undefined) return failure("browser-approval-required");
-    const browserApproval = options.browserApproval;
-    const outcome = await askWhilePageLives(
-      existing === undefined ? undefined : pageHold,
-      signal,
-      (askSignal) => browserApproval.request(origin, askSignal),
-    );
-    if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
-    const changed = browserAuthorityFailure(options, input.operation);
-    if (changed !== undefined || signal?.aborted === true)
-      return failure(changed ?? "tool-interrupted");
-    if (existing !== undefined) options.browserApproval.remember(String(existing.contextId));
-  }
   if (existing === undefined) {
     const action = actionRequest(options, authority);
-    // At Full access a Private page needs no site approval and may navigate
+    // A Private page needs no site approval at any level and may navigate
     // across origins; a page in a signed-in profile holds the site it asked for.
-    const opensEverySite = profile === undefined && !requiresApproval;
+    const opensEverySite = profile === undefined;
     const created = await guardedBrowserEffect(options, threadId, input.operation, signal, () =>
       options.browser!.create({
         windowId: options.windowId,
@@ -1667,7 +1647,6 @@ async function browserToolOne(
           maxConcurrentTabs: MAX_BROWSER_TABS_PER_CONTEXT,
           sessionTimeoutMs: 600_000,
         },
-        ...(opensEverySite ? { fullAccessAgent: true as const } : {}),
       }),
     );
     if (created.kind === "failure") return failure(created.reason);
@@ -1680,7 +1659,7 @@ async function browserToolOne(
           authority,
         });
       }
-      if (requiresApproval) options.browserApproval?.remember(contextId);
+      if (profile === undefined) options.browserApproval?.remember(contextId);
       options.browserApproval?.rememberBinding?.(contextId);
     }
   }
@@ -1837,7 +1816,12 @@ async function browserToolOne(
     }
   }
   // The page may have been handed to the person while an approval waited.
-  const heldNow = options.browser.inspectThread(options.windowId, threadId).waitingForPerson;
+  const heldNow = takenBack(
+    options.browser,
+    options.windowId,
+    threadId,
+    options.browser.inspectThread(options.windowId, threadId),
+  ).waitingForPerson;
   if (heldNow !== undefined) {
     await releaseUpload?.();
     return heldForPersonAnswer(heldNow);

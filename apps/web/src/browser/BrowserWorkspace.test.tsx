@@ -440,7 +440,8 @@ describe("BrowserWorkspace", () => {
       const page = pages.get(contextId)!;
       if (request.kind !== "navigate" || request.target === undefined) return snapshotOf(contextId);
       const target = new URL(request.target);
-      if (!page.context.policy.allowedOrigins.includes(target.origin)) {
+      const admits = page.context.policy.allowedOrigins;
+      if (!admits.includes("*") && !admits.includes(target.origin)) {
         return snapshotOf(contextId, {
           category: "policy-denied",
           reason: "origin-not-approved",
@@ -503,6 +504,12 @@ describe("BrowserWorkspace", () => {
 
     // The first tab opened the thread's shared page, the one the agent's tool
     // uses; the second asked for a page of its own and is bound to it.
+    // This pane has no desktop Browser, so each page holds the site typed: the
+    // headless Browser cannot keep a typed address's redirect off this
+    // computer's network.
+    expect(
+      vi.mocked(browser.create).mock.calls.map(([input]) => input.policy.allowedOrigins),
+    ).toEqual([["http://127.0.0.1:4101"], ["http://127.0.0.1:4102"]]);
     // Both asked the host to choose; neither chose for itself.
     expect(
       vi

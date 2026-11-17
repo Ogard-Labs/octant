@@ -19,9 +19,9 @@ export const MAX_BROWSER_TABS_PER_CONTEXT = 8;
 
 /**
  * The entry that stands for every http and https site. In a context's
- * `allowedOrigins` it is the Private page an agent opened at Full access,
- * which needs no site approval and may navigate across origins; the host
- * admits it from no other caller and never beside a stored profile. As the
+ * `allowedOrigins` it is a Private page, which needs no site approval at any
+ * level and may navigate across origins; the host admits it alone and never
+ * beside a stored profile. As the
  * `origin` of a remembered profile site it is the person's "Allow all sites
  * in this profile" answer. `*` is not an origin a URL can have, so it never
  * collides with a real site.
