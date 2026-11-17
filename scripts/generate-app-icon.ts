@@ -7,7 +7,10 @@ import { fileURLToPath } from "node:url";
 /**
  * Draws the Stable app icon on the macOS icon grid: an 824px rounded square
  * centred on a 1024px canvas (100px margin), a soft drop shadow inside the
- * margin, and the flat white aperture mark. A tile that misses this grid is
+ * margin, and the flat white aperture mark. The tile is a lifted dark grey
+ * with a faint light rim: near-black, its edge vanished on a dark Dock and
+ * only the mark read, so the icon looked smaller than tiles of the same size
+ * beside it (measured equal height, maintainer request, 2026-11-17). A tile that misses this grid is
  * treated as a legacy icon and shrunk into a plate in the Dock.
  *
  * Uses rsvg-convert (librsvg). Run `--write` to replace
@@ -55,11 +58,14 @@ export async function iconSvg(): Promise<string> {
   const offset = CANVAS / 2 - 49.95 * unit;
   return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${CANVAS}" height="${CANVAS}" viewBox="0 0 ${CANVAS} ${CANVAS}">
 <defs>
-<linearGradient id="tile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1c1c1c"/><stop offset="1" stop-color="#161616"/></linearGradient>
+<linearGradient id="tile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#343434"/><stop offset="1" stop-color="#1e1e1e"/></linearGradient>
+<linearGradient id="rim" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.22"/><stop offset="1" stop-color="#fff" stop-opacity="0.08"/></linearGradient>
+<clipPath id="inside"><path d="${squirclePath()}"/></clipPath>
 <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="10"/></filter>
 </defs>
 <path d="${squirclePath()}" transform="translate(0 10)" fill="#000" fill-opacity="0.3" filter="url(#shadow)"/>
 <path d="${squirclePath()}" fill="url(#tile)"/>
+<path d="${squirclePath()}" fill="none" stroke="url(#rim)" stroke-width="12" clip-path="url(#inside)"/>
 <g transform="translate(${offset.toFixed(2)} ${offset.toFixed(2)}) scale(${unit.toFixed(4)})">${await apertureMarkup()}</g>
 </svg>
 `;
