@@ -73,7 +73,10 @@ it("preserves the packaged Electron Node switch beside a selected network enviro
     environment: { ELECTRON_RUN_AS_NODE: "1" },
   });
 
-  const launch = makeProcessConfinementLive({ platform: "linux" }).prepare({
+  const launch = makeProcessConfinementLive({
+    platform: "linux",
+    sandboxPath: process.execPath,
+  }).prepare({
     executable: "/bin/sh",
     args: ["-c", "true"],
     boundRoot: project,
