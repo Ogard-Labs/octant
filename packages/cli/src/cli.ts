@@ -843,37 +843,39 @@ const administratorRunner: ServiceCommandRunner = {
 
 /** `octant account`: a question needs a terminal; sign-in runs the provider's CLI on it. */
 async function runAccountFlow(context: CliContext, command: AccountCliCommand): Promise<number> {
-  const interactive = process.stdin.isTTY === true;
-  const prompt = interactive
-    ? createInterface({ input: process.stdin, output: process.stdout })
-    : undefined;
-  const closed =
-    prompt === undefined
-      ? undefined
-      : new Promise<undefined>((resolve) => prompt.once("close", () => resolve(undefined)));
-  try {
-    return await withLocalControlSession(context, (session) =>
-      runAccountCliCommand({
-        command,
-        session,
-        ask:
-          prompt === undefined || closed === undefined
-            ? undefined
-            : (question) => Promise.race([prompt.question(question), closed]),
-        run: (binary, args, env) =>
-          new Promise((resolve, reject) => {
-            const child = spawn(binary, [...args], { stdio: "inherit", env });
-            child.once("error", reject);
-            child.once("exit", (code) => resolve(code ?? 1));
-          }),
-        env: process.env,
-        stdout: process.stdout,
-        stderr: process.stderr,
-      }),
-    );
-  } finally {
-    prompt?.close();
-  }
+  // The prompt opens only for the one question and closes at once: a reader
+  // left on stdin while the provider's sign-in owns the terminal would take
+  // the code the person pastes for it (reproduced under a PTY).
+  const ask =
+    process.stdin.isTTY === true
+      ? async (question: string): Promise<string | undefined> => {
+          const prompt = createInterface({ input: process.stdin, output: process.stdout });
+          const closed = new Promise<undefined>((resolve) =>
+            prompt.once("close", () => resolve(undefined)),
+          );
+          try {
+            return await Promise.race([prompt.question(question), closed]);
+          } finally {
+            prompt.close();
+          }
+        }
+      : undefined;
+  return await withLocalControlSession(context, (session) =>
+    runAccountCliCommand({
+      command,
+      session,
+      ask,
+      run: (binary, args, env) =>
+        new Promise((resolve, reject) => {
+          const child = spawn(binary, [...args], { stdio: "inherit", env });
+          child.once("error", reject);
+          child.once("exit", (code) => resolve(code ?? 1));
+        }),
+      env: process.env,
+      stdout: process.stdout,
+      stderr: process.stderr,
+    }),
+  );
 }
 
 /** `octant provider sign-in`: the terms question needs a terminal; the code does not. */

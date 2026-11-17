@@ -70,6 +70,17 @@ describe("account sign-in through the account's own CLI", () => {
     ]);
   });
 
+  it("offers the whole sign-in page when the CLI writes its address in pieces", async () => {
+    const cli = fakeCli();
+    const started = startAccountSignIn(command, cli.spawn);
+    cli.print("visit: https://claude.com/cai/oauth/auth");
+    cli.print("orize?code=true&state=abc\nPaste code here if prompted > ");
+    await expect(started).resolves.toMatchObject({
+      status: "started",
+      signInUrl: "https://claude.com/cai/oauth/authorize?code=true&state=abc",
+    });
+  });
+
   it("stays pending until the CLI finishes, then reports the account signed in", async () => {
     const cli = fakeCli();
     const started = startAccountSignIn(command, cli.spawn);

@@ -137,6 +137,7 @@ export function AccountSignIn(props: {
       {state.attempt.codeEntry === true ? (
         <form
           className="account-sign-in__code"
+          noValidate
           onSubmit={(event) => {
             event.preventDefault();
             void submitCode();

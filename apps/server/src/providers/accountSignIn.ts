@@ -26,7 +26,9 @@ export const ACCOUNT_SIGN_IN_LIFETIME_MS = 10 * 60_000;
 /** How long the CLI has to print its sign-in page address. */
 const SIGN_IN_PAGE_WAIT_MS = 20_000;
 const OUTPUT_LIMIT = 16_384;
-const SIGN_IN_PAGE = /https:\/\/[^\s"'<>]+/;
+// The address counts only once something ends it: a CLI can write it in more
+// than one chunk, and a prefix would lose its query.
+const SIGN_IN_PAGE = /https:\/\/[^\s"'<>]+(?=[\s"'<>])/;
 
 export interface AccountSignInProcess {
   readonly onOutput: (listener: (chunk: string) => void) => void;
@@ -97,6 +99,15 @@ const spawnSignIn: AccountSignInSpawn = (binaryPath, args, environment) => {
   // A code pasted just as the CLI exits meets a closed input; that is the
   // CLI's answer, not a host failure, so the write error is dropped here.
   child.stdin?.on("error", () => undefined);
+  // A waiting sign-in must not keep a stopping host alive: the host ends by
+  // letting its work finish, not by calling exit, so the child and its pipes
+  // are unreferenced and the exit hook stops the child.
+  child.unref();
+  for (const stream of [child.stdin, child.stdout, child.stderr]) {
+    if (stream !== null && "unref" in stream && typeof stream.unref === "function") {
+      stream.unref();
+    }
+  }
   return {
     onOutput: (listener) => {
       child.stdout?.on("data", (chunk: Buffer) => listener(chunk.toString("utf8")));
