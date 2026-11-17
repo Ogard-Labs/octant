@@ -188,6 +188,8 @@ export interface ProjectServiceOptions {
   readonly desktopRecipeKeys?: Pick<DesktopRecipeKeys, "save" | "discard" | "retire">;
   /** The host user's home folder, canonical; an extra folder is judged against it. */
   readonly homeDirectory?: () => string;
+  /** The Project's Strict, read as a folder is added; absent reads Strict. */
+  readonly resolveProjectStrict?: (projectId: string) => boolean;
 }
 
 /** What the host names the Project it provisions under the default folder. */
@@ -239,6 +241,7 @@ export class ProjectService implements ProjectServiceApi {
   readonly #offeredDesktopProviders: () => ReadonlyArray<LeasableDesktopProvider>;
   readonly #desktopRecipeKeys: ProjectServiceOptions["desktopRecipeKeys"];
   readonly #homeDirectory: () => string;
+  readonly #resolveProjectStrict: (projectId: string) => boolean;
   readonly #archiveListeners = new Set<
     (project: Extract<Project, { readonly type: "work" }>) => void
   >();
@@ -270,6 +273,7 @@ export class ProjectService implements ProjectServiceApi {
     this.#offeredDesktopProviders = options.offeredDesktopProviders ?? (() => []);
     this.#desktopRecipeKeys = options.desktopRecipeKeys;
     this.#homeDirectory = options.homeDirectory ?? (() => realpathSync(homedir()));
+    this.#resolveProjectStrict = options.resolveProjectStrict ?? (() => true);
   }
 
   hasActiveProject(projectId: ProjectId, requiredType: ProjectType): boolean {
@@ -945,6 +949,7 @@ export class ProjectService implements ProjectServiceApi {
             now: this.#now(),
           });
           const homeDirectory = this.#homeDirectory();
+          const strict = this.#resolveProjectStrict(String(current.id));
           if (
             extraFolderIsHome(picked.canonicalRoot, homeDirectory) &&
             command.confirmHomeFolder !== true
@@ -957,6 +962,7 @@ export class ProjectService implements ProjectServiceApi {
               candidate: picked.canonicalRoot,
               homeDirectory,
               homeFolderConfirmed: true,
+              strict,
             });
             if (refusal !== undefined)
               throw new ProjectServiceError({ category: "invalid", message: refusal });
@@ -983,6 +989,7 @@ export class ProjectService implements ProjectServiceApi {
             addedAt: timestamp,
             homeDirectory,
             ...(command.confirmHomeFolder === true ? { homeFolderConfirmed: true } : {}),
+            strict,
           });
           project = added.project;
           eventFacts = { folder: added.folder };

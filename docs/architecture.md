@@ -4944,8 +4944,9 @@ thread's [guardrail level](#security-and-authority). New tasks may choose an app
   built): the add command answers a home folder with
   `project-extra-folder-needs-confirmation`, the warning, and a fresh
   single-use receipt for the same folder, window and Project type in place of
-  the spent one, and only a resend with `confirmHomeFolder` spends it. The
-  confirmed home folder may hold the main folder and the other extra folders;
+  the spent one, and only a resend with `confirmHomeFolder` spends it. Under
+  the Project's Strict the home folder is refused without the warning,
+  confirmed or not. The confirmed home folder may hold the main folder and the other extra folders;
   its credential folders stay denied for every confined launch, because the
   secret guard's denials follow every folder grant. Relinking the main folder
   inside it is refused until it is removed. The domain policy refuses any
@@ -10539,7 +10540,8 @@ the model at another size.
   new thread alone at Full access and journals `fullAccessRunFlag` on it,
   saving nothing on the Project; the host accepts the flag only from a window
   on this host, so no agent grant, device or routine sets it, and the MCP
-  server never sends it; under
+  server never sends it, and refuses it, naming Strict, where the thread
+  would be Strict; under
   [Octant adds no restrictions of its own unless Strict is on](#security-and-authority); built), so
   a thread starts at Full access only where the person already set it (the
   same tools served to an agent grant accept it when the person chose Full
@@ -14336,11 +14338,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   it, so no approval leaves the server's authority.
 
   **Octant adds no restrictions of its own unless Strict is on**
-  (maintainer decision, 2026-11-16; partly built: slash commands, the
-  Strict setting, Project trust from Claude Code and Codex, the default
-  level, image generation, the resource queue, Work's Browser page scripts,
-  the local CLI's Full access flag, the home folder as an extra folder and
-  the items marked built below). A person who moves
+  (maintainer decision, 2026-11-16; partly built: the Strict setting and
+  every item marked built below; not built yet: the opt-in extras). A
+  person who moves
   from a provider's own CLI to Octant keeps every workflow that worked
   there, and Octant restricts a provider no more than any other agent
   workspace does. Outside Strict, the provider's own sandbox, permission
@@ -14433,7 +14433,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     Project's folder or one above it) and Codex's `trust_level = "trusted"`
     for the Project's folder in `config.toml`, under `CLAUDE_CONFIG_DIR` and
     `CODEX_HOME` when set, when a session starts and when the trust prompt
-    asks; `projectTrustsProvider` is where Strict will plug in.
+    asks; `projectTrustsProvider` counts that record only when the thread's
+    Strict, read at the same moments, is off.
   - **Default level.** A new thread still starts asking, as the providers'
     CLIs do, and a person may choose Full access as their default level in
     Settings (built: Settings › Code's Default mode and Settings › Work's
@@ -14488,24 +14489,28 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     Code's one-use, exact-source script permission under the same rules
     ([Browser for agents: Bounded page scripts](design/browser-agent-tool.md#bounded-page-scripts));
     built: both tools ask through one shared function
-    (`browserPageScriptPermission.ts`), and Work's `oneUsePermission` is
-    where Strict will keep Work refused.
+    (`browserPageScriptPermission.ts`), and under the thread's Strict, read
+    at the call, Work below Full access is refused as before.
   - **Local CLI at Full access.** `octant agent` takes an explicit per-run
     Full access flag the person sets on the command line: that run's thread
     starts at Full access alone, journaled with the flag, never saving Full
     access on the Project. A tool call another agent makes through
     `octant agent mcp` still cannot choose it, outside an agent grant the
     person set to Full access. Built as `octant agent --full-access`
-    ([Native harness: scripted callers](#native-harness)); Strict will refuse
-    the flag.
+    ([Native harness: scripted callers](#native-harness)). Strict refuses
+    the flag with a sentence naming Strict (built: a new Code thread and a
+    Work thread's level change read Strict as the thread would resolve it,
+    its own choice, else its Project's default, else Settings, before
+    anything is journaled).
   - **Home folder as an extra folder.** A Project's extra folder may be the
     home folder, behind a warning naming what it opens; the credential
     folders inside it (`.ssh`, `.aws`, `.gnupg`, `Library/Keychains` and the
     rest) stay protected, a folder above home and the system folders stay
     refused ([Projects with several folders](#projects-with-several-folders));
     built: the host answers the home folder with its warning and a fresh
-    single-use receipt, and a confirmed resend adds it. Strict will refuse
-    the home folder; `homeFolderConfirmed` in the domain policy is where.
+    single-use receipt, and a confirmed resend adds it. Under the Project's
+    Strict, read as the folder is added, the host refuses the home folder
+    without the warning, confirmed or not (built).
   - **Stalled-turn limit.** At Full access the stalled-turn limit defaults
     to Off; below Full access it stays 30 minutes, and the person may set
     either. Strict keeps 30 minutes at every level (built: Settings ›
@@ -14514,7 +14519,7 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     under Strict, and every turn below Full access, takes the stalled-turn
     limit).
   - **Opt-in extras.** A per-person list of provider tools to block, and in
-    Strict a notice saying what Strict withheld.
+    Strict a notice saying what Strict withheld (not built yet).
 
   Kept as product rules, since no provider feature depends on them: Plan is
   read-only, Chat has no folder or shell (it is an extra mode, not a limit
@@ -14551,7 +14556,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     and Git actions follow the level instead of Plan's read-only gate
     ([Coordinator threads](design/coordinator-threads.md)). The one place
     that decides a coordinator turn's posture, `coordinatorTurnPosture` in
-    `@octant/domain`, is where Strict will keep Plan's gate at every level.
+    `@octant/domain`, keeps Plan's gate at every level under the thread's
+    Strict, read as each turn starts (built).
   - **Pull requests.** A pull-request watch's end after ten started wakes or
     three days, and Auto-fix's three attempts per failure.
   - **Agent messages and children.** A turn's three thread messages, and a
@@ -14625,7 +14631,7 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     [Provider runtimes](design/provider-runtimes.md)), and an outside
     provider driver is admitted on Linux under the same trust steps as on
     macOS (built: it runs without confinement and its provider row says so;
-    Strict, once built, keeps it `host-prohibited` there;
+    under the host's Strict it stays `host-prohibited` there, built;
     [Outside provider drivers](design/outside-provider-drivers.md)).
 
   **Plan and Chat tool parity** (maintainer decision, 2026-11-16; partly
@@ -19672,7 +19678,9 @@ deliverable and keeps every gate above:
      pid and creation time, read through System32's Windows PowerShell with
      an exact argument list and no shell
      (`(Get-Process -Id <pid>).StartTime.ToFileTimeUtc()`), so a reused pid
-     never matches. Provider runtimes and terminals keep their receipts there
+     never matches. The read may take 60 seconds, because Windows
+     PowerShell's first start on a fresh machine is slow and a failed read
+     fails the receipt, which stops a live harness command. Provider runtimes and terminals keep their receipts there
      as elsewhere, and so do the harness shell's Windows commands (supervisor
      `windows-harness-shell`, beside the other harness receipts). A host
      restart finds and stops what it left behind, through the tree stop, and

@@ -1934,6 +1934,7 @@ export class CodeOperationService {
                       command,
                       recordedStart?.event.executionPolicy,
                       this.#options.isCoordinatorThread?.(String(scope.thread.id)) === true,
+                      () => this.#options.threadStrict?.(scope.thread) ?? true,
                     ),
                   )
                 : scope.thread;
@@ -2275,6 +2276,7 @@ export class CodeOperationService {
           command,
           recordedTurnAccessPosture(frames),
           this.#options.isCoordinatorThread?.(String(thread.id)) === true,
+          () => this.#options.threadStrict?.(thread) ?? true,
         ),
       );
       const held: StartingTurn = {
@@ -7102,15 +7104,17 @@ function turnAccessPosture(
   command: Extract<CodeOperationCommand, { readonly kind: "start-provider-turn" }>,
   recorded: CodeThread["executionPolicy"] | undefined,
   coordinator: boolean,
+  strict: () => boolean,
 ): CodeThread["executionPolicy"] {
   const requested = recorded ?? command.executionPolicy;
   const posture = clampTurnAccessPosture({
     thread: thread.executionPolicy,
     ...(requested === undefined ? {} : { requested }),
   });
-  // A coordinator reads and its workers write: below Full access its turns
-  // run under Plan's read-only gate, whatever level the person gave the thread.
-  return coordinator ? coordinatorTurnPosture(posture) : posture;
+  // A coordinator reads and its workers write: below Full access, and at every
+  // level under Strict, its turns run under Plan's read-only gate, whatever
+  // level the person gave the thread.
+  return coordinator ? coordinatorTurnPosture(posture, strict()) : posture;
 }
 
 function threadForTurn(
