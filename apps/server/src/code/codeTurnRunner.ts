@@ -172,6 +172,8 @@ export interface CodeTurnEvent {
   readonly sequence: number;
   readonly occurredAt: ProviderRuntimeEvent["occurredAt"];
   readonly text?: string;
+  /** The provider's wording while a task runs; only on `task-progress`. */
+  readonly runningText?: string;
   readonly requestId?: string;
   /** The labels a provider question offers; absent on every other category. */
   readonly options?: ReadonlyArray<string>;
@@ -1131,6 +1133,7 @@ function normalizeProviderEvent(
         requestId: text(event.taskId),
         status: event.status,
         text: text(event.summary),
+        ...(event.runningSummary === undefined ? {} : { runningText: text(event.runningSummary) }),
       });
     case "task-list":
       return Effect.succeed({

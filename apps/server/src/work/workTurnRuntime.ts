@@ -763,6 +763,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                     taskId: event.taskId,
                     state: event.status === "in-progress" ? "running" : event.status,
                     summary: event.summary,
+                    ...(event.runningSummary === undefined
+                      ? {}
+                      : { runningSummary: event.runningSummary }),
                   };
                   const next = upsertThreadTaskProgress(tasks, task);
                   if (next === tasks) {

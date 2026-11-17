@@ -7,6 +7,8 @@ export interface ThreadTaskRow {
   readonly id: string;
   readonly state: "pending" | "running" | "waiting" | "completed" | "failed";
   readonly summary: string;
+  /** The provider's wording while the task runs ("Running the tests"). */
+  readonly runningSummary?: string;
 }
 
 /** The live task list a thread's Tasks panel shows, from the turn it came out of. */
@@ -37,6 +39,17 @@ function taskIcon(state: ThreadTaskRow["state"]): ReactNode {
     case "pending":
       return <Circle aria-hidden="true" size={12} />;
   }
+}
+
+/**
+ * How a task is named: its running wording while the turn is writing and the
+ * task is in hand, its plain wording otherwise, so a stopped turn never
+ * claims work is still going on.
+ */
+function taskWording(task: ThreadTaskRow, turnRunning: boolean): string {
+  return turnRunning && task.state === "running" && task.runningSummary !== undefined
+    ? task.runningSummary
+    : task.summary;
 }
 
 /**
@@ -77,6 +90,12 @@ export function ThreadTasksPanel(props: ThreadTasksPanelProps) {
     .join(" · ");
   const status =
     attention || (state === "completed" ? "Complete" : running ? "In progress" : "Incomplete");
+  // While the turn writes and nothing needs attention, the header names the
+  // task in hand in its running wording instead of the generic status.
+  const current =
+    running && !attention
+      ? tasks.find((task) => task.state === "running" && task.runningSummary !== undefined)
+      : undefined;
   if (tasks.length === 0) return null;
 
   return (
@@ -99,7 +118,9 @@ export function ThreadTasksPanel(props: ThreadTasksPanelProps) {
         <span>
           {completed} of {tasks.length} tasks completed
         </span>
-        <span className="thread-tasks__status">{status}</span>
+        <span className="thread-tasks__status">
+          {current === undefined ? status : taskWording(current, running)}
+        </span>
         <ChevronDown
           aria-hidden="true"
           className="thread-tasks__chevron"
@@ -115,7 +136,7 @@ export function ThreadTasksPanel(props: ThreadTasksPanelProps) {
                 {index + 1}.
               </span>
               <span className="thread-tasks__mark">{taskIcon(task.state)}</span>
-              <span className="thread-tasks__summary">{task.summary}</span>
+              <span className="thread-tasks__summary">{taskWording(task, running)}</span>
             </li>
           ))}
         </ol>

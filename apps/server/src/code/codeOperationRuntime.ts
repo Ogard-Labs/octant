@@ -7483,6 +7483,9 @@ function normalizedOperationEvent(
       state: event.status === "in-progress" ? "running" : ((event.status ?? "waiting") as never),
       summary:
         boundProviderSummary(event.text ?? "Provider task progress.") ?? "Provider task progress.",
+      ...(event.runningText === undefined
+        ? {}
+        : { runningSummary: boundProviderSummary(event.runningText) }),
     };
   if (event.category === "task-list")
     return {

@@ -1002,6 +1002,9 @@ const AttemptBlock = memo(function AttemptBlock(props: {
                 id: task.taskId,
                 state: task.state,
                 summary: task.summary,
+                ...(task.runningSummary === undefined
+                  ? {}
+                  : { runningSummary: task.runningSummary }),
               })),
             }}
           />
