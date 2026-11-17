@@ -420,8 +420,11 @@ struct octant_open_scope octant_open_begin(struct file *file)
 	unsigned long flags;
 	u32 operation;
 	bool valid;
-	if (!octant_mediation_restricted())
+	if (!octant_mediation_restricted()) {
+		if (file_inode(file)->i_sb->s_magic == OVERLAYFS_SUPER_MAGIC)
+			pr_info("Octant mediation: overlay open unrestricted\n");
 		return scope;
+	}
 	inode = d_inode(file->f_path.dentry);
 	if (!guarded_inode(inode))
 		return scope;
@@ -474,6 +477,10 @@ struct octant_open_scope octant_open_begin(struct file *file)
 		else
 			open->prepared = true;
 	}
+	if (inode->i_sb->s_magic == OVERLAYFS_SUPER_MAGIC)
+		pr_info("Octant mediation: overlay open logical error=%d active=%u prepared=%u operation=%u epoch=%llu\n",
+			scope.error, open->active, open->prepared, open->operation,
+			(unsigned long long)open->epoch);
 	return scope;
 }
 
@@ -496,18 +503,33 @@ int octant_open_backing(struct inode *inode)
 	open = &task->open;
 	context = open->context;
 	if (!open->active || !open->prepared || open->owner != current || !context ||
-	    current_context() != context)
+	    current_context() != context) {
+		pr_info("Octant mediation: overlay backing state active=%u prepared=%u owner=%u context=%u current=%u\n",
+			open->active, open->prepared, open->owner == current, !!context,
+			context && current_context() == context);
 		return -EACCES;
+	}
 	error = admit_inode_request(inode, open->operation, &request);
-	if (error)
+	if (error) {
+		pr_info("Octant mediation: overlay backing decision error=%d device=%u:%u inode=%llu operation=%u\n",
+			error, MAJOR(inode->i_sb->s_dev), MINOR(inode->i_sb->s_dev),
+			(unsigned long long)inode->i_ino, open->operation);
 		return error;
-	if (request.namespace_epoch != open->epoch)
+	}
+	if (request.namespace_epoch != open->epoch) {
+		pr_info("Octant mediation: overlay backing epoch open=%llu decision=%llu\n",
+			(unsigned long long)open->epoch,
+			(unsigned long long)request.namespace_epoch);
 		return -EAGAIN;
+	}
 	spin_lock_irqsave(&context->lock, flags);
 	spin_lock(&namespace_lock);
 	valid = !context->dead && broker_alive(context) && scope_epoch_valid(open->epoch, task);
 	spin_unlock(&namespace_lock);
 	spin_unlock_irqrestore(&context->lock, flags);
+	pr_info("Octant mediation: overlay backing admitted=%u device=%u:%u inode=%llu operation=%u\n",
+		valid, MAJOR(inode->i_sb->s_dev), MINOR(inode->i_sb->s_dev),
+		(unsigned long long)inode->i_ino, open->operation);
 	return valid ? 0 : -EACCES;
 }
 
@@ -538,35 +560,20 @@ static bool stacked_open_allows(u32 operation)
 	struct octant_open *open = &task->open;
 	struct octant_context *context = open->context;
 	unsigned long flags;
-	bool valid, dead, alive;
-	u64 current_epoch;
-	u32 mutations, depth;
+	bool valid;
 	/* OverlayFS may temporarily override the caller credential with the
 	 * mounter's credential while resolving metacopy/backing state. The scope
 	 * is bound to this task and exact kernel call, so validate its retained
 	 * enrolled context rather than treating that credential override as a
 	 * different workload. */
 	if (!open->active || !open->prepared || open->owner != current || !context ||
-	    (operation == OCTANT_MEDIATION_WRITE && open->operation != OCTANT_MEDIATION_WRITE)) {
-		pr_info_ratelimited("Octant mediation: stacked open state active=%u prepared=%u owner=%u context=%u operation=%u admitted=%u\n",
-			open->active, open->prepared, open->owner == current, !!context,
-			operation, open->operation);
+	    (operation == OCTANT_MEDIATION_WRITE && open->operation != OCTANT_MEDIATION_WRITE))
 		return false;
-	}
 	spin_lock_irqsave(&context->lock, flags);
 	spin_lock(&namespace_lock);
-	dead = context->dead;
-	alive = broker_alive(context);
-	current_epoch = namespace_epoch;
-	mutations = active_mutations;
-	depth = task->mutation_depth;
-	valid = !dead && alive && scope_epoch_valid(open->epoch, task);
+	valid = !context->dead && broker_alive(context) && scope_epoch_valid(open->epoch, task);
 	spin_unlock(&namespace_lock);
 	spin_unlock_irqrestore(&context->lock, flags);
-	if (!valid)
-		pr_info_ratelimited("Octant mediation: stacked open validity dead=%u broker=%u epoch=%llu namespace=%llu mutations=%u depth=%u\n",
-			dead, alive, (unsigned long long)open->epoch,
-			(unsigned long long)current_epoch, mutations, depth);
 	return valid;
 }
 
