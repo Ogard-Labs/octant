@@ -1,4 +1,5 @@
 import { DEFAULT_THEME_SETTINGS, type ThemeSettings } from "@octant/contracts/theme";
+import { GEIST_UI_FAMILY } from "@octant/theme";
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { followInputModality } from "../lib/inputModality";
@@ -39,7 +40,17 @@ function Scene(props: { readonly id: string; readonly scheme: "light" | "dark" }
   useEffect(() => {
     let cancelled = false;
     const finish = async () => {
+      // The bundled faces, asked for by name: a face nothing has used yet is
+      // not loaded, and `ready` would not wait for it.
+      await Promise.all([
+        document.fonts.load("400 14px 'Geist Variable'"),
+        document.fonts.load("500 14px 'Geist Variable'"),
+        document.fonts.load("600 14px 'Geist Variable'"),
+        document.fonts.load("400 13px 'Geist Mono Variable'"),
+      ]);
       await document.fonts.ready;
+      if (!document.fonts.check("400 14px 'Geist Variable'"))
+        throw new Error("The bundled Geist face did not load.");
       // Let effects, popups and polled fixtures settle before the picture.
       for (let frame = 0; frame < 3; frame += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -70,6 +81,12 @@ function Scene(props: { readonly id: string; readonly scheme: "light" | "dark" }
     mode: props.scheme,
     // The plain ground: no glass washes and no background picture.
     reducedTransparency: true,
+    // The platform face differs by system, so the picture is drawn in the
+    // bundled Geist, the face Appearance offers, and looks the same everywhere.
+    typography: {
+      ...DEFAULT_THEME_SETTINGS.typography,
+      ui: { ...DEFAULT_THEME_SETTINGS.typography.ui, family: GEIST_UI_FAMILY },
+    },
   };
   return (
     <ThemeSettingsProvider rememberMode={false} settings={settings}>
