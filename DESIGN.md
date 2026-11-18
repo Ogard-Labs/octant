@@ -1936,15 +1936,17 @@ a shared control.
 **Visual check.** The `visual-check.yml` workflow draws the key screens in a
 pinned Chromium (the one that matches `playwright-core`, not the runner's Chrome)
 and compares each picture with its baseline in `apps/web/visual-baselines`. It
-runs on a pull request that touches `apps/web`, the theme packages, the theme
+draws on a pull request that touches `apps/web`, the theme packages, the theme
 contract or this file, so a later change cannot quietly spoil the look that
-landed. The scenes (`apps/web/visual-check.html`, source in
+landed. `Visual check` is a required check: on any other pull request, and in
+the merge queue, it reports passed without drawing, since the pull request's own
+run already compared the change. The scenes (`apps/web/visual-check.html`, source in
 `apps/web/src/visualCheck/`) are the start screen, the Code side panel, the
 Appearance and Usage Settings pages, the Agents, Artifacts and Automations
 tables, the Where, Project and approval menus open, and the icon rail with the
 account face. Each is drawn in light and dark at 1280 by 800, and the tables and
 the side panel again at 760 wide, from fixed data, a fixed clock, bundled fonts
-and no motion, with no host behind them. A picture fails when more than 0.1% of
+and no motion, with no host behind them. A picture fails when more than 50 of
 its pixels differ by more than 24 in any channel, or its size changes. The run
 then uploads the `visual-check` artifact with the actual, baseline and diff
 pictures (differences in red). It does not cover the packaged app, window glass,
