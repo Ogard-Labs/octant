@@ -5,6 +5,7 @@ import {
   type AwsProfilePorts,
   type AwsSsoMintOutcome,
 } from "./awsProfileCredentials";
+import type { AwsStsOutcome } from "./awsSts";
 import { createCloudIamRuntime, isCloudIamGrantMaterial } from "./cloudIam";
 import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
 import { MODEL_HOST, MODEL_PATH, cloudDescriptor } from "./fakeCloudIam.test-support";
@@ -22,6 +23,8 @@ function ports(
     readFile: async (path) => files[path],
     runCredentialProcess: async () => ({ exitCode: 1, stdout: "" }),
     mintSsoRoleCredentials: async () => ({ kind: "unavailable" }),
+    assumeRole: async () => ({ kind: "unavailable" }),
+    assumeRoleWithWebIdentity: async () => ({ kind: "unavailable" }),
     homeDirectory: HOME,
     env: {},
     now: () => NOW,
@@ -125,18 +128,158 @@ describe("reading the person's AWS profile in the broker", () => {
     ).toEqual({ kind: "refused", reason: "process-failed" });
   });
 
-  it("refuses a missing profile and one that only assumes a role", async () => {
+  it("refuses a missing profile and a role it cannot assume as written", async () => {
     const files = {
-      [`${HOME}/.aws/config`]:
-        "[profile chained]\nrole_arn = arn:aws:iam::1:role/x\nsource_profile = base\n",
+      [`${HOME}/.aws/config`]: [
+        "[profile malformed]",
+        "role_arn = arn:aws:iam::1:role/x",
+        "source_profile = base",
+        "[profile metadata]",
+        "role_arn = arn:aws:iam::123456789012:role/Ops",
+        "credential_source = Ec2InstanceMetadata",
+        "[profile loop-a]",
+        "role_arn = arn:aws:iam::123456789012:role/A",
+        "source_profile = loop-b",
+        "[profile loop-b]",
+        "role_arn = arn:aws:iam::123456789012:role/B",
+        "source_profile = loop-a",
+      ].join("\n"),
     };
-    expect(await resolveAwsProfileCredentials("absent", ports(files))).toEqual({
-      kind: "refused",
-      reason: "profile-missing",
+    const assumeRole = vi.fn(async () => roleAnswer("ASIAROLE000000000001"));
+    for (const [name, reason] of [
+      ["absent", "profile-missing"],
+      ["malformed", "unsupported"],
+      ["metadata", "unsupported"],
+      ["loop-a", "unsupported"],
+    ] as const) {
+      expect(await resolveAwsProfileCredentials(name, ports(files, { assumeRole }))).toEqual({
+        kind: "refused",
+        reason,
+      });
+    }
+    expect(assumeRole).not.toHaveBeenCalled();
+  });
+});
+
+function roleAnswer(accessKeyId: string, expiresAt = NOW + 3_600_000): AwsStsOutcome {
+  return {
+    kind: "credentials",
+    credentials: {
+      accessKeyId,
+      secretAccessKey: `${accessKeyId}-secret`,
+      sessionToken: `${accessKeyId}-token`,
+      expiresAt,
+    },
+  };
+}
+
+describe("a profile that assumes a role", () => {
+  const chainedConfig = [
+    "[profile base]",
+    "region = eu-west-1",
+    "[profile hop]",
+    "role_arn = arn:aws:iam::123456789012:role/Hop",
+    "source_profile = base",
+    "[profile bedrock]",
+    "role_arn = arn:aws:iam::210987654321:role/BedrockInvoke",
+    "source_profile = hop",
+    "role_session_name = person-at-laptop",
+    "external_id = shared-external-id",
+    "duration_seconds = 1800",
+    "region = us-west-2",
+  ].join("\n");
+
+  it("assumes each role in a chain from the source profile's keys, as the AWS CLI does", async () => {
+    const assumeRole = vi
+      .fn<AwsProfilePorts["assumeRole"]>()
+      .mockResolvedValueOnce(roleAnswer("ASIAHOP0000000000001"))
+      .mockResolvedValueOnce(roleAnswer("ASIABEDROCK000000001"));
+    const resolved = await resolveAwsProfileCredentials(
+      "bedrock",
+      ports(
+        {
+          [`${HOME}/.aws/config`]: chainedConfig,
+          [`${HOME}/.aws/credentials`]: `[base]\naws_access_key_id = ${KEY_ID}\naws_secret_access_key = ${SECRET}\n`,
+        },
+        { assumeRole },
+      ),
+    );
+    expect(resolved).toEqual({ ...roleAnswer("ASIABEDROCK000000001"), via: "assume-role" });
+    expect(assumeRole).toHaveBeenNthCalledWith(1, {
+      region: undefined,
+      roleArn: "arn:aws:iam::123456789012:role/Hop",
+      roleSessionName: `octant-session-${Math.floor(NOW / 1_000)}`,
+      source: { accessKeyId: KEY_ID, secretAccessKey: SECRET },
     });
-    expect(await resolveAwsProfileCredentials("chained", ports(files))).toEqual({
+    expect(assumeRole).toHaveBeenNthCalledWith(2, {
+      region: "us-west-2",
+      roleArn: "arn:aws:iam::210987654321:role/BedrockInvoke",
+      roleSessionName: "person-at-laptop",
+      externalId: "shared-external-id",
+      durationSeconds: 1800,
+      source: {
+        accessKeyId: "ASIAHOP0000000000001",
+        secretAccessKey: "ASIAHOP0000000000001-secret",
+        sessionToken: "ASIAHOP0000000000001-token",
+        expiresAt: NOW + 3_600_000,
+      },
+    });
+  });
+
+  it("assumes a role with the web identity token file and with the broker's environment keys", async () => {
+    const assumeRoleWithWebIdentity = vi.fn(async () => roleAnswer("ASIAWEBIDENTITY00001"));
+    const assumeRole = vi.fn(async () => roleAnswer("ASIAENVIRONMENT00001"));
+    const files = {
+      [`${HOME}/.aws/config`]: [
+        "[profile federated]",
+        "role_arn = arn:aws:iam::123456789012:role/Federated",
+        "web_identity_token_file = ~/.aws/token",
+        "[profile from-env]",
+        "role_arn = arn:aws:iam::123456789012:role/FromEnv",
+        "credential_source = Environment",
+      ].join("\n"),
+      [`${HOME}/.aws/token`]: "eyJhbGciOi.web-identity.token\n",
+    };
+    const env = { AWS_ACCESS_KEY_ID: KEY_ID, AWS_SECRET_ACCESS_KEY: SECRET };
+    const reading = ports(files, { assumeRole, assumeRoleWithWebIdentity, env });
+    expect(await resolveAwsProfileCredentials("federated", reading)).toMatchObject({
+      kind: "credentials",
+      via: "web-identity",
+    });
+    expect(assumeRoleWithWebIdentity).toHaveBeenCalledWith(
+      expect.objectContaining({ webIdentityToken: "eyJhbGciOi.web-identity.token" }),
+    );
+    expect(await resolveAwsProfileCredentials("from-env", reading)).toMatchObject({
+      kind: "credentials",
+      via: "assume-role",
+    });
+    expect(assumeRole).toHaveBeenCalledWith(
+      expect.objectContaining({ source: { accessKeyId: KEY_ID, secretAccessKey: SECRET } }),
+    );
+  });
+
+  it("refuses a role that asks for an MFA code, and names a refusal from the token service", async () => {
+    const files = {
+      [`${HOME}/.aws/config`]: [
+        "[profile guarded]",
+        "role_arn = arn:aws:iam::123456789012:role/Guarded",
+        "source_profile = base",
+        "mfa_serial = arn:aws:iam::123456789012:mfa/person",
+        "[profile untrusted]",
+        "role_arn = arn:aws:iam::123456789012:role/Untrusted",
+        "source_profile = base",
+      ].join("\n"),
+      [`${HOME}/.aws/credentials`]: `[base]\naws_access_key_id = ${KEY_ID}\naws_secret_access_key = ${SECRET}\n`,
+    };
+    const assumeRole = vi.fn(async (): Promise<AwsStsOutcome> => ({ kind: "refused" }));
+    expect(await resolveAwsProfileCredentials("guarded", ports(files, { assumeRole }))).toEqual({
       kind: "refused",
-      reason: "unsupported",
+      reason: "mfa-required",
+    });
+    expect(assumeRole).not.toHaveBeenCalled();
+    expect(await resolveAwsProfileCredentials("untrusted", ports(files, { assumeRole }))).toEqual({
+      kind: "refused",
+      reason: "role-refused",
     });
   });
 });
@@ -199,5 +342,92 @@ describe("a cloud grant from the person's own keys", () => {
 
     expect(await runtime.revoke(connected.credentialRef)).toEqual({ kind: "revoked" });
     expect(store.values.has(connected.credentialRef)).toBe(false);
+  });
+
+  it("assumes a profile's role at the token service, signs with it until it nears expiry, then assumes it again", async () => {
+    const store = memoryStore();
+    let clock = NOW;
+    const stsCalls: Array<{ readonly url: string; readonly init: RequestInit | undefined }> = [];
+    let issued = 0;
+    // A stand-in for the regional token service: it answers AssumeRole in
+    // the query protocol's XML, each time with new credentials for an hour.
+    const fakeSts: typeof fetch = async (input, init) => {
+      const url = String(input);
+      stsCalls.push({ url, init });
+      issued += 1;
+      const expiration = new Date(clock + 3_600_000).toISOString();
+      return new Response(
+        `<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><AssumeRoleResult><Credentials><AccessKeyId>ASIAROLE00000000000${issued}</AccessKeyId><SecretAccessKey>role-secret-${issued}</SecretAccessKey><SessionToken>role-token-${issued}</SessionToken><Expiration>${expiration}</Expiration></Credentials></AssumeRoleResult></AssumeRoleResponse>`,
+        { status: 200, headers: { "content-type": "text/xml" } },
+      );
+    };
+    const files: Record<string, string> = {
+      [`${HOME}/.aws/config`]: [
+        "[profile bedrock]",
+        "role_arn = arn:aws:iam::123456789012:role/BedrockInvoke",
+        "source_profile = base",
+        "external_id = shared-external-id",
+        "region = us-west-2",
+      ].join("\n"),
+      [`${HOME}/.aws/credentials`]: `[base]\naws_access_key_id = ${KEY_ID}\naws_secret_access_key = ${SECRET}\n`,
+    };
+    const runtime = createCloudIamRuntime({
+      store,
+      fetch: fakeSts,
+      now: () => clock,
+      profiles: {
+        readFile: async (path) => files[path],
+        runCredentialProcess: async () => ({ exitCode: 1, stdout: "" }),
+        homeDirectory: HOME,
+        env: {},
+      },
+    });
+    const { scope } = cloudDescriptor();
+    const connected = await runtime.connect({
+      descriptorId: "amazon-bedrock",
+      source: { kind: "aws-profile", profileName: "bedrock" },
+      scope,
+      actorId: "00000000-0000-4000-8000-000000000001",
+      termsAcknowledgedAt: new Date(NOW).toISOString(),
+    });
+    expect(connected).toMatchObject({ kind: "signed-in" });
+    if (connected.kind !== "signed-in") throw new Error("not connected");
+
+    expect(stsCalls).toHaveLength(1);
+    const call = stsCalls[0];
+    expect(call?.url).toBe("https://sts.us-west-2.amazonaws.com/");
+    const body = new URLSearchParams(String(call?.init?.body));
+    expect(Object.fromEntries(body)).toMatchObject({
+      Action: "AssumeRole",
+      RoleArn: "arn:aws:iam::123456789012:role/BedrockInvoke",
+      ExternalId: "shared-external-id",
+    });
+    const stsHeaders = new Headers(call?.init?.headers);
+    expect(stsHeaders.get("authorization")).toContain(
+      `Credential=${KEY_ID}/20261116/us-west-2/sts/aws4_request`,
+    );
+    // The source secret signs the call and is never sent.
+    expect(JSON.stringify(call)).not.toContain(SECRET);
+
+    const request = {
+      method: "POST",
+      host: MODEL_HOST,
+      path: MODEL_PATH,
+      query: [],
+      headers: { "content-type": "application/json" },
+      payloadHash: "0".repeat(64),
+    };
+    const sign = () =>
+      runtime.sign({ credentialRef: connected.credentialRef, request, renewCredentials: false });
+    const first = await sign();
+    expect(first).toMatchObject({ kind: "signed" });
+    expect(JSON.stringify(first)).toContain("ASIAROLE000000000001");
+    expect(JSON.stringify(first)).not.toContain("role-secret-1");
+    expect(stsCalls).toHaveLength(1);
+
+    clock = NOW + 58 * 60_000;
+    const renewed = await sign();
+    expect(stsCalls).toHaveLength(2);
+    expect(JSON.stringify(renewed)).toContain("ASIAROLE000000000002");
   });
 });

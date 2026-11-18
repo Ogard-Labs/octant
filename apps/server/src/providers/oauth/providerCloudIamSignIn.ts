@@ -369,7 +369,9 @@ async function connectPersonCloudSource(input: {
         reason === "profile-missing" ||
         reason === "process-failed" ||
         reason === "unsupported" ||
-        reason === "not-authorized"
+        reason === "not-authorized" ||
+        reason === "mfa-required" ||
+        reason === "role-refused"
           ? `aws-${reason}`
           : "invalid",
     };
