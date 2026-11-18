@@ -230,11 +230,21 @@ async function probe(root: string) {
     await landed("person-typed-local-open", local("/local"), "Local");
 
     // The agent opens a local address it names; the committed page continues on
-    // its exact origin — a page-started move, then a same-origin redirect.
+    // its exact origin — a page-started move, then a same-origin redirect. The
+    // hops are timed, so each check accepts the page already past that point:
+    // a refused hop leaves it stuck earlier in the chain.
+    const chain = [local("/local-chain"), local("/local-chain-next"), local("/local-chain-deep")];
+    const reached = async (checkName: string, index: number) => {
+      await until(() => chain.indexOf(state().url) >= index);
+      const at = chain.indexOf(state().url);
+      if (at < index)
+        throw Error(`${checkName}: observed ${state().url}, wanted past ${chain[index]}.`);
+      checks.push(checkName);
+    };
     await navigate(local("/local-chain"));
-    await landed("agent-named-local-open", local("/local-chain"), "Local chain");
-    await landed("same-origin-page-move", local("/local-chain-next"), "Local chain next");
-    await landed("same-origin-redirect", local("/local-chain-deep"), "Local chain deep");
+    await reached("agent-named-local-open", 0);
+    await reached("same-origin-page-move", 1);
+    await reached("same-origin-redirect", 2);
 
     // A move to a different local name on the same port is a different origin.
     await navigate(local("/local-away"));
