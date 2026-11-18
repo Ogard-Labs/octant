@@ -20,6 +20,7 @@ import {
   groupSubagentRows,
   isActiveSubagentRow,
   subagentRunTime,
+  subagentStartedAt,
   type SubagentListItem,
   type SubagentRow,
 } from "./subagentRows";
@@ -172,6 +173,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
     writeOpen(storage, next);
   };
   const count = trayStatus(props.entries, observations, props.observationsTruncated === true);
+  const waitingOn = open ? undefined : waitingRows(props.entries, observations, rows);
 
   return (
     <div
@@ -193,9 +195,14 @@ export function SubagentsTray(props: SubagentsTrayProps) {
           variant="ghost"
         >
           <span className="composer-subagents__label">Subagents</span>
-          <span className="composer-subagents__count">{count}</span>
+          {waitingOn === undefined ? (
+            <span className="composer-subagents__count">{count}</span>
+          ) : null}
           <ChevronDown aria-hidden="true" className="composer-subagents__chevron" size={12} />
         </OctantButton>
+        {waitingOn === undefined ? null : (
+          <WaitingLine rows={waitingOn} onOpenSubagent={props.onOpenSubagent} />
+        )}
         {props.onOpenSubagent === undefined ? null : (
           <OctantButton
             aria-label={`View all ${total} subagents in Agents`}
@@ -327,6 +334,92 @@ export function SubagentsTray(props: SubagentsTrayProps) {
       )}
     </div>
   );
+}
+
+/**
+ * The folded head's line while nothing needs the person and children work:
+ * what the parent waits on, the two longest-running by name and the rest
+ * counted. Each name opens its child, as the rows do.
+ */
+function WaitingLine(props: {
+  readonly rows: ReadonlyArray<SubagentRow>;
+  readonly onOpenSubagent?: ((runId?: string) => void) | undefined;
+}) {
+  const shown = props.rows.slice(0, 2);
+  const others = props.rows.length - shown.length;
+  const name = (row: SubagentRow) => {
+    const label = subagentTaskName(row);
+    return props.onOpenSubagent === undefined ? (
+      <span className="composer-subagents__name" key={row.id} title={row.task}>
+        {label}
+      </span>
+    ) : (
+      <OctantButton
+        className="composer-subagents__name composer-subagents__name--link"
+        key={row.id}
+        onClick={() => props.onOpenSubagent?.(row.id)}
+        title={row.task}
+        type="button"
+        variant="link"
+      >
+        {label}
+      </OctantButton>
+    );
+  };
+  const joiner = (index: number) =>
+    index === 0 ? null : (
+      <span className="composer-subagents__waiting-text" key={`join:${index}`}>
+        {others === 0 && index === shown.length - 1 ? " and " : ", "}
+      </span>
+    );
+  return (
+    <span className="composer-subagents__waiting">
+      <span className="composer-subagents__waiting-text">Waiting on&nbsp;</span>
+      {shown.flatMap((row, index) => [joiner(index), name(row)])}
+      {others === 0 ? null : (
+        <span className="composer-subagents__waiting-text">
+          {` and ${others} other${others === 1 ? "" : "s"}`}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function subagentTaskName(row: SubagentRow): string {
+  return (
+    row.task
+      .split("\n")
+      .map((part) => part.trim())
+      .find((part) => part !== "") ?? row.task
+  );
+}
+
+/**
+ * The working children to name in the folded head, longest-running first, or
+ * nothing when the head must keep its counts: any child that failed, waits,
+ * has a result to review, stopped or has no known status is attention, and
+ * attention comes first.
+ */
+function waitingRows(
+  entries: ReadonlyArray<AgentHierarchyInputEntry>,
+  observations: ReadonlyArray<AgentObservedChild>,
+  rows: ReadonlyArray<SubagentRow>,
+): ReadonlyArray<SubagentRow> | undefined {
+  const working = new Set(["queued", "starting", "running"]);
+  const quiet = (status: string) => working.has(status) || status === "completed";
+  if (
+    [...entries, ...observations].some((child) => !quiet(child.lifecycleStatus)) ||
+    entries.some((entry) => entry.lifecycleStatus === "completed" && subagentNeedsReview(entry))
+  ) {
+    return undefined;
+  }
+  const active = rows.filter((row) => working.has(row.lifecycleStatus));
+  if (active.length === 0) return undefined;
+  const started = (row: SubagentRow) => {
+    const time = Date.parse(subagentStartedAt(row));
+    return Number.isFinite(time) ? time : Number.POSITIVE_INFINITY;
+  };
+  return [...active].sort((a, b) => started(a) - started(b));
 }
 
 function SubagentTrayRow(props: {

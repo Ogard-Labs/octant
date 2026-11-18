@@ -1,6 +1,6 @@
 # Sub-thread progress in a thread
 
-Status: Building (slice 1 of 2 done)
+Status: Done (2026-11-18)
 Size: Small — changes inside the settled subagent surfaces of the thread view
 Owner: maintainers · Started: 2026-11-18 · Approved: 2026-11-18, maintainers ("start the orchestrator sub-thread fixes", from the ranked assessment)
 
@@ -68,7 +68,7 @@ surfaces (2026-11-18) ranked the gaps below.
 ## Build plan
 
 1. Done (2026-11-18): FR-1, FR-2, FR-5: rows open their child, real run time everywhere, one name.
-2. FR-3, FR-4: the waiting line and the quiet finish line.
+2. Done (2026-11-18): FR-3, FR-4: the waiting line and the quiet finish line.
 
 Each slice: focused tests, a visual-check scene if a covered screen changes,
 and the spec moved into thread-view.md.
@@ -77,3 +77,4 @@ and the spec moved into thread-view.md.
 
 - 2026-11-18: first draft, approved with the request to start.
 - 2026-11-18: slice 1 built (FR-1, FR-2, FR-5); rules moved into thread-view.md, workspace.md and decisions.md.
+- 2026-11-18: slice 2 built (FR-3, FR-4); rules moved into thread-view.md and decisions.md.

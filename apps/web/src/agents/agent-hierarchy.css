@@ -478,6 +478,53 @@
   flex: 0 0 auto;
 }
 
+/* The folded head's waiting line: one line the head's height, names cut with
+   an ellipsis, so swapping it for the counts moves nothing. */
+.composer-subagents__head:has(.composer-subagents__waiting) .composer-subagents__toggle {
+  flex: 0 0 auto;
+}
+
+.composer-subagents__waiting {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: baseline;
+  overflow: hidden;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  line-height: 24px;
+  white-space: nowrap;
+}
+
+.composer-subagents__waiting-text {
+  flex: 0 0 auto;
+}
+
+.composer-subagents__name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composer-subagents__name--link {
+  display: block;
+  height: auto;
+  padding: 0;
+  font: inherit;
+  font-weight: normal;
+  text-align: start;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-decoration-color: var(--oct-hairline);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.composer-subagents__name--link:hover {
+  text-decoration-color: currentcolor;
+}
+
 .composer-subagents__body {
   display: grid;
   min-width: 0;
@@ -715,6 +762,30 @@
   min-width: 0;
   gap: var(--oct-space-1);
   padding: var(--oct-space-3) 0 0;
+}
+
+.child-result-quiet {
+  display: grid;
+  min-width: 0;
+  justify-items: center;
+  gap: var(--oct-space-1);
+}
+
+.child-result-quiet__line {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--oct-space-2);
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.child-result-quiet > div {
+  min-width: 0;
+  justify-self: stretch;
 }
 
 .child-result {

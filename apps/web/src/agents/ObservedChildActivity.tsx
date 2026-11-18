@@ -7,7 +7,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { OctantInput } from "../ui/base/OctantInput";
 import { observedChildUsageLine } from "./agentRunGraphFacts";
-import { subagentStatusWord, SubagentStatusIcon } from "./subagentStatus";
+import { subagentElapsedLabel, subagentStatusWord, SubagentStatusIcon } from "./subagentStatus";
 
 /** Selection keys never enter the managed run identifier or command paths. */
 export function observedChildSelectionId(child: AgentObservedChild): string {
@@ -195,7 +195,13 @@ function ObservedChildStop(props: {
 export function ObservedChildRow(props: {
   readonly child: AgentObservedChild;
   /** How long the child has run, by the shared run-time rule; the trailing slot. */
-  readonly runTime: string;
+  /**
+   * How long it ran, drawn in a trailing slot: the card passes it and ticks it.
+   * The Agents panel passes `seenAt` instead and keeps its "First seen" age,
+   * because nothing ticks there and its managed rows carry no time column.
+   */
+  readonly runTime?: string;
+  readonly seenAt?: number;
   /** The provider's display name, or its instance id when unknown. */
   readonly providerName: string;
   /** Present when the surface knows the instance, so its mark is drawn. */
@@ -207,16 +213,20 @@ export function ObservedChildRow(props: {
 }) {
   const child = props.child;
   const task = child.task ?? "Task unavailable";
+  const seen =
+    props.seenAt === undefined ? "" : subagentElapsedLabel(child.firstObservedAt, props.seenAt);
+  const runTime = props.runTime ?? "";
   const meta = [
     subagentStatusWord(child.lifecycleStatus),
     `Started by ${props.providerName}`,
     props.model ?? child.modelId ?? "Model unknown",
     observedChildUsageLine(child.usage),
+    seen === "" ? undefined : `First seen ${seen} ago`,
   ]
     .filter((part): part is string => part !== undefined)
     .join(" · ");
   // The run time is drawn once, in the trailing slot, and spoken through the label.
-  const spoken = props.runTime === "" ? meta : `${meta} · Ran ${props.runTime}`;
+  const spoken = runTime === "" ? meta : `${meta} · Ran ${runTime}`;
   return (
     <>
       <OctantButton
@@ -240,9 +250,11 @@ export function ObservedChildRow(props: {
             {child.finalSummary ?? (child.latestSummary || "No activity reported.")}
           </span>
         </span>
-        <span aria-hidden="true" className="composer-subagents__time">
-          {props.runTime}
-        </span>
+        {props.runTime === undefined ? null : (
+          <span aria-hidden="true" className="composer-subagents__time">
+            {runTime}
+          </span>
+        )}
       </OctantButton>
       <ObservedChildStop child={child} client={props.client} />
       <ObservedChildSteering child={child} client={props.client} />

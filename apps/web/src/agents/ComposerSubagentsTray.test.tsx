@@ -348,6 +348,67 @@ describe("SubagentsTray", () => {
     expect(onOpenSubagent).toHaveBeenLastCalledWith("b");
   });
 
+  it("says what a folded card waits on, oldest working child first, with the rest counted", () => {
+    const started = (id: string, createdAt: string) => ({
+      ...entry(id, "running"),
+      createdAt,
+      task: `Task ${id}\nsecond line`,
+    });
+    renderTray(
+      [
+        started("late", "2026-09-26T09:59:30.000Z"),
+        started("first", "2026-09-26T09:58:00.000Z"),
+        started("middle", "2026-09-26T09:59:00.000Z"),
+        entry("done", "completed"),
+      ],
+      { storage: memoryStorage() },
+    );
+
+    const tray = screen.getByRole("group", { name: "Subagents" });
+    expect(tray).toHaveTextContent("Waiting on Task first, Task middle and 1 other");
+    expect(tray).not.toHaveTextContent("working");
+    expect(within(tray).queryByText(/second line/)).not.toBeInTheDocument();
+  });
+
+  it("names one or two waiting children without a count", () => {
+    renderTray([entry("a", "running")], { storage: memoryStorage() });
+    expect(screen.getByRole("group", { name: "Subagents" })).toHaveTextContent("Waiting on Task a");
+    cleanup();
+    renderTray([entry("a", "running"), entry("b", "queued")], { storage: memoryStorage() });
+    expect(screen.getByRole("group", { name: "Subagents" })).toHaveTextContent(
+      "Waiting on Task a and Task b",
+    );
+  });
+
+  it("opens a child from its name in the folded head", async () => {
+    const user = userEvent.setup();
+    const { onOpenSubagent } = renderTray([entry("a", "running"), entry("b", "running")], {
+      storage: memoryStorage(),
+    });
+    await user.click(screen.getByRole("button", { name: "Task b" }));
+    expect(onOpenSubagent).toHaveBeenLastCalledWith("b");
+  });
+
+  it("keeps the counts while folded when a child failed or a result awaits review", () => {
+    renderTray([entry("a", "running"), entry("b", "failed")], { storage: memoryStorage() });
+    let tray = screen.getByRole("group", { name: "Subagents" });
+    expect(tray).toHaveTextContent("1 failed · 1 working");
+    expect(tray).not.toHaveTextContent("Waiting on");
+    cleanup();
+    renderTray([entry("a", "running"), entry("b", "completed", { required: true })], {
+      storage: memoryStorage(),
+    });
+    tray = screen.getByRole("group", { name: "Subagents" });
+    expect(tray).toHaveTextContent("1 to review · 1 working");
+    expect(tray).not.toHaveTextContent("Waiting on");
+  });
+
+  it("shows the counts, not the waiting line, once the card is open", () => {
+    renderTray([entry("a", "running")]);
+    expect(screen.getByRole("group", { name: "Subagents" })).not.toHaveTextContent("Waiting on");
+    expect(screen.getByRole("button", { name: /Subagents,/ })).toHaveTextContent("1 working");
+  });
+
   it("folds to its head and stays folded for this viewer", async () => {
     const user = userEvent.setup();
     const storage = memoryStorage({ "octant.composer-subagents.open": "true" });

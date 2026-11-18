@@ -337,7 +337,15 @@ reached the card dims and withholds Stop; the thread's connection notice says wh
 Task-plan completion is never counted as child completion. View all opens the
 full Agents list even when every child has finished. Expansion previews at most
 three active or unresolved children; longer history stays in Environment and
-Agents. Compact rows show task, semantic status, recorded model and available
+Agents. While the card is folded, no child needs attention (nothing failed,
+waiting, stopped, of unknown status or to review) and at least one child is
+working, its head reads one line in place of the counts, "Waiting on <A>, <B>
+and N others" ("and 1 other" for one more; "Waiting on <A>" or "Waiting on <A>
+and <B>" for one or two). The names are the longest-working children's task
+first lines, oldest first, cut with an ellipsis to fit, each a link-styled
+button that opens that child as the rows do. The head keeps its height and one
+line, so swapping it for the counts moves nothing; expanded, or with anything
+needing attention, the head shows the counts. Compact rows show task, semantic status, recorded model and available
 activity. Each row also shows how long the child has run, measured from its request (or
 first sight of a provider's own) to its last update and ticking while it works,
 the same rule as the transcript's row, at the trailing edge in a slot of fixed
@@ -368,9 +376,14 @@ not write, so it never renders as their right-aligned bubble. It is a
 left-aligned child-result card in the thread's measure: a status mark and
 "<Role> subagent finished" (or the state it stopped in), the provider and
 model, the task in meta ink, then the reply as Markdown, folded after about
-eight lines behind Show full result. A subagent that stopped gives the host's
-recorded reason in place of a reply. Run ID, generation and provider ID sit
-behind a Details disclosure. The card is one component in Chat, Work and
+eight lines behind Show full result. A child that finished is not drawn as that
+card at rest: its delivered result reads as one quiet centred line, "<Role>
+subagent finished · worked 48s" (the run time by the rows' rule, left out when
+no times are known), with the reply behind Show result, a disclosure that opens
+the card in place and works from the keyboard. A subagent that stopped or
+failed keeps the full card and gives the host's recorded reason in place of a
+reply. Run ID, generation and provider ID sit behind a Details disclosure in
+the opened card. The card is one component in Chat, Work and
 Code; a delivery the card cannot read is shown as its text under a plain
 "Subagent result" head.
 
@@ -387,7 +400,7 @@ usage where the runtime reports them, "Usage not reported" otherwise. Every
 row, managed or not, names its provider.
 
 A result steered into the parent's running turn shows as the same child-result
-card after that turn's reply, headed "Delivered into the running turn".
+line or card after that turn's reply, headed "Delivered into the running turn".
 
 Managed result previews identify their execution generation and recorded model.
 The result detail leads with the reported summary, files, checks and blockers;
