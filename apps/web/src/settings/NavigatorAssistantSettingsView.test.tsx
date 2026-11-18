@@ -113,10 +113,10 @@ describe("NavigatorAssistantSettingsView", () => {
 
     expect(
       screen.getByText(
-        "No ready providers are available. Connect one in Providers & Models to configure Navigator.",
+        "No provider is ready. Connect one in Providers & Models to set up Navigator.",
       ),
     ).toBeVisible();
-    expect(screen.getByText("No vision reviewer is configured.", { exact: false })).toBeVisible();
+    expect(screen.getByText("No image reviewer is set.", { exact: false })).toBeVisible();
   });
 });
 

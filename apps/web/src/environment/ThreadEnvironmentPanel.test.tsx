@@ -1,6 +1,9 @@
 import { decodeEnvironmentCompactIdentity, LOCAL_HOST_ID } from "@octant/contracts";
 import { render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import type { ContextClient } from "@octant/client-runtime/context-client";
+import { decodeThreadExternalContentState } from "@octant/contracts/content-provenance";
+import { describe, expect, it, vi } from "vitest";
+import { OutsideContentProvider } from "../composer/OutsideContentNotice";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
 
 const identity = decodeEnvironmentCompactIdentity({
@@ -126,5 +129,30 @@ describe("the thread environment panel", () => {
       </>,
     );
     expect(screen.queryByText("Previous pane facts")).not.toBeInTheDocument();
+  });
+
+  it("says in the panel that a marked thread read outside content, with a Review action", async () => {
+    const threadId = "40000000-0000-4000-8000-000000000001";
+    const client = {
+      externalContentAvailable: true,
+      readExternalContent: vi.fn(async () =>
+        decodeThreadExternalContentState({
+          threadId,
+          externalContentIngested: true,
+          version: 1,
+          ingestionCount: 2,
+          sources: [{ sourceLabel: "bash", ingestionCount: 2 }],
+        }),
+      ),
+      clearExternalContent: vi.fn(),
+    } as unknown as ContextClient;
+    render(
+      <OutsideContentProvider thread={{ client, mode: "code", threadId }}>
+        <ThreadEnvironmentPanel open summary={{ identity }} />
+      </OutsideContentProvider>,
+    );
+    const row = await screen.findByRole("region", { name: "Outside content" });
+    expect(row).toHaveTextContent("Outside content · read 2 times");
+    expect(within(row).getByRole("button", { name: "Review" })).toBeInTheDocument();
   });
 });

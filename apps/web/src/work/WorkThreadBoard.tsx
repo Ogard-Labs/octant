@@ -10,7 +10,7 @@ import type {
 import type { ProjectId } from "@octant/contracts/projects";
 import type { WorkThreadId } from "@octant/contracts/work-threads";
 import { THREAD_BOARD_STATUS_COLUMN_ORDER } from "@octant/domain/thread-board-policy";
-import { ChevronDown, Filter, Folder, RefreshCw, Search } from "lucide-react";
+import { ChevronDown, Filter, Folder, RefreshCw, Search } from "../ui/icons";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ThreadBoardCardLive,

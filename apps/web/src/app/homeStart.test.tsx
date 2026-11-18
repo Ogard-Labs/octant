@@ -92,9 +92,12 @@ describe("the start screen model", () => {
     );
     const before = result.current;
     const computersBefore = before?.cards?.find((card) => card.id === COMPUTERS_CARD_ID);
-    if (computersBefore === undefined) throw new Error("The start screen has no Computers card.");
+    if (computersBefore?.useContent === undefined) {
+      throw new Error("The start screen has no Computers card.");
+    }
+    const readBefore = computersBefore.useContent;
     // This computer alone, with nothing running on it, is a quiet card.
-    expect(renderHook(() => computersBefore.useContent()).result.current).toMatchObject({
+    expect(renderHook(() => readBefore()).result.current).toMatchObject({
       status: "ready",
       count: 0,
     });
@@ -102,8 +105,11 @@ describe("the start screen model", () => {
     rerender({ snapshots: [devbox] });
     expect(result.current).not.toBe(before);
     const computersAfter = result.current?.cards?.find((card) => card.id === COMPUTERS_CARD_ID);
-    if (computersAfter === undefined) throw new Error("The start screen lost its Computers card.");
-    const content = renderHook(() => computersAfter.useContent()).result.current;
+    if (computersAfter?.useContent === undefined) {
+      throw new Error("The start screen lost its Computers card.");
+    }
+    const readAfter = computersAfter.useContent;
+    const content = renderHook(() => readAfter()).result.current;
     if (content.status !== "ready") throw new Error("The Computers card did not settle.");
     expect(content.count).toBe(1);
     const { getByText } = render(<>{content.body}</>);

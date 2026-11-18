@@ -47,22 +47,6 @@
   margin-bottom: var(--oct-space-6);
 }
 
-/* An empty library sits in the middle of the page, as any empty page does. */
-.surface__inner:has(> .artifact-library > .surface-empty) {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-}
-
-.artifact-library:has(> .surface-empty) {
-  flex: 1 1 auto;
-}
-
-.artifact-library > .surface-empty {
-  flex: 1 1 auto;
-  align-content: center;
-}
-
 .artifact-library__search {
   display: flex;
   align-items: center;
@@ -83,14 +67,6 @@
   color: var(--oct-fg);
   font: inherit;
   outline: none;
-}
-
-/* .select paints the filters; the recipe's width: 100% is for form
-   columns, and here each filter shares one wrapping toolbar row. */
-.artifact-library__select {
-  width: auto;
-  min-height: var(--oct-control-height-sm);
-  font-size: var(--oct-text-sm);
 }
 
 /* The gallery/list choice sits at the end of the toolbar as a two-item
@@ -148,6 +124,132 @@
   list-style: none;
 }
 
+/* The List view is a table: the name (with where it lives), the person's tags,
+   whether it is shared, when it changed, and the sync and export controls.
+   The head and every row share one column list with fixed trailing widths, so
+   a tag added or a time ticking changes a cell's words and never moves a
+   column. */
+.artifact-table {
+  container-type: inline-size;
+}
+
+.artifact-table__head,
+.artifact-table-row {
+  --artifact-columns: minmax(0, 1fr) 11rem 5.5rem 5rem 11rem;
+  display: grid;
+  grid-template-columns: var(--artifact-columns);
+  align-items: center;
+  column-gap: var(--oct-space-4);
+  padding-inline: var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.artifact-table__head {
+  height: var(--oct-space-8);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.artifact-table__rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.artifact-table-row {
+  min-height: 2.5rem;
+}
+
+.artifact-table-row:hover {
+  background: var(--oct-wash-hover);
+}
+
+.artifact-table-row__open {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  min-width: 0;
+  /* The shared button recipe gives a button one line's height; a name over its
+     quiet second line needs its own. */
+  height: auto;
+  min-height: 0;
+  padding-block: var(--oct-space-1);
+  color: inherit;
+  text-align: start;
+  white-space: normal;
+  cursor: default;
+}
+
+.artifact-table-row__title,
+.artifact-table-row__meta {
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-table-row__title {
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
+}
+
+.artifact-table-row__meta,
+.artifact-table-row__share,
+.artifact-table-row__edited {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.artifact-table-row__share {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+/* Tags stay on one line, so a row with many tags keeps the same height as
+   the rest; the line scrolls sideways instead of wrapping. */
+.artifact-table-row__tags {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.artifact-table-row__tags > .artifact-tags {
+  flex-wrap: nowrap;
+}
+
+.artifact-table-row__tags .artifact-tags__chip {
+  flex: none;
+}
+
+.artifact-table-row__aside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--oct-space-1);
+}
+
+/* In a narrow pane the edited time gives way first: it stays in the open
+   button's description, while the tags, the share mark and the controls are
+   what a row must keep. */
+@container (max-width: 640px) {
+  .artifact-table__head,
+  .artifact-table-row {
+    --artifact-columns: minmax(0, 1fr) 8rem 5.5rem 11rem;
+  }
+
+  .artifact-table__head > :nth-child(4),
+  .artifact-table-row__edited {
+    display: none;
+  }
+}
+
 .artifact-row {
   display: flex;
   flex-wrap: wrap;
@@ -174,6 +276,9 @@
 
 .artifact-row__open:hover {
   background: var(--oct-surface);
+}
+.artifact-row__open:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
 }
 
 .artifact-row__title {
@@ -262,6 +367,9 @@
   background: var(--oct-surface);
   color: var(--oct-fg);
 }
+.artifact-tags__chip-remove:active {
+  background: var(--oct-wash-pressed);
+}
 
 .artifact-tags__add {
   display: inline-flex;
@@ -311,22 +419,19 @@
   border: 0;
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: default;
-  transition: box-shadow var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
 .artifact-card__button:hover {
-  box-shadow: var(--octant-shadow-md);
+  background: color-mix(in oklab, var(--oct-surface) 94%, var(--oct-fg));
 }
-
-@media (prefers-reduced-motion: reduce) {
-  .artifact-card__button {
-    transition: none;
-  }
+.artifact-card__button:active {
+  background: var(--oct-wash-pressed);
 }
 
 .artifact-card__preview {

@@ -120,7 +120,7 @@ export function ProjectMemoryProposalPrompt(props: {
           <ApprovalOutsideContentNote outsideContent={pending.outsideContent} />
         )
       }
-      detail="Every later thread in this Project starts with its memory. The entry will be marked as written by an agent in this thread."
+      detail="Every later thread in this Project starts with this memory. It is marked as written by an agent."
       error={message}
       label="Project memory change"
       summary={proposalSummary(change)}

@@ -967,6 +967,137 @@ describe("Project icon route", () => {
   });
 });
 
+describe("Project icon change route", () => {
+  const iconUrl = `http://127.0.0.1/api/projects/${projectId}/icon`;
+  const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+
+  function changeRoute(options: { reachable?: boolean; refuse?: boolean } = {}) {
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: 0 });
+    const write = vi.fn(async () =>
+      options.refuse === true
+        ? ({ status: "refused", reason: "not-an-image", message: "Not an image." } as const)
+        : ({ status: "stored" } as const),
+    );
+    const remove = vi.fn(async () => undefined);
+    const route = createProjectRouteHandler({
+      service: {
+        bootstrap: async () => ({
+          active: options.reachable === false ? [] : [{ id: projectId }],
+        }),
+      } as never,
+      environmentService: {} as never,
+      windowAuthorityStore: store,
+      customIcons: { write, remove },
+      now: () => 1,
+    });
+    return { route, write, remove };
+  }
+
+  const authed = { "x-octant-window-capability": capability };
+
+  it("copies the image a window on this host sends for a Project it can reach", async () => {
+    const { route, write } = changeRoute();
+
+    const response = await route(
+      new Request(iconUrl, {
+        method: "PUT",
+        headers: { ...authed, "content-type": "image/png" },
+        body: png,
+      }),
+    );
+
+    expect(response?.status).toBe(204);
+    expect(write).toHaveBeenCalledWith(projectId, png, "image/png");
+  });
+
+  it("answers the refusal's message when the file is not an acceptable icon", async () => {
+    const { route } = changeRoute({ refuse: true });
+
+    const response = await route(
+      new Request(iconUrl, {
+        method: "PUT",
+        headers: { ...authed, "content-type": "image/png" },
+        body: png,
+      }),
+    );
+
+    expect(response?.status).toBe(400);
+    expect(await response?.json()).toMatchObject({ message: "Not an image." });
+  });
+
+  it("refuses an image that declares more than 256 KB before reading it", async () => {
+    const { route, write } = changeRoute();
+
+    const response = await route(
+      new Request(iconUrl, {
+        method: "PUT",
+        headers: { ...authed, "content-type": "image/png", "content-length": "300000" },
+        body: png,
+      }),
+    );
+
+    expect(response?.status).toBe(413);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("refuses a window that cannot reach the Project and a request without a credential", async () => {
+    const stranger = changeRoute({ reachable: false });
+    const anonymous = changeRoute();
+
+    const unreachable = await stranger.route(
+      new Request(iconUrl, {
+        method: "PUT",
+        headers: { ...authed, "content-type": "image/png" },
+        body: png,
+      }),
+    );
+    const unauthenticated = await anonymous.route(
+      new Request(iconUrl, { method: "PUT", headers: { "content-type": "image/png" }, body: png }),
+    );
+
+    expect(unreachable?.status).toBe(404);
+    expect(unauthenticated?.status).toBe(401);
+    expect(stranger.write).not.toHaveBeenCalled();
+    expect(anonymous.write).not.toHaveBeenCalled();
+  });
+
+  it("drops the chosen icon with a DELETE", async () => {
+    const { route, remove } = changeRoute();
+
+    const response = await route(new Request(iconUrl, { method: "DELETE", headers: authed }));
+
+    expect(response?.status).toBe(204);
+    expect(remove).toHaveBeenCalledWith(projectId);
+  });
+
+  it("serves which icon it is so the page can offer the folder's own", async () => {
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: 0 });
+    const route = createProjectRouteHandler({
+      service: {} as never,
+      environmentService: {} as never,
+      windowAuthorityStore: store,
+      icons: {
+        read: async () => ({
+          status: "found",
+          bytes: png,
+          mediaType: "image/png",
+          etag: '"1-1"',
+          source: "custom",
+          foundAvailable: false,
+        }),
+      },
+      now: () => 1,
+    });
+
+    const response = await route(new Request(iconUrl, { headers: authed }));
+
+    expect(response?.headers.get("x-octant-project-icon-source")).toBe("custom");
+    expect(response?.headers.get("x-octant-project-icon-found")).toBe("0");
+  });
+});
+
 function routeFixture(
   overrides: Record<string, unknown>,
   environmentOverrides: Record<string, unknown> = {},

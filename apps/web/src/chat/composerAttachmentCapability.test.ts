@@ -73,7 +73,7 @@ describe("buildImageAttachmentCapability", () => {
 
     expect(capability).toEqual({
       kind: "unavailable",
-      reason: "The selected model does not accept images. Choose an image-capable model.",
+      reason: "This model cannot read images. Pick one that can.",
     });
   });
 

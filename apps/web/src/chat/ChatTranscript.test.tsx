@@ -372,7 +372,7 @@ describe("ChatTranscript", () => {
       />,
     );
 
-    const fold = screen.getByRole("button", { name: "3 tool calls" });
+    const fold = screen.getByRole("button", { name: "3 tool calls: 2 web requests, 1 read" });
     expect(screen.getByRole("button", { name: "Read, unfinished" })).toBeInTheDocument();
     expect(screen.getByText("Web search")).not.toBeVisible();
     await userEvent.click(fold);
@@ -601,7 +601,7 @@ describe("ChatTranscript", () => {
   it.each([
     ["timed-out", "The provider stopped responding and the turn timed out."],
     ["unavailable", "The provider is unavailable."],
-    ["tool-timed-out", "An app-managed tool call did not return before the turn deadline."],
+    ["tool-timed-out", "A tool call did not finish before the time limit."],
   ] as const)("states why a %s turn failed in Octant's own words", (code, sentence) => {
     const failed = viewFixture().turns[0]!.attempts[0]!;
     render(
@@ -1495,7 +1495,7 @@ describe("ChatTranscript", () => {
           view={viewFixture()}
         />,
       );
-      const fork = screen.queryByRole("button", { name: "Fork from here" }) !== null;
+      const fork = screen.queryAllByRole("button", { name: "Fork from here" }).length > 0;
       await userEvent.click(screen.getByRole("button", { name: "More actions" }));
       await screen.findByRole("menuitem", { name: "Forget" });
       const offered = {
@@ -2055,7 +2055,7 @@ function providerGroup(id: string, conversation: "native" | "replayed"): PickerG
     }),
     runtime: conversation === "native" ? "provider" : "octant-harness",
     readiness: "ready",
-    driverLabel: conversation === "native" ? "Codex CLI" : "OpenAI-compatible",
+    driverLabel: conversation === "native" ? "Codex" : "OpenAI-compatible",
     endpointHost: undefined,
     executionHost: "This computer",
     sections: [],

@@ -53,6 +53,15 @@ describe("OctantEmpty states", () => {
     expect(container.querySelector('[data-slot="empty-description"]')).toBeNull();
   });
 
+  it("renders one raised, token-owned state card", () => {
+    render(<OctantEmpty message="Try the primary action." role="status" title="Nothing here" />);
+
+    const state = screen.getByRole("status");
+    expect(state).toHaveAttribute("data-slot", "empty");
+    expect(state).toHaveClass("rounded-xl");
+    expect(state).toHaveClass("outline-(--oct-hairline)");
+  });
+
   it("marks an unavailable state by its glyph and words, never by a warning colour", () => {
     render(
       <OctantEmpty

@@ -35,7 +35,7 @@ export function HostDataMapView({ report }: HostDataMapViewProps) {
     <div className="host-data-map" data-setting-id="data-map" id="settings-data-map">
       <SettingsPanel
         title="Data map"
-        description="What this host stores, and where. Names and locations only — never secrets. This view is read-only."
+        description="What this host stores, and where. Names and places only, never secrets. Read-only."
       >
         <HostFacts report={report} />
       </SettingsPanel>
@@ -120,7 +120,7 @@ function RelatedActions({ report }: { readonly report: HostDataMap }) {
   return (
     <SettingsPanel
       title="Purge and export"
-      description="This map does not delete or export anything. Those actions live on their existing surfaces."
+      description="This map deletes and exports nothing. Use the existing pages for that."
     >
       <ul className="host-data-map__related">
         {report.related.map((action) =>

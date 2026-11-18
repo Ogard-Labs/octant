@@ -150,6 +150,29 @@ describe("useThemeController", () => {
     expect(seen).toEqual(["light"]);
   });
 
+  it("says so when a choice is refused because another window changed the settings, and shows the saved value", async () => {
+    const client = {
+      bootstrap: async () => ({ settings: DEFAULT_THEME_SETTINGS, version: 1 }),
+      execute: async () => {
+        throw new ThemeClientFailure({
+          category: "conflict",
+          message: "Appearance changed elsewhere.",
+          expectedVersion: 1 as never,
+          actualVersion: 2 as never,
+        });
+      },
+    } as unknown as ThemeClient;
+    const view = mount(client);
+    await waitFor(() => expect(view.result.current.status).toBe("ready"));
+
+    await act(async () => {
+      expect(await view.result.current.applyPatch({ mode: "light" })).toBe(false);
+    });
+
+    await waitFor(() => expect(view.result.current.draft?.mode).toBe("system"));
+    expect(view.result.current.error).toBe("Appearance changed elsewhere.");
+  });
+
   it("saves the value pressed, not the draft as it stood before the press", async () => {
     const { client, seen } = versionedClient();
     const view = mount(client);

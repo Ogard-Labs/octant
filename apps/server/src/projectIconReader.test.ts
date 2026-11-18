@@ -44,4 +44,71 @@ describe("Project icon reader", () => {
     expect(await read(windowId, unknownId)).toEqual({ status: "none" });
     expect(find).not.toHaveBeenCalled();
   });
+
+  it("serves the chosen icon before the folder's own and says the folder has one", async () => {
+    const chosen: ProjectIconLookup = {
+      status: "found",
+      bytes: new Uint8Array(new ArrayBuffer(2)),
+      mediaType: "image/svg+xml",
+      etag: '"2-2"',
+    };
+    const projects = {
+      bootstrap: vi.fn(async () => ({
+        active: [{ id: codeId, type: "code", binding: { canonicalRoot: "/opaque/code" } }],
+      })),
+    };
+    const read = createProjectIconReader({
+      projects: projects as never,
+      find: async () => hit,
+      custom: { read: async () => chosen },
+    }).read;
+
+    expect(await read(windowId, codeId)).toMatchObject({
+      status: "found",
+      mediaType: "image/svg+xml",
+      source: "custom",
+      foundAvailable: true,
+    });
+  });
+
+  it("falls back to the folder's icon when none was chosen, and to nothing when neither exists", async () => {
+    const projects = {
+      bootstrap: vi.fn(async () => ({
+        active: [{ id: codeId, type: "code", binding: { canonicalRoot: "/opaque/code" } }],
+      })),
+    };
+    const none = { read: async () => ({ status: "none" as const }) };
+    const withFound = createProjectIconReader({
+      projects: projects as never,
+      find: async () => hit,
+      custom: none,
+    }).read;
+    const withNothing = createProjectIconReader({
+      projects: projects as never,
+      find: async () => ({ status: "none" }),
+      custom: none,
+    }).read;
+
+    expect(await withFound(windowId, codeId)).toBe(hit);
+    expect(await withNothing(windowId, codeId)).toEqual({ status: "none" });
+  });
+
+  it("lets a Chat Project show a chosen icon even though it has no folder", async () => {
+    const chosen: ProjectIconLookup = {
+      status: "found",
+      bytes: new Uint8Array(new ArrayBuffer(2)),
+      mediaType: "image/png",
+      etag: '"2-2"',
+    };
+    const find = vi.fn(async (_root: string) => hit);
+    const projects = { bootstrap: vi.fn(async () => ({ active: [{ id: chatId, type: "chat" }] })) };
+    const read = createProjectIconReader({
+      projects: projects as never,
+      find,
+      custom: { read: async () => chosen },
+    }).read;
+
+    expect(await read(windowId, chatId)).toMatchObject({ source: "custom", foundAvailable: false });
+    expect(find).not.toHaveBeenCalled();
+  });
 });

@@ -1,5 +1,5 @@
 import { createElement, useId, useState, type KeyboardEvent } from "react";
-import { Slash } from "lucide-react";
+import { Slash } from "../ui/icons";
 import type { ProviderInstanceId, ProviderSlashCommand } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
 import {

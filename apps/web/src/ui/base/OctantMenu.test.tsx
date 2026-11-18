@@ -153,3 +153,82 @@ describe("OctantMenu", () => {
     expect(onValueChange).toHaveBeenCalledWith("none", expect.anything());
   });
 });
+
+describe("menus in the desktop app", () => {
+  it("open in the page even where the desktop offers its own menus, so a row keeps its description", async () => {
+    const popup = vi.fn(async () => ({ kind: "dismissed" }));
+    Object.defineProperty(window, "octantHost", {
+      configurable: true,
+      value: { popupNativeMenu: popup },
+    });
+    try {
+      const user = userEvent.setup();
+      render(
+        <OctantMenu
+          items={[
+            { value: "work", label: "Work", description: "Files and documents" },
+            { value: "code", label: "Code", description: "A checkout and a terminal" },
+          ]}
+          onValueChange={vi.fn()}
+          trigger="Mode"
+          triggerLabel="Mode"
+          value="work"
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: "Mode" }));
+      expect(
+        await screen.findByRole("menuitemradio", { name: "Code" }),
+      ).toHaveAccessibleDescription("A checkout and a terminal");
+      expect(popup).not.toHaveBeenCalled();
+    } finally {
+      Reflect.deleteProperty(window, "octantHost");
+    }
+  });
+
+  it("caps its popup at the room the window leaves and lets the rows scroll", async () => {
+    const user = userEvent.setup();
+    render(
+      <OctantMenu
+        items={[
+          { label: "First", value: "first" },
+          { label: "Second", value: "second" },
+        ]}
+        onValueChange={vi.fn()}
+        trigger="Pick"
+        triggerLabel="Pick"
+        value="first"
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Pick" }));
+    const popup = (await screen.findByRole("menu")) as HTMLElement;
+    expect(popup.className).toContain("max-h-(--available-height)");
+    expect(popup.className).toContain("overflow-y-auto");
+  });
+
+  it("draws a destructive action in the danger ink and leaves the others plain", async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    render(
+      <OctantMenu
+        items={[
+          { label: "Rename", value: "rename" },
+          { destructive: true, label: "Delete", value: "delete" },
+        ]}
+        onValueChange={onValueChange}
+        selectionMode="action"
+        trigger="Actions"
+        triggerLabel="Actions"
+        value=""
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Delete" })).toHaveAttribute(
+      "data-destructive",
+    );
+    expect(screen.getByRole("menuitem", { name: "Rename" })).not.toHaveAttribute(
+      "data-destructive",
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(onValueChange).toHaveBeenCalledWith("delete");
+  });
+});

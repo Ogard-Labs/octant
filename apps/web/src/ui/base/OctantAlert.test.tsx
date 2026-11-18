@@ -44,13 +44,17 @@ describe("OctantAlert", () => {
 
   it("draws a neutral alert's icon in neutral ink and only the warning variant's in the warning ink", () => {
     const system = readFileSync(join(process.cwd(), "src/styles/octant.css"), "utf8");
-    const mark = (selector: string) =>
-      new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\="]/g, "\\$&")} > svg \\{([^}]*)\\}`).exec(
+    const tone = (selector: string) =>
+      new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\="]/g, "\\$&")} \\{([^}]*)\\}`).exec(
         system,
       )?.[1] ?? "";
-    expect(mark(".callout")).toContain("color: var(--oct-meta);");
-    expect(mark('.callout[data-tone="warning"]')).toContain("color: var(--oct-warn-fg);");
-    expect(mark('.callout[data-tone="danger"]')).toContain("color: var(--oct-danger-fg);");
+    // The tone is one property the icon and its dot read; nothing else on the
+    // card changes colour, so no tone tints the fill or the edge.
+    expect(tone(".callout")).toContain("--callout-tone: var(--oct-meta);");
+    expect(tone('.callout[data-tone="warning"]')).toContain("--callout-tone: var(--oct-warn-fg);");
+    expect(tone('.callout[data-tone="danger"]')).toContain("--callout-tone: var(--oct-danger-fg);");
+    expect(tone(".callout > svg")).toContain("color: var(--callout-tone);");
+    expect(tone('.callout[data-tone="warning"]')).not.toMatch(/background|border/);
     render(<OctantAlert>Plain.</OctantAlert>);
     expect(screen.getByRole("status")).toHaveAttribute("data-tone", "neutral");
   });

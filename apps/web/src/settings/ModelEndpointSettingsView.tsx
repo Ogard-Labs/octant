@@ -10,7 +10,7 @@ import {
   isNativeHarnessDriverKind,
   modelCarriesAppManagedTools,
 } from "@octant/domain";
-import { Plus } from "lucide-react";
+import { Plus } from "../ui/icons";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useHostPlatform } from "../platform";
 import { boundSubscriptionOffer } from "../providers/configuration/HttpConfigurationForms";
@@ -449,7 +449,7 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
         }
         description={
           <>
-            Services Octant sends requests to itself. Their models appear under Octant in the model
+            Services Octant itself sends requests to. Their models show under Octant in the model
             picker.{" "}
             <span aria-label="Endpoint summary" className="endpoint-list__summary" role="status">
               {summarize(rows.map((row) => row.status))}

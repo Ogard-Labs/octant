@@ -6,15 +6,7 @@ import {
   type OctantKeybindingActionId,
   type OctantKeybindings,
 } from "@octant/domain";
-import {
-  Check,
-  ClipboardCheck,
-  Clock,
-  CornerUpLeft,
-  Minus,
-  X,
-  type LucideIcon,
-} from "lucide-react";
+import { Check, Clock, CornerUpLeft, Minus, X, type IconComponent } from "../ui/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ParsedDiffFile } from "../code/unifiedDiff";
 import { UnifiedDiffList } from "../code/UnifiedDiffList";
@@ -60,6 +52,8 @@ export interface ReviewPageProps {
   readonly changeRevision: number;
   readonly now: number;
   readonly onClose: () => void;
+  /** The one action from an empty page: start a thread. Absent hides the button. */
+  readonly onStartThread?: () => void;
   readonly onOpen: (entry: ReviewEntry) => void;
   readonly onComplete: (entry: ReviewEntry) => Promise<ReviewActionOutcome>;
   readonly onSnooze: (entry: ReviewEntry, until: string) => Promise<ReviewActionOutcome>;
@@ -118,7 +112,7 @@ function useLoaded<T>(
   return state.key === key ? state.loaded : { status: "loading" };
 }
 
-const CHECK_ICONS: Readonly<Record<ReviewCheckKind, LucideIcon>> = {
+const CHECK_ICONS: Readonly<Record<ReviewCheckKind, IconComponent>> = {
   passed: Check,
   failing: X,
   pending: Clock,
@@ -492,8 +486,20 @@ export function ReviewPage(props: ReviewPageProps) {
         {selected === undefined ? (
           <OctantEmpty
             layout="line"
-            detail="Finished threads you have not opened will appear here."
-            icon={<ClipboardCheck size={20} />}
+            {...(props.onStartThread === undefined
+              ? {}
+              : {
+                  action: (
+                    <OctantButton
+                      onClick={props.onStartThread}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      Start a thread
+                    </OctantButton>
+                  ),
+                })}
             title="Nothing waiting for review"
           />
         ) : (

@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Circle, CircleX, Clock3, LoaderCircle } from "lucide-react";
+import { Check, ChevronDown, Circle, CircleX, Clock3, LoaderCircle } from "../ui/icons";
 import { useId, useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 

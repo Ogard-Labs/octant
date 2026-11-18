@@ -78,7 +78,11 @@ export function useBrowserThreadRead(options: BrowserThreadSnapshotOptions): Bro
                 controller.signal,
               )
             : await client.inspect(
-                { contextId: decodeBrowserContextId(contextId), threadId },
+                {
+                  contextId: decodeBrowserContextId(contextId),
+                  threadId,
+                  ...(picture ? { freshPicture: true } : {}),
+                },
                 controller.signal,
               );
         if (controller.signal.aborted) return true;

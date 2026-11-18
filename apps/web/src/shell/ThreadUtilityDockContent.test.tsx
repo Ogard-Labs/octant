@@ -205,7 +205,7 @@ describe("thread utility dock content", () => {
       />,
     );
     expect(
-      await screen.findAllByText(/turned off in Settings/i, {}, { timeout: 10_000 }),
+      await screen.findAllByText("Subagents are turned off", {}, { timeout: 10_000 }),
     ).not.toHaveLength(0);
     expect(screen.queryByRole("form", { name: "Create subagent" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Task")).not.toBeInTheDocument();
@@ -219,9 +219,7 @@ describe("thread utility dock content", () => {
   it("states why iOS Simulator is unavailable when the thread has no Xcode project", async () => {
     const { appleProjectPath: _missing, ...withoutProject } = props();
     render(<ThreadUtilityDockContent {...withoutProject} />);
-    expect(
-      await screen.findByRole("heading", { name: "iOS Simulator is unavailable" }),
-    ).toBeVisible();
+    expect(await screen.findByText("iOS Simulator is unavailable")).toBeVisible();
   });
 
   it("explains that Files opens from a Code thread when the active thread is Chat", async () => {
@@ -236,7 +234,7 @@ describe("thread utility dock content", () => {
     // The Files pane is lazy-loaded; a cold module transform can exceed the
     // query library's one-second default in the full renderer suite.
     expect(
-      await screen.findByRole("heading", { name: "Files is unavailable" }, { timeout: 5_000 }),
+      await screen.findByText("Files is unavailable", undefined, { timeout: 5_000 }),
     ).toBeVisible();
     expect(screen.getByText("Files opens from a Code thread.")).toBeVisible();
   });
@@ -323,15 +321,9 @@ describe("thread utility dock content", () => {
     render(<ThreadUtilityDockContent {...props()} surface="pull-requests" />);
 
     expect(
-      await screen.findByRole(
-        "heading",
-        { name: "Pull requests is unavailable" },
-        { timeout: 5_000 },
-      ),
+      await screen.findByText("Pull requests is unavailable", undefined, { timeout: 5_000 }),
     ).toBeVisible();
-    expect(
-      screen.getByText("This thread has no Project whose pull requests could be listed."),
-    ).toBeVisible();
+    expect(screen.getByText("This thread has no Project to list pull requests for.")).toBeVisible();
   });
 
   it("uses a loading state while Code utility data is still arriving", async () => {
@@ -344,17 +336,13 @@ describe("thread utility dock content", () => {
     );
 
     expect(screen.getByRole("status")).toHaveTextContent("Loading Terminal");
-    expect(
-      screen.queryByRole("heading", { name: "Terminal is unavailable" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Terminal is unavailable")).not.toBeInTheDocument();
   });
 
   it("states why iOS Simulator is unavailable when the Apple toolchain client is missing", async () => {
     const { appleToolchainClient: _missing, ...withoutClient } = props();
     render(<ThreadUtilityDockContent {...withoutClient} />);
-    expect(
-      await screen.findByRole("heading", { name: "iOS Simulator is unavailable" }),
-    ).toBeVisible();
+    expect(await screen.findByText("iOS Simulator is unavailable")).toBeVisible();
     expect(screen.queryByText(/apple-workbench/)).not.toBeInTheDocument();
   });
 
@@ -434,8 +422,6 @@ describe("thread utility dock content", () => {
 
   it("states why Android emulator is unavailable when the toolchain client is missing", async () => {
     render(<ThreadUtilityDockContent {...props()} surface="android-emulator" />);
-    expect(
-      await screen.findByRole("heading", { name: "Android emulator is unavailable" }),
-    ).toBeVisible();
+    expect(await screen.findByText("Android emulator is unavailable")).toBeVisible();
   });
 });

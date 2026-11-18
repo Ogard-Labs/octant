@@ -91,12 +91,17 @@ export function LocalCommitsPanel(props: LocalCommitsPanelProps) {
       ) : null}
       {listing.kind === "ready" ? (
         <>
-          <div className="git-history__status" role="status">
-            {listing.commits.length.toLocaleString("en")}
-            {listing.truncated ? "+ " : " "}
-            {listing.commits.length === 1 ? "local commit" : "local commits"}
-            {listing.comparedWith === undefined ? "" : ` · not on ${listing.comparedWith}`}
-          </div>
+          {/* With nothing to list the count said "0 local commits · not on
+              main" over a line saying every commit is on main: one state says
+              it once. */}
+          {listing.commits.length === 0 ? null : (
+            <div className="git-history__status" role="status">
+              {listing.commits.length.toLocaleString("en")}
+              {listing.truncated ? "+ " : " "}
+              {listing.commits.length === 1 ? "local commit" : "local commits"}
+              {listing.comparedWith === undefined ? "" : ` · not on ${listing.comparedWith}`}
+            </div>
+          )}
           {listing.truncated ? (
             <p className="git-history__notice" role="note">
               Showing the newest {listing.commits.length.toLocaleString("en")}. Older local commits
@@ -104,11 +109,16 @@ export function LocalCommitsPanel(props: LocalCommitsPanelProps) {
             </p>
           ) : null}
           {listing.commits.length === 0 ? (
-            <p className="git-history__notice">
-              {listing.comparedWith === undefined
-                ? "There is no upstream or base branch to compare against."
-                : `Every commit on this branch is already on ${listing.comparedWith}.`}
-            </p>
+            <OctantEmpty
+              message={
+                listing.comparedWith === undefined
+                  ? "There is no upstream or base branch to compare against."
+                  : `Every commit on this branch is already on ${listing.comparedWith}.`
+              }
+              role="status"
+              state="neutral"
+              title="No local commits"
+            />
           ) : (
             <ul className="git-history__diffs">
               {listing.commits.map((commit) => (

@@ -11,7 +11,7 @@ import {
   type ConnectorCatalogEntry,
   type ConnectorCategory,
 } from "@octant/domain";
-import { Search } from "lucide-react";
+import { Search } from "../ui/icons";
 import { useCallback, useId, useRef, useState, type ReactNode } from "react";
 import { SettingsSection } from "../settings/primitives";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -31,8 +31,6 @@ export interface ConnectorsViewProps {
   /** Whether this host keeps keys and runs sign-ins: the Octant window on it. */
   readonly localHost: boolean;
   readonly disabled: boolean;
-  /** The toggle between Installed, Marketplace and Connectors, kept in the section's actions. */
-  readonly actions: ReactNode;
   /** Told after a connector's package was added, so the installed set is read again. */
   readonly onConnected: () => void;
   /** The host's connection listing, already read, so a connected row can say it stopped working. */
@@ -130,7 +128,6 @@ export function ConnectorsView(props: ConnectorsViewProps) {
 
   return (
     <SettingsSection
-      actions={props.actions}
       className="extensions-settings__section"
       description="Hosted services an agent can use once you connect them. Connecting adds the server to this host; nothing is fetched to show this list."
       title="Connectors"

@@ -1,3 +1,4 @@
+import type { PreparationTarget } from "../projects/WorktreePreparationDialog";
 import type { HostId } from "@octant/contracts/host";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -35,7 +36,6 @@ import type { useContextController } from "../context/useContextController";
 import type { RepositoryIssueRow } from "../github/readIssuesAcrossRepositories";
 import type { useMachineChangeFeed } from "../polling/useMachineChangeFeed";
 import type { useProjectController } from "../projects/useProjectController";
-import type { useDiscoveryController } from "../providers/useDiscoveryController";
 import type { ProviderController } from "../providers/useProviderController";
 import { useFirstPartyPluginsEffective } from "../shell/firstPartyPluginsEffective";
 import type { DraftThreadWorkspaceProps } from "../shell/DraftThreadWorkspace";
@@ -201,7 +201,6 @@ export interface ThreadPaneContainerProps {
   readonly crossContextOffer: ShellController["crossContextOffer"];
   readonly createHostId: HostId;
   readonly createHostViewScope: CreateHostViewScope;
-  readonly discoveryController: ReturnType<typeof useDiscoveryController>;
   readonly dockOpen: boolean;
   readonly dockSurface?: RightUtilityDockSurfaceId;
   readonly draftCreating: boolean;
@@ -220,6 +219,8 @@ export interface ThreadPaneContainerProps {
   readonly hidden: boolean;
   readonly homeStart?: DraftThreadWorkspaceProps["homeStart"];
   readonly hostBridge?: OctantHostBridge;
+  /** Opens worktree setup for one Code thread's checkout. */
+  readonly onOpenWorktrees?: (target: PreparationTarget) => void;
   readonly hosts: NonNullable<WorkspaceViewProps["hosts"]>;
   readonly imageGenerationProfiles?: ReturnType<typeof listEligibleImageProfiles>;
   readonly isNarrow: boolean;
@@ -245,13 +246,12 @@ export interface ThreadPaneContainerProps {
   readonly presentedLayout: NonNullable<ShellController["presentedLayout"]>;
   readonly projectClient: ProjectController["client"];
   readonly providerController: ProviderController;
-  readonly providerReady: boolean;
   readonly revealTurn?: RevealedThreadTurn;
   readonly serverUrl: string;
   readonly settings: NonNullable<ShellController["settings"]>;
   readonly tabActivation: ShellController["tabActivation"];
   readonly threadStatsSummary: ReturnType<typeof useThreadTurnMetrics>;
-  readonly welcomeBackdrop?: ReactNode;
+  readonly welcomeGround?: boolean;
   readonly windowCapability: string;
   readonly workCreateThreadAvailable: boolean;
   readonly workNavigation: ReturnType<typeof useWorkThreadNavigation>;
@@ -305,7 +305,6 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     crossContextOffer,
     createHostId,
     createHostViewScope,
-    discoveryController,
     dockOpen,
     dockSurface,
     draftCreating,
@@ -342,13 +341,12 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     presentedLayout,
     projectClient,
     providerController,
-    providerReady,
     revealTurn,
     serverUrl,
     settings,
     tabActivation,
     threadStatsSummary,
-    welcomeBackdrop,
+    welcomeGround,
     windowCapability,
     workCreateThreadAvailable,
     workNavigation,
@@ -619,7 +617,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   threadMenuItems={threadMenuItems}
                   sandboxRestrictionsClient={props.clients.sandboxRestrictionsClient}
                   {...(contextClient === undefined ? {} : { contextClient })}
-                  {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
+                  {...(welcomeGround === undefined ? {} : { welcomeGround })}
                   followUpSuggestions={{
                     client: followUpSuggestionClient,
                     sideTaskClient,
@@ -714,6 +712,9 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   extensionClient={extensionClient}
                   automationClient={automationClient}
                   onOpenRoutine={openRoutine}
+                  {...(props.onOpenWorktrees === undefined
+                    ? {}
+                    : { onOpenWorktrees: props.onOpenWorktrees })}
                   workPromotionController={workPromotionController}
                   codeProviderChoices={codeProviderChoices}
                   openInApplications={settings.openInApplications}
@@ -770,11 +771,6 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   {...(activeMode === "chat" && draftError !== undefined
                     ? { chatWelcomeError: draftError }
                     : {})}
-                  providerReady={providerReady}
-                  {...(discoveryController.message === undefined
-                    ? {}
-                    : { providerBootstrapMessage: discoveryController.message })}
-                  onOpenDraftThread={(mode) => void openDraftThread(mode)}
                   workCreateThreadAvailable={workCreateThreadAvailable}
                   workMutationClient={workMutationClient}
                   workThreadClient={workThreadClient}
@@ -798,6 +794,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   }}
                   usageDashboardClient={usageDashboardClient}
                   spendCeilingClient={spendCeilingClient}
+                  {...(settings.spendCeilingShown ? { spendCeilingShown: true } : {})}
                   onOpenUsageDashboard={(filter) => {
                     setPendingUsageFilter(filter);
                     setUsageOpen(true);

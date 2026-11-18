@@ -1,4 +1,4 @@
-import { FolderOpen, GitBranch, GitPullRequest, Network } from "lucide-react";
+import { FolderOpen, GitBranch, GitPullRequest, Network } from "../ui/icons";
 import { useCodeCheckout } from "../environment/CodeCheckoutContext";
 import { OctantButton } from "../ui/base/OctantButton";
 

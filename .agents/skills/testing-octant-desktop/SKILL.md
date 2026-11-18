@@ -262,7 +262,7 @@ context.usage-reconciled` with no protocol-error payloads.
 ## OpenCode binary naming (post-#851)
 
 - Released OpenCode 2 installs `opencode`; `opencode2` is the earlier beta kept as fallback.
-  Discovery prefers `opencode` labeled "OpenCode CLI"; the beta name shows "OpenCode 2 preview".
+  Discovery prefers `opencode` labeled "OpenCode"; the beta name shows "OpenCode 2 preview".
   `isOpenCode2BinaryPath` accepts both names → both route to the OpenCode 2 driver.
 - `brew install opencode` works on this host (formula ships only the 1.x line — no real 2.x
   install exists on brew or npm `opencode-ai`). A 1.x binary under the new routing hits the
@@ -280,8 +280,8 @@ context.usage-reconciled` with no protocol-error payloads.
   coding-agent/custom-API kinds — its options end at "Ollama native HTTP" (press End inside the
   open select to confirm the last option). Image providers (OpenAI/Gemini/BFL/Ideogram) are NOT
   listed there; they live exclusively under Settings → Image generation → "Add image provider".
-- Chat-mode composer DOES offer Codex CLI models: model picker → type "luna" in "Search models…"
-  → "GPT-5.6-Luna — Codex CLI" selects it. Codex turns work in Chat, not just Code.
+- Chat-mode composer DOES offer Codex models: model picker → type "luna" in "Search models…"
+  → "GPT-5.6-Luna — Codex" selects it. Codex turns work in Chat, not just Code.
 
 ## Navigation/surface notes
 

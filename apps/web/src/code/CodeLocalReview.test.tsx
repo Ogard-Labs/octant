@@ -27,6 +27,7 @@ import {
 } from "../composer/composerThreadDraftStore";
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
+import { chooseReviewView, reviewViewIsOn } from "./reviewMenuTestHelpers";
 
 const now = "2026-11-02T12:00:00.000Z";
 const patch =
@@ -567,7 +568,7 @@ it("keeps a live captured version and its selected anchor through metadata recon
     if (stack === null) throw new Error("captured diff missing");
     stack.scrollTop = 47;
     expect(stack.querySelectorAll('tr[data-kind="removed"]')).toHaveLength(2);
-    await user.click(screen.getByRole("checkbox", { name: "Ignore edge whitespace" }));
+    await chooseReviewView("Ignore edge whitespace");
     expect(stack.querySelectorAll('tr[data-kind="removed"]')).toHaveLength(1);
     expect(
       vi
@@ -609,7 +610,7 @@ it("keeps a live captured version and its selected anchor through metadata recon
     await user.click(screen.getByRole("button", { name: "View newer capture" }));
     await screen.findByRole("heading", { name: /^Turn capture 2$/ });
     expect(vi.mocked(f.client.operationContent).mock.calls).toHaveLength(contentReads + 1);
-    expect(screen.getByRole("checkbox", { name: "Ignore edge whitespace" })).toBeChecked();
+    expect(await reviewViewIsOn("Ignore edge whitespace")).toBe(true);
     expect(
       screen.getByRole("checkbox", { name: "Select finding: Keep the original behavior." }),
     ).toBeChecked();

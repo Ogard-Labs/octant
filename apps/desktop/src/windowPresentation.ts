@@ -37,6 +37,23 @@ export interface WindowPresentationInput {
   readonly highContrast: boolean;
 }
 
+/**
+ * Why the host will not draw Glass, as the renderer words it. Absent when
+ * nothing stands in the way, which is also what a person who chose Off sees.
+ */
+export type GlassRefusal =
+  | "unsupported-platform"
+  | "reduced-transparency"
+  | "increased-contrast"
+  | "thermal-pressure";
+
+export const GLASS_REFUSALS: ReadonlyArray<GlassRefusal> = [
+  "unsupported-platform",
+  "reduced-transparency",
+  "increased-contrast",
+  "thermal-pressure",
+];
+
 export interface WindowPresentation {
   /** CSS pixels reserved by macOS hiddenInset before renderer hit targets. */
   readonly interactiveTitlebarInset: number;
@@ -53,6 +70,8 @@ export interface WindowPresentation {
       };
   readonly material: ResolvedSidebarMaterial;
   readonly vibrancy: "sidebar" | null;
+  /** What stands in the way of Glass right now, whatever the person chose. */
+  readonly glassRefusal: GlassRefusal | null;
 }
 
 export interface NativeThemePort {
@@ -72,6 +91,8 @@ export interface PresentationWindowPort {
    * desktop behind it sharp when nothing is frosting it natively.
    */
   readonly publishSidebarVibrancy: (vibrancy: "sidebar" | null) => void;
+  /** Tells the renderer why Glass is refused, so Settings can say so. */
+  readonly publishGlassRefusal: (refusal: GlassRefusal | null) => void;
 }
 
 interface CreateWindowPresentationControllerOptions {
@@ -82,6 +103,8 @@ interface CreateWindowPresentationControllerOptions {
   readonly sidebarVibrancyMode: "off" | "subtle" | "strong";
   readonly compositionSupported: boolean;
   readonly performanceSafe: boolean;
+  /** One line per change of what the gate saw, for the app's log. */
+  readonly report?: (line: string) => void;
 }
 
 export interface WindowPresentationController {
@@ -108,15 +131,30 @@ export interface PowerMonitorPort {
   ) => unknown;
 }
 
+/** The first thing that stands in the way of Glass, in the order a person could undo it. */
+export function resolveGlassRefusal(
+  input: Pick<
+    WindowPresentationInput,
+    | "platform"
+    | "compositionSupported"
+    | "performanceSafe"
+    | "prefersReducedTransparency"
+    | "highContrast"
+  >,
+): GlassRefusal | null {
+  if (input.platform !== "darwin" || !input.compositionSupported) return "unsupported-platform";
+  if (input.prefersReducedTransparency) return "reduced-transparency";
+  if (input.highContrast) return "increased-contrast";
+  if (!input.performanceSafe) return "thermal-pressure";
+  return null;
+}
+
 export function resolveWindowPresentation(input: WindowPresentationInput): WindowPresentation {
+  const glassRefusal = resolveGlassRefusal(input);
   const translucent =
-    input.platform === "darwin" &&
+    glassRefusal === null &&
     input.sidebarMaterial === "system" &&
-    input.sidebarVibrancyMode !== "off" &&
-    input.compositionSupported &&
-    input.performanceSafe &&
-    !input.prefersReducedTransparency &&
-    !input.highContrast;
+    input.sidebarVibrancyMode !== "off";
   return {
     interactiveTitlebarInset: input.platform === "darwin" ? NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT : 0,
     browserWindow:
@@ -138,7 +176,21 @@ export function resolveWindowPresentation(input: WindowPresentationInput): Windo
           },
     material: translucent ? "translucent" : "opaque",
     vibrancy: translucent ? "sidebar" : null,
+    glassRefusal,
   };
+}
+
+export function describeGlassGate(
+  input: WindowPresentationInput,
+  presentation: Pick<WindowPresentation, "material" | "glassRefusal">,
+): string {
+  return (
+    `[octant] window glass gate: platform=${input.platform} material=${input.sidebarMaterial} ` +
+    `mode=${input.sidebarVibrancyMode} composition=${input.compositionSupported} ` +
+    `performanceSafe=${input.performanceSafe} reducedTransparency=${input.prefersReducedTransparency} ` +
+    `increasedContrast=${input.highContrast} -> ${presentation.material}` +
+    (presentation.glassRefusal === null ? "" : ` (refused: ${presentation.glassRefusal})`)
+  );
 }
 
 export function createWindowPresentationController(
@@ -147,8 +199,9 @@ export function createWindowPresentationController(
   let sidebarMaterial = options.sidebarMaterial;
   let sidebarVibrancyMode = options.sidebarVibrancyMode;
   let performanceSafe = options.performanceSafe;
+  let lastReported = "";
   const refresh = () => {
-    const presentation = resolveWindowPresentation({
+    const input = {
       platform: options.platform,
       sidebarMaterial,
       sidebarVibrancyMode,
@@ -156,10 +209,17 @@ export function createWindowPresentationController(
       performanceSafe,
       prefersReducedTransparency: options.nativeTheme.prefersReducedTransparency,
       highContrast: options.nativeTheme.shouldUseHighContrastColors,
-    });
+    };
+    const presentation = resolveWindowPresentation(input);
+    const line = describeGlassGate(input, presentation);
+    if (line !== lastReported) {
+      lastReported = line;
+      options.report?.(line);
+    }
     options.window.setVibrancy(presentation.vibrancy);
     options.window.publishResolvedMaterial(presentation.material);
     options.window.publishSidebarVibrancy(presentation.vibrancy);
+    options.window.publishGlassRefusal(presentation.glassRefusal);
     return presentation;
   };
   options.nativeTheme.on("updated", refresh);
@@ -179,8 +239,30 @@ export function createWindowPresentationController(
 interface ObserveThermalPerformanceOptions {
   readonly platform: NodeJS.Platform;
   readonly powerMonitor: PowerMonitorPort;
-  readonly richEffectsAllowed: boolean;
   readonly updatePerformanceSafe: (safe: boolean) => void;
+  readonly report?: (line: string) => void;
+}
+
+/**
+ * Glass is a material, not an animation, so it does not ask the system's
+ * rich-animation hint: that reads false in a remote-desktop session and under
+ * Reduce motion, and it made Glass refuse on a Mac driven over screen sharing.
+ * Only the thermal state gates it.
+ */
+export function thermalStateAllowsGlass(state: ThermalState): boolean {
+  return state === "nominal" || state === "fair";
+}
+
+/**
+ * What the gate starts from, before the thermal observer runs. Starting from
+ * `false` made every launch log "refused: thermal-pressure" on a cool Mac, and
+ * the first line is the one a person reads.
+ */
+export function glassSafeAtStart(
+  platform: NodeJS.Platform,
+  powerMonitor: Pick<PowerMonitorPort, "getCurrentThermalState">,
+): boolean {
+  return platform === "darwin" && thermalStateAllowsGlass(powerMonitor.getCurrentThermalState());
 }
 
 export function observeThermalPerformance(options: ObserveThermalPerformanceOptions): () => void {
@@ -189,9 +271,8 @@ export function observeThermalPerformance(options: ObserveThermalPerformanceOpti
     return () => undefined;
   }
   const update = ({ state }: { readonly state: ThermalState }) => {
-    options.updatePerformanceSafe(
-      options.richEffectsAllowed && (state === "nominal" || state === "fair"),
-    );
+    options.report?.(`[octant] window glass gate: thermalState=${state}`);
+    options.updatePerformanceSafe(thermalStateAllowsGlass(state));
   };
   options.powerMonitor.on("thermal-state-change", update);
   update({ state: options.powerMonitor.getCurrentThermalState() });

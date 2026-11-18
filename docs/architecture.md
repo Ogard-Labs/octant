@@ -461,6 +461,25 @@ held HTTP connections are closed and listener completion is awaited. Failures
 remain explicit, including startup and cleanup errors together. This reuses the
 desktop's existing quit deadline rather than adding a separate watchdog.
 
+A Browser page's favicon is the one image the desktop host fetches for the
+person's tab strip. On the page's `page-favicon-updated` the host takes the first
+http(s) icon address and fetches it once, through the page's own session (so it
+follows the profile and network rules the page already has, without the page's
+cookies), only from a site the context admits for the page itself. A redirect is
+refused, not followed: only the declared address is checked against the admitted
+sites, and an admitted site must not be able to send the host on to an address
+the page is kept from, such as one on this computer or its network. One fetch
+runs per tab; a newer declaration ends the older fetch, and a page that rewrites
+its icon address in a loop starts at most one fetch a second. The fetch has
+a 5 second timeout and a 64 KB cap, accepts only PNG, ICO, JPEG, GIF, WebP and SVG
+by sniffing the bytes (the declared type and the address are not trusted), and
+keeps the result as a `data:` URL in memory for the tab, refetched only when the
+icon address changes. Any failure leaves no icon, which the renderer draws as
+the globe. The icon is never written to disk, its address is never logged, and
+it rides only the person's preview read (the `faviconDataUrl` of the Browser
+observation, at most 90,000 characters, validated by the server before it is
+kept); it is never part of an agent's tool result.
+
 Accepted quit is terminal for host start and restart admission, including
 queued work. A start already in progress must close a late desktop-owned
 result; a late borrowed attachment is left alone. Confirmation remains
@@ -1012,13 +1031,15 @@ showed. A remembered origin covers Private pages only; a page in a Project or
 Personal Browser profile asks for each origin and remembers the pair (origin,
 profile), never one without the other
 ([Browser profiles](design/browser-profiles.md#the-agent-on-a-signed-in-page)).
-At Full access a Private page needs no site approval and may navigate across
-origins; a profile page keeps its site approval at every level, which the
-person can remember or widen to "Allow all sites in this profile"
-([the Full access rule](#security-and-authority); maintainer request,
-2026-11-12). Built: the agent tool opens that Private page with the any-site
-entry in its allowlist, which the browser service admits from no other caller
-and never beside a stored profile
+A Private page needs no site approval at any level and may navigate across
+origins, this computer and its network included (maintainer decision,
+2026-11-17; before, only at Full access); a profile page keeps its site
+approval at every level, which the person can remember or widen to "Allow all
+sites in this profile" ([the Full access rule](#security-and-authority)). A
+remembered origin therefore matters only on a profile page now. Built: the
+agent tool and the person's Browser open a Private page with the any-site
+entry in its allowlist, which the browser service admits alone and never
+beside a stored profile
 ([Browser for agents](design/browser-agent-tool.md#refusal-and-expiry-recovery)).
 Plan admits only the Browser operations that read the page already open in
 the thread's own Browser (`audit` among them) and `stop`, and refuses every
@@ -1643,7 +1664,7 @@ that serves several threads from one process (Codex, OpenCode) reports
 Chat, its Stop still waits for the runtime to confirm the turn ended before the
 attempt reads `cancelled`; if no confirmation arrives within ten seconds, the
 attempt is recorded `interrupted` with `stop-unconfirmed` ("Stop was not
-confirmed. The provider may still be running this response."), which frees the
+confirmed. The provider may still be working."), which frees the
 thread without claiming the work stopped. While a Stop is unanswered the
 composer's Stop reads "Stopping response…" and cannot be pressed again. For a provider that supports it, a
 Stop keeps the attempt running until the runtime really ends it, so a Stop that
@@ -5753,15 +5774,22 @@ flowchart LR
   - On replay a clear deletes the thread's ingestion rows and zeroes its taint
     row, and the projection ignores an event at or below the last one it
     applied for that thread. A journal without the event replays unchanged.
-  - The surface is one notice in the composer of a Chat, Work, or Code thread
-    that a local window or, not built yet, a paired device has open, drawn only
-    while the thread is marked, with a
-    Review action. The notice reads the mark when the thread opens and again
-    when a turn starts or settles. Review lists the sources in plain words
-    with their counts and times (a row projected before the host recorded
-    times shows none), says that clearing removes nothing the model read and
-    that the next outside content marks the thread again, and holds Clear the
-    mark back while a turn is running or messages are queued. Every refusal
+  - The surface is two places for the thread a local window or, not built yet,
+    a paired device has open, drawn only while the thread is marked (a
+    maintainer's choice, 2026-11-14). In the thread's Environment panel, of
+    every kind that has one, an "Outside content · read N times" row with a
+    Review action; its globe takes the warning ink only while the mark has
+    effect, that is below Full access. In the composer's row, a 16px globe in
+    the warning ink with no words immediately before the mode control, only
+    below Full access, named "This thread read outside content, so risky
+    actions ask first. See Environment." Neither opens a popover: both
+    open the one Review dialog. The mark is read when the thread opens and
+    again when a turn starts or settles. Review ("Outside content in this
+    thread") lists the sources in plain words with their counts and times (a
+    row projected before the host recorded times shows none), says that
+    clearing says the person checked it, undoes nothing the model read, and
+    that new outside content marks the thread again, and holds Clear mark back
+    while a turn is running or messages are queued. Every refusal
     is shown as its own sentence, and a `stale` one reloads the list. A client
     that is not on a loopback host (`externalContentAvailable`) neither
     reads nor draws it. Approval prompts do not yet say that the mark is why
@@ -7047,7 +7075,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   refresh keeps the last snapshot and shows its age. Every provider
   instance's last plan-limit reading, whatever its source, is also saved
   in `providers/usage-readings.json` (owner-only, listed in the host data
-  map), so the usage rings show it after a host restart as a past
+  map), so the rail's account face shows it after a host restart as a past
   observation with its original `observedAt`. A restored reading is
   never refreshed by starting a provider: the launch pass and the
   schedule leave it as it is, and the first fresh evidence (a turn's
@@ -7166,7 +7194,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   ([Coordinator threads: Running workers](design/coordinator-threads.md#running-workers)).
   Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
-  Code or Codex CLI instance is created enabled; every other detected runtime
+  Code or Codex instance is created enabled; every other detected runtime
   is created disabled. Discovery never installs or updates runtimes, never
   toggles an existing instance, and never treats enablement as readiness. A
   runtime created from a scan saves the launcher the scan examined, not the
@@ -7178,6 +7206,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   switch) to say "Update available"; only the person's click runs the
   provider's own updater, per
   [Runtime updates](design/provider-runtimes.md#runtime-updates).
+- **Default account names.** Discovery names an account for its runtime ("Codex",
+  "OpenCode"). An account saved earlier as exactly "Codex CLI" on the codex driver or
+  "OpenCode CLI" on the opencode driver is renamed once when the host starts, through
+  the same rename command and `provider.instance-renamed@1` event a person's edit
+  produces, after the provider projection is read and before a scan registers any
+  account. Any other name is never touched, an account that already has a rename in its
+  journal keeps its name (so renaming it back sticks), a name another account holds is
+  skipped, and a refusal is logged and never fails startup.
 - **Provider catalog.** Settings › Providers & Models › Provider catalog lists the bundled
   provider-driver packages (`bundledProviderDriverCatalog` in
   `@octant/plugin-host`). Each entry is validated against the public
@@ -7811,7 +7847,7 @@ when the session opens (Claude Code 2.1.287 answers `getContextUsage` with
 of a 200000 window), and the Claude mapper stamps it on every usage report of the
 session together with the input the latest request read as `contextTokens`. The
 runtime's separate `autocompact_state` message is only sent to remote workers, so
-the host does not depend on it. Codex CLI and every other runtime report no
+the host does not depend on it. Codex and every other runtime report no
 point and stay `unknown`.
 
 **Provider capacity.** One in-memory `ProviderCapacityScheduler` per host admits
@@ -8948,8 +8984,9 @@ watched has ended.
   If the compaction-state read fails while a compaction runs, the window keeps
   the running answer and asks again, more slowly each time; after five failed
   reads in a row (a host that went away, or a window that lost the thread) it
-  stops holding send and reads "Compaction state unknown: the host stopped
-  answering. It may still be compacting, and refuses a send until it ends."
+  stops holding send and reads "The host stopped answering, so compaction
+  status is unknown. It may still be running, and sending is blocked until it
+  ends."
 - The result line, in the popover and the inspector (and on the
   timeline divider): "Compacted · 41.2K freed · summary by Codex", "Compacted ·
   freed amount shows after the next reply · summary by Codex", "Compacted ·
@@ -14274,11 +14311,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     moves to Plan from its own mode picker, as a Code thread does.
   - **Computer keeps its first-action ask** at every level, Full access
     included: it asks at the first action in each application, once per
-    thread. The Browser asks at Full access only on a signed-in profile; a
-    Private page asks nothing there. Both are entries in the Full access
-    rule above (maintainer request, 2026-11-12, replacing the earlier
-    decision that both asked at every level). Not built yet: the Browser
-    still asks for each site on a Private page.
+    thread. The Browser asks only on a signed-in profile, at every level; a
+    Private page asks nothing at any level (maintainer decision, 2026-11-17;
+    before, only at Full access). Both are entries in the Full access rule
+    above (maintainer request, 2026-11-12, replacing the earlier decision
+    that both asked at every level). Built.
   - **Plan is an overlay,** not a level: a mode of a thread at any level,
     always read-only.
   - **Lowering is journaled and shown.** Each change records who lowered it,
@@ -14326,8 +14363,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     an old account report cannot survive a failed refresh as a current fact.
     Every actual action still passes its own host admission. Routine-created
     Work and Code tasks read these same host inputs and running ceilings.
-    The existing outside-content notice qualifies its prompt explanation to
-    levels below Full access; review/clear remains a separate person act.
+    The Outside content row in Environment qualifies its warning to levels
+    below Full access; review/clear remains a separate person act.
   - **Older recorded levels replay as Full access.** A level journaled by
     the earlier design, which kept a sandboxed no-prompt level and a
     separate switch, replays as Full access; nothing recorded is dropped.
@@ -15093,6 +15130,18 @@ approval-gated` command that undoes it. The terminal shows no one-time
   decided against the one the thread holds now. Re-presenting the same
   approval rather than minting a new one keeps one identity per provider
   call and needs no new answer route.
+  A running Code turn keeps the grant persistence it started with, as it
+  keeps a narrower mode (a wider mode applies from the next message, which
+  the mode control's tooltip says while such a turn runs). A persistence
+  change alone therefore does not ask again: the allow is delivered for that
+  one call (`scope: "once"`), so nothing is remembered beyond what either
+  setting allows. Plan still refuses an allow. Every answer the host refuses
+  names its reason in words, among them a request that no longer waits (it
+  was answered, withdrawn, or its turn ended), Plan, and a provider session
+  that is gone; a delivered answer is journaled as `approval-answered` on the
+  turn that asked, so a re-read of the turn no longer offers it. Rationale:
+  a person who switched to Full access mid-turn could never approve that
+  turn's remaining asks, and each Approve failed with no reason given.
   A native-harness "always" grant follows the same rule: it records the
   posture it was granted under and answers a later ask in its class only
   while the thread still holds that posture. After a permissions change the

@@ -49,7 +49,7 @@ export interface ProviderDiscoveryDescriptor {
 export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> = [
   {
     driverKind: "codex",
-    displayName: "Codex CLI",
+    displayName: "Codex",
     executableNames: ["codex"],
     approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
     versionProbeArgs: ["--version"],
@@ -70,9 +70,9 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
   },
   {
     driverKind: "opencode",
-    displayName: "OpenCode CLI",
+    displayName: "OpenCode",
     displayNameForExecutable: (executableName) =>
-      executableName === "opencode2" ? "OpenCode 2 preview" : "OpenCode CLI",
+      executableName === "opencode2" ? "OpenCode 2 preview" : "OpenCode",
     // Released OpenCode 2 installs `opencode`; `opencode2` is the earlier beta
     // name kept as a fallback when only a beta binary is present.
     executableNames: ["opencode", "opencode2"],

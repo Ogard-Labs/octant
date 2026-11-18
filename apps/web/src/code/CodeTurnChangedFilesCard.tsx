@@ -1,5 +1,5 @@
 import type { CodeTurnChangedFiles } from "@octant/contracts/code-operations";
-import { ChevronDown, FileText } from "lucide-react";
+import { ChevronDown, FileText } from "../ui/icons";
 import { useId, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 

@@ -47,6 +47,8 @@ const FILE_HEADER_ESTIMATE_PX = 37 + FILE_BORDER_HEIGHT_PX;
 const BINARY_NOTICE_ESTIMATE_PX = 34;
 const GAP_ROW_ESTIMATE_PX = 26;
 const DIFF_LINE_ESTIMATE_PX = 20;
+/** A line number is text in the row, not a 28px control: the recipe's default size set every row's height. */
+const LINE_NUMBER_BUTTON = "h-auto border-0 text-[length:inherit] leading-[inherit] font-normal";
 
 type DiffVirtualRow =
   | {
@@ -585,6 +587,7 @@ function renderBodyRow(input: {
           <OctantButton
             type="button"
             variant="bare"
+            className={LINE_NUMBER_BUTTON}
             aria-label={`Comment on ${path} original line ${line.oldNumber}`}
             onClick={() => {
               if (oldNumber !== undefined)
@@ -604,6 +607,7 @@ function renderBodyRow(input: {
           <OctantButton
             type="button"
             variant="bare"
+            className={LINE_NUMBER_BUTTON}
             aria-label={`Comment on ${path} modified line ${line.newNumber}`}
             onClick={() => {
               if (newNumber !== undefined)

@@ -191,7 +191,7 @@ export function PairedComputersSettingsSection({
         </SettingRow>
         {claiming === undefined || federation === undefined ? null : (
           <SettingRow
-            description="Compare the code below with the one that computer shows, then approve there."
+            description="Compare this code with the one on that computer, then approve there."
             label={`Pairing ${claiming.computer.displayName}`}
             scope="app"
             settingId="paired-computers-claim"

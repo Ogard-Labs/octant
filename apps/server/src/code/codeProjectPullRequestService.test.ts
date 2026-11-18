@@ -6,7 +6,7 @@ import {
 } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import type { CodeProjectLinkedThreadFact } from "@octant/domain/code-project-pull-request-policy";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -23,6 +23,7 @@ import {
   type CodeProjectPullRequestAuthorizedProject,
   type CodeProjectPullRequestMergePort,
 } from "./codeProjectPullRequestService";
+import { joinCodeThreadBoardPullRequests } from "./threadBoardPullRequestJoin";
 import type {
   GhActivePullRequestListResult,
   GhActivePullRequestRow,
@@ -962,6 +963,112 @@ describe("CodeProjectPullRequestService", () => {
       { threadId: docsThreadId, title: "Docs delivery" },
     ]);
     expect(board.freshness).toEqual({ status: "fresh", lastSuccessfulRefreshAt: now });
+  });
+
+  it("carries line counts, check counts and merging from a refresh into each thread's board summary", async () => {
+    const { service } = serviceFixture({
+      list: async () => ({
+        status: "ok",
+        rows: [
+          ghRow({
+            additions: 2173,
+            deletions: 296,
+            checks: "pending",
+            checkCounts: { passed: 19, total: 26 },
+            merging: "queued",
+          }),
+        ],
+      }),
+    });
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    const snapshot = await service.navigationSnapshot(windowId);
+    const summaries = joinCodeThreadBoardPullRequests({ threadId, snapshot });
+    expect(summaries.items[0]).toMatchObject({
+      additions: 2173,
+      deletions: 296,
+      checkCounts: { passed: 19, total: 26 },
+      merging: "queued",
+    });
+  });
+
+  it("reads the three facts of a journal-known pull request from its own observation, and none for one never observed", async () => {
+    const { service } = serviceFixture({
+      knownPullRequests: [
+        { number: 11, observedAt: "2026-08-21T08:00:00Z" },
+        { number: 10, observedAt: "2026-08-21T08:00:00Z" },
+      ],
+      list: async () => ({ status: "ok", rows: [] }),
+      detail: async (request) =>
+        request.number === 11
+          ? {
+              ...observedDetail,
+              pullRequest: {
+                ...observedDetail.pullRequest,
+                number: 11,
+                additions: 7,
+                deletions: 3,
+                checkCounts: { passed: 1, total: 2 },
+                merging: "auto-merge" as const,
+              },
+            }
+          : { status: "unavailable" },
+    });
+    const before = await service.boardSnapshot(windowId);
+    expect(before.rows.every((row) => row.additions === undefined)).toBe(true);
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    const rows = (await service.boardSnapshot(windowId)).rows;
+    expect(rows.find((row) => row.number === 11)).toMatchObject({
+      additions: 7,
+      deletions: 3,
+      checkCounts: { passed: 1, total: 2 },
+      merging: "auto-merge",
+    });
+    const unobserved = rows.find((row) => row.number === 10);
+    expect(unobserved?.state).toBe("unknown");
+    expect(unobserved?.additions).toBe(undefined);
+    expect(unobserved?.merging).toBe(undefined);
+  });
+
+  it("loads a snapshot written before the three facts existed and keeps them across a restart once recorded", async () => {
+    const root = mkdtempSync(join(tmpdir(), "octant-pull-requests-"));
+    const path = join(root, "snapshot.json");
+    try {
+      const old = serviceFixture({ snapshotStore: new CodeProjectPullRequestSnapshotStore(path) });
+      await old.service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+      const written = readFileSync(path, "utf8");
+      for (const key of ["additions", "deletions", "checkCounts", "merging"]) {
+        expect(written).not.toContain(key);
+      }
+      const restored = serviceFixture({
+        snapshotStore: new CodeProjectPullRequestSnapshotStore(path),
+      });
+      const oldRow = (await restored.service.query(windowId, { version: 1 })).rows[0];
+      expect(oldRow?.number).toBe(12);
+      expect(oldRow?.additions).toBe(undefined);
+
+      const recorded = serviceFixture({
+        snapshotStore: new CodeProjectPullRequestSnapshotStore(path),
+        list: async () => ({
+          status: "ok",
+          rows: [ghRow({ additions: 4, deletions: 2, merging: "auto-merge" })],
+        }),
+      });
+      await recorded.service.refresh(
+        windowId,
+        { kind: "refresh-all" },
+        new AbortController().signal,
+      );
+      const again = serviceFixture({
+        snapshotStore: new CodeProjectPullRequestSnapshotStore(path),
+      });
+      expect((await again.service.query(windowId, { version: 1 })).rows[0]).toMatchObject({
+        additions: 4,
+        deletions: 2,
+        merging: "auto-merge",
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("reconstructs merged and closed board history on the first manual refresh after restart", async () => {

@@ -1,7 +1,7 @@
 import type { AgentObservedChild } from "@octant/contracts";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
-import { ChevronDown, X } from "lucide-react";
+import { ChevronDown, X } from "../ui/icons";
 import { useContext, useEffect, useId, useMemo, useState } from "react";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
@@ -14,7 +14,7 @@ import { SubagentStatusIcon, subagentElapsedLabel, subagentStatusWord } from "./
 import { AgentResultPreview, latestResultPacket } from "./AgentRunResults";
 import { ObservedChildRow, type ObservedChildClient } from "./ObservedChildActivity";
 import type { SubagentProviderIdentity } from "./AgentRunDependencyGraph";
-import { ProviderGlyph } from "../providers/ProviderGlyph";
+import { SubagentProviderMark, useSubagentProviders } from "./subagentProviders";
 import {
   buildSubagentRows,
   groupSubagentRows,
@@ -22,7 +22,8 @@ import {
   type SubagentListItem,
   type SubagentRow,
 } from "./subagentRows";
-import { useChildRunStatus } from "./useChildRunStatus";
+import { useChildRunStatus, type ChildRunStatusController } from "./useChildRunStatus";
+import { ThreadSubagentsContext } from "./threadSubagents";
 import "./agent-hierarchy.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { ChildRunRequests, type ChildRunInteractionsClient } from "./ChildRunRequests";
@@ -41,33 +42,35 @@ export function ThreadSubagentsTray(props: {
   readonly interactionsClient?: ChildRunInteractionsClient;
   /** Opens the Agents tool; with a run id, on that subagent's conversation. */
   readonly onOpenSubagent?: (runId?: string) => void;
-  /** The configured provider instances, so each row names what ran it. */
-  readonly providerInstances?: ReadonlyArray<{
-    readonly id: string;
-    readonly driverKind: string;
-    readonly displayName: string;
-  }>;
 }) {
-  // The thread already says its host connection is lost; the tray dims and
-  // disables its controls rather than saying so a second time.
-  const connectionLost = useContext(ThreadConnectionLostContext);
+  // The pane's shared read, when the pane holds one: the transcript's rows
+  // read the same one.
+  const shared = useContext(ThreadSubagentsContext);
+  return shared === undefined ? (
+    <OwnThreadSubagentsTray {...props} />
+  ) : (
+    <ThreadSubagentsTrayBody {...props} subagents={shared} />
+  );
+}
+
+/** A tray outside a pane that reads its thread's subagents reads them itself. */
+function OwnThreadSubagentsTray(props: Parameters<typeof ThreadSubagentsTray>[0]) {
   const subagents = useChildRunStatus({
     client: props.client,
     parentThreadId: decodeAgentRunParentThreadId(props.threadId),
   });
-  const instances = props.providerInstances;
-  const providers = useMemo(
-    () =>
-      instances === undefined
-        ? undefined
-        : new Map(
-            instances.map((instance) => [
-              String(instance.id),
-              { driverKind: instance.driverKind, displayName: instance.displayName },
-            ]),
-          ),
-    [instances],
-  );
+  return <ThreadSubagentsTrayBody {...props} subagents={subagents} />;
+}
+
+function ThreadSubagentsTrayBody(
+  props: Parameters<typeof ThreadSubagentsTray>[0] & {
+    readonly subagents: ChildRunStatusController;
+  },
+) {
+  // The thread already says its host connection is lost; the tray dims and
+  // disables its controls rather than saying so a second time.
+  const connectionLost = useContext(ThreadConnectionLostContext);
+  const subagents = props.subagents;
   if (subagents.status !== "ready") return null;
   return (
     <>
@@ -88,7 +91,6 @@ export function ThreadSubagentsTray(props: {
         entries={subagents.entries}
         observations={subagents.observations}
         observationsTruncated={subagents.observationsTruncated}
-        {...(providers === undefined ? {} : { providers })}
         {...(subagents.errorMessage === undefined ? {} : { errorMessage: subagents.errorMessage })}
         {...(props.onOpenSubagent === undefined ? {} : { onOpenSubagent: props.onOpenSubagent })}
         onStop={(runId) => void subagents.cancelRun(runId)}
@@ -145,14 +147,15 @@ export function SubagentsTray(props: SubagentsTrayProps) {
       isActiveAgentHierarchyStatus(entry.lifecycleStatus),
   );
   const observations = props.observations ?? NO_OBSERVATIONS;
+  const providers = useSubagentProviders(props.providers);
   const rows = useMemo(
     () =>
       buildSubagentRows({
         entries: props.entries,
         observations,
-        ...(props.providers === undefined ? {} : { providers: props.providers }),
+        ...(providers === undefined ? {} : { providers }),
       }),
-    [props.entries, observations, props.providers],
+    [props.entries, observations, providers],
   );
   const candidates = trayCandidates(rows);
   const preview = candidates.slice(0, 3);
@@ -230,7 +233,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
                 and cannot be resumed.
               </p>
               <p className="composer-subagents__confirm-scope">
-                Only this thread&apos;s managed subagents are affected.
+                Only this thread&apos;s helpers are affected.
               </p>
               <div className="composer-subagents__confirm-actions">
                 <OctantButton
@@ -286,6 +289,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
                       {...(props.stopClient === undefined ? {} : { client: props.stopClient })}
                       now={now}
                       providerName={item.row.providerName}
+                      model={item.row.model}
                       {...(item.row.driverKind === undefined
                         ? {}
                         : { driverKind: item.row.driverKind })}
@@ -358,9 +362,11 @@ function SubagentTrayRow(props: {
         variant="ghost"
       >
         <SubagentStatusIcon lifecycleStatus={entry.lifecycleStatus} />
-        {row.driverKind === undefined ? null : (
-          <ProviderGlyph displayName={row.providerName} driverKind={row.driverKind} size={12} />
-        )}
+        <SubagentProviderMark
+          driverKind={row.driverKind}
+          providerName={row.providerName}
+          size={12}
+        />
         <span className="composer-subagents__content">
           <span className="composer-subagents__task">{entry.task}</span>
           <span className="composer-subagents__meta">{meta}</span>
@@ -513,7 +519,7 @@ function writeOpen(storage: Pick<Storage, "setItem"> | undefined, open: boolean)
  * Refresh the update age while preview rows are visible, including finished
  * results awaiting review, without polling the clock for a folded tray.
  */
-function useNow(ticking: boolean): number {
+export function useNow(ticking: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!ticking) return;

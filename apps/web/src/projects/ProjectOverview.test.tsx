@@ -3,7 +3,9 @@ import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import type { ProjectSummary } from "@octant/contracts/projects";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { ProjectIconContext, createProjectIconSource } from "./ProjectIcon";
 import { ProjectOverview } from "./ProjectOverview";
 import { ProjectsDirectory } from "./ProjectsDirectory";
 import { ProjectThreadsProvider, type ProjectThreadsAccess } from "./ProjectThreadsSection";
@@ -77,6 +79,41 @@ describe("ProjectOverview", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("hides the spend ceiling row while the switch is off, unless the Project has a ceiling set", async () => {
+    const project = {
+      id: "20000000-0000-4000-8000-000000000009",
+      name: "Octant",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      updatedAt: "2026-07-21T12:00:00.000Z",
+      type: "code",
+      binding: { canonicalRoot: "/opaque/repository" },
+      codeAccessPersistence: "current-session",
+    } as unknown as ProjectSummary;
+    const page = (snapshot: object) => (
+      <ProjectOverview
+        onArchive={vi.fn()}
+        onNewThread={vi.fn()}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        project={project}
+        spendCeilingClient={{ snapshot: vi.fn(async () => snapshot) } as never}
+        spendCeilingShown={false}
+      />
+    );
+    const { unmount } = render(page({}));
+    await waitFor(() => expect(screen.queryByText("Spend ceiling")).toBeNull());
+    unmount();
+
+    // A ceiling set before the switch existed must stay reachable, or nothing
+    // on the page could raise or clear it.
+    render(page({ project: { version: 1 } }));
+    expect(await screen.findByText("Spend ceiling")).toBeVisible();
+  });
+
   it("offers a Work Project an off-by-default status file switch, but not the default folder", async () => {
     const user = userEvent.setup();
     const onWorkStatusFileChange = vi.fn(async () => true);
@@ -104,7 +141,7 @@ describe("ProjectOverview", () => {
 
     const toggle = screen.getByRole("switch", { name: "Keep a status file" });
     expect(toggle).not.toBeChecked();
-    expect(toggle).toHaveAccessibleDescription(/When off, Octant writes nothing into the folder/);
+    expect(toggle).toHaveAccessibleDescription(/Off: Octant writes nothing to the folder/);
     await user.click(toggle);
     expect(onWorkStatusFileChange).toHaveBeenCalledWith(workProject.id, true);
 
@@ -206,7 +243,7 @@ describe("ProjectOverview", () => {
       name: "Agents may write Project memory without asking",
     });
     expect(toggle).not.toBeChecked();
-    expect(toggle).toHaveAccessibleDescription(/At Full access agents never ask/);
+    expect(toggle).toHaveAccessibleDescription(/Full access never asks/);
     await user.click(toggle);
     expect(onAgentMemoryWritesChange).toHaveBeenCalledWith(chatProject.id, true);
 
@@ -342,6 +379,43 @@ describe("ProjectOverview", () => {
     expect(onDismiss).toHaveBeenCalledOnce();
   });
 
+  it("keeps New thread as the one visible action and holds Relink and Archive in a menu", async () => {
+    const user = userEvent.setup();
+    const onArchive = vi.fn();
+    const onNewThread = vi.fn();
+    const project = {
+      id: "20000000-0000-4000-8000-000000000010",
+      name: "Octant",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      updatedAt: "2026-07-21T12:00:00.000Z",
+      type: "code",
+      binding: { canonicalRoot: "/opaque/repository" },
+      codeAccessPersistence: "current-session",
+    } as unknown as ProjectSummary;
+    render(
+      <ProjectOverview
+        onArchive={onArchive}
+        onNewThread={onNewThread}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        project={project}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "New thread" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Relink folder" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Archive Project" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "More Project actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Relink folder" })).toBeVisible();
+    await user.click(screen.getByRole("menuitem", { name: "Archive Project" }));
+    expect(onArchive).toHaveBeenCalledExactlyOnceWith(project.id);
+  });
+
   it("composes the Chat overview into a virtual Chat Project", () => {
     render(
       <ProjectOverview
@@ -373,7 +447,7 @@ describe("ProjectOverview", () => {
     expect(
       screen.queryByText(/Virtual organization with approved memory/i),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Archive" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "More Project actions" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Memory" })).not.toBeInTheDocument();
   });
 
@@ -539,9 +613,7 @@ describe("ProjectOverview", () => {
     );
     expect(screen.queryByRole("heading", { name: "Project workspace" })).not.toBeInTheDocument();
     expect(screen.queryByText(/Git|worktree|pull request/i)).not.toBeInTheDocument();
-    expect(
-      screen.getByText("Confined to the Project's folders. Knowledge-work stays inside them."),
-    ).toBeVisible();
+    expect(screen.getByText("Stays inside the Project's folders.")).toBeVisible();
   });
 
   it("offers ordinary authenticated-web relink for an available bound Project", async () => {
@@ -598,7 +670,8 @@ describe("ProjectOverview", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Relink folder" }));
+    await user.click(screen.getByRole("button", { name: "More Project actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Relink folder" }));
     await user.click(await screen.findByRole("button", { name: "Select" }));
     await waitFor(() => expect(onRelink).toHaveBeenCalledWith(project.id, "R".repeat(43)));
   });
@@ -650,11 +723,12 @@ describe("ProjectOverview", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Relink folder" }));
+    await user.click(screen.getByRole("button", { name: "More Project actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Relink folder" }));
     await user.click(await screen.findByRole("button", { name: "Select" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Project root could not be relinked. Review the Project status and retry.",
+      "Could not relink the Project folder. Check the Project status and try again.",
     );
     expect(screen.getByRole("dialog", { name: "Add Work folder" })).toBeVisible();
   });
@@ -716,6 +790,7 @@ describe("ProjectOverview", () => {
     expect(screen.getByText(/Stale Project snapshot/i)).toBeInTheDocument();
     expect(screen.getByText(/Stale snapshot · read-only/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /relink/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "More Project actions" })).not.toBeInTheDocument();
   });
 
   it("offers no relink while the snapshot is stale, even where relinking is otherwise allowed", () => {
@@ -815,11 +890,13 @@ describe("ProjectOverview threads and recent activity", () => {
     ).toEqual(["thread-newer", "thread-older"]);
     expect(screen.queryByRole("button", { name: /Someone else's work/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Loose chat/ })).not.toBeInTheDocument();
-    // One compact indicator retains all of the row's attention states.
+    // The strongest state is said in words, and the row's one name keeps all of them.
+    expect(within(list).getByText("Needs you")).toBeVisible();
     expect(
-      within(list).getByRole("img", { name: "Needs attention · New activity · Follow-up" }),
+      within(list).getByRole("button", {
+        name: /Launch checklist.*Needs attention, New activity, Follow-up/,
+      }),
     ).toBeVisible();
-    expect(within(list).queryByText("Needs attention")).not.toBeInTheDocument();
 
     await user.click(within(list).getByRole("button", { name: /Launch checklist/ }));
     expect(onSelectThread).toHaveBeenCalledWith("thread-newer");
@@ -891,5 +968,132 @@ describe("ProjectOverview threads and recent activity", () => {
       screen.queryByRole("heading", { name: "Threads and recent activity" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("No threads in this Project yet.")).not.toBeInTheDocument();
+  });
+
+  describe("icon choice", () => {
+    const project = {
+      id: "20000000-0000-4000-8000-0000000000a1",
+      name: "Octant",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      updatedAt: "2026-07-21T12:00:00.000Z",
+      type: "code",
+      binding: { canonicalRoot: "/opaque/repository" },
+      codeAccessPersistence: "current-session",
+    } as unknown as ProjectSummary;
+
+    function iconHost(custom: boolean, foundAvailable: boolean) {
+      URL.createObjectURL = vi.fn(() => "blob:icon");
+      const fetcher = vi.fn(async (_input: URL | RequestInfo, init?: RequestInit) => {
+        if (init?.method === "PUT" || init?.method === "DELETE") {
+          return new Response(null, { status: 204 });
+        }
+        return {
+          ok: true,
+          status: 200,
+          blob: async () => new Blob(["x"]),
+          headers: new Headers({
+            "x-octant-project-icon-source": custom ? "custom" : "found",
+            "x-octant-project-icon-found": foundAvailable ? "1" : "0",
+          }),
+        };
+      }) as unknown as typeof fetch;
+      return {
+        fetcher,
+        source: createProjectIconSource({
+          serverUrl: "http://127.0.0.1:1/",
+          windowCapability: "c",
+          fetcher,
+        }),
+      };
+    }
+
+    function view(source: ReturnType<typeof createProjectIconSource>, desktop: boolean) {
+      return render(
+        <ProjectIconContext.Provider value={source}>
+          <ProjectOverview
+            {...(desktop
+              ? {
+                  hostBridge: {
+                    selectProjectRoot: vi.fn(),
+                  } as unknown as NonNullable<ComponentProps<typeof ProjectOverview>["hostBridge"]>,
+                }
+              : {})}
+            onArchive={vi.fn()}
+            onRelink={vi.fn()}
+            onRename={vi.fn()}
+            project={project}
+          />
+        </ProjectIconContext.Provider>,
+      );
+    }
+
+    it("turns Change icon off in a browser and says where to choose one", async () => {
+      const user = userEvent.setup();
+      view(iconHost(false, true).source, false);
+
+      await user.click(screen.getByRole("button", { name: "More Project actions" }));
+
+      const item = await screen.findByRole("menuitem", { name: "Change icon…" });
+      expect(item).toHaveAttribute("aria-disabled", "true");
+      expect(item).toHaveAccessibleDescription("Choose an icon in the desktop app.");
+    });
+
+    it("copies a chosen picture to the host and says so", async () => {
+      const user = userEvent.setup();
+      const { fetcher, source } = iconHost(false, true);
+      view(source, true);
+
+      await user.upload(
+        screen.getByLabelText("Choose an icon image"),
+        new File(["x"], "mark.png", { type: "image/png" }),
+      );
+
+      expect(await screen.findByText("Icon changed.")).toBeVisible();
+      expect(vi.mocked(fetcher).mock.calls.some(([, init]) => init?.method === "PUT")).toBe(true);
+    });
+
+    it("refuses a picture over 256 KB without asking the host", async () => {
+      const user = userEvent.setup();
+      const { fetcher, source } = iconHost(false, true);
+      view(source, true);
+      const big = new File([new Uint8Array(262_145)], "big.png", { type: "image/png" });
+
+      await user.upload(screen.getByLabelText("Choose an icon image"), big);
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("larger than 256 KB");
+      expect(vi.mocked(fetcher).mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);
+    });
+
+    it("offers the folder's own icon back when one is chosen and the folder has one", async () => {
+      const user = userEvent.setup();
+      const { fetcher, source } = iconHost(true, true);
+      view(source, true);
+      await waitFor(() => expect(source.details?.(String(project.id))?.custom).toBe(true));
+
+      await user.click(screen.getByRole("button", { name: "More Project actions" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Use found icon" }));
+
+      await waitFor(() =>
+        expect(vi.mocked(fetcher).mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(
+          true,
+        ),
+      );
+    });
+
+    it("offers to remove a chosen icon when the folder has none", async () => {
+      const user = userEvent.setup();
+      const { source } = iconHost(true, false);
+      view(source, true);
+      await waitFor(() => expect(source.details?.(String(project.id))?.custom).toBe(true));
+
+      await user.click(screen.getByRole("button", { name: "More Project actions" }));
+
+      expect(await screen.findByRole("menuitem", { name: "Remove custom icon" })).toBeVisible();
+      expect(screen.queryByRole("menuitem", { name: "Use found icon" })).not.toBeInTheDocument();
+    });
   });
 });

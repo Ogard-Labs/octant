@@ -1,11 +1,12 @@
 import type { CodeWorktreeRef } from "@octant/contracts/code";
-import { Check, ChevronDown, GitBranch, Search } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, GitBranch, Search } from "../../ui/icons";
 import { useMemo, useRef, useState } from "react";
 import { OctantSwitch } from "../../ui/base/OctantSwitch";
 import { OctantBadge } from "../../ui/base/OctantBadge";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantPopover } from "../../ui/base/OctantPopover";
+import { PopupSkeletonRows } from "../../ui/base/PopupSkeletonRows";
 
 export interface CodeBranchSelectorProps {
   /** The currently selected base branch (short name, no remote prefix). */
@@ -20,6 +21,14 @@ export interface CodeBranchSelectorProps {
   readonly onSelectRef: (ref: CodeWorktreeRef) => void;
   readonly onStartFromOriginChange?: (value: boolean) => void;
   readonly startFromOriginAvailable?: boolean;
+  /**
+   * "row" draws the trigger as a row of the Where menu ("Start from  main ›")
+   * and opens the list beside it; the origin switch then lives in Worktree
+   * options, not at the foot of the list. Defaults to the composer chip.
+   */
+  readonly presentation?: "chip" | "row";
+  /** The row's name, when drawn as a row. */
+  readonly rowLabel?: string;
 }
 
 /**
@@ -41,9 +50,11 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
   }, [props.refs, query]);
 
   const triggerLabel = props.branch;
+  const asRow = props.presentation === "row";
 
   return (
     <OctantPopover
+      align="start"
       className="code-branch-selector__menu"
       onOpenChange={(next) => {
         setOpen(next);
@@ -53,16 +64,31 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
         }
       }}
       open={open}
+      side={asRow ? "inline-end" : "top"}
       title="Choose base branch"
       trigger={
-        <>
-          <GitBranch aria-hidden="true" size={12} />
-          <span className="code-branch-selector__trigger-label">{triggerLabel}</span>
-          <ChevronDown aria-hidden="true" className="code-branch-selector__chevron" size={12} />
-        </>
+        asRow ? (
+          <>
+            <span className="code-where__row-name">{props.rowLabel ?? "Start from"}</span>
+            <span className="code-where__row-value">
+              <span className="code-where__row-value-text">{triggerLabel}</span>
+              <ChevronRight aria-hidden="true" size={12} />
+            </span>
+          </>
+        ) : (
+          <>
+            <GitBranch aria-hidden="true" size={12} />
+            <span className="code-branch-selector__trigger-label">{triggerLabel}</span>
+            <ChevronDown aria-hidden="true" className="code-branch-selector__chevron" size={12} />
+          </>
+        )
       }
-      triggerClassName="code-branch-selector__trigger composer-tray__item"
-      triggerLabel="Base branch"
+      triggerClassName={
+        asRow
+          ? "code-where__row code-where__row--action"
+          : "code-branch-selector__trigger composer-tray__item"
+      }
+      triggerLabel={asRow ? `${props.rowLabel ?? "Start from"}: ${triggerLabel}` : "Base branch"}
       {...(props.disabled === undefined ? {} : { triggerDisabled: props.disabled })}
     >
       <label className="octant-popover-search code-branch-selector__search">
@@ -79,11 +105,9 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
       </label>
       <div aria-label="Refs" className="code-branch-selector__list" role="listbox">
         {props.loading === true && (props.refs === undefined || props.refs.length === 0) ? (
-          <p className="octant-popover-empty" role="status">
-            Loading refs…
-          </p>
+          <PopupSkeletonRows label="Loading refs…" rows={6} />
         ) : filtered.length === 0 ? (
-          <p className="octant-popover-empty" role="status">
+          <p className="octant-popover-empty code-branch-selector__empty" role="status">
             {props.refs === undefined || props.refs.length === 0
               ? "No refs reported for this repository."
               : "No refs match the search."}
@@ -124,9 +148,9 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
           })
         )}
       </div>
-      {props.onStartFromOriginChange !== undefined ? (
+      {props.onStartFromOriginChange !== undefined && !asRow ? (
         <div className="code-branch-selector__footer">
-          <span>Start from origin</span>
+          <span className="oct-menu-option">Start from origin</span>
           <OctantSwitch
             checked={props.startFromOrigin && props.startFromOriginAvailable === true}
             disabled={props.startFromOriginAvailable !== true}

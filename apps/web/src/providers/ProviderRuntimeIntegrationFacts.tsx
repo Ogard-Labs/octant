@@ -154,7 +154,7 @@ const USAGE_FACTS: Readonly<Record<ProviderUsageReporting, Fact>> = {
   "not-reported": {
     value: "Not reported",
     detail:
-      "This runtime reports no usage, so its threads show no context window and spend limits leave its turns out.",
+      "This runtime reports no usage, so its threads show no context window and the spend ceiling leaves its turns out.",
   },
   "not-confirmed": {
     value: "Not confirmed",

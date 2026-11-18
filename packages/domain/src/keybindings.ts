@@ -18,6 +18,7 @@ export type OctantKeybindingActionId =
   | "zen-mode"
   | "toggle-sidebar"
   | "home"
+  | "new-thread"
   | "new-todo"
   | "next-waiting-thread"
   | "reply-detail-cycle"
@@ -80,6 +81,7 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
     defaultChord: "Mod+\\",
   },
   { id: "home", label: "Go to the home screen", area: "Shell", defaultChord: "Mod+Shift+H" },
+  { id: "new-thread", label: "Start a new thread", area: "Shell", defaultChord: "Mod+N" },
   // L for list. Held by no other default and no desktop menu item. Like the
   // home chord it answers in a text field, where a thought to note down often
   // arrives.

@@ -358,7 +358,11 @@ export function CodeGitPane(props: CodeGitPaneProps) {
           </OctantButton>
         </div>
       )}
-      {failure === undefined ? null : <OctantAlert tone="warning">{failure}</OctantAlert>}
+      {failure === undefined ? null : (
+        <OctantAlert layout="row" tone="warning">
+          {failure}
+        </OctantAlert>
+      )}
       {lastResult === undefined ? null : <p role="status">{lastResult}</p>}
     </section>
   );

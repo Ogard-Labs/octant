@@ -109,9 +109,9 @@ export function ProjectSpendCeilingSection(props: {
       <h3>Spend ceiling</h3>
       {remaining === undefined ? (
         <p role="note">
-          No spend ceiling is set on this Project. A turn must also stay under any thread ceiling.
-          Setting one is a host owner command. Tokens, turns, total agent run time, and money each
-          count over the calendar window you choose.
+          No spend ceiling on this Project. A turn must still stay under any thread ceiling. Setting
+          one is a host owner command. Tokens, turns, total agent run time, and money each count
+          over the calendar window you choose.
         </p>
       ) : phrases.length === 0 ? null : (
         <p role="status">{phrases.map((phrase) => `${phrase} this ${windowPeriod}`).join(" · ")}</p>
@@ -176,4 +176,32 @@ export function ProjectSpendCeilingSection(props: {
       {message === undefined ? null : <OctantAlert tone="warning">{message}</OctantAlert>}
     </section>
   );
+}
+
+/**
+ * Whether this Project has a spend ceiling set, read once while the row is
+ * switched off. A ceiling set before the switch existed must keep its row, or
+ * nothing on the Project page could raise or clear it (review finding,
+ * 2026-11-17). A read that fails leaves the row hidden, as the switch says.
+ */
+export function useProjectSpendCeilingSet(
+  client: SpendCeilingClient | undefined,
+  projectId: string,
+  skip: boolean,
+): boolean {
+  const [set, setSet] = useState(false);
+  useEffect(() => {
+    if (client === undefined || skip) return;
+    let cancelled = false;
+    client.snapshot({ projectId }).then(
+      (next) => {
+        if (!cancelled) setSet(next.project !== undefined);
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [client, projectId, skip]);
+  return set;
 }

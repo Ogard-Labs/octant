@@ -5,6 +5,8 @@ export interface HostMemoryNotice {
   readonly id: string;
   readonly title: string;
   readonly detail: string;
+  /** Reports something Octant did and asks nothing: it may leave by itself. */
+  readonly transient: boolean;
 }
 
 const PRESSURE_LABEL: Readonly<Record<HostMemoryPressureLevel, string>> = {
@@ -47,16 +49,21 @@ export function hostReliefFact(relief: NonNullable<HostMemoryStatus["lastRelief"
   return `${formatMemoryEventTime(relief.at)}: stopped ${count(relief.idleProviderRuntimesStopped, "idle provider process", "idle provider processes")}, released ${count(relief.idleSessionsReleased, "paused session")}, ${count(relief.activeTurnsKept, "running turn")} kept going`;
 }
 
+/**
+ * Three short sentences: it runs again, what memory read last, and the record
+ * kept. The first wording ran to five lines of a notice that stays until it is
+ * dismissed, over the top of whatever pane stood under it.
+ */
 function stopDetail(stop: NonNullable<HostMemoryStatus["previousStop"]>): string {
   const reading =
     stop.pressure === "normal"
-      ? `At the last reading memory looked normal and the host held ${stop.processMegabytes} MB, so the cause is not known.`
-      : `At the last reading memory was ${stop.pressure === "critical" ? "very low" : "low"} and the host held ${stop.processMegabytes} MB.`;
+      ? `Memory looked normal at the last reading (host at ${stop.processMegabytes} MB), so the cause is not known.`
+      : `Memory was ${stop.pressure === "critical" ? "very low" : "low"} at the last reading (host at ${stop.processMegabytes} MB).`;
   const record =
     stop.crashRecord === undefined
       ? ""
-      : ` Octant kept a crash record on this device (${stop.crashRecord.exitReason}, ${formatMemoryEventTime(stop.crashRecord.recordedAt)}). Save diagnostics in Settings > Host includes it; nothing was sent.`;
-  return `Octant ended without a clean stop and is running again. ${reading}${record}`;
+      : ` A crash record is kept on this device (${stop.crashRecord.exitReason}, ${formatMemoryEventTime(stop.crashRecord.recordedAt)}). Save diagnostics includes it; nothing was sent.`;
+  return `It is running again. ${reading}${record}`;
 }
 
 const timeFormatter = new Intl.DateTimeFormat(undefined, {
@@ -84,6 +91,7 @@ export function hostMemoryNotices(
       id: `stop:${memory.previousStop.lastSeenAt}`,
       title: "Octant stopped unexpectedly",
       detail: stopDetail(memory.previousStop),
+      transient: false,
     });
   }
   const relief = memory.lastRelief;
@@ -96,6 +104,7 @@ export function hostMemoryNotices(
       id: `relief:${relief.at}`,
       title: "Octant freed memory",
       detail: reliefDetail(relief),
+      transient: true,
     });
   }
   return notices;

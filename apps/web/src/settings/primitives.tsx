@@ -1,5 +1,5 @@
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "../ui/icons";
 import {
   createContext,
   useContext,
@@ -501,6 +501,42 @@ export function SettingsState(props: {
     <p className={`settings-state settings-state--${props.kind}`} role="status">
       {props.children}
     </p>
+  );
+}
+
+/**
+ * The rows of a list before its data arrives, at the height a Settings row
+ * has, so the list is the size it will be and nothing below it moves when the
+ * answer lands.
+ */
+export function SettingsSkeletonRows(props: {
+  /** Spoken in place of the shapes. */
+  readonly label: string;
+  readonly rows?: number;
+}) {
+  const rows = Array.from({ length: props.rows ?? 3 }, (_unused, index) => index);
+  return (
+    <div className="settings-skeleton" role="status">
+      <span className="sr-only">{props.label}</span>
+      <div aria-hidden="true" className="settings-skeleton__rows">
+        {rows.map((row) => (
+          <span className="skeleton settings-skeleton__row" key={row} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** A command's own words: collapsed, fixed in height and scrollable, so a long answer never grows the page. */
+export function SettingsOutputWell(props: {
+  readonly summary: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <details className="settings-output-well">
+      <summary>{props.summary}</summary>
+      <pre tabIndex={0}>{props.children}</pre>
+    </details>
   );
 }
 

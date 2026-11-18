@@ -1,5 +1,5 @@
 import type { AgentRunResultPacket } from "@octant/contracts";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from "../ui/icons";
 import { useId, useState, type ReactNode } from "react";
 import { Markdown } from "../markdown/Markdown";
 import { OctantButton } from "../ui/base/OctantButton";

@@ -1,7 +1,7 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import { IMAGE_LIBRARY_SCOPE_ID, type ImageGenerationProfileView } from "@octant/contracts";
-import { Images } from "lucide-react";
+import { Images } from "../ui/icons";
 import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { GeneratedImageList } from "./GeneratedImageList";
@@ -59,7 +59,7 @@ export function ImageLibraryView(props: ImageLibraryViewProps) {
                   </OctantButton>
                 ),
               })}
-          detail="Add one under Settings › Voice & images."
+          detail="Generate images from a prompt and keep them on this computer. A profile names the model that makes them; add one under Settings › Voice & images."
           icon={<Images size={20} />}
           title="No image profile yet"
         />

@@ -4,7 +4,7 @@ import type {
   AutomationSummary,
   AutomationThreadRoutineRequest,
 } from "@octant/contracts/automation";
-import { CalendarClock } from "lucide-react";
+import { CalendarClock, MoreHorizontal, Plus } from "../ui/icons";
 import { useCallback, useState } from "react";
 import { automationLifecycleLabel } from "../automation/automationCenterModel";
 import { followUpWhenLabel, routineScheduleLine } from "../automation/routinePresentation";
@@ -16,6 +16,7 @@ import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantMenu } from "../ui/base/OctantMenu";
 import { EnvironmentGroup } from "./EnvironmentGroup";
 import { FollowUpPicker, scheduledAtOf, type Editing } from "./EnvironmentFollowUpPicker";
 import { EnvironmentRoutineForm } from "./EnvironmentRoutineForm";
@@ -88,7 +89,7 @@ function dueOrder(summary: AutomationSummary): number {
  * Every active and paused routine of this thread's Project, so a person sees
  * from the thread what already runs in its folder: this thread's own
  * follow-ups first, then the routines it created, then the rest. Each one can
- * be paused, resumed, or opened in the Automation Center, and a follow-up here
+ * be paused, resumed, or opened in Automations from its "…" menu, and a follow-up here
  * moved or cancelled. The row is always offered in a Work or Code thread,
  * because both ways to create one start here: Follow up later, and New
  * routine, which the host builds from this thread's Project and mode.
@@ -102,6 +103,11 @@ export function EnvironmentRoutines(props: {
   readonly projectId: string;
   readonly mode: "work" | "code";
   readonly onOpenRoutine?: (automationId: string) => void;
+  /**
+   * Offers "Set a goal…" in the "+" menu. The Work panel passes it while its
+   * thread has no goal, so the goal group appears only once there is one.
+   */
+  readonly onSetGoal?: () => void;
 }) {
   const { client, threadId, projectId, mode } = props;
   const [routines, setRoutines] = useState<ReadonlyArray<AutomationSummary>>([]);
@@ -209,6 +215,29 @@ export function EnvironmentRoutines(props: {
       : routines.slice(0, COLLAPSED_ROUTINE_COUNT);
   return (
     <EnvironmentGroup
+      // The two ways to add one share a "+" at the row's end: two ghost
+      // buttons stood in every thread's strip whether or not it had any.
+      action={
+        <OctantMenu
+          items={[
+            { value: "follow-up", label: "Follow up later", disabled: busy },
+            { value: "routine", label: "New routine", disabled: busy },
+            ...(props.onSetGoal === undefined ? [] : [{ value: "goal", label: "Set a goal…" }]),
+          ]}
+          onValueChange={(value) =>
+            value === "goal"
+              ? props.onSetGoal?.()
+              : value === "follow-up"
+                ? start({ kind: "follow-up", editing: { kind: "new" } })
+                : start({ kind: "new" })
+          }
+          selectionMode="action"
+          trigger={<Plus aria-hidden="true" size={16} />}
+          triggerClassName="environment-menu-trigger"
+          triggerLabel="Add a routine"
+          value=""
+        />
+      }
       icon={CalendarClock}
       onOpenChange={setOpen}
       open={open}
@@ -219,28 +248,6 @@ export function EnvironmentRoutines(props: {
       }
       title="Routines"
     >
-      <div className="environment-routine__actions">
-        <OctantButton
-          className="window-no-drag"
-          disabled={busy}
-          onClick={() => start({ kind: "follow-up", editing: { kind: "new" } })}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          Follow up later
-        </OctantButton>
-        <OctantButton
-          className="window-no-drag"
-          disabled={busy}
-          onClick={() => start({ kind: "new" })}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          New routine
-        </OctantButton>
-      </div>
       {opened?.kind === "follow-up" ? (
         <FollowUpPicker
           busy={busy}
@@ -278,91 +285,91 @@ export function EnvironmentRoutines(props: {
                 className="environment-routine"
                 key={String(summary.id)}
               >
-                <div className="environment-routine__head">
+                <div className="environment-routine__text">
                   <span className="environment-routine__name">{summary.displayName}</span>
-                  <span className="environment-routines__state">
-                    {summary.lifecycle === "enabled"
-                      ? "Active"
-                      : paused
-                        ? "Paused"
-                        : automationLifecycleLabel(summary.lifecycle)}
-                  </span>
+                  <p className="environment-routine__schedule">
+                    {[
+                      label === undefined ? undefined : <span key="place">{label}</span>,
+                      <span key="when">
+                        {summary.trigger.kind === "weekly-local"
+                          ? `${schedule} (${summary.trigger.timeZone})`
+                          : schedule}
+                      </span>,
+                      summary.lifecycle === "enabled" ? undefined : (
+                        <span key="state">
+                          {paused ? "Paused" : automationLifecycleLabel(summary.lifecycle)}
+                        </span>
+                      ),
+                    ]
+                      .filter((part) => part !== undefined)
+                      .flatMap((part, index) =>
+                        index === 0
+                          ? [part]
+                          : [
+                              <span aria-hidden="true" key={`dot-${String(index)}`}>
+                                {" · "}
+                              </span>,
+                              part,
+                            ],
+                      )}
+                  </p>
                 </div>
-                {label === undefined ? null : <p className="environment-routine__place">{label}</p>}
-                <p className="environment-routine__schedule">
-                  {summary.trigger.kind === "weekly-local"
-                    ? `${schedule} (${summary.trigger.timeZone})`
-                    : schedule}
-                </p>
-                <div className="environment-routine__actions">
-                  {followUpHere ? (
-                    <>
-                      <OctantButton
-                        className="window-no-drag"
-                        disabled={busy}
-                        onClick={() =>
-                          start({ kind: "follow-up", editing: { kind: "move", summary } })
-                        }
-                        size="sm"
-                        type="button"
-                        variant="ghost"
-                      >
-                        Change time
-                      </OctantButton>
-                      <OctantButton
-                        aria-label={`Cancel follow-up ${summary.displayName}`}
-                        className="window-no-drag"
-                        disabled={busy}
-                        onClick={() =>
-                          void act(() =>
-                            client.execute({
-                              kind: "archive-automation",
-                              automationId: summary.id,
-                              expectedVersion: summary.version,
-                            }),
-                          )
-                        }
-                        size="sm"
-                        type="button"
-                        variant="ghost"
-                      >
-                        Cancel
-                      </OctantButton>
-                    </>
-                  ) : (
-                    <OctantButton
-                      aria-label={`${paused ? "Resume" : "Pause"} ${summary.displayName}`}
-                      className="window-no-drag"
-                      disabled={busy}
-                      onClick={() =>
-                        void act(() =>
-                          client.execute({
-                            kind: paused ? "resume-automation" : "pause-automation",
-                            automationId: summary.id,
-                            expectedVersion: summary.version,
-                          }),
-                        )
-                      }
-                      size="sm"
-                      type="button"
-                      variant="ghost"
-                    >
-                      {paused ? "Resume" : "Pause"}
-                    </OctantButton>
-                  )}
-                  {props.onOpenRoutine === undefined ? null : (
-                    <OctantButton
-                      aria-label={`Open ${summary.displayName} in Automation Center`}
-                      className="window-no-drag"
-                      onClick={() => props.onOpenRoutine?.(String(summary.id))}
-                      size="sm"
-                      type="button"
-                      variant="ghost"
-                    >
-                      Open in Automation Center
-                    </OctantButton>
-                  )}
-                </div>
+                {/* One "…" slot at the row's end, drawn at rest, so nothing
+                    moves when a row is pointed at (maintainer request
+                    2026-11-17: the four lines and two or three ghost buttons
+                    per routine were the loudest thing in the panel). */}
+                <OctantMenu
+                  items={[
+                    ...(followUpHere
+                      ? [
+                          { value: "change-time", label: "Change time", disabled: busy },
+                          {
+                            value: "cancel",
+                            label: "Cancel follow-up",
+                            destructive: true,
+                            disabled: busy,
+                          },
+                        ]
+                      : [
+                          {
+                            value: "pause-resume",
+                            label: paused ? "Resume" : "Pause",
+                            disabled: busy,
+                          },
+                        ]),
+                    ...(props.onOpenRoutine === undefined
+                      ? []
+                      : [{ value: "open", label: "Open in Automations" }]),
+                  ]}
+                  onValueChange={(value) => {
+                    if (value === "change-time") {
+                      start({ kind: "follow-up", editing: { kind: "move", summary } });
+                    } else if (value === "cancel") {
+                      void act(() =>
+                        client.execute({
+                          kind: "archive-automation",
+                          automationId: summary.id,
+                          expectedVersion: summary.version,
+                        }),
+                      );
+                    } else if (value === "pause-resume") {
+                      void act(() =>
+                        client.execute({
+                          kind: paused ? "resume-automation" : "pause-automation",
+                          automationId: summary.id,
+                          expectedVersion: summary.version,
+                        }),
+                      );
+                    } else {
+                      props.onOpenRoutine?.(String(summary.id));
+                    }
+                  }}
+                  selectionMode="action"
+                  trigger={<MoreHorizontal aria-hidden="true" size={16} />}
+                  triggerClassName="environment-menu-trigger"
+                  triggerLabel={`Actions for ${summary.displayName}`}
+                  value=""
+                />
               </li>
             );
           })}

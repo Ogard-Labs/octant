@@ -1,7 +1,7 @@
 import type { OpenAiCompatibleProviderConfiguration } from "@octant/contracts";
 import type { SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
 import { subscriptionOAuthOffers } from "@octant/domain";
-import { Plus } from "lucide-react";
+import { Plus } from "../../ui/icons";
 import { useEffect, useId, useState } from "react";
 import { thisComputerName, useHostPlatform } from "../../platform";
 import { ProviderGlyph } from "../../providers/ProviderGlyph";

@@ -28,7 +28,6 @@
 }
 
 .chat-welcome__suggestions {
-  order: 3;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
@@ -169,29 +168,6 @@
   border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
   line-height: 1.45;
-}
-
-/* A session's tool and age are short and always read whole; the title gives
-   way first. Shrinking the meta clipped "16d ago" beside a long title; the
-   picker's shared meta rule loads after this sheet, hence the compound
-   selector. */
-.github-picker__option-meta.terminal-session-picker__meta {
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.terminal-session-picker__source {
-  display: grid;
-  flex: 1;
-  min-width: 0;
-  gap: var(--oct-space-1);
-}
-
-.terminal-session-picker__folder {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  white-space: normal;
-  overflow-wrap: anywhere;
 }
 
 /* The terminal session a Work or Code thread started from: folded above the
@@ -601,6 +577,9 @@
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
 }
+.thread-work-shelf__history > button:active {
+  background: var(--oct-wash-pressed);
+}
 
 .thread-work-shelf__narrow-label {
   display: none;
@@ -691,6 +670,10 @@
   background: var(--oct-fg-soft);
   border-color: var(--octant-border-strong);
 }
+.thread-work-shelf__item-actions button:active,
+.thread-work-shelf form button:active {
+  background: var(--oct-wash-pressed);
+}
 
 .thread-work-shelf form {
   max-width: 100%;
@@ -735,9 +718,6 @@
   /* The frame owns the composer's ring and lift. Adding a shadow here drew a
      second, solid outline a step brighter than the hairline, so the box read
      as two stacked borders. */
-  transition:
-    background-color var(--oct-motion-fast) var(--oct-ease-color),
-    box-shadow var(--oct-motion-fast) var(--oct-ease-color);
 }
 
 .chat-composer__bar {
@@ -946,11 +926,6 @@
 }
 
 @media (max-width: 680px) {
-  .chat-welcome .welcome {
-    justify-content: center;
-    padding: 28px 0;
-  }
-
   .chat-welcome__suggestions {
     gap: var(--oct-space-1);
   }
@@ -1095,6 +1070,9 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
   border-color: var(--octant-border-strong, var(--oct-border));
   background: var(--oct-selection);
 }
+.tracker-reference-chip:active {
+  background: var(--oct-wash-pressed);
+}
 
 .tracker-reference-chip__raw {
   min-width: 0;
@@ -1205,13 +1183,15 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
 .chat-rich-text th,
 .chat-rich-text td {
   padding: var(--oct-space-2) var(--oct-space-3);
-  border: 1px solid var(--oct-border);
+  /* Rows are told apart by one hairline under each, not a box round every
+     cell: a full grid drew a heavy mesh over a reply. */
+  border: 0;
+  border-bottom: 1px solid var(--oct-hairline);
   text-align: start;
   vertical-align: top;
 }
 .chat-rich-text th {
-  background: var(--oct-surface);
-  color: var(--oct-fg);
+  color: var(--oct-fg-2);
   font-weight: var(--oct-weight-medium);
 }
 .chat-rich-text li > ul,

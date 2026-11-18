@@ -228,59 +228,17 @@ describe("WorkThreadWorkspace", () => {
     const level = await screen.findByText("Ask first", { selector: ".guardrail-level__mode" });
     expect(level).not.toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: /^Thread info/ }));
+    // The panel is an item of the + menu; the row holds no button for it.
+    expect(screen.queryByRole("button", { name: /^Thread info/, hidden: true })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Add attachment/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Thread info" }));
 
     expect(screen.getByRole("region", { name: "Thread info" })).toContainElement(level);
     expect(level).toBeVisible();
   });
 
-  it.each([true, false])(
-    "shows the working folder without borrowing a different binding root (matching: %s)",
-    async (matching) => {
-      const thread = workThread();
-      const project = decodeProjectSummary({
-        id: thread.projectId,
-        type: "work",
-        name: "Research",
-        lifecycle: "active",
-        pinned: false,
-        rank: "0/1",
-        version: 1,
-        createdAt: thread.createdAt,
-        updatedAt: thread.updatedAt,
-        binding: { canonicalRoot: "/Users/example/Research" },
-        bindingRevisionId: matching
-          ? thread.bindingRevisionId
-          : "30000000-0000-4000-8000-000000000102",
-      });
-      render(
-        <WorkThreadWorkspace
-          initialThread={thread}
-          projects={[project]}
-          threadClient={{
-            searchTranscript: vi.fn(),
-            bootstrap: vi.fn(),
-            navigation: vi.fn(),
-            execute: vi.fn(),
-            queryBoard: vi.fn(),
-          }}
-          threadId={thread.id}
-          title={thread.title}
-        />,
-      );
-      const strip = await screen.findByRole("button", { name: /^Thread info/ });
-      expect(within(strip).getByText("Research")).toBeVisible();
-      expect(within(strip).getByText("research/brief")).toBeVisible();
-      await userEvent.setup().hover(strip);
-      expect(await screen.findByRole("tooltip")).toHaveTextContent(
-        matching ? "/Users/example/Research/research/brief" : "research/brief",
-      );
-      expect(strip.closest(".composer-under")).not.toBeNull();
-    },
-  );
-
-  it("says the folder once when the Project carries its folder's name", async () => {
-    const thread = workThread({ workingDirectory: "." });
+  it("leaves a local thread's Project and folder to the Environment panel", async () => {
+    const thread = workThread();
     const project = decodeProjectSummary({
       id: thread.projectId,
       type: "work",
@@ -294,7 +252,7 @@ describe("WorkThreadWorkspace", () => {
       binding: { canonicalRoot: "/Users/example/Research" },
       bindingRevisionId: thread.bindingRevisionId,
     });
-    render(
+    const { container } = render(
       <WorkThreadWorkspace
         initialThread={thread}
         projects={[project]}
@@ -309,11 +267,12 @@ describe("WorkThreadWorkspace", () => {
         title={thread.title}
       />,
     );
-    const strip = await screen.findByRole("button", { name: /^Thread info/ });
-    // One "Research", and hovering it still tells where the folder is.
-    expect(within(strip).getByText("Research")).toBeVisible();
-    await userEvent.setup().hover(strip);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("/Users/example/Research");
+    await screen.findByRole("button", { name: "Provider and model" });
+    const under = container.querySelector<HTMLElement>(".composer-under");
+    expect(under).not.toBeNull();
+    expect(within(under as HTMLElement).queryByText("Research")).toBeNull();
+    expect(within(under as HTMLElement).queryByText("research/brief")).toBeNull();
+    expect(screen.queryByRole("group", { name: "Project and folder" })).toBeNull();
   });
 
   it("names the server and folder a thread on a server works in", async () => {
@@ -348,10 +307,11 @@ describe("WorkThreadWorkspace", () => {
         />
       </ServerCodeProjectsContext.Provider>,
     );
-    const strip = await screen.findByRole("button", { name: /^Thread info/ });
-    expect(within(strip).getByText("Notes")).toBeVisible();
-    await userEvent.setup().hover(strip);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("devbox:/home/build/notes");
+    // A thread on a server has no Environment row for its place, so the row
+    // under the box keeps naming it.
+    const place = await screen.findByRole("group", { name: "Project and folder" });
+    expect(within(place).getByText("Notes")).toBeVisible();
+    expect(within(place).getByTitle("devbox:/home/build/notes")).toBeInTheDocument();
   });
 
   it("keeps a Browser approval visible and explains a failed decision", async () => {
@@ -385,7 +345,7 @@ describe("WorkThreadWorkspace", () => {
     const row = await screen.findByRole("group", { name: "Browser origin approval" });
     await user.click(within(row).getByRole("button", { name: "Approve once" }));
     expect(await within(row).findByRole("alert")).toHaveTextContent(
-      "Browser approval could not be sent. Keep this request open and retry.",
+      "Could not send the browser approval. Keep this open and try again.",
     );
     expect(screen.getByRole("group", { name: "Browser origin approval" })).toBeInTheDocument();
   });
@@ -709,8 +669,8 @@ describe("WorkThreadWorkspace", () => {
     );
     await screen.findByLabelText("Bound provider and model");
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    const levels = await screen.findByRole("slider", { name: "Effort level" });
-    fireEvent.change(levels, { target: { value: levels.getAttribute("max") } });
+    const levels = await screen.findByRole("group", { name: "Effort level" });
+    await user.click(within(levels).getByRole("button", { name: "High" }));
     await waitFor(() =>
       expect(execute).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -721,8 +681,11 @@ describe("WorkThreadWorkspace", () => {
         }),
       ),
     );
-    expect(levels).toHaveAttribute("aria-valuetext", "High");
-    fireEvent.change(levels, { target: { value: "0" } });
+    expect(within(levels).getByRole("button", { name: "High" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await user.click(within(levels).getByRole("button", { name: "High" }));
     await waitFor(() =>
       expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ modelOptionValues: {} })),
     );
@@ -916,7 +879,7 @@ describe("WorkThreadWorkspace", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Rewind to here…" }));
     const dialog = await screen.findByRole("dialog", { name: "Rewind to here" });
     // Work keeps no copies of files, so the conversation is the only choice.
-    expect(within(dialog).getByText(/Work takes no file checkpoints/)).toBeVisible();
+    expect(within(dialog).getByText(/Work keeps no file checkpoints/)).toBeVisible();
     expect(within(dialog).queryByRole("button", { name: "Files only" })).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Rewind" }));
 
@@ -1486,7 +1449,9 @@ describe("WorkThreadWorkspace", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: /2 tool calls$/ })).toBeVisible();
+    expect(
+      await screen.findByRole("button", { name: /2 tool calls: 1 read, 1 search$/ }),
+    ).toBeVisible();
     expect(screen.getByRole("button", { name: "Search, unfinished" })).toBeInTheDocument();
     expect(screen.getByText("Done.")).toBeVisible();
   });
@@ -2185,7 +2150,7 @@ describe("WorkThreadWorkspace", () => {
       transcript: vi.fn(),
       transcriptWindow: vi.fn(() => firstPage.promise),
     };
-    const prompt = /Describe what you want made/;
+    const prompt = /Describe what to make/;
     const seen: boolean[] = [];
     const watcher = new MutationObserver(() => seen.push(screen.queryByText(prompt) !== null));
     render(
@@ -2236,7 +2201,7 @@ describe("WorkThreadWorkspace", () => {
       />,
     );
     await waitFor(() => expect(turnClient.transcriptWindow).toHaveBeenCalledOnce());
-    expect(screen.queryByText(/Describe what you want made/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Describe what to make/)).not.toBeInTheDocument();
 
     await act(async () => {
       firstPage.resolve(
@@ -2250,7 +2215,7 @@ describe("WorkThreadWorkspace", () => {
         }),
       );
     });
-    expect(await screen.findByText(/Describe what you want made/)).toBeVisible();
+    expect(await screen.findByText(/Describe what to make/)).toBeVisible();
   });
 
   it("starts transcript and pending-request reads together from the navigation thread", async () => {
@@ -3068,7 +3033,7 @@ describe("WorkThreadWorkspace", () => {
     expect(composer).toHaveValue("Use the updated tools");
     expect(startFirstTurn).toHaveBeenCalledTimes(1);
     fireEvent.drop(composer, { dataTransfer: nativeFolderTransfer() });
-    expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+    expect(await screen.findByText(/Folder drops need the desktop app/)).toBeVisible();
     expect(composer).toHaveValue("Use the updated tools");
     expect(action).toBeVisible();
     expect(startFirstTurn).toHaveBeenCalledTimes(1);
@@ -3190,9 +3155,7 @@ describe("WorkThreadWorkspace", () => {
 
     expect(mutate).not.toHaveBeenCalled();
     expect(startFirstTurn).not.toHaveBeenCalled();
-    expect(
-      await screen.findByText(/must be rebound before sending a follow-up/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/Rebind this task before sending/)).toBeInTheDocument();
   });
 
   it("offers a file picker on an existing Work thread that can send images", async () => {
@@ -3329,9 +3292,7 @@ describe("WorkThreadWorkspace", () => {
       clipboardData: { files: [file], items: [] },
     });
     // The refusal is a card above the box, not a line among the chips.
-    const refusal = await screen.findByText(
-      "The selected model does not accept images. Choose an image-capable model.",
-    );
+    const refusal = await screen.findByText("This model cannot read images. Pick one that can.");
     expect(refusal.closest(".composer-notices")).not.toBeNull();
     expect(screen.queryByLabelText("Attached images")).toBeNull();
     expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
@@ -3763,7 +3724,7 @@ it("refuses a native folder as an attachment when the desktop extraction bridge 
   );
   const input = screen.getByRole("textbox", { name: "Work prompt" });
   fireEvent.drop(input, { dataTransfer: nativeFolderTransfer() });
-  expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+  expect(await screen.findByText(/Folder drops need the desktop app/)).toBeVisible();
 });
 
 it("offers an empty Work thread its folder's outside sessions and shows live tasks with Stop above the composer", async () => {

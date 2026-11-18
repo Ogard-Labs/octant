@@ -5,6 +5,7 @@ import type {
   ThreadRoutineReceipt,
   ThreadToolStep,
 } from "@octant/contracts";
+import { toolDisplayName } from "./toolKinds";
 
 /**
  * What a running turn is doing, beyond the message it is writing.
@@ -31,6 +32,8 @@ export type TurnActivityRow =
       readonly outsideContent?: ToolOutsideContentMark;
       /** The routine the call created, shown as a receipt card under the turn. */
       readonly routine?: ThreadRoutineReceipt;
+      /** How long the call ran, when the host recorded its start and end. */
+      readonly durationMs?: number;
     }
   | {
       readonly kind: "task";
@@ -51,6 +54,8 @@ export interface TurnActivity {
   readonly rows: ReadonlyArray<TurnActivityRow>;
   /** Accumulated reasoning-channel text, in arrival order. */
   readonly reasoning: string;
+  /** How long the reasoning channel ran, when the host recorded start and end times. */
+  readonly reasoningMs?: number;
   /**
    * Whether the durable turn journaled more steps than the conversation page
    * carries back. Only replayed history can set this; a live turn is watched
@@ -212,7 +217,7 @@ export function runningStepTitle(activity: TurnActivity | undefined): string | u
   for (let index = activity.rows.length - 1; index >= 0; index -= 1) {
     const row = activity.rows[index];
     if (row?.kind === "tool" && (row.state === "started" || row.state === "running")) {
-      const title = row.toolName.trim();
+      const title = toolDisplayName(row.toolName).trim();
       return title.length === 0 ? undefined : title;
     }
   }

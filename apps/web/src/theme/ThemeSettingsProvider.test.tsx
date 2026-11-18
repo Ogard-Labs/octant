@@ -26,10 +26,10 @@ describe("ThemeSettingsProvider", () => {
     expect(root.style.getPropertyValue("--octant-focus")).toBe("#1f6f96");
     expect(root.style.getPropertyValue("--octant-palette-green")).toBe("#41761c");
     expect(root.style.getPropertyValue("--octant-sidebar-translucent-subtle")).toBe(
-      "color-mix(in srgb, #fafaf9 78%, transparent)",
+      "color-mix(in srgb, #fafaf9 88%, transparent)",
     );
     expect(root.style.getPropertyValue("--octant-workspace-translucent-subtle")).toBe(
-      "color-mix(in srgb, #ffffff 78%, transparent)",
+      "color-mix(in srgb, #ffffff 88%, transparent)",
     );
 
     result.unmount();
@@ -76,37 +76,101 @@ describe("ThemeSettingsProvider", () => {
     expect(root.style.getPropertyValue("--octant-workspace")).toBe("");
   });
 
-  it("lays a chosen glass tint over the whole window at every level, and keeps it readable under increased contrast", () => {
+  it("clamps a chosen glass tint at paint time and marks thin glass for the stylesheet", () => {
     const result = render(
       <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "light", glassTint: 20 }}>
         <div>Theme content</div>
       </ThemeSettingsProvider>,
     );
     const root = document.documentElement;
-    for (const level of ["", "-subtle", "-strong"]) {
-      expect(root.style.getPropertyValue(`--octant-sidebar-translucent${level}`)).toBe(
-        "color-mix(in srgb, #fafaf9 20%, transparent)",
-      );
-    }
-    // The window surface is the workspace colour, so the tint lies over it too.
+    // The light floor is 45; the saved 20 is untouched, only the paint is clamped.
     for (const level of ["", "-subtle", "-strong"]) {
       expect(root.style.getPropertyValue(`--octant-workspace-translucent${level}`)).toBe(
-        "color-mix(in srgb, #ffffff 20%, transparent)",
+        "color-mix(in srgb, #ffffff 45%, transparent)",
       );
     }
+    expect(root.dataset.octantGlassThin).toBe("subtle strong");
     result.rerender(
+      <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark" }}>
+        <div>Theme content</div>
+      </ThemeSettingsProvider>,
+    );
+    // Both dark levels (74 and 58) are under the secondary floor of 77.
+    expect(root.dataset.octantGlassThin).toBe("subtle strong");
+    result.rerender(
+      <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "light" }}>
+        <div>Theme content</div>
+      </ThemeSettingsProvider>,
+    );
+    // Both light defaults (88 and 76) clear the secondary floor of 72.
+    expect(root.dataset.octantGlassThin).toBeUndefined();
+    result.unmount();
+    expect(root.dataset.octantGlassThin).toBeUndefined();
+  });
+
+  it("paints the dark window coat at 74% for Subtle and 58% for Strong, and a saved low Tint at the floor", () => {
+    const root = document.documentElement;
+    const result = render(
+      <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark" }}>
+        <div>Theme content</div>
+      </ThemeSettingsProvider>,
+    );
+    const coat = (level: "subtle" | "strong") =>
+      root.style.getPropertyValue(`--octant-workspace-translucent-${level}`);
+    expect(coat("subtle")).toMatch(/ 74%, transparent\)$/);
+    expect(coat("strong")).toMatch(/ 58%, transparent\)$/);
+    result.rerender(
+      <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark", glassTint: 8 }}>
+        <div>Theme content</div>
+      </ThemeSettingsProvider>,
+    );
+    // A Tint replaces both levels and is clamped at the dark floor of 45%.
+    expect(coat("subtle")).toMatch(/ 45%, transparent\)$/);
+    expect(coat("strong")).toMatch(/ 45%, transparent\)$/);
+    result.unmount();
+  });
+
+  it("publishes density, text smoothing and the custom contrast step for the stylesheets", () => {
+    const result = render(
       <ThemeSettingsProvider
         settings={{
           ...DEFAULT_THEME_SETTINGS,
-          mode: "light",
-          glassTint: 20,
-          increasedContrast: true,
+          mode: "dark",
+          density: "compact",
+          fontSmoothing: "off",
+          darkPresetId: "custom" as never,
+          customThemeDark: {
+            ground: "#1b1d23",
+            ink: "#f2f2f4",
+            accent: "#7aa2ff",
+            contrast: "firm",
+          } as never,
         }}
       >
         <div>Theme content</div>
       </ThemeSettingsProvider>,
     );
-    expect(root.style.getPropertyValue("--octant-sidebar-translucent-subtle")).toMatch(/ 80%, /);
+    const root = document.documentElement;
+    expect(root.dataset.octantDensity).toBe("compact");
+    expect(root.dataset.octantFontSmoothing).toBe("off");
+    expect(root.style.getPropertyValue("--oct-contrast-scale")).toBe("1.5");
+    result.rerender(
+      <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark" }}>
+        <div>Theme content</div>
+      </ThemeSettingsProvider>,
+    );
+    expect(root.dataset.octantDensity).toBe("comfortable");
+    // Smooth is the default; only a stored "off" turns it off.
+    expect(root.dataset.octantFontSmoothing).toBe("on");
+    expect(root.style.getPropertyValue("--oct-contrast-scale")).toBe("");
+    result.rerender(
+      <ThemeSettingsProvider
+        settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark", fontSmoothing: "on" }}
+      >
+        <div>Theme content</div>
+      </ThemeSettingsProvider>,
+    );
+    expect(root.dataset.octantFontSmoothing).toBe("on");
     result.unmount();
   });
 

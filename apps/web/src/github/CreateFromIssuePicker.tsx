@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Check, Search } from "lucide-react";
+import { Check, ChevronLeft, CircleCheck, CircleDot, Search } from "../ui/icons";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type {
   GithubAuthenticationSnapshot,
@@ -9,6 +9,8 @@ import type {
 } from "@octant/contracts";
 import { describeGithubRemediation } from "./githubRemediation";
 import { GitHubRepositoryPicker } from "../code/GitHubRepositoryPicker";
+import { loadList, peekList } from "../composer/createFromCache";
+import { PopupSkeletonRows } from "../ui/base/PopupSkeletonRows";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -72,6 +74,47 @@ function thenableFrom(value: unknown): Promise<unknown> | undefined {
   return undefined;
 }
 
+type IssuesResponse = Awaited<ReturnType<GithubClient["readCatalogue"]>>;
+
+const ISSUE_PAGE_SIZE = 30;
+
+const issuesKey = (owner: string, name: string) => `github-issues:${owner}/${name}`;
+
+/** A repository's first page of issues, shared with whoever reads ahead of the person choosing it. */
+export function loadGithubIssues(
+  client: GithubClient,
+  owner: string,
+  name: string,
+): Promise<IssuesResponse> {
+  return loadList(
+    client,
+    issuesKey(owner, name),
+    () => client.readCatalogue({ kind: "issues", owner, name, pageSize: ISSUE_PAGE_SIZE as never }),
+    { keep: (response) => response.kind === "issues" },
+  );
+}
+
+function issueListStateFrom(response: IssuesResponse): IssueListState {
+  if (response.kind === "unavailable") {
+    return {
+      kind: "unavailable",
+      message:
+        response.remediation === undefined
+          ? "GitHub issues are unavailable."
+          : describeGithubRemediation(response.remediation),
+    };
+  }
+  if (response.kind !== "issues") {
+    return { kind: "error", message: "GitHub returned an unexpected response." };
+  }
+  return {
+    kind: "ready",
+    rows: response.page.rows,
+    hasNextPage: response.page.hasNextPage,
+    ...(response.page.endCursor === undefined ? {} : { endCursor: response.page.endCursor }),
+  };
+}
+
 export interface CreateFromIssuePickerProps {
   readonly client: GithubClient;
   readonly selected?: GithubIssueContextRequest;
@@ -108,38 +151,30 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
         return;
       }
       const operation = ++issuesGeneration.current;
-      setIssues({ kind: "loading" });
+      // A repository's first page, with no search, is read ahead and kept: it
+      // shows at once and is asked again behind the rows when it has grown old.
+      const kept = search === "";
+      const cached = kept ? peekList<IssuesResponse>(client, issuesKey(owner, name)) : undefined;
+      if (cached === undefined) setIssues({ kind: "loading" });
+      else {
+        setIssues(issueListStateFrom(cached.value));
+        if (cached.fresh) return;
+      }
       try {
-        const response = await readCatalogue({
-          kind: "issues",
-          owner,
-          name,
-          pageSize: 30 as never,
-          ...(search === "" ? {} : { search }),
-        });
+        const response = kept
+          ? await loadGithubIssues(client, owner, name)
+          : await readCatalogue({
+              kind: "issues",
+              owner,
+              name,
+              pageSize: ISSUE_PAGE_SIZE as never,
+              search,
+            });
         if (operation !== issuesGeneration.current) return;
-        if (response.kind === "unavailable") {
-          setIssues({
-            kind: "unavailable",
-            message:
-              response.remediation === undefined
-                ? "GitHub issues are unavailable."
-                : describeGithubRemediation(response.remediation),
-          });
-          return;
-        }
-        if (response.kind !== "issues") {
-          setIssues({ kind: "error", message: "GitHub returned an unexpected response." });
-          return;
-        }
-        setIssues({
-          kind: "ready",
-          rows: response.page.rows,
-          hasNextPage: response.page.hasNextPage,
-          ...(response.page.endCursor === undefined ? {} : { endCursor: response.page.endCursor }),
-        });
+        setIssues(issueListStateFrom(response));
       } catch (error) {
         if (operation !== issuesGeneration.current) return;
+        if (cached !== undefined) return;
         setIssues({
           kind: "error",
           message: error instanceof Error ? error.message : "GitHub issues are unavailable.",
@@ -200,25 +235,33 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
   return (
     <div className="create-from-issue">
       {repository === undefined ? (
-        <GitHubRepositoryPicker client={client} onSelect={setRepository} />
+        <GitHubRepositoryPicker
+          client={client}
+          onPreview={(row) =>
+            void loadGithubIssues(client, row.owner, row.name).catch(() => undefined)
+          }
+          onSelect={setRepository}
+        />
       ) : (
         <>
           {/* The chosen repository folds to one row, so the issues get the room
               instead of opening under a list nobody is choosing from any more. */}
           <div className="create-from-issue__repository">
-            <span>
-              {repository.owner}/{repository.name}
-            </span>
             <OctantButton
+              aria-label="Change repository"
               onClick={() => {
                 setRepository(undefined);
                 setQuery("");
               }}
               size="sm"
+              title="Change repository"
               type="button"
               variant="ghost"
             >
-              Change
+              <ChevronLeft aria-hidden="true" size={14} />
+              <span className="oct-menu-option">
+                {repository.owner}/{repository.name}
+              </span>
             </OctantButton>
           </div>
           <label className="octant-popover-search">
@@ -233,10 +276,8 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
               value={query}
             />
           </label>
-          {issues.kind === "loading" ? (
-            <p className="octant-popover-empty" role="status">
-              Loading issues…
-            </p>
+          {issues.kind === "loading" || issues.kind === "idle" ? (
+            <PopupSkeletonRows label="Loading issues…" />
           ) : null}
           {issues.kind === "error" || issues.kind === "unavailable" ? (
             <OctantAlert tone="warning">{issues.message}</OctantAlert>
@@ -244,21 +285,23 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
           {issues.kind === "ready" ? (
             issues.rows.length === 0 ? (
               <p className="octant-popover-empty" role="status">
-                No issues match.
+                {query.trim() === "" ? "No issues in this repository." : "No issues match."}
               </p>
             ) : (
-              <ul aria-label="GitHub issues" className="github-picker__listbox" id={listboxId}>
+              <ul aria-label="GitHub issues" className="create-from__list" id={listboxId}>
                 {issues.rows.map((row) => {
                   const selected =
                     props.selected !== undefined &&
                     props.selected.owner === repository.owner &&
                     props.selected.name === repository.name &&
                     props.selected.number === row.number;
+                  const State = row.state === "open" ? CircleDot : CircleCheck;
                   return (
                     <li key={row.number}>
                       <OctantButton
+                        aria-label={`#${String(row.number)} ${row.title}`}
                         aria-pressed={selected}
-                        className="octant-popover-option github-picker__option"
+                        className="octant-popover-option create-from__row"
                         disabled={props.disabled}
                         onClick={() =>
                           onSelect(
@@ -270,14 +313,21 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
                             row.title,
                           )
                         }
+                        title={row.title}
                         type="button"
                         variant="bare"
                       >
-                        <span className="github-picker__option-name">
-                          #{row.number} {row.title}
-                        </span>
-                        <span className="github-picker__option-meta">
-                          {row.state} · {row.author}
+                        <State
+                          aria-hidden="true"
+                          className="create-from__state"
+                          data-state={row.state}
+                          size={14}
+                        />
+                        <span className="create-from__copy">
+                          <span className="create-from__title">{row.title}</span>
+                          <span className="oct-menu-detail create-from__meta">
+                            #{row.number} · {repository.owner}/{repository.name} · {row.author}
+                          </span>
                         </span>
                         {selected ? (
                           <Check
@@ -290,19 +340,21 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
                     </li>
                   );
                 })}
+                {issues.hasNextPage ? (
+                  <li>
+                    <OctantButton
+                      className="octant-popover-option create-from__more"
+                      disabled={loadingMore || props.disabled}
+                      onClick={() => void loadMore()}
+                      type="button"
+                      variant="bare"
+                    >
+                      {loadingMore ? "Loading more…" : "Load more issues"}
+                    </OctantButton>
+                  </li>
+                ) : null}
               </ul>
             )
-          ) : null}
-          {issues.kind === "ready" && issues.hasNextPage ? (
-            <OctantButton
-              disabled={loadingMore || props.disabled}
-              onClick={() => void loadMore()}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              {loadingMore ? "Loading more…" : "Load more issues"}
-            </OctantButton>
           ) : null}
         </>
       )}

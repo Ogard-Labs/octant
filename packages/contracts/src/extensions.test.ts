@@ -359,7 +359,7 @@ describe("extension package contracts", () => {
         {
           id: "provider-driver",
           kind: "provider-driver",
-          displayName: "Codex CLI",
+          displayName: "Codex",
           declaredCapabilities: [],
           entryPoint: "builtin:provider-driver/codex",
         },
@@ -377,7 +377,7 @@ describe("extension package contracts", () => {
           {
             id: "provider-driver",
             kind: "provider-driver",
-            displayName: "Codex CLI",
+            displayName: "Codex",
             declaredCapabilities: [],
           },
         ],

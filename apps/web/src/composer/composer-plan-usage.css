@@ -1,7 +1,7 @@
 /* The start screen's context row, just above the box: where the
-   thread runs on the left, how much of the plan is left on the right. It has
-   no fill or edge of its own, like a thread's strip, and the meters drop to
-   their own right-aligned line when the chips leave no room. */
+   thread runs on the left, what is left of each plan window on the right, as one line of text. It has
+   no fill or edge of its own, like a thread's strip, and the line drops to
+   its own right-aligned line when the chips leave no room. */
 .composer-start {
   display: flex;
   flex-wrap: wrap;
@@ -18,14 +18,43 @@
   min-width: 0;
 }
 
-.composer-start > .plan-usage {
+/* The usage cell is reserved whether or not the chosen provider reports a
+   window, so switching Chat and a folder (each may pick another provider)
+   never changes how much room the chips have. */
+.composer-start__usage {
+  display: flex;
+  flex: 0 1 auto;
+  justify-content: flex-end;
+  min-width: 6.5rem;
   margin-left: auto;
+}
+
+.composer-start__usage > .plan-usage-line {
   padding: 0 var(--oct-space-2);
 }
 
-/* The usage warning takes the full row above the context chips, so it reads as
-   part of the composer and not a page banner. */
-.composer-start > .composer-usage-warning {
-  flex: 1 1 100%;
-  margin: 0 0 var(--oct-space-2);
+/* "Create from…" ends the row in every state. The usage cell stood after it,
+   reserved even when the provider reports no window, so with none the control
+   floated short of the box's right edge (measured: it ended at 1173 where the
+   box's last control ends at 1276). The tray's two groups and the usage cell
+   are laid out as one row of three: the chips, the usage in its reserved cell,
+   and "Create from…" last, on the edge the send button ends on. The cell is
+   still reserved, so a provider that starts reporting a window moves nothing.
+   A narrow window keeps the earlier stacking. */
+@media (min-width: 681px) {
+  .composer-start > .composer-tray--start {
+    display: contents;
+  }
+
+  .composer-start__usage {
+    order: 1;
+  }
+
+  .composer-start > .composer-tray--start > .composer-tray__trailing {
+    order: 2;
+  }
+
+  .composer-start:has(> .composer-start__usage) .composer-tray__trailing {
+    margin-left: 0;
+  }
 }

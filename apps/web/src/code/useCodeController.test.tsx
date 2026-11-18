@@ -1996,9 +1996,27 @@ describe("useCodeController", () => {
     },
   );
 
-  it("withdraws only the approval an owner answered on another device", async () => {
+  const answeredApproval = "70000000-0000-4000-8000-000000000034";
+  it.each([
+    {
+      who: "an owner answered on another device",
+      settlement: {
+        kind: "owner-approval-settled",
+        approvalId: answeredApproval,
+        outcome: "approved",
+        actingPrincipal: {
+          kind: "owner-unlock",
+          memberId: "70000000-0000-4000-8000-000000000036",
+        },
+      },
+    },
+    {
+      who: "the host already delivered when the turn is read again",
+      settlement: { kind: "approval-answered", approvalId: answeredApproval, decision: "approved" },
+    },
+  ] as const)("withdraws only the approval $who", async ({ settlement }) => {
     const operationId = "70000000-0000-4000-8000-000000000033";
-    const answered = "70000000-0000-4000-8000-000000000034",
+    const answered = answeredApproval,
       other = "70000000-0000-4000-8000-000000000035";
     async function* waitingFrames() {
       for (const [cursor, approvalId] of [
@@ -2022,15 +2040,7 @@ describe("useCodeController", () => {
         operationId,
         cursor: 3,
         occurredAt: now,
-        event: {
-          kind: "owner-approval-settled",
-          approvalId: answered,
-          outcome: "approved",
-          actingPrincipal: {
-            kind: "owner-unlock",
-            memberId: "70000000-0000-4000-8000-000000000036",
-          },
-        },
+        event: settlement,
       };
       yield {
         threadId: ids.thread,

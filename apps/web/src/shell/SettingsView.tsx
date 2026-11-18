@@ -18,7 +18,7 @@ import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import { settleSettingsRail } from "./settingsRailScroll";
 import type { SkillRootStatus } from "@octant/contracts/extension-rpc";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
-import { ArrowLeft, Check, Menu, Search, X } from "lucide-react";
+import { ArrowLeft, Check, Menu, Search, X } from "../ui/icons";
 import type { ShellSettings } from "@octant/contracts/shell";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { ServerProject } from "@octant/contracts/server-projects";
@@ -43,6 +43,7 @@ import { isImageProfileDriverKind, resolveAppBackground } from "@octant/domain";
 import { resolveEffectiveThemeMode } from "@octant/domain/theme-policy";
 import type { ProviderController } from "../providers/useProviderController";
 import type { DiscoveryController, LocateBinaryOutcome } from "../providers/useDiscoveryController";
+import { glassOffNote } from "./useShellPresentation";
 import { ProviderSettingsView } from "../providers/ProviderSettingsView";
 import { ProviderDiscoverySection } from "../providers/ProviderDiscoverySection";
 import { ProviderCatalogView } from "../providers/catalog/ProviderCatalogView";
@@ -64,6 +65,7 @@ import {
   type FirstPartyPluginComponentId,
 } from "./contributionRegistry";
 import { useFirstPartyPluginsEffective } from "./firstPartyPluginsEffective";
+import { SettingsOutlineRow, SETTINGS_OUTLINE_PAGES } from "./SettingsOutlineRow";
 import { SettingsNavigation, type SettingsNavigationItem } from "./SettingsNavigation";
 import { useSettingsSaved, type SettingsWriteResult } from "./useSettingsSaved";
 import { SidebarDestinationSettings } from "./SidebarDestinationSettings";
@@ -180,7 +182,6 @@ import {
   SettingsPageScope,
   SettingsSection,
   SettingsState,
-  revealSettingsAncestors,
   type SettingsOutlineEntry,
 } from "../settings/primitives";
 import { SidebarRowDetailsSettings } from "../settings/SidebarRowDetailsSettings";
@@ -268,6 +269,8 @@ export interface SettingsViewProps {
   readonly search: string;
   readonly settings: ShellSettings;
   readonly sidebarVibrancySupported: boolean;
+  /** Why Glass is off while it is chosen: "Glass is off because …". */
+  readonly glassOffNote?: string;
   readonly hostBridge?: OctantHostBridge;
   /**
    * Implemented setting ids. Kept as a stable contract of what is implemented;
@@ -370,37 +373,22 @@ const SECTION_LABELS: Readonly<Partial<Record<SettingsSectionId, string>>> = Obj
 );
 
 const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>> = {
-  general:
-    "Who you are in Octant, app-wide defaults, updates, and what Octant tells you while you are away.",
-  appearance: "Choose how Octant looks. Use a built-in theme or make your own.",
-  sidebar: "How the sidebar is laid out and what each thread row in it shows.",
-  keybindings: "Change the shortcuts that reach Octant's global surfaces.",
-  chat: "Defaults for new Chat conversations.",
-  work: "Defaults for new Work threads: the model they start on and what they may do without asking.",
-  code: "Defaults for Code threads and delivery.",
-  voice: "The providers that turn speech into text, text into speech, and prompts into images.",
-  "computer-use": "Control applications through the bundled Computer use plugin.",
-  "device-tools":
-    "The iPhone simulator and Android emulator tools that come with Octant, and their updates.",
-  providers:
-    "Connect providers, manage authentication, pick default models, and see every provider Octant can set up.",
-  harness:
-    "Models you add by API key or run locally: which model does which job, including Navigator's.",
-  skills:
-    "Skills extend what agents can do. Review the source, then trust and enable only what you want.",
-  "web-search":
-    "Where Octant's own web search may send a query, the data policy it follows, and the keys it uses.",
-  github: "Connection and repository access on the selected host.",
-  host: "Octant's background service: its status, startup, and maintenance.",
-  permissions:
-    "The files no agent may touch, the network places and servers agents may reach, and what you have already allowed.",
-  memory:
-    "What Octant remembers about you across threads and Projects, and how to keep things out of it.",
-  data: "What this host stores, how long it keeps threads, and how to back it up.",
-  "secret-stores":
-    "Keep API keys in a password manager you already use. Octant keeps a reference and fetches the key when it is used.",
-  sync: "Where artifact versions go when sync is on, in a store you own.",
-  usage: "Activity and usage across providers.",
+  general: "Your profile, defaults, updates, and alerts.",
+  work: "What new Work threads start with.",
+  voice: "Speech, text-to-speech, and image providers.",
+  "computer-use": "Let agents use apps on this Mac.",
+  "device-tools": "Simulator and emulator tools, and their updates.",
+  providers: "Connect providers, sign in, and pick default models.",
+  harness: "Models you add by key or run locally.",
+  skills: "Review skills, then trust and enable only what you want.",
+  "web-search": "Where web search may send queries.",
+  github: "GitHub connection on the selected host.",
+  host: "Octant's background service.",
+  permissions: "Files agents may not touch, places they may reach, and what you have allowed.",
+  memory: "What Octant remembers about you, and how to keep things out.",
+  data: "What this host stores and how to back it up.",
+  "secret-stores": "Use a password manager for API keys.",
+  sync: "Where artifact versions go when sync is on.",
 };
 
 const APPEARANCE_SECTION = (): SettingsSectionEntry =>
@@ -855,36 +843,9 @@ export function SettingsView(props: SettingsViewProps) {
                 ) : null}
               </header>
               {/* Links, not headings: the page already has its h1 and one h2 per
-                  section, and this row only moves the reader between them. A
-                  page of three sections or fewer fits in a glance, so an index
-                  there is only more chrome above the first control. */}
-              {!hasQuery && outline.length >= 4 ? (
-                <nav aria-label="On this page" className="settings-view__outline">
-                  <ul>
-                    {outline.map((entry) => (
-                      <li key={entry.id}>
-                        <a
-                          className="settings-view__outline-link window-no-drag"
-                          href={`#${entry.id}`}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            // A section inside a closed disclosure opens first,
-                            // or the link would scroll to nothing.
-                            // A collapsed section opens on the next frame.
-                            const scroll = () => entry.element.scrollIntoView?.({ block: "start" });
-                            if (revealSettingsAncestors(entry.element)) {
-                              requestAnimationFrame(scroll);
-                            } else {
-                              scroll();
-                            }
-                          }}
-                        >
-                          {entry.title}
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                </nav>
+                  section, and this row only moves the reader between them. */}
+              {!hasQuery && SETTINGS_OUTLINE_PAGES.has(route.activeSection) ? (
+                <SettingsOutlineRow entries={outline} scrollRoot={contentRef} />
               ) : null}
             </div>
             {hasQuery ? (
@@ -1108,7 +1069,7 @@ function ActiveSectionContent({
             <div className="setgroup">
               <SettingRow
                 label="Stream replies"
-                description="Show answers as they arrive. Turn off to wait for the finished answer; reasoning stays expandable."
+                description="Show answers as they arrive. Off waits for the full answer; reasoning stays expandable."
                 scope="app"
                 settingId="stream-replies"
                 focused={focusedSetting === settingId("stream-replies")}
@@ -1277,7 +1238,7 @@ function ActiveSectionContent({
             <SettingsSection title="Stalled turns">
               <div className="setgroup">
                 <SettingRow
-                  description="Cuts a turn off when its provider sends nothing for this long, from the next turn; a tool call the provider reports as running is not silence, up to the tool-call pause limit."
+                  description="Ends a turn when its provider sends nothing for this long, from the next turn; a tool call the provider reports as running is not silence, up to the tool-call pause limit."
                   focused={focusedSetting === settingId("stalled-turn-limit")}
                   label="Stalled-turn limit"
                   scope="host"
@@ -1307,7 +1268,7 @@ function ActiveSectionContent({
                   />
                 </SettingRow>
                 <SettingRow
-                  description="Pauses the stalled-turn limit for at most this long while one tool call the provider reports as running has not finished, from the next turn."
+                  description="Pauses the stalled-turn limit for up to this long while a running tool call has not finished. Applies from the next turn."
                   focused={focusedSetting === settingId("provider-tool-call-pause-limit")}
                   label="Tool-call pause limit"
                   scope="host"
@@ -1321,7 +1282,7 @@ function ActiveSectionContent({
                   />
                 </SettingRow>
                 <SettingRow
-                  description="Stops a provider session left running only background work, such as a dev server, after its thread has had no turn for this long; its live tasks stop with it."
+                  description="Stops a provider session that only runs background work, such as a dev server, once its thread has had no turn for this long. Its tasks stop with it."
                   focused={focusedSetting === settingId("background-session-idle-limit")}
                   label="Background work limit"
                   scope="host"
@@ -1453,6 +1414,9 @@ function ActiveSectionContent({
             ? {}
             : { providerSnapshot: props.providerController.snapshot })}
           {...(props.isNarrow === undefined ? {} : { isNarrow: props.isNarrow })}
+          focusedSetting={focusedSetting}
+          settings={props.settings}
+          onSettingsChange={props.onSettingsChange}
           {...(props.localUsageHistoryClient === undefined
             ? {}
             : { historyClient: props.localUsageHistoryClient })}
@@ -1535,8 +1499,8 @@ function ActiveSectionContent({
           {setupGuide}
           <section aria-label="Remote access" id="settings-remote-access">
             <p>
-              Enabling the remote listener and pairing devices happen on the host machine, in the
-              Octant desktop app or with the <code>octant pair</code> and <code>octant auth</code>{" "}
+              Turn on the remote listener and pair devices on the host computer, in the Octant
+              desktop app or with the <code>octant pair</code> and <code>octant auth</code>{" "}
               commands.
             </p>
             <BrowserHubSection hubAdministration={hubAdministrationOf(props.hostBridge)} />
@@ -1652,12 +1616,12 @@ function ActiveSectionContent({
             }
           />
           <SettingsSection
-            description="Files an agent sends to a page or saves from one. A thread at Full access downloads and uploads without asking; a download you start yourself goes to your Downloads folder."
+            description="Files an agent sends to or saves from a page. At Full access, threads download and upload without asking. Downloads you start yourself go to your Downloads folder."
             title="Browser uploads and downloads"
           >
             <div className="setgroup">
               <SettingRow
-                description="Below Full access, lets a page an agent drives start a download, and Octant asks before saving it. Off, those downloads are blocked."
+                description="Below Full access, lets a page an agent drives start a download; Octant asks before saving. Off blocks those downloads."
                 focused={focusedSetting === settingId("browser-agent-downloads")}
                 label="Let agents download files"
                 scope="host"
@@ -1692,7 +1656,7 @@ function ActiveSectionContent({
                 />
               </SettingRow>
               <SettingRow
-                description="How many downloads a page keeps waiting for an agent to save. A newer one replaces the oldest."
+                description="How many downloads wait for an agent to save. A new one replaces the oldest."
                 focused={focusedSetting === settingId("browser-held-download-limit")}
                 label="Downloads kept waiting"
                 scope="host"
@@ -1766,6 +1730,7 @@ function ActiveSectionContent({
                 settingId="browser-captures-per-thread"
               >
                 <OctantNumberStepper
+                  field
                   label="Captures kept per thread"
                   max={MAX_BROWSER_CAPTURES_PER_THREAD}
                   min={1}
@@ -1804,6 +1769,7 @@ function ActiveSectionContent({
                 settingId="tool-steps-per-turn"
               >
                 <OctantNumberStepper
+                  field
                   label="Tool steps kept per turn"
                   max={MAX_THREAD_TOOL_STEPS_SETTING}
                   min={1}
@@ -1819,6 +1785,7 @@ function ActiveSectionContent({
                 settingId="tool-steps-per-turn-full-access"
               >
                 <OctantNumberStepper
+                  field
                   label="Tool steps kept per turn at Full access"
                   max={MAX_THREAD_TOOL_STEPS_SETTING}
                   min={0}
@@ -1915,7 +1882,7 @@ function ActiveSectionContent({
           )}
           <SettingsSection
             title="Background Browser ownership"
-            description="Keep this host's native Browser available for newly reviewed task permissions when its windows close."
+            description="Keep the host's native Browser running for newly reviewed task permissions after its windows close."
           >
             <div className="setgroup">
               <SettingRow
@@ -1923,7 +1890,7 @@ function ActiveSectionContent({
                 scope="host"
                 settingId="persistent-browser-owner"
                 focused={focusedSetting === settingId("persistent-browser-owner")}
-                description="Keeps the agent's Browser running after the last window closes. It starts no task, copies no sign-ins and widens no permission; turning it off or quitting Octant ends it."
+                description="Keeps the agent's Browser running after the last window closes. It starts no task, copies no sign-ins, and adds no permission. Turning it off or quitting Octant ends it."
               >
                 <OctantSwitch
                   checked={props.settings.persistentBrowserOwner}
@@ -2015,7 +1982,7 @@ function RememberedBrowserOriginsPanel(props: {
               ? "1 site always allowed"
               : `${props.origins.length + props.profileSites.length} sites always allowed`,
       }}
-      description="Granted with “Always allow” or “Allow all sites in this profile” on a thread’s Browser approval; forgetting one makes the next open ask again."
+      description="Granted by “Always allow” or “Allow all sites in this profile” on a Browser approval. Forget one and the next open asks again."
       title="Remembered websites"
     >
       {props.origins.length === 0 && props.profileSites.length === 0 ? (
@@ -2566,7 +2533,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       >
         <div className="setgroup">
           <SettingRow
-            description="How you are shown inside Octant. There is no account behind this, and none of it is required."
+            description="How you appear inside Octant. There is no account, and none of this is required."
             focused={focusedSetting === settingId("user-profile")}
             label="Your profile"
             scope="app"
@@ -2586,7 +2553,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       <SettingsSection title="Available modes">
         <div className="setgroup">
           <SettingRow
-            description="Offer Chat in Work's composer: answers without touching your files. Existing threads stay stored when hidden."
+            description="Offer Chat in Work's composer: answers without touching your files. Hidden threads stay saved."
             focused={focusedSetting === settingId("enable-chat")}
             label="Chat"
             scope="app"
@@ -2599,7 +2566,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
           <SettingRow
-            description="Offer In a folder in Work's composer: reads and edits one folder you choose. Existing threads stay stored when hidden."
+            description="Offer In a folder in Work's composer: reads and edits one folder you choose. Hidden threads stay saved."
             focused={focusedSetting === settingId("enable-work")}
             label="Work in a folder"
             scope="app"
@@ -2648,7 +2615,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
         <SettingsSection title="Quitting">
           <div className="setgroup">
             <SettingRow
-              description="The first ⌘Q shows a notice and the second, within a moment, quits. Off, one press quits. Choosing Quit from a menu always quits at once, and Octant still asks before stopping running work."
+              description="The first ⌘Q shows a notice; a second one soon after quits. Off: one press quits. Choosing Quit from a menu always quits at once, and Octant still asks before stopping running work."
               focused={focusedSetting === settingId("quit-shortcut-second-press")}
               label="Press ⌘Q twice to quit"
               scope="app"
@@ -2668,7 +2635,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       <SettingsSection title="Files">
         <div className="setgroup">
           <SettingRow
-            description="Where Work and Code threads started without a Project keep their files, and where artifact files are mirrored unless a Project says otherwise."
+            description="Where Work and Code threads without a Project keep their files, and where artifact files are mirrored unless a Project says otherwise."
             focused={focusedSetting === settingId("default-folder")}
             label="Default folder"
             scope="host"
@@ -2702,7 +2669,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       <SettingsSection title="Compaction">
         <div className="setgroup">
           <SettingRow
-            description="When a thread on Octant Harness or a model endpoint fills this much of its window, Octant compacts it before the next turn. The thread keeps every message."
+            description="When an Octant Harness or model endpoint thread fills this much of its window, Octant compacts it before the next turn. Every message is kept."
             focused={focusedSetting === settingId("auto-compact-octant")}
             label="Compact Octant threads"
             scope="host"
@@ -2740,7 +2707,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
           <SettingRow
-            description="When no turn has run on a thread for this long, Octant compacts it once, so the reply you come back to starts from a summary. Threads holding little are left alone."
+            description="After a thread sits idle this long, Octant compacts it once, so your next reply starts from a summary. Small threads are left alone."
             focused={focusedSetting === settingId("auto-compact-idle")}
             label="Compact quiet threads"
             scope="host"
@@ -2752,7 +2719,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
           <SettingRow
-            description="When a provider's 5-hour or weekly limit is this used, Octant compacts the thread so another provider can pick it up before the limit stops you."
+            description="When a provider's 5-hour or weekly limit is this full, Octant compacts the thread so another provider can take over before the limit stops you."
             focused={focusedSetting === settingId("auto-compact-limit")}
             label="Compact near a usage limit"
             scope="host"
@@ -2901,7 +2868,7 @@ function MarketplaceSection({ focusedSetting, props }: SectionProps) {
     <SettingsSection title="Marketplace">
       <div className="setgroup">
         <SettingRow
-          description="Skill and extension catalog search contacts third-party registries only when you ask."
+          description="Skill and extension search contacts outside registries only when you ask."
           focused={focusedSetting === settingId("marketplace-fetches")}
           label="Marketplace fetches"
           scope="host"
@@ -2926,7 +2893,7 @@ function KeybindingsSection({ focusedSetting }: Pick<SectionProps, "focusedSetti
       <SettingsSection title="Keyboard shortcuts">
         <div className="setgroup">
           <SettingRow
-            description="Click a shortcut, then press the replacement chord. Changes take effect immediately."
+            description="Click a shortcut, then press the new keys. Changes apply at once."
             focused={focusedSetting === settingId("keybindings")}
             label="Shortcuts"
             labelledBySection
@@ -2972,7 +2939,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
       <div className="setgroup">
         {isAvailable("sidebar-material") ? (
           <SettingRow
-            description="The frosted material behind the whole window. Off paints it solid."
+            description="The frosted look behind the window. Off makes it solid."
             focused={focusedSetting === settingId("sidebar-material")}
             label="Glass"
             scope="app"
@@ -3006,14 +2973,14 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
                 data-visible-when-material="opaque"
                 id="translucent-sidebar-effective-note"
               >
-                Translucency is unavailable, so Octant is using an opaque sidebar.
+                {props.glassOffNote ?? glassOffNote(null, false)}
               </p>
             ) : null}
           </SettingRow>
         ) : null}
         {isAvailable("glass-tint") && glass !== "off" && props.themeController !== undefined ? (
           <SettingRow
-            description="How much colour lies over the glass behind the window. Lower is more see-through."
+            description="How much colour sits over the glass. Lower is more see-through."
             focused={focusedSetting === settingId("glass-tint")}
             label="Tint"
             scope="app"
@@ -3112,7 +3079,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
         ) : null}
         {isAvailable("usage-bars") ? (
           <SettingRow
-            description="How the plan-usage meters above the composer draw their bar."
+            description="How the plan-usage meters above the composer look."
             focused={focusedSetting === settingId("usage-bars")}
             label="Usage bars"
             scope="app"
@@ -3222,7 +3189,7 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
           ) : null}
           {isAvailable("sidebar-destinations") ? (
             <SettingRow
-              description="Choose which destinations appear in the sidebar, where they live, and in what order."
+              description="Choose which destinations the sidebar shows, and their order."
               focused={focusedSetting === settingId("sidebar-destinations")}
               label="Sidebar destinations"
               scope="app"
@@ -3236,7 +3203,7 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
           ) : null}
           {isAvailable("sidebar-more") ? (
             <SettingRow
-              description="Reveal the menu-only destinations and Customize sidebar under a More row at the end of the sidebar navigation. Off keeps them in the account menu."
+              description="Put menu-only destinations and Customize sidebar under a More row. Off keeps them in the account menu."
               focused={focusedSetting === settingId("sidebar-more")}
               label="More row in the sidebar"
               scope="app"
@@ -3254,7 +3221,7 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
           ) : null}
           {isAvailable("sidebar-count-tiles") ? (
             <SettingRow
-              description="Show Inbox, Running, To review, and Done today as count tiles. Off keeps the plain Inbox and Board rows."
+              description="Show Inbox, Running, To review, and Done today as count tiles. Off shows plain Inbox and Board rows."
               focused={focusedSetting === settingId("sidebar-count-tiles")}
               label="Count tiles"
               scope="app"
@@ -3272,7 +3239,7 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
           ) : null}
           {isAvailable("sidebar-search") ? (
             <SettingRow
-              description="An icon that opens a filter for the thread list, or a filter that is always shown."
+              description="A filter icon, or a filter that is always visible."
               focused={focusedSetting === settingId("sidebar-search")}
               label="Thread filter"
               scope="app"
@@ -3319,7 +3286,7 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
           ) : null}
           {isAvailable("mode-switcher") ? (
             <SettingRow
-              description="Two icon buttons, or a dropdown that names the current mode."
+              description="Two icon buttons, or a dropdown showing the current mode."
               focused={focusedSetting === settingId("mode-switcher")}
               label="Mode switcher"
               scope="app"
@@ -3393,7 +3360,7 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
         </div>
       </SettingsSection>
       <SettingsSection
-        description="What a thread row in each sidebar list shows. A hidden detail is left out, not left as a gap."
+        description="What each thread row shows. Hidden details leave no gap."
         title="Thread rows"
       >
         <div className="settings-panel__body">
@@ -3436,6 +3403,9 @@ function UsageSettingsSection(props: {
   readonly limits?: ReactNode;
   readonly providers?: ReadonlyArray<ProviderInstance>;
   readonly onOpenSubject?: (subjectType: string, subjectId: string) => void;
+  readonly focusedSetting: SettingsSettingId | undefined;
+  readonly settings: ShellSettings;
+  readonly onSettingsChange: SettingsViewProps["onSettingsChange"];
 }) {
   const [source, setSource] = useState<"provider" | "octant" | "diagnostics" | "benchmarks">(
     props.historyClient === undefined ? "octant" : "provider",
@@ -3463,6 +3433,22 @@ function UsageSettingsSection(props: {
   );
   return (
     <div className="settings-usage-stack" id="settings-usage">
+      <div className="setgroup">
+        <SettingRow
+          description="Show the spend ceiling row on threads and Projects. A ceiling that is set always shows."
+          focused={props.focusedSetting === settingId("spend-ceiling-shown")}
+          label="Show spend ceiling"
+          scope="app"
+          settingId="spend-ceiling-shown"
+        >
+          <OctantSwitch
+            checked={props.settings.spendCeilingShown}
+            describedBy="spend-ceiling-shown-description"
+            label="Show spend ceiling"
+            onCheckedChange={(checked) => props.onSettingsChange({ spendCeilingShown: checked })}
+          />
+        </SettingRow>
+      </div>
       {source === "diagnostics" ? (
         <TurnDiagnosticsWorkspace
           client={props.client}
@@ -3522,7 +3508,7 @@ function MaintenanceSection({
     <SettingsSection id="settings-maintenance" title="Maintenance">
       <div className="setgroup">
         <SettingRow
-          description="Restores the current mode's pane arrangement, sidebar, and dock to defaults. Threads and data are kept."
+          description="Resets this mode's panes, sidebar, and dock to defaults. Threads and data are kept."
           focused={focusedSetting === settingId("reset-layout")}
           label="Reset active mode layout"
           scope="app"
@@ -3539,7 +3525,7 @@ function MaintenanceSection({
         </SettingRow>
         {resetBoundsAvailable ? (
           <SettingRow
-            description="Moves and resizes the native window to its default bounds. Workspace data is kept."
+            description="Moves and resizes the window to its default size. Your data is kept."
             focused={focusedSetting === settingId("reset-window-bounds")}
             label="Reset native window bounds"
             scope="app"
@@ -3573,7 +3559,7 @@ function MaintenanceSection({
         ) : null}
         {diagnosticsExportClient !== undefined ? (
           <SettingRow
-            description="Saves a redacted report about one failed action, found by the ID shown with the error. Review it before sharing."
+            description="Saves a redacted report about one failed action, found by the ID shown with the error. Check it before sharing."
             focused={focusedSetting === settingId("export-diagnostics")}
             label="Failure report"
             scope="host"
@@ -3584,7 +3570,7 @@ function MaintenanceSection({
         ) : null}
         {diagnosticsExportClient !== undefined ? (
           <SettingRow
-            description="Journal events per kind over the last 14 days, read when Settings opens. Counts only."
+            description="Events per kind over the last 14 days. Counts only. Read when Settings opens."
             focused={focusedSetting === settingId("journal-growth")}
             label="Journal growth"
             scope="host"
@@ -3624,8 +3610,8 @@ function SidebarBackgroundSettings({
     <div className="settings-view__setting">
       {suspended ? (
         <p className="settings-view__hint">
-          Workspace background covers the sidebar. Turn off Cover the sidebar to use these saved
-          settings.
+          The workspace background sits behind everything, including the sidebar. Set it to show
+          behind the start screens only to use these saved settings.
         </p>
       ) : null}
       <label className="settings-view__field">

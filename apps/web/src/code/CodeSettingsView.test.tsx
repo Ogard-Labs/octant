@@ -202,7 +202,7 @@ describe("CodeSettingsView", () => {
 
     const requirement = screen.getByRole("switch", { name: "Code needs a Git repository" });
     expect(requirement).toBeChecked();
-    expect(screen.getByText(/the default folder included/)).toBeVisible();
+    expect(screen.getByText(/including the default folder/)).toBeVisible();
     expect(screen.queryByRole("switch", { name: "Threads without a Project" })).toBeNull();
 
     await userEvent.setup().click(requirement);

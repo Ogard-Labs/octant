@@ -7,6 +7,7 @@ import { WINDOWS_STRICT_REFUSAL } from "@octant/domain/guardrail-policy";
 import { HostPlatformContext } from "../platform";
 import {
   PermissionModePicker,
+  runningTurnKeepsNarrowerMode,
   threadKeepsFullAccessSandbox,
   WINDOWS_PROVIDER_APPROVALS_DETAIL,
 } from "./PermissionModePicker";
@@ -28,6 +29,25 @@ describe("the approval control", () => {
     expect(trigger).toHaveAccessibleDescription("Asks before commands and file changes.");
     await userEvent.click(trigger);
     expect(await screen.findAllByRole("menuitemradio")).toHaveLength(5);
+  });
+
+  it("opens in Octant's own menu in the desktop app, not the system's, so each mode keeps its line of detail", async () => {
+    const popup = vi.fn(async () => ({ kind: "dismissed" }));
+    Object.defineProperty(window, "octantHost", {
+      configurable: true,
+      value: { popupNativeMenu: popup },
+    });
+    try {
+      render(<PermissionModePicker autoSupported onChange={() => undefined} value="ask-first" />);
+      await userEvent.click(screen.getByRole("button", { name: "Mode: Ask first" }));
+      expect(await screen.findAllByRole("menuitemradio")).toHaveLength(5);
+      expect(screen.getByRole("menuitemradio", { name: "Plan" })).toHaveAccessibleDescription(
+        "Read-only. No commands or edits.",
+      );
+      expect(popup).not.toHaveBeenCalled();
+    } finally {
+      Reflect.deleteProperty(window, "octantHost");
+    }
   });
 });
 
@@ -184,6 +204,38 @@ describe("the sandbox at Full access in the mode picker", () => {
   });
 });
 
+describe("a wider mode picked while a turn runs", () => {
+  it("says in the mode's tooltip that it applies from the next message, only while a narrower turn runs", () => {
+    const keeps = (
+      turnRunning: boolean,
+      turnPolicy: "approval-gated" | "full-access" | undefined,
+    ) => runningTurnKeepsNarrowerMode({ turnRunning, turnPolicy, threadPolicy: "full-access" });
+    expect(keeps(true, "approval-gated")).toBe(true);
+    expect(keeps(true, "full-access")).toBe(false);
+    expect(keeps(false, "approval-gated")).toBe(false);
+    expect(keeps(true, undefined)).toBe(false);
+    expect(
+      runningTurnKeepsNarrowerMode({
+        turnRunning: true,
+        turnPolicy: "full-access",
+        threadPolicy: "plan",
+      }),
+    ).toBe(false);
+
+    render(
+      <PermissionModePicker
+        appliesFromNextMessage
+        autoSupported
+        onChange={() => undefined}
+        value="full-access"
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "Mode: Full access" });
+    expect(trigger.getAttribute("title")).toMatch(/Full access applies from your next message\.$/);
+    expect(trigger).toHaveAccessibleDescription(/Full access applies from your next message\.$/);
+  });
+});
+
 describe("the mode picker on a Windows host", () => {
   it("offers every level outside Strict, says the provider's own approvals decide below Full access, and warns once before the first Full access pick", async () => {
     const onChange = vi.fn();
@@ -263,10 +315,33 @@ describe("Strict in the mode picker", () => {
     );
     await userEvent.click(screen.getByRole("button", { name: /^Mode:/ }));
     const strict = await screen.findByRole("menuitemcheckbox", { name: /^Strict/ });
-    expect(strict).toHaveAccessibleDescription(
-      /Some workflows that work in the provider's own app/,
-    );
+    expect(strict).toHaveAccessibleDescription("Octant's own limits on top of the provider's.");
     await userEvent.click(strict);
     expect(onStrictChange).toHaveBeenCalledWith(true);
+  });
+
+  it("sets the switches apart from the modes with one separator, so Strict does not read as another mode", async () => {
+    render(
+      <PermissionModePicker
+        autoSupported
+        onChange={() => undefined}
+        onStrictChange={() => undefined}
+        strict={false}
+        value="ask-first"
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /^Mode:/ }));
+    const strict = await screen.findByRole("menuitemcheckbox", { name: /^Strict/ });
+    const menu = screen.getByRole("menu");
+    const separator = menu.querySelector('[role="separator"]');
+    expect(separator).not.toBeNull();
+    const lastMode = menu.querySelectorAll('[role="menuitemradio"]');
+    expect(
+      separator!.compareDocumentPosition(lastMode[lastMode.length - 1]!) &
+        Node.DOCUMENT_POSITION_PRECEDING,
+    ).toBeTruthy();
+    expect(
+      separator!.compareDocumentPosition(strict) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });

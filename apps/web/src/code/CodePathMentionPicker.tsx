@@ -9,7 +9,7 @@ import {
   type CodeThreadId,
 } from "@octant/contracts";
 import { reconcileFileMentionPaths } from "@octant/domain";
-import { File, Folder } from "lucide-react";
+import { File, Folder } from "../ui/icons";
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { OctantButton } from "../ui/base/OctantButton";

@@ -145,7 +145,13 @@ previews and confirmation dialogs retain their discrete boundaries. A
 destructive group is its own section at the end of its page, marked by that
 placement and by its confirm control, not by heading colour. Labels and
 descriptions align left, controls align right, and compound editors may expand
-below. A row's "more" (a custom font stack, network details, what an update
+below. A row's description is one short line in the meta ink at 12px. A number
+is a plain right-aligned field with its unit inside it (the arrow keys step it;
+there is no minus and plus). A switch is on in the primary ink, never the
+accent: colour stays on status dots. A preset choice leads with a small swatch
+window drawn from the preset's own tokens, so a theme can be seen before the
+sheet closes. An error or a scan finding under a provider's name is its own 12px
+line in the name's column. A row's "more" (a custom font stack, network details, what an update
 check sends) sits behind one `.settings-disclosure` recipe: a 12px summary with
 the app's chevron, never the browser's marker. Loading and status lines are one
 quiet sentence; only an error keeps a box. Essential labels and explanatory
@@ -179,6 +185,12 @@ Appearance keeps interface typography visible, with editor and terminal fonts
 in named disclosures. Host data inventory lives under Stored data. Installed
 skills and collision diagnostics scroll within a bounded collection while
 search, counts, and Show all remain outside that scroller.
+
+Appearance also offers density (Comfortable or Compact), a Custom preset per mode
+built from Ground, Ink, Accent and a Contrast step (Soft, Standard, Firm; a seed
+set whose text cannot stay readable is refused with the failing role named), and
+a Smooth text switch for grayscale smoothing at a heavier weight (on by default), shown only on a Mac. The values are
+in [DESIGN.md: Appearance](../../DESIGN.md#appearance).
 
 ## Models, providers, and skills
 
@@ -255,8 +267,8 @@ title.
 ## Extension, skill, and Usage cards
 
 Usage totals sit in the Settings kit's card inside Settings. Provider create
-forms, individual extension objects, and artifact cards use the same raised
-recipe; in Settings, the extension and skill collections are kit cards too, and
+forms, individual extension objects, and artifact cards use the same flat
+card recipe; in Settings, the extension and skill collections are kit cards too, and
 the Installed and Marketplace switch rides the first section's label line.
 
 ## Permissions
@@ -484,6 +496,11 @@ the paired browser and requires its own explicit choice after opening the
 dialog; cancellation leaves the key untouched.
 
 ## Usage
+
+The Usage Settings page leads with **Show spend ceiling**, off by default: on,
+every thread's Usage group and every Project page show the spend ceiling row;
+off, a row shows only where a ceiling is set or has refused a turn. A settings
+store from before the switch reads as off (maintainer request, 2026-11-17).
 
 The Usage destination opens local provider history by default when that host
 supports it. Octant records remain a separate source; the two totals are never

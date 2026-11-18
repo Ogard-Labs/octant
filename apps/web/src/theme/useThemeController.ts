@@ -71,24 +71,30 @@ export function useThemeController(options: {
   // window's values back. Queued writes check this and stand down instead.
   const conflicts = useRef(0);
 
-  const load = useCallback(async () => {
-    setStatus("loading");
-    try {
-      const bootstrap = await client.bootstrap();
-      if (!mounted.current) return;
-      setSettings(bootstrap.settings);
-      setDraft(bootstrap.settings);
-      draftRef.current = bootstrap.settings;
-      setVersion(bootstrap.version);
-      versionRef.current = bootstrap.version;
-      setError(undefined);
-      setStatus("ready");
-    } catch (cause) {
-      if (!mounted.current) return;
-      setStatus("unavailable");
-      setError(cause instanceof Error ? cause.message : "Appearance settings are unavailable.");
-    }
-  }, [client]);
+  // A reload that follows a refused write keeps the refusal's message: clearing
+  // it put the draft back to the saved value with nothing said, so a choice
+  // that did not stick looked like a control that did nothing.
+  const load = useCallback(
+    async (keepError = false) => {
+      setStatus("loading");
+      try {
+        const bootstrap = await client.bootstrap();
+        if (!mounted.current) return;
+        setSettings(bootstrap.settings);
+        setDraft(bootstrap.settings);
+        draftRef.current = bootstrap.settings;
+        setVersion(bootstrap.version);
+        versionRef.current = bootstrap.version;
+        if (!keepError) setError(undefined);
+        setStatus("ready");
+      } catch (cause) {
+        if (!mounted.current) return;
+        setStatus("unavailable");
+        setError(cause instanceof Error ? cause.message : "Appearance settings are unavailable.");
+      }
+    },
+    [client],
+  );
 
   useEffect(() => {
     mounted.current = true;
@@ -134,7 +140,7 @@ export function useThemeController(options: {
           conflicts.current += 1;
           setStatus("conflict");
           setError(cause.message);
-          void load();
+          void load(true);
         } else {
           setStatus("unavailable");
           setError(

@@ -1,5 +1,5 @@
 import type { ThreadPublishedPage } from "@octant/contracts";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink } from "../ui/icons";
 import { useContext } from "react";
 import { MarkdownLinkActionsContext } from "../markdown/Markdown";
 

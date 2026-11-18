@@ -2,16 +2,9 @@ import type {
   ThreadBoardPullRequestChecksSummary,
   ThreadBoardPullRequestState,
 } from "@octant/contracts";
-import { GitPullRequest } from "lucide-react";
+import { GitPullRequest } from "../ui/icons";
+import { pullRequestStateMark } from "./pullRequestState";
 import { OctantButton } from "../ui/base/OctantButton";
-
-const STATE_LABELS: Readonly<Record<ThreadBoardPullRequestState, string>> = {
-  unknown: "Pull request",
-  draft: "Draft",
-  open: "Open",
-  merged: "Merged",
-  closed: "Closed",
-};
 
 export interface PullRequestChipProps {
   readonly number: number;
@@ -44,13 +37,13 @@ function checksNote(
 }
 
 export function PullRequestChip(props: PullRequestChipProps) {
-  const label = STATE_LABELS[props.state];
+  const { label } = pullRequestStateMark(props.state);
   const note = props.showState === true ? checksNote(props.state, props.checks) : undefined;
   const chip = (
     <span
       className={`pull-request-chip${props.className === undefined ? "" : ` ${props.className}`}`}
       data-checks={props.state === "open" ? props.checks : undefined}
-      data-tone={props.state}
+      data-pr-state={props.state}
       title={`Pull request #${props.number} · ${label}`}
     >
       <GitPullRequest aria-hidden="true" size={12} />#{props.number}

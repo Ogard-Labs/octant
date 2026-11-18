@@ -1,4 +1,4 @@
-import { Network, X } from "lucide-react";
+import { Network, X } from "../ui/icons";
 import { useState } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
 import { WorkerMark } from "../projects/coordinatorMarks";

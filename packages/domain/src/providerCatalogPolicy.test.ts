@@ -88,7 +88,7 @@ function snapshot(
 
 const codexCandidate = {
   driverKind: "codex",
-  displayName: "Codex CLI",
+  displayName: "Codex",
   binaryPath: "/opt/homebrew/Cellar/codex/1.0/bin/codex",
   discoveredPath: "/opt/homebrew/bin/codex",
   readiness: "ready",

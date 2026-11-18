@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRipple } from "./appBackdropCharacters";
-import { cellWave, fieldLevel, parseColor, printLevel, runMovingPrint } from "./appBackdropPrint";
+import {
+  cellWave,
+  parseColor,
+  printLevel,
+  runMovingPrint,
+  toTwoTone,
+  toneCell,
+  type Toned,
+} from "./appBackdropPrint";
 
 describe("pixel ground frame pacing", () => {
   afterEach(() => {
@@ -8,7 +16,7 @@ describe("pixel ground frame pacing", () => {
     vi.restoreAllMocks();
   });
 
-  it("asks for an animation frame about twelve times a second while drifting, twenty-four while a wave runs, and leaves nothing pending once stopped", () => {
+  it("asks for an animation frame about fifteen times a second while drifting, twenty-four while a wave runs, and leaves nothing pending once stopped", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     const draws = vi.fn();
     const context: Partial<CanvasRenderingContext2D> = {
@@ -46,14 +54,21 @@ describe("pixel ground frame pacing", () => {
     const canvas = document.createElement("canvas");
     document.body.append(canvas);
 
-    const stop = runMovingPrint(canvas, {}, { kind: "dither", cell: 4, levels: 4 }, true);
+    const stop = runMovingPrint(
+      canvas,
+      { scene: "ridges" },
+      { kind: "dither", cell: 4, levels: 4 },
+      true,
+    );
+    // Setup waits for idle time, then the first frame draws.
+    vi.advanceTimersByTime(10);
     const drawsBefore = draws.mock.calls.length;
     runSecondAt125Hz();
     const drawsInOneSecond = draws.mock.calls.length - drawsBefore;
-    expect(drawsInOneSecond).toBeGreaterThanOrEqual(10);
-    expect(drawsInOneSecond).toBeLessThanOrEqual(13);
-    expect(framesRequested).toBeGreaterThanOrEqual(10);
-    expect(framesRequested).toBeLessThanOrEqual(13);
+    expect(drawsInOneSecond).toBeGreaterThanOrEqual(13);
+    expect(drawsInOneSecond).toBeLessThanOrEqual(16);
+    expect(framesRequested).toBeGreaterThanOrEqual(13);
+    expect(framesRequested).toBeLessThanOrEqual(16);
 
     // A click over the print starts a wave, which runs at twice the cadence
     // (an 8 ms vsync rounds both cadences down a little, as a real one does).
@@ -77,16 +92,6 @@ describe("pixel ground frame pacing", () => {
 });
 
 describe("the moving print", () => {
-  it("keeps the field's brightness between dark and full", () => {
-    for (let t = 0; t < 20; t += 1.7) {
-      for (let cell = 0; cell < 200; cell += 13) {
-        const level = fieldLevel(cell, cell * 0.6, t);
-        expect(level).toBeGreaterThanOrEqual(0);
-        expect(level).toBeLessThanOrEqual(1);
-      }
-    }
-  });
-
   it("dithers an in-between level into a pattern of its two nearest steps", () => {
     const steps = new Set<number>();
     for (let row = 0; row < 4; row += 1) {
@@ -117,5 +122,127 @@ describe("the moving print", () => {
     expect(parseColor("#e3a33a")).toEqual([227, 163, 58]);
     expect(parseColor(" #fff ")).toEqual([255, 255, 255]);
     expect(parseColor("transparent")).toBeUndefined();
+  });
+});
+
+/** A stand-in 2d context and a counted compositor, shared by the lifecycle tests below. */
+function stubCanvas() {
+  const draws = vi.fn();
+  const context: Partial<CanvasRenderingContext2D> = {
+    setTransform: vi.fn(),
+    clearRect: vi.fn(),
+    drawImage: draws,
+    putImageData: vi.fn(),
+    createImageData: vi
+      .fn()
+      .mockReturnValue({ data: new Uint8ClampedArray(4), width: 1, height: 1 }),
+  };
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+    context as CanvasRenderingContext2D,
+  );
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) =>
+    window.setTimeout(() => callback(performance.now()), 0),
+  );
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => window.clearTimeout(id));
+  const canvas = document.createElement("canvas");
+  document.body.append(canvas);
+  return { draws, canvas };
+}
+
+describe("the pixel ground's lifecycle", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    document.body.replaceChildren();
+  });
+
+  it("holds one frame and keeps no timer when motion is off", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const { draws, canvas } = stubCanvas();
+    const stop = runMovingPrint(
+      canvas,
+      { scene: "burst" },
+      { kind: "dither", cell: 3, levels: 4 },
+      false,
+    );
+    vi.advanceTimersByTime(5000);
+    expect(draws).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(canvas.dataset["ready"]).toBe("true");
+    stop();
+    expect(canvas.dataset["ready"]).toBeUndefined();
+  });
+
+  it("stops drawing while the document is hidden and resumes when it returns", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const { draws, canvas } = stubCanvas();
+    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    const stop = runMovingPrint(
+      canvas,
+      { scene: "drift" },
+      { kind: "dither", cell: 3, levels: 4 },
+      true,
+    );
+    vi.advanceTimersByTime(1000);
+    expect(draws.mock.calls.length).toBeGreaterThan(5);
+    hidden.mockReturnValue(true);
+    document.dispatchEvent(new Event("visibilitychange"));
+    vi.advanceTimersByTime(100);
+    const whileHidden = draws.mock.calls.length;
+    vi.advanceTimersByTime(3000);
+    expect(draws.mock.calls.length).toBe(whileHidden);
+    expect(vi.getTimerCount()).toBe(0);
+    hidden.mockReturnValue(false);
+    document.dispatchEvent(new Event("visibilitychange"));
+    vi.advanceTimersByTime(1000);
+    expect(draws.mock.calls.length).toBeGreaterThan(whileHidden);
+    stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("the two-tone print", () => {
+  const page = { ink: 0.5, accent: 0.7 };
+
+  it("uses the accent only where the glow is above the ink", () => {
+    const into: Toned = { accent: false, alpha: 0 };
+    let accents = 0;
+    for (let row = 0; row < 4; row += 1) {
+      for (let column = 0; column < 4; column += 1) {
+        toneCell(0.6, 0, 4, true, column, row, page, into);
+        expect(into.accent).toBe(false);
+        toneCell(0.2, 1, 4, true, column, row, page, into);
+        if (into.accent) accents += 1;
+      }
+    }
+    expect(accents).toBe(16);
+    toneCell(0.2, 1, 4, true, 0, 0, page, into);
+    expect(into.alpha).toBeCloseTo(0.7);
+  });
+
+  it("steps the ink through the chosen number of levels and no more", () => {
+    const into: Toned = { accent: false, alpha: 0 };
+    const alphas = new Set<number>();
+    for (let value = 0; value <= 1; value += 0.01) {
+      for (let row = 0; row < 4; row += 1) {
+        for (let column = 0; column < 4; column += 1) {
+          toneCell(value, 0, 4, true, column, row, page, into);
+          alphas.add(Math.round(into.alpha * 1000));
+        }
+      }
+    }
+    expect([...alphas].sort((a, b) => a - b)).toEqual([0, 167, 333, 500]);
+  });
+
+  it("gives only the bright warm cells of a picture the accent", () => {
+    const rgba = new Uint8ClampedArray(4 * 4);
+    // Dark, grey, bright blue, bright orange.
+    rgba.set([20, 20, 20, 255, 128, 128, 128, 255, 200, 220, 255, 255, 255, 190, 60, 255]);
+    const picture = toTwoTone({ columns: 4, rows: 1, rgba });
+    expect(picture.glow[3]).toBeGreaterThan(0.5);
+    expect(picture.glow[0]).toBe(0);
+    expect(picture.glow[1]).toBe(0);
+    expect(picture.glow[2]).toBeLessThan(0.3);
+    expect(picture.light[0]).toBeLessThan(picture.light[3] ?? 0);
   });
 });

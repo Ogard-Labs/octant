@@ -8,7 +8,9 @@ import {
 } from "../palette/pendingRequests.test-fixtures";
 import { decodePendingRequest, type WaitingAsk } from "@octant/contracts/pending-requests";
 import {
+  assignedWorkMeta,
   assignedWorkSeenKey,
+  assignedWorkState,
   buildInboxAttentionItems,
   groupInboxByProject,
   inboxAttentionMeta,
@@ -133,6 +135,42 @@ describe("assignedWorkSeenKey", () => {
     };
     expect(assignedWorkSeenKey(item)).not.toBe(
       assignedWorkSeenKey({ ...item, updatedAt: "2026-08-29T10:00:00Z" }),
+    );
+  });
+});
+
+describe("assigned work rows", () => {
+  const item = {
+    category: "pull-request" as const,
+    owner: "Ogard-Labs",
+    name: "octant",
+    number: 2531,
+    title: "Colour the list",
+    author: "octocat",
+    updatedAt: "2026-10-06T05:10:00Z",
+    url: "https://github.com/Ogard-Labs/octant/pull/2531",
+  };
+  const now = Date.parse("2026-10-06T08:10:00.000Z");
+
+  it("names an open pull request and an open issue in the open tone", () => {
+    expect(assignedWorkState(item)).toEqual({ label: "Open pull request", tone: "open" });
+    expect(assignedWorkState({ ...item, category: "review-request" }).label).toBe(
+      "Open pull request",
+    );
+    expect(assignedWorkState({ ...item, draft: true })).toEqual({
+      label: "Draft pull request",
+      tone: "draft",
+    });
+    expect(assignedWorkState({ ...item, category: "issue" })).toEqual({
+      label: "Open issue",
+      tone: "open",
+    });
+  });
+
+  it("reads number, repository and age on the meta line, saying a review request", () => {
+    expect(assignedWorkMeta(item, now)).toBe("#2531 · Ogard-Labs/octant · 3h");
+    expect(assignedWorkMeta({ ...item, category: "review-request" }, now)).toBe(
+      "#2531 · Ogard-Labs/octant · Review requested · 3h",
     );
   });
 });

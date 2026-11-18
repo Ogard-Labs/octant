@@ -375,6 +375,70 @@ describe("ShellService", () => {
     });
   });
 
+  it("leaves a new task's draft as the only pane when the open asks for the whole window", () => {
+    const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
+    const code = base.layouts.code;
+    if (code.kind !== "pane") throw new Error("expected pane");
+    const fixture = persistenceStub({ project: projectFixture("code") });
+    const service = new ShellService({
+      persistence: fixture.persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+    });
+    service.bootstrap(ids.window);
+    const split = service.execute({
+      kind: "apply-workspace-operation",
+      windowId: ids.window,
+      expectedVersion: 0,
+      operation: {
+        kind: "split-pane",
+        mode: "code",
+        targetPaneId: code.paneId,
+        surface: {
+          kind: "settings",
+          id: "00000000-0000-4000-8000-000000000232" as never,
+          title: "Settings",
+        },
+        splitNodeId: "00000000-0000-4000-8000-000000000233",
+        newPaneNodeId: "00000000-0000-4000-8000-000000000234",
+        newPaneId: "00000000-0000-4000-8000-000000000235",
+        orientation: "horizontal",
+        placement: "after",
+        ratio: 0.5,
+      },
+    });
+    if (split.kind !== "workspace-replaced") throw new Error("expected the split to apply");
+
+    const result = service.execute({
+      kind: "apply-workspace-operation",
+      windowId: ids.window,
+      expectedVersion: split.version,
+      operation: {
+        kind: "open-surface",
+        mode: "code",
+        paneId: code.paneId,
+        surface: {
+          kind: "draft-thread",
+          id: "00000000-0000-4000-8000-000000000236" as never,
+          projectId,
+          mode: "code",
+          title: "New Code thread",
+        },
+        alone: true,
+      },
+    });
+
+    expect(result).toMatchObject({
+      kind: "workspace-replaced",
+      workspace: {
+        contextByMode: { code: { projectId, boundRoot: "/repo" } },
+        layouts: {
+          code: { kind: "pane", paneId: code.paneId, surface: { kind: "draft-thread" } },
+        },
+      },
+    });
+  });
+
   it("opens no tab for a Code thread whose Project the catalog no longer holds", () => {
     // Threads of a Project that was bound to a folder on an SSH target keep
     // their journal, but the Project itself is gone, so nothing resolves them.

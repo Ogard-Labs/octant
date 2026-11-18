@@ -1,4 +1,4 @@
-import { Ellipsis } from "lucide-react";
+import { Ellipsis } from "../ui/icons";
 import type { ReactNode } from "react";
 import { OctantContextMenu } from "../ui/base/OctantContextMenu";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";

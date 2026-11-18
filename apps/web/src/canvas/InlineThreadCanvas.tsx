@@ -7,7 +7,7 @@ import {
   Maximize2,
   Minimize2,
   PanelRightOpen,
-} from "lucide-react";
+} from "../ui/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";

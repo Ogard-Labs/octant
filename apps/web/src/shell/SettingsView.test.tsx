@@ -573,14 +573,14 @@ describe("SettingsView", () => {
     expect(section).toHaveTextContent(/^Managed in Octant\./);
     expect(within(section).getAllByRole("paragraph")).toHaveLength(1);
     expect(within(section).queryByRole("button")).toBeNull();
-    expect(section).not.toHaveTextContent(/happen on the host machine/);
+    expect(section).not.toHaveTextContent(/on the host computer/);
   });
 
   it("keeps pairing codes on the host: a client without the local administration bridge gets none", () => {
     renderSettings({ initialDeepLink: { section: "remote-access" } });
 
     const section = screen.getByRole("region", { name: "Remote access" });
-    expect(section).toHaveTextContent(/happen on the host machine/);
+    expect(section).toHaveTextContent(/on the host computer/);
     expect(screen.queryByRole("button", { name: "Create pairing code" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Create pairing link" })).toBeNull();
     expect(screen.queryByRole("img", { name: "Pairing code QR" })).toBeNull();
@@ -826,8 +826,8 @@ describe("SettingsView", () => {
       initialDeepLink: { section: "providers" },
     });
 
-    fireEvent.click(await screen.findByRole("link", { name: /^Codex CLI, / }));
-    expect(screen.getByRole("heading", { level: 1, name: "Codex CLI" })).toBeDefined();
+    fireEvent.click(await screen.findByRole("link", { name: /^Codex, / }));
+    expect(screen.getByRole("heading", { level: 1, name: "Codex" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Back to Provider catalog" })).toBeDefined();
     // The page's own look on this host runs once when it opens; browsing the
     // catalog and opening a driver's setup start no other.
@@ -1046,7 +1046,7 @@ describe("SettingsView", () => {
     expect(control).toHaveAttribute("aria-checked", "true");
     expect(control).toHaveAttribute("aria-describedby", "sidebar-more-description");
     expect(document.getElementById("sidebar-more-description")).toHaveTextContent(
-      "Reveal the menu-only destinations and Customize sidebar",
+      "Put menu-only destinations and Customize sidebar",
     );
     await user.click(control);
     expect(onSettingsChange).toHaveBeenLastCalledWith({ sidebarMoreEnabled: false });
@@ -1059,7 +1059,7 @@ describe("SettingsView", () => {
     });
     navigateTo("Appearance");
     const tint = screen.getByRole("slider", { name: "Glass tint" });
-    expect(tint).toHaveValue("58");
+    expect(tint).toHaveValue("74");
     fireEvent.change(tint, { target: { value: "12" } });
     expect(applyPatch).toHaveBeenLastCalledWith({ glassTint: 12 });
   });
@@ -1103,24 +1103,20 @@ describe("SettingsView", () => {
     expect(screen.getByRole("columnheader", { name: "Projects" })).toBeVisible();
     expect(screen.getByRole("columnheader", { name: "Activity" })).toBeVisible();
 
-    // Each view starts with what its rows already carried: the tree shows
-    // branch, pull request, age, and status; the feed shows the Project name
-    // and status alone.
+    // The tree starts with branch, pull request, age, and status; the feed
+    // with the Project name, age, and status.
     for (const name of [
       "Branch on Projects rows",
       "Pull request on Projects rows",
       "Last updated on Projects rows",
       "Status on Projects rows",
       "Project on Activity rows",
+      "Last updated on Activity rows",
       "Status on Activity rows",
     ]) {
       expect(screen.getByRole("checkbox", { name })).toBeChecked();
     }
-    for (const name of [
-      "Branch on Activity rows",
-      "Pull request on Activity rows",
-      "Last updated on Activity rows",
-    ]) {
+    for (const name of ["Branch on Activity rows", "Pull request on Activity rows"]) {
       expect(screen.getByRole("checkbox", { name })).not.toBeChecked();
     }
     // A Projects row sits under its Project, so it offers no Project detail.
@@ -1141,13 +1137,13 @@ describe("SettingsView", () => {
           project: true,
           branch: false,
           pullRequest: false,
-          lastUpdated: false,
+          lastUpdated: true,
           status: true,
         },
       },
     });
 
-    // Turning the Activity age on says nothing about the Projects rows.
+    // Turning the Activity age off says nothing about the Projects rows.
     await user.click(screen.getByRole("checkbox", { name: "Last updated on Activity rows" }));
     expect(onSettingsChange).toHaveBeenLastCalledWith({
       sidebarRowProperties: {
@@ -1162,7 +1158,7 @@ describe("SettingsView", () => {
           project: true,
           branch: false,
           pullRequest: false,
-          lastUpdated: true,
+          lastUpdated: false,
           status: true,
         },
       },
@@ -1177,7 +1173,7 @@ describe("SettingsView", () => {
       within(screen.getByRole("group", { name: "Glass" })).getByRole("button", { name: "Subtle" }),
     ).toHaveAttribute("aria-pressed", "true");
     const note = screen.getByText(
-      "Translucency is unavailable, so Octant is using an opaque sidebar.",
+      "Glass is off because a browser window has no material to frost.",
     );
     expect(note).toHaveClass("settings-view__effective-note");
     expect(note).toHaveAttribute("data-visible-when-material", "opaque");
@@ -1194,9 +1190,7 @@ describe("SettingsView", () => {
         sidebarVibrancySupported={false}
       />,
     );
-    expect(
-      screen.queryByText("Translucency is unavailable, so Octant is using an opaque sidebar."),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Glass is off because/)).not.toBeInTheDocument();
   });
   it("shows the effective fallback note for reduced transparency and unsupported backdrop", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
@@ -1209,7 +1203,7 @@ describe("SettingsView", () => {
     // Settings reads the window's own surfaces, which turn opaque on the shell
     // under reduced transparency; the narrow drawer's blur goes with them.
     expect(styles).toMatch(
-      /\.shell--material-translucent \.settings-view__sidebar\s*\{[^}]*background:\s*var\(--octant-window-surface\);[^}]*backdrop-filter:/s,
+      /\.shell--material-translucent \.settings-view__sidebar\s*\{[^}]*background:\s*var\(--octant-float-glass\);[^}]*backdrop-filter:\s*none;/s,
     );
     expect(styles).toMatch(
       /@media \(prefers-reduced-transparency: reduce\)\s*\{\s*\.shell--material-translucent \.settings-view__sidebar\s*\{\s*backdrop-filter:\s*none;/,
@@ -1232,9 +1226,9 @@ describe("SettingsView", () => {
     expect(styles).toContain(
       ".shell--material-translucent :is(.settings-view__workspace, .settings-view__mobile-header) { background: transparent; }",
     );
-    // A section card is the card step under Glass, not a mix into the page.
+    // A section card is a 2% wash of ink over the sheet, not a mix into the page.
     expect(styles).toMatch(
-      /\.shell--material-translucent \.settings-view \{ --oct-settings-card-fill: var\(--octant-card\); \}/,
+      /\.shell--material-translucent \.settings-view \{ --oct-settings-card-fill: color-mix\(in srgb, var\(--octant-text-primary\) 2%, transparent\); \}/,
     );
   });
 
@@ -1268,14 +1262,15 @@ describe("SettingsView", () => {
     expect(screen.getByRole("combobox", { name: "Sidebar background type" })).toBeDisabled();
     expect(screen.getByLabelText("Sidebar overlay color")).toBeDisabled();
     expect(screen.getByRole("slider", { name: "Sidebar overlay opacity" })).toBeDisabled();
-    expect(screen.getByText(/Workspace background covers the sidebar/)).toBeVisible();
+    expect(
+      screen.getByText(/background sits behind everything, including the sidebar/),
+    ).toBeVisible();
     expect(applyPatch).not.toHaveBeenCalled();
   });
 
   it.each([
     { kind: "none", scope: "everywhere", coversSidebar: true, increasedContrast: false },
     { kind: "theme", scope: "welcome", coversSidebar: true, increasedContrast: false },
-    { kind: "theme", scope: "everywhere", coversSidebar: false, increasedContrast: false },
     { kind: "theme", scope: "everywhere", coversSidebar: true, increasedContrast: true },
   ])(
     "keeps separate sidebar controls available when no effective background covers it: %j",
@@ -1292,7 +1287,9 @@ describe("SettingsView", () => {
       });
       navigateTo("Sidebar");
       expect(screen.getByRole("combobox", { name: "Sidebar background type" })).toBeEnabled();
-      expect(screen.queryByText(/Workspace background covers the sidebar/)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/background sits behind everything, including the sidebar/),
+      ).not.toBeInTheDocument();
     },
   );
 
@@ -1529,9 +1526,7 @@ describe("SettingsView", () => {
     );
     expect(screen.getByRole("heading", { name: "Host" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toHaveFocus();
-    expect(
-      screen.getByText(/Restores the current mode's pane arrangement.*Threads and data are kept/i),
-    ).toBeVisible();
+    expect(screen.getByText(/Resets this mode's panes.*Threads and data are kept/i)).toBeVisible();
     expect(onDeepLinkApplied).toHaveBeenCalledOnce();
   });
 
@@ -1596,6 +1591,27 @@ describe("SettingsView", () => {
     expect(within(source).getByRole("button", { name: "Octant records" })).toBeVisible();
     // The embedded view contributes its controls, not a second page title.
     expect(screen.getAllByRole("heading", { name: "Usage" })).toHaveLength(1);
+  });
+
+  it("shows the spend ceiling row switch off in Usage and saves it when turned on", async () => {
+    const user = userEvent.setup();
+    const usageClient = { query: vi.fn(), export: vi.fn(), reset: vi.fn(), retain: vi.fn() };
+    const localUsageHistoryClient = {
+      load: vi.fn(async () => {
+        throw new Error("history unavailable in this test");
+      }),
+    };
+    const { props } = renderSettings({
+      usageClient: usageClient as never,
+      localUsageHistoryClient: localUsageHistoryClient as never,
+    });
+    navigateTo("Usage");
+
+    const toggle = await screen.findByRole("switch", { name: "Show spend ceiling" });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ spendCeilingShown: true });
   });
 
   it("offers Diagnostics in Usage and leaves Settings for the thread of a failed turn", async () => {
@@ -2024,7 +2040,7 @@ describe("SettingsView", () => {
     const control = screen.getByRole("switch", { name: "Let agents download files" });
     expect(control).toHaveAttribute("aria-checked", "false");
     expect(
-      screen.getByText(/a download you start yourself goes to your Downloads folder/),
+      screen.getByText(/Downloads you start yourself go to your Downloads folder/),
     ).toBeVisible();
     await userEvent.setup().click(control);
     expect(onSettingsChange).toHaveBeenLastCalledWith({ agentBrowserDownloads: true });
@@ -2036,9 +2052,10 @@ describe("SettingsView", () => {
     navigateTo("Permissions");
     expect(screen.getByRole("heading", { name: "Browser captures" })).toBeInTheDocument();
     expect(screen.getByRole("spinbutton", { name: "Captures kept per thread" })).toHaveValue(200);
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "Decrease Captures kept per thread" }));
+    const captures = screen.getByRole("spinbutton", { name: "Captures kept per thread" });
+    const typing = userEvent.setup();
+    await typing.clear(captures);
+    await typing.type(captures, "199");
     expect(onSettingsChange).toHaveBeenLastCalledWith({ browserCapturesPerThread: 199 });
   });
 
@@ -2069,11 +2086,12 @@ describe("SettingsView", () => {
     expect(screen.getByText(/stops after 64 runtime events for each step kept/)).toBeVisible();
     expect(screen.getByText(/no event count stops the turn/)).toBeVisible();
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Decrease Tool steps kept per turn" }));
+    const belowFull = screen.getByRole("spinbutton", { name: "Tool steps kept per turn" });
+    await user.clear(belowFull);
+    await user.type(belowFull, "63");
     expect(onSettingsChange).toHaveBeenLastCalledWith({ toolStepsPerTurn: 63 });
-    await user.click(
-      screen.getByRole("button", { name: "Increase Tool steps kept per turn at Full access" }),
-    );
+    await user.clear(fullAccess);
+    await user.type(fullAccess, "1");
     expect(onSettingsChange).toHaveBeenLastCalledWith({ fullAccessToolStepsPerTurn: 1 });
   });
 
@@ -2220,7 +2238,7 @@ describe("SettingsView", () => {
   it("explains that the GitHub connection stays on the host when no client is available", () => {
     renderSettings();
     navigateTo("GitHub");
-    expect(screen.getByText(/managed on the owning host/i)).toBeInTheDocument();
+    expect(screen.getByText(/set up on the computer that owns it/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Refresh status" })).not.toBeInTheDocument();
   });
 

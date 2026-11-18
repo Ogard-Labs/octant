@@ -9,8 +9,13 @@ import {
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import type { DockToolButtonsProps } from "./DockToolButtons";
 import { ShellResizeHandle } from "./ShellResizeHandle";
+import { splitEnvironmentStrip } from "./dockEnvironmentStrip";
 import {
+  dockColumnIsFixed,
   dockWidthCeiling,
+  flexibleDockMinimum,
+  ENVIRONMENT_STRIP_WIDTH,
+  TILED_DOCK_MIN_WIDTH,
   type RightUtilityDockResolution,
   type RightUtilityDockSurfaceDescriptor,
   type RightUtilityDockSurfaceId,
@@ -33,12 +38,18 @@ export interface RightUtilityDockProps {
   readonly vitals?: ReactNode;
   readonly artifacts?: ReactNode;
   readonly isNarrow: boolean;
+  /** What the panes of a split keep between them, which the tool columns leave alone. */
+  readonly primaryMinimum?: number | undefined;
   readonly onClose: () => void;
   readonly onCloseTab: (tabId: string) => void;
   readonly onCommitWidth: (width: number) => void;
   /** A drag was abandoned: drop the preview rather than keep the width it started from. */
   readonly onCancelWidthPreview?: () => void;
   readonly onOpenTab: (surface: RightUtilityDockSurfaceId) => void;
+  /** A Browser page's favicon as a `data:` URL, when the page has declared one. */
+  readonly pageIcon?: (tabId: string) => string | undefined;
+  /** What a Browser page shows: its title, else its host; absent before a page loads. */
+  readonly pageTitle?: (tabId: string) => string | undefined;
   readonly onPreviewWidth: (width: number) => void;
   readonly onSelectSurface: (tabId: string) => void;
   readonly open: boolean;
@@ -66,9 +77,37 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
   // What is drawn, not what is stored: the stylesheet clamps the stored width
   // to the room the thread leaves, and the separator announced the stored one.
   const [drawnWidth, setDrawnWidth] = useState<number>();
+  // With Environment open it is a strip of its own and the handle sizes only
+  // the tool columns beside it.
+  const split = splitEnvironmentStrip({
+    tabs: props.tabs.map((tab) => ({
+      id: tab.id,
+      surface: ("surface" in tab ? tab.surface : tab).id,
+    })),
+    ...(props.activeTabId === undefined ? {} : { active: props.activeTabId }),
+    ...(props.tiles?.layout === undefined ? {} : { layout: props.tiles.layout }),
+    ...(props.tiles?.minimised === undefined ? {} : { minimised: props.tiles.minimised }),
+  });
+  const stripOpen =
+    !props.isNarrow &&
+    props.tiles !== undefined &&
+    split.environmentTabId !== undefined &&
+    !(props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface");
+  // Fixed tools never resize, so their column draws no handle.
+  const columnFixed = dockColumnIsFixed(
+    props.tabs.map((tab) => ("surface" in tab ? tab.surface : tab).id),
+  );
+  const reserved = stripOpen ? ENVIRONMENT_STRIP_WIDTH : 0;
+  const tileColumns = props.isNarrow
+    ? 1
+    : stripOpen
+      ? (split.toolLayout?.columns.length ?? 1)
+      : (props.tiles?.layout?.columns.length ?? 1);
   const ceiling = dockWidthCeiling(workspaceWidth, {
-    tileColumns: props.isNarrow ? 1 : (props.tiles?.layout?.columns.length ?? 1),
+    reservedWidth: reserved,
+    tileColumns,
     viewportWidth: typeof window === "undefined" ? undefined : window.innerWidth,
+    primaryMinimum: props.primaryMinimum,
   });
 
   useLayoutEffect(() => {
@@ -92,7 +131,41 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
     return () => observer.disconnect();
   }, [props.isNarrow, props.open]);
 
+  // Two columns stand side by side only where the thread's minimum and
+  // Environment leave each its floor; elsewhere no place beside is offered.
+  const columnsFit =
+    dockWidthCeiling(workspaceWidth, {
+      reservedWidth: reserved,
+      tileColumns: 2,
+      viewportWidth: typeof window === "undefined" ? undefined : window.innerWidth,
+      primaryMinimum: props.primaryMinimum,
+    }) >= TILED_DOCK_MIN_WIDTH;
+
   if (!props.open && !props.isNarrow) return null;
+
+  const resizeHandle = (
+    <ShellResizeHandle
+      accessibleName="Resize utility dock"
+      className="right-utility-dock__resize"
+      edge="leading"
+      maximum={ceiling}
+      // Two columns side by side stop at their own floor, where the dock's
+      // width stops following the handle; one column keeps the tool minimum.
+      minimum={
+        columnFixed
+          ? MIN_CONTEXT_SIDEBAR_WIDTH
+          : tileColumns >= 2 && ceiling >= TILED_DOCK_MIN_WIDTH
+            ? TILED_DOCK_MIN_WIDTH
+            : flexibleDockMinimum(ceiling)
+      }
+      {...(props.onCancelWidthPreview === undefined
+        ? {}
+        : { onCancel: props.onCancelWidthPreview })}
+      onCommit={props.onCommitWidth}
+      onPreview={props.onPreviewWidth}
+      value={Math.min((drawnWidth ?? props.width) - reserved, ceiling)}
+    />
+  );
 
   // Only the narrow dock is a modal that nothing else can dismiss. Docked, the
   // window chrome's disclosure closes it, so the header carries no second
@@ -116,6 +189,8 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       {...(props.artifacts === undefined ? {} : { artifacts: props.artifacts })}
       onCloseTab={props.onCloseTab}
       onOpenTab={props.onOpenTab}
+      {...(props.pageIcon === undefined ? {} : { pageIcon: props.pageIcon })}
+      {...(props.pageTitle === undefined ? {} : { pageTitle: props.pageTitle })}
       onSelectSurface={props.onSelectSurface}
       {...(props.overview === undefined ? {} : { overview: props.overview })}
       {...(props.plan === undefined ? {} : { plan: props.plan })}
@@ -127,6 +202,8 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       {...(props.terminal === undefined ? {} : { terminal: props.terminal })}
       {...(props.tests === undefined ? {} : { tests: props.tests })}
       {...(props.tiles === undefined ? {} : { tiles: props.tiles })}
+      columnsFit={columnsFit}
+      {...(stripOpen && !columnFixed ? { toolResizeHandle: resizeHandle } : {})}
       {...(props.toolRow === undefined ? {} : { toolRow: props.toolRow })}
       {...(props.toolsAwaitingThread === undefined
         ? {}
@@ -159,23 +236,12 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
   return (
     <aside
       aria-label="Right Utility Dock"
-      className="right-utility-dock window-no-drag"
+      className="right-utility-dock"
+      data-dock-environment={stripOpen ? "true" : undefined}
       id="right-utility-dock"
       ref={dock}
     >
-      <ShellResizeHandle
-        accessibleName="Resize utility dock"
-        className="right-utility-dock__resize"
-        edge="leading"
-        maximum={ceiling}
-        minimum={MIN_CONTEXT_SIDEBAR_WIDTH}
-        {...(props.onCancelWidthPreview === undefined
-          ? {}
-          : { onCancel: props.onCancelWidthPreview })}
-        onCommit={props.onCommitWidth}
-        onPreview={props.onPreviewWidth}
-        value={Math.min(drawnWidth ?? props.width, ceiling)}
-      />
+      {stripOpen || columnFixed ? null : resizeHandle}
       {surface}
     </aside>
   );

@@ -137,6 +137,9 @@ describe("the Chat thread environment summary", () => {
       expect(screen.getAllByRole("region", { name: "Environment details" })).toHaveLength(1),
     );
     expect(screen.getByText("1 attachment")).toBeVisible();
+    // Project-scoped memory is the constant case and is left unsaid; only an
+    // unfiled Chat, where memory is unavailable, gets a row.
+    expect(screen.queryByText("Memory")).not.toBeInTheDocument();
     expect(screen.getByText("First view")).toBeVisible();
     expect(screen.getByText("Second view")).toBeVisible();
   });
@@ -269,5 +272,55 @@ describe("the Chat thread environment summary", () => {
 
     expect(await screen.findByText("1 attachment")).toBeVisible();
     expect(readWholeThread).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves out a count of none, keeps Counting and Unavailable, and never drops a Project named for a number", async () => {
+    const base = controller();
+    const zeroName = { ...chatProject(), name: "0 Ventures" } as ProjectSummary;
+    const first = render(
+      <ChatThreadEnvironment controller={base} environmentOpen projects={[zeroName]} tab={tabA}>
+        <div />
+      </ChatThreadEnvironment>,
+    );
+    await screen.findByText("1 attachment");
+    expect(screen.getByText("0 Ventures", { selector: "dd" })).toBeVisible();
+    expect(screen.queryByText("Sources")).not.toBeInTheDocument();
+    expect(screen.queryByText("Recap")).not.toBeInTheDocument();
+    first.unmount();
+
+    const pending = render(
+      <ChatThreadEnvironment
+        controller={{
+          ...base,
+          readWholeThread: () => new Promise(() => {}),
+          transcriptWindow: windowState,
+        }}
+        environmentOpen
+        projects={[chatProject()]}
+        tab={tabA}
+      >
+        <div />
+      </ChatThreadEnvironment>,
+    );
+    expect((await screen.findAllByText("Counting")).length).toBe(3);
+    pending.unmount();
+
+    render(
+      <ChatThreadEnvironment
+        controller={{
+          ...base,
+          readWholeThread: async () => {
+            throw new Error("unavailable");
+          },
+          transcriptWindow: windowState,
+        }}
+        environmentOpen
+        projects={[chatProject()]}
+        tab={tabA}
+      >
+        <div />
+      </ChatThreadEnvironment>,
+    );
+    await waitFor(() => expect(screen.getAllByText("Unavailable").length).toBe(3));
   });
 });

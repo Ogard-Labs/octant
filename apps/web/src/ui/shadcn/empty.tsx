@@ -6,7 +6,7 @@ export function Empty({ className, ...props }: ComponentProps<"section">) {
   return (
     <section
       className={cn(
-        "grid w-full max-w-[480px] grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-2 rounded-xl bg-card p-4 text-left text-card-foreground shadow-[var(--octant-shadow-sm)]",
+        "grid w-full max-w-[480px] grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-2 rounded-xl bg-card p-4 text-left text-card-foreground outline outline-1 -outline-offset-1 outline-(--oct-hairline)",
         className,
       )}
       data-slot="empty"
@@ -16,7 +16,7 @@ export function Empty({ className, ...props }: ComponentProps<"section">) {
 }
 
 const emptyStateMediaVariants = cva(
-  "grid size-[round(1.846rem,2px)] shrink-0 place-items-center rounded-lg border border-border bg-secondary text-muted-foreground",
+  "grid size-[round(1.714rem,2px)] shrink-0 place-items-center rounded-lg border border-border bg-secondary text-muted-foreground",
   {
     variants: {
       tone: {

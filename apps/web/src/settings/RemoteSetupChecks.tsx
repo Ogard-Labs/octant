@@ -187,16 +187,14 @@ export function RemoteSetupChecks(props: {
       {host ? (
         props.readHostStatus === undefined ? (
           <p>
-            Host readiness checks need the Octant desktop window on that host. Open its Remote
-            access settings and check the listener there.
+            These checks need the Octant desktop app on that computer. Open its Remote access
+            settings and check the listener there.
           </p>
         ) : null
       ) : (
         <>
           {props.servers === undefined ? (
-            <p>
-              Server registration is unavailable in this client. Use the Octant window on the host.
-            </p>
+            <p>Servers cannot be registered here. Use the Octant app on the host computer.</p>
           ) : loadFailed ? (
             <OctantAlert tone="danger">
               The Octant host could not load registered servers. Reload to recheck; no SSH

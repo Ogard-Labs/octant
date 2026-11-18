@@ -11,10 +11,10 @@ import {
 } from "./typography";
 
 describe("typography projections", () => {
-  it("ships the platform face at the compact size as the default interface face", () => {
+  it("ships the platform face at 14px as the default interface face", () => {
     expect(DEFAULT_UI_TYPOGRAPHY).toEqual({
       fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-      fontSize: 13,
+      fontSize: 14,
       fontWeight: 400,
     });
     expect(DEFAULT_EDITOR_TYPOGRAPHY).toMatchObject({

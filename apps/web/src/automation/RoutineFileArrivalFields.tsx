@@ -44,7 +44,7 @@ export function RoutineFileArrivalFields(props: {
           placeholder="Inbox"
         />
         <p className="automation-editor__note" id={ids.directoryHelp}>
-          Choose an existing folder relative to the main Project folder; use . for the Project root.
+          Pick an existing folder inside the main Project folder. Use . for the Project root.
         </p>
       </div>
       <div className="automation-editor__field">
@@ -120,7 +120,7 @@ export function RoutineFileArrivalFields(props: {
           </p>
         ) : null}
         <ul>
-          <li>The first complete scan is a baseline; existing files do not start a run.</li>
+          <li>The first scan only sets a baseline. Existing files do not start a run.</li>
           <li>
             At most {trigger.automaticStartLimit || "8"} automatic runs per arm, then review and
             re-arm; quiet time and restarting do not reset the limit.

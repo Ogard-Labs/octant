@@ -29,8 +29,9 @@
   font-size: var(--oct-text-detail);
 }
 
+/* A fact about delivery, not a step in creating: it sits under the cards. */
 .automation-center__delivery {
-  margin: 0 0 1rem;
+  margin: 1rem 0 0;
 }
 
 .automation-center__body {
@@ -57,56 +58,22 @@
   min-height: 0;
 }
 
-/* The creation paths and suggestions are independently actionable objects,
-   so they keep their lift; the sections around them are open. */
-.automation-center__creation-paths {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.6rem;
-  margin-top: 0.75rem;
+/* The table drops its runs column by the list's own width, not the window's:
+   the list shares the window with a detail pane. */
+.automation-center__list-pane {
+  container-type: inline-size;
 }
 
-.automation-center__creation-path {
-  display: grid;
-  min-height: 5.5rem;
-  grid-template-columns: 1.75rem minmax(0, 1fr);
-  align-items: start;
-  justify-content: stretch;
-  gap: 0.65rem;
-  padding: 0.85rem;
-  color: var(--oct-fg-2);
-  border: 0;
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-  box-shadow: var(--octant-shadow-sm);
-  text-align: left;
-  white-space: normal;
-}
-
-.automation-center__creation-path > svg {
-  margin-top: 2px;
-  color: var(--oct-muted);
-}
-
-.automation-center__creation-path--featured > svg {
-  color: var(--oct-accent-fg);
-}
-
-.automation-center__creation-path > span,
-.automation-center__suggestion {
-  display: grid;
-  min-width: 0;
-  gap: 0.25rem;
-}
-
-.automation-center__creation-path strong,
+/* The suggestions are independently actionable objects, so they keep their
+   lift: each is a button drawn as a card with its one hairline. Without it, in light, the card fill is the
+   page's own white and the card read as loose text. The sections around them
+   are open. */
 .automation-center__suggestion strong {
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
 }
 
-.automation-center__creation-path small,
 .automation-center__suggestion span {
   color: var(--oct-muted);
   font-size: var(--oct-text-detail);
@@ -117,11 +84,16 @@
 .automation-center__suggestion-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* Every card in a row is as tall as the tallest, so the grid reads even. */
+  grid-auto-rows: 1fr;
   gap: 0.5rem;
   margin-top: 0.75rem;
 }
 
 .automation-center__suggestion {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
   height: auto;
   min-height: 4.5rem;
   align-content: start;
@@ -130,7 +102,8 @@
   border: 0;
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
   text-align: left;
   white-space: normal;
 }
@@ -147,21 +120,18 @@
   min-width: 0;
 }
 
-/* The view and mode filters ride the .segmented/.segment recipe; the
-   rules here only translate its button idiom (aria-pressed) to this
-   markup's radio-in-label idiom. */
-.automation-center__filter,
+/* The view switch rides the .segmented/.segment recipe; the rules here only
+   translate its button idiom (aria-pressed) to this markup's radio-in-label
+   idiom. */
 .automation-center__view {
   cursor: default;
 }
 
-.automation-center__filter:has(input:checked),
 .automation-center__view:has(input:checked) {
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
 }
 
-.automation-center__filter input,
 .automation-center__view input {
   position: absolute;
   width: 1px;
@@ -170,14 +140,35 @@
   clip-path: inset(50%);
 }
 
-.automation-center__create {
-  margin-inline-start: auto;
+/* The list is one table: the routine (its kind, name and plain schedule), its
+   last seven runs, when it runs next, its on switch and a "…" menu. Every row
+   shares the head's columns, and the trailing columns have fixed widths, so a
+   run arriving, a switch flipping or a time ticking changes a cell's words and
+   never moves a column. */
+.automation-center__groups {
+  --automation-columns: minmax(0, 1fr) 7.5rem 7.5rem 2.75rem 2rem;
+}
+
+.automation-table__head {
+  display: grid;
+  grid-template-columns: var(--automation-columns);
+  align-items: center;
+  column-gap: var(--oct-space-4);
+  height: var(--oct-space-8);
+  padding-inline: var(--oct-space-3);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.automation-center__totals {
+  flex: none;
+  white-space: nowrap;
 }
 
 .automation-center__rows {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -185,38 +176,194 @@
 
 .automation-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.25rem 0.5rem;
-  padding: 0.5rem 0.65rem;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
+  grid-template-columns: var(--automation-columns);
+  align-items: center;
+  column-gap: var(--oct-space-4);
+  min-height: 3.5rem;
+  padding-inline: var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-hairline);
 }
 
+.automation-row:hover {
+  background: var(--oct-wash-hover);
+}
+
+/* The open button spans the routine, runs and next-run columns, so a click
+   anywhere on them opens the routine, while the switch and the menu stay
+   their own controls. */
 .automation-row__open {
-  justify-self: start;
-  border: none;
-  background: transparent;
+  grid-column: 1 / span 3;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  /* The shared button recipe gives a button one line's height; a row of two
+     lines needs its own. */
+  height: auto;
+  min-height: 0;
+  min-width: 0;
+  padding-block: var(--oct-space-2);
+  /* The button's inline padding and border would push its subgrid cells off
+     the column head's edges (measured 9px right, then 6px left, 2026-11-17),
+     and a subgrid keeps its own gap, which the recipe sets to 4px. */
+  padding-inline: 0;
+  border-width: 0;
+  column-gap: inherit;
   color: inherit;
-  padding: 0;
+  text-align: start;
+  cursor: default;
+}
+
+.automation-row__routine {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-3);
+  min-width: 0;
+}
+
+.automation-row__kind {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--oct-radius-sm);
+  background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
+  color: var(--oct-muted);
+}
+
+.automation-row__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.automation-row__name,
+.automation-row__schedule {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automation-row__name {
+  color: var(--oct-fg);
   font-size: var(--oct-text-base);
   font-weight: var(--oct-weight-medium);
-  cursor: default;
-  text-align: start;
 }
 
-.automation-row__open:hover .automation-row__name {
-  text-decoration: underline;
-}
-
-.automation-row__meta {
-  grid-column: 1;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.25rem 0.75rem;
+.automation-row__schedule {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+}
+
+.automation-row__runs {
+  display: flex;
+  gap: var(--oct-space-1);
+}
+
+.automation-row__run {
+  width: 0.625rem;
+  height: 1rem;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--oct-fg) 10%, transparent);
+}
+
+.automation-row__run[data-tone="success"] {
+  background: var(--oct-success);
+}
+
+.automation-row__run[data-tone="failure"] {
+  background: var(--oct-danger);
+}
+
+.automation-row__run[data-tone="active"] {
+  background: color-mix(in oklab, var(--oct-fg) 45%, transparent);
+}
+
+.automation-row__run[data-tone="quiet"] {
+  background: color-mix(in oklab, var(--oct-fg) 22%, transparent);
+}
+
+.automation-row__run[data-tone="empty"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--oct-hairline);
+}
+
+.automation-row__next {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.automation-row__next-primary {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.automation-row__next-secondary {
+  min-height: 1lh;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+}
+
+.automation-row__next[data-tone="paused"] .automation-row__next-primary {
+  color: var(--oct-warn-fg);
+}
+
+.automation-row__next[data-tone="quiet"] .automation-row__next-primary {
+  color: var(--oct-meta);
+}
+
+/* A paused or archived routine reads as resting: its name, runs and times
+   step back, and the switch beside them stays at full strength because it is
+   the way back. */
+.automation-row:is([data-lifecycle="paused"], [data-lifecycle="archived"])
+  :is(.automation-row__kind, .automation-row__name, .automation-row__runs) {
+  opacity: 0.55;
+}
+
+.automation-row__toggle {
+  display: inline-flex;
+  justify-content: center;
+}
+
+.automation-row__menu-wrap {
+  display: inline-flex;
+  justify-content: center;
+}
+
+.automation-row__menu-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-muted);
+}
+
+.automation-row__menu-toggle:hover {
+  background: var(--oct-wash-hover);
+  color: var(--oct-fg);
+}
+
+/* In a narrow pane the runs give way first: the name, next run, switch and
+   menu are what a row must keep. */
+@container (max-width: 620px) {
+  .automation-center__groups {
+    --automation-columns: minmax(0, 1fr) 6.5rem 2.75rem 2rem;
+  }
+
+  .automation-table__head > :nth-child(2),
+  .automation-row__runs {
+    display: none;
+  }
+
+  .automation-row__open {
+    grid-column: 1 / span 2;
+  }
 }
 
 .routine-composer {
@@ -268,37 +415,6 @@
 .routine-composer__draft-work {
   margin: 0;
   color: var(--oct-muted);
-}
-
-.automation-center__completed {
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-}
-
-.automation-row__state[data-lifecycle="paused"],
-.automation-row__status[data-run-lifecycle="failed"] {
-  color: var(--oct-warn-fg);
-}
-
-.automation-row__menu-wrap {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  position: relative;
-  align-self: start;
-}
-
-/* .menu paints the surface; this places it against the row's edge and
-   stacks the actions it holds. */
-.automation-row__menu {
-  position: absolute;
-  inset-inline-end: 0;
-  display: flex;
-  flex-direction: column;
-  min-width: 9rem;
-}
-
-.automation-row__menu > * {
-  justify-content: flex-start;
 }
 
 .automation-detail {
@@ -497,7 +613,6 @@
 }
 
 @media (max-width: 720px) {
-  .automation-center__creation-paths,
   .automation-center__suggestion-grid,
   .automation-center__body[data-detail-open="true"] {
     grid-template-columns: minmax(0, 1fr);

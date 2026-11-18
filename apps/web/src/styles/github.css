@@ -1,67 +1,45 @@
 /* Host-scoped GitHub issue browser. Distinct from Project-bound pull-request
-   surfaces: this overlay lists issues from any accessible repository. */
+   surfaces: this page lists issues from any accessible repository. */
 
 /* ── Issues ─────────────────────────────────────────────────────────────
-   A Surface: header, one toolbar (repository chooser, state, sort, search),
-   then two panes. The list reads like GitHub's: a state glyph, the title,
-   one line of attribution. The reader keeps the body as plain text on
-   purpose, in a card, with the comments as cards under it. */
-.github-issue-browser__repository {
-  gap: var(--oct-space-1);
-}
-
-.github-issue-browser__repository-name {
-  max-width: 28ch;
-  overflow: hidden;
-  font-size: var(--oct-text-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.github-issue-browser__search {
-  display: flex;
-  flex: 1 1 auto;
-  align-items: center;
+   Laid out as the Pull requests page is (pull-request-page.css): a list
+   column with its title, count, Repository control, search and state chips,
+   and a reading pane that uses the pull request pane's columns. Here are only
+   the parts the issue page has of its own. */
+.github-issue-browser .pr-page__list {
   gap: var(--oct-space-2);
-  min-width: 200px;
-  height: 30px;
-  padding: 0 var(--oct-space-2);
-  color: var(--oct-meta);
-  border: 1px solid var(--input);
-  border-radius: var(--oct-radius-sm);
-  background: var(--octant-control);
 }
 
-/* Hover and focus step the edge and the fill as the shared field paint does
-   (field-paint.ts): the rest edge is the strong border, so hover and focus
-   step it to the muted text colour, and focus fills the field. */
-.github-issue-browser__search:hover,
-.github-issue-browser__search:focus-within {
-  border-color: var(--muted-foreground);
-}
-.github-issue-browser__search:focus-within {
-  background: var(--accent);
+.github-issue-browser .work-list__repository-trigger {
+  height: 24px;
 }
 
+/* The search field is the pull request list's, at the list column's width; the
+   wrapper takes no second focus treatment. */
 .github-issue-browser__search input[type="search"] {
-  width: 100%;
-  min-width: 0;
-  height: auto;
-  padding: 0;
-  color: var(--oct-fg);
-  border: 0;
-  background: transparent;
   box-shadow: none;
-  font-size: var(--oct-text-sm);
 }
 
 .github-issue-browser__repository-popup {
   display: grid;
+  align-content: start;
   gap: var(--oct-space-2);
   width: min(36rem, calc(100vw - 2rem));
-  max-height: min(60vh, 32rem);
+  height: min(60vh, 32rem);
   padding: 12px;
   overflow: auto;
+}
+
+/* The list stands in a box of its own height whether it is loading, empty or
+   full, so the popup keeps its size while the repositories arrive. */
+.github-issue-browser__repository-popup .github-picker__results {
+  height: min(40vh, 15rem);
+  flex: 0 0 auto;
+}
+
+.github-issue-browser__repository-popup .github-picker__listbox {
+  flex: 1 1 auto;
+  max-height: none;
 }
 
 .github-issue-browser__all-recent {
@@ -69,19 +47,11 @@
   gap: var(--oct-space-2);
 }
 
-/* The select recipe fills its row; on a toolbar it is one control among
-   several and the search takes the slack instead. */
-.github-issue-browser__sort {
-  width: auto;
-  min-width: 11rem;
-  flex: 0 0 auto;
-}
-
 .github-issue-browser__empty {
   display: grid;
   justify-items: center;
   gap: var(--oct-space-2);
-  max-width: 36rem;
+  padding-top: var(--oct-space-6);
   color: var(--oct-muted);
   text-align: center;
 }
@@ -101,56 +71,11 @@
   margin-top: var(--oct-space-1);
 }
 
-.github-issue-browser__body {
+.github-issue-browser__list-body {
   display: grid;
-  grid-template-columns: minmax(320px, min(720px, 46%)) minmax(0, 1fr);
-  /* The surface scrolls as a page, so the panes claim most of the viewport
-     up front rather than growing with the four rows a short list holds. */
-  min-height: min(72vh, 760px);
-  flex: 1 1 auto;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--octant-card);
-}
-
-.github-issue-browser__list-pane,
-.github-issue-browser__detail-pane {
-  display: flex;
-  flex-direction: column;
   gap: var(--oct-space-2);
+  align-content: start;
   min-width: 0;
-  min-height: 0;
-  overflow: auto;
-}
-
-.github-issue-browser__list-pane {
-  padding: var(--oct-space-1) var(--oct-space-2);
-}
-
-/* The list sits inside the card, so its rows need no outward reach. */
-.github-issue-browser__list-pane .work-list__list {
-  margin-inline: 0;
-}
-
-.github-issue-browser__detail-pane {
-  padding: var(--oct-space-5) var(--oct-space-6) var(--oct-space-8);
-  border-left: 1px solid var(--oct-border);
-}
-
-.github-issue-browser__pad,
-.github-issue-browser__list-pane > .github-issue-browser__stale,
-.github-issue-browser__list-pane > .github-issue-browser__across-notes {
-  padding: var(--oct-space-2) var(--oct-space-4);
-}
-
-.github-issue-browser__row-repository {
-  overflow: hidden;
-  max-width: 100%;
-  color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .github-issue-browser__across-notes {
@@ -158,37 +83,8 @@
   gap: var(--oct-space-2);
 }
 
-.github-issue-browser__row-title {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-  line-height: var(--oct-leading-snug);
-}
-
-.github-issue-browser__row-number {
-  color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
-  font-weight: 400;
-}
-
-.github-issue-browser__row-meta {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px var(--oct-space-2);
-  margin: 0;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
 .github-issue-browser__more {
-  align-self: flex-start;
-  margin: var(--oct-space-2) var(--oct-space-3);
+  justify-self: start;
 }
 
 .github-issue-browser__stale {
@@ -205,64 +101,8 @@
   line-height: var(--oct-leading-snug);
 }
 
-.github-issue-browser__placeholder {
-  display: grid;
-  justify-items: center;
-  gap: var(--oct-space-2);
-  padding: var(--oct-space-8) 0;
-  color: var(--oct-meta);
-  text-align: center;
-}
-
-.github-issue-browser__detail {
-  display: flex;
-  flex-direction: column;
-  gap: var(--oct-space-5);
-  min-width: 0;
-  max-width: 76ch;
-}
-
-.github-issue-browser__detail-header {
-  display: flex;
-  flex-direction: column;
-  gap: var(--oct-space-2);
-}
-
-.github-issue-browser__detail-kicker {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--oct-space-2);
-  margin: 0;
-  font-size: var(--oct-text-xs);
-}
-
-.github-issue-browser__detail-title {
-  margin: 0;
-  overflow-wrap: anywhere;
-  color: var(--oct-fg);
-  font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-medium);
-  letter-spacing: var(--oct-tracking-tight);
-  line-height: 1.25;
-}
-
-.github-issue-browser__detail-actions {
-  display: flex;
-  gap: var(--oct-space-2);
-  padding-top: var(--oct-space-1);
-}
-
-.github-issue-browser__reader {
-  display: grid;
-  gap: var(--oct-space-3);
-  padding: var(--oct-space-4);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--octant-app-background);
-}
-
 .github-issue-browser__url {
-  margin: 0;
+  margin: var(--oct-space-4) 0 0;
   overflow-wrap: anywhere;
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
@@ -278,65 +118,29 @@
   list-style: none;
 }
 
-.github-issue-browser__body-text {
-  margin: 0;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-  color: var(--oct-fg);
-  font-family: var(--oct-font-body);
-  font-size: var(--oct-text-sm);
-  line-height: var(--oct-leading-body);
-}
-
 .github-issue-browser__comments-section {
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: var(--oct-space-3);
+  margin-top: var(--oct-space-6);
 }
 
-.github-issue-browser__comments-title {
+.github-issue-browser__comments-section > h2 {
   display: flex;
   align-items: baseline;
   gap: var(--oct-space-2);
   margin: 0;
-  padding-bottom: var(--oct-space-2);
-  border-bottom: 1px solid var(--oct-hairline);
 }
 
-.github-issue-browser__comments {
-  display: flex;
-  flex-direction: column;
-  gap: var(--oct-space-2);
-  margin: 0;
-  padding: 0;
+/* A description's checklist reads as one: the box is a mark of what is done and
+   cannot be changed here. */
+.pr-detail__prose input[type="checkbox"] {
+  margin: 0 var(--oct-space-2) 0 0;
+  vertical-align: -2px;
+  accent-color: var(--oct-accent);
+}
+
+.pr-detail__prose li:has(> input[type="checkbox"]) {
   list-style: none;
-}
-
-.github-issue-browser__comment {
-  display: flex;
-  flex-direction: column;
-  gap: var(--oct-space-2);
-  padding: var(--oct-space-3) var(--oct-space-4);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--octant-app-background);
-}
-
-.github-issue-browser__comment-author {
-  color: var(--oct-fg-2);
-  font-weight: var(--oct-weight-medium);
-}
-
-@media (max-width: 680px) {
-  .github-issue-browser__body {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .github-issue-browser__detail-pane {
-    padding: var(--oct-space-4);
-    border-left: 0;
-    border-top: 1px solid var(--oct-border);
-  }
 }
 
 html[data-octant-increased-contrast="true"] .work-list__row[aria-current="true"] {
