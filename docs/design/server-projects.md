@@ -52,6 +52,14 @@ unverified host identities require correction through their existing owners.
 The entry explains unsupported server-Project capabilities and uncertain-result
 recovery without implying parity or retrying a command.
 
+**Private network guides.** Below the journeys, searchable guides explain
+Tailscale and Cloudflare private routing, each with a button that opens the
+provider's own page in the person's browser. Sign-in and network enrollment
+happen with the network provider, never in Octant. A guide only explains: it
+grants no device or server access, starts no connection, and changes no
+listener. A client without local administration names Settings on the host
+for the listener step.
+
 **Read-only checks.** Each server journey can check a registered alias and user
 without binding a Project or starting a task. Only an authenticated local window
 may call `/api/remote-setup-check`; paired clients, agents and routines cannot
@@ -219,6 +227,19 @@ checks never change registry/configuration or journal state.
   host's files. Delegation, Browser, Computer, connectors, and forks are not
   offered there, since each acts on this host. The routine tools are offered,
   since they act only on this host's routine records ([Routines](#routines)).
+- **Attached files.** A file the turn names by path rather than sends (any
+  file but an image or a file the model takes natively) is copied before the
+  turn is accepted, over the Project's own SSH connection, into the thread's
+  attachments folder on the server,
+  `<home>/.octant/thread-attachments/<thread>/<attachment>/<name>`, outside
+  every Project folder. The copy is made read-only, its SHA-256 is checked
+  against the journaled digest, and the turn names its path there. The thread's
+  file tools read that folder and write nowhere in it; another thread's do not
+  read it, even through a Project folder that holds the login's home. The copy
+  is made before the turn's start is journaled, so a failed copy leaves no turn. A copy that fails refuses the turn with a sentence saying so. The
+  copies stay on the server when the thread is deleted (not built: removing
+  them). The same holds for a Work thread there
+  ([Plan and Chat tool parity](../architecture.md#security-and-authority)).
 - **The same levels.** The thread's guardrail level is resolved as it is for
   any Code thread (thread, then the account default), and decides each call as
   it does locally: Plan is read-only, Guarded asks for every command and edit,
@@ -311,7 +332,7 @@ checks never change registry/configuration or journal state.
   Full access. _Rationale:_ the posture says what holds the shell, and on a
   server nothing does: Octant has no sandbox there, and the person opening
   their own shell is the approval, as it is for a local Project terminal.
-  A Code Project opens it from the dock's quick tools. A Work Project opens
+  A Code Project opens it in Zen. A Work Project opens
   **Open terminal** in its Settings → Permissions → Servers row, only while this
   live local window holds that Work Project and its default-off **Developer
   tools** choice is on. Another Work Project offers its existing explicit

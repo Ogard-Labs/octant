@@ -1,11 +1,19 @@
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { createHash } from "node:crypto";
-import { isAbsolute, relative, resolve, sep } from "node:path";
-import { planReadOnlyToolServers, providerOwnMemoryLaunches } from "@octant/domain";
+import { homedir } from "node:os";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  CODEX_BLOCKABLE_TOOLS,
+  mcpServerTool,
+  planReadOnlyToolServers,
+  providerOwnMemoryLaunches,
+} from "@octant/domain";
 import {
   decodeProviderFailure,
   decodeProviderProbeResult,
   decodeProviderServiceLimits,
+  MAX_PROVIDER_ATTACHMENTS,
+  MAX_PROVIDER_CONTEXT_BLOCKS,
   type CorrelationId,
   type PermissionPersistence,
   ProviderExecutionPolicy,
@@ -14,6 +22,7 @@ import {
   type ProviderCapabilities,
   type ProviderContextBlock,
   type ProviderInstanceId,
+  type ProviderMention,
   type ProviderModel,
   type ProviderModelOptionValues,
   type ProviderNativeSetup,
@@ -36,12 +45,16 @@ import type {
   ProviderConnection,
   ProviderDriver,
   ProviderSessionCompaction,
+  ProviderSessionForkRequest,
+  ProviderSessionOwnership,
 } from "@octant/provider-sdk/driver";
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
   attachmentMediaTypeToModality,
   isOctantInstructionContext,
+  isStandingProviderContext,
   PROVIDER_CONTEXT_RESTATED,
+  providerContextIdentity,
   renderOctantInstructions,
   renderProviderContextSections,
   renderProviderTurnPrompt,
@@ -52,6 +65,7 @@ import { Cause, Effect, Exit, Option, Queue, Scope, Stream } from "effect";
 import {
   codexAccountWindowStatus,
   mapCodexMessage,
+  mapCodexReviewNote,
   mapCodexSubagentCall,
   mapCodexSubagentRequest,
   mapCodexSubagentWebSearch,
@@ -64,6 +78,7 @@ import {
 import { providerApprovalCall } from "./providerApprovalCall";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { isAtLeastRelease } from "./releaseVersion";
+import { makeCodexNativeSessions } from "./codexNativeSessions";
 import {
   codexRunsNativeSandbox,
   type CodexAppServerConnection,
@@ -83,8 +98,12 @@ import {
   decodeAccountReadResult,
   decodeConfigReadResult,
   decodeModelListResult,
+  decodePluginInstalledResult,
   decodeReviewStartResult,
   decodeSkillsListResult,
+  decodeThreadForkResult,
+  decodeThreadListResult,
+  decodeThreadReadResult,
   decodeThreadResumeResult,
   decodeThreadStartResult,
   decodeThreadCompactStartResult,
@@ -96,11 +115,14 @@ import {
   type CodexConfigReadResult,
   type CodexDynamicToolSpec,
   type CodexModelListResult,
+  type CodexPluginInstalledResult,
   type CodexRpcId,
   type CodexRateLimitsReadResult,
   type CodexReviewStartResult,
   type CodexServerMessage,
   type CodexSkillsListResult,
+  type CodexStoredThread,
+  type CodexThreadListResult,
   type CodexThreadResult,
   type CodexTurnResult,
   type CodexTurnSteerResult,
@@ -119,7 +141,10 @@ export interface CodexThreadStartInput {
   readonly cwd: string;
   readonly model: string;
   readonly approvalPolicy: "never" | "on-request" | "untrusted";
-  readonly sandbox: "danger-full-access" | "workspace-write" | "read-only";
+  /** Codex's built-in sandbox mode; absent when `permissions` names a profile instead. */
+  readonly sandbox?: "danger-full-access" | "workspace-write" | "read-only";
+  /** A permissions profile the thread's `config` defines, in place of `sandbox`. */
+  readonly permissions?: string;
   /**
    * Who answers approval requests: the host (`user`) or the harness's own
    * reviewer (`auto_review`). Always sent, never omitted — Codex
@@ -166,7 +191,7 @@ export function codexReviewRequest(prompt: string): CodexReviewTarget | undefine
 /** Codex's `/review`, listed among the provider's commands in every composer. */
 const CODEX_REVIEW_COMMAND = {
   name: "review",
-  description: "Codex reviews this checkout read-only and reports its findings (Work and Code)",
+  description: "Codex reviews this checkout and reports its findings (Work and Code)",
   argumentHint: "[what to review]",
 } as const;
 
@@ -183,17 +208,32 @@ export interface CodexThreadConfig {
    * config, never written to the account's `config.toml`.
    */
   readonly model_auto_compact_token_limit?: number;
-  readonly mcp_servers?: Readonly<Record<string, { readonly enabled: false }>>;
+  readonly mcp_servers?: Readonly<
+    Record<string, { readonly enabled: false } | { readonly disabled_tools: ReadonlyArray<string> }>
+  >;
   /** Codex's own web search, switched off unless the session's native setup has it on. */
   readonly web_search?: "disabled";
   readonly skills?: {
     readonly config: ReadonlyArray<{ readonly path: string; readonly enabled: false }>;
   };
+  /** Codex's permissions profiles, by name; see {@link codexNativePermissionProfile}. */
+  readonly permissions?: Readonly<Record<string, CodexPermissionProfile>>;
+  /** Codex's own trust record for a Project folder; see {@link codexProjectTrustConfig}. */
+  readonly projects?: Readonly<Record<string, { readonly trust_level: "trusted" }>>;
+}
+
+/** A Codex permissions profile (`[permissions.<name>]` in codex-rs `permissions_toml.rs`). */
+export interface CodexPermissionProfile {
+  readonly extends: ":workspace";
+  readonly filesystem: Readonly<Record<string, "write" | "deny">>;
+  readonly network?: { readonly enabled: true };
 }
 
 export interface CodexThreadResumeInput {
   readonly threadId: string;
   readonly config?: CodexThreadConfig;
+  /** The permissions profile the resumed thread runs under, which its `config` defines. */
+  readonly permissions?: string;
 }
 
 /**
@@ -334,6 +374,72 @@ function codexPlanThreadConfig(
 }
 
 /**
+ * The person's blocked tools laid over a thread's overrides. Codex's shell,
+ * image view and web search each have a switch of their own; a blocked tool
+ * of one of the person's MCP servers goes in that server's `disabled_tools`,
+ * named only for a server the effective config at `cwd` has, because a
+ * partial entry for a server it lacks would be read as a new, broken server.
+ * A server already switched off stays off. Any other name is refused rather
+ * than run: Settings refuses it when added, so only an older list reaches
+ * here with one.
+ */
+function codexBlockedToolsConfig(
+  client: CodexClientPort,
+  cwd: string,
+  config: CodexThreadConfig,
+  blocked: ReadonlyArray<string>,
+): Effect.Effect<CodexThreadConfig, ProviderFailure> {
+  if (blocked.length === 0) return Effect.succeed(config);
+  let next: CodexThreadConfig = config;
+  const serverTools = new Map<string, Array<string>>();
+  for (const tool of blocked) {
+    if (tool === "shell") next = { ...next, ...CODEX_SHELL_OFF_CONFIG };
+    else if (tool === "view_image") next = { ...next, "features.view_image": false };
+    else if (tool === "web_search") next = { ...next, ...CODEX_WEB_SEARCH_OFF_CONFIG };
+    else {
+      const named = mcpServerTool(tool);
+      if (named === undefined) {
+        return Effect.fail(
+          failure(
+            "unsupported",
+            `Codex cannot block ${tool}; it blocks ${CODEX_BLOCKABLE_TOOLS.join(", ")} and MCP server tools. Remove it in Settings › Permissions › Blocked tools.`,
+          ),
+        );
+      }
+      serverTools.set(named.server, [...(serverTools.get(named.server) ?? []), named.tool]);
+    }
+  }
+  if (serverTools.size === 0) return Effect.succeed(next);
+  const settled = next;
+  return request(() => client.configRead({ cwd })).pipe(
+    Effect.map((result) => {
+      const configured = result.config.mcp_servers ?? {};
+      const servers = { ...settled.mcp_servers };
+      for (const [server, tools] of serverTools) {
+        if (!Object.hasOwn(configured, server)) continue;
+        const current = servers[server];
+        if (current !== undefined && "enabled" in current) continue;
+        // The override replaces the server's `disabled_tools`, so the
+        // person's own list is kept beside Octant's blocks; a tool they
+        // switched off in Codex never comes back on.
+        const own = ownDisabledTools(configured[server]);
+        servers[server] = { disabled_tools: [...new Set([...own, ...tools])] };
+      }
+      return Object.keys(servers).length === 0 ? settled : { ...settled, mcp_servers: servers };
+    }),
+  );
+}
+
+/** The tools a server's own Codex config switches off, read as untrusted input. */
+function ownDisabledTools(server: unknown): ReadonlyArray<string> {
+  if (typeof server !== "object" || server === null) return [];
+  const listed: unknown = Reflect.get(server, "disabled_tools");
+  return Array.isArray(listed)
+    ? listed.filter((tool): tool is string => typeof tool === "string")
+    : [];
+}
+
+/**
  * The `skills/list` scopes whose skills do not come from the Project: the
  * user's own (`$CODEX_HOME/skills`, `~/.agents/skills`), Codex's bundled ones,
  * and the administrator's. Any other scope, including one a later release
@@ -419,7 +525,11 @@ function codexProjectSkillsConfig(
 
 export type CodexTurnInputItem =
   | { readonly type: "text"; readonly text: string }
-  | { readonly type: "image"; readonly url: string };
+  | { readonly type: "image"; readonly url: string }
+  /** One of Codex's skills, by the `SKILL.md` path its `skills/list` reported. */
+  | { readonly type: "skill"; readonly name: string; readonly path: string }
+  /** A plugin, as `plugin://<name>@<marketplace>`. */
+  | { readonly type: "mention"; readonly name: string; readonly path: string };
 
 /** One entry of `turn/start.additionalContext`, rendered by Codex under a tag named by its key. */
 export interface CodexAdditionalContextEntry {
@@ -450,6 +560,8 @@ export interface CodexTurnStartInput {
       }
     | { readonly type: "readOnly"; readonly networkAccess?: boolean }
     | { readonly type: "externalSandbox"; readonly networkAccess: "restricted" | "enabled" };
+  /** A permissions profile the thread's config defines, in place of `sandboxPolicy`. */
+  readonly permissions?: string;
   readonly approvalsReviewer: "auto_review" | "user";
   /**
    * The thread's current model and reasoning effort, restated per turn once a
@@ -516,10 +628,38 @@ export interface CodexClientPort {
   modelList(cursor?: string): Promise<CodexModelListResult>;
   /** Without `cwd`, the effective config of every layer but a Project's. */
   configRead(input: { readonly cwd?: string }): Promise<CodexConfigReadResult>;
+  /** With no folder, the account's own skills and Codex's bundled ones. */
   skillsList(input: {
-    readonly cwds: readonly [string];
-    readonly forceReload: true;
+    readonly cwds: readonly [string] | readonly [];
+    readonly forceReload?: true;
   }): Promise<CodexSkillsListResult>;
+  /** The plugins installed for the account (codex-cli 0.135.0 and later). */
+  pluginInstalled?(input: {
+    readonly cwds?: readonly [string];
+  }): Promise<CodexPluginInstalledResult>;
+  /** Stored threads in one folder, newest first; a listing loads none of them. */
+  threadList?(input: {
+    readonly cwd: string;
+    readonly cursor?: string;
+    readonly limit: number;
+    readonly sortKey: "updated_at";
+    readonly archived: false;
+    readonly sourceKinds: ReadonlyArray<string>;
+  }): Promise<CodexThreadListResult>;
+  /** One stored thread, read without loading it. */
+  threadRead?(input: {
+    readonly threadId: string;
+  }): Promise<{ readonly thread: CodexStoredThread }>;
+  /**
+   * Copies a stored thread into a new one through `lastTurnId` (codex-cli
+   * 0.143.0 and later). The copy stays loaded in the app-server that made it.
+   */
+  threadFork?(input: {
+    readonly threadId: string;
+    readonly lastTurnId: string;
+    readonly cwd: string;
+    readonly excludeTurns: true;
+  }): Promise<CodexThreadResult>;
   threadStart(input: CodexThreadStartInput): Promise<CodexThreadResult>;
   threadResume(input: CodexThreadResumeInput): Promise<CodexThreadResult>;
   turnStart(input: CodexTurnStartInput): Promise<CodexTurnResult>;
@@ -572,6 +712,11 @@ export interface CodexDriverOptions {
    */
   readonly planMcpServers?: () => ReadonlyArray<string>;
   readonly idleLeaseMs?: number;
+  /**
+   * Which Codex threads an Octant thread holds, read from the host's journal.
+   * Absent, the driver offers none of the person's own sessions.
+   */
+  readonly sessionOwnership?: ProviderSessionOwnership;
   readonly clock?: () => string;
   /**
    * The host environment the runtime's allowlist is applied to when the
@@ -592,6 +737,12 @@ export interface CodexDriverOptions {
   readonly toolCallId?: () => string;
   readonly jitter?: (baseDelayMs: number) => number;
   readonly sleep?: (milliseconds: number) => Promise<void>;
+  /**
+   * The protected paths that stay refused at every level on this host (the
+   * provider sign-ins), resolved by the host and read at each start and
+   * resume. Absent, Codex's own sandbox carries no deny rules.
+   */
+  readonly protectedSignIns?: () => ReadonlyArray<string>;
 }
 
 interface SessionState {
@@ -604,6 +755,8 @@ interface SessionState {
   readonly strict: boolean | undefined;
   /** The sandbox this session's commands run in; see {@link CodexSessionSandbox}. */
   readonly sandbox: CodexSessionSandbox;
+  /** Whether Codex's own sandbox runs under Octant's permissions profile. */
+  readonly permissionProfile: boolean;
   readonly threadId: string;
   readonly correlationId: CorrelationId;
   readonly turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">;
@@ -622,6 +775,8 @@ interface SessionState {
   reviewTarget?: CodexReviewTarget | undefined;
   /** The findings the running review reported, once it left review mode. */
   reviewFindings?: string | undefined;
+  /** Whether this runtime can add the running review's findings to the session's thread. */
+  reviewRecordsFindings?: boolean | undefined;
   activeTurnId?: string;
   outputAccepted: boolean;
   terminal: boolean;
@@ -699,9 +854,9 @@ const capabilities = {
     // The account home's hooks load as Codex loads them; Octant never
     // switched them off.
     hooks: "supported",
-    // Octant has no switch of its own for a Project's Codex config; Codex's
-    // own folder trust decides.
-    projectCode: "unsupported",
+    // A Project the person trusted for Codex loads its `.codex/config.toml`
+    // outside Plan and Strict (`codexProjectTrustConfig`).
+    projectCode: "supported",
   },
 } as const;
 
@@ -772,6 +927,133 @@ const CODEX_TURN_CONTEXT_RELEASE = [0, 140, 0] as const;
  * compaction drops both the entries and Codex's memory of them (measured on
  * 0.164.0), and Octant then sends them again.
  */
+/** The longest list of skills and plugins one account offers in the `@` menu. */
+const MAX_CODEX_MENTIONS = 256;
+/** The most skill and plugin items one turn carries. */
+const MAX_CODEX_TURN_MENTIONS = 16;
+const CODEX_MENTION_NAME = /^[A-Za-z0-9][A-Za-z0-9:_.-]{0,127}$/u;
+
+function mentionDescription(...candidates: ReadonlyArray<string | null | undefined>) {
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim();
+    if (trimmed !== undefined && trimmed.length > 0)
+      return Array.from(trimmed).slice(0, 512).join("");
+  }
+  return undefined;
+}
+
+/**
+ * The account's own skills (not a Project's) and its installed plugins, for
+ * the composer's `@` menu. A release that lists neither, or answers either
+ * badly, offers what the other listed: the menu grants nothing, so a failed
+ * read never fails the probe.
+ */
+async function codexAccountMentions(
+  client: CodexClientPort,
+): Promise<ReadonlyArray<ProviderMention>> {
+  const mentions = new Map<string, ProviderMention>();
+  const add = (mention: ProviderMention) => {
+    const key = `${mention.kind}:${mention.name}`;
+    if (mentions.size < MAX_CODEX_MENTIONS && !mentions.has(key)) mentions.set(key, mention);
+  };
+  const skills = await client.skillsList({ cwds: [] }).catch(() => undefined);
+  for (const skill of skills?.data.flatMap((entry) => entry.skills) ?? []) {
+    if (
+      skill.name === undefined ||
+      !CODEX_MENTION_NAME.test(skill.name) ||
+      skill.enabled === false ||
+      !CODEX_SKILL_SCOPES_OUTSIDE_THE_PROJECT.has(skill.scope)
+    )
+      continue;
+    const description = mentionDescription(skill.shortDescription, skill.description);
+    add({ kind: "skill", name: skill.name, ...(description === undefined ? {} : { description }) });
+  }
+  const plugins = await client.pluginInstalled?.({}).catch(() => undefined);
+  for (const plugin of plugins?.marketplaces.flatMap((entry) => entry.plugins) ?? []) {
+    if (!plugin.installed || !plugin.enabled || !CODEX_MENTION_NAME.test(plugin.name)) continue;
+    const description = mentionDescription(plugin.interface?.shortDescription);
+    add({
+      kind: "plugin",
+      name: plugin.name,
+      ...(description === undefined ? {} : { description }),
+    });
+  }
+  return [...mentions.values()];
+}
+
+/** The names a prompt references with one sigil, as Codex's own composer writes them. */
+function referencedNames(prompt: string, sigil: "$" | "@"): ReadonlyArray<string> {
+  const names = new Set<string>();
+  const pattern =
+    sigil === "$"
+      ? /(?:^|\s)\$([A-Za-z0-9][A-Za-z0-9:_.-]*)/gu
+      : /(?:^|\s)@([A-Za-z0-9][A-Za-z0-9:_.-]*)/gu;
+  for (const match of prompt.matchAll(pattern)) {
+    const name = match[1];
+    if (name === undefined) continue;
+    names.add(name);
+    // A sentence may end on the reference.
+    const trimmed = name.replace(/[.:]+$/u, "");
+    if (trimmed.length > 0) names.add(trimmed);
+  }
+  return [...names];
+}
+
+/**
+ * The skills and plugins a turn's prompt names, as Codex input items beside
+ * its text: `$name` for one of Codex's skills, `@name` for an installed
+ * plugin. Each is resolved against Codex's own listing for the thread's
+ * folder, never a path the client sent, so a reference grants nothing Codex
+ * would not load for that thread anyway: a Project skill Octant switched off
+ * for the thread, a disabled skill or plugin, and plugins on a thread whose
+ * plugins are off are never sent. A name two skills or two plugins share is
+ * left to Codex's own reading of the text. A listing that fails sends no
+ * items; the text still carries the reference.
+ */
+async function codexReferencedMentions(
+  client: CodexClientPort,
+  input: {
+    readonly prompt: string;
+    readonly projectRoot: string;
+    readonly threadConfig: CodexThreadConfig;
+  },
+): Promise<ReadonlyArray<CodexTurnInputItem>> {
+  const items: CodexTurnInputItem[] = [];
+  const skillNames = referencedNames(input.prompt, "$");
+  if (skillNames.length > 0) {
+    const switchedOff = new Set(input.threadConfig.skills?.config.map((rule) => rule.path) ?? []);
+    const listed = await client.skillsList({ cwds: [input.projectRoot] }).catch(() => undefined);
+    const byName = new Map<string, Array<string>>();
+    for (const skill of listed?.data.flatMap((entry) => entry.skills) ?? []) {
+      if (skill.name === undefined || skill.enabled === false || switchedOff.has(skill.path))
+        continue;
+      byName.set(skill.name, [...(byName.get(skill.name) ?? []), skill.path]);
+    }
+    for (const name of skillNames) {
+      const paths = byName.get(name);
+      if (paths?.length === 1 && paths[0] !== undefined)
+        items.push({ type: "skill", name, path: paths[0] });
+    }
+  }
+  const pluginNames = referencedNames(input.prompt, "@");
+  if (pluginNames.length > 0 && input.threadConfig["features.plugins"] !== false) {
+    const installed = await client
+      .pluginInstalled?.({ cwds: [input.projectRoot] })
+      .catch(() => undefined);
+    const byName = new Map<string, Array<string>>();
+    for (const plugin of installed?.marketplaces.flatMap((entry) => entry.plugins) ?? []) {
+      if (!plugin.installed || !plugin.enabled) continue;
+      byName.set(plugin.name, [...(byName.get(plugin.name) ?? []), plugin.id]);
+    }
+    for (const name of pluginNames) {
+      const ids = byName.get(name);
+      if (ids?.length === 1 && ids[0] !== undefined)
+        items.push({ type: "mention", name, path: `plugin://${ids[0]}` });
+    }
+  }
+  return items.slice(0, MAX_CODEX_TURN_MENTIONS);
+}
+
 const CODEX_INSTRUCTIONS_KEY = "octant_instructions";
 const CODEX_MATERIAL_KEY = "octant_context";
 
@@ -841,25 +1123,46 @@ export interface CodexInjectedMessage {
   readonly role: "developer" | "user" | "assistant";
   readonly content: ReadonlyArray<
     | { readonly type: "input_text"; readonly text: string }
+    | { readonly type: "input_image"; readonly image_url: string }
     | { readonly type: "output_text"; readonly text: string }
   >;
 }
 
 /**
- * A `/review` turn's Octant context, as the messages `turn/start` would have
- * placed ahead of a request: Octant's own rules as a developer message, the
- * rest (pending messages, a handoff, skills, memory) as a user message, each
- * under the tag its key names. The review itself takes only a target, so the
- * context goes into the session's own thread instead of being dropped.
+ * A `/review` turn's Octant context and images, as the messages `turn/start`
+ * would have placed ahead of a request: Octant's own rules as a developer
+ * message, the rest (pending messages, a handoff, skills, memory) as a user
+ * message, each under the tag its key names, and the images the person
+ * attached as a user message of their own. The review itself takes only a
+ * target, so what the turn carries goes into the session's own thread instead
+ * of being dropped, where the next turn sees it.
  */
 export function codexInjectedContext(
   context: ReadonlyArray<ProviderContextBlock>,
+  attachments: ProviderTurnInput["attachments"] = [],
 ): ReadonlyArray<CodexInjectedMessage> {
-  return Object.entries(codexContextEntries(context)).map(([key, entry]) => ({
-    type: "message",
-    role: entry.kind === "application" ? "developer" : "user",
-    content: [{ type: "input_text", text: `<${key}>\n${entry.value}\n</${key}>` }],
-  }));
+  const messages: CodexInjectedMessage[] = Object.entries(codexContextEntries(context)).map(
+    ([key, entry]) => ({
+      type: "message",
+      role: entry.kind === "application" ? "developer" : "user",
+      content: [{ type: "input_text", text: `<${key}>\n${entry.value}\n</${key}>` }],
+    }),
+  );
+  // Codex takes images and nothing else, as `codexTurnRequest` sends them.
+  const images = attachments.filter(
+    (attachment) => attachmentMediaTypeToModality(attachment.mediaType) === "image",
+  );
+  if (images.length > 0) {
+    messages.push({
+      type: "message",
+      role: "user",
+      content: images.map((attachment) => ({
+        type: "input_image",
+        image_url: `data:${attachment.mediaType};base64,${Buffer.from(attachment.bytes).toString("base64")}`,
+      })),
+    });
+  }
+  return messages;
 }
 
 /**
@@ -886,7 +1189,7 @@ export function codexReviewRecord(
       content: [
         {
           type: "input_text",
-          text: `I ran /review on ${asked}. Codex's review, run read-only on a thread of its own, reported:\n\n${reported}`,
+          text: `I ran /review on ${asked}. Codex's review, run on a thread of its own, reported:\n\n${reported}`,
         },
       ],
     },
@@ -987,7 +1290,9 @@ export function codexExecutionSettings(
   autoApprove?: boolean,
   fullAccessSandbox?: boolean,
   sessionSandbox: CodexSessionSandbox = OCTANT_SANDBOX,
-): Pick<CodexThreadStartInput, "approvalPolicy" | "sandbox" | "approvalsReviewer"> {
+): Pick<CodexThreadStartInput, "approvalPolicy" | "approvalsReviewer"> & {
+  readonly sandbox: NonNullable<CodexThreadStartInput["sandbox"]>;
+} {
   if (
     sessionSandbox.kind === "native" &&
     fullAccessSandbox !== true &&
@@ -1089,6 +1394,26 @@ export function codexExecutionSettings(
 }
 
 /**
+ * The sandbox Codex's own review thread starts with. Where Codex's own
+ * sandbox can start (outside Octant's profile) it is `read-only`, as Codex's
+ * review needs nothing more. Inside Octant's profile Codex's own sandbox
+ * cannot start, so the thread runs none of its own and Octant's profile holds
+ * the session's level, as every turn's external sandbox tells Codex (codex-rs
+ * reads `danger-full-access` and an external sandbox as the same mode when it
+ * matches a resume's overrides, `collect_resume_override_mismatches`).
+ */
+export function codexReviewThreadSandbox(state: {
+  readonly sandbox: CodexSessionSandbox;
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly fullAccessSandbox: boolean | undefined;
+}): "read-only" | "danger-full-access" {
+  const outsideOctantProfile =
+    state.sandbox.kind === "native" ||
+    (state.executionPolicy === "full-access" && state.fullAccessSandbox !== true);
+  return outsideOctantProfile ? "read-only" : "danger-full-access";
+}
+
+/**
  * The same authority as `codexExecutionSettings`, in the shape `turn/start`
  * takes. It is re-sent every turn because `thread/start` settles a thread once:
  * a thread created under an earlier mapping keeps that mapping through
@@ -1146,6 +1471,124 @@ export function codexTurnExecutionSettings(
           networkAccess: networkOpen === true ? "enabled" : "restricted",
         } as const);
   return { ...rest, sandboxPolicy };
+}
+
+/**
+ * A turn's settings under Octant's permissions profile: the profile restated
+ * by name in place of the built-in `sandboxPolicy`, which would replace it for
+ * this turn and those after it.
+ */
+export function codexTurnPermissions(
+  settings: ReturnType<typeof codexTurnExecutionSettings>,
+  profile: boolean,
+): Pick<
+  CodexTurnStartInput,
+  "approvalPolicy" | "sandboxPolicy" | "approvalsReviewer" | "permissions"
+> {
+  if (!profile) return settings;
+  const { sandboxPolicy: _replaced, ...rest } = settings;
+  return { ...rest, permissions: CODEX_OCTANT_PROFILE };
+}
+
+/** The permissions profile Octant names for Codex's own sandbox outside Strict. */
+export const CODEX_OCTANT_PROFILE = "octant-workspace";
+
+/**
+ * The first release measured to take a named permissions profile from a
+ * thread's `config` with `permissions` selecting it, and to refuse a profile's
+ * `deny` paths inside its own sandbox (codex-cli 0.169.0 on Linux: a `cat` of
+ * a denied file failed with `Permission denied` while the workspace stayed
+ * writable).
+ */
+const CODEX_PERMISSION_PROFILES_RELEASE = [0, 169, 0] as const;
+
+/**
+ * Codex's own workspace sandbox as a named permissions profile, so it can
+ * carry what Octant keeps out of reach outside Strict: other providers'
+ * sign-ins, as `deny` paths Codex's own sandbox refuses to read or write.
+ * Codex's built-in `workspace-write` (thread `sandbox`, turn `sandboxPolicy`)
+ * has no deny field (`SandboxWorkspaceWrite` in codex-rs `config/src/types.rs`
+ * holds writable roots, network and temp exclusions only), so the profile
+ * replaces it: `:workspace` with the session's folders writable, and the
+ * network open only where Octant's egress proxy is not in the way. Each
+ * `allowed` path, the account's own Codex home, is writable again inside a
+ * denied folder; a more specific path wins in Codex's policy (measured on
+ * 0.169.0: a denied folder with one account home re-allowed read that home
+ * and refused its sibling). `undefined` where the session does not run Codex's
+ * own workspace sandbox, on Windows, or on a release before profiles.
+ */
+export function codexNativePermissionProfile(input: {
+  readonly sessionSandbox: CodexSessionSandbox;
+  readonly policy: ProviderExecutionPolicy;
+  readonly fullAccessSandbox: boolean | undefined;
+  readonly platform: NodeJS.Platform;
+  readonly version: string;
+  readonly networkOpen: boolean;
+  readonly denied: ReadonlyArray<string>;
+  readonly allowed: ReadonlyArray<string>;
+}): CodexPermissionProfile | undefined {
+  if (
+    input.sessionSandbox.kind !== "native" ||
+    input.fullAccessSandbox === true ||
+    (input.policy !== "approval-gated" && input.policy !== "auto-accept-edits") ||
+    input.platform === "win32" ||
+    !isAtLeastRelease(input.version, CODEX_PERMISSION_PROFILES_RELEASE)
+  ) {
+    return undefined;
+  }
+  const filesystem: Record<string, "write" | "deny"> = {};
+  for (const root of input.sessionSandbox.writableRoots) filesystem[root] = "write";
+  for (const path of input.denied) filesystem[path] = "deny";
+  for (const path of input.allowed) filesystem[path] = "write";
+  return {
+    extends: ":workspace",
+    filesystem,
+    ...(input.networkOpen ? { network: { enabled: true } as const } : {}),
+  };
+}
+
+/**
+ * The provider sign-ins Codex's own sandbox refuses outside Strict, as Octant's
+ * profile refuses them (the host's Full access list, which is the sign-ins
+ * alone), less the account's own Codex home and what lies in it; that home is
+ * returned as `allowed` when it sits inside a denied folder (an Octant-managed
+ * account home inside Octant's own provider folder).
+ */
+export function codexProtectedSignIns(
+  signIns: ReadonlyArray<string>,
+  codexHome: string,
+): { readonly denied: ReadonlyArray<string>; readonly allowed: ReadonlyArray<string> } {
+  const home = resolve(codexHome);
+  const inside = (path: string, folder: string) =>
+    path === folder || path.startsWith(`${folder}${sep}`);
+  const paths = signIns.map((path) => resolve(path));
+  const denied = [...new Set(paths.filter((path) => !inside(path, home)))];
+  return { denied, allowed: denied.some((path) => inside(home, path)) ? [home] : [] };
+}
+
+/**
+ * A thread's override that makes Codex load its own Project configuration
+ * (`.codex/config.toml` at the Project): the folder recorded as trusted in
+ * the thread's own config, which Codex reads before it loads Project layers
+ * (`project_trust_context` in codex-rs `config/src/loader/mod.rs`). Measured on
+ * 0.169.0: a `read-only` thread loaded the Project's `model` with this
+ * override and not without it, and nothing was written to `config.toml`.
+ * Only for a Work or Code thread whose Project the person trusted for Codex,
+ * outside Plan and Strict.
+ */
+export function codexProjectTrustConfig(input: {
+  readonly projectRoot: string;
+  readonly mode: "chat" | "work" | "code";
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly strict: boolean | undefined;
+  readonly nativeSetup: ProviderNativeSetup | undefined;
+}): Pick<CodexThreadConfig, "projects"> {
+  return input.mode !== "chat" &&
+    input.executionPolicy !== "plan" &&
+    input.strict === false &&
+    input.nativeSetup?.projectCode === true
+    ? { projects: { [input.projectRoot]: { trust_level: "trusted" } } }
+    : {};
 }
 
 /**
@@ -1316,6 +1759,10 @@ export function makeCodexClient(connection: CodexAppServerConnection): CodexClie
       ),
     configRead: (input) => rpc.request("config/read", input, decodeConfigReadResult),
     skillsList: (input) => rpc.request("skills/list", input, decodeSkillsListResult),
+    pluginInstalled: (input) => rpc.request("plugin/installed", input, decodePluginInstalledResult),
+    threadList: (input) => rpc.request("thread/list", input, decodeThreadListResult),
+    threadRead: (input) => rpc.request("thread/read", input, decodeThreadReadResult),
+    threadFork: (input) => rpc.request("thread/fork", input, decodeThreadForkResult),
     threadStart: (input) => rpc.request("thread/start", input, decodeThreadStartResult),
     threadResume: (input) => rpc.request("thread/resume", input, decodeThreadResumeResult),
     turnStart: (input) => rpc.request("turn/start", input, decodeTurnStartResult),
@@ -1367,6 +1814,10 @@ function toolCatalogContinuation(input: {
   readonly resumeCursor: ProviderResumeCursor;
   readonly tools: ReadonlyArray<ProviderToolDefinition>;
 }): "unchanged" | "handoff-required" {
+  // A session begun outside Octant never had Octant's tools and cannot gain
+  // them, so it runs with the runtime's own: handing it over as text would
+  // lose the session the person chose to continue.
+  if (input.resumeCursor.adopted === true) return "unchanged";
   // Withdrawing a tool keeps the cached native session; the host refuses its
   // later calls. New or changed definitions cannot reach that saved session.
   const recorded = new Map(
@@ -1382,6 +1833,8 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
   // Codex's own subagent threads outlive the turn and connection that started them.
   const subagentLineage = new Map<string, string>();
   const subagentUsage = new Map<string, ProviderChildUsage>();
+  // What a review turn could not hand its thread outlives the session it ran in.
+  const heldForNextTurn = new Map<string, CodexHeldTurnInput>();
   const clock = options.clock ?? (() => new Date().toISOString());
   const makeCorrelation = options.correlationId ?? (() => crypto.randomUUID());
   const contextFacts = makeCodexContextFacts(options, clientFactory, clock);
@@ -1389,11 +1842,106 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
   const makeTaskId = options.taskId ?? (() => crypto.randomUUID());
   const makeToolCallId = options.toolCallId ?? (() => crypto.randomUUID());
 
+  const sessionOwnership = options.sessionOwnership;
+  const sessionCatalog = <A>(use: (client: CodexClientPort) => Promise<A>) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const runtime = yield* acquireRuntime(options, clientFactory, CATALOG_AUTHORITY);
+        return yield* Effect.tryPromise({
+          try: () => use(runtime.client),
+          catch: (error) => error,
+        });
+      }),
+    );
+  /**
+   * Copies a session Octant holds through a turn with Codex's own
+   * `thread/fork`, for a fork or a rewind, and returns the cursor that
+   * resumes the copy. The copy stays loaded in the app-server that made it,
+   * and another app-server's resume is refused while it does (measured with
+   * codex-cli 0.170.0), so it is made on a process of its own that closes as
+   * soon as the copy exists; the thread's next turn then resumes it on its
+   * own lease. A copy is made only for the source's own folder and mode, and
+   * only by a release that cuts at a turn (`lastTurnId`, 0.143.0); anything
+   * else goes back as the text handoff.
+   */
+  const forkSession = (
+    input: ProviderSessionForkRequest,
+  ): Effect.Effect<ProviderResumeCursor | undefined, ProviderFailure> => {
+    const source = input.source;
+    const binding = source.binding;
+    if (
+      String(input.instanceId) !== String(options.instanceId) ||
+      source.driverKind !== "codex" ||
+      binding === undefined ||
+      String(binding.instanceId) !== String(options.instanceId) ||
+      binding.projectRoot !== input.projectRoot ||
+      binding.mode !== input.mode ||
+      input.anchor.trim().length === 0
+    )
+      return Effect.succeed(undefined);
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const runtime = yield* acquireRuntime(
+          options,
+          clientFactory,
+          CATALOG_AUTHORITY,
+          // One process per copy: a process shared by two copies closes only
+          // after the second, so the first copy would stay loaded there and
+          // its resume would meet the writer conflict.
+          `${CODEX_SESSION_COPY_LEASE}:${String(input.sessionId)}`,
+          0,
+        );
+        const threadFork = runtime.client.threadFork;
+        if (threadFork === undefined || !isAtLeastRelease(runtime.version, CODEX_FORK_RELEASE))
+          return undefined;
+        const copy = yield* request(() =>
+          threadFork({
+            threadId: source.value,
+            lastTurnId: input.anchor,
+            cwd: input.projectRoot,
+            excludeTurns: true,
+          }),
+        );
+        if (copy.cwd !== input.projectRoot)
+          return yield* Effect.fail(
+            failure("unauthorized", "Codex copied the thread into a different Project root."),
+          );
+        return {
+          driverKind: "codex" as const,
+          value: copy.thread.id,
+          // A copy keeps the source's app tools (measured with codex-cli 0.170.0).
+          ...(source.tools === undefined ? {} : { tools: source.tools }),
+          ...(source.toolDefinitions === undefined
+            ? {}
+            : { toolDefinitions: source.toolDefinitions }),
+          ...(source.adopted === true ? { adopted: true as const } : {}),
+          binding: providerResumeBinding({
+            instanceId: options.instanceId,
+            sessionId: input.sessionId,
+            projectRoot: input.projectRoot,
+            mode: input.mode,
+            modelId: input.modelId,
+          }),
+        };
+      }),
+    );
+  };
+
   return {
     kind: "codex",
     conversationOwnership: "provider",
     toolCatalogContinuation,
     contextFacts,
+    forkSession,
+    ...(sessionOwnership === undefined
+      ? {}
+      : {
+          nativeSessions: makeCodexNativeSessions({
+            instanceId: options.instanceId,
+            heldSessions: () => sessionOwnership.held("codex"),
+            catalog: sessionCatalog,
+          }),
+        }),
     probe: ({ instanceId }) =>
       instanceId !== options.instanceId
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
@@ -1401,11 +1949,12 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             const runtime = yield* acquireRuntime(options, clientFactory, CATALOG_AUTHORITY);
             const accountResult = yield* request(runtime.client.accountRead);
             const models = yield* readModels(runtime.client);
+            const mentions = yield* Effect.promise(() => codexAccountMentions(runtime.client));
             const environment = yield* Effect.promise(() => resolveCodexLaunchEnvironment(options));
             // A Bedrock sign-in through an AWS profile or exported credentials
             // is refused only for a Strict session, when its lease starts;
             // the account itself stays ready for every other thread.
-            const result = normalizeProbe(
+            const probed = normalizeProbe(
               instanceId,
               runtime.version,
               accountResult,
@@ -1413,6 +1962,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
               clock(),
               codexProviderCredential(environment ?? process.env),
             );
+            const result = mentions.length === 0 ? probed : { ...probed, mentions };
             // Publish the fresh catalog like the other drivers do, so a caller
             // that probes before opening a session (Chat probes before every
             // turn) validates model options and turn input against it even
@@ -1562,6 +2112,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             makeToolCallId,
             subagentLineage,
             subagentUsage,
+            heldForNextTurn,
           },
         );
       });
@@ -1570,6 +2121,10 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
 }
 
 const CATALOG_AUTHORITY: CodexLaunchAuthority = { kind: "catalog" };
+/** The lease prefix of the short-lived process each session copy is made on. */
+const CODEX_SESSION_COPY_LEASE = "codex-session-copy";
+/** The first release whose `thread/fork` cuts the copy at a turn (`lastTurnId`). */
+const CODEX_FORK_RELEASE = [0, 143, 0] as const;
 
 /**
  * Everything one thread lease's process is launched for. None of it can
@@ -1632,12 +2187,14 @@ function acquireRuntime(
   clientFactory: (connection: CodexAppServerConnection) => CodexClientPort,
   authority: CodexLaunchAuthority,
   lease?: string,
+  idleMs?: number,
 ) {
   return options.runtimeRegistry.acquireRuntime<CodexLeasedRuntime>(options.instanceId, {
     idleMs:
-      authority.kind === "thread" && authority.sandboxPolicy !== undefined
+      idleMs ??
+      (authority.kind === "thread" && authority.sandboxPolicy !== undefined
         ? 0
-        : (options.idleLeaseMs ?? 30_000),
+        : (options.idleLeaseMs ?? 30_000)),
     ...(lease === undefined ? {} : { lease }),
     start: async () => {
       const scope = await Effect.runPromise(Scope.make());
@@ -1879,6 +2436,66 @@ interface ConnectionFactories {
   readonly subagentLineage: Map<string, string>;
   /** The latest usage Codex reported on each of its own subagent threads, bounded like the lineage. */
   readonly subagentUsage: Map<string, ProviderChildUsage>;
+  /**
+   * What a `/review` turn carried that a release without `thread/inject_items`
+   * could not add to the session's thread, by that thread, for its next turn;
+   * shared by the driver's connections, since each turn's session ends with it.
+   */
+  readonly heldForNextTurn: Map<string, CodexHeldTurnInput>;
+}
+
+/** A turn's context and attachments a review could not hand to its thread. */
+export interface CodexHeldTurnInput {
+  readonly context: ReadonlyArray<ProviderContextBlock>;
+  readonly attachments: ProviderTurnInput["attachments"];
+}
+
+/** Threads whose held input is kept; the oldest goes first. */
+const MAX_CODEX_HELD_THREADS = 64;
+
+/**
+ * The turn with what an earlier review held for its thread ahead of what it
+ * carries itself, and what still waits after it. The turn's own context and
+ * attachments always go; held ones fill what room the limits leave, oldest
+ * first, and the rest stays held rather than being dropped. A held standing
+ * block goes only while the turn neither restates Octant's context (a
+ * restatement replaces every earlier block, so a withdrawn one must not come
+ * back) nor carries a newer version of the same block; waiting messages and
+ * other one-time blocks always go.
+ */
+export function withHeldTurnInput(
+  input: ProviderTurnInput,
+  held: CodexHeldTurnInput | undefined,
+): { readonly input: ProviderTurnInput; readonly deferred: CodexHeldTurnInput | undefined } {
+  if (held === undefined) return { input, deferred: undefined };
+  const own = input.context ?? [];
+  const restates = own.some(
+    (block) => block.kind === "instructions" && block.text === PROVIDER_CONTEXT_RESTATED,
+  );
+  const ownIdentities = new Set(own.map(providerContextIdentity));
+  const stillHeld = held.context.filter((block) =>
+    block.kind === "instructions" && block.text === PROVIDER_CONTEXT_RESTATED
+      ? !restates
+      : isStandingProviderContext(block)
+        ? !restates && !ownIdentities.has(providerContextIdentity(block))
+        : true,
+  );
+  const contextRoom = Math.max(0, MAX_PROVIDER_CONTEXT_BLOCKS - own.length);
+  const attachmentRoom = Math.max(0, MAX_PROVIDER_ATTACHMENTS - input.attachments.length);
+  const context = [...stillHeld.slice(0, contextRoom), ...own];
+  const deferredContext = stillHeld.slice(contextRoom);
+  const deferredAttachments = held.attachments.slice(attachmentRoom);
+  return {
+    input: {
+      ...input,
+      ...(context.length === 0 ? {} : { context }),
+      attachments: [...held.attachments.slice(0, attachmentRoom), ...input.attachments],
+    },
+    deferred:
+      deferredContext.length === 0 && deferredAttachments.length === 0
+        ? undefined
+        : { context: deferredContext, attachments: deferredAttachments },
+  };
 }
 
 /** How far a subagent's subagents are followed back to the thread that owns them. */
@@ -1977,6 +2594,7 @@ function makeConnection(
     const modeThreadConfig = (
       nativeSetup: ProviderNativeSetup | undefined,
       executionPolicy: ProviderExecutionPolicy,
+      blockedTools: ReadonlyArray<string> = [],
     ): Effect.Effect<CodexThreadConfig, ProviderFailure> =>
       Effect.gen(function* () {
         // The person's own Project skills load as Codex loads them, so none
@@ -2005,7 +2623,8 @@ function makeConnection(
           nativeSetup?.webTools === true
             ? modeConfig
             : { ...modeConfig, ...CODEX_WEB_SEARCH_OFF_CONFIG };
-        return skills === undefined ? webConfig : { ...webConfig, skills };
+        const withSkills = skills === undefined ? webConfig : { ...webConfig, skills };
+        return yield* codexBlockedToolsConfig(client, projectRoot, withSkills, blockedTools);
       });
 
     // Windows has no Octant profile to hold Plan read-only, so a Plan session
@@ -2032,6 +2651,53 @@ function makeConnection(
       codexPlanRunsNativeSandbox(input)
         ? { kind: "native", writableRoots: [projectRoot, ...extraFolders] }
         : OCTANT_SANDBOX;
+    /**
+     * The profile a session of this posture runs Codex's own sandbox under,
+     * read once its process is leased (the network claim follows the lease).
+     */
+    const hostPlatform = options.platform ?? process.platform;
+    const nativeProfile = (input: {
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly fullAccessSandbox?: boolean;
+      readonly strict?: boolean;
+    }): CodexPermissionProfile | undefined => {
+      const launchEnvironment =
+        input.strict === false
+          ? (options.openEnvironment ?? options.environment)
+          : options.environment;
+      const signIns = codexProtectedSignIns(
+        options.protectedSignIns?.() ?? [],
+        launchEnvironment?.CODEX_HOME ?? join(homedir(), ".codex"),
+      );
+      return codexNativePermissionProfile({
+        sessionSandbox: sessionSandbox(input),
+        policy: input.executionPolicy,
+        fullAccessSandbox: input.fullAccessSandbox,
+        platform: hostPlatform,
+        version,
+        networkOpen: leasedNetworkOpen,
+        ...signIns,
+      });
+    };
+    /** A posture's thread config, less what each request adds. */
+    const postureConfig = (input: {
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly fullAccessSandbox?: boolean;
+      readonly strict?: boolean;
+      readonly nativeSetup?: ProviderNativeSetup;
+    }): Pick<CodexThreadConfig, "permissions" | "projects"> => {
+      const profile = nativeProfile(input);
+      return {
+        ...codexProjectTrustConfig({
+          projectRoot,
+          mode: mode ?? "code",
+          executionPolicy: input.executionPolicy,
+          strict: input.strict,
+          nativeSetup: input.nativeSetup,
+        }),
+        ...(profile === undefined ? {} : { permissions: { [CODEX_OCTANT_PROFILE]: profile } }),
+      };
+    };
     const offer = (event: ProviderRuntimeEvent) => Effect.runFork(Queue.offer(queue, event));
     /** Forgets the thread a review ran on once its run ends, so nothing more is read from it. */
     const endReview = (state: SessionState) => {
@@ -2040,84 +2706,58 @@ function makeConnection(
       state.reviewThreadId = undefined;
       state.reviewTarget = undefined;
       state.reviewFindings = undefined;
+      state.reviewRecordsFindings = undefined;
       if (sessionsByThread.get(reviewThreadId) === state) sessionsByThread.delete(reviewThreadId);
     };
     /**
-     * Codex's own review of the thread's checkout. It runs on a thread of
-     * its own started read-only with no approvals, because the review Codex
-     * runs inline takes the sandbox of the thread it runs on, and the
-     * session's thread may write. Codex's read-only sandbox is real only on a
-     * process outside Octant's profile, where Codex's own Seatbelt can start:
-     * a Work or Code thread outside Strict below Full access, or Full access
-     * without the sandbox. Elsewhere the review is refused rather than run
-     * with writes. Plan and Chat never start one.
+     * Codex's own review of the thread's checkout, in every Work and Code
+     * mode, as `/review` runs in Codex on its own. It runs inline on an
+     * ephemeral thread of its own with no approvals, as Codex's review agent
+     * always runs (`AskForApproval::Never`, codex-rs `core/src/tasks/review.rs`),
+     * started at the level the session's thread holds. `thread/start` takes
+     * that level at once, where the session's thread holds whatever its last
+     * turn stated: a Strict thread before its first turn still holds the
+     * `read-only` it was started with, which names Codex's own sandbox.
+     * Outside Octant's profile Codex's own read-only sandbox starts, as
+     * before. Inside it (Strict, Plan, Full access that keeps the sandbox)
+     * Codex's own sandbox cannot start (macOS refuses a Seatbelt inside
+     * another), so the review thread runs none of its own and Octant's
+     * profile holds the level: read-only in Plan, the Project at the guarded
+     * levels. Only Chat, which has no Project, never starts one.
      */
     const startReview = (
       state: SessionState,
       target: CodexReviewTarget,
       input: ProviderTurnInput,
+      deferred: CodexHeldTurnInput | undefined,
     ): Effect.Effect<void, ProviderFailure> =>
       Effect.gen(function* () {
-        if (mode === "chat" || state.executionPolicy === "plan") {
+        if (mode === "chat") {
           return yield* Effect.fail(
-            failure("unsupported", "Codex's review runs in Work and Code, outside Plan."),
-          );
-        }
-        const readOnlyHolds =
-          state.sandbox.kind === "native" ||
-          (state.executionPolicy === "full-access" && state.fullAccessSandbox !== true);
-        if (!readOnlyHolds) {
-          return yield* Effect.fail(
-            failure(
-              "unsupported",
-              "Codex's review needs its own read-only sandbox, which cannot start inside Octant's sandbox. Turn Strict off for this thread, or run it at Full access without the sandbox.",
-            ),
+            failure("unsupported", "Codex's review runs in Work and Code, which have a Project."),
           );
         }
         const reviewStart = client.reviewStart;
-        const threadInjectItems = client.threadInjectItems;
-        if (reviewStart === undefined || threadInjectItems === undefined) {
+        if (reviewStart === undefined) {
           return yield* Effect.fail(failure("unsupported", "This Codex runtime cannot review."));
         }
-        // The review takes only a target. A file the person attached cannot
-        // reach it, so the send is refused before anything leaves, and
-        // whatever the turn carried stays for the next one.
-        if (input.attachments.length > 0) {
-          return yield* Effect.fail(
-            failure(
-              "unsupported",
-              "Codex's review takes no attachments. Send them in a turn of their own, then run /review.",
-            ),
-          );
-        }
         ensureSubscribed();
-        // Everything else the turn carries (pending messages, a handoff,
-        // Octant's context) goes into the session's own thread first, so the
-        // send reports delivered only what Codex has. A runtime that cannot
-        // take it refuses the review before anything is delivered.
-        const injected = codexInjectedContext(
+        // What the turn carries (Octant's context, pending messages, a
+        // handoff, the images the person attached) goes into the session's
+        // own thread first, where the next turn sees it; the review itself
+        // takes only a target. A release that cannot take it still reviews,
+        // and the driver holds it for the thread's next turn instead.
+        const carried = codexInjectedContext(
           withCarriedToolRules(input, state.carriedTools).context ?? [],
+          input.attachments,
         );
-        if (injected.length > 0) {
-          yield* Effect.tryPromise({
-            try: () => threadInjectItems({ threadId: state.threadId, items: injected }),
-            catch: (error) =>
-              error instanceof CodexRpcClientFailure &&
-              error.kind === "remote" &&
-              error.remoteCode === -32601
-                ? failure(
-                    "unsupported",
-                    "This Codex release cannot carry a turn's context into a review.",
-                  )
-                : providerFailure(error),
-          });
-        }
+        const injects = yield* injectItems(state.threadId, carried);
         const reviewThread = yield* request(() =>
           client.threadStart({
             cwd: projectRoot,
             model: state.modelId,
             approvalPolicy: "never",
-            sandbox: "read-only",
+            sandbox: codexReviewThreadSandbox(state),
             approvalsReviewer: "user",
             config: state.threadConfig,
             ephemeral: true,
@@ -2131,6 +2771,7 @@ function makeConnection(
         state.reviewThreadId = reviewThread.thread.id;
         state.reviewTarget = target;
         state.reviewFindings = undefined;
+        state.reviewRecordsFindings = injects !== "unsupported";
         sessionsByThread.set(reviewThread.thread.id, state);
         const started = yield* Effect.tryPromise({
           try: () => reviewStart({ threadId: reviewThread.thread.id, target, delivery: "inline" }),
@@ -2152,7 +2793,62 @@ function makeConnection(
         }
         state.activeTurnId = started.turn.id;
         state.context ??= makeEventContext(state, factories);
+        if (injects === "added" || carried.length === 0) {
+          holdForNextTurn(state.threadId, deferred);
+          return;
+        }
+        holdForNextTurn(state.threadId, {
+          context: [...(deferred?.context ?? []), ...(input.context ?? [])],
+          attachments: [
+            ...(deferred?.attachments ?? []),
+            ...input.attachments.filter(
+              (attachment) => attachmentMediaTypeToModality(attachment.mediaType) === "image",
+            ),
+          ],
+        });
+        for (const noted of mapCodexReviewNote(
+          state.context,
+          "review-carried",
+          "This Codex release cannot add a message's context or attachments to its thread without a turn, so the review ran without them; they go with your next message on this thread.",
+        ))
+          offer(noted);
       });
+    /** Keeps what still waits for the thread's next turn, or forgets the thread when nothing does. */
+    const holdForNextTurn = (threadId: string, waiting: CodexHeldTurnInput | undefined) => {
+      const held = factories.heldForNextTurn;
+      held.delete(threadId);
+      if (waiting === undefined) return;
+      held.set(threadId, waiting);
+      if (held.size > MAX_CODEX_HELD_THREADS) {
+        const oldest = held.keys().next().value;
+        if (oldest !== undefined) held.delete(oldest);
+      }
+    };
+    /**
+     * Appends messages to a thread without a turn; `unsupported` on a release
+     * without `thread/inject_items`, which leaves the thread as it was.
+     */
+    const injectItems = (
+      threadId: string,
+      items: ReadonlyArray<CodexInjectedMessage>,
+    ): Effect.Effect<"added" | "unsupported", ProviderFailure> => {
+      const threadInjectItems = client.threadInjectItems;
+      if (items.length === 0) return Effect.succeed("added");
+      if (threadInjectItems === undefined) return Effect.succeed("unsupported");
+      return Effect.tryPromise({
+        try: () => threadInjectItems({ threadId, items }),
+        catch: (error) => error,
+      }).pipe(
+        Effect.as("added" as const),
+        Effect.catchAll((error) =>
+          error instanceof CodexRpcClientFailure &&
+          error.kind === "remote" &&
+          error.remoteCode === -32601
+            ? Effect.succeed("unsupported" as const)
+            : Effect.fail(providerFailure(error)),
+        ),
+      );
+    };
     const activate = (state: SessionState) => {
       if (state.active) return;
       state.active = true;
@@ -2564,9 +3260,10 @@ function makeConnection(
     /**
      * Ends a review that reported its findings: they go into the session's
      * own thread (`codexReviewRecord`) before the turn reports completed, so
-     * the next turn, which resumes that thread, sees what the review found. A
-     * runtime that cannot take them fails the turn with a sentence saying so
-     * rather than leave the thread without them unseen.
+     * the next turn, which resumes that thread, sees what the review found.
+     * Where they cannot go (a release without `thread/inject_items`, or one
+     * that refused them) the review still completes, after a note saying a
+     * follow-up turn will not see them.
      */
     const recordReview = (
       state: SessionState,
@@ -2574,35 +3271,37 @@ function makeConnection(
       target: CodexReviewTarget,
       findings: string,
     ) => {
+      const records = state.reviewRecordsFindings === true;
+      const context = state.context;
       state.terminal = true;
       clearPendingApprovals(state);
       clearPendingTools(state);
       deactivate(state);
-      const threadInjectItems = client.threadInjectItems;
-      const recorded =
-        threadInjectItems === undefined
-          ? Promise.reject(new Error("Codex cannot take the review's findings."))
-          : threadInjectItems({
-              threadId: state.threadId,
-              items: codexReviewRecord(target, findings),
-            });
+      const recorded: Promise<"added" | "unsupported"> = records
+        ? Effect.runPromise(injectItems(state.threadId, codexReviewRecord(target, findings)))
+        : Promise.resolve("unsupported");
       void recorded
-        .then(
-          () => offer(completed),
-          () =>
-            offer({
-              kind: "failed",
-              failure: failure(
-                "provider-failed",
-                "Codex's review finished, but its findings could not be added to this thread's conversation, so a follow-up turn would not see them.",
-              ),
-              instanceId: completed.instanceId,
-              sessionId: completed.sessionId,
-              sequence: completed.sequence,
-              correlationId: completed.correlationId,
-              occurredAt: completed.occurredAt,
-            } as ProviderRuntimeEvent),
-        )
+        .catch(() => "unsupported" as const)
+        .then((outcome) => {
+          if (outcome === "added" || context === undefined) {
+            offer(completed);
+            return;
+          }
+          // The note goes ahead of the completion, which keeps its place as
+          // the turn's last event.
+          const notes = mapCodexReviewNote(
+            context,
+            "review-unrecorded",
+            "Codex's findings could not be added to this thread's conversation, so a follow-up turn will not see them; paste them into your next message to act on them.",
+          );
+          notes.forEach((noted, index) =>
+            offer({ ...noted, sequence: completed.sequence + index } as ProviderRuntimeEvent),
+          );
+          offer({
+            ...completed,
+            sequence: completed.sequence + notes.length,
+          } as ProviderRuntimeEvent);
+        })
         .finally(unsubscribeWhenIdle);
     };
     const ensureSubscribed = () => {
@@ -2750,6 +3449,7 @@ function makeConnection(
         fullAccessSandbox: input.fullAccessSandbox,
         strict: input.strict,
         sandbox: sessionSandbox(input),
+        permissionProfile: nativeProfile(input) !== undefined,
         threadId: thread.thread.id,
         ...(turnOverrides === undefined ? {} : { turnOverrides }),
         ...(collaborationMode === undefined ? {} : { collaborationMode }),
@@ -2805,17 +3505,28 @@ function makeConnection(
               optionSettings = codexModelOptionSettings(observedModel, requestedOptions);
             }
             const dynamicTools = codexDynamicTools(input.tools);
-            const modeConfig = yield* modeThreadConfig(input.nativeSetup, input.executionPolicy);
+            const modeConfig = yield* modeThreadConfig(
+              input.nativeSetup,
+              input.executionPolicy,
+              input.blockedTools,
+            );
+            const posture = postureConfig(input);
             const config = {
               ...optionSettings.config,
               ...modeConfig,
               ...codexCompactionLimit(input.compactionPoint),
+              ...posture,
             };
+            // A profile replaces Codex's built-in sandbox mode, which codex-rs
+            // refuses alongside it.
+            const { sandbox, ...unsandboxed } = settings;
             const thread = yield* request(() =>
               client.threadStart({
                 cwd: projectRoot,
                 model: input.modelId,
-                ...settings,
+                ...(posture.permissions === undefined
+                  ? { ...unsandboxed, sandbox }
+                  : { ...unsandboxed, permissions: CODEX_OCTANT_PROFILE }),
                 ...optionSettings,
                 config,
                 ...(mode === "chat" ? { environments: [] as const } : {}),
@@ -2894,7 +3605,12 @@ function makeConnection(
           Effect.gen(function* () {
             yield* ensureRuntime(codexLeasePosture(input));
             ensureSubscribed();
-            const modeConfig = yield* modeThreadConfig(input.nativeSetup, input.executionPolicy);
+            const modeConfig = yield* modeThreadConfig(
+              input.nativeSetup,
+              input.executionPolicy,
+              input.blockedTools,
+            );
+            const posture = postureConfig(input);
             const resumeRequest = () =>
               Effect.tryPromise({
                 try: () =>
@@ -2909,7 +3625,14 @@ function makeConnection(
                   // the same overrides, so they are stated on every resume.
                   client.threadResume({
                     threadId: input.resumeCursor.value,
-                    config: { ...modeConfig, ...codexCompactionLimit(input.compactionPoint) },
+                    config: {
+                      ...modeConfig,
+                      ...codexCompactionLimit(input.compactionPoint),
+                      ...posture,
+                    },
+                    ...(posture.permissions === undefined
+                      ? {}
+                      : { permissions: CODEX_OCTANT_PROFILE }),
                   }),
                 catch: (error) =>
                   error instanceof CodexRpcClientFailure ? error : providerFailure(error),
@@ -3003,23 +3726,40 @@ function makeConnection(
             if (state.compaction !== undefined) {
               return Effect.fail(failure("unavailable", "Codex is compacting this session."));
             }
+            const held = factories.heldForNextTurn.get(state.threadId);
+            const { input: turnInput, deferred } = withHeldTurnInput(input, held);
             const review = codexReviewRequest(input.prompt);
-            if (review !== undefined) return startReview(state, review, input);
+            if (review !== undefined) return startReview(state, review, turnInput, deferred);
             ensureSubscribed();
             return Effect.tryPromise({
               try: async () => {
+                const turnRequest = codexTurnRequest(
+                  withCarriedToolRules(turnInput, state.carriedTools),
+                  version,
+                );
+                const mentions = await codexReferencedMentions(client, {
+                  prompt: input.prompt,
+                  projectRoot: state.projectRoot,
+                  threadConfig: state.threadConfig,
+                });
                 let lastError: unknown;
                 for (let attempt = 0; attempt <= SATURATION_DELAYS_MS.length; attempt += 1) {
                   try {
                     const turn = await client.turnStart({
                       threadId: state.threadId,
-                      ...codexTurnRequest(withCarriedToolRules(input, state.carriedTools), version),
-                      ...codexTurnExecutionSettings(
-                        state.executionPolicy,
-                        state.autoApprove,
-                        state.fullAccessSandbox,
-                        leasedNetworkOpen,
-                        state.sandbox,
+                      ...turnRequest,
+                      ...(mentions.length === 0
+                        ? {}
+                        : { input: [...turnRequest.input, ...mentions] }),
+                      ...codexTurnPermissions(
+                        codexTurnExecutionSettings(
+                          state.executionPolicy,
+                          state.autoApprove,
+                          state.fullAccessSandbox,
+                          leasedNetworkOpen,
+                          state.sandbox,
+                        ),
+                        state.permissionProfile,
                       ),
                       ...state.turnOverrides,
                       ...(state.collaborationMode === undefined
@@ -3035,6 +3775,9 @@ function makeConnection(
                     }
                     state.activeTurnId = turn.turn.id;
                     state.context ??= makeEventContext(state, factories);
+                    if (factories.heldForNextTurn.get(state.threadId) === held) {
+                      holdForNextTurn(state.threadId, deferred);
+                    }
                     return;
                   } catch (error) {
                     lastError = error;

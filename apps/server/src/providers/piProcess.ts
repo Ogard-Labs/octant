@@ -85,6 +85,8 @@ export interface PiConfinementPort {
     readonly root: string;
     /** The Project's extra folders, granted what `root` is granted. */
     readonly extraFolders?: ReadonlyArray<string>;
+    /** Folders Pi reads at every level and never writes: the thread's attachments folder. */
+    readonly readOnlyFolders?: ReadonlyArray<string>;
     readonly piHome: string;
     readonly sessionDirectory: string;
     readonly sessionId: string;
@@ -103,6 +105,8 @@ export interface PiConfinementPort {
     readonly environment: NodeJS.ProcessEnv;
     readonly tools?: ReadonlyArray<ProviderToolDefinition>;
     readonly toolBridge?: PiManagedToolBridgeConfig;
+    /** The person's blocked tools, left out of Pi's list and refused by the bridge. */
+    readonly blockedTools?: ReadonlyArray<string>;
     /** The release read before launch; it decides how tools are selected. */
     readonly version?: string;
   }) => Effect.Effect<PiLaunchSpec, ProviderFailure>;
@@ -122,6 +126,8 @@ export interface PiProcessPort {
     readonly root: string;
     /** The Project's extra folders, granted what `root` is granted. */
     readonly extraFolders?: ReadonlyArray<string>;
+    /** Folders Pi reads at every level and never writes: the thread's attachments folder. */
+    readonly readOnlyFolders?: ReadonlyArray<string>;
     readonly piHome: string;
     readonly sessionDirectory: string;
     readonly sessionId: string;
@@ -146,6 +152,8 @@ export interface PiProcessPort {
     readonly onProcessStarted?: ProviderProcessStartedListener;
     readonly tools?: ReadonlyArray<ProviderToolDefinition>;
     readonly toolBridge?: PiManagedToolBridgeConfig;
+    /** The person's blocked tools, left out of Pi's list and refused by the bridge. */
+    readonly blockedTools?: ReadonlyArray<string>;
   }) => Effect.Effect<PiRpcConnection, ProviderFailure, Scope.Scope>;
 }
 
@@ -187,6 +195,10 @@ function piWindowsLaunch(input: {
     executionPolicy: input.executionPolicy,
     fullAccessSandbox: input.fullAccessSandbox,
     strict: input.sandboxPolicy === undefined ? input.strict : true,
+    // A Chat launch starts Pi with no built-in tool, no extension and none of
+    // the person's resources (`piArguments`), so it has no folder or shell
+    // without Octant's sandbox.
+    chatWithoutFolderOrShell: true,
   });
 }
 
@@ -241,12 +253,22 @@ const PROVIDER_CREDENTIALS: ReadonlyMap<string, ReadonlyArray<string>> = new Map
   ["openrouter", ["OPENROUTER_API_KEY"]],
   ["xai", ["XAI_API_KEY"]],
 ]);
-const APPROVAL_BRIDGE = `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+/**
+ * Refuses a tool the person blocked in Settings before any other rule, at
+ * every level and for every tool, an extension's or Octant's own included:
+ * the bridge is the one gate every Pi tool call passes.
+ */
+const BLOCKED_TOOL_REASON = "Blocked in Octant Settings › Permissions › Blocked tools";
+
+function approvalBridge(blocked: ReadonlyArray<string>): string {
+  return `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const knownReads = new Set(${JSON.stringify(KNOWN_READ_TOOLS)});
+const blocked = new Set(${javascriptLiteral(blocked)});
 
 export default function octantApprovalBridge(pi: ExtensionAPI) {
   pi.on("tool_call", async (event, ctx) => {
+    if (blocked.has(event.toolName)) return { block: true, reason: ${javascriptLiteral(BLOCKED_TOOL_REASON)} };
     if (knownReads.has(event.toolName)) return undefined;
     if (process.env.OCTANT_PI_APPROVALS === "disabled") return undefined;
     if (!ctx.hasUI || typeof event.toolCallId !== "string" || event.toolCallId.length === 0) {
@@ -260,6 +282,7 @@ export default function octantApprovalBridge(pi: ExtensionAPI) {
   });
 }
 `;
+}
 
 function javascriptLiteral(value: unknown): string {
   const serialized = JSON.stringify(value);
@@ -267,8 +290,11 @@ function javascriptLiteral(value: unknown): string {
   return serialized.replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029");
 }
 
-export function piExtensionSource(tools: ReadonlyArray<ProviderToolDefinition>): string {
-  if (tools.length === 0) return APPROVAL_BRIDGE;
+export function piExtensionSource(
+  tools: ReadonlyArray<ProviderToolDefinition>,
+  blocked: ReadonlyArray<string> = [],
+): string {
+  if (tools.length === 0) return approvalBridge(blocked);
   const catalogAttestation = piToolCatalogAttestation(tools);
   return `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -277,6 +303,7 @@ const bridgeUrl = process.env.OCTANT_PI_TOOL_BRIDGE_URL;
 const bridgeToken = process.env.OCTANT_PI_TOOL_BRIDGE_TOKEN;
 const catalogAttestation = "${catalogAttestation}";
 const knownReads = new Set(${javascriptLiteral(KNOWN_READ_TOOLS)});
+const blocked = new Set(${javascriptLiteral(blocked)});
 const octantTools = new Set(definitions.map((definition) => definition.name));
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -321,6 +348,7 @@ export default function octantManagedTools(pi: ExtensionAPI) {
   }
 
   pi.on("tool_call", async (event, ctx) => {
+    if (blocked.has(event.toolName)) return { block: true, reason: ${javascriptLiteral(BLOCKED_TOOL_REASON)} };
     if (knownReads.has(event.toolName) || octantTools.has(event.toolName)) return undefined;
     if (process.env.OCTANT_PI_APPROVALS === "disabled") return undefined;
     if (!ctx.hasUI || typeof event.toolCallId !== "string" || event.toolCallId.length === 0) {
@@ -538,6 +566,7 @@ export function piArguments(
   resumePath?: string,
   ownResources: PiOwnResources = NO_OWN_RESOURCES,
   version?: string,
+  blockedTools: ReadonlyArray<string> = [],
 ): ReadonlyArray<string> {
   // Work and Code share one capability set at the thread's level, so a Work
   // session starts with Pi's bash as a Code session does.
@@ -547,7 +576,11 @@ export function piArguments(
       : executionPolicy === "plan"
         ? READ_TOOLS.split(",")
         : ALL_TOOLS.split(",");
-  const selectedTools = [...builtInTools, ...appToolNames];
+  // A blocked tool is left out of the list Pi offers the model; the bridge
+  // refuses it too, for an extension's tool the list does not name.
+  const selectedTools = [...builtInTools, ...appToolNames].filter(
+    (name) => !blockedTools.includes(name),
+  );
   const own = piOwnSetup(mode, executionPolicy);
   // A plain `--tools` list is an allowlist that also leaves every tool an
   // extension registers unregistered. Where the person's extensions load,
@@ -814,7 +847,9 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
               `${JSON.stringify({ defaultProjectTrust: "never", enableInstallTelemetry: false }, null, 2)}\n`,
               { mode: 0o600 },
             );
-            writeFileSync(bridgePath, piExtensionSource(tools), { mode: 0o600 });
+            writeFileSync(bridgePath, piExtensionSource(tools, input.blockedTools ?? []), {
+              mode: 0o600,
+            });
             chmodSync(bridgePath, 0o600);
             prepareProviderOwnedLink(piHome, credentialPath, "auth.json");
             prepareProviderOwnedLink(piHome, modelsPath, "models.json");
@@ -854,6 +889,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
           resumePath,
           ownResources,
           input.version,
+          input.blockedTools ?? [],
         );
         const wall = piWallPolicy(input);
         if (platform === "win32") {
@@ -979,6 +1015,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 ...credentialPaths,
                 ...ownSetupPaths,
                 ...(input.servers === undefined ? [] : [input.servers.folder]),
+                ...(input.readOnlyFolders ?? []),
               ],
               privateHomeAllowPaths: [
                 root,
@@ -989,6 +1026,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 ...credentialPaths,
                 ...ownSetupPaths,
                 ...(input.servers === undefined ? [] : [input.servers.folder]),
+                ...(input.readOnlyFolders ?? []),
               ],
               ...(platform === "darwin" && (bridgeRule !== undefined || input.servers !== undefined)
                 ? {

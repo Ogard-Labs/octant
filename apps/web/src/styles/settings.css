@@ -4367,3 +4367,43 @@ html[data-octant-increased-contrast="true"]
 .web-search-settings__save {
   padding-top: var(--oct-space-3);
 }
+
+.settings-app-background__characters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-app-background__characters > .settings-view__text-input {
+  width: 9ch;
+  flex: 0 0 auto;
+}
+
+.settings-setup-command {
+  margin-block-start: var(--oct-space-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* An inline link in a setup step's sentence reads as a link: accent ink, an
+   underline when pointed at. Unstyled, it looked like the words around it. */
+.settings-setup-link {
+  color: var(--oct-accent-fg);
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+
+.settings-setup-link:hover,
+.settings-setup-link:focus-visible {
+  text-decoration: underline;
+}
+
+.settings-setup-action {
+  display: flex;
+  margin-block-start: var(--oct-space-2);
+}
+
+.settings-theme-editor__import-note {
+  min-block-size: 2lh;
+}

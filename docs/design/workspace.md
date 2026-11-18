@@ -1427,27 +1427,24 @@ Rules and limits
 are owned by
 [Architecture: modes](../architecture.md#modes-chat-work-and-code).
 The top-right control reveals the dock only when the active pane has a bound thread
-or a valid launchable tool. A new Code task's pane, before its thread exists, keeps
-the control but starts with the dock closed, whatever the window's saved choice;
-opened there, its tool row shows the common tools disabled ("Available once the
-task starts") and its body says so. That show or hide belongs to the draft and is
-never saved as the window's choice. Once that start screen has a Project, the dock's body holds the
-Project's quick tools (Terminal and Browser; a server Project's are its
-Terminal only); they never stand as a column
-beside the start screen ([Start screen: Welcome screen](start-screen.md#welcome-screen)). An available empty dock opens on a stack of fact cards (Environment with
+or a valid launchable tool. A start screen (the welcome screen, or a new task in
+Chat, Work or Code before its thread exists) has no dock, no bottom panel, no tool
+row and no change count, with a Project chosen as well, and nothing opens them;
+a request made there is dropped, so it cannot surface when a thread appears. They
+return once the task has a thread (maintainer request, 2026-11-18; see
+[Start screen: Welcome screen](start-screen.md#welcome-screen)). An available empty dock opens on a stack of fact cards (Environment with
 the local window's Remote access switch, Local servers, Context, Changes,
-Outputs, Background tasks, Running now; see [Right dock and bottom panel](#right-dock-and-bottom-panel));
+Outputs, Subagents, Running now; see [Right dock and bottom panel](#right-dock-and-bottom-panel));
 its header is an empty band as tall as the title rail, and the tools are opened
 from the **tool row**: at 961px and wider it stands outermost at the end of the
 title band, above the Environment section, and it is the focused thread's row.
 Before it the band keeps the window's controls: Show sidebar, Back and Forward
-while the sidebar is hidden, the Open in and Project action slots, the Code
-start screen's uncommitted-changes count. It has no switch for the dock or the bottom panel:
+while the sidebar is hidden, and the Open in and Project action slots. It has no switch for the dock or the bottom panel:
 every tool is a panel that its button in the thread header's row opens, and that
 a person can move between the side and the bottom, so a window-level "show the
 side" or "show the bottom" switch no longer named anything (the side one only
 opened Review, 2026-11-16). The window has one row, and nothing moves it: not
-Environment or a tool opening or closing, not a change count or a Project
+Environment or a tool opening or closing, not a Project
 action arriving beside it, not going from a thread to a new task. The pane
 draws it (it knows the thread and its tools) into a slot the title band offers,
 last in the band's trailing cluster; whatever stands at the window's top right
@@ -1497,12 +1494,7 @@ shell stays running and in view. A button reads pressed while its
 tool is on screen, in the dock or in the bottom panel's front tab while the panel is open, and carries a quiet dot while
 the tool is open but not shown (a bottom-panel tool behind the front one included; pressing it brings it forward). When both columns are full a tool that is not shown
 is not refused: its press shows it in the focused tile's place, the replaced tool stays
-open but hidden, and the button says "Shows in place of <the focused tool>". On a new Code task
-before its thread exists the buttons are disabled with "Available once the task starts", except that once the
-start screen has a Project, Terminal and Browser read **Project terminal** and **Project browser**
-and are enabled (a Project on a server offers the terminal only): pressing one opens the dock straight into the Project's own
-terminal or browser, no thread involved; the open one reads pressed, pressing it again closes the dock and
-stops the shell, and pressing the other switches. A press leaves focus
+open but hidden, and the button says "Shows in place of <the focused tool>". On a start screen there is no row (see above). A press leaves focus
 on the button. The row is one toolbar named "Tools" with one Tab stop and arrow-key
 movement, and it keeps its own width in the header: the title gives way first.
 The five tools with a button of their own (Environment, Terminal, Review, Browser,
@@ -3053,11 +3045,14 @@ opens Review, and the thread's pull request with its checks in words.
 **Outputs** lists the documents and Canvases the window knows the thread has
 (those it had when opened and those its turns wrote since, never a deleted
 file), newest first and at most five, each a row that opens it in Document or
-Canvas, with the count at the title's right. **Background tasks** lists the
+Canvas, with the count at the title's right. **Subagents** lists the
 runs the thread's agent handed work to, from the same read and cadence as the
-Environment tab's Subagents row: each running one a spinner, task, and age,
-with the running count at the title's right, and the finished ones folded under
-one "N finished" row; a row opens that run in Agents.
+Environment tab's Subagents row: each running one a spinner, task, and how long
+it has run, with the running count at the title's right, and the finished ones
+folded under one "N finished" row; each row shows its run time at the trailing
+edge in a fixed-width slot, by the same rule as the transcript's subagent rows
+([Thread view: Subagents in a thread](thread-view.md#subagents-in-a-thread)); a
+row opens that run in Agents.
 **Running now** lists the other threads the window knows are working (any
 mode, at most five, newest first, never the thread on screen), each a spinner,
 title, Project, and age, and opens that thread. Model and access are not
@@ -3104,15 +3099,12 @@ size: no width animates from narrow to wide.
 Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed. The bottom panel starts closed. An explicit dock show or hide is restored per window; merely mounting the default records no choice, so an initial narrow frame does not become a saved close. The active-pane eligibility rules below still determine whether dock chrome is shown.
 
 A welcome, Project, or other pane with neither a bound thread nor a valid
-launchable tool keeps the dock closed and draws no tool row. A new Code task's
-pane before its thread exists keeps the dock available but starts closed, whatever the
-window's saved choice: it has nothing of a thread's to show, and opened by
-default it covered a third of a blank start screen to say its tools were not
-available yet. The window has no dock switch; the
-draft's dock opens from the Project terminal and Project browser buttons in the pane header once the start
-screen has a Project (they open the Project's quick tools straight into the tool pressed), and without a
-Project every button waits ("Available once the task starts") and the dock stays closed. A show or hide there belongs to the draft and is never saved as the window's choice;
-once the task has a thread the window's own choice applies again. Restored presentation for another subject never makes unavailable
+launchable tool keeps the dock closed and draws no tool row. So does a new task's
+pane before its thread exists, in every mode, with a Project chosen as well: no
+dock, no bottom panel and no tool row, and nothing opens them, so the window's
+saved choice is neither shown nor changed there; once the task has a thread the
+window's own choice applies again (maintainer request, 2026-11-18; before, a Code
+task's dock stayed available there, with the Project's quick tools). Restored presentation for another subject never makes unavailable
 chrome visible.
 
 The right Tools launcher starts directly beneath the window control rail, without an extra top spacer.

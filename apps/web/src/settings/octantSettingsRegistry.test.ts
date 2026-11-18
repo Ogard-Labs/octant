@@ -137,8 +137,11 @@ describe("octantSettingsRegistry", () => {
       "sandbox-policy-credentials",
       "protected-files",
       "protected-files-add",
+      "blocked-tools",
+      "blocked-tools-add",
       "public-links",
       "public-link-service",
+      "public-link-setup",
       "browser-site-approvals",
       "browser-agent-downloads",
       "browser-captures-per-thread",
@@ -446,6 +449,7 @@ describe("octantSettingsRegistry", () => {
  * Project's overview, not in Settings, so Settings search does not list them.
  */
 const UNLISTED_SETTING_ROWS = new Set([
+  "app-background-characters-reset",
   "agent-access-code",
   "agent-access-edit",
   "browser-hub-claim",

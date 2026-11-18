@@ -953,7 +953,10 @@ describe("MonacoEditorPane language services", () => {
   it("says when language services are off, refused, or on another platform, and keeps the editor", async () => {
     for (const [reason, text] of [
       ["turned-off", "Language services are off. Turn them on in Settings › Code."],
-      ["unsupported-platform", "Language services are not available on this host's platform."],
+      [
+        "unsupported-platform",
+        "Language services are not available here: they run on macOS and Linux, and on Windows outside Strict.",
+      ],
       ["checkout-unavailable", "Language services are unavailable: the checkout is unavailable."],
     ] as const) {
       const fixture = languageRuntime();

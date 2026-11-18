@@ -37,6 +37,8 @@ export interface WizardSignInChoice {
   readonly label: string;
   readonly detail: string;
   readonly needsKey: boolean;
+  /** What the secret field is called when it is not the choice's own label. */
+  readonly keyLabel?: string;
 }
 
 /** The label a provider card and the footer's "Add <provider>" button carry. */
@@ -51,7 +53,7 @@ export function wizardProviderDescription(type: ProviderCreateProviderType): str
   }
   switch (type) {
     case "claude":
-      return "Anthropic's Claude through the Agent SDK. Sign in with a subscription or use an API key.";
+      return "Anthropic's Claude through the Agent SDK. Sign in with a subscription, an API key, or a gateway.";
     case "codex":
       return "OpenAI's coding agent. Octant runs your installed codex CLI with its own sign-in.";
     case "opencode":
@@ -128,6 +130,13 @@ export function wizardSignInChoices(
         detail: `Octant keeps the key in ${credentialStore} and never shows it again.`,
         needsKey: true,
       },
+      {
+        id: "gateway",
+        label: "Gateway",
+        detail: `Claude Code calls your gateway's address with its token. Octant keeps the token in ${credentialStore} and never shows it again.`,
+        needsKey: true,
+        keyLabel: "Gateway token",
+      },
     ];
   }
   if (isAcpAgentKind(type)) {
@@ -173,7 +182,11 @@ export function wizardAuthentication(
   type: ProviderCreateProviderType,
   choice: string,
 ): { readonly claude?: ClaudeAuthentication; readonly acp?: AcpAgentAuthentication } {
-  if (type === "claude") return { claude: choice === "api-key" ? "api-key" : "subscription" };
+  if (type === "claude") {
+    return {
+      claude: choice === "api-key" || choice === "gateway" ? choice : "subscription",
+    };
+  }
   if (isAcpAgentKind(type)) {
     const posture = offeredAcpAuthentication(type).find((candidate) => candidate === choice);
     return posture === undefined ? {} : { acp: posture };

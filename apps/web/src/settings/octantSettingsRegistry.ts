@@ -411,6 +411,31 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "background colours colors tones shades dither bold",
         },
         {
+          id: settingId("app-background-characters"),
+          label: "Background characters",
+          scope: "app",
+          keywords: "background characters ascii letters glyphs symbols custom pattern",
+        },
+        {
+          id: settingId("app-background-character-pattern"),
+          label: "Character pattern",
+          scope: "app",
+          keywords:
+            "background characters pattern blotches currents rings all in turn shape ascii glyphs custom",
+        },
+        {
+          id: settingId("app-background-character-density"),
+          label: "Character density",
+          scope: "app",
+          keywords: "background characters density amount how much ascii glyphs custom",
+        },
+        {
+          id: settingId("app-background-character-speed"),
+          label: "Character speed",
+          scope: "app",
+          keywords: "background characters speed motion drift still ascii glyphs custom",
+        },
+        {
           id: settingId("app-background-photo"),
           label: "Background photo",
           scope: "app",
@@ -1393,6 +1418,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "protected files add path folder secret deny agents",
         },
         {
+          id: settingId("blocked-tools"),
+          label: "Blocked tools",
+          scope: "host",
+          keywords:
+            "blocked tools block disallow deny provider tool claude code codex opencode pi mcp server webfetch shell bash",
+        },
+        {
+          id: settingId("blocked-tools-add"),
+          label: "Block a tool",
+          scope: "host",
+          keywords: "blocked tools block add provider tool deny disallowedTools",
+        },
+        {
           id: settingId("public-links"),
           label: "Public links",
           scope: "host",
@@ -1404,6 +1442,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Service address",
           scope: "host",
           keywords: "public links service address url self-hosted publish share",
+        },
+        {
+          id: settingId("public-link-setup"),
+          label: "Set up the self-hosted Canvas share service",
+          scope: "host",
+          keywords:
+            "public links deploy deployment docker compose caddy https self hosted canvas sharing artifact hosting guide",
         },
         {
           id: settingId("browser-site-approvals"),
@@ -1877,6 +1922,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       keywords:
         "remote access private listener lan tailscale https certificate pairing pair link ticket code approve deny device devices paired inventory browser phone revoke rename origin port exposure",
       settings: [
+        {
+          id: settingId("tailscale-setup"),
+          label: "Connect with Tailscale",
+          scope: "host",
+          keywords:
+            "tailscale login sign in tailnet magicdns devbox hub private network remote device setup",
+        },
+        {
+          id: settingId("cloudflare-setup"),
+          label: "Set up Cloudflare private routing",
+          scope: "host",
+          keywords:
+            "cloudflare zero trust warp cloudflared tunnel private network routing split tunnels devbox setup",
+        },
         {
           id: settingId("remote-setup-checks"),
           label: "Remote setup checks",

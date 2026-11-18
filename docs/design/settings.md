@@ -49,7 +49,7 @@ opens on Your identity (the profile), followed by Your instructions (a
 multi-line field with its count, limit, a likely-secret warning, and Save,
 read-only where the window cannot change it) and Orchestration, the same field
 for coordinator threads ([Octant instructions](octant-instructions.md#settings)),
-and ends on Notifications (what Octant sends while a person is away); Permissions holds the files no agent may touch,
+and ends on Notifications (what Octant sends while a person is away); Permissions holds the files no agent may touch, then the provider tools the person blocked,
 then the network places and servers agents may reach (Network limits, Safe
 networks, Servers), then what a person has already allowed (remembered
 websites, remembered tool approvals, public links), with Octant's own limits
@@ -85,6 +85,7 @@ background, and a thread-row grid of detail by list). A page names its scope onc
 its own only when it differs. Settings folds long choices it does not need
 open: the built-in background pictures sit behind the current one and a
 Change action, and the pattern dials appear only while the pattern is drawn.
+The ASCII field's pattern, characters, density and speed sit in one folded Customize row. The starter set menu gains a "From plugins" group, each entry named with its plugin, while installed, trusted and enabled plugins offer grounds; a pick is copied and saved once. Importing a theme file whose photo is not on this computer leaves the photo out and says so in one quiet line under the import buttons, whose two lines are kept from the first paint, so nothing moves when it fills in. A Pixels ground showing another scene drops the dead photo quietly, since it draws no photo.
 Rows in Settings are `SettingRow`; rows everywhere else are `surface-row`. Both
 draw the same hairline.
 
@@ -314,6 +315,18 @@ a text field and an **Add** button; a refused path is said in the section's
 feedback line. A paired device edits the section as a local window does
 (maintainer decision, 2026-11-12; not built yet: today a paired device sees the
 section as set on the host machine).
+**Blocked tools** follows Protected files in Settings › Permissions: one row
+per blocked tool, its name with the provider and "Blocked" as meta and an
+**Unblock** button, then a "Block a tool" row with a provider select (Claude
+Code, Codex, OpenCode, Pi), a text field taking the provider's own tool name
+or `server__tool` for a tool of one of its MCP servers, and a **Block**
+button. The list starts empty and applies with or without Strict, at every
+level, from the next launch of that provider. A name the provider cannot
+block (Codex blocks only shell, view_image, web_search and MCP server tools)
+is refused in the section's feedback line, and the draft stays. A paired
+device may change the list on the host; a window with no client for it says
+the list is set on the host machine. Enforcement is in [Architecture:
+Security and authority](../architecture.md#security-and-authority).
 **Configure protections** in Settings › Permissions uses the shared **Strict**
 control at thread, Project and Settings scopes, independent of access level.
 Saving a policy does not enable Strict. With Strict off the saved configuration

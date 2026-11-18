@@ -272,14 +272,14 @@ describe("Chat routes", () => {
     expect(execute).toHaveBeenCalledTimes(4);
   });
 
-  it("rejects unsupported attachment media types", async () => {
+  it("rejects an attachment whose media type is not a type/subtype", async () => {
     const upload = vi.fn();
     const route = routeFixture({ uploadAttachment: upload });
     const response = await route(
       request("/api/chat/attachments", {
         method: "POST",
         headers: {
-          "content-type": "application/x-executable",
+          "content-type": "not a type",
           "x-octant-chat-thread-id": String(threadId),
           "x-octant-chat-attachment-id": String(attachmentId),
           "x-octant-chat-display-name": encodeURIComponent("run.bin"),
@@ -317,6 +317,44 @@ describe("Chat routes", () => {
     await expect(response?.json()).resolves.toEqual(purged);
     expect(discardAttachment).toHaveBeenCalledWith(threadId, attachmentId);
     expect(readAttachment).not.toHaveBeenCalled();
+  });
+
+  it("hands back an attached file the model does not take natively as bytes, never as a page", async () => {
+    const served = async (mediaType: string) => {
+      const attachment = {
+        id: attachmentId,
+        threadId,
+        displayName: "file",
+        mediaType,
+        byteLength: 3,
+        digest: "a".repeat(64),
+        status: "finalized" as const,
+        createdAt: now,
+      };
+      const route = routeFixture({
+        readAttachment: vi.fn(async () => new Uint8Array([1, 2, 3])),
+        read: vi.fn(() => ({
+          thread: threadFixture,
+          turns: [],
+          lastSequence: 0,
+          contents: [],
+          attachments: [attachment],
+          citations: [],
+          workItems: [],
+        })),
+      });
+      const response = await route(
+        request(`/api/chat/attachments/${attachmentId}`, {
+          method: "GET",
+          headers: { "x-octant-chat-thread-id": String(threadId) },
+        }),
+      );
+      return response?.headers;
+    };
+    expect((await served("text/html"))?.get("content-type")).toBe("application/octet-stream");
+    const image = await served("image/png");
+    expect(image?.get("content-type")).toBe("image/png");
+    expect(image?.get("x-content-type-options")).toBe("nosniff");
   });
 
   it("opens the event response before a future frame arrives", async () => {

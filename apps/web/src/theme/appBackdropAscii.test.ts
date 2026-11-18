@@ -1,9 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AppBackgroundCharacterPattern } from "@octant/contracts/theme";
 import {
   CENTRE_SHARE,
+  type AsciiFieldOptions,
   PEAK_ALPHA,
   fieldPixelRatio,
+  densityScale,
+  inkScale,
+  meanStrength,
   patchStrength,
+  patchThresholds,
   runAsciiField,
 } from "./appBackdropAscii";
 import {
@@ -26,17 +32,23 @@ interface MaskWrite {
 }
 
 function recordingCanvases() {
-  const writes = { frames: 0, masks: [] as MaskWrite[], ringMasks: [] as MaskWrite[] };
+  const writes = {
+    frames: 0,
+    glyphPaints: 0,
+    surfaces: 0,
+    masks: [] as MaskWrite[],
+    ringMasks: [] as MaskWrite[],
+  };
   const maskCanvases: HTMLCanvasElement[] = [];
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
     function (this: HTMLCanvasElement) {
       // Cell masks are one pixel per cell: the first is the field's, the second a ring's.
       if (this.width === 100 && !maskCanvases.includes(this)) maskCanvases.push(this);
       return {
-        createImageData: (width: number, height: number) => ({
-          width,
-          data: new Uint8ClampedArray(width * height * 4),
-        }),
+        createImageData: (width: number, height: number) => {
+          writes.surfaces += 1;
+          return { width, data: new Uint8ClampedArray(width * height * 4) };
+        },
         putImageData: (
           (owner: HTMLCanvasElement) => (image: { width: number; data: Uint8ClampedArray }) => {
             const alphas: number[] = [];
@@ -53,7 +65,9 @@ function recordingCanvases() {
         },
         drawImage: () => undefined,
         clearRect: () => undefined,
-        fillText: () => undefined,
+        fillText: () => {
+          writes.glyphPaints += 1;
+        },
       } as unknown as CanvasRenderingContext2D;
     },
   );
@@ -400,5 +414,152 @@ describe("character ground click rings", () => {
     vi.advanceTimersByTime(1000);
     expect(vi.getTimerCount()).toBe(0);
     expect(writes.ringMasks.length).toBeGreaterThan(0);
+  });
+
+  it("lights more cells at the highest density than at the default, and fewer at the lowest", () => {
+    const lit = (density: number) => {
+      const thresholds = patchThresholds(density);
+      let count = 0;
+      for (let row = 0; row < 40; row += 1) {
+        for (let column = 0; column < 120; column += 1) {
+          count += patchStrength(column, row, 7, thresholds);
+        }
+      }
+      return count;
+    };
+    expect(lit(100)).toBeGreaterThan(lit(50));
+    expect(lit(0)).toBeLessThan(lit(50));
+    expect(patchThresholds(50)).toEqual({ low: 0.52, high: 0.82 });
+  });
+
+  it("holds one frame at speed zero, however long it runs", () => {
+    const writes = recordingCanvases();
+    const stop = runAsciiField(sizedCanvas(), false, undefined, () => ({
+      characterSet: "01",
+      density: 50,
+      speed: 0,
+      pattern: "cycle",
+    }));
+    vi.advanceTimersByTime(3000);
+    expect(writes.frames).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+    stop();
+  });
+
+  it("draws a heavier set fainter than the default letters, and never boosts a lighter one", () => {
+    expect(inkScale(0.25, 1)).toBeCloseTo(0.25);
+    expect(inkScale(0.25, 0.25)).toBe(1);
+    expect(inkScale(0.25, 0.1)).toBe(1);
+    expect(PEAK_ALPHA * inkScale(0.25, 1)).toBeLessThan(PEAK_ALPHA);
+  });
+
+  it("keeps the field running when the set changes, repainting its glyphs once", () => {
+    const writes = recordingCanvases();
+    let options: AsciiFieldOptions = {
+      characterSet: "ab",
+      density: 50,
+      speed: 50,
+      pattern: "cycle",
+    };
+    const stop = runAsciiField(sizedCanvas(), true, undefined, () => options);
+    vi.advanceTimersByTime(500);
+    const before = writes.frames;
+    options = { ...options, characterSet: "01" };
+    vi.advanceTimersByTime(500);
+    expect(writes.frames).toBeGreaterThan(before);
+    stop();
+  });
+
+  it("never inks more on average than the default field, at any density or set", () => {
+    const defaultInk = meanStrength(50) * 0.25;
+    for (const density of [0, 50, 100]) {
+      for (const coverage of [0.1, 0.25, 0.6, 1]) {
+        const ink =
+          meanStrength(density) * densityScale(density) * inkScale(0.25, coverage) * coverage;
+        expect(ink).toBeLessThanOrEqual(defaultInk + 1e-9);
+      }
+    }
+    expect(densityScale(100)).toBeLessThan(1);
+    expect(densityScale(0)).toBe(1);
+  });
+
+  it("never inks more on average than the default field, for any held pattern and density", () => {
+    const defaultInk = meanStrength(50);
+    const patterns: ReadonlyArray<AppBackgroundCharacterPattern> = [
+      "blotches",
+      "currents",
+      "rings",
+    ];
+    for (const pattern of patterns) {
+      for (const density of [0, 50, 100]) {
+        expect(meanStrength(density, pattern) * densityScale(density, pattern)).toBeLessThanOrEqual(
+          defaultInk + 1e-9,
+        );
+      }
+    }
+  });
+
+  it("draws a held pattern alone, with no cross-fade where the cycle blends two", () => {
+    const sum = (t: number, pattern: AppBackgroundCharacterPattern) => {
+      const thresholds = patchThresholds(50);
+      let total = 0;
+      const cells: number[] = [];
+      for (let row = 0; row < 40; row += 1) {
+        for (let column = 0; column < 120; column += 1) {
+          const value = patchStrength(column, row, t, thresholds, pattern);
+          total += value;
+          cells.push(value);
+        }
+      }
+      return { total, cells };
+    };
+    // At 45 s the cycle is in the middle of its rings, so a held ring field is the same.
+    expect(sum(45, "rings").cells).toEqual(sum(45, "cycle").cells);
+    // At 5 s the cycle draws blotches, not rings.
+    expect(sum(5, "rings").cells).not.toEqual(sum(5, "cycle").cells);
+    // At 18 s the cycle is blending blotches into currents; a held pattern is not.
+    expect(sum(18, "blotches").cells).not.toEqual(sum(18, "cycle").cells);
+    expect(sum(18, "blotches").cells).toEqual(sum(18, "blotches").cells);
+  });
+
+  it("redraws a still field in place when the pattern changes", () => {
+    const writes = recordingCanvases();
+    let options: AsciiFieldOptions = {
+      characterSet: "ab",
+      density: 50,
+      speed: 0,
+      pattern: "blotches",
+    };
+    const stop = runAsciiField(sizedCanvas(), false, undefined, () => options);
+    vi.advanceTimersByTime(100);
+    const before = writes.masks.at(-1)?.alphas.join(",");
+    options = { ...options, pattern: "rings" };
+    stop.redraw();
+    expect(writes.masks.at(-1)?.alphas.join(",")).not.toBe(before);
+    stop();
+  });
+
+  it("redraws a still field in place when the density changes, without rebuilding or re-rolling it", () => {
+    const writes = recordingCanvases();
+    let options: AsciiFieldOptions = {
+      characterSet: "ab",
+      density: 50,
+      speed: 0,
+      pattern: "cycle",
+    };
+    const stop = runAsciiField(sizedCanvas(), false, undefined, () => options);
+    vi.advanceTimersByTime(100);
+    const surfaces = writes.surfaces;
+    const paints = writes.glyphPaints;
+    const frames = writes.frames;
+    const litBefore = writes.masks.at(-1)?.alphas.filter((alpha) => alpha > 0).length ?? 0;
+    options = { ...options, density: 100 };
+    stop.redraw();
+    expect(writes.frames).toBe(frames + 1);
+    const litAfter = writes.masks.at(-1)?.alphas.filter((alpha) => alpha > 0).length ?? 0;
+    expect(litAfter).toBeGreaterThan(litBefore);
+    expect(writes.surfaces).toBe(surfaces);
+    expect(writes.glyphPaints).toBe(paints);
+    stop();
   });
 });

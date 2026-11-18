@@ -108,6 +108,7 @@ import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-cl
 import type { OctantInstructionsClient } from "@octant/client-runtime/octant-instructions-client";
 import { OctantInstructionsSettings } from "../settings/OctantInstructionsSettings";
 import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
+import type { BlockedToolsClient } from "@octant/client-runtime/blocked-tools-client";
 import type { ArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
 import type { DiskCleanupClient } from "@octant/client-runtime/disk-cleanup-client";
 import type { SafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
@@ -132,6 +133,7 @@ import { AutomaticModelSettings } from "../settings/AutomaticModelSettings";
 import { PersonMemorySettings } from "../settings/PersonMemorySettings";
 import { TodoListHostSettings } from "../todos/TodoListHostSettings";
 import { ProtectedFilesSettings } from "../settings/ProtectedFilesSettings";
+import { BlockedToolsSettings } from "../settings/BlockedToolsSettings";
 import { ArchivedWorktreesSettings } from "../settings/ArchivedWorktreesSettings";
 import { HostWorktreesSettings } from "../settings/HostWorktreesSettings";
 import { XcodeBuildDataSettings } from "../settings/XcodeBuildDataSettings";
@@ -295,6 +297,7 @@ export interface SettingsViewProps {
   >;
   /** Settings › Permissions › Protected files; absent where the host publishes no list. */
   readonly protectedFilesClient?: ProtectedFilesClient;
+  readonly blockedToolsClient?: BlockedToolsClient;
   readonly sandboxRestrictionsClient?: SandboxRestrictionsClient;
   readonly sandboxInitialScope?:
     | import("@octant/contracts/sandbox-policy").SandboxRestrictionsScope
@@ -1459,6 +1462,7 @@ function ActiveSectionContent({
       );
       const setupGuide = (
         <RemoteSetupGuide
+          externalUrlHost={props.hostBridge}
           focusedSetting={focusedSetting}
           canConfigureHost={administration !== undefined}
           checks={props.serverProjectsClient}
@@ -1571,6 +1575,7 @@ function ActiveSectionContent({
             client={props.protectedFilesClient}
             focusedSetting={focusedSetting}
           />
+          <BlockedToolsSettings client={props.blockedToolsClient} focusedSetting={focusedSetting} />
           <SafeNetworksSettings
             client={props.safeNetworksClient}
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}
@@ -1820,7 +1825,11 @@ function ActiveSectionContent({
           {props.canvasClient?.publicLinkSettings === undefined ? null : (
             <SettingsSection title="Public links">
               <div className="setgroup">
-                <PublicLinkSettings client={props.canvasClient} focusedSetting={focusedSetting} />
+                <PublicLinkSettings
+                  externalUrlHost={props.hostBridge}
+                  client={props.canvasClient}
+                  focusedSetting={focusedSetting}
+                />
               </div>
             </SettingsSection>
           )}
@@ -3105,6 +3114,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
     <section aria-label="Appearance" className="settings-section-stack" id="settings-appearance">
       {props.themeController !== undefined ? (
         <ThemeAppearanceEditor
+          photoLibrary={props.backgroundImageLibrary}
           afterScheme={
             <>
               {windowSection}
@@ -3125,6 +3135,9 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
                         library={props.backgroundImageLibrary}
                         onChange={(appBackground) => {
                           void props.themeController?.applyPatch({ appBackground });
+                        }}
+                        onPreview={(appBackground) => {
+                          props.themeController?.updateDraft({ appBackground });
                         }}
                       />
                     </>

@@ -345,7 +345,11 @@ function connectRefusal(reason: string | undefined): string {
     case "aws-process-failed":
       return "The profile's credential_process did not print credentials.";
     case "aws-unsupported":
-      return "That profile only assumes a role or names a source Octant does not read yet. Use a profile with keys, single sign-on or credential_process.";
+      return "That profile names a source Octant does not read, such as instance or container metadata, or its role settings are incomplete or chain into a loop. Use a profile with keys, single sign-on, credential_process or a role from one of those.";
+    case "aws-mfa-required":
+      return "That profile's role asks for an MFA code, which Octant has no place to enter. Use a profile whose role needs no MFA code, or one with single sign-on.";
+    case "aws-role-refused":
+      return "AWS refused to let that profile's source credentials assume its role. Check the role's trust policy, external_id and duration_seconds.";
     case "aws-not-authorized":
       return "Your organization's portal does not give you that profile's account and role.";
     case "local-host-required":

@@ -22,6 +22,19 @@ word carries colour. `TurnHeader` in `apps/web/src/transcript/` is the one
 recipe; a mode maps its own lifecycle onto its vocabulary and adds nothing of
 its own.
 
+## Strict notice
+
+When a provider launch was Strict, the host journals what Strict kept for it,
+and the turn shows one quiet note above its reply in Code and Work: "Strict
+kept: Octant's sandbox, protected files, a fixed environment, …". The words
+come from the protections the host applied to that launch (its runtime
+family, and whether it ran in Octant's sandbox), never from the level alone.
+The note shows on the first Strict launch in a thread and again only when what
+Strict kept differs from the turn before, so a thread says it once per change
+rather than on every turn; a launch outside Strict shows nothing. It is the
+same meta-ink note as a provider handoff's (`role="note"`), not a page banner
+or a card. `strictKeptSentence` in `@octant/domain` is the one wording.
+
 ## Reply actions
 
 A finished reply (completed, failed, interrupted or cancelled) ends with one
@@ -337,10 +350,20 @@ reached the card dims and withholds Stop; the thread's connection notice says wh
 Task-plan completion is never counted as child completion. View all opens the
 full Agents list even when every child has finished. Expansion previews at most
 three active or unresolved children; longer history stays in Environment and
-Agents. Compact rows show task, semantic status, recorded model and available
-activity. Age is explicitly time since the last update or first observation,
-never inferred execution duration. Raw identifiers and workspace paths belong
-in details. Rows open the child in Agents. Only managed active children offer
+Agents. While the card is folded, no child needs attention (nothing failed,
+waiting, stopped, of unknown status or to review) and at least one child is
+working, its head reads one line in place of the counts, "Waiting on <A>, <B>
+and N others" ("and 1 other" for one more; "Waiting on <A>" or "Waiting on <A>
+and <B>" for one or two). The names are the longest-working children's task
+first lines, oldest first, cut with an ellipsis to fit, each a link-styled
+button that opens that child as the rows do. The head keeps its height and one
+line, so swapping it for the counts moves nothing; expanded, or with anything
+needing attention, the head shows the counts. Compact rows show task, semantic status, recorded model and available
+activity. Each row also shows how long the child has run, measured from its request (or
+first sight of a provider's own) to its last update and ticking while it works,
+the same rule as the transcript's row, at the trailing edge in a slot of fixed
+width: a finished child's time stops where it stopped. Raw identifiers and
+workspace paths belong in details. Rows open the child in Agents. Only managed active children offer
 Stop; Stop all asks first and names its managed scope. Headers and rows wrap at
 narrow widths, disclosures work with the keyboard and retain visible focus,
 and expanded lists have bounded height.
@@ -352,7 +375,10 @@ managed run's result once it has one, else its state), the model and effort as
 the picker names them ("Sonnet 5.5 High"; nothing when the run reported no
 model), how long it has run (from its request or first sight to its last
 update, ticking while it works), and its state mark at the trailing edge, in a
-slot that keeps its width so nothing moves when a run finishes. A subagent
+slot that keeps its width so nothing moves when a run finishes. The row is one
+button that opens the child in Agents, as the card's rows do: Enter or Space on
+it opens too, its name is the task and its state, and it keeps its look on
+hover and press. A subagent
 belongs to the turn that was running when it started, because the host links
 a subagent to its thread and not to a turn: a turn owns the span from its start
 to the next turn's. The rows and the composer's card read one shared summary
@@ -363,9 +389,14 @@ not write, so it never renders as their right-aligned bubble. It is a
 left-aligned child-result card in the thread's measure: a status mark and
 "<Role> subagent finished" (or the state it stopped in), the provider and
 model, the task in meta ink, then the reply as Markdown, folded after about
-eight lines behind Show full result. A subagent that stopped gives the host's
-recorded reason in place of a reply. Run ID, generation and provider ID sit
-behind a Details disclosure. The card is one component in Chat, Work and
+eight lines behind Show full result. A child that finished is not drawn as that
+card at rest: its delivered result reads as one quiet centred line, "<Role>
+subagent finished · worked 48s" (the run time by the rows' rule, left out when
+no times are known), with the reply behind Show result, a disclosure that opens
+the card in place and works from the keyboard. A subagent that stopped or
+failed keeps the full card and gives the host's recorded reason in place of a
+reply. Run ID, generation and provider ID sit behind a Details disclosure in
+the opened card. The card is one component in Chat, Work and
 Code; a delivery the card cannot read is shown as its text under a plain
 "Subagent result" head.
 
@@ -382,7 +413,7 @@ usage where the runtime reports them, "Usage not reported" otherwise. Every
 row, managed or not, names its provider.
 
 A result steered into the parent's running turn shows as the same child-result
-card after that turn's reply, headed "Delivered into the running turn".
+line or card after that turn's reply, headed "Delivered into the running turn".
 
 Managed result previews identify their execution generation and recorded model.
 The result detail leads with the reported summary, files, checks and blockers;
@@ -730,6 +761,34 @@ and scrolling inside the card past 18rem so the buttons stay in reach, then
 "This turn ends; the next one runs at" the level it returns to, with
 **Approve plan ·** that level and **Keep planning**. The rules are in
 [Provider runtimes](provider-runtimes.md#plan-mode-as-level-changes).
+
+The phone draws the same block on a Work thread's screen, above the
+thread's level: the label, the agent's sentence, the plan whole in a
+bordered monospace block that scrolls inside the card past 18rem, the line
+saying what happens to this turn, and the two answers with the desktop's
+words. The phone reads the thread's pending requests from the host and
+sends only yes or no with the version it read; the host applies the level
+change and journals it as the device. Approving a plan, which widens what
+the next turn may do, asks for the phone's own confirmation (Face ID, Touch
+ID or passcode) first; switching to Plan and keeping the level do not. A
+Code thread's level-change ask stays with the desktop, like the phone's
+other Code approvals.
+
+Every other request a Work agent waits on draws on the same screen, oldest
+first, with the desktop's words: a tool call as **Provider approval** (the
+action and what it does, **Approve** and **Deny**), a question as its prompt,
+each offered answer and **Type your own answer** with **Submit**, and a
+questionnaire as each question with its limits (**Choose one**, **Select
+1–n options**, a **(Recommended)** option, **Write another answer**), the
+optional **Anything to add?**, **Send answers** and **Dismiss**, which ends
+the question unanswered as the desktop's does. Each sends the answer and the
+version it read through the same request route a window uses, and the host
+journals it as the device. Approving a tool call lets the agent act, so it
+asks for the phone's own confirmation first; denying, answering a question
+and dismissing do not. A refusal (answered elsewhere, its version moved, the
+thread's permissions changed since it asked) shows the host's sentence under
+the card, which stays; an answer holding a path or link, which Work request
+text never carries, is refused on the phone before it is sent.
 
 ## Sessions started outside Octant
 

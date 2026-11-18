@@ -981,8 +981,9 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   // JSON bodies within the listener's default budget.
   ...(
     [
-      ["/api/chat/attachments", "POST", "chat", CHAT_ATTACHMENT_MEDIA_TYPES, false],
-      // Work and Code take a file of any type (maintainer decision, 2026-11-16).
+      // Every mode takes a file of any type (maintainer decision, 2026-11-16):
+      // Chat decides at send whether its model takes it natively or as text.
+      ["/api/chat/attachments", "POST", "chat", CHAT_ATTACHMENT_MEDIA_TYPES, true],
       ["/api/work/attachments", "PUT", "work", WORK_ATTACHMENT_MEDIA_TYPES, true],
       ["/api/code/attachments", "PUT", "code", CODE_ATTACHMENT_MEDIA_TYPES, true],
     ] as const
@@ -1090,6 +1091,21 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     methods: ["POST"] as const,
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 8_192,
+  },
+  // Settings › Permissions › Blocked tools, which a device the host's own
+  // person paired reads and changes as a window does.
+  {
+    kind: "exact" as const,
+    path: "/api/blocked-tools",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/blocked-tools/commands",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 4_096,
   },
   // The host's shell settings, for a device the host's own person paired: it
   // has no window here to bootstrap, so this is where it reads them and

@@ -12,7 +12,12 @@ import type { ProviderModel } from "@octant/contracts/providers";
 import type { ProviderCapabilitySupport } from "@octant/contracts/providers";
 import type { ProviderObservedState } from "@octant/contracts/providers";
 import type { ProviderReadiness } from "@octant/contracts/providers";
-import { threadAppToolSupport, type AppToolThreadLevel } from "./browserAgentAvailability";
+import {
+  carriesThreadTools,
+  threadAppToolSupport,
+  type AppToolCapabilities,
+  type AppToolThreadLevel,
+} from "./browserAgentAvailability";
 import {
   hasVerifiedToolAuthority,
   hasWorkToolAuthority,
@@ -45,6 +50,7 @@ const driverLabels: Readonly<Record<Exclude<ProviderDriverKind, AcpAgentKind>, s
   // A bundled kind's name is never borrowed: an outside instance is labelled
   // as what it is, beside its package's own display name.
   "outside-harness-endpoint": "Outside driver",
+  "acp-agent": "Added ACP agent",
 };
 
 export function driverLabel(driverKind: ProviderDriverKind): string {
@@ -255,6 +261,8 @@ export interface PickerGroup {
   readonly forceStop?: ProviderCapabilitySupport;
   /** The provider's own slash commands its runtime last listed; absent when none. */
   readonly providerCommands?: ProviderObservedState["commands"];
+  /** The provider's own skills and plugins its runtime last listed; absent when none. */
+  readonly providerMentions?: ProviderObservedState["mentions"];
   /**
    * Whether this account's threads may choose the runtime's own artifact tool
    * instead of a Canvas, per mode. Absent when the instance was never probed
@@ -443,6 +451,7 @@ export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<P
       sections,
       appManagedTools: observed.capabilities.appManagedTools,
       ...(observed.commands === undefined ? {} : { providerCommands: observed.commands }),
+      ...(observed.mentions === undefined ? {} : { providerMentions: observed.mentions }),
       ...(observed.capabilities.forceStop === undefined
         ? {}
         : { forceStop: observed.capabilities.forceStop }),
@@ -712,10 +721,7 @@ export function modelCanTakeDelegatedWork(
   driverKind: ProviderDriverKind,
   observed: Pick<ProviderObservedState, "readiness" | "models"> &
     Partial<Pick<ProviderObservedState, "verifiedToolModelIds">> & {
-      readonly capabilities?: Pick<
-        ProviderObservedState["capabilities"],
-        "appManagedTools" | "appManagedToolsAtFullAccess"
-      >;
+      readonly capabilities?: AppToolCapabilities;
     },
   modelId: ProviderModelId,
   level?: AppToolThreadLevel,
@@ -725,7 +731,7 @@ export function modelCanTakeDelegatedWork(
     (observed.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false) ||
     (level !== undefined &&
       observed.capabilities !== undefined &&
-      threadAppToolSupport(observed.capabilities, level) === "mixed");
+      carriesThreadTools(threadAppToolSupport(observed.capabilities, level)));
   if (!carriesTools) return false;
   if (!isNativeHarnessDriverKind(driverKind)) {
     return (

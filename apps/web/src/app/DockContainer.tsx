@@ -187,11 +187,6 @@ export interface DockContainerProps {
   /** Whether the dock's thread runs on this computer rather than a paired one. */
   readonly dockThreadOnThisComputer: boolean;
   readonly dockThreadKey?: ThreadUtilityDockKey;
-  /**
-   * Present while the active pane is a new Code task with no thread yet: the
-   * tools its title band shows disabled until the task starts.
-   */
-  readonly dockToolsAwaitingThread?: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly hostBridge?: OctantHostBridge;
   readonly isNarrow: boolean;
   /** What the panes of a split keep between them beside the dock. */
@@ -267,7 +262,6 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     dockThreadHost,
     dockThreadKey,
     dockThreadOnThisComputer,
-    dockToolsAwaitingThread,
     isNarrow,
     splitPrimaryMinimum,
     navigation,
@@ -570,7 +564,6 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
             ? undefined
             : writtenDocumentsByThread.get(dockThreadKey)?.documents
         }
-        now={now}
         onOpenDocument={actions.openWrittenDocument}
         onOpenRemoteAccessSettings={() => void actions.openSettings({ section: "remote-access" })}
         onOpenSubagent={actions.openSubagent}
@@ -898,9 +891,6 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
             ? undefined
             : threadUtility("side-chat")
         }
-        {...(dockToolsAwaitingThread === undefined
-          ? {}
-          : { toolsAwaitingThread: dockToolsAwaitingThread })}
         {...(bottomPanelOpen && activeBottomSurface?.id === "terminal"
           ? {}
           : { terminal: threadUtility("terminal") })}

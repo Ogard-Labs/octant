@@ -23,6 +23,7 @@ import {
   adaptBetaOpenCodeEvent,
   betaAgentPermissionRules,
   betaSessionPermissionRules,
+  openCodeBlockedToolNames,
   betaPermissionEffect,
   makeOpenCodeDriver,
   normalizeOpenCodeProbe,
@@ -171,6 +172,9 @@ describe("OpenCode driver", () => {
     // jail, which starts the git stand-in; elsewhere turns run only in Work
     // and Code outside Plan, so the probe attests that jail.
     expect(probe.capabilities.appManagedTools).toBe("supported");
+    // A rewind continues OpenCode's own fork of the session cut at the last
+    // kept turn, so the rewind preview may promise a copy.
+    expect(probe.capabilities.sessionRollback).toBe("supported");
     expect(fixture.processInputs[0]).toMatchObject(
       process.platform === "darwin" || process.platform === "linux"
         ? { mode: "chat", executionPolicy: "plan", loopbackPorts: [expect.any(Number)] }
@@ -568,6 +572,45 @@ describe("OpenCode driver", () => {
       "provider-session:gate",
       "child-session:child-gate",
     ]);
+  });
+
+  it("names the turn's last assistant message as where it ends in OpenCode's session, not a delegated session's", async () => {
+    const message = (id: string, role: "user" | "assistant", session: string) =>
+      ({
+        type: "message.updated",
+        properties: { sessionID: session, info: { id, role, sessionID: session } },
+      }) as unknown as Event;
+    const fixture = driverFixture({
+      events: [
+        message("msg_1", "user", "provider-session"),
+        message("msg_2", "assistant", "provider-session"),
+        message("msg_9", "assistant", "child-session"),
+        idleEvent("provider-session"),
+      ],
+    });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* fixture.driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+          });
+          const stream = yield* connection.subscribe;
+          const collector = yield* Effect.fork(
+            Stream.runCollect(
+              stream.pipe(
+                Stream.filter((event) => event.sessionId === sessionId),
+                Stream.takeUntil((event) => event.kind === "completed"),
+              ),
+            ),
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          return yield* Fiber.join(collector);
+        }),
+      ),
+    );
+    expect(Array.from(output).at(-1)).toMatchObject({ kind: "completed", nativeAnchor: "msg_2" });
   });
 
   it("reports cumulative usage across every model step in one prompt", async () => {
@@ -1718,6 +1761,7 @@ describe("OpenCode driver", () => {
       approvals: "supported",
       userQuestions: "supported",
       fileChanges: "unsupported",
+      sessionRollback: "supported",
     });
     // Where the Chat and Plan jail starts no process the launch refuses both,
     // and the report says so.
@@ -3368,6 +3412,34 @@ describe("OpenCode driver", () => {
       evaluateV2Permission(
         betaSessionPermissionRules("plan", "code", undefined, [], false, on),
         "websearch",
+      ),
+    ).toBe("allow");
+  });
+
+  it("denies a tool the person blocked at every level, after every allow, on both runtimes", () => {
+    const blockedTools = openCodeBlockedToolNames(["webfetch", "docs__search"]);
+    expect(blockedTools).toEqual(["webfetch", "docs_search"]);
+    // Web tools and tool servers on, so only the block stands in the way.
+    const own = { rules: [], toolServers: true, webTools: true, blockedTools } as const;
+    for (const policy of ["plan", "approval-gated", "auto-accept-edits", "full-access"] as const) {
+      for (const action of blockedTools) {
+        expect(
+          evaluatePermission(permissionRules(policy, "code", "octant", [], false, own), action),
+        ).toBe("deny");
+        expect(
+          evaluateV2Permission(
+            betaSessionPermissionRules(policy, "code", "octant", [], false, own),
+            action,
+          ),
+        ).toBe("deny");
+      }
+    }
+    // Without the block, Full access runs the same tools.
+    const unblocked = { rules: [], toolServers: true, webTools: true } as const;
+    expect(
+      evaluatePermission(
+        permissionRules("full-access", "code", undefined, [], false, unblocked),
+        "webfetch",
       ),
     ).toBe("allow");
   });

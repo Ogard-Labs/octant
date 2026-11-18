@@ -42,6 +42,7 @@ import type {
   ProviderConnection,
   ProviderDriver,
   ProviderSessionCompaction,
+  ProviderInPlaceLevelChange,
   ProviderSessionForkRequest,
   ProviderWakeupSchedule,
   ProviderBackgroundWork,
@@ -96,6 +97,8 @@ import {
 } from "./claudeEventMapper";
 import { CLAUDE_TASK_TOOLS, ClaudeTaskList, readClaudeStoredTaskList } from "./claudeTaskList";
 import {
+  claudeAccountUsesStoredKey,
+  mcpServerTool,
   planReadOnlyToolServers,
   providerOwnMemoryLaunches,
   windowsProviderLaunch,
@@ -270,6 +273,18 @@ const CLAUDE_ARTIFACT_READ_ACTIONS = new Set<string>(["read", "list", "quickstar
 /** Claude's claude.ai Projects tool, whose upload names a local file in `local_path`. */
 const CLAUDE_PROJECTS_TOOL = "Projects";
 const CLAUDE_READ_TOOLS = new Set<string>(CLAUDE_PLAN_TOOLS);
+/** Claude's built-in tools that read or change a folder or run a command. */
+const CLAUDE_FOLDER_AND_SHELL_TOOLS = new Set<string>([
+  ...CLAUDE_PLAN_TOOLS,
+  "LS",
+  "Edit",
+  "Write",
+  "NotebookEdit",
+  "Bash",
+  "Monitor",
+  "TaskOutput",
+  "TaskStop",
+]);
 /**
  * Tools that change only Claude's own session state: no file, shell, network,
  * or person is involved, so every posture runs them unasked, as Claude Code
@@ -386,7 +401,9 @@ export function claudeWorktreeTarget(
  * a level change instead (`approval-request` with `levelChange`), and the
  * call itself is always refused with what the person decided. An approved
  * change applies from the thread's next session, because Plan's read-only
- * rule rests on the tool set and sandbox profile a session launches with. A
+ * rule rests on the tool set and sandbox profile a session launches with,
+ * except entering Plan, which the host can apply in place
+ * (`changeLevelInPlace`): the gate then holds the session to Plan itself. A
  * session whose host does not answer level changes holds neither tool.
  */
 export const CLAUDE_ENTER_PLAN_TOOL = "EnterPlanMode";
@@ -457,6 +474,16 @@ export function claudeExecutionOptions(
     ...policyOptions,
     fullToolSet: policyOptions.fullToolSet && (mode === "work" || mode === "code"),
   };
+  // Elsewhere Chat's file and shell tools ask and are declined inside
+  // Octant's sandbox. Windows has no such sandbox, so a Chat session there is
+  // started without them: Claude Code then has no tool that reads a folder or
+  // runs a command, whatever a hook or the gate would have answered.
+  if (mode === "chat" && platform === "win32") {
+    return {
+      ...options,
+      tools: options.tools.filter((tool) => !CLAUDE_FOLDER_AND_SHELL_TOOLS.has(tool)),
+    };
+  }
   // A Work or Code Plan turn may run read-only commands where its sandbox can
   // hold the shell to them (see `claudePlanRunsCommands`). Plan has no
   // approvals, so the sandbox, not a person, is what keeps them read-only.
@@ -564,8 +591,73 @@ function claudeNativeToolAnswer(
 }
 
 /** Claude's answer to a Plan call of an account MCP server the person did not mark. */
+export const CLAUDE_BLOCKED_TOOL_REFUSAL =
+  "This tool is blocked in Octant Settings › Permissions › Blocked tools.";
+
+/**
+ * The person's blocked tools as Claude Code names them: a built-in by its own
+ * name, and an MCP server's tool given as `server__tool` under Claude Code's
+ * `mcp__server__tool`.
+ */
+export function claudeBlockedToolNames(
+  blocked: ReadonlyArray<string> | undefined,
+): ReadonlyArray<string> {
+  return (blocked ?? []).map((tool) =>
+    tool.startsWith("mcp__") || mcpServerTool(tool) === undefined ? tool : `mcp__${tool}`,
+  );
+}
+
 export const CLAUDE_PLAN_MCP_SERVER_REFUSAL =
   'This MCP server is not allowed in Plan. Mark it "Read-only — allowed in Plan" in Settings to use it here.';
+
+/** Plan's sentence for a call a session moved to Plan inside its turn may not make. */
+export const CLAUDE_IN_PLACE_PLAN_REFUSAL =
+  "The thread moved to Plan during this turn, so it is read-only now: no file change, command, subagent or workflow runs. Keep reading and write the plan as your reply.";
+/** Why a mode switch is refused once the thread moved to Plan inside the turn. */
+export const CLAUDE_IN_PLACE_PLAN_LEVEL_REFUSAL =
+  "The thread is already in Plan for the rest of this turn. Write the plan as your reply; leaving Plan is asked from the thread's next turn.";
+
+/**
+ * What a session the thread moved to Plan inside its turn may still call.
+ * It keeps the tools and sandbox of the level it launched at, so its own
+ * sandbox cannot judge a command, and only what a Plan session would hold
+ * stays: reads, the session's own task tools, a question, a skill's text, a
+ * web read (asked as in Plan), the servers the person marked read-only, and
+ * Octant's own tools, which the host judges at the thread's current level.
+ * Everything else is refused, every write, `Bash` call, sandbox escape,
+ * subagent and `Workflow` start among it; a tool this list does not know
+ * fails closed.
+ */
+export function claudeInPlacePlanRefusal(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+  planMcpServers: readonly string[],
+): string | undefined {
+  if (CLAUDE_LEVEL_CHANGE_TOOLS.has(toolName)) return CLAUDE_IN_PLACE_PLAN_LEVEL_REFUSAL;
+  if (
+    CLAUDE_READ_TOOLS.has(toolName) ||
+    toolName === "LS" ||
+    CLAUDE_SESSION_TOOLS.has(toolName) ||
+    toolName === "AskUserQuestion" ||
+    toolName === "Skill" ||
+    CLAUDE_WEB_TOOLS.has(toolName) ||
+    toolName.startsWith("mcp__octant__")
+  ) {
+    return undefined;
+  }
+  if (
+    toolName === CLAUDE_ARTIFACT_TOOL &&
+    typeof input.action === "string" &&
+    CLAUDE_ARTIFACT_READ_ACTIONS.has(input.action)
+  ) {
+    return undefined;
+  }
+  const server = claudeAccountMcpServer(toolName);
+  if (server !== undefined) {
+    return planMcpServers.includes(server) ? undefined : CLAUDE_PLAN_MCP_SERVER_REFUSAL;
+  }
+  return CLAUDE_IN_PLACE_PLAN_REFUSAL;
+}
 
 /**
  * The account MCP server a tool belongs to (`mcp__<server>__<tool>`), or
@@ -1352,6 +1444,8 @@ export interface ClaudeDriverOptions {
   readonly gitIdentity?: (checkoutRoot: string) => Promise<ClaudeGitIdentity>;
   readonly binaryPath: string;
   readonly authentication: ClaudeAuthentication;
+  /** A gateway account's address; its token comes from the credential broker. */
+  readonly gatewayBaseUrl?: string;
   /** Claude-owned directory for this account. */
   readonly configDirectory?: string;
   /**
@@ -1555,6 +1649,26 @@ interface SessionState {
   readonly settledToolUseIds: Set<string>;
   /** The task list from Claude's task tools, kept across the session's turns. */
   readonly taskList: ClaudeTaskList;
+  /** Whether the host answers this session's level-change asks. */
+  readonly levelChanges: boolean;
+  /**
+   * The account directory overlaps the checkout, so the task tools Plan keeps
+   * would write inside the Project: the session cannot enter Plan in place.
+   */
+  readonly accountDirectoryBroadensPlan: boolean;
+  /** The account MCP servers the person marked read-only, which Plan still starts. */
+  readonly planMcpServers: readonly string[];
+  /**
+   * The thread moved to Plan inside this session's turn
+   * ({@link ProviderConnection.changeLevelInPlace}). The session keeps the
+   * tools and sandbox of the level it launched at, so from then on the gate
+   * judges every call at Plan and refuses whatever a Plan session would not
+   * hold ({@link claudeInPlacePlanRefusal}). It never turns back, even when
+   * the runtime refused to switch and the host ends the turn.
+   */
+  inPlacePlan: boolean;
+  /** The runtime accepted the switch to plan mode, so the turn goes on in Plan. */
+  planModeSwitched: boolean;
   claudeSessionId?: string;
   context?: ClaudeEventContext;
   collector?: Fiber.RuntimeFiber<void, never>;
@@ -1627,12 +1741,23 @@ interface ClaudeRuntimeTurn {
   readonly opened: DeferredValue<boolean>;
 }
 
+/** The level a session's gate judges its calls at now. */
+function claudeGateLevel(
+  state: SessionState,
+  launched: ProviderExecutionPolicy,
+): ProviderExecutionPolicy {
+  return state.inPlacePlan ? "plan" : launched;
+}
+
 /** What the runtime is told after the person answered its ask to change the thread's level. */
-function claudeLevelChangeAnswer(toolName: string, approved: boolean): string {
+function claudeLevelChangeAnswer(toolName: string, approved: boolean, inPlace: boolean): string {
   if (!approved) {
     return toolName === CLAUDE_ENTER_PLAN_TOOL
       ? "The person kept this thread at its level. Continue without planning mode."
       : "The person kept this thread in Plan. Keep planning read-only, or revise the plan.";
+  }
+  if (inPlace && toolName === CLAUDE_ENTER_PLAN_TOOL) {
+    return "The person approved planning first. The thread is in Plan now, read-only, for the rest of this turn: read what you need and write the plan as your reply.";
   }
   return toolName === CLAUDE_ENTER_PLAN_TOOL
     ? "The person approved planning first. Octant ends this turn now; the thread's next turn runs in Plan, read-only. Stop here."
@@ -2362,6 +2487,12 @@ function probeSdk(
   });
 }
 
+function storedKeyMissingMessage(options: ClaudeDriverOptions): string {
+  return options.authentication === "gateway"
+    ? "Store the gateway token for this Claude account."
+    : "Store an Anthropic API key for this Claude provider.";
+}
+
 function makeProbe(
   options: ClaudeDriverOptions,
   environmentFactory: ClaudeEnvironmentFactory,
@@ -2419,7 +2550,7 @@ function makeProbe(
               readiness: "unauthenticated",
               version,
               credentialStatus: "missing",
-              message: "Store an Anthropic API key for this Claude provider.",
+              message: storedKeyMissingMessage(options),
             },
             clock,
           );
@@ -2433,7 +2564,7 @@ function makeProbe(
                   readiness: "unauthenticated",
                   version,
                   credentialStatus: "missing",
-                  message: "Store an Anthropic API key for this Claude provider.",
+                  message: storedKeyMissingMessage(options),
                 }
               : {
                   readiness: "unavailable",
@@ -2448,6 +2579,7 @@ function makeProbe(
       }
       const sdkResult = yield* probeSdk(options, environmentFactory, {
         ...(apiKey === undefined ? {} : { apiKey }),
+        ...(options.gatewayBaseUrl === undefined ? {} : { gatewayBaseUrl: options.gatewayBaseUrl }),
         ...(options.configDirectory === undefined
           ? {}
           : { configDirectory: options.configDirectory }),
@@ -2469,7 +2601,7 @@ function makeProbe(
           {
             readiness: "incompatible",
             version,
-            ...(options.authentication === "api-key"
+            ...(claudeAccountUsesStoredKey(options.authentication)
               ? { credentialStatus: "stored" as const }
               : {}),
             message: sdkResult.message,
@@ -2486,7 +2618,9 @@ function makeProbe(
           compactAnnounced: sdkResult.compactAnnounced,
           commands: sdkResult.commands,
           hostTrafficDisabled,
-          ...(options.authentication === "api-key" ? { credentialStatus: "stored" as const } : {}),
+          ...(claudeAccountUsesStoredKey(options.authentication)
+            ? { credentialStatus: "stored" as const }
+            : {}),
         },
         clock,
       );
@@ -2508,7 +2642,7 @@ function makeClaudeContextFacts(
             failure("invalid-configuration", "Provider instance does not match driver."),
           );
         }
-        if (options.authentication === "api-key") {
+        if (claudeAccountUsesStoredKey(options.authentication)) {
           return yield* Effect.fail(failure("unsupported", "Plan limits do not apply."));
         }
         // This reading starts a `claude` process. That is worth it when a
@@ -3646,6 +3780,7 @@ function makeConnection(
         readonly wakeups?: ProviderWakeupSchedule;
         readonly outlivesTurn?: boolean;
         readonly levelChanges?: boolean;
+        readonly blockedTools?: ReadonlyArray<string>;
       },
       signal: AbortSignal,
       resumeSessionId?: string,
@@ -3653,13 +3788,15 @@ function makeConnection(
       // Windows has no Octant sandbox, so each launch there is decided from
       // its own mode, level and Strict value before anything runs: below Full
       // access Claude's own permission modes hold it outside Strict, and
-      // Strict and a kept sandbox are refused by name.
+      // Strict and a kept sandbox are refused by name. A Chat session there
+      // starts with no file or shell tool (`claudeExecutionOptions`).
       if ((options.platform ?? process.platform) === "win32") {
         const windows = windowsProviderLaunch({
           mode: mode ?? "code",
           executionPolicy: input.executionPolicy,
           fullAccessSandbox: input.fullAccessSandbox,
           strict: input.strict,
+          chatWithoutFolderOrShell: true,
         });
         if (windows.status === "refused") throw failure("incompatible", windows.reason);
       }
@@ -3706,9 +3843,14 @@ function makeConnection(
       let scope: Scope.CloseableScope | undefined;
       let state: SessionState | undefined;
       try {
-        if (options.authentication === "api-key") {
+        if (claudeAccountUsesStoredKey(options.authentication)) {
           if (!(await runSetupEffect(brokerHas(options), signal))) {
-            throw failure("unauthenticated", "Claude API-key credential is missing.");
+            throw failure(
+              "unauthenticated",
+              options.authentication === "gateway"
+                ? "Claude gateway token is missing."
+                : "Claude API-key credential is missing.",
+            );
           }
           apiKey = await runSetupEffect(brokerResolve(options), signal);
         }
@@ -3726,6 +3868,16 @@ function makeConnection(
             "Claude Plan confinement cannot use an account directory that overlaps the checkout.",
           );
         }
+        // Plan refuses an account directory that overlaps the checkout, since
+        // the session's own task tools write there. A session launched at
+        // another level over such a folder cannot be held to Plan in place.
+        const accountDirectoryBroadensPlan =
+          options.configDirectory !== undefined &&
+          claudeAccountDirectoryBroadensPlan(
+            projectRoot,
+            options.configDirectory,
+            options.isProjectConfinedPath,
+          );
         scope = await runSetupEffect(Scope.make(), signal);
         const initialized = deferred<string>();
         // Startup no longer waits on this: the runtime initializes with the
@@ -3738,6 +3890,9 @@ function makeConnection(
         const environment = await runSetupEffect(
           environmentFactory(options.authentication, {
             ...(apiKey !== undefined ? { apiKey } : {}),
+            ...(options.gatewayBaseUrl === undefined
+              ? {}
+              : { gatewayBaseUrl: options.gatewayBaseUrl }),
             ...(options.configDirectory === undefined
               ? {}
               : { configDirectory: options.configDirectory }),
@@ -3772,6 +3927,10 @@ function makeConnection(
           executionPolicy: input.executionPolicy,
           setup: input.nativeSetup,
         });
+        // The gate judges each call with the session's current level, which
+        // can narrow to Plan inside a turn, and Plan never leaves a call to
+        // the person's own rules.
+        const ownLaunchPermissions = ownPermissions;
         const octantSandbox = claudeOctantConfiguresSandbox({
           executionPolicy: input.executionPolicy,
           fullAccessSandbox: sandboxedFullAccess,
@@ -3873,11 +4032,21 @@ function makeConnection(
           setup: nativeSetup,
           marked: options.planMcpServers?.() ?? [],
         });
+        // The servers a Plan session of this setup would start, which a
+        // session moved to Plan inside its turn still calls.
+        const inPlacePlanMcpServers =
+          input.executionPolicy === "plan"
+            ? planMcpServers
+            : planReadOnlyToolServers({
+                executionPolicy: "plan",
+                setup: nativeSetup,
+                marked: options.planMcpServers?.() ?? [],
+              });
         const policyExecutionOptions = claudeExecutionOptions(
           input.executionPolicy,
           input.autoApprove,
           mode,
-          process.platform,
+          options.platform ?? process.platform,
           strict,
           nativeSetup,
         );
@@ -3934,6 +4103,9 @@ function makeConnection(
         // less what Octant withholds, so the gate below sees every tool.
         // A single-use session starts no later turn, so it schedules none.
         const wakeups = input.singleUse === true ? undefined : input.wakeups;
+        // The person's blocked tools, refused by Claude Code's own
+        // `disallowedTools` and again at the gate below.
+        const blockedTools = claudeBlockedToolNames(input.blockedTools);
         const withheldTools = executionOptions.fullToolSet
           ? claudeWithheldTools(
               nativeSetup,
@@ -4037,6 +4209,16 @@ function makeConnection(
             return deny("Claude tool authority state was exhausted.");
           }
           expireClaudePreToolGrants(activeState, factories.authorityNow());
+          if (blockedTools.includes(request.toolName)) return deny(CLAUDE_BLOCKED_TOOL_REFUSAL);
+          // The level this call is judged at: Plan once the thread moved
+          // there inside the turn, whatever the session launched at. A call
+          // whose grant the hook gave before that is refused here too.
+          const executionPolicy = claudeGateLevel(activeState, input.executionPolicy);
+          const ownPermissions = ownLaunchPermissions && !activeState.inPlacePlan;
+          const inPlaceRefusal = activeState.inPlacePlan
+            ? claudeInPlacePlanRefusal(request.toolName, request.input, activeState.planMcpServers)
+            : undefined;
+          if (inPlaceRefusal !== undefined) return deny(inPlaceRefusal);
           const digest = claudeAuthorityInputDigest(request.input);
           const grant = activeState?.preToolRequests.get(request.toolUseId);
           if (
@@ -4057,7 +4239,7 @@ function makeConnection(
           // asked about (or one Octant keeps asking), so Octant waives
           // nothing here: the ask reaches the person, or Reviewed's reviewer.
           if (
-            (input.executionPolicy === "full-access" &&
+            (executionPolicy === "full-access" &&
               grant.unsandboxed !== true &&
               request.toolName !== "AskUserQuestion" &&
               !CLAUDE_LEVEL_CHANGE_TOOLS.has(request.toolName)) ||
@@ -4067,15 +4249,11 @@ function makeConnection(
               // every other tool still ask, and so does a read or an edit
               // outside the Project's folders.
               ((grant.outsideProject !== true &&
-                input.executionPolicy === "auto-accept-edits" &&
+                executionPolicy === "auto-accept-edits" &&
                 CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
                 (grant.outsideProject !== true && CLAUDE_READ_TOOLS.has(request.toolName)) ||
                 CLAUDE_SESSION_TOOLS.has(request.toolName) ||
-                isPlanShellCommand(
-                  input.executionPolicy,
-                  request.toolName,
-                  executionOptions.tools,
-                )))
+                isPlanShellCommand(executionPolicy, request.toolName, executionOptions.tools)))
           ) {
             holdWorktree(activeState, request.toolName, request.input, grant.workingDirectory);
             activeState.settledToolUseIds.add(request.toolUseId);
@@ -4210,7 +4388,7 @@ function makeConnection(
               tool: mapped.request.toolName,
               arguments: request.input,
               workingDirectory: grant.workingDirectory,
-              ownerShell: sandbox !== undefined && input.executionPolicy !== "plan",
+              ownerShell: sandbox !== undefined && executionPolicy !== "plan",
             }),
           };
           activeState.pendingApprovals.set(pending.requestId, pending);
@@ -4276,13 +4454,18 @@ function makeConnection(
             return deny("Claude tool authority state was exhausted.");
           }
           expireClaudePreToolGrants(activeState, factories.authorityNow());
+          if (blockedTools.includes(request.toolName)) return deny(CLAUDE_BLOCKED_TOOL_REFUSAL);
+          // Plan once the thread moved there inside the turn, whatever the
+          // session launched at.
+          const executionPolicy = claudeGateLevel(activeState, input.executionPolicy);
+          const ownPermissions = ownLaunchPermissions && !activeState.inPlacePlan;
           // In Plan only the account's servers the person marked start. A call
           // to any other is refused with what to do about it.
           const planServer = claudeAccountMcpServer(request.toolName);
           if (
-            input.executionPolicy === "plan" &&
+            executionPolicy === "plan" &&
             planServer !== undefined &&
-            !planMcpServers.includes(planServer)
+            !activeState.planMcpServers.includes(planServer)
           ) {
             return deny(CLAUDE_PLAN_MCP_SERVER_REFUSAL);
           }
@@ -4312,6 +4495,14 @@ function makeConnection(
           if (request.toolName === CLAUDE_ARTIFACT_TOOL) {
             activeState.artifactCalls.set(request.toolUseId, claudeArtifactCall(requestInput));
           }
+          if (activeState.inPlacePlan) {
+            const refusal = claudeInPlacePlanRefusal(
+              request.toolName,
+              requestInput,
+              activeState.planMcpServers,
+            );
+            if (refusal !== undefined) return deny(refusal);
+          }
           // The plan already reached the thread as the reply's text from the
           // call's transcript block. Granting the call would let Claude Code
           // leave plan mode for one that edits, so it is always refused; where
@@ -4319,7 +4510,7 @@ function makeConnection(
           // to leave Plan, and the call is refused with their answer below.
           if (request.toolName === CLAUDE_PLAN_EXIT_TOOL && !levelChanges) {
             return deny(
-              input.executionPolicy === "plan"
+              executionPolicy === "plan"
                 ? CLAUDE_PLAN_CAPTURED_MESSAGE
                 : CLAUDE_LEVEL_CHANGE_REFUSAL,
             );
@@ -4332,7 +4523,7 @@ function makeConnection(
           if (
             CLAUDE_LEVEL_CHANGE_TOOLS.has(request.toolName) &&
             (!levelChanges ||
-              (request.toolName === CLAUDE_EXIT_PLAN_TOOL && input.executionPolicy !== "plan"))
+              (request.toolName === CLAUDE_EXIT_PLAN_TOOL && executionPolicy !== "plan"))
           ) {
             return deny(CLAUDE_LEVEL_CHANGE_REFUSAL);
           }
@@ -4364,13 +4555,13 @@ function makeConnection(
           const secretRefusal =
             sandboxedFullAccess ||
             input.strict === true ||
-            claudeSecretGuardApplies(input.executionPolicy)
+            claudeSecretGuardApplies(executionPolicy)
               ? claudeFileToolSecretRefusal(
                   request.toolName,
                   requestInput,
                   ownClaudeAccountPaths,
                   request.projectRoot,
-                  claudeSearchesRunUnguarded(input.executionPolicy),
+                  claudeSearchesRunUnguarded(executionPolicy),
                   undefined,
                   sandboxedFullAccess || strict,
                 )
@@ -4387,7 +4578,7 @@ function makeConnection(
             typeof memoryTarget === "string"
               ? claudeMemoryWriteRefusal({
                   mode,
-                  executionPolicy: input.executionPolicy,
+                  executionPolicy,
                   toolName: request.toolName,
                   target: memoryTarget,
                   workingDirectory: request.projectRoot,
@@ -4419,11 +4610,11 @@ function makeConnection(
           const escapesSandbox =
             CLAUDE_SHELL_TOOLS.has(request.toolName) &&
             requestInput.dangerouslyDisableSandbox === true;
-          if (escapesSandbox && input.executionPolicy === "plan") {
+          if (escapesSandbox && executionPolicy === "plan") {
             return deny("Plan runs every command inside its sandbox.");
           }
           const asksUnsandboxed =
-            escapesSandbox && (input.strict === true || input.executionPolicy !== "full-access");
+            escapesSandbox && (input.strict === true || executionPolicy !== "full-access");
           // Claude Code takes a hook "allow" as the final word and runs the
           // tool without calling `canUseTool`. Observed 2026-09-06: an
           // approval-gated thread answered "allow" here for a Project-confined
@@ -4484,7 +4675,7 @@ function makeConnection(
                 : undefined;
             const entersUnheldWorktree =
               worktreeTarget !== undefined && !sessionHolds(activeState, worktreeTarget);
-            return claudeOwnRulesDecide(input.executionPolicy, request.toolName, !ownPermissions) &&
+            return claudeOwnRulesDecide(executionPolicy, request.toolName, !ownPermissions) &&
               !asksUnsandboxed &&
               !outsideProject &&
               !entersUnheldWorktree
@@ -4498,7 +4689,7 @@ function makeConnection(
           if (CLAUDE_LEVEL_CHANGE_TOOLS.has(request.toolName) || asksUnsandboxed)
             return askThroughGrant();
           const decide = (): ClaudePreToolDecision | Promise<ClaudePreToolDecision> => {
-            if (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") {
+            if (executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") {
               return settledUnasked();
             }
             // Outside Strict Claude's own engine and the person's rules decide
@@ -4506,17 +4697,17 @@ function makeConnection(
             // "own-rules"), reads and edits included, so a person's `deny`
             // rule still refuses an in-Project read.
             if (ownPermissions) return askThroughGrant();
-            return (input.executionPolicy === "auto-accept-edits" &&
+            return (executionPolicy === "auto-accept-edits" &&
               CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
               (request.toolName !== "AskUserQuestion" && CLAUDE_READ_TOOLS.has(request.toolName)) ||
               CLAUDE_SESSION_TOOLS.has(request.toolName) ||
-              isPlanShellCommand(input.executionPolicy, request.toolName, executionOptions.tools)
+              isPlanShellCommand(executionPolicy, request.toolName, executionOptions.tools)
               ? settledUnasked()
               : askThroughGrant();
           };
           // A marked server's call in Plan is put to the person, whatever
           // their own rules allow: Plan runs nothing that writes unasked.
-          if (input.executionPolicy === "plan" && planServer !== undefined) {
+          if (executionPolicy === "plan" && planServer !== undefined) {
             return askThroughGrant();
           }
           // The person's own Claude tools name no file to confine: a subagent
@@ -4524,11 +4715,11 @@ function makeConnection(
           // an MCP server call asks below Full access.
           const nativeAnswer = claudeNativeToolAnswer(request.toolName, nativeSetup);
           if (nativeAnswer !== undefined) {
-            if (input.executionPolicy === "full-access") return settledUnasked();
+            if (executionPolicy === "full-access") return settledUnasked();
             if (ownPermissions) return askThroughGrant();
             return nativeAnswer === "unasked" ? settledUnasked() : askThroughGrant();
           }
-          if (input.executionPolicy === "full-access" || ownPermissions) {
+          if (executionPolicy === "full-access" || ownPermissions) {
             // Nothing may ask here (Full access, or Claude's own rules allow
             // the publish), so nothing would read the snapshot at approval:
             // the host keeps what was sent from this hook instead. An approval
@@ -4542,7 +4733,7 @@ function makeConnection(
                 activeState.publishedSnapshots.set(request.toolUseId, snapshot);
               }
             }
-            if (input.executionPolicy === "full-access" && !sandboxedFullAccess) return decide();
+            if (executionPolicy === "full-access" && !sandboxedFullAccess) return decide();
           }
           // A shell call carries no cwd of its own: Claude Code runs it in the
           // session's working directory, which is the Project root, and the
@@ -4596,7 +4787,7 @@ function makeConnection(
             // Outside Strict a publish naming a local file follows the
             // thread's file rules, as a `Write` does, so it asks too.
             if (
-              input.executionPolicy === "plan" ||
+              executionPolicy === "plan" ||
               input.strict === true ||
               sandboxedFullAccess ||
               CLAUDE_SHELL_TOOLS.has(request.toolName) ||
@@ -4781,6 +4972,7 @@ function makeConnection(
               ...(input.singleUse === true ? { persistSession: false as const } : {}),
               tools: executionOptions.tools,
               ...(withheldTools === undefined ? {} : { withheldTools }),
+              ...(blockedTools.length === 0 ? {} : { blockedTools }),
               ...(nativeSetup === undefined ? {} : { nativeSetup }),
               ...(instructions === undefined ? {} : { instructions }),
               ...claudeAutoCompactWindow(input.compactionPoint),
@@ -4834,6 +5026,11 @@ function makeConnection(
           observedToolUseIds: new Set(),
           settledToolUseIds: new Set(),
           taskList,
+          levelChanges,
+          accountDirectoryBroadensPlan,
+          planMcpServers: inPlacePlanMcpServers,
+          inPlacePlan: false,
+          planModeSwitched: false,
           outputAccepted: false,
           pendingTurns: 0,
           promptHookRuns: claudePromptHookRuns(nativeSetup, runtimeVersion),
@@ -5058,6 +5255,7 @@ function makeConnection(
               ...(input.wakeups === undefined ? {} : { wakeups: input.wakeups }),
               ...(input.outlivesTurn === true ? { outlivesTurn: true } : {}),
               ...(input.levelChanges === true ? { levelChanges: true } : {}),
+              ...(input.blockedTools === undefined ? {} : { blockedTools: input.blockedTools }),
             },
             signal,
             input.resumeCursor.value,
@@ -5306,6 +5504,51 @@ function makeConnection(
           });
         });
       },
+      // Entering Plan inside the running turn: the gate judges every later
+      // call at Plan before the runtime is asked to switch, so a call racing
+      // the switch is never let through at the old level, and a switch the
+      // runtime does not accept still leaves the gate at Plan while the host
+      // ends the turn.
+      changeLevelInPlace: ({ sessionId, change }) =>
+        Effect.suspend((): Effect.Effect<ProviderInPlaceLevelChange> => {
+          const state = sessions.get(sessionId);
+          if (
+            change !== "enter-plan" ||
+            state === undefined ||
+            state.terminal ||
+            state.releasing ||
+            state.released ||
+            state.pendingTurns === 0
+          ) {
+            return Effect.succeed({
+              status: "refused" as const,
+              reason: "Claude session has no running turn.",
+            });
+          }
+          if (
+            !state.levelChanges ||
+            state.executionPolicy === "plan" ||
+            state.accountDirectoryBroadensPlan
+          ) {
+            return Effect.succeed({
+              status: "refused" as const,
+              reason: "Claude session does not take a level change in place.",
+            });
+          }
+          state.inPlacePlan = true;
+          return state.query.setPermissionMode("plan").pipe(
+            Effect.map(() => {
+              state.planModeSwitched = true;
+              return { status: "applied" as const };
+            }),
+            Effect.catchAll(() =>
+              Effect.succeed({
+                status: "failed" as const,
+                reason: "Claude did not switch to plan mode.",
+              }),
+            ),
+          );
+        }),
       backgroundChildAgent: ({ sessionId, childAgentId }) => {
         const state = sessions.get(sessionId);
         const context = state?.context;
@@ -5512,8 +5755,22 @@ function makeConnection(
             if (CLAUDE_LEVEL_CHANGE_TOOLS.has(pending.toolName)) {
               pending.decision.resolve({
                 behavior: "deny",
-                message: claudeLevelChangeAnswer(pending.toolName, answer.approved),
+                message: claudeLevelChangeAnswer(
+                  pending.toolName,
+                  answer.approved,
+                  state.planModeSwitched,
+                ),
               });
+              return;
+            }
+            // A call asked about before the thread moved to Plan inside the
+            // turn is judged at Plan when it is answered: an allow given now
+            // must not run a write the session's level no longer permits.
+            const inPlaceRefusal = state.inPlacePlan
+              ? claudeInPlacePlanRefusal(pending.toolName, {}, state.planMcpServers)
+              : undefined;
+            if (answer.approved && inPlaceRefusal !== undefined) {
+              pending.decision.resolve({ behavior: "deny", message: inPlaceRefusal });
               return;
             }
             if (answer.approved) {

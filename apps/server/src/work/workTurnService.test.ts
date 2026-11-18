@@ -1,5 +1,5 @@
 import { decodeStartWorkThreadTurnCommand } from "@octant/contracts";
-import { SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL } from "../attachments/attachedFiles";
+import { SERVER_ATTACHMENT_TRANSFER_REFUSAL } from "../serverProjects/serverAttachments";
 import { continueWorkTurns } from "../wiring/continuation";
 import { RESTART_CONTINUATION_PROMPT } from "../harness/restartContinuation";
 import { threadRestartContinuationId } from "../harness/threadRestartContinuation";
@@ -223,6 +223,31 @@ describe("WorkTurnService", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it.each([true, false])(
+    "journals what Strict kept with the turn as it launches only when Strict is on (Strict: %s)",
+    async (strict) => {
+      const fixture = serviceFixture({ threadAccess: "ask-first", resolveStrict: () => strict });
+      vi.stubGlobal("process", Object.create(process, { platform: { value: "linux" } }));
+      try {
+        await fixture.service.startFirstTurn(ids.window, startCommand());
+        await vi.waitFor(() => expect(fixture.acquireInputs).toHaveLength(1));
+        const kept = vi
+          .mocked(fixture.persistence.journal.append)
+          .mock.calls.flatMap(([append]) => append.events)
+          .flatMap((event) => {
+            const payload = event.payload as { readonly strictKept?: ReadonlyArray<string> };
+            return payload.strictKept === undefined ? [] : [payload.strictKept];
+          });
+        if (strict) {
+          expect(kept).toHaveLength(1);
+          expect(kept[0]).toEqual(expect.arrayContaining(["octant-sandbox", "protected-files"]));
+        } else expect(kept).toEqual([]);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
 
   it("starts a Windows Work turn at Full access and reaches its provider", async () => {
     const fixture = serviceFixture({ threadAccess: "full-access", resolveStrict: () => false });
@@ -6324,6 +6349,7 @@ describe("a Work turn in a Project on a server", () => {
       status: "bound",
       folder: "/srv/notes",
       tools,
+      transferAttachments: async () => ({ status: "transferred", files: [] }),
     });
     await expect(fixture.service.startFirstTurn(ids.window, startCommand())).resolves.toMatchObject(
       { kind: "accepted" },
@@ -6339,7 +6365,74 @@ describe("a Work turn in a Project on a server", () => {
     expect(fixture.workingDirectories.resolve).not.toHaveBeenCalled();
   });
 
-  it("refuses before anything starts a file its server could not open, since the attachments folder is on this host", async () => {
+  it("copies a file it names by path to the thread's attachments folder on its server, and names the copy", async () => {
+    const store = await attachmentStore();
+    const attachmentId = decodeWorkAttachmentId("30000000-0000-4000-8000-0000000000a1");
+    await store.stage({
+      threadId: ids.thread,
+      attachmentId,
+      displayName: "report.pdf",
+      mediaType: "application/pdf",
+      bytes: new Uint8Array([37, 80, 68, 70]),
+    });
+    const serverPath = `/home/me/.octant/thread-attachments/${String(ids.thread)}/${String(attachmentId)}/report.pdf`;
+    const transferAttachments = vi.fn(
+      async (
+        files: ReadonlyArray<{ readonly displayName: string; readonly bytes: Uint8Array }>,
+      ) => ({
+        status: "transferred" as const,
+        files: files.map((file) => ({
+          displayName: file.displayName,
+          mediaType: "application/pdf",
+          byteLength: file.bytes.byteLength,
+          path: serverPath,
+        })),
+      }),
+    );
+    const run = vi.fn<WorkTurnRuntimePort["run"]>(async () => ({
+      kind: "completed",
+      response: "Done there",
+    }));
+    const fixture = serviceFixture({
+      attachments: store,
+      supportsAttachments: () => true,
+      serverProjects: {
+        holds: () => true,
+        bind: () => ({
+          status: "bound",
+          folder: "/srv/notes",
+          tools: {
+            definitions: [],
+            execute: async () => ({ result: {} }),
+            close: async () => undefined,
+          },
+          transferAttachments,
+        }),
+      },
+      turnRuntime: { run },
+      turnFileObserver: { observe: vi.fn(() => undefined) } as never,
+    });
+    fixture.persistence.readProject.mockReturnValue(undefined as never);
+    fixture.projects.bootstrap.mockResolvedValue({ active: [] });
+    await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      attachmentIds: [attachmentId],
+    });
+    await fixture.waitForIdle();
+    expect(transferAttachments).toHaveBeenCalledWith([
+      expect.objectContaining({
+        displayName: "report.pdf",
+        bytes: new Uint8Array([37, 80, 68, 70]),
+      }),
+    ]);
+    expect(run).toHaveBeenCalledOnce();
+    // The agent is told the copy's path on the server, never this host's.
+    const sent = JSON.stringify(run.mock.calls[0]?.[0]);
+    expect(sent).toContain(serverPath);
+    expect(sent).not.toContain(store.threadFolder(ids.thread) ?? "unreachable");
+  });
+
+  it("refuses before anything starts a file it could not copy to its server", async () => {
     const store = await attachmentStore();
     const attachmentId = decodeWorkAttachmentId("30000000-0000-4000-8000-0000000000a1");
     await store.stage({
@@ -6366,6 +6459,10 @@ describe("a Work turn in a Project on a server", () => {
             execute: async () => ({ result: {} }),
             close: async () => undefined,
           },
+          transferAttachments: async () => ({
+            status: "refused",
+            message: SERVER_ATTACHMENT_TRANSFER_REFUSAL,
+          }),
         }),
       },
       turnRuntime: { run },
@@ -6379,7 +6476,7 @@ describe("a Work turn in a Project on a server", () => {
         attachmentIds: [attachmentId],
       }),
     ).rejects.toMatchObject({
-      failure: { category: "unsupported", message: SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL },
+      failure: { category: "unavailable", message: SERVER_ATTACHMENT_TRANSFER_REFUSAL },
     });
     expect(run).not.toHaveBeenCalled();
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();

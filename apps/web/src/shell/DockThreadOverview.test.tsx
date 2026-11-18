@@ -139,7 +139,6 @@ describe("the thread dock overview", () => {
 
     expect(screen.getByRole("region", { name: "Thread overview" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Tools" })).toBeNull();
-    expect(screen.queryByRole("group", { name: "Quick tools" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Open Terminal" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Add tool" })).toBeNull();
   });

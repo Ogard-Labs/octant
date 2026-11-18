@@ -1500,7 +1500,7 @@ no tag and matches no tag filter. Tags are changed from the
 library's cards and rows; the open Canvas tab carries no tag control.
 
 **Claude artifacts in the library** (maintainer decision, 2026-11-16;
-built except Copy into Canvas). The library and the dock's Artifacts tool also list
+built). The library and the dock's Artifacts tool also list
 every page a thread published to claude.ai through Claude's `Artifact`
 tool, beside Canvas documents, in one view across all of the person's
 Claude accounts. The entries come from the journal alone: each publish
@@ -1533,8 +1533,23 @@ check, by a window on this host only; a paired device sees the card and opens
 the page on claude.ai. Which publish to a page is newest is read from its
 thread's journal order, not a time: a Work step has no time of its own, so a
 publish and the update after it in one turn are ordered by the turn's place
-and the step's place in it, and a Code publish by its frame's cursor. Not built yet: Copy into Canvas, because the library
-holds no thread context for the HTML importer's create.
+and the step's place in it, and a Code publish by its frame's cursor.
+
+Copy into Canvas is built for an HTML snapshot. The library has no thread
+of its own for a create to name, so the copy is created where the page was
+made: `POST /api/artifacts/claude-copy` names the page's mode, thread and
+tool call and the title the person confirmed (the form starts from the
+page's library title, and the person may change it). The host reads the kept
+snapshot itself under the publishing thread's read check, the same read
+**Show snapshot** makes, so nothing the request carries becomes the page. It
+takes the workspace scope from that thread's durable record, refuses a thread
+or Project that is no longer active, and runs the
+[HTML importer](#html-import) in that Project and mode with the thread as the
+origin, so the copy is bounded, stripped, marked as outside content and
+journaled exactly as an imported file is. A Markdown snapshot is refused as
+`not-html`. The copy has the snapshot's reach: a window on this host only. A
+paired device never reads the snapshot, so it is not offered the action and
+the route refuses it.
 
 ## Design block
 
@@ -2212,7 +2227,8 @@ A person can bring a single HTML page they already have, such as a page an AI
 assistant made for them, into a new Canvas. **Import HTML…** sits under the
 Create Canvas form wherever a person can create a Canvas (today the Chat
 thread's Canvas tools), and takes a file the person chooses or markup they
-paste. It opens a new Canvas in the same thread and Project a create there
+paste. The artifact library's **Copy into Canvas** runs the same import on a
+Claude page's kept snapshot ([Artifact library and tags](#artifact-library-and-tags)). It opens a new Canvas in the same thread and Project a create there
 would, and nothing else: the page is the whole document, one `design` block.
 The feature and its copy say "HTML page"; Octant reads no assistant's own
 artifact format and copies no other product's identifiers.
@@ -2230,8 +2246,12 @@ artifact format and copies no other product's identifiers.
   stays owned by the thread it names, which the create policy checks), and
   journals the create with the device as actor while the version keeps the
   person as its author. A device the hub's roster introduced has no window
-  context and is refused. A device's plain create, and an import control in
-  the paired browser, are not built.
+  context and is refused. The paired browser offers **Import HTML…** in a
+  Chat thread's Canvas tools to a device that acts as the host's person, on
+  its own: a device's plain create is not built, so no create draft is
+  shown beside it. The phone offers the same import from a Chat thread's
+  Views and panes, from a file or pasted markup with an optional title, and
+  shows the host's summary of what was taken out or its refusal.
 - **Bounds and refusals.** The page is at most 256 KiB of UTF-8
   (`CANVAS_HTML_IMPORT_MAX_BYTES`), checked on the host; a body past the
   route's 1 MiB read is answered as too large too. What survives the import

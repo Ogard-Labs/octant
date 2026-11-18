@@ -63,6 +63,10 @@ const ACP_ENDPOINTS: Readonly<Record<AcpProviderKind, ReadonlyArray<string>>> = 
   cline: ["cline.bot", ...MODEL_PROVIDERS],
   qwen: ["qwen.ai", "dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com"],
   fx: MODEL_PROVIDERS,
+  // An added agent's own vendor is not known: below Full access it reaches
+  // the common model providers, the endpoints its environment names and the
+  // Project's own network rules.
+  "acp-agent": MODEL_PROVIDERS,
 };
 
 const RUNTIME_ENDPOINTS: Readonly<

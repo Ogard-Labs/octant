@@ -1,6 +1,6 @@
 import type { ResolvedAppBackground } from "@octant/domain";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { runAsciiField } from "./appBackdropAscii";
+import { DEFAULT_ASCII_OPTIONS, runAsciiField, type AsciiFieldStop } from "./appBackdropAscii";
 import { runFlowingField } from "./appBackdropFlowing";
 import { runMovingPrint } from "./appBackdropPrint";
 import {
@@ -129,11 +129,42 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
   ]);
 
   const characters = resolved.kind === "characters";
+  // The field reads its set, density and speed each frame, so editing them
+  // changes the running field instead of restarting it.
+  const characterOptions = useRef(DEFAULT_ASCII_OPTIONS);
+  characterOptions.current =
+    resolved.characters === undefined
+      ? DEFAULT_ASCII_OPTIONS
+      : {
+          characterSet: resolved.characters.characterSet,
+          density: resolved.characters.density,
+          speed: resolved.characters.speed,
+          pattern: resolved.characters.pattern,
+        };
+  const asciiField = useRef<AsciiFieldStop | undefined>(undefined);
   useEffect(() => {
     const canvas = charactersCanvas.current;
     if (!characters || canvas === null) return;
-    return runAsciiField(canvas, resolved.backgroundAnimated, wavesWithin);
+    const stop = runAsciiField(
+      canvas,
+      resolved.backgroundAnimated,
+      wavesWithin,
+      () => characterOptions.current,
+    );
+    asciiField.current = stop;
+    return () => {
+      asciiField.current = undefined;
+      stop();
+    };
   }, [characters, wavesWithin, resolved.backgroundAnimated]);
+  // A still field draws one frame, so it draws that frame again in place when
+  // what it draws changes; its glyphs are not rebuilt.
+  const characterSet = resolved.characters?.characterSet;
+  const characterDensity = resolved.characters?.density;
+  const characterPattern = resolved.characters?.pattern;
+  useEffect(() => {
+    asciiField.current?.redraw();
+  }, [characterSet, characterDensity, characterPattern]);
 
   const pixels = resolved.kind === "pixels";
   const scene = resolved.scene;

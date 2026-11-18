@@ -514,6 +514,7 @@ describe("ChatTranscript", () => {
     render(<ChatTranscript onRewindTurn={onRewindTurn} view={view} />);
 
     expect(screen.queryByRole("article", { name: "Your message" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Show result" }));
     const card = screen.getByRole("article", { name: "Research subagent finished" });
     expect(card).toHaveTextContent("MATRIX-A3");
     expect(card).not.toHaveTextContent("0b9d3f40-5a52-4a1e-8c11-111111111111");
