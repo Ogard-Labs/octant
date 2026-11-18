@@ -20,7 +20,6 @@ import {
   renderProviderTurnPrompt,
 } from "@octant/provider-sdk/chat-conformance";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import type { ResolvedProtectedEntry } from "@octant/domain";
 import {
   codexAppServerArgs,
   codexRunsNativeSandbox,
@@ -3228,26 +3227,11 @@ describe("Codex execution authority and approvals", () => {
 
   describe("Codex's own sandbox under Octant's permissions profile", () => {
     const extra = "/tmp/octant-codex-extra";
-    const signIn = (path: string): ResolvedProtectedEntry => ({
-      ruleId: "provider-sign-ins",
-      label: "Provider sign-ins",
-      channel: "provider-sign-in",
-      ownAccountExempt: true,
-      kind: "path",
-      path,
-    });
-    const protectedFiles = () => [
-      signIn("/home/person/.claude/.credentials.json"),
-      signIn("/home/person/.codex/auth.json"),
-      signIn("/data/providers"),
-      {
-        ruleId: "ssh-private-keys" as const,
-        label: "SSH private keys",
-        channel: "ssh-agent" as const,
-        ownAccountExempt: false,
-        kind: "path" as const,
-        path: "/home/person/.ssh/id_ed25519",
-      },
+    // The host resolves the list; the driver reads no protected-file state.
+    const protectedSignIns = () => [
+      "/home/person/.claude/.credentials.json",
+      "/home/person/.codex/auth.json",
+      "/data/providers",
     ];
     const run = async (input: {
       readonly strict?: boolean;
@@ -3259,7 +3243,7 @@ describe("Codex execution authority and approvals", () => {
         makeCodexDriver(
           f.options({
             platform: "darwin",
-            protectedFiles,
+            protectedSignIns,
             openEnvironment: { CODEX_HOME: "/data/providers/codex-account" },
           }),
         ),
@@ -3312,9 +3296,6 @@ describe("Codex execution authority and approvals", () => {
           },
         },
       });
-      // Outside Strict only the sign-ins are kept: the person's own keys stay
-      // theirs to use, as on Codex's own.
-      expect(JSON.stringify(thread)).not.toContain(".ssh");
       // Each turn restates the profile instead of the built-in sandbox, which
       // would replace it.
       expect(turn).toMatchObject({ permissions: CODEX_OCTANT_PROFILE });

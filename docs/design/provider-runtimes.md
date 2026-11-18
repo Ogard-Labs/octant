@@ -1366,8 +1366,10 @@ and escalation in place of Octant's profile:
   permissions profile instead (`codexNativePermissionProfile`): the thread's
   `config` defines `permissions.octant-workspace` as `:workspace` with the
   Project's folders `write`, other providers' sign-ins `deny` (the Provider
-  sign-ins group the person has not removed, less the account's own Codex
-  home, which stays `write` inside Octant's provider folder), and the network
+  sign-ins group the person has not removed, as the host resolves it at its
+  composition boundary and hands the driver as a plain list, less the
+  account's own Codex home, which stays `write` inside Octant's provider
+  folder), and the network
   `enabled` only without Octant's egress proxy. `thread/start` and
   `thread/resume` select it with `permissions` in place of `sandbox`, and each
   turn restates it by name in place of `sandboxPolicy`, which would replace

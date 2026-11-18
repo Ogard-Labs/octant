@@ -209,6 +209,7 @@ export function makeProviderDriver(
       }
       const codexHome = effectiveCodexAccountHome(instance, hostEnvironment, homedir());
       const readCodexOwnMemory = options.providerOwnMemory;
+      const readProtectedPaths = options.protectedPaths;
       const codexEnvironment = codexAccountProcessEnvironment({
         binaryPath: instance.configuration.binaryPath,
         hostEnvironment,
@@ -238,6 +239,9 @@ export function makeProviderDriver(
         ...(options.credentialResolver === undefined
           ? {}
           : { credentialResolver: options.credentialResolver }),
+        ...(readProtectedPaths === undefined
+          ? {}
+          : { protectedSignIns: () => readProtectedPaths().atFullAccess }),
       });
       // Settings signs the account in with its own `codex login`, under its home.
       return withAccountSignIn(codexDriver, {

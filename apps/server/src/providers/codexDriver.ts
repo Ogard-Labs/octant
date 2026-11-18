@@ -2,12 +2,7 @@ import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import {
-  planReadOnlyToolServers,
-  providerOwnMemoryLaunches,
-  type ResolvedProtectedEntry,
-} from "@octant/domain";
-import { protectedAtLevel, secretGuardEntries } from "../process/secretGuard";
+import { planReadOnlyToolServers, providerOwnMemoryLaunches } from "@octant/domain";
 import {
   decodeProviderFailure,
   decodeProviderProbeResult,
@@ -616,8 +611,12 @@ export interface CodexDriverOptions {
   readonly toolCallId?: () => string;
   readonly jitter?: (baseDelayMs: number) => number;
   readonly sleep?: (milliseconds: number) => Promise<void>;
-  /** The protected list in force; defaults to the host's (`secretGuardEntries`). */
-  readonly protectedFiles?: () => ReadonlyArray<ResolvedProtectedEntry>;
+  /**
+   * The protected paths that stay refused at every level on this host (the
+   * provider sign-ins), resolved by the host and read at each start and
+   * resume. Absent, Codex's own sandbox carries no deny rules.
+   */
+  readonly protectedSignIns?: () => ReadonlyArray<string>;
 }
 
 interface SessionState {
@@ -1254,21 +1253,19 @@ export function codexNativePermissionProfile(input: {
 
 /**
  * The provider sign-ins Codex's own sandbox refuses outside Strict, as Octant's
- * profile refuses them (`protectedAtLevel` with Full access's list, which is
- * the sign-ins alone), less the account's own Codex home and what lies in it;
- * that home is returned as `allowed` when it sits inside a denied folder (an
- * Octant-managed account home inside Octant's own provider folder).
+ * profile refuses them (the host's Full access list, which is the sign-ins
+ * alone), less the account's own Codex home and what lies in it; that home is
+ * returned as `allowed` when it sits inside a denied folder (an Octant-managed
+ * account home inside Octant's own provider folder).
  */
 export function codexProtectedSignIns(
-  entries: ReadonlyArray<ResolvedProtectedEntry>,
+  signIns: ReadonlyArray<string>,
   codexHome: string,
 ): { readonly denied: ReadonlyArray<string>; readonly allowed: ReadonlyArray<string> } {
   const home = resolve(codexHome);
   const inside = (path: string, folder: string) =>
     path === folder || path.startsWith(`${folder}${sep}`);
-  const paths = protectedAtLevel(entries, true).flatMap((entry) =>
-    entry.kind === "path" ? [resolve(entry.path)] : [],
-  );
+  const paths = signIns.map((path) => resolve(path));
   const denied = [...new Set(paths.filter((path) => !inside(path, home)))];
   return { denied, allowed: denied.some((path) => inside(home, path)) ? [home] : [] };
 }
@@ -2197,7 +2194,7 @@ function makeConnection(
           ? (options.openEnvironment ?? options.environment)
           : options.environment;
       const signIns = codexProtectedSignIns(
-        (options.protectedFiles ?? (() => secretGuardEntries({ platform: hostPlatform })))(),
+        options.protectedSignIns?.() ?? [],
         launchEnvironment?.CODEX_HOME ?? join(homedir(), ".codex"),
       );
       return codexNativePermissionProfile({
