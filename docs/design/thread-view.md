@@ -6,9 +6,18 @@ How a thread reads in Chat, Work, and Code: the turn header, the transcript, wha
 
 Every assistant reply in Chat, Work, and Code opens with the same line: who
 answered (provider and model as the picker names them), how the turn stands
-(Working…, Waiting for approval, Completed with how long it took, Failed with
+(Working, Waiting for approval, Completed with how long it took, Failed with
 the host's sanitized reason on the line below), and when it last changed at the
-right edge. It is set in the interface face at the detail size; only the status
+right edge. While a turn runs and has a start time, the line reads "Working ·
+12s · Read": the clock counts from the turn's own start (not from when the row
+mounted) once a second in tabular digits with a fixed minimum width, so a tick
+moves nothing; the step is the title of the newest running tool, left out when
+none runs (a reply that spoke before a tool ran still names it), and clips to an ellipsis. The live
+region holds the step alone, so a change of step is announced politely and the
+clock is never read; the timer stops when the turn settles and when the row
+unmounts. A finished turn's duration ("Worked for 1m 5s") is drawn once: at the
+head of the fold's summary line when the turn folds its tool calls, otherwise in
+the header. It is set in the interface face at the detail size; only the status
 word carries colour. `TurnHeader` in `apps/web/src/transcript/` is the one
 recipe; a mode maps its own lifecycle onto its vocabulary and adds nothing of
 its own.
@@ -100,7 +109,13 @@ Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn:
 - **Low** (default): "Thinking stays folded, and a finished turn's tool calls
   fold behind one line." Thinking is shut, tool rows are listed while the turn
   runs and fold behind "N tool calls" once it settles, and each row's detail is
-  shut. This is the transcript as it was before the setting.
+  shut. A run of two or more consecutive reads, searches, and folder listings
+  (recognised by tool name; a call carrying a published page, an automation, or
+  an outside-content tag stays its own row) is one row such as "Read 4 files,
+  searched 2 times", shut at Low and listed at Medium and High, in running and
+  settled turns; any other row ends the run, and a lone look stays a plain row.
+  The settled fold's line leads with the turn's duration: "Worked for 1m 5s · 12
+  tool calls · 4 files edited". This is the transcript as it was before the setting.
 - **Medium**: "Thinking stays folded with its first line showing, and tool
   calls stay listed." A shut Thinking row carries the reasoning's first line
   after its name, as plain words in the muted ink, clipped to the row with an

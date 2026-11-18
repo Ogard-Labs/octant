@@ -186,7 +186,11 @@ import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
 import { TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { RewindDialog, composerAfterRewind } from "../transcript/RewindDialog";
-import { toolStepsActivity } from "../transcript/turnActivity";
+import {
+  runningStepTitle,
+  settledTurnFoldsActivity,
+  toolStepsActivity,
+} from "../transcript/turnActivity";
 import { useToolCallRecordsReader } from "../transcript/toolCallRecordsReader";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
@@ -378,14 +382,20 @@ function WorkTurnHeader(props: {
 }) {
   const outcome = turnHeaderOutcome(props.turn);
   const usageLimit = props.turn.failure?.usageLimit;
-  const workedFor = turnWorkedFor(outcome, props.turn.acceptedAt, props.turn.updatedAt);
+  const workedFor = workTurnWorkedFor(props.turn);
+  const activity = toolStepsActivity(props.turn.toolSteps, props.turn.toolStepsTruncated);
   return (
     <>
       <TurnHeader
         at={props.turn.updatedAt}
         outcome={outcome}
         provider={providerModelLabel(props.providerGroups, props.turn.authority)}
-        {...(workedFor === undefined ? {} : { workedFor })}
+        startedAt={props.turn.acceptedAt}
+        step={runningStepTitle(activity)}
+        {...(workedFor === undefined ||
+        (activity !== undefined && settledTurnFoldsActivity(activity))
+          ? {}
+          : { workedFor })}
         {...(props.turn.failure === undefined ? {} : { reason: props.turn.failure.message })}
       />
       {props.turn.inputReceipt === undefined ? null : (
@@ -476,6 +486,7 @@ function WorkToolGroup(props: {
   };
   // A turn whose subagents left no tool row still lists them.
   if (activity === undefined) return <TurnSubagentRows window={subagents} />;
+  const workedFor = workTurnWorkedFor(props.turn);
   const status = props.turn.status;
   const canvasClient = props.canvasClient;
   const threadId = String(props.turn.threadId);
@@ -487,6 +498,7 @@ function WorkToolGroup(props: {
       }
       running={status === "accepted" || status === "running"}
       settled={status === "completed" || status === "failed" || status === "cancelled"}
+      {...(workedFor !== undefined && settledTurnFoldsActivity(activity) ? { workedFor } : {})}
       {...(toolCallRecords === undefined ? {} : { toolCallRecords })}
       subagents={subagents}
     />
@@ -500,6 +512,10 @@ function WorkToolGroup(props: {
  * surface showed only the user's own message — so the header is emitted for
  * every turn, reply or not.
  */
+function workTurnWorkedFor(turn: WorkTurnState): string | undefined {
+  return turnWorkedFor(turnHeaderOutcome(turn), turn.acceptedAt, turn.updatedAt);
+}
+
 function turnHeaderOutcome(turn: WorkTurnState): TurnHeaderOutcome {
   switch (turn.status) {
     case "accepted":

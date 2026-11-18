@@ -555,7 +555,8 @@ describe("ChatTranscript", () => {
 
     for (const label of [
       "Queued",
-      "Streaming",
+      // A streaming attempt counts its time from when it started.
+      "Working",
       "Waiting for approval",
       "Interrupted",
       "Failed",

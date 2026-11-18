@@ -139,6 +139,7 @@ import { CodeTurnChangedFilesCard } from "./CodeTurnChangedFilesCard";
 import { CodeTurnReviewPreviewCard } from "./CodeTurnReviewPreviewCard";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
+import { runningStepTitle, settledTurnFoldsActivity } from "../transcript/turnActivity";
 import { liveTaskProgress } from "./transcriptActivity";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { modelDisplayName, providerModelLabel } from "../providers/providerModelLabel";
@@ -2011,6 +2012,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   message.at !== undefined
                     ? turnWorkedFor("completed", message.startedAt, message.at)
                     : undefined;
+                const workedForInFold =
+                  workedFor !== undefined &&
+                  activity !== undefined &&
+                  settledTurnFoldsActivity(activity);
                 return (
                   <div className="code-thread-workspace__row">
                     {handoff === "provider" ? (
@@ -2178,7 +2183,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                           <>
                             <TurnHeader
                               outcome={turnHeaderOutcome(message.status)}
-                              {...(workedFor === undefined ? {} : { workedFor })}
+                              {...(workedFor === undefined || workedForInFold ? {} : { workedFor })}
+                              {...(message.startedAt === undefined
+                                ? {}
+                                : { startedAt: message.startedAt })}
+                              step={runningStepTitle(activity)}
                               provider={
                                 message.providerInstanceId === undefined ||
                                 message.modelId === undefined
@@ -2188,7 +2197,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                       modelId: message.modelId,
                                     })
                               }
-                              {...(message.status === undefined || message.status === "completed"
+                              {...(message.status === undefined ||
+                              message.status === "completed" ||
+                              // The running line is the header's own: "Working · 12s · step".
+                              message.status === "incomplete"
                                 ? {}
                                 : {
                                     label: turnStatusLabel(
@@ -2218,6 +2230,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             ) : (
                               <TurnActivityRows
                                 activity={activity}
+                                {...(workedForInFold && workedFor !== undefined
+                                  ? { workedFor }
+                                  : {})}
                                 publishedSnapshotRuntime={(toolCallId) =>
                                   publishedSnapshotRunRuntimeFor(props.canvasClient, {
                                     mode: "code",

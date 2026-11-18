@@ -51,7 +51,9 @@ import { PublishedSnapshot } from "./PublishedSnapshot";
 import type { DesignRunRuntime } from "../canvas/blocks/designRunningFrame";
 import {
   alwaysVisibleActivityRows,
+  groupActivityRows,
   settledTurnActivitySummary,
+  type ActivityItem,
   type TurnActivity,
   type TurnActivityRow,
 } from "./turnActivity";
@@ -65,6 +67,11 @@ export interface TurnActivityRowsProps {
    * pending work and diffs remain visible.
    */
   readonly settled?: boolean;
+  /**
+   * "Worked for 1m 5s", for the fold's summary line. A caller passes it only
+   * where the turn header leaves it out, so the duration is shown once.
+   */
+  readonly workedFor?: string;
   /**
    * How a published page's snapshot runs its script, by the tool call that
    * published it. Absent leaves such a snapshot unable to run here.
@@ -274,11 +281,20 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   const pinnedRows = alwaysVisibleActivityRows(activity);
   const pinnedIds = new Set(pinnedRows.map(rowKey));
   const foldableRows = activity.rows.filter((row) => !pinnedIds.has(rowKey(row)));
-  const summary = settledTurnActivitySummary(activity);
+  const summary = settledTurnActivitySummary(activity, props.workedFor);
   const toolNames = activity.rows.flatMap((row) => (row.kind === "tool" ? [row.toolName] : []));
   const kindCounts = countToolKinds(toolNames);
-  const groupName = toolNames.length > 0 ? toolCallsAccessibleName(toolNames) : summary;
-  const foldSettledToolchain = settled && !running && summary.length > 0 && foldableRows.length > 0;
+  const baseName = toolNames.length > 0 ? toolCallsAccessibleName(toolNames) : summary;
+  // The duration leads the fold's name and its drawn line; the kind marks follow.
+  const groupName =
+    props.workedFor !== undefined && toolNames.length > 0
+      ? `${props.workedFor} · ${baseName}`
+      : baseName;
+  const foldSettledToolchain =
+    settled &&
+    !running &&
+    settledTurnActivitySummary(activity).length > 0 &&
+    foldableRows.length > 0;
   // A published page is what the turn delivered, so it stays in view below the
   // rows even when the settled toolchain folds away.
   const routineRows = activity.rows.filter(
@@ -309,7 +325,34 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
     disclosures.choose(id, !isOpen(id));
   };
 
-  const renderDisclosure = (row: TurnActivityRow) => {
+  const renderGroup = (item: Extract<ActivityItem, { readonly kind: "group" }>) => {
+    // A lone read becomes a group when the next look arrives; it keeps the
+    // open state the person gave that row.
+    const first = item.rows[0];
+    const seeded =
+      first === undefined
+        ? opening.toolCalls
+        : disclosures.isOpen(rowKey(first), opening.toolCalls);
+    return (
+      <ExploreGroup
+        key={item.id}
+        item={item}
+        onKeyDown={onSummaryKeyDown(item.id)}
+        onToggle={onToggle(item.id)}
+        open={disclosures.isOpen(item.id, seeded)}
+        settled={settled && !running}
+      >
+        {item.rows.map(renderDisclosure)}
+      </ExploreGroup>
+    );
+  };
+
+  const renderRows = (rows: ReadonlyArray<TurnActivityRow>) =>
+    groupActivityRows(rows).map((item) =>
+      item.kind === "group" ? renderGroup(item) : renderDisclosure(item.row),
+    );
+
+  function renderDisclosure(row: TurnActivityRow) {
     const id = rowKey(row);
     if (row.kind === "review") return <ShieldReviewLine key={id} row={row} />;
     return (
@@ -327,7 +370,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
         onReveal={() => setRevealedSummaryIds((current) => setHas(current, id, true))}
       />
     );
-  };
+  }
 
   const thinkingOpen = isOpen(THINKING_ID);
   const thinkingLabel = thinkingDurationLabel(activity.reasoningMs);
@@ -377,7 +420,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
       {thinkingDisclosure}
       {foldSettledToolchain ? (
         <>
-          {pinnedRows.map(renderDisclosure)}
+          {renderRows(pinnedRows)}
           <details
             className="turn-activity__disclosure turn-activity__disclosure--toolchain"
             onToggle={onToggle(TOOL_CALLS_ID)}
@@ -393,7 +436,12 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
               <Wrench aria-hidden="true" className="turn-activity__kind-icon" size={14} />
               {kindCounts.length === 0 ? (
                 <span className="turn-activity__name">{summary}</span>
-              ) : (
+              ) : props.workedFor === undefined ? null : (
+                <span aria-hidden="true" className="turn-activity__duration">
+                  {props.workedFor}
+                </span>
+              )}
+              {kindCounts.length === 0 ? null : (
                 <span aria-hidden="true" className="turn-activity__name turn-activity__kinds">
                   {kindCounts.slice(0, GROUP_KINDS_SHOWN).map(({ kind, count }) => {
                     const Icon = KIND_ICONS[kind];
@@ -413,11 +461,11 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
               )}
               <span className="turn-activity__status" />
             </summary>
-            <div className="turn-activity__toolchain">{foldableRows.map(renderDisclosure)}</div>
+            <div className="turn-activity__toolchain">{renderRows(foldableRows)}</div>
           </details>
         </>
       ) : (
-        <>{activity.rows.map(renderDisclosure)}</>
+        <>{renderRows(activity.rows)}</>
       )}
       {props.subagents === undefined ? null : <TurnSubagentRows window={props.subagents} />}
       {routineRows.length === 0 ? null : (
@@ -446,6 +494,65 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
         </ul>
       )}
     </div>
+  );
+}
+
+/**
+ * A run of reads, searches, and listings as one row. Its rows stay inside,
+ * opened by the Reply detail level the way the settled fold is: shut at Low,
+ * listed at Medium and High.
+ */
+function ExploreGroup(props: {
+  readonly item: Extract<ActivityItem, { readonly kind: "group" }>;
+  readonly open: boolean;
+  readonly settled: boolean;
+  readonly onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
+  readonly onToggle: (event: ToggleEvent<HTMLDetailsElement>) => void;
+  readonly children: ReactNode;
+}) {
+  const { item } = props;
+  const running =
+    !props.settled && item.rows.some((row) => row.state === "started" || row.state === "running");
+  const failed = item.rows.filter((row) => row.state === "failed").length;
+  // A settled turn never saw these calls end, so the group is not done.
+  const unfinished =
+    props.settled && item.rows.some((row) => row.state === "started" || row.state === "running");
+  const outcome = running
+    ? "running"
+    : unfinished
+      ? "unfinished"
+      : failed > 0
+        ? `${failed} failed`
+        : "done";
+  const StateIcon = running ? LoaderCircle : unfinished ? Circle : failed > 0 ? X : Check;
+  // A failed call stays in view, as a failed row does, whatever the level.
+  const open = props.open || failed > 0;
+  return (
+    <details
+      className="turn-activity__disclosure turn-activity__disclosure--group"
+      data-kind="group"
+      data-state={
+        running ? "running" : unfinished ? "unfinished" : failed > 0 ? "failed" : "completed"
+      }
+      onToggle={props.onToggle}
+      open={open}
+    >
+      <summary
+        aria-expanded={open}
+        aria-label={`${item.label}, ${outcome}`}
+        onKeyDown={props.onKeyDown}
+        role="button"
+      >
+        <ChevronRight aria-hidden="true" className="turn-activity__chevron" size={14} />
+        <Search aria-hidden="true" className="turn-activity__kind-icon" size={14} />
+        <span className="turn-activity__name">{item.label}</span>
+        <span className="turn-activity__status">
+          <span className="visually-hidden turn-activity__outcome">{outcome}</span>
+          <StateIcon aria-hidden="true" className="turn-activity__status-icon" size={14} />
+        </span>
+      </summary>
+      <div className="turn-activity__toolchain">{props.children}</div>
+    </details>
   );
 }
 

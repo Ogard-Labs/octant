@@ -1874,6 +1874,27 @@ html[data-octant-increased-contrast="true"] .turn-action-menu__more .shell-icon-
   gap: 4px;
 }
 
+/* The running line ("Working · 12s · Read") shrinks its step to an ellipsis
+   instead of wrapping, and the clock keeps tabular digits in a fixed minimum
+   width so a tick never moves the words beside it. */
+.turn-header__status--live {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.turn-header__elapsed {
+  /* Wide enough for the longest form, "59m 59s" and "10h 05m". */
+  min-width: 8ch;
+  font-variant-numeric: tabular-nums;
+}
+
+.turn-header__step {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .turn-header[data-outcome="failed"] .turn-header__status,
 .turn-header[data-outcome="interrupted"] .turn-header__status {
   color: var(--octant-danger-text);
