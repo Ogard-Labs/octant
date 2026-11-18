@@ -63,18 +63,27 @@ describe("a Project's own code and its trust", () => {
     ).toEqual({ status: "none" });
   });
 
-  it("asks nothing for a provider that is not a key provider, or whose trust loads no Project code", () => {
-    for (const driverKind of ["pi", "codex"] as const) {
-      expect(
-        projectCodeTrust({
-          driverKind,
-          projectType: "code",
-          trusted: false,
-          present: [".claude/settings.json", ".mcp.json", ".codex/config.toml"],
-        }),
-      ).toEqual({ status: "none" });
-    }
+  it("asks nothing for a provider that is not a key provider", () => {
+    expect(
+      projectCodeTrust({
+        driverKind: "pi",
+        projectType: "code",
+        trusted: false,
+        present: [".claude/settings.json", ".mcp.json", ".codex/config.toml"],
+      }),
+    ).toEqual({ status: "none" });
     expect(projectCodeEntries("pi")).toEqual([]);
+  });
+
+  it("asks before Codex loads its own Project configuration", () => {
+    expect(
+      projectCodeTrust({
+        driverKind: "codex",
+        projectType: "code",
+        trusted: false,
+        present: [".claude/settings.json", ".codex/config.toml"],
+      }),
+    ).toEqual({ status: "untrusted", provider: "codex", found: ["settings"] });
   });
 
   it("asks nothing in a Chat Project, which has no folder", () => {
