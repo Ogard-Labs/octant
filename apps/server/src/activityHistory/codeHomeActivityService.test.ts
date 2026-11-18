@@ -195,6 +195,58 @@ describe("CodeHomeActivityService", () => {
     await read(readQuery("prs-merged"));
   });
 
+  it("expires a snapshot whose comparison-only witness loses access", async () => {
+    const denied = new Set<string>();
+    // The comparison fact leads so coverage reaches its window; its witness
+    // counts only toward the comparison, never toward the current records.
+    const facts = [
+      mergeFact({
+        identity: "octant-dev/octant#7",
+        threadId: otherThread,
+        occurredAt: "2026-08-14T10:00:00.000Z",
+      }),
+      mergeFact({ occurredAt: "2026-08-19T10:00:00.000Z" }),
+    ];
+    const service = new CodeHomeActivityService({
+      listProjects: async () => [project],
+      canReadThread: async ({ threadId }) => !denied.has(threadId),
+      readFacts: (input) =>
+        facts.filter(
+          (fact) =>
+            (input.from === null || fact.occurredAt >= input.from) && fact.occurredAt < input.until,
+        ),
+      coverageFrom: () => "2026-08-14T10:00:00.000Z",
+      projectionHeld: () => false,
+      uuid: () => `83000000-0000-4000-8000-${String(++uuidCounter).padStart(12, "0")}`,
+      now: () => Date.now(),
+      clock: () => now,
+    });
+    const view = await service.read(
+      windowId,
+      {
+        kind: "read",
+        card: "prs-merged",
+        source: "octant",
+        current: { from: "2026-08-18T00:00:00.000Z", until: "2026-08-25T00:00:00.000Z" },
+        comparison: { from: "2026-08-11T00:00:00.000Z", until: "2026-08-18T00:00:00.000Z" },
+      },
+      () => true,
+    );
+    expect(view.count).toBe(1);
+    expect(view.comparisonCount).toBe(1);
+
+    denied.add(otherThread);
+    const page = await service.read(
+      windowId,
+      { kind: "page", snapshotId: view.snapshotId!, offset: 0 },
+      () => true,
+    );
+    expect(page).toMatchObject({ status: "unavailable", reason: "authorization-changed" });
+    expect(page.count).toBeUndefined();
+    expect(page.comparisonCount).toBeUndefined();
+    expect(page.records).toHaveLength(0);
+  });
+
   it("reports a held projection as unavailable instead of an empty history", async () => {
     const { read } = fixture([mergeFact()], { held: true });
     const view = await read(readQuery("prs-merged"));

@@ -1623,7 +1623,7 @@ export class CodeProjectPullRequestService {
             repositoryOwner: repository.repositoryOwner,
             repositoryName: repository.repositoryName,
             number: pullRequest.number,
-            ...(pullRequest.title === "" ? {} : { title: pullRequest.title }),
+            ...(pullRequest.title === "" ? {} : { title: deliveryTitleBytes(pullRequest.title) }),
             occurredAt: pullRequest.mergedAt,
             mergedBy: pullRequest.mergedBy,
           }),
@@ -1668,7 +1668,7 @@ export class CodeProjectPullRequestService {
           repositoryOwner: repository.repositoryOwner,
           repositoryName: repository.repositoryName,
           number: issueNumber,
-          ...(closure.title === "" ? {} : { title: closure.title }),
+          ...(closure.title === "" ? {} : { title: deliveryTitleBytes(closure.title) }),
           occurredAt: closure.closedAt,
           closingPullRequest: {
             repositoryOwner: repository.repositoryOwner,
@@ -1742,6 +1742,20 @@ function githubIdentityFromRemotes(
 
 function repositoryKey(projectId: ProjectId, owner: string, name: string): string {
   return `${String(projectId)}:${owner}/${name}`;
+}
+
+/**
+ * The delivery contract accepts at most 256 UTF-8 bytes of title. A longer
+ * GitHub title must not sink the whole observation — cut it at the byte limit
+ * and drop the partial code point the cut may leave behind.
+ */
+function deliveryTitleBytes(title: string): string {
+  const bytes = Buffer.from(title, "utf8");
+  if (bytes.byteLength <= 256) return title;
+  return bytes
+    .subarray(0, 256)
+    .toString("utf8")
+    .replace(/\uFFFD+/u, "");
 }
 
 function projectFreshnessKey(

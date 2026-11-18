@@ -178,6 +178,10 @@ export class CodeHomeActivityService {
 
     const coverageFrom = this.#ports.coverageFrom(query.card);
     let comparisonCount: number | undefined;
+    // A comparison-only witness still proved the answer: it must sit in the
+    // snapshot's authority set so losing it expires the snapshot instead of
+    // letting a later page keep answering `comparisonCount`.
+    const authorityOf = new Map(selected.authorityOf);
     if (query.comparison !== undefined) {
       // A comparison counts only over coverage the source actually has: a
       // card that first recorded after the comparison window ends would read
@@ -192,6 +196,9 @@ export class CodeHomeActivityService {
           query.card === "runs"
             ? this.#countFinishes(comparison.records).successful
             : comparison.records.length;
+        for (const [identity, witness] of comparison.authorityOf) {
+          authorityOf.set(identity, witness);
+        }
       }
     }
 
@@ -203,7 +210,7 @@ export class CodeHomeActivityService {
       admittedKey: admitted.slice().sort().join("|"),
       all: records,
       filtered,
-      authorityOf: selected.authorityOf,
+      authorityOf,
       count,
       comparisonCount,
       finished,

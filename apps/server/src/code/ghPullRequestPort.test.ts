@@ -613,6 +613,39 @@ describe("GhPullRequestPort.observeReviewByIdentity", () => {
     );
   });
 
+  it("reads the issues a pull request closes from the exported array", async () => {
+    // `gh pr view --json closingIssuesReferences` answers a plain array of
+    // {number,url,repository} items, not a GraphQL `nodes` connection.
+    const { port } = fixture([
+      {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          ...JSON.parse(detailJson),
+          closingIssuesReferences: [
+            {
+              number: 41,
+              url: "https://github.com/octant/octant/issues/41",
+              repository: { name: "octant", owner: { login: "octant" } },
+            },
+            {
+              number: 42,
+              url: "https://github.com/octant/octant/issues/42",
+              repository: { name: "octant", owner: { login: "octant" } },
+            },
+            { number: 0 },
+          ],
+        }),
+      },
+      { exitCode: 0, stdout: diffText },
+    ]);
+
+    const result = await port.observeReviewByIdentity(
+      identityRequest,
+      new AbortController().signal,
+    );
+    expect(result).toMatchObject({ pullRequest: { closingIssueNumbers: [41, 42] } });
+  });
+
   it("returns unavailable when both gh pr view and gh pr diff fail", async () => {
     const { port } = fixture([
       { exitCode: 1, stdout: "private failure" },

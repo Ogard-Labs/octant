@@ -5,6 +5,7 @@ import {
   type CodeProjectPullRequestRow,
 } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts/code";
+import type { ActivityDeliveryObserved } from "@octant/contracts/code-home-activity";
 import type { CodeProjectLinkedThreadFact } from "@octant/domain/code-project-pull-request-policy";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -109,6 +110,7 @@ function serviceFixture(options: {
   readonly merge?: CodeProjectPullRequestMergePort;
   readonly mergeJournal?: Journal;
   readonly recordMerge?: (record: CodeProjectPullRequestMergeRecorded) => void;
+  readonly recordDelivery?: (observation: ActivityDeliveryObserved) => void;
   readonly requiredChecks?: (
     request: { readonly owner: string; readonly name: string; readonly number: number },
     signal: AbortSignal,
@@ -174,6 +176,7 @@ function serviceFixture(options: {
     detail: { observeReviewByIdentity },
     ...(options.merge === undefined ? {} : { merge: options.merge }),
     ...(options.recordMerge === undefined ? {} : { recordMerge: options.recordMerge }),
+    ...(options.recordDelivery === undefined ? {} : { recordDelivery: options.recordDelivery }),
     ...(options.requiredChecks === undefined ? {} : { requiredChecks: options.requiredChecks }),
     ...(mergeJournal === undefined
       ? {}
@@ -1970,6 +1973,38 @@ describe("CodeProjectPullRequestService", () => {
     });
     expect(view.linkedThreads).toEqual([{ threadId, title: "Manual refresh" }]);
     expect(view.freshness).toEqual({ status: "fresh", lastSuccessfulRefreshAt: now });
+  });
+
+  it("records a merged delivery whose GitHub title exceeds the delivery limit", async () => {
+    const recordDelivery = vi.fn();
+    // 100 CJK characters are 300 UTF-8 bytes, past the contract's 256; the
+    // observation must record the delivery with the title cut on a boundary
+    // rather than dropping the whole record.
+    const longTitle = "\u754C".repeat(100);
+    const { service } = serviceFixture({
+      recordDelivery,
+      detail: async () =>
+        ({
+          ...observedDetail,
+          pullRequest: {
+            ...observedDetail.pullRequest,
+            state: "merged",
+            title: longTitle,
+            mergedAt: "2026-08-22T08:00:00.000Z",
+            mergedBy: "octocat",
+          },
+        }) satisfies GhPullRequestReviewResult,
+    });
+
+    await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+
+    expect(recordDelivery).toHaveBeenCalledTimes(1);
+    expect(recordDelivery.mock.calls[0]?.[0]).toMatchObject({
+      kind: "prs-merged",
+      number: 12,
+      title: "\u754C".repeat(85),
+      mergedBy: "octocat",
+    });
   });
 
   it("keeps the last authorized detail when refresh fails", async () => {

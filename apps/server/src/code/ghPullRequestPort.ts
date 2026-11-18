@@ -1520,9 +1520,11 @@ function decodeIssueClosure(
 }
 
 function decodeClosingIssueNumbers(value: unknown): readonly number[] {
-  if (!isRecord(value) || !Array.isArray(value.nodes)) return [];
+  // `gh pr view --json closingIssuesReferences` exports a plain array of
+  // {number,url,repository} items, not a GraphQL connection.
+  if (!Array.isArray(value)) return [];
   const numbers: number[] = [];
-  for (const node of value.nodes) {
+  for (const node of value) {
     if (!isRecord(node)) continue;
     const number = node.number;
     if (typeof number === "number" && Number.isSafeInteger(number) && number > 0) {
