@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -174,9 +174,11 @@ describe("a Windows tree stop that fails", () => {
         pids.push(Number(JSON.parse(readFileSync(join(receipts, name), "utf8")).pid));
       }
     } finally {
+      // The stop is made to fail, so end each tree here. Killing only the
+      // recorded pid leaves its children holding the working folder.
       for (const pid of pids) {
         try {
-          process.kill(pid, "SIGKILL");
+          execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
         } catch {
           // Already gone.
         }
