@@ -1,9 +1,10 @@
 import { EventEmitter } from "node:events";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resolveAvailableTools } from "../scaffold/scaffoldFilesystem";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
 
 const directories: string[] = [];
@@ -171,4 +172,21 @@ describe("a repository test or scaffold on a Windows host", () => {
     },
     90_000,
   );
+});
+
+describe("a scaffold generator's availability on a Windows host", () => {
+  it("finds a tool by its PATHEXT extension, as Windows does, and never by the bare name", async () => {
+    const bin = folder();
+    // PATHEXT spells extensions in capitals; Windows matches them in any case.
+    for (const name of ["bunx.EXE", "npx"]) {
+      writeFileSync(join(bin, name), "");
+      chmodSync(join(bin, name), 0o755);
+    }
+    await expect(
+      resolveAvailableTools(["bunx", "npx"], bin, {
+        platform: "win32",
+        pathExtensions: ".COM;.EXE;.BAT;.CMD",
+      }),
+    ).resolves.toEqual(["bunx"]);
+  });
 });

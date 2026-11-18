@@ -12,7 +12,11 @@ import {
   type OwnedProcessReceiptHandle,
 } from "../process/nodeOwnedProcessReceipt";
 import { WINDOWS_PROCESS_ENVIRONMENT_NAMES } from "../process/windowsEnvironment";
-import { stopWindowsProcessTree, type WindowsProcessTreeStop } from "../process/windowsProcessTree";
+import {
+  stopWindowsProcessTree,
+  stopWindowsTreeConfirmed,
+  type WindowsProcessTreeStop,
+} from "../process/windowsProcessTree";
 import { resolveWindowsProviderProgram } from "../process/windowsProviderProgram";
 import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
 import {
@@ -433,13 +437,10 @@ export class DebugAdapterProcessPort {
       child.once("error", () => resolve());
     });
     const { stdin, stdout, stderr, pid } = child;
-    const stopTree = async () => {
-      if (pid !== undefined) await this.#stopWindowsTree(pid).catch(() => "failed" as const);
-      await Promise.race([
-        exited,
-        new Promise<void>((resolve) => setTimeout(resolve, STOP_GRACE_MS).unref?.()),
-      ]);
-    };
+    const stopTree = () =>
+      pid === undefined
+        ? Promise.resolve("uncertain" as const)
+        : stopWindowsTreeConfirmed(pid, exited, this.#stopWindowsTree, STOP_GRACE_MS);
     if (stdin === null || stdout === null || pid === undefined) {
       await stopTree();
       await removeState();
@@ -467,10 +468,23 @@ export class DebugAdapterProcessPort {
     }
     let finished: Promise<void> | undefined;
     // The program the adapter started outlives it on Windows unless the tree
-    // is stopped, so the tree goes before the receipt does.
+    // is stopped, so the tree goes before the receipt does. A stop that
+    // failed, or a root not seen to exit, keeps the receipt and the state
+    // folder: a restarted host stops the tree from the receipt, and the
+    // session's end does not pretend the program is gone.
     const finish = () => {
       finished ??= (async () => {
-        await stopTree();
+        if ((await stopTree()) === "uncertain") {
+          console.warn(
+            `Octant kept debug session ${input.sessionId}'s ownership receipt: process ${pid} could not be shown stopped.`,
+          );
+          void exited.then(async () => {
+            if ((await stopTree()) !== "stopped") return;
+            await receipt.remove().catch(() => undefined);
+            await removeState();
+          });
+          return;
+        }
         await receipt.remove().catch(() => undefined);
         await removeState();
       })();

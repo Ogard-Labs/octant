@@ -20068,7 +20068,9 @@ deliverable and keeps every gate above:
      found on `Path` with `PATHEXT`'s extensions and an npm `.cmd` shim
      read for the program it starts (as above), with the Windows names a
      program needs in its environment, and ends its whole tree on timeout
-     or cancellation. A
+     or cancellation. A scaffold's generator counts as installed when
+     `Path` holds it under one of `PATHEXT`'s extensions (`bunx.exe`), as
+     Windows finds it. A
      [language server](design/language-services.md#launch-classes), a
      Project's own toolchain copy among them, starts for a thread outside
      Strict (`decideLanguageServerLaunch` answers confinement `none`);
@@ -20079,7 +20081,11 @@ deliverable and keeps every gate above:
      the agent's `octant_debug` tool included, starts after the level's
      confirmation on the open network, its child connecting on loopback,
      and ends when Strict turns on. Each keeps its receipt, private cache
-     or state folder, and the tree stop.
+     or state folder, and the tree stop. A server's or session's receipt
+     (and a session's state folder) goes only once the tree stop ran and the
+     root was seen to exit (`stopWindowsTreeConfirmed`); a failed or
+     unconfirmed stop keeps them, so a restarted host still stops the tree,
+     and the stop is tried again when the root exits.
    - **Not yet on Windows.** A Chat thread on OpenCode or an ACP agent
      (above), and every launch under Strict at any level or with the
      sandbox kept, until the confinement launcher has run a real provider

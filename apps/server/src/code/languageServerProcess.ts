@@ -11,7 +11,11 @@ import {
   type OwnedProcessReceiptHandle,
 } from "../process/nodeOwnedProcessReceipt";
 import { WINDOWS_PROCESS_ENVIRONMENT_NAMES } from "../process/windowsEnvironment";
-import { stopWindowsProcessTree, type WindowsProcessTreeStop } from "../process/windowsProcessTree";
+import {
+  stopWindowsProcessTree,
+  stopWindowsTreeConfirmed,
+  type WindowsProcessTreeStop,
+} from "../process/windowsProcessTree";
 import { resolveWindowsProviderProgram } from "../process/windowsProviderProgram";
 import type { ExtensionLanguageServerClass } from "@octant/contracts/extensions";
 import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
@@ -359,13 +363,10 @@ export class LanguageServerProcessPort {
       child.once("error", () => resolve());
     });
     const { stdin, stdout, stderr, pid } = child;
-    const stop = async () => {
-      if (pid !== undefined) await this.#stopWindowsTree(pid).catch(() => "failed" as const);
-      await Promise.race([
-        exited,
-        new Promise<void>((resolve) => setTimeout(resolve, STOP_GRACE_MS).unref?.()),
-      ]);
-    };
+    const stop = () =>
+      pid === undefined
+        ? Promise.resolve("uncertain" as const)
+        : stopWindowsTreeConfirmed(pid, exited, this.#stopWindowsTree, STOP_GRACE_MS);
     if (stdin === null || stdout === null || pid === undefined) {
       await stop();
       return { status: "failed" };
@@ -392,22 +393,31 @@ export class LanguageServerProcessPort {
       return { status: "failed" };
     }
     // A server's own children outlive it on Windows unless its tree is
-    // stopped, so the tree goes before the receipt does.
-    void exited.then(async () => {
-      await this.#stopWindowsTree(pid).catch(() => "failed" as const);
-      await receipt.remove();
-    });
+    // stopped, so the tree goes before the receipt does. A stop that failed,
+    // or a root not seen to exit, keeps the receipt, so a restarted host
+    // still stops the tree from it.
+    let finished: Promise<void> | undefined;
+    const finish = () => {
+      finished ??= (async () => {
+        if ((await stop()) === "uncertain") {
+          console.warn(
+            `Octant kept language server ${input.ownerId}'s ownership receipt: process ${pid} could not be shown stopped.`,
+          );
+          // Once the root is seen to exit, its tree is stopped again and the
+          // receipt goes only if that stop is confirmed.
+          void exited.then(async () => {
+            if ((await stop()) === "stopped") await receipt.remove().catch(() => undefined);
+          });
+          return;
+        }
+        await receipt.remove();
+      })();
+      return finished;
+    };
+    void exited.then(finish);
     return {
       status: "launched",
-      process: {
-        stdin,
-        stdout,
-        exited,
-        kill: async () => {
-          await stop();
-          await receipt.remove();
-        },
-      },
+      process: { stdin, stdout, exited, kill: finish },
     };
   }
 

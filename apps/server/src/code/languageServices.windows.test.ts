@@ -1,4 +1,5 @@
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -117,6 +118,57 @@ describe("a language server on a Windows host", () => {
   }, 90_000);
 });
 
+describe("a Windows tree stop that fails", () => {
+  it("keeps the language server's and the debug session's receipts, so a restart still stops them", async () => {
+    const receipts = join(folder(), "receipts");
+    const failing = async () => "failed" as const;
+    const server = new LanguageServerProcessPort({
+      platform: "win32",
+      receiptDirectory: receipts,
+      processIdentity: async () => "fixture",
+      confinement: confinementThatMustNotRun,
+      stopWindowsTree: failing,
+    });
+    const debug = new DebugAdapterProcessPort({
+      platform: "win32",
+      receiptDirectory: receipts,
+      processIdentity: async () => "fixture",
+      confinement: confinementThatMustNotRun,
+      stopWindowsTree: failing,
+      spawn: (command, _args, options) =>
+        spawn(command, ["-e", ECHO], {
+          cwd: options.cwd,
+          env: options.env,
+          stdio: ["pipe", "pipe", "pipe"],
+        }),
+    });
+    const root = folder();
+    const launched = [
+      await server.launch({ ...languageServerLaunch(root), unconfined: true }),
+      await debug.launch({ ...debugLaunch(root), unconfined: true }),
+    ];
+    const pids: number[] = [];
+    try {
+      for (const outcome of launched) {
+        if (outcome.status !== "launched") throw new Error(`not launched: ${outcome.status}`);
+        await outcome.process.kill();
+      }
+      expect(readdirSync(receipts).filter((name) => name.endsWith(".json"))).toHaveLength(2);
+      for (const name of readdirSync(receipts)) {
+        pids.push(Number(JSON.parse(readFileSync(join(receipts, name), "utf8")).pid));
+      }
+    } finally {
+      for (const pid of pids) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // Already gone.
+        }
+      }
+    }
+  }, 90_000);
+});
+
 describe("a debug session on a Windows host", () => {
   it("refuses a session the policy did not decide was unconfined, or one on a proxied network", async () => {
     const spawn = vi.fn();
@@ -146,7 +198,6 @@ describe("a debug session on a Windows host", () => {
   it("starts the adapter unconfined outside Strict with the configuration's environment and a loopback child port, and ends its tree", async () => {
     const stopped: number[] = [];
     const spawned: Array<{ command: string; env: NodeJS.ProcessEnv }> = [];
-    const { spawn } = await import("node:child_process");
     const port = new DebugAdapterProcessPort({
       platform: "win32",
       receiptDirectory: join(folder(), "receipts"),
