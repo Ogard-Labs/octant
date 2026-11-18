@@ -5,6 +5,7 @@ import type { WorkThread } from "@octant/contracts/work-threads";
 import type { NativeHarnessComposition } from "../harness/nativeHarnessComposition";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { ServerConnection } from "./serverConnection";
+import { transferServerAttachments, type ServerAttachmentTransfer } from "./serverAttachments";
 import { ServerFileSystem } from "./serverFiles";
 import type { ServerProjectStore } from "./serverProjectStore";
 import { createServerShell, type ServerShellOptions } from "./serverShell";
@@ -55,8 +56,19 @@ export function serverWorkProjectOf(
 }
 
 export type ServerWorkTurnBinding =
-  | { readonly status: "bound"; readonly folder: string; readonly tools: AppManagedToolSet }
+  | {
+      readonly status: "bound";
+      readonly folder: string;
+      readonly tools: AppManagedToolSet;
+      /** Copies files the turn names by path to the thread's attachments folder on the server. */
+      readonly transferAttachments: ServerAttachmentTransferPort;
+    }
   | { readonly status: "refused"; readonly message: string };
+
+export type ServerAttachmentTransferPort = (
+  files: Parameters<typeof transferServerAttachments>[0]["files"],
+  signal?: AbortSignal,
+) => Promise<ServerAttachmentTransfer>;
 
 const SERVER_NOT_REGISTERED =
   "This Project's server is no longer registered in Settings › Permissions › Servers, so nothing can run there.";
@@ -102,6 +114,7 @@ export function bindServerWorkTurn(
         server: address,
         root: project.folder,
         fullAccess,
+        attachmentsOf: String(input.thread.id),
       }),
     shell: createServerShell({
       connection: options.connection,
@@ -116,5 +129,17 @@ export function bindServerWorkTurn(
   });
   return tools === undefined
     ? { status: "refused", message: SERVER_RUNTIME_NOT_HARNESS }
-    : { status: "bound", folder: project.folder, tools };
+    : {
+        status: "bound",
+        folder: project.folder,
+        tools,
+        transferAttachments: (files, signal) =>
+          transferServerAttachments({
+            connection: options.connection,
+            server: address(),
+            threadId: String(input.thread.id),
+            files,
+            ...(signal === undefined ? {} : { signal }),
+          }),
+      };
 }

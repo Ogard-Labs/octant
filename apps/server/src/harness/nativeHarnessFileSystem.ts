@@ -873,6 +873,31 @@ export function readFileContent(
   return readSlice(path, content.toString("utf8"), input);
 }
 
+/**
+ * The text a read takes out of a Word, PowerPoint or Excel file or a PDF,
+ * under the same limits, for a caller that has the file's bytes rather than
+ * a path: `unreadable` when it looks like one and does not parse, undefined
+ * when it is none of them.
+ */
+export function extractedDocumentText(content: Buffer):
+  | {
+      readonly text: string;
+      readonly truncated: boolean;
+      readonly format: NativeHarnessExtractedFormat;
+    }
+  | "unreadable"
+  | undefined {
+  const sniffed = sniffPreviewKind(content, "", "application/octet-stream", {
+    maxSniffBytes: SNIFFED_HEAD_BYTES,
+    maxByteSize: content.length,
+  });
+  const kind = sniffed.ok ? sniffed.kind : "unsupported";
+  if (kind !== "document" && kind !== "slides" && kind !== "workbook" && kind !== "pdf")
+    return undefined;
+  const extracted = extractedText(kind, content);
+  return extracted === undefined ? "unreadable" : { ...extracted, format: EXTRACTED_FORMATS[kind] };
+}
+
 /** How much of a file's start decides whether it is text, as the preview sniffs it. */
 const SNIFFED_HEAD_BYTES = 4096;
 

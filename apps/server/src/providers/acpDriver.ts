@@ -27,7 +27,9 @@ import {
   type ProviderToolAnswer,
   type ProviderToolDefinition,
   type ProviderApprovalCall,
+  type ProviderTurnInput,
 } from "@octant/contracts";
+import { attachedFileText } from "../attachments/attachedFiles";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import {
   normalizeAcpElicitation,
@@ -70,7 +72,7 @@ import {
   type AcpConfigOptionsResult,
   type AcpMcpHttpServer,
   type AcpNewSessionResult,
-  type AcpPromptImage,
+  type AcpPromptAttachment,
   type AcpPromptResult,
   type AcpServerRequest,
   type AcpServerRequestMessage,
@@ -112,7 +114,7 @@ export interface AcpClientPort {
   readonly prompt: (
     sessionId: string,
     prompt: string,
-    images?: ReadonlyArray<AcpPromptImage>,
+    attachments?: ReadonlyArray<AcpPromptAttachment>,
   ) => Promise<AcpPromptResult>;
   readonly setConfigOption: (
     sessionId: string,
@@ -179,8 +181,8 @@ interface AcpRetainedRuntime {
   readonly client: AcpClientPort;
   readonly managedTools: AcpManagedToolsLease | undefined;
   readonly appManagedTools: ProviderCapabilitySupport;
-  /** Whether this process's `initialize` reply advertised image prompt blocks. */
-  readonly imageInput: boolean;
+  /** The prompt blocks this process's `initialize` reply advertised beyond text. */
+  readonly promptInputs: AcpPromptInputs;
   readonly version: string;
   readonly commands: Set<string>;
   readonly compatibility: string;
@@ -406,15 +408,67 @@ function providerFailure(
   }
 }
 
-const ACP_IMAGE_INPUT_MODALITIES: readonly ProviderInputModality[] = ["text", "image"];
+interface AcpPromptInputs {
+  /** `promptCapabilities.image`: the agent takes `image` blocks. */
+  readonly image: boolean;
+  /** `promptCapabilities.embeddedContext`: the agent takes embedded `resource` blocks. */
+  readonly embeddedContext: boolean;
+}
 
 /**
- * Whether the agent's own `initialize` reply says it takes image prompt
- * blocks. Attachments reach an ACP agent only then; otherwise it stays
- * text only (maintainer decision, 2026-11-14).
+ * What the agent's own `initialize` reply says it takes beyond text. A file
+ * reaches an ACP agent natively only as a block it advertised: an image as an
+ * `image` block, any other file as an embedded `resource`; otherwise the agent
+ * stays text only (maintainer decision, 2026-11-14) and a Work or Code turn
+ * names the file by its path in the thread's attachments folder.
  */
-function acceptsImagePrompts(initialized: AcpConnection["initialized"]): boolean {
-  return initialized.agentCapabilities.promptCapabilities?.image === true;
+function acceptedPromptInputs(initialized: AcpConnection["initialized"]): AcpPromptInputs {
+  const prompt = initialized.agentCapabilities.promptCapabilities;
+  return { image: prompt?.image === true, embeddedContext: prompt?.embeddedContext === true };
+}
+
+function promptInputModalities(inputs: AcpPromptInputs): readonly ProviderInputModality[] {
+  if (!inputs.image && !inputs.embeddedContext) return textOnlyInputModalities;
+  return [
+    "text",
+    ...(inputs.image ? (["image"] as const) : []),
+    ...(inputs.embeddedContext ? (["document"] as const) : []),
+  ];
+}
+
+/**
+ * One attached file as the prompt block the agent advertised for it, or
+ * undefined when it advertised none that carries it. An embedded resource
+ * names the attachment, not a path: the agent is handed the content itself.
+ */
+function acpPromptAttachment(
+  attachment: ProviderTurnInput["attachments"][number],
+  inputs: AcpPromptInputs,
+): AcpPromptAttachment | undefined {
+  const modality = attachmentMediaTypeToModality(attachment.mediaType);
+  if (modality === "image") {
+    return inputs.image
+      ? {
+          type: "image",
+          mimeType: attachment.mediaType,
+          data: Buffer.from(attachment.bytes).toString("base64"),
+        }
+      : undefined;
+  }
+  if (!inputs.embeddedContext) return undefined;
+  const uri = `attachment:${encodeURIComponent(attachment.attachmentId)}/${encodeURIComponent(attachment.displayName)}`;
+  const text = attachedFileText(attachment.bytes);
+  return {
+    type: "resource",
+    resource:
+      text === undefined
+        ? {
+            uri,
+            mimeType: attachment.mediaType,
+            blob: Buffer.from(attachment.bytes).toString("base64"),
+          }
+        : { uri, mimeType: attachment.mediaType, text },
+  };
 }
 
 function normalizeModels(
@@ -422,7 +476,7 @@ function normalizeModels(
   options: ReadonlyArray<AcpSessionConfigOption>,
   models: AcpSessionModelState | undefined,
   optionsByModel?: ReadonlyMap<string, ReadonlyArray<AcpSessionConfigOption>>,
-  imageInput = false,
+  promptInputs: AcpPromptInputs = { image: false, embeddedContext: false },
 ) {
   const model = options.find((option) => option.id === "model");
   // The config option and the session's model state are two ACP spellings of
@@ -467,9 +521,9 @@ function normalizeModels(
         reasoning !== undefined || declaredLevels.length > 0
           ? ("supported" as const)
           : ("unavailable" as const),
-      // ACP advertises image prompts for the agent, not per model, so every
+      // ACP advertises prompt blocks for the agent, not per model, so every
       // model it lists carries what the agent said it accepts.
-      inputModalities: imageInput ? ACP_IMAGE_INPUT_MODALITIES : textOnlyInputModalities,
+      inputModalities: promptInputModalities(promptInputs),
       // The agent reasons, and that capability is reported above. A level is
       // declared only because the session applies it: the driver sets the
       // profile's reasoning option, or carries it in the session metadata, when
@@ -545,8 +599,8 @@ function normalizeProbe(
   credentialStatus?: "stored",
   optionsByModel?: ReadonlyMap<string, ReadonlyArray<AcpSessionConfigOption>>,
 ): ProviderProbeResult {
-  const imageInput = acceptsImagePrompts(initialized);
-  const models = normalizeModels(profile, options, sessionModels, optionsByModel, imageInput);
+  const promptInputs = acceptedPromptInputs(initialized);
+  const models = normalizeModels(profile, options, sessionModels, optionsByModel, promptInputs);
   const reasoning =
     resolveReasoningOption(profile, options) !== undefined ||
     models.some((model) => model.reasoning === "supported")
@@ -570,7 +624,8 @@ function normalizeProbe(
         negotiatedAppManagedTools(initialized, profile, version),
         version,
       ),
-      nativeAttachments: imageInput ? "supported" : "unsupported",
+      nativeAttachments:
+        promptInputs.image || promptInputs.embeddedContext ? "supported" : "unsupported",
       resume,
       reasoning,
     },
@@ -907,7 +962,14 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
         return listed;
       });
     },
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], sandboxPolicy }) => {
+    acquire: ({
+      instanceId,
+      projectRoot,
+      mode,
+      extraFolders = [],
+      attachmentsFolder,
+      sandboxPolicy,
+    }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
@@ -918,8 +980,13 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
           failure("invalid-configuration", `${name} requires an explicit product mode.`),
         );
       }
+      // Chat has no folder, so it is granted no attachments folder either.
+      const readOnlyFolders =
+        attachmentsFolder === undefined || mode === "chat" ? [] : [attachmentsFolder];
       if (
-        [projectRoot, ...extraFolders].some((root) => !isAbsolute(root) || resolve(root) !== root)
+        [projectRoot, ...extraFolders, ...readOnlyFolders].some(
+          (root) => !isAbsolute(root) || resolve(root) !== root,
+        )
       ) {
         return Effect.fail(
           failure(
@@ -935,6 +1002,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
         mode,
         resumeIdentities,
         factories,
+        readOnlyFolders,
       );
     },
   };
@@ -947,6 +1015,8 @@ function makeConnection(
   mode: AcpSessionMode,
   resumeIdentities: Map<string, ResumeIdentity>,
   factories: Factories,
+  /** Folders the agent reads and never writes: the thread's attachments folder. */
+  readOnlyFolders: ReadonlyArray<string> = [],
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   const { profile } = options;
   const name = profile.displayName;
@@ -1420,6 +1490,7 @@ function makeConnection(
               binaryPath: options.binaryPath,
               root: runtimeRoot,
               ...(extraFolders.length === 0 ? {} : { extraFolders }),
+              ...(readOnlyFolders.length === 0 ? {} : { readOnlyFolders }),
               managedHome: options.managedHome,
               mode,
               executionPolicy,
@@ -1555,6 +1626,7 @@ function makeConnection(
             options.managedHome,
             projectRoot,
             extraFolders,
+            readOnlyFolders,
             mode,
             input.modelId,
             input.modelOptionValues ?? {},
@@ -1901,7 +1973,7 @@ function makeConnection(
               client,
               managedTools: runtimeTools,
               appManagedTools,
-              imageInput: acceptsImagePrompts(connection.initialized),
+              promptInputs: acceptedPromptInputs(connection.initialized),
               version: connection.version,
               commands: new Set(
                 !commandsMismatch && commandSessionId === source.sessionId ? startupCommands : [],
@@ -2130,24 +2202,30 @@ function makeConnection(
         stateFor(input.sessionId).pipe(
           Effect.flatMap((state) => {
             const { bridgeTools } = partitionTools(input.tools);
-            // Attachments go only to an agent that advertised image prompts,
-            // and only as images; anything else is refused, not dropped.
-            if (input.attachments.length > 0) {
-              if (!state.runtime.imageInput) {
-                return Effect.fail(failure("unsupported", "Native attachments are unsupported."));
-              }
-              if (
-                input.attachments.some(
-                  (attachment) => attachmentMediaTypeToModality(attachment.mediaType) !== "image",
-                )
-              ) {
-                return Effect.fail(failure("unsupported", `${name} takes only image attachments.`));
-              }
+            // Each attachment goes only as a block the agent advertised: an
+            // image as an image, any other file as an embedded resource. One
+            // it advertised no block for is refused, not dropped.
+            const { promptInputs } = state.runtime;
+            if (
+              input.attachments.length > 0 &&
+              !promptInputs.image &&
+              !promptInputs.embeddedContext
+            )
+              return Effect.fail(failure("unsupported", "Native attachments are unsupported."));
+            const attachments: AcpPromptAttachment[] = [];
+            for (const attachment of input.attachments) {
+              const block = acpPromptAttachment(attachment, promptInputs);
+              if (block === undefined)
+                return Effect.fail(
+                  failure(
+                    "unsupported",
+                    promptInputs.image
+                      ? `${name} takes only image attachments.`
+                      : `${name} does not take image attachments.`,
+                  ),
+                );
+              attachments.push(block);
             }
-            const images: ReadonlyArray<AcpPromptImage> = input.attachments.map((attachment) => ({
-              mimeType: attachment.mediaType,
-              data: Buffer.from(attachment.bytes).toString("base64"),
-            }));
             const validationInput = { ...input, attachments: [], tools: bridgeTools };
             return rejectUnsupportedChatTurn(validationInput, {
               ...capabilities,
@@ -2204,7 +2282,7 @@ function makeConnection(
                 if (state.runtime.usage !== undefined) beginAcpUsageTurn(state.runtime.usage);
                 state.promptActive = true;
                 void state.client
-                  .prompt(state.sourceSessionId, prompt, images)
+                  .prompt(state.sourceSessionId, prompt, attachments)
                   .then((result) => {
                     state.promptActive = false;
                     void cancelForms(state);

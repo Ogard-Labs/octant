@@ -262,6 +262,7 @@ export function bindServerCodeTurn(
       server: address,
       root: place.folder,
       fullAccess,
+      attachmentsOf: String(input.thread.id),
     });
   const shell = createServerShell({
     connection: options.connection,

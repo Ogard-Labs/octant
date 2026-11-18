@@ -2954,6 +2954,55 @@ describe("CodeOperationService", () => {
     ).resolves.toMatchObject({ kind: "provider-turn-state" });
   });
 
+  it("copies a server Project's file to its server and names the copy there", async () => {
+    const file = {
+      attachmentId: "40000000-0000-4000-8000-000000000041",
+      displayName: "report.pdf",
+      mediaType: "application/pdf",
+      byteLength: 3,
+      digest: "f".repeat(64),
+    };
+    const attachments = {
+      peek: () => ({ status: "ok" as const, attachments: [file] }),
+      release: vi.fn(),
+      read: vi.fn(async () => new Uint8Array([1, 2, 3])),
+      readablePath: vi.fn(async () => "/octant-data/code-threads/thread/report.pdf"),
+      threadFolder: () => "/octant-data/code-threads/thread",
+    };
+    const serverPath = "/home/me/.octant/thread-attachments/thread/attachment/report.pdf";
+    const transferServerAttachments = vi.fn(
+      async (_thread: CodeThread, files: ReadonlyArray<{ readonly displayName: string }>) => ({
+        status: "transferred" as const,
+        files: files.map((sent) => ({
+          displayName: sent.displayName,
+          mediaType: "application/pdf",
+          byteLength: 3,
+          path: serverPath,
+        })),
+      }),
+    );
+    const fixture = providerTurnFixture({
+      remoteRoot: true,
+      holdsServerThread: () => true,
+      transferServerAttachments,
+      attachments: attachments as never,
+      supportsAttachments: () => true,
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }),
+    });
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        attachmentIds: [file.attachmentId],
+      } as never),
+    ).resolves.toMatchObject({ kind: "provider-turn-state" });
+    expect(transferServerAttachments).toHaveBeenCalledWith(expect.anything(), [
+      expect.objectContaining({ displayName: "report.pdf", bytes: new Uint8Array([1, 2, 3]) }),
+    ]);
+    const sent = JSON.stringify(fixture.turns.start.mock.calls[0]?.[0]);
+    expect(sent).toContain(serverPath);
+    expect(attachments.readablePath).not.toHaveBeenCalled();
+  });
+
   it("runs a server Project's Git panel with Git on its server, and refuses it when the server has none", async () => {
     const localStage = vi.fn(async () => ({ status: "applied" as const }));
     const serverStage = vi.fn(async () => ({ status: "applied" as const }));
@@ -3699,6 +3748,7 @@ function providerTurnFixture(
       | "threadStrict"
       | "takeProductFeedbackForTurn"
       | "holdsServerThread"
+      | "transferServerAttachments"
       | "serverGit"
       | "serverRepositoryTests"
       | "repositoryTests"

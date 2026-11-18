@@ -105,6 +105,23 @@ elif [ -f "$r" ]; then printf 'f%s' "$r"
 else printf 'o%s' "$r"
 fi`;
 
+/**
+ * Where a thread's attached files are copied on a server, under the login's
+ * home and outside every Project folder: `<home>/.octant/thread-attachments/
+ * <thread>/<attachment>/<name>`. The file tools read there and write nowhere
+ * there, as a local runtime reads the thread's attachments folder on this host.
+ */
+export const SERVER_THREAD_ATTACHMENTS = ".octant/thread-attachments";
+
+/**
+ * A read in a thread's attachments folder: the folder (`$2`) must be that
+ * thread's under the login's home, real or as named, before the ordinary read
+ * resolves the path inside it.
+ */
+const ATTACHMENT_READ_SCRIPT = `h=$(realpath -- "$HOME" 2>/dev/null) || h=$HOME
+case "$2" in "$h"/${SERVER_THREAD_ATTACHMENTS}/*|"$HOME"/${SERVER_THREAD_ATTACHMENTS}/*) ;; *) printf 'x'; exit 0;; esac
+${READ_SCRIPT}`;
+
 const PUT_SCRIPT = `exec 2>/dev/null
 mkdir -p -- "$(dirname -- "$1")" || exit 3
 cat > "$1" || exit 3`;
@@ -147,6 +164,11 @@ export interface ServerFileSystemOptions {
    * this host. Without it every protected path is refused.
    */
   readonly fullAccess?: () => boolean;
+  /**
+   * The thread whose attachments folder on the server the file tools may read
+   * (see {@link SERVER_THREAD_ATTACHMENTS}). Absent reads only the folder.
+   */
+  readonly attachmentsOf?: string;
 }
 
 type Resolved =
@@ -189,11 +211,15 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     const lexical = this.#lexical(input.path);
     const guarded = this.#guard(lexical);
     if (guarded !== undefined) return guarded;
-    const resolved = await this.#resolve(READ_SCRIPT, [
-      lexical,
-      this.#root,
-      String(this.#maxFileBytes),
-    ]);
+    // A file the person attached was copied to the thread's own folder on the
+    // server, which is read like the Project folder and written never.
+    const attachments = this.#attachmentsFolderOf(lexical);
+    const resolved = await this.#resolve(
+      attachments === undefined ? READ_SCRIPT : ATTACHMENT_READ_SCRIPT,
+      [lexical, attachments ?? this.#root, String(this.#maxFileBytes)],
+      undefined,
+      attachments,
+    );
     if (resolved.kind === "refused") return resolved;
     const guardedReal = this.#guard(resolved.path);
     if (guardedReal !== undefined) return guardedReal;
@@ -413,6 +439,8 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     script: string,
     args: ReadonlyArray<string>,
     maxOutputBytes = this.#maxFileBytes + 4_096,
+    /** The folder the real path must be inside; the Project folder unless named. */
+    within: string = this.#root,
   ): Promise<
     | (Extract<Resolved, { readonly kind: "inside" }> & {
         readonly truncated: boolean;
@@ -431,7 +459,9 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     const nul = call.output.indexOf(0);
     if (nul === -1) return refusedWith("path-not-found");
     const path = call.output.subarray(0, nul).toString("utf8");
-    if (!this.#inside(path)) return refusedWith("path-escapes-root");
+    if (classifyPathContainment(within, path) !== "contained") {
+      return refusedWith("path-escapes-root");
+    }
     return {
       kind: "inside",
       path,
@@ -482,8 +512,20 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
   }
 
   #display(path: string): string {
+    // An attached file outside the folder is shown by the path it was named by.
+    if (!this.#inside(path)) return path;
     const relative = posix.relative(this.#root, path);
     return relative === "" ? "." : relative;
+  }
+
+  /** The thread's attachments folder a path names, judged on the path as written. */
+  #attachmentsFolderOf(lexical: string): string | undefined {
+    if (this.#options.attachmentsOf === undefined) return undefined;
+    const marker = `/${SERVER_THREAD_ATTACHMENTS}/${this.#options.attachmentsOf}`;
+    const at = lexical.indexOf(marker);
+    if (at <= 0) return undefined;
+    const folder = lexical.slice(0, at + marker.length);
+    return lexical === folder || lexical.startsWith(`${folder}/`) ? folder : undefined;
   }
 }
 

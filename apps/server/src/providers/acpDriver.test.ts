@@ -1157,13 +1157,138 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     expect(offered.probed.models[0]?.inputModalities).toEqual(["text", "image"]);
     expect(offered.sent._tag).toBe("Right");
     expect(offered.prompt).toHaveBeenCalledWith(expect.any(String), expect.any(String), [
-      { mimeType: "image/png", data: "AQID" },
+      { type: "image", mimeType: "image/png", data: "AQID" },
     ]);
     const textOnly = await run(false);
     expect(textOnly.probed.capabilities.nativeAttachments).toBe("unsupported");
     expect(textOnly.probed.models[0]?.inputModalities).toEqual(["text"]);
     expect(textOnly.sent).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
     expect(textOnly.prompt).not.toHaveBeenCalled();
+  });
+
+  it("sends an attached document as an embedded resource only to an agent that advertises embedded context", async () => {
+    const notes = {
+      attachmentId: "file-1",
+      displayName: "notes.md",
+      mediaType: "text/markdown",
+      bytes: new TextEncoder().encode("# Plan\n"),
+    };
+    const report = {
+      attachmentId: "file-2",
+      displayName: "report.pdf",
+      mediaType: "application/pdf",
+      bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x00, 0xff]),
+    };
+    const run = async (embeddedContext: boolean) => {
+      const f = fixture(profile);
+      Object.assign(f.connection.initialized.agentCapabilities, {
+        promptCapabilities: { image: false, embeddedContext },
+      });
+      const probed = await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+      const sent = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            return yield* Effect.either(
+              connection.send({
+                sessionId,
+                prompt: "read these",
+                attachments: [notes, report],
+                tools: [],
+              }),
+            );
+          }),
+        ),
+      );
+      return { probed, sent, prompt: f.client.prompt };
+    };
+    const embedded = await run(true);
+    expect(embedded.probed.capabilities.nativeAttachments).toBe("supported");
+    expect(embedded.probed.models[0]?.inputModalities).toEqual(["text", "document"]);
+    expect(embedded.sent._tag).toBe("Right");
+    // Text goes as text; bytes that are not UTF-8 text go as a base64 blob.
+    expect(embedded.prompt).toHaveBeenCalledWith(expect.any(String), expect.any(String), [
+      {
+        type: "resource",
+        resource: {
+          uri: "attachment:file-1/notes.md",
+          mimeType: "text/markdown",
+          text: "# Plan\n",
+        },
+      },
+      {
+        type: "resource",
+        resource: {
+          uri: "attachment:file-2/report.pdf",
+          mimeType: "application/pdf",
+          blob: Buffer.from(report.bytes).toString("base64"),
+        },
+      },
+    ]);
+    const textOnly = await run(false);
+    expect(textOnly.probed.capabilities.nativeAttachments).toBe("unsupported");
+    expect(textOnly.sent).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
+    expect(textOnly.prompt).not.toHaveBeenCalled();
+  });
+
+  it("lets a Work or Code launch read the thread's attachments folder, and a Chat launch none", async () => {
+    const attachmentsFolder = "/data/code-threads/thread-1";
+    const launched = async (mode: "code" | "chat") => {
+      const f = fixture(profile);
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* f.driver.acquire({
+              instanceId,
+              projectRoot,
+              mode,
+              attachmentsFolder,
+            });
+            // An agent that cannot run read-only refuses Chat before it launches.
+            yield* Effect.either(
+              connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+            );
+          }),
+        ),
+      );
+      return f.starts.at(-1);
+    };
+    expect((await launched("code"))?.readOnlyFolders).toEqual([attachmentsFolder]);
+    expect((await launched("chat"))?.readOnlyFolders).toBeUndefined();
+  });
+
+  it("refuses an image to an agent that advertised embedded context but not image prompts", async () => {
+    const f = fixture(profile);
+    Object.assign(f.connection.initialized.agentCapabilities, {
+      promptCapabilities: { image: false, embeddedContext: true },
+    });
+    await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+    const sent = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          return yield* Effect.either(
+            connection.send({
+              sessionId,
+              prompt: "look",
+              attachments: [
+                {
+                  attachmentId: "image-1",
+                  displayName: "screen.png",
+                  mediaType: "image/png",
+                  bytes: new Uint8Array([1, 2, 3]),
+                },
+              ],
+              tools: [],
+            }),
+          );
+        }),
+      ),
+    );
+    expect(sent).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
+    expect(f.client.prompt).not.toHaveBeenCalled();
   });
 
   it("reports app-managed tools only when the ACP handshake advertises HTTP MCP", async () => {

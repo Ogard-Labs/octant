@@ -1256,6 +1256,18 @@ export interface CodeOperationServiceOptions {
    * on its folder. Absent, every `remote-root` thread is refused.
    */
   readonly holdsServerThread?: (thread: CodeThread) => boolean;
+  /**
+   * Copies files a server thread's turn names by path to the thread's
+   * attachments folder on its server, where its file tools read them. Absent,
+   * such a turn is refused before it starts.
+   */
+  readonly transferServerAttachments?: (
+    thread: CodeThread,
+    files: ReadonlyArray<ProviderAttachmentInput>,
+  ) => Promise<
+    | { readonly status: "transferred"; readonly files: ReadonlyArray<AttachedFileByPath> }
+    | { readonly status: "refused"; readonly message: string }
+  >;
   /** The login a server thread's terminal opens on its server, or undefined when it has none now. */
   readonly serverTerminalLogin?: (
     thread: CodeThread,
@@ -2012,12 +2024,14 @@ export class CodeOperationService {
                 }
               }
               // A server thread's agent works with the server's file tools, and
-              // this host's attachments folder is not there: a file the turn
-              // would name by path is refused before the start is journaled.
+              // this host's attachments folder is not there: with no transfer
+              // to the server, a file the turn would name by path is refused
+              // before the start is journaled.
               if (
                 command.kind === "start-provider-turn" &&
                 recordedStart === undefined &&
                 turnRefusal === undefined &&
+                this.#options.transferServerAttachments === undefined &&
                 this.#options.holdsServerThread?.(turnThread) === true &&
                 partitionAttachedFiles(starting.attachments).files.some(
                   (reference) =>
@@ -6393,14 +6407,27 @@ export class CodeOperationService {
     );
     const filesByPath = files.filter((reference) => !nativeFiles.includes(reference));
     if (serverThread && filesByPath.length > 0) {
-      return this.#failed(
-        command.operationId,
-        "unsupported",
-        SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
-        "refused",
-      );
-    }
-    if (filesByPath.length > 0) {
+      // Copied to the thread's attachments folder on its server, where its
+      // file tools read them; with no transfer, the turn is refused.
+      const transfer = this.#options.transferServerAttachments;
+      if (transfer === undefined)
+        return this.#failed(
+          command.operationId,
+          "unsupported",
+          SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
+          "refused",
+        );
+      const inputs = await this.#attachmentInputs(command.threadId, filesByPath);
+      const transferred = inputs === undefined ? undefined : await transfer(thread, inputs);
+      if (transferred === undefined || transferred.status === "refused")
+        return this.#failed(
+          command.operationId,
+          "unavailable",
+          transferred?.message ?? "A file attached to this turn is unavailable.",
+          "refused",
+        );
+      context.push({ kind: "user-message", text: attachedFilesMessage(transferred.files) });
+    } else if (filesByPath.length > 0) {
       const named = await this.#attachedFilePaths(command.threadId, filesByPath);
       if (named === undefined) {
         return this.#failed(
