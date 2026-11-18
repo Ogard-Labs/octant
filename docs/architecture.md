@@ -14920,16 +14920,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   **Plan and Chat tool parity** (maintainer decision, 2026-11-16; partly
   built). Plan and Chat keep their rules (Plan writes nothing, Chat has no
   folder), and inside those rules a provider keeps what it offers on its own:
-  - **Read-only MCP servers in Plan** (designed, not built). A server's own
-    `readOnlyHint` is the server's claim and is never trusted. The person may
-    mark one MCP server "Read-only — allowed in Plan", per server and per
-    host, from the Settings surfaces that manage MCP servers today; the mark
-    is journaled, and a tool's `readOnlyHint` may pre-suggest the mark in the
-    dialog but never sets it. In Plan the tools of a marked server are offered
-    and run under the thread's ask rules; an unmarked server stays withheld,
-    as every server is in Plan today. It is to be wired for every provider
-    whose MCP servers Octant controls: Claude Code, Codex and OpenCode at
-    least. Until built, Plan starts no MCP server but Octant's own.
+  - **Read-only MCP servers in Plan** (built for Claude Code, Codex and
+    OpenCode; the full rule, and why a `readOnlyHint` never pre-suggests the
+    mark, is in the second **Plan and Chat tool parity** entry below).
   - **Provider memory, read-only** (built for Claude Code and Codex). Claude
     Code loads its memory in Plan and Chat with the account's memory setting
     on: the account's `CLAUDE.md` (in Chat the only instruction file, since
@@ -14997,8 +14990,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     the person may answer exactly those calls, once each. A hosted (HTTP)
     server works in Plan; one that runs on this computer may not start where
     Plan's sandbox starts no program (OpenCode on macOS), which the Settings
-    page says. Not built: a tool's `readOnlyHint` pre-suggesting the mark,
-    since Octant does not connect to a provider's own servers to read it.
+    page says. A tool's `readOnlyHint` pre-suggesting the mark has no place
+    to appear, and stays unbuilt until one exists. Octant never connects to a
+    provider's own servers to read it, and keeps not connecting. The servers
+    Octant does connect to (installed MCP extensions and connectors) carry no
+    mark, because in Plan each of their calls is put to the person.
   - **Provider memory, read-only** (built for Claude Code and Codex). Claude
     Code loads its memory in Plan and Chat with the account's memory setting
     on: the account's `CLAUDE.md` (in Chat the only instruction file, since
