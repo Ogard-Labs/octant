@@ -171,6 +171,9 @@ describe("OpenCode driver", () => {
     // jail, which starts the git stand-in; elsewhere turns run only in Work
     // and Code outside Plan, so the probe attests that jail.
     expect(probe.capabilities.appManagedTools).toBe("supported");
+    // A rewind continues OpenCode's own fork of the session cut at the last
+    // kept turn, so the rewind preview may promise a copy.
+    expect(probe.capabilities.sessionRollback).toBe("supported");
     expect(fixture.processInputs[0]).toMatchObject(
       process.platform === "darwin" || process.platform === "linux"
         ? { mode: "chat", executionPolicy: "plan", loopbackPorts: [expect.any(Number)] }
@@ -1757,6 +1760,7 @@ describe("OpenCode driver", () => {
       approvals: "supported",
       userQuestions: "supported",
       fileChanges: "unsupported",
+      sessionRollback: "supported",
     });
     // Where the Chat and Plan jail starts no process the launch refuses both,
     // and the report says so.
