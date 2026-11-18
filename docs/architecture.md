@@ -7512,10 +7512,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   discovery descriptor, the bundled plugin and its identity, picker and
   Settings labels, and the Settings create and configuration forms. A new
   agent adds its row, its runtime profile, its logo, and conformance evidence.
-  Decided (maintainer decision, 2026-11-16; designed, not built): a person may
-  also add an agent from the public ACP registry or their own local command
-  through the plugin model, so a reviewed row is no longer the only way an ACP
-  agent runs ([Provider runtimes: Any ACP agent](design/provider-runtimes.md#any-acp-agent)).
+  Decided (maintainer decision, 2026-11-16; built except the probe-next
+  profiles): a person may also add an agent from the public ACP registry or
+  their own local command through the plugin model, so a reviewed row is no
+  longer the only way an ACP agent runs. Every added agent shares one driver
+  kind, `acp-agent`, outside the rows, admitted by one bundled plugin; which
+  agent an instance runs, how it was installed and whether it is trusted are
+  its configuration, so the vocabulary stays closed
+  ([Provider runtimes: Any ACP agent](design/provider-runtimes.md#any-acp-agent)).
   The row never widens the vocabulary to `string`: an unlisted kind fails to
   decode, a configuration must name the same agent as its instance or command
   and a posture its row lists, and every capability is still the one the
@@ -11717,6 +11721,18 @@ Project, thread, and provider policy allow it. Any other state — `not-installe
 `incompatible`, `mode-prohibited`, `project-prohibited`, `thread-prohibited`,
 `host-prohibited`, `stale-catalog-epoch`, `broken`, `draining` — contributes no
 prompt, schema, tool, route, model, or capability.
+
+**Any ACP agent.** An agent a person adds from the public ACP registry or as
+their own local command takes the same three steps, with no one-step form:
+**Install**, **Trust** (which shows what trusting grants and whether the
+download was unverified) and **Turn on**, each its own journaled command that
+the host decides and refuses out of order, and that only a client acting as
+the host's own person may send. A registry agent is named by its registry id
+alone; its package, release, archive address and checksum come from the
+host's listing. The install runs nothing it fetched. Until trusted, the
+agent runs in Octant's sandbox at every level with nothing remembered and
+none of Octant's tools
+([Provider runtimes: Any ACP agent](design/provider-runtimes.md#any-acp-agent)).
 
 **npm packages.** A person may type an npm package name, with an optional
 version, range, or dist-tag, in Marketplace or as
@@ -16435,17 +16451,17 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Code tools reach the models its connection check reports with tool use;
   Harness endpoints reach them only for models a person verified.
 
-  | Column                    | Driver kinds                                                                                                     | Chat  | Work              | Code              | Agent loop       |
-  | ------------------------- | ---------------------------------------------------------------------------------------------------------------- | ----- | ----------------- | ----------------- | ---------------- |
-  | Claude Code               | `claude`                                                                                                         | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | Codex                     | `codex`                                                                                                          | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | OpenCode                  | `opencode`                                                                                                       | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | Pi                        | `pi`                                                                                                             | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | ACP agents                | `kilo`, `devin`, `mistral-vibe`, `kimi-code`, `grok`, `goose`, `glm`, `gemini`, `copilot`, `cline`, `qwen`, `fx` | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | Ollama                    | `ollama`                                                                                                         | `yes` | `verified-models` | `verified-models` | `octant-harness` |
-  | Harness endpoints         | `openai-compatible`, `anthropic-compatible`, `azure-foundry`, `amazon-bedrock`                                   | `yes` | `verified-models` | `verified-models` | `octant-harness` |
-  | Outside harness endpoints | `outside-harness-endpoint`                                                                                       | `yes` | `verified-models` | `verified-models` | `octant-harness` |
-  | Oh My Pi                  | `oh-my-pi`                                                                                                       | `no`  | `no`              | `no`              | `none`           |
+  | Column                    | Driver kinds                                                                                                                  | Chat  | Work              | Code              | Agent loop       |
+  | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----- | ----------------- | ----------------- | ---------------- |
+  | Claude Code               | `claude`                                                                                                                      | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Codex                     | `codex`                                                                                                                       | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | OpenCode                  | `opencode`                                                                                                                    | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Pi                        | `pi`                                                                                                                          | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | ACP agents                | `kilo`, `devin`, `mistral-vibe`, `kimi-code`, `grok`, `goose`, `glm`, `gemini`, `copilot`, `cline`, `qwen`, `fx`, `acp-agent` | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Ollama                    | `ollama`                                                                                                                      | `yes` | `verified-models` | `verified-models` | `octant-harness` |
+  | Harness endpoints         | `openai-compatible`, `anthropic-compatible`, `azure-foundry`, `amazon-bedrock`                                                | `yes` | `verified-models` | `verified-models` | `octant-harness` |
+  | Outside harness endpoints | `outside-harness-endpoint`                                                                                                    | `yes` | `verified-models` | `verified-models` | `octant-harness` |
+  | Oh My Pi                  | `oh-my-pi`                                                                                                                    | `no`  | `no`              | `no`              | `none`           |
 
   The image profiles (`openai-image`, `gemini-native-image`, `bfl-image`,
   `ideogram-image`) are not turn drivers and are not in the matrix.

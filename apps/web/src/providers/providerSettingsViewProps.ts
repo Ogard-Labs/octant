@@ -72,6 +72,7 @@ export function providerSettingsViewProps(
     onSetClaudeArtifactDelivery: controller.setClaudeArtifactDelivery,
     onSetProviderNativeSetup: controller.setProviderNativeSetup,
     onSetProviderOwnMemory: controller.setProviderOwnMemory,
+    onAcpAgentStep: controller.acpAgentStep,
     onDataTagsChange: controller.setDataTags,
     onModelDataTagsChange: controller.setModelDataTags,
     onModelContextWindowChange: controller.setModelContextWindow,

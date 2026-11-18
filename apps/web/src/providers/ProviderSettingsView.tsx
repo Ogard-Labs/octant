@@ -40,7 +40,12 @@ import type { ProviderCreateProviderType } from "./ProviderSettingsConfiguration
 import { AddProviderWizard } from "./wizard/AddProviderWizard";
 import { ProviderSettingsList } from "./ProviderSettingsList";
 import { isModelEndpointDriverKind } from "./providerSettingsPresentation";
-import type { ModelToolVerification, TransientProviderCredential } from "./useProviderController";
+import type {
+  AcpAgentStep,
+  ModelToolVerification,
+  TransientProviderCredential,
+} from "./useProviderController";
+import { AddedAcpAgentsSection } from "./AddedAcpAgentsSection";
 import type { LocateBinaryOutcome } from "./useDiscoveryController";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -251,6 +256,8 @@ export interface ProviderSettingsViewProps {
     enabled: boolean,
   ) => Promise<boolean>;
   /** Turns one Claude Code or Codex account's own memory on or off. */
+  /** Adds, installs, trusts, turns on or removes any ACP agent, one step at a time. */
+  readonly onAcpAgentStep?: (step: AcpAgentStep) => Promise<boolean>;
   readonly onSetProviderOwnMemory?: (
     instanceId: ProviderInstanceId,
     enabled: boolean,
@@ -513,6 +520,13 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
           : { onModelContextWindowChange: props.onModelContextWindowChange })}
         onVerifyModelTools={props.onVerifyModelTools}
       />
+      {props.onAcpAgentStep === undefined ? null : (
+        <AddedAcpAgentsSection
+          busy={props.busy}
+          instances={props.instances}
+          onStep={props.onAcpAgentStep}
+        />
+      )}
       <SettingsSection title="Defaults">
         <div className="setgroup">
           <div className="setrow">
