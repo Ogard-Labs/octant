@@ -4,15 +4,15 @@ name: Visual check
 # draws the new pictures, uploads them as the `visual-check` artifact and
 # passes. It pushes nothing; a person commits the pictures with
 # scripts/visual-baselines-from-ci.ts.
+#
+# `Visual check` is a required check, so it must report on every pull request
+# and in the merge queue. A path filter on the trigger would leave it pending
+# forever on a pull request that does not touch the screens; the `scope` job
+# decides instead, and a skipped job counts as passed.
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
-    paths:
-      - apps/web/**
-      - packages/theme/**
-      - packages/contracts/src/theme.ts
-      - DESIGN.md
-      - .github/workflows/visual-check.yml
+  merge_group:
   push:
     branches: [main]
     paths:
@@ -28,7 +28,39 @@ concurrency:
   group: visual-check-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  scope:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      pull-requests: read
+    outputs:
+      draw: ${{ steps.scope.outputs.draw }}
+    steps:
+      - name: Decide whether the screens can have changed
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL: ${{ github.event.pull_request.number }}
+        run: |
+          case "${{ github.event_name }}" in
+            # The pull request's own run already compared this change, and a
+            # design change still waiting for its pictures must not stop the queue.
+            merge_group) draw=false ;;
+            pull_request)
+              if gh api --paginate "repos/${{ github.repository }}/pulls/${PULL}/files" --jq '.[].filename' \
+                | grep -qE '^(apps/web/|packages/theme/|packages/contracts/src/theme\.ts$|DESIGN\.md$|\.github/workflows/visual-check\.yml$)'; then
+                draw=true
+              else
+                draw=false
+              fi ;;
+            *) draw=true ;;
+          esac
+          echo "draw=${draw}" >> "$GITHUB_OUTPUT"
+          echo "Draw the key screens: ${draw}"
   visual:
+    name: Visual check
+    needs: scope
+    if: needs.scope.outputs.draw == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     env:
