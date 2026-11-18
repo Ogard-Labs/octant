@@ -59,3 +59,20 @@ jobs:
       # with one, and the feed URL needs the exact published name.
       asset_prefix: Octant
     secrets: inherit
+
+  # The build above creates the release as a prerelease; only after every row
+  # has published does this job attach the fixed-name disk image and mark the
+  # release latest, so releases/latest/download/Octant-darwin-arm64.dmg always
+  # serves the newest Preview. A failed or partial build never reaches here.
+  latest:
+    name: Mark the release latest
+    needs: [decide, release]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/publish-latest-download.sh "v${{ needs.decide.outputs.version }}"
+        env:
+          GH_TOKEN: ${{ github.token }}

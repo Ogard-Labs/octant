@@ -19806,6 +19806,14 @@ the same condition as the app, and unsigned when the app is. The zip stays the
 only artifact the update feed lists; the disk image is a download, never an
 update source. Octant Nightly builds no disk image.
 
+The newest Preview, and later the newest stable, is also the repository's
+latest GitHub release. A last release job runs only after every build row has
+published, attaches the disk image a second time under the fixed name
+`Octant-darwin-arm64.dmg`, and marks the release latest, so
+`https://github.com/Ogard-Labs/octant/releases/latest/download/Octant-darwin-arm64.dmg`
+always serves the current Preview. Nightly builds and the `feed-*` mailbox
+releases stay prereleases, so the link never resolves to them.
+
 Cross-platform desktop (macOS, Linux, Windows) remains authorized: the Linux
 desktop shell, then the Linux AppImage with its signed feed, then Windows.
 Work and Code run on Windows at Full access with the sandbox off (step 3 of

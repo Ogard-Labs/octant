@@ -258,3 +258,20 @@ jobs:
       asset_prefix: Octant
       environment: stable
     secrets: inherit
+
+  # A stable release already publishes full; the same job still attaches the
+  # fixed-name disk image and marks it latest, so the public
+  # releases/latest/download URL keeps resolving once a stable release is the
+  # newest. Runs only after every publish row and the installer have shipped.
+  latest:
+    name: Mark the release latest
+    needs: [verify, publish, windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/publish-latest-download.sh "v${{ needs.verify.outputs.version }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
