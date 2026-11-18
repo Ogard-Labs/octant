@@ -174,7 +174,7 @@ export type AgentRunDelegationResult =
  * The bare reason code left the model and the person with nothing to act on.
  */
 const TAINTED_DELEGATION_MESSAGE =
-  "This thread has taken in outside content (a helper's reply counts), so it cannot start more helpers unless its person allows that for the thread. A person can review what it read and clear that from the notice above the composer, or the work can continue in a new thread.";
+  "This thread has taken in outside content (a helper's reply counts), so it cannot start more helpers unless its person allows that for the thread. A person can review what it read and clear that from the Outside content row in Environment, or the work can continue in a new thread.";
 
 /**
  * Whether outside content stops this delegation. A thread that can ask its

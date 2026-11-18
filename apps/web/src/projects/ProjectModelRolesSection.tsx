@@ -237,7 +237,7 @@ export function ProjectModelRolesSection(props: ProjectModelRolesSectionProps) {
   return (
     <div className="project-model-roles">
       <p className="oct-meta">
-        Each role uses Settings unless this Project chooses its own. A Project can pick only models
+        Each role uses Settings unless this Project picks its own. A Project can pick only models
         Settings lists for the role.
       </p>
       {message === undefined ? null : (

@@ -71,6 +71,9 @@
 .device-toolbar__device--switch[aria-expanded="true"] {
   background: var(--oct-fg-soft);
 }
+.device-toolbar__device--switch:active {
+  background: var(--oct-wash-pressed);
+}
 
 .device-toolbar__name {
   overflow: hidden;
@@ -154,6 +157,9 @@
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
 }
+.device-toolbar__more:active {
+  background: var(--oct-wash-pressed);
+}
 
 .device-dot {
   flex: none;
@@ -231,10 +237,6 @@
 
 .device-line__message strong {
   font-weight: var(--oct-weight-medium);
-}
-
-.device-line--approval {
-  background: color-mix(in oklab, var(--oct-warn-soft) 60%, var(--oct-bg));
 }
 
 .device-line--approval .device-line__mark {
@@ -722,4 +724,10 @@ html[data-octant-reduced-motion="true"] .device-spinner {
 html[data-octant-reduced-motion="true"] .device-touch {
   animation-name: device-touch-still;
   animation-timing-function: steps(1, end);
+}
+
+/* A state card's title is the pane bar, flush with the card's top and edges. */
+.device-card > .pane-bar {
+  margin: calc(var(--oct-space-5) * -1) calc(var(--oct-space-5) * -1) var(--oct-space-3);
+  border-radius: var(--oct-radius-md) var(--oct-radius-md) 0 0;
 }

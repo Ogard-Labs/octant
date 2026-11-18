@@ -9,6 +9,7 @@ import {
   decodeAutomationDefinition,
   decodeAutomationEvent,
   decodeAutomationQuery,
+  decodeAutomationQueryResponse,
   decodeAutomationRun,
   decodeAutomationRunReportedResult,
   decodeAutomationTrigger,
@@ -1389,5 +1390,26 @@ describe("integration source coverage receipts", () => {
       { ids: Array.from({ length: 257 }, (_, index) => `run-${index}`), atLimit: false },
     ])
       expect(() => decode(window)).toThrow();
+  });
+});
+
+describe("automation list totals and recent runs", () => {
+  const totals = { automations: 100, enabled: 25, windowDays: 30, runs: 299, succeeded: 149 };
+
+  it("accepts a list response that carries 30-day totals", () => {
+    const decoded = decodeAutomationQueryResponse({ kind: "automation-list", items: [], totals });
+    expect(decoded).toEqual({ kind: "automation-list", items: [], totals });
+  });
+
+  it("rejects negative or fractional totals and any window other than 30 days", () => {
+    for (const bad of [
+      { ...totals, runs: -1 },
+      { ...totals, succeeded: 1.5 },
+      { ...totals, windowDays: 7 },
+    ]) {
+      expect(() =>
+        decodeAutomationQueryResponse({ kind: "automation-list", items: [], totals: bad }),
+      ).toThrow();
+    }
   });
 });

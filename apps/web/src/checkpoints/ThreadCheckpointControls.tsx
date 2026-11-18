@@ -1,5 +1,5 @@
 import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
-import { Flag } from "lucide-react";
+import { Flag } from "../ui/icons";
 import { useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { turnMenuTrigger, useFocusAfterTurnMenuCloses } from "../transcript/turnPanelFocus";

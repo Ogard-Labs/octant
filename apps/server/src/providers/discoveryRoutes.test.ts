@@ -25,7 +25,7 @@ const fakeSnapshot = {
   candidates: [
     {
       driverKind: "codex",
-      displayName: "Codex CLI",
+      displayName: "Codex",
       binaryPath: "/usr/local/bin/codex",
       version: "codex-cli 0.1.0",
       readiness: "ready",
@@ -146,7 +146,7 @@ describe("discoveryRoutes", () => {
     expect(body.snapshot.candidates[0].driverKind).toBe("codex");
   });
 
-  it("auto-registers one first-run Codex CLI instance enabled per discovered family after scan", async () => {
+  it("auto-registers one first-run Codex instance enabled per discovered family after scan", async () => {
     const listInstances = vi.fn(async () => []);
     const createFromDiscovery = vi.fn(async () => ({
       instanceId: decodeProviderInstanceId("00000000-0000-4000-8000-000000000902"),
@@ -271,7 +271,7 @@ describe("discoveryRoutes", () => {
           kind: "connect",
           driverKind: "codex",
           binaryPath: "/usr/local/bin/codex",
-          displayName: "Codex CLI",
+          displayName: "Codex",
         },
       }),
     );
@@ -319,7 +319,7 @@ describe("discoveryRoutes", () => {
       kind: "connect",
       driverKind: "codex",
       binaryPath: "/usr/local/bin/codex",
-      displayName: "Codex CLI",
+      displayName: "Codex",
     };
 
     expect((await handler(fromDevice("/api/providers/discovery/scan", "hub-roster")))?.status).toBe(
@@ -377,7 +377,7 @@ describe("discoveryRoutes", () => {
           kind: "connect",
           driverKind: "codex",
           binaryPath: "/usr/local/bin/codex",
-          displayName: "Codex CLI",
+          displayName: "Codex",
         },
       }),
     );
@@ -430,7 +430,7 @@ it("rejects connect for unknown candidates", async () => {
         kind: "connect",
         driverKind: "codex",
         binaryPath: "/tmp/not-from-scan/codex",
-        displayName: "Codex CLI",
+        displayName: "Codex",
       },
     }),
   );
@@ -482,7 +482,7 @@ describe("locate binary", () => {
   function scannedCandidate(binaryPath: string, patch: Partial<DiscoveryCandidate> = {}) {
     return {
       driverKind: "codex",
-      displayName: "Codex CLI",
+      displayName: "Codex",
       binaryPath,
       readiness: "ready",
       pathSummary: binaryPath,
@@ -644,7 +644,7 @@ describe("locate binary", () => {
         status: 400,
         body: {
           category: "invalid-configuration",
-          message: "The chosen file did not answer Codex CLI's version check.",
+          message: "The chosen file did not answer Codex's version check.",
         },
       });
     }
@@ -764,7 +764,7 @@ describe("locate binary", () => {
 it("connects a detected runtime to the provider its driver already has instead of adding a second", async () => {
   const existing = createCodexProvider({
     id: decodeProviderInstanceId("00000000-0000-4000-8000-000000000777"),
-    displayName: "Codex CLI",
+    displayName: "Codex",
     // A different path than the candidate's: discovery keeps one provider per
     // driver family, so a second executable still reuses this provider.
     binaryPath: "/opt/homebrew/bin/codex",
@@ -786,7 +786,7 @@ it("connects a detected runtime to the provider its driver already has instead o
         kind: "connect",
         driverKind: "codex",
         binaryPath: "/usr/local/bin/codex",
-        displayName: "Codex CLI",
+        displayName: "Codex",
       },
     }),
   );

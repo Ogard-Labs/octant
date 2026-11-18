@@ -1,5 +1,5 @@
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
-import { Check, ChevronRight } from "lucide-react";
+import { Check, ChevronRight } from "../icons";
 import {
   createContext,
   useContext,
@@ -104,7 +104,7 @@ export function DropdownMenuPopup({
         else if (ref !== null && ref !== undefined) ref.current = node;
       }}
       className={cn(
-        "z-[var(--oct-z-popup)] min-w-[12rem] max-w-(--available-width) rounded-xl bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
+        "z-[var(--oct-z-popup)] max-h-(--available-height) min-w-[12rem] max-w-[min(var(--available-width),var(--oct-menu-max-w))] overflow-y-auto rounded-(--oct-radius-lg) bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-pop)] outline-none",
         className,
       )}
       data-slot="dropdown-menu-content"
@@ -147,12 +147,14 @@ export function DropdownMenuGroupLabel({
 
 export function DropdownMenuItem({
   className,
+  destructive = false,
   ...props
-}: ComponentProps<typeof MenuPrimitive.Item>) {
+}: ComponentProps<typeof MenuPrimitive.Item> & { readonly destructive?: boolean }) {
   return (
     <MenuPrimitive.Item
       className={cn(dropdownMenuItemClassName, className)}
       closeOnClick
+      {...(destructive ? { "data-destructive": "" } : {})}
       {...props}
     />
   );

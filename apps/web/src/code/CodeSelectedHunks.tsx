@@ -29,6 +29,8 @@ export interface CodeSelectedHunksProps {
   readonly createOperationId: () => CodeOperationId;
   readonly createGitOperationId: () => CodeGitOperationId;
   readonly requestApproval?: (command: Command) => Promise<CodeApprovalId | undefined>;
+  /** Opens the disclosure at first render: it was chosen from a menu. */
+  readonly startOpen?: boolean;
 }
 
 const UNAVAILABLE: Readonly<Record<CodeGitHunkUnavailableReason, string>> = {
@@ -234,7 +236,11 @@ export function CodeSelectedHunks(props: CodeSelectedHunksProps) {
   };
   const files = shown === undefined ? [] : parseUnifiedDiff(shown.text);
   return (
-    <OctantCollapsible className="code-diff-pane__hunk-selection" summary="Select Git hunks">
+    <OctantCollapsible
+      className="code-diff-pane__hunk-selection"
+      open={props.startOpen}
+      summary="Select Git hunks"
+    >
       <p>
         Compare the index and working tree separately. Selection uses the exact unified patch,
         including whitespace.
@@ -244,7 +250,8 @@ export function CodeSelectedHunks(props: CodeSelectedHunksProps) {
           disabled={pending}
           onClick={() => void refresh("unstaged")}
           type="button"
-          variant="outline"
+          size="sm"
+          variant="secondary"
         >
           Compare unstaged hunks
         </OctantButton>
@@ -252,16 +259,27 @@ export function CodeSelectedHunks(props: CodeSelectedHunksProps) {
           disabled={pending}
           onClick={() => void refresh("staged")}
           type="button"
-          variant="outline"
+          size="sm"
+          variant="secondary"
         >
           Compare staged hunks
         </OctantButton>
       </div>
-      {pending ? <p role="status">Waiting for checkout…</p> : null}
-      {message === undefined ? null : <OctantAlert tone="neutral">{message}</OctantAlert>}
+      {pending ? (
+        <p className="oct-meta" role="status">
+          Waiting for checkout…
+        </p>
+      ) : null}
+      {message === undefined ? null : (
+        <OctantAlert layout="row" tone="neutral">
+          {message}
+        </OctantAlert>
+      )}
       {shown === undefined ? null : (
         <>
-          <h2>{shown.comparison.scope === "unstaged" ? "Index → Working tree" : "HEAD → Index"}</h2>
+          <h2 className="oct-section-label">
+            {shown.comparison.scope === "unstaged" ? "Index → Working tree" : "HEAD → Index"}
+          </h2>
           <p>
             {shown.comparison.scope === "unstaged"
               ? "Stage or reverse selected unstaged hunks. Other staged work is kept."
@@ -333,6 +351,7 @@ export function CodeSelectedHunks(props: CodeSelectedHunksProps) {
             <OctantButton
               disabled={pending || selected.length === 0 || props.executionPolicy === "plan"}
               onClick={() => void apply(shown.comparison.scope === "staged" ? "unstage" : "stage")}
+              size="sm"
               type="button"
             >
               {shown.comparison.scope === "staged" ? "Unstage" : "Stage"} selected hunks
@@ -341,8 +360,9 @@ export function CodeSelectedHunks(props: CodeSelectedHunksProps) {
               <OctantButton
                 disabled={pending || selected.length === 0 || props.executionPolicy === "plan"}
                 onClick={() => setConfirming(true)}
+                size="sm"
                 type="button"
-                variant="outline"
+                variant="secondary"
               >
                 Reverse selected hunks…
               </OctantButton>

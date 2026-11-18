@@ -116,7 +116,7 @@ describe("answering a child beside its parent", () => {
       <ChildRunRequests client={api} threadId={threadId} entries={entries} disconnected={false} />,
     );
     await userEvent.click(await screen.findByRole("button", { name: "Allow" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("response could not be confirmed");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not confirm your answer");
     await userEvent.click(screen.getByRole("button", { name: "Allow" }));
     expect(api.decideApproval).toHaveBeenCalledTimes(2);
     await waitFor(() =>

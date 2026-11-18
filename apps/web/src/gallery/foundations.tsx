@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Folder, GitBranch, Search } from "lucide-react";
+import { Check, ChevronDown, Folder, GitBranch, Search } from "../ui/icons";
 import { useEffect, useState, type CSSProperties } from "react";
 import { MARK_TICK_STROKE_WIDTH } from "../ui/IconDefaults";
 import { Section, Specimen } from "./Specimen";
@@ -243,7 +243,7 @@ function TickCell(props: { readonly sizeKey: unknown }) {
 export function IconScale(props: { readonly sizeKey: unknown }) {
   return (
     <Section
-      caption="The four sizes the icon-scale contract allows, at the one 1.5 stroke the app sets for every icon, and the heavier tick stroke for a tick inside a small filled mark; the size and stroke printed are measured from the drawn svg."
+      caption="The four sizes the icon-scale contract allows, at the one 2 stroke the app sets for every icon, and the heavier tick stroke for a tick inside a small filled mark; the size and stroke printed are measured from the drawn svg."
       id="icons"
       title="Icon sizes and stroke"
     >

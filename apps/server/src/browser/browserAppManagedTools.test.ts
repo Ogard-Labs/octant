@@ -113,7 +113,11 @@ describe("createBrowserAppManagedTools", () => {
     expect(tools.definitions.map((definition) => definition.name)).toEqual(["octant_browser"]);
     const result = await tools.execute({
       name: "octant_browser",
-      inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com/path" }),
+      inputJson: JSON.stringify({
+        operation: "navigate",
+        url: "https://example.com/path",
+        profile: "personal",
+      }),
     });
     expect(result).toMatchObject({
       isError: false,
@@ -253,7 +257,11 @@ describe("createBrowserAppManagedTools", () => {
       });
     const missing = await make().execute({
       name: "octant_browser",
-      inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com" }),
+      inputJson: JSON.stringify({
+        operation: "navigate",
+        url: "https://example.com",
+        profile: "personal",
+      }),
     });
     expect(missing.result).toEqual({ error: "browser-approval-required" });
     const planned = await make("plan").execute({
@@ -361,7 +369,11 @@ describe("createBrowserAppManagedTools", () => {
 
     const pending = tools.execute({
       name: "octant_browser",
-      inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com" }),
+      inputJson: JSON.stringify({
+        operation: "navigate",
+        url: "https://example.com",
+        profile: "personal",
+      }),
     });
     await vi.waitFor(() => expect(approval).toHaveBeenCalledOnce());
     currentModel = "model-b";
@@ -388,6 +400,7 @@ describe("createBrowserAppManagedTools", () => {
           authority,
           policy: {
             profileMode: "isolated",
+            profile: { kind: "personal" },
             allowedOrigins: ["https://example.com"],
             credentialFieldProtection: true,
             maxConcurrentTabs: 8,
@@ -422,7 +435,11 @@ describe("createBrowserAppManagedTools", () => {
     await expect(
       tools.execute({
         name: "octant_browser",
-        inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com" }),
+        inputJson: JSON.stringify({
+          operation: "navigate",
+          url: "https://example.com",
+          profile: "personal",
+        }),
       }),
     ).resolves.toMatchObject({ isError: false });
     currentModel = "model-b";
@@ -1051,10 +1068,8 @@ describe("octant_browser profile argument", () => {
     } = {},
   ) {
     const create = vi.fn(
-      async (input: {
-        policy: { profile?: unknown; allowedOrigins: ReadonlyArray<string> };
-        fullAccessAgent?: true;
-      }) => activeContext(input.policy.profile),
+      async (input: { policy: { profile?: unknown; allowedOrigins: ReadonlyArray<string> } }) =>
+        activeContext(input.policy.profile),
     );
     const page = options.page;
     const releaseThread = vi.fn(async () => snapshot());
@@ -1223,7 +1238,10 @@ describe("octant_browser profile argument", () => {
 
   it("withdraws a site approval for the open page when the page closes", async () => {
     const page = new AbortController();
-    const { run, act, request } = fixture({ inspect: openPage(), page: page.signal });
+    const { run, act, request } = fixture({
+      inspect: openPage({ kind: "personal" }),
+      page: page.signal,
+    });
     request.mockImplementationOnce(closesWhileAsked(page));
 
     expect(await run({ operation: "snapshot" })).toEqual({
@@ -1530,19 +1548,19 @@ describe("octant_browser profile argument", () => {
     } as never as BrowserAutomationSnapshot;
   };
 
-  it("opens a Private page at Full access without asking, free to navigate across origins", async () => {
-    const { run, create, request } = fixture({ fullAccess: true });
+  it.each([true, false])(
+    "opens a Private page without asking at any level, free to navigate across origins (full access: %s)",
+    async (fullAccess) => {
+      const { run, create, request } = fixture({ fullAccess });
 
-    const result = await run({ operation: "navigate", url: "https://example.com/a" });
+      const result = await run({ operation: "navigate", url: "https://example.com/a" });
 
-    expect(result.isError).toBe(false);
-    expect(request).not.toHaveBeenCalled();
-    expect(create.mock.calls[0]?.[0]).toMatchObject({
-      policy: { allowedOrigins: ["*"] },
-      fullAccessAgent: true,
-    });
-    expect(create.mock.calls[0]?.[0].policy.profile).toBeUndefined();
-  });
+      expect(result.isError).toBe(false);
+      expect(request).not.toHaveBeenCalled();
+      expect(create.mock.calls[0]?.[0]).toMatchObject({ policy: { allowedOrigins: ["*"] } });
+      expect(create.mock.calls[0]?.[0].policy.profile).toBeUndefined();
+    },
+  );
 
   it("navigates an open Private page to another origin at Full access without asking or reopening", async () => {
     const { run, act, request, create, releaseThread } = fixture({
@@ -1588,7 +1606,6 @@ describe("octant_browser profile argument", () => {
       expect.objectContaining({ origin: "https://example.com", profile: { kind: "personal" } }),
     );
     expect(create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual(["https://example.com"]);
-    expect(create.mock.calls[0]?.[0].fullAccessAgent).toBeUndefined();
   });
 
   it("opens nothing in a signed-in profile at Full access when the person declines the site", async () => {
@@ -1605,36 +1622,35 @@ describe("octant_browser profile argument", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it("still asks for each origin on a Private page below Full access, and holds it to that origin", async () => {
+  it("still asks for each origin on a signed-in page below Full access, and holds it to that origin", async () => {
     const { run, create, request } = fixture({ fullAccess: false });
 
-    await run({ operation: "navigate", url: "https://example.com/a" });
+    await run({ operation: "navigate", url: "https://example.com/a", profile: "personal" });
 
     expect(request).toHaveBeenCalledWith(
       expect.objectContaining({ origin: "https://example.com" }),
     );
     expect(create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual(["https://example.com"]);
-    expect(create.mock.calls[0]?.[0].fullAccessAgent).toBeUndefined();
   });
 
-  it("does not reopen a one-site Private page below Full access to reach another origin", async () => {
+  it("reopens a one-site Private page as an any-site page to reach another origin, at any level", async () => {
     const contextId = "50000000-0000-4000-8000-000000000001";
-    const { run, act, create, releaseThread } = fixture({
+    const { run, request, create, releaseThread } = fixture({
       fullAccess: false,
       inspect: activeContext(),
       modelBindings: new Map([[contextId, { modelId, authority: workAuthority }]]),
     });
 
-    await run({ operation: "navigate", url: "https://elsewhere.example/b" });
+    const result = await run({ operation: "navigate", url: "https://elsewhere.example/b" });
 
-    // The service refuses the navigation as `origin-not-approved`; the tool
-    // neither widens the page nor opens another.
-    expect(releaseThread).not.toHaveBeenCalled();
-    expect(create).not.toHaveBeenCalled();
-    expect(act).toHaveBeenCalledOnce();
+    expect(result.isError).toBe(false);
+    expect(request).not.toHaveBeenCalled();
+    expect(releaseThread).toHaveBeenCalledOnce();
+    expect(create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual(["*"]);
+    expect(create.mock.calls[0]?.[0].policy.profile).toBeUndefined();
   });
 
-  it("stops using a page that admits every site once the thread is below Full access", async () => {
+  it("keeps using a page that admits every site after the thread drops below Full access", async () => {
     const contextId = "50000000-0000-4000-8000-000000000001";
     const bound = () => new Map([[contextId, { modelId, authority: workAuthority }]]);
     const reading = fixture({
@@ -1642,25 +1658,31 @@ describe("octant_browser profile argument", () => {
       inspect: everySiteContext(),
       modelBindings: bound(),
     });
-    expect(await reading.run({ operation: "snapshot" })).toMatchObject({
-      isError: true,
-      result: { error: "browser-navigation-required" },
-    });
-    expect(reading.act).not.toHaveBeenCalled();
+    expect((await reading.run({ operation: "snapshot" })).isError).toBe(false);
+    expect(reading.act).toHaveBeenCalledOnce();
+    expect(reading.request).not.toHaveBeenCalled();
 
     const navigating = fixture({
       fullAccess: false,
       inspect: everySiteContext(),
       modelBindings: bound(),
     });
-    await navigating.run({ operation: "navigate", url: "https://elsewhere.example/b" });
-    expect(navigating.releaseThread).toHaveBeenCalledOnce();
-    expect(navigating.request).toHaveBeenCalledWith(
-      expect.objectContaining({ origin: "https://elsewhere.example" }),
+    const result = await navigating.run({
+      operation: "navigate",
+      url: "https://elsewhere.example/b",
+    });
+    expect(result.isError).toBe(false);
+    expect(navigating.request).not.toHaveBeenCalled();
+    expect(navigating.releaseThread).not.toHaveBeenCalled();
+    expect(navigating.create).not.toHaveBeenCalled();
+    expect(navigating.act).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          kind: "navigate",
+          target: "https://elsewhere.example/b",
+        }),
+      }),
     );
-    expect(navigating.create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual([
-      "https://elsewhere.example",
-    ]);
   });
 
   it("keeps reading a page that admits every site in Plan, where it cannot move", async () => {
@@ -1681,7 +1703,7 @@ describe("octant_browser profile argument", () => {
     await run({ operation: "navigate", url: "https://example.com/a" });
 
     expect(create.mock.calls[0]?.[0].policy.profile).toBeUndefined();
-    expect(request.mock.calls[0]?.[0]).not.toHaveProperty("profile");
+    expect(request).not.toHaveBeenCalled();
   });
 
   it.each(["task default", "explicit selector"] as const)(
@@ -2795,10 +2817,20 @@ describe("octant_browser in Plan mode", () => {
   });
 
   /** A Plan turn whose page is already open and approved for model-a. */
-  function planTools(options: { readonly modelId?: string } = {}) {
+  function planTools(options: { readonly modelId?: string; readonly signedIn?: true } = {}) {
     const turnModel = options.modelId ?? modelId;
-    const act = vi.fn(async () => page);
-    const create = vi.fn(async () => page);
+    const open =
+      options.signedIn === undefined
+        ? page
+        : ({
+            ...page,
+            context: {
+              ...page.context,
+              policy: { ...page.context?.policy, profile: { kind: "personal" } },
+            },
+          } as never as BrowserAutomationSnapshot);
+    const act = vi.fn(async () => open);
+    const create = vi.fn(async () => open);
     const releaseThread = vi.fn(async () => snapshot());
     const saveDownload = vi.fn();
     const request = vi.fn(async () => "denied" as const);
@@ -2815,7 +2847,7 @@ describe("octant_browser in Plan mode", () => {
       executionPolicy: "plan",
       resolveAuthority: () => planAuthority,
       browser: {
-        inspectThread: () => page,
+        inspectThread: () => open,
         create,
         act,
         saveDownload: saveDownload as never,
@@ -2898,8 +2930,8 @@ describe("octant_browser in Plan mode", () => {
     });
   });
 
-  it("still asks the person before another model reads the page, and reads nothing they decline", async () => {
-    const { tools, act, request } = planTools({ modelId: "model-b" });
+  it("still asks the person before another model reads a signed-in page, and reads nothing they decline", async () => {
+    const { tools, act, request } = planTools({ modelId: "model-b", signedIn: true });
     expect(await call(tools, { operation: "snapshot" })).toEqual({
       result: { error: "browser-approval-denied" },
       isError: true,
@@ -2954,6 +2986,75 @@ describe("octant_browser in Plan mode", () => {
       isError: true,
     });
     expect(act).not.toHaveBeenCalled();
+  });
+});
+
+describe("octant_browser when the person has taken the page over", () => {
+  const contextId = "50000000-0000-4000-8000-000000000041";
+  const open = snapshot({
+    status: "running",
+    context: {
+      contextId: contextId as never,
+      threadId,
+      actionId: "60000000-0000-4000-8000-000000000041" as never,
+      correlationId: "70000000-0000-4000-8000-000000000041" as never,
+      authority,
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["*"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 8,
+        sessionTimeoutMs: 600_000,
+      },
+      state: "active",
+      createdAt: "2026-11-17T10:00:00.000Z" as never,
+    },
+    observation: { url: "https://example.com/a", revision: 5 } as never,
+  });
+
+  function toolsHeldFor(hold: "take-over" | "sign-in") {
+    let held: BrowserAutomationSnapshot = { ...open, waitingForPerson: hold } as never;
+    const takeBack = vi.fn(() => {
+      held = open;
+      return held;
+    });
+    const act = vi.fn(async () => open);
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "chat",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map<string, BrowserModelBinding>([[contextId, { modelId, authority }]]),
+      executionPolicy: "approval-gated",
+      resolveAuthority: () => authority,
+      browser: {
+        inspectThread: () => held,
+        create: vi.fn(),
+        act,
+        releaseThread: vi.fn(async () => snapshot()),
+        takeBack,
+      },
+      uuid: () => crypto.randomUUID(),
+    });
+    return { tools, takeBack, act };
+  }
+  const read = (tools: ReturnType<typeof toolsHeldFor>["tools"]) =>
+    tools.execute({ name: "octant_browser", inputJson: JSON.stringify({ operation: "snapshot" }) });
+
+  it("takes back a page the person took over and runs the call, but keeps waiting for a sign-in", async () => {
+    const takenOver = toolsHeldFor("take-over");
+    expect((await read(takenOver.tools)).isError).toBe(false);
+    expect(takenOver.takeBack).toHaveBeenCalledOnce();
+    expect(takenOver.act).toHaveBeenCalledOnce();
+
+    const signingIn = toolsHeldFor("sign-in");
+    expect(await read(signingIn.tools)).toMatchObject({
+      isError: true,
+      result: { error: "browser-waiting-for-person" },
+    });
+    expect(signingIn.takeBack).not.toHaveBeenCalled();
+    expect(signingIn.act).not.toHaveBeenCalled();
   });
 });
 

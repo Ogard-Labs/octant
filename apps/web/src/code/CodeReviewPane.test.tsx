@@ -69,7 +69,7 @@ describe("CodeReviewPane", () => {
         }),
       ),
     );
-    expect(screen.getByText(/Local only/i)).toBeVisible();
+    expect(screen.queryByText(/No local findings/i)).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /publish|approve|merge/i }),
     ).not.toBeInTheDocument();

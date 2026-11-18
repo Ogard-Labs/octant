@@ -93,7 +93,7 @@ row has one control where it had a name and an icon. Elsewhere it is a small
 icon after the Project (or in the leading cell). Its name is its tooltip and
 its accessible name. It opens one menu above the row from its leading edge,
 drawn as every other menu the row opens: the same edge, corner and
-4px inset, 288px wide and never wider than the line, with rows 30px tall that
+4px inset, 288px wide and never wider than the line, with rows 28px tall that
 answer the pointer across their whole width. A row is its name leading, and at
 the trailing edge its current value in muted ink and its arrow. The level in
 force heads the menu, its name over where it came from ("Matches your
@@ -183,6 +183,28 @@ it is current while that start screen shows. The `home` keybinding
 screen's composer scope, so its unsent text comes back with it. Before Home,
 the start screen had no way back once a person left it.
 
+**A new task takes the whole window.** Started while the window shows a split,
+New task (the row, the band's button, the key, the palette, a Project's own
+New task) leaves its draft as the mode's only pane: the other panes close in
+the same server step, so nothing is drawn in between, and their threads stay
+in the list. A zoom on one pane ends with the split. Opened into one half, the
+draft stood beside a thread the person had not asked to keep in view, and
+half a window is not where a task starts. Every other open keeps the rule
+under [Panes and content navigation](#panes-and-content-navigation): it
+replaces one pane.
+
+**New thread** also leads the sidebar's list as a row (28px, the control radius,
+a 16px icon, the label and the `new-thread` key cap at its right in the meta ink),
+beside the band's compose button; both run the same action. The command palette
+(`command-palette`, Mod+K by default, named in the sidebar Search button's
+tooltip) lists, besides threads, the pages the rail and sidebar open (Home,
+Inbox, Agents, Artifacts, Projects, and in Work and Code Board and Automations),
+every Settings page that needs no native capability, New thread, Show or hide
+the sidebar, and the dock tools the thread can open. In the Activity feed the
+newest group is open, so a feed whose only group is Earlier is never a blank
+column. Group headings in the sidebar are 12px in the meta ink with a 14px
+chevron and the count as a right-aligned number.
+
 Projects opens its searchable directory in the main workspace. Selecting a Project
 replaces that directory with the Project overview; Projects in primary navigation
 returns to the directory. Neither view adds a second sidebar. Other destinations
@@ -226,7 +248,18 @@ without such an open find no icon), it is a regular file of at most 256 KB, and 
 its extension (PNG and ICO signatures; an SVG must open as an SVG document). The
 host serves it on the authenticated Project API at `GET /api/projects/{id}/icon`
 with `nosniff`, a content security policy that forbids script, and an ETag, and
-answers a plain 404 when there is none. The renderer draws it as an `<img>` at
+answers a plain 404 when there is none. A person can choose the icon instead: the
+Project page's actions menu offers Change icon… (the desktop's native file
+picker; disabled with its reason in a browser), Use found icon, and Remove
+custom icon. The chosen PNG, SVG or ICO (256 KB at most, same checks) is
+copied into the host's own data folder and served before the folder's icon,
+over `PUT` and `DELETE` on the same path from a window on this host that can
+reach the Project; the original file is never read again, and a refusal's
+reason shows in the page's status line, under the buttons, so New thread does not
+move. The page's cards follow one family: a 14px title row with a one-line status
+or action at its end, 12px one-line descriptions with the full rule in a
+tooltip, one primary button per view, and Manage panels that open as one inset
+section under their row with the row's label not repeated. The renderer draws it as an `<img>` at
 the row's own icon size (a step of the [icon scale](../../DESIGN.md#icons)) with a small radius; it never
 inlines SVG markup. The picture is fetched once per Project per session, not
 per render or per navigation poll. The row's letter tile or folder glyph shows
@@ -240,20 +273,32 @@ The icon source belongs to the window's current host and credential. Replacing
 either or unmounting its provider cancels pending icon requests and revokes its
 object URLs; a late answer cannot retain a blob after that lifetime ends.
 
-The Project overview is one reading column in the 880px measure, starting
-below the title band. The header sits on the page: the Project tile at 40px
-(the colour picker), the name as the editable title with the kind ("Code
-Project") as its subtitle, and the actions at the right edge, New thread in
-the neutral secondary paint beside the ghost Relink folder and Archive
-Project. Everything else reads on cards in the Settings section recipe: one
-card for the Project's folders (the main folder first, labelled Main directory
+The Project overview starts below the title band. The header sits on the
+page: the Project's own icon, or its colour tile where the folder has none, at 24px (the colour picker), the name as the editable
+title, and one quiet line under it, the kind ("Code Project") then the folder
+read from home as `~/…`. The one visible action is **New thread** in the
+neutral solid paint; **Relink folder** and **Archive Project** (Archive on a
+Chat Project) wait in a **More Project actions** menu at its right, and
+Archive keeps its confirmation. When the Project's folder is unavailable,
+**Choose new root** stays beside New thread, because it is then the remedy.
+At 880px of page width and up the page has two columns: the main column holds
+Threads, then Context, then Access and limits, and a 300px side column holds
+the Repository card (Folders on a Work Project), then Planner and Starting
+workers. Below that it is one column in the order Threads, Context, Access and
+limits, Repository, Planner, Starting workers. The side cards float beside the
+main column rather than sharing rows with it, so a short card never stretches
+to the list's height and Context follows Threads whatever the side's height;
+in the source the planner cards therefore precede the list. Cards are the
+Settings family: a 12px radius, a 2% ink fill, a hairline. The Repository card
+holds the project's folders (the main folder first, labelled Main directory
 or Main repository, in mono, read from home as `~/…` with the full path on
-hover and for screen readers, and its availability on the first row; then
-each extra folder as an Extra folder row with Remove; then one line saying
-extra folders get the main folder's access while checkouts and Git stay in
-the main folder (a terminal or saved action can start in any folder), and **Add folder…**, which opens the native folder
-picker on desktop and the host folder browser elsewhere; then what the
-binding grants), then labelled groups. A refused folder (one above home, a
+hover and for screen readers; then each extra folder as an Extra folder row
+with Remove; then one line saying extra folders get the main folder's access
+while checkouts and Git stay in the main folder (a terminal or saved action
+can start in any folder), and **Add folder…**, which opens the native folder
+picker on desktop and the host folder browser elsewhere), then the folder's
+availability as a dot and a word, then one line on what the binding grants
+(said once; the Git sentence is not repeated). A refused folder (one above home, a
 system or credential folder, one inside or around another folder of the
 Project) shows the host's reason on the card. The home folder itself shows the
 host's warning, naming that threads may read and change every file in it while
@@ -265,10 +310,18 @@ files after the main folder's, each file by its own name with its folder's
 full path beside the size (in Code, each extra folder is a tree of its own beneath the checkout's, headed by its last component, and its files open in the editor), and the Overview's folder list adds each extra
 folder's top level labelled with the folder's name. Rules for what an extra folder grants are
 in [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders). Threads are rows
-in one card: the title alone on its line, then the state chip, the approval
-posture as quiet text (it is a standing setting, not a state or a control, so
-it takes no chip), and facts on one line beneath it, then Details. A Work
-Project's thread list takes the same labelled card. Settings
+in one card. A row holds the title, the status as a small dot and a word in
+a column of its own (the dot is filled for in progress, hollow for ready, warm
+for waiting, cool-grey for done, red for interrupted; the word always says it),
+and under the title one quiet line of branch, change size (`+6 −0`) and age,
+with the New activity, Follow-up and Pinned tags. **Details** holds the rest:
+approval posture, the full change count with staged and committed-ahead, checks,
+review, pull request, agents, recovery, why the thread is blocked, the
+worktree, delivery and last activity. An empty list says so and offers **New
+thread**. A Work Project's thread list takes the same labelled card. Settings
+rows keep a 13px label, a one-line 12px description (a longer explanation is the
+description's tooltip and its accessible description, never a paragraph) and the
+control at the right, with switches in neutral ink. Settings
 rows split into **Context** (Memory, Instructions ([Octant instructions](octant-instructions.md#settings)), Design system on a Work or Code Project ([Project design systems](design-systems.md#the-design-system-panel)), Brand kit, Canvases) and **Access and
 limits** (Provider access, Guardrail level, Developer tools on a Work
 Project, Disposable desktop, Status file, Spend ceiling); a group with no
@@ -422,7 +475,7 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   with what it limits and its default
   ([Coordinator threads: Bounds](coordinator-threads.md#bounds)). The settings
   sat above the composer as a select and three number fields until 2026-11-15;
-  most people keep the defaults, and the box for the work came after them. A Code thread's row menu has **Make coordinator**, a submenu
+  most people keep the defaults, and the box for the work came after them. A thread's row menu keeps its everyday actions on top (Pin in pane, Pin, Rename; Mark as read or unread, Mark done, Put away, Snooze; the pull-request destinations) and files the rest under **More**, with Archive last and alone (maintainer request, 2026-11-16). A Code thread's row menu has **Make coordinator**, a submenu
   with the same worker-level choice, or **Stop
   coordinating** on a coordinator (never on a worker); on a coordinator
   **Coordinator limits…**, which opens the same dialog with the three bounds
@@ -602,7 +655,10 @@ the shelf's `data-shelf` value stays `completed`, separate from its label.
 The **Review page** lists the threads the sidebar's To review count counts, by
 the same predicate (`isWaitingForReview`: unread, not working, not on a shelf),
 so the tile's number and the page's rows never disagree. A Code thread's
-checkout diff remembers Unified or Side by side in this window; Settings ›
+checkout diff remembers Unified or Side by side in this window, set from the Review bar's
+**More review actions** menu together with Ignore whitespace (maintainer request,
+2026-11-16; the menu's button wears a dot while either is off its default, and
+the menu offers Reset); Settings ›
 Code supplies the default only while that thread has no stored choice. Rows run oldest
 first, by the host's reported finish time where it has one. The detail panel
 reads the thread's last reply, the Code board's check facts, an Octant-run
@@ -653,7 +709,7 @@ need a stable answer identity before this control can apply to them.
 
 The central workspace is one persistent recursive
 split tree. A leaf holds exactly one surface — a thread, a draft, a Project
-overview, a utility surface, or a mode welcome. A pane retains navigation references for conversations, files, previews, and canvases; selecting a
+overview, a utility surface, or a mode welcome. A pane retains navigation references for its one conversation and for the files, previews, and canvases opened in it; selecting a
 tab reopens that surface through the authoritative command path. Image creation
 and revision occupy pane-owned tabs whose drafts remain mounted while switching
 back to the conversation. Opening the same content selects its existing entry; closing active content
@@ -681,9 +737,9 @@ Thread titles appear once in the title row, and the row shows the thread's
 current title: a pane stores the title the thread had when it opened, so the
 shell reads the title from the navigation rows instead, and a rename made in
 any window reaches every open pane. A thread pane's title row is its
-drag handle. Its text starts on the left edge of the thread's text column
-below (see Alignment in the design system), so the title reads one line down
-into the transcript: a breadcrumb (the Project in meta text, a slash, and the
+drag handle. Its text starts 20px after the stage's left edge (see Window frame in the
+design system), the thread column's own inset, and does not move when a
+thread opens or the dock opens: a breadcrumb (the Project in meta text, a slash, and the
 title), then the environment mark (a small neutral tile holding a laptop glyph
 when the thread runs on this computer, a cloud glyph and the host's name when
 it runs on another host) and the pull-request chip. With content tabs open the
@@ -714,13 +770,19 @@ geometry and close-control presentation are shared with dock tools under
 
 These tabs add no persisted layout or authority.
 
-**Opening into tabs.** A single click on a sidebar thread opens it in the
-active pane in place: it takes over the pane's open tab unless that tab was
-kept, so browsing threads does not grow the tab row. A double click keeps the
-thread as a tab of its own, and so does a later double click on its tab; a
-kept tab stays when another thread opens in the pane, which then opens beside
-it as a new tab. A tab opened from anywhere else (a link, a search result, a
-drop) is kept.
+**One conversation to a pane.** A thread opened in a pane, from the sidebar,
+a link, a search result or a drop, takes the place of the thread the pane
+showed: the title row never holds a second thread. Threads live in the
+sidebar's list, and Back and Forward walk the ones a window has shown. Until
+2026-11-16 every thread a pane had shown stayed as a tab (a single click
+replaced a previewed one, a double click kept it), so the title row grew a
+second list of threads beside the sidebar's and read as a browser's tab strip
+(maintainer request). Tabs remain for what is opened over a conversation: a
+file, a preview, a canvas, image creation. They keep their place when another
+thread opens, and a row restored from storage that still holds several
+threads keeps the one the pane shows. A file, preview or canvas opened over a
+thread always opens beside it, so the row keeps the way back to the
+conversation.
 
 A thread row drags out of the sidebar the same way from either arrangement,
 Status or the Project tree. Chat and Work threads share that list but not a
@@ -731,9 +793,9 @@ following it to that mode, where the host would refuse to place it.
 **Moving tabs and showing them side by side.** A tab drags the way a pane's
 title row does, through the same drop rules: dropped on another pane's edge it
 splits that pane and opens there, dropped on a pane's centre it opens in that
-pane, and any tab of a pane that holds more than one may split its own pane,
-so a tab dragged to its pane's right edge lands beside the thread the pane
-shows. The pane's open tab does so too: the pane first shows the neighbour a
+pane, and any tab of a pane that holds more than one (its conversation and the
+files, previews or canvases over it) may split its own pane, so a file's tab
+dragged to its pane's right edge lands beside the thread the pane shows. The pane's open tab does so too: the pane first shows the neighbour a
 close would show, then the tab is placed. (Carried with its pane, the open tab
 had no drop target anywhere in the pane it was in, and dropped on another pane
 it took the whole pane, its other tabs with it.) A pane's only tab moves its
@@ -864,6 +926,36 @@ client. A Code file additionally exposes the language-server outline and
 selection-to-agent review. Language capabilities and launch authority remain
 owned by [Language services](language-services.md).
 
+In a Code thread a file opens inside the **Files tool**, in the dock beside the
+thread, and a plain click never replaces the thread with a Code file tab. The
+tool is a file viewer: the open files (name and ×) are the tabs of its pane bar,
+where Refresh and the tree toggle are the bar's actions; under the bar a
+breadcrumb path in muted ink with the checkout's name at its end,
+then the editor filling the tool, and the file tree as a column 260px wide
+at the right with its filter field on top in a 32px row on the pane's 12px inset.
+With no file open the editor's place holds one quiet centred line. The tree
+toggle used to stand in a row of the editor's column, and in a pane under 480px
+that column collapsed to the toggle's 40px and stood as an empty gutter left of
+the tree (measured 2026-11-15). A single click on a tree row previews
+the file in the one italic tab that the next single click replaces; a double
+click on the row or the tab, or an edit, keeps the tab. In a tool narrower than
+480px the tree and the editor take turns: the tree fills the pane, and choosing a file closes it. The editor draws no eyebrow and no
+rows of text buttons: Save (only while the buffer is dirty) and Open externally
+are icon buttons in the tool's bar, and Commands, Find, Replace, Format, Go to
+line, Outline, Send selection to agent, Editor settings, Find references in
+checkout, Preview rename, Find quick fixes and **Open in main area** are items of
+one **File actions** menu there, with Monaco's own shortcuts unchanged. Open in
+main area is the only way to open a file as a workspace Code file tab, which
+draws the same actions in a slim header of its own. Tree rows are 28px, 13px
+text at weight 500 in the primary ink, with 12px of indent per level. A folder is
+a 12px muted chevron (rotated when open) and its name, with no folder icon; a
+file is a 16px glyph by type (code, document, image, file) and its name.
+Dotfolders, dotfiles and ignored folders (`node_modules`, `dist` and the like)
+are drawn in the muted ink. Rows ellipsise long names, mark the selected file
+with the full-row selected fill, take a hover fill on the others, and end a changed file's row with a small dot (warning for modified,
+success for added) read from the host's Git observation; the incomplete-tree
+note is one muted line.
+
 Unsaved text is kept locally on the client, separately from pane references,
 messages and the host journal. Code recovery keys include the endpoint, checkout
 and file identity; Work recovery uses the authorized host, Project and a stable
@@ -898,19 +990,32 @@ file. Save remains the explicit disk write.
 
 ## Start-screen cards
 
-Every start screen shows one question and its composer. **New task**, in
-every mode, stops there, with the composer docked at the foot of the page.
-**Code Home**, where Code lands with nothing chosen, adds Code's prompt
-suggestions, one card area, and Code's agent home under the composer. No
-start screen has tabs or action tiles. These are the rules; each card's rows,
+Every start screen is one column in every mode: the question, its composer
+directly under it, then the mode's prompt suggestions (Code's four cards, on one
+line; Chat's starter chips before its first thread) and one calm list. Home,
+where a mode lands with nothing chosen, and New task, which is Home with the
+Project named, put the question and the composer in the same place. No start
+screen has tabs or action tiles. These are the rules; each card's rows,
 wording, and reads are specified in [Start screen](start-screen.md).
 
 - **Paint order.** The composer paints first. The card area mounts on the frame
   after the first commit and each card begins its reads only then, so a start
   screen never waits on a card. A card that is off or unavailable is never
   mounted and reads nothing.
+- **One list.** Needs you, In progress, Your pull requests, Continue, and on
+  Code Open issues, in that order, each drawn only while it has rows and
+  separated by space, not boxes; rows have no card behind them. Each item shows
+  once (Needs you wins), at most five rows per section with a **See all** link to
+  the full page, and one quiet line with a next step when everything is empty.
+  The list draws once every source has answered, so nothing moves when a late
+  one lands. Cards that give it rows: Needs you, Working now, Running services
+  and Pull requests. Other cards (CI failures, Handovers, Computers) stay glass
+  cards in a grid under it. Customize is a **…** menu in the first section's
+  header. The ground behind the column keeps a fifth of its strength. See
+  [Start screen: The list](start-screen.md#the-list).
 - **Cards, in default order.** Needs you, Working now, Running services, Pull
-  requests, CI failures, and Computers, each on by default, on Code Home only.
+  requests, CI failures, and Computers, each on by default, on every mode's
+  home.
 - **Unavailable is hidden.** A card this window cannot read is hidden and left
   out of Customize rather than shown broken: Needs you without a
   pending-request reader (a remote window); Pull requests and CI failures
@@ -927,11 +1032,10 @@ wording, and reads are specified in [Start screen](start-screen.md).
   has not checked yet. Running services says it could not check rather than that
   nothing runs. Any other empty card shows one quiet line, never fake rows. A
   lone card spans the row.
-- **Row limits.** Needs you and Working now show at most five rows, then **+N
-  more** (Needs you opens the Inbox, Working now the Running view); Running
-  services five, then **+N more
-  listening**; Pull requests six, then **+N more** (Pull requests); CI failures
-  five, most recently failed first; Computers four, then **+N more**.
+- **Row limits.** Each list section shows at most five rows, then **See all**
+  (Needs you opens the Inbox, In progress the Running view, Your pull requests
+  the Pull requests page, Open issues the Issues page); CI failures five, most
+  recently failed first; Computers four, then **+N more**.
 - **Reads.** A card reads only what the window's own authority returns. Needs
   you and Working now read on mount and on change signals and add no timer;
   signals that arrive during a read become one more read once it lands. Pull
@@ -953,40 +1057,120 @@ wording, and reads are specified in [Start screen](start-screen.md).
   a thread; it answers nothing. See
   [Needs you across surfaces](start-screen.md#needs-you-across-surfaces).
 
+**Inbox GitHub rows.** An assigned pull request or issue wears the state glyph
+and colour the pull request and issue lists use (open green), named for
+assistive technology ("Open pull request", "Open issue"). The meta line reads
+`#number · owner/repository`, then "Review requested" for a review request,
+then the age. The unseen dot sits in a fixed slot at the row's trailing edge, so
+reading an item changes a colour and moves nothing. The assigned-work read
+lists open items only. A draft pull request carries the search result's draft
+flag (optional, so an older host still decodes) and wears the draft glyph in
+grey, named "Draft pull request"; merged and closed cannot occur.
+
+### List pages and empty states
+
+Running and Done today are sidebar lists and To review is a master-detail
+page with its own keys, so they keep their own layouts; they do not render the
+Inbox row. An empty list page ends in one action: Inbox, To review and Agents
+offer Start a thread; Artifacts, the Image generator and Agents describe in two
+short lines what the page is for beside their existing add button. The
+Projects list shows each Work or Code Project's thread count at the trailing
+edge in place of "Available"; only a state that needs the person (Archived,
+Relink required, Unverified) is a word. Issues open on the current Project's
+GitHub repository when the Project has one and the host has used it. The
+Agents toolbar is one row: search, one Filter menu (Status and Mode as two
+labelled groups), the List and Graph switch, and a "…" menu that holds Save as
+Canvas. A run's Open thread shows while the pointer or focus is on its row and
+always on touch, keeping its space; pressing the row still opens the run's
+detail (maintainer request, 2026-11-16). The Artifacts toolbar is search, one
+Filter menu (Kind, Project, Mode and Tag as radio groups), the gallery and list
+switch, and the tabs. Automations has one "New automation" button in the page
+header; it opens a menu of Describe with Octant and Create manually, each with
+its sentence as the item's description, and the two-card creation section is
+gone. The toolbar is search, the List and Calendar switch, and one Filter menu
+(Status, Group, Sort, Mode and Show completed). Every Filter button reads
+"Filter" with the number of non-default choices, says it in its accessible name
+("Filter, 2 active"), and its menu ends with Reset filters while anything is on.
+The Automations notice about notification delivery sits under the list, and the
+suggested templates are a three-column grid of equal-height cards, kept in the
+empty state beside the same single button. The Automations list query carries
+each Automation's last seven runs (oldest first) and the 30-day totals over the
+caller's visible Automations, so the page shows a run strip per row and a header
+summary without a request per Automation (maintainer request, 2026-11-17).
+
+The Automations list is one table under a quiet head of column names
+(Automation, Last 7 runs, Next run, On). A row leads with a mark for what
+starts the routine (a clock for a schedule, a hook for an event, a folder for
+new files), then its name and one plain line of what it runs on and its
+Project, the last seven runs as small blocks (green completed, red failed or
+interrupted, grey running or skipped, outlined where there is no run yet, oldest
+on the left), the next run as a day and time with "in 21h 55m" under it ("On
+event", "On new files", "Paused" or "Done" where there is no time, with when it
+last ran), its on switch, which pauses and resumes it, and a "…" menu (Open
+details, Run now, Archive). A paused routine's name, mark and runs step back
+while its switch stays at full strength. The toolbar shows the 30-day totals
+("25 of 100 enabled · 299 runs in 30 days · 49.8% succeeded") and New
+automation is the page's primary button. In a narrow list the runs column gives
+way first; the trailing columns have fixed widths, so nothing moves when a run
+arrives or the switch flips (maintainer request, 2026-11-17).
+
+The Agents List view and the Artifacts list view are tables of the same kind:
+one quiet head of column names over the rows, each row one press that opens the
+item and is named for it, and the row's other cells read as its description.
+Agents shows Agent (the task, with its thread, mode, Project, and provider and
+model on a quiet second line), Status, Started, Run time and Usage. Run time
+counts only while a run is live: a run summary has no end time, and its last
+update moves when its result is acknowledged or delivered. Usage the provider
+did not report is left blank, never zero, and an estimate says Estimated. Artifacts shows Name (with Project and kind under it), Tags, Shared
+and Edited, with sync state, Export and Versions in a trailing cell. Controls
+that act on a row (Open thread, Acknowledge, tag editing, sync choices) sit
+beside the row's press, never inside it. In a narrow list the figure columns
+give way first, and their head cells with them (maintainer request,
+2026-11-17).
+
 ### Inbox page
 
-The Inbox opens as a few raised cards in one readable column, not as sections
+The Inbox opens as a few flat cards in one readable column, not as sections
 under rules.
 
-- **Title line.** "Inbox" as a display title (`--oct-text-2xl` at the strong weight, a modifier on the page title), and on
-  its baseline, in the meta ink, one sentence of state in the person's locale:
-  today's date and what waits ("Nothing is waiting on you.", "1 thread is
-  waiting on you.", "3 threads are waiting on you."), with the urgent count when
-  there is one. There is no greeting by time of day and no separate count line.
+- **Title line.** "Inbox" in the page title role (`--oct-text-2xl` at the strong weight, shared by every destination), and on
+  its baseline, in the secondary ink, one sentence of state in the person's locale:
+  today's date and what waits ("1 thread is waiting on you.", "3 threads are
+  waiting on you."), with the urgent count when there is one. An empty page has
+  no such sentence: its Needs you card already says nothing is there (maintainer
+  request, 2026-11-16). There is no greeting by time of day and no separate
+  count line.
   Refresh is a quiet icon button with a tooltip at the trailing edge.
-- **One column.** The content keeps a measure of 980px, left-aligned under the
-  title's inset; a wide window leaves ground, it does not stretch the cards.
+- **Columns.** The content keeps a measure of 980px, left-aligned under the
+  title's inset, and opens to 1240px in a window 1200px wide or more; a wide
+  window leaves ground, it does not stretch the cards. The To-dos page keeps the
+  same measure, so both pages end on one right edge; it has no card, so its
+  field, toolbar and list sit on the page itself.
 - **Cards.** **Needs you** is the left card and **GitHub**, **Linear** and
-  **Plan usage** stack to its right at about three to two (the list is the wider column), in one column when the
-  page's own width (a container query, not the window's) is under 720px. Each
+  **Plan usage** stack to its right: Needs you takes a 560px column when the page's own width
+  (a container query, not the window's) is 900px or more, and every card is one
+  column below that. Each
   card's label sits inside it at the top in the meta ink. The Needs you filters
   (All, Urgent, Decide, Stuck, Finished, with counts) are quiet chips at the
   trailing edge of that label row and filter only that card. An empty Needs you
-  says what will show up there in one sentence, with Open the Board as a quiet
-  text button beside it. Loading, empty and failed GitHub and Linear are one
-  sentence in their card.
+  says what will show up there in one sentence, with Start a thread as its one
+  quiet text button. A GitHub or Linear source still loading is one quiet
+  skeleton row, never a sentence that reads as an error; empty and failed are
+  one sentence in their card.
 - **Plan usage** lists each provider account that reports a plan window: its
   name, the share left on the plan usage meter and, where the reading carries
   it, when the window resets. It reads the host observation the composer and the
   rail already hold, adds no request, and is absent while no account reports a
   window.
+- **Inset.** A card's label, its rows' glyphs and text and its notes stand on one
+  16px inset, and a row's trailing items end 16px in, on the filters' right edge.
 - **Rows** in every card carry no rule between them; the row under the pointer
   takes the quiet hover fill with the row radius. Screen readers meet the title,
   the state sentence, Needs you, GitHub, Linear, then Plan usage.
 
 ## Tool lifecycles
 
-In current Code Review, **Select Git hunks** opens separate **Index → Working
+In current Code Review, **Select Git hunks** (an action in the toolbar's ⋯ menu) opens separate **Index → Working
 tree** and **HEAD → Index** comparisons. The selected unified hunk shows its
 file and both line ranges before Stage, Unstage or Reverse. Selection always
 uses exact whitespace, independently of the ordinary diff's display preference.
@@ -1009,27 +1193,53 @@ Each tile resolves its own availability against the active pane, and the dock
 still never shows another pane's content. All Browser tabs are pages of one
 Browser tool and share one tile. The layout is window-local presentation in
 local storage: it grants nothing, starts nothing, and the bottom panel never
-has one. Each tile has one bar, 32px: the tool's name (the Browser's bar is its page row),
+has one. Each tile has one bar, 32px: the tool's name (the Browser's and the Terminal's bar is their row of pages or sessions, one tab each even for a single page, then "+"; a tool alone has no bar, so the same row stands at the top of its body, and the row is never dropped in any layout),
 then the tool's own controls (navigation as words, actions as icons, status as
 text; they fold into a named view menu and then a More menu before the name is
-cut), with an Arrange menu (Move left, right, up and down where the caps allow, Show
-alone, Hide from view, and for the Browser and Terminal Minimise to card) and Close at its
-trailing edge; a tool that is open but not shown is marked on its button in the title band's
+cut), with an Arrange menu on the bar's context menu (right click, the menu key, Shift+F10 on a control of the bar, or Enter or Space on the bar itself, which is a Tab stop; never a button on the bar: Move left, right, up and down where the caps allow, Move
+left of, right of, above or below each other tile where the caps allow it and it changes
+something, Show alone, Hide from view, and for the Browser and Terminal Minimise to card) and Close at its
+trailing edge; a tool that is open but not shown is marked on its button in the thread header's
 tool row (a minimised tool is not a tile: its card stands for it, and its button says so).
 Stacked, a page showed four bars and named the tool
-three times. Every tile is a square pane that shares its edges with its neighbours and
-with the stage: no gap and no corner, one 1px line between two panes
-([DESIGN.md](../../DESIGN.md#depth-and-material) owns the material), and one
-under the title band along the top. The divider's hit area is 8px wide,
-centred on that line; it is empty at rest, shows the strong border while hovered
-and the meta ink while grabbed, and keeps no accent line after a click. At 960px and below the dock is a
-sheet over the page (a floating container with its own 12px corner) that holds
-one tool, so its tile is the same square pane with no neighbour: a tile is square
-and flat at every width, and no width gives one a corner, a rim or a gap. Columns stand side by side only when the tile area can give each 280px and
-otherwise stack. The thread keeps 440px beside two columns (560px beside one,
-from a 1100px window up), because at 560px two tools could never stand side by
-side in a 1440px window: with the sidebar open a second column widens the dock to
-about 620px, about 306px per column. Stacked columns stay resizable. A tool the bottom panel takes, or one
+three times. Every tile is a flat pane that shares its edges with its neighbours and
+with the stage: no gap, no corner of its own and no shadow, one 1px line between
+two panes ([DESIGN.md](../../DESIGN.md#depth-and-material) owns the material),
+and the framed panel's outline along the top and right, which clips the tiles to
+its rounded corners. Every split between tiles, vertical or horizontal, has a divider whose hit area is 8px wide,
+centred on that line, as the sidebar's is; it is empty at rest, shows the strong border while hovered
+and the meta ink while grabbed, and keeps no accent line after a click. A drag resizes
+the pair with minimum sizes, Escape abandons it, a double click returns the pair to an even
+split, and a focused divider takes the arrow keys (Shift for a larger step, Home and End for the
+ends of its range) and reports its share as `aria-valuenow`; the sizes are part of the
+window-local layout. Only the pair the person is dragging changes. A tile moves by its bar:
+dragging the bar over another tile marks the half of that tile (left, right, above, below)
+the drop would take, with one indicator and no other tile moving, and the Arrange menu does the
+same for the keyboard. A drop that would leave the tiles as they are, or that the caps refuse,
+shows no indicator. A native Browser page stays in the window while a divider is held: it follows
+the divider live, held 40px clear of the pointer on its own side so it never takes the drag, and
+it is placed at the final bounds when the divider is let go. Only dragging a tile or a tool button
+over the dock takes the page out of the window, because a native view cannot receive a drop.
+The page's bounds are sent one at a time, so a page taken out and put back is never removed after
+it was shown again. At 960px and below the dock is a
+sheet over the page (a floating container with its own 16px corner) that holds
+one tool, so its tile is the same flat pane with no neighbour: a tile is flat
+at every width, and no width gives one a corner of its own, a shadow or a gap. Columns stand side by side only when the tile area can give each 280px and
+otherwise stack, and a place beside a tile (a drop on its left or right side, or
+its menu's moves) is offered on the same test: the tool room the thread's
+minimum and Environment leave must hold two 280px columns and the dock's own
+handle (568px), so a place that is offered is never then drawn stacked. Where the window has
+960px of tool room two columns widen the dock to it (480px each); with less
+they share the room there is. Once the person drags the dock's edge the two
+columns follow that width, down to their floor (568px); before 2026-11-16 a
+dragged width under 960px was raised back, so the handle moved and the dock
+did not. The thread keeps its 560px minimum beside one
+column or two (from a 1100px window up), so a second column never takes the
+thread under it or moves Environment. Until 2026-11-16 a place beside needed the
+whole 960px, which refused the drop on a 1920px screen with the sidebar and
+Environment open (716px of tool room) and left no way to stand a tool up as a
+narrow column. A newly opened tool still goes below the focused one; only a
+person puts a tool beside another. Stacked columns stay resizable. A tool the bottom panel takes, or one
 that becomes unavailable, loses its tile and returns as a tab. Opening a dock tool leaves the bottom panel open; only a tool the panel
 already shows leaves it for the dock.
 The shell loads each tool through `dockModuleRegistry`; modules under
@@ -1165,13 +1375,47 @@ repository's other labels (a button adds one; no free-text label), a comment
 box, a reply box on each open review thread, and Close or Reopen pull request.
 A comment or reply says it posts under the person's name; a refusal is one
 alert line under the section, and, until a paired device uses the same controls
-(not built yet), it is told only the desktop window can do it. Rules and limits
+(not built yet), it is told only the desktop window can do it.
+
+**The Pull requests reading pane.** The destination reads a pull request beside
+its list; the dock's Review tool keeps the one-column arrangement above with
+the same actions and refusals. The pane has three regions. A tab row (Summary,
+Changes with "+added −removed" in success and danger ink, Timeline) carries, at
+its trailing edge, icon buttons (Open on GitHub, Copy link, Refresh), a quiet
+Open chat button, a **Merge** split button (primary; the chevron's menu picks
+Squash and merge, Merge commit or Rebase and merge, squash by default; Merge
+still asks first in an inline confirmation naming the reviewed head) and a "..."
+menu holding Close or Reopen pull request. Under it, the state pill with
+"repository #number", the title in the page-title role (26px, 600), one meta
+line (author, age, head → base) and, on Summary, the description as markdown at
+13px with a 720px measure; Summary holds no form. Changes lists commits, changed
+files and the diff. Timeline lists the reviews and comments, newest last, then
+the labels, review-thread replies, the comment form and the review form
+(Approve, Request changes with a note) at the end. The status column (260px,
+sticky) has small captions in the navigation-group role: Merge status (one
+sentence), Checks (failing first, View all), Reviews (each reviewer's latest
+state), Comments (a count that opens Timeline), linked threads, and Automatic
+actions as two compact switch rows whose sentence is a tooltip and still read to
+a screen reader. There is no Request reviewers action: no host command asks a
+reviewer. The text column (720px) and the status column (260px) sit together with a 32px gap on one grid
+that the tab row and the body share, so the tabs start at the text column's left edge and the
+actions end exactly on the status column's right edge (the actions are 2px apart and fit the
+column; none reaches past it), and switching a tab moves none of them. There is no divider line
+beside the status column. The block is centred in the pane, except where centring would leave
+more than 96px between the pane's edge and the text (a pane wider than 1204px, a window of about
+1900px or more with the sidebar open): then it sits 48px in from the pane's left edge, so the
+reading column stays near the list. The **Merge** control is one split button: the label and a
+20px chevron share the small button's height and radius, divided by one 1px line inside the
+accent fill. A description's lists keep their bullets and numbers. Where the pane is under 760px the status column folds under the title
+into columns on Summary and is not shown on the other tabs. Loading, an
+unavailable read and a missing detail are each one quiet line, not a card.
+Rules and limits
 are owned by
 [Architecture: modes](../architecture.md#modes-chat-work-and-code).
 The top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. A new Code task's pane, before its thread exists, keeps
 the control but starts with the dock closed, whatever the window's saved choice;
-opened there, its title band shows the common tools disabled ("Available once the
+opened there, its tool row shows the common tools disabled ("Available once the
 task starts") and its body says so. That show or hide belongs to the draft and is
 never saved as the window's choice. Once that start screen has a Project, the dock's body holds the
 Project's quick tools (Terminal and Browser; a server Project's are its
@@ -1180,13 +1424,58 @@ beside the start screen ([Start screen: Welcome screen](start-screen.md#welcome-
 the local window's Remote access switch, Local servers, Context, Changes,
 Outputs, Background tasks, Running now; see [Right dock and bottom panel](#right-dock-and-bottom-panel));
 its header is an empty band as tall as the title rail, and the tools are opened
-from the title band's **tool row**. At 961px and wider the row sits before the
-bottom-panel and dock toggles: one
+from the **tool row**: at 961px and wider it stands outermost at the end of the
+title band, above the Environment section, and it is the focused thread's row.
+Before it the band keeps the window's controls: Show sidebar, Back and Forward
+while the sidebar is hidden, the Open in and Project action slots, the Code
+start screen's uncommitted-changes count. It has no switch for the dock or the bottom panel:
+every tool is a panel that its button in the thread header's row opens, and that
+a person can move between the side and the bottom, so a window-level "show the
+side" or "show the bottom" switch no longer named anything (the side one only
+opened Review, 2026-11-16). The window has one row, and nothing moves it: not
+Environment or a tool opening or closing, not a change count or a Project
+action arriving beside it, not going from a thread to a new task. The pane
+draws it (it knows the thread and its tools) into a slot the title band offers,
+last in the band's trailing cluster; whatever stands at the window's top right
+(a pane's header, a tool tile's bar) already gives up the cluster's measured
+width. Under 640px of title band the row is one **Tools** menu button, read
+from the band and not from a pane's header, whose width the row itself
+changes. A destination page has no thread and so no row: the controls before
+it in the cluster then stand at the band's end, a move that happens with the
+page and never under a press on the row. A single pane and its Environment section are one box under one header,
+which runs on over the section and stops before the row. A split's other panes
+draw no row: the dock shows the focused thread's tools, so a press on a pane
+focuses it and the one row becomes that thread's. Until 2026-11-16 the row
+stood in the pane's header on the thread box's narrowest line, which kept it
+still but left it in the middle of the band with nothing open; each pane of a
+split had a row, and a resting one opened a tool for its own thread
+(maintainer request). A window with no title band slot (under 961px, or a pane
+drawn by itself) keeps that older arrangement: the row at the end of the pane's
+header, and a split's other thread panes with **their own row at rest**: the
+tools that thread's mode has (a Chat thread beside a Code thread offers no
+Terminal), each with the quiet open dot when that thread has it open in its own
+dock, none pressed, none draggable. Tools that depend on what only the focused
+thread reads (Plan, Delivery, Canvas, Document) are listed at rest only while
+that thread has one open. A press there focuses that pane and shows the tool
+for its thread, never closing one.
+Under 440px of header (the pane's width, or the run to the row's line where
+that is shorter) the row folds into one **Tools** menu button that
+lists every tool. The panes of a split keep 440px each beside the dock
+(`splitPrimaryMinimum`), so the tool region gives before a row folds; once the
+tool region is at its 280px the panes give and their rows fold. Measured
+(1800px window, two threads, Files open, 2026-11-16): the panes stood 409px
+each with both rows folded, and are 440px each with full rows beside a 577px
+tool region. A start screen has no title, so its header is the row alone,
+laid over the band. Closing the last open tool closes the dock, so the thread
+takes the window back, and the row stays where it is, and pressing any tool's button opens the dock again. The row is one
 icon button for each of Environment, Terminal, Review, Browser, and Files, in that order,
 then **More tools**, a menu of every other tool the thread can use, grouped as the
 launcher groups them, each a checked item while that tool is shown, and after the
 tools the pull requests the thread is already about under "Relevant to this thread". A button is present
-only where the thread can use the tool. Pressing one opens the tool as a tile beside the
+only where the thread can use the tool, except **iOS Simulator**, which is always listed in
+Devices so the menu keeps one size: where the Project has no iOS app it is greyed and not
+pressable, and its tooltip says "This Project has no iOS app" ("Choose a Project with an iOS
+app" when no Project is chosen). Pressing one opens the tool as a tile beside the
 focused one (alone when the dock is empty) and widens and shows the dock; pressing it
 again closes the tool (the Browser closes every page), except that a pressed Browser or Terminal button
 minimises its tool to a card on the dock's shelf instead (see **Minimised tools**), so the page or
@@ -1195,13 +1484,17 @@ tool is on screen, in the dock or in the bottom panel's front tab while the pane
 the tool is open but not shown (a bottom-panel tool behind the front one included; pressing it brings it forward). When both columns are full a tool that is not shown
 is not refused: its press shows it in the focused tile's place, the replaced tool stays
 open but hidden, and the button says "Shows in place of <the focused tool>". On a new Code task
-before its thread exists the buttons are disabled with "Available once the task starts". A press leaves focus
+before its thread exists the buttons are disabled with "Available once the task starts", except that once the
+start screen has a Project, Terminal and Browser read **Project terminal** and **Project browser**
+and are enabled (a Project on a server offers the terminal only): pressing one opens the dock straight into the Project's own
+terminal or browser, no thread involved; the open one reads pressed, pressing it again closes the dock and
+stops the shell, and pressing the other switches. A press leaves focus
 on the button. The row is one toolbar named "Tools" with one Tab stop and arrow-key
-movement, and its width is part of the trailing cluster the pane header reserves.
+movement, and it keeps its own width in the header: the title gives way first.
 The five tools with a button of their own (Environment, Terminal, Review, Browser,
 Files) have a context menu on that button (right click, the menu key or Shift+F10): Show
 below for an open tool that is not on screen, Show alone, Hide from view and the
-moves the caps allow for a tile, Minimise to card on Browser and Terminal, New Terminal on Terminal and New Browser page on
+moves the caps allow for a tile, **Move to bottom panel** on a shown tool the panel can hold (the same move as the drag to the thread's foot, absent in the drawer and in Chat; on a tool's own first tab only, since the panel holds one of each tool, and never on Browser, whose tab beside cannot close without ending the thread's session), **Move to the side** on a tool the bottom panel holds (it leaves the panel's tabs, and the panel stays for the tools still in it), Minimise to card on Browser and Terminal, New Terminal on Terminal and New Browser page on
 Browser, and Close. A minimised tool's button is not pressed, carries the dot, and reads "Minimised to a card"; pressing it restores the tool. Each such button is also the drag source for an open tool: dropped on the dock body, the right third
 shows the tool beside, the lower third below, and anywhere else replaces the
 focused tile. A tool opened from More tools has neither: it is shown beside the
@@ -1221,7 +1514,7 @@ memory used and total, network in and out, disk throughput, disk space, GPU
 utilisation, and **Energy**. The readings are plain rows on the dock's own
 surface with a hairline between them, never boxes on a fill of their own, and a
 history line appears once it has two samples to join. Each reading is drawn
-only when that host reports it; a host with no battery says "No battery", and a figure the host cannot read
+only when that host reports it; a host with no battery draws no Energy row (maintainer request, 2026-11-16), and a figure the host cannot read
 is left out rather than drawn as zero. The tool keeps the last five minutes of
 samples in the window (nothing is stored), reads about every five seconds only
 while it is mounted and the window is visible, never overlaps reads, abandons one
@@ -1320,18 +1613,19 @@ card brings it back as a tile of its own (see **A card**). The state, with the
 place each minimised tool stood in, is window-local presentation stored with the
 thread's open tools; the bottom panel never has one.
 
-- **Ways in.** A tile's **Arrange <tool>** menu offers **Minimise to card** for the
-  Browser and the Terminal only, after **Hide from view**. The Browser and
-  Terminal buttons in the title band's tool row offer the same item on their
+- **Ways in.** A Browser or Terminal pane's bar has a **Minimise <tool>**
+  button (a picture-in-picture glyph) before Close: one press turns
+  the pane into its card. A tile's **Arrange <tool>** menu offers **Minimise to
+  card** for the same two tools, after **Hide from view**. The Browser and
+  Terminal buttons in the thread header's tool row offer the same item on their
   context menu (right click, the menu key or Shift+F10), after the placements
   and before New Terminal or New Browser page. Pressing a pressed Browser or
   Terminal button minimises it instead of closing it, so the page or shell keeps
   running in view on the shelf; closing stays the tile bar's **Close** and
   **Close <tool>** on the button's menu, and every other tool keeps its rule
-  that a press on a pressed button closes it. The tile bar has no button of its
-  own for it, so a tile still has one bar and one name. Minimising never closes
+  that a press on a pressed button closes it. Minimising never closes
   or stops the tool and never sends anything to a page or a shell. Where the
-  tile's Arrange menu minimised it, focus goes to the card's expand control,
+  tile's bar or its Arrange menu minimised it, focus goes to the card's expand control,
   since the control it was on has left; it is taken only while focus is still on
   the page body or in the closing menu, so a person who has since moved it keeps
   it where they put it.
@@ -1356,10 +1650,20 @@ thread's open tools; the bottom panel never has one.
   tiles above keep their floors and measure the space that is left. The modal dock
   (960px and below) has no room for it and draws none; the state is kept, and
   there the tool's button reads as any open tool's, so nothing leads nowhere.
-- **A card** is one of the dock's cards: the tool's icon, a title, **Show
-  <tool>** (expand) and **Hide <tool> card** controls, and a live preview that is
+- **A card** is one of the dock's cards: the tool's icon (a page's own icon
+  for the Browser), a title, a small chevron right after the title that opens
+  a menu of the tool's pages or sessions ("Browser pages", "Terminal
+  sessions"; the one the card shows is marked; drawn whenever the tool has
+  any, one included, so the head is the same for one page and for five),
+  **Show <tool>** (expand) and a second control (the Terminal's **Hide Terminal card**, the
+  Browser's **Close Browser**, below), and a live preview that is
   itself the expand control (named "Show <tool>, live preview"); the preview is
   drawn inert under that one button, so nothing in it can take focus or act.
+  Choosing a Browser page in the chevron's menu makes it the page the card
+  shows and the one Show returns to, without showing, closing or moving
+  anything; the Terminal's card follows the thread's first shell, so choosing
+  a session there shows that session in its pane. The picture box keeps its
+  size whatever it holds.
   Show brings the tool back as a tile of its own (the Browser as the page it
   last showed), focused, and returns the keyboard to the tool's button in the row. It returns to the place it
   was minimised from while that place still exists: the same row of a column it
@@ -1374,20 +1678,26 @@ thread's open tools; the bottom panel never has one.
   reading open but not shown (the dot and "Open"), and no page or shell is closed or stopped (closing a tab with its
   own browser context ends that context, which a card that only previews must
   never do; the floating preview it replaces only hid itself). The keyboard goes
-  to the tool's button in the row, else the dock toggle, looked for again as the
+  to the tool's button in the row, else the dock itself, looked for again as the
   row re-renders so focus never falls to the page. Pressing the button shows the
   tool. Closing the tool stays the tile bar's close and **Close** on its button's
-  menu. A card never starts a process, never writes to the journal and never sends input
+  menu. The Browser card's X is the exception to Hide: it is **Close Browser** and
+  closes the page the card shows, as that page's tab close does (the card then stands
+  for the next Browser page, or goes with the last), so a page can be closed from the
+  collapsed dock without expanding it; the Browser card has no separate hide. A card never starts a process, never writes to the journal and never sends input
   to a shell or a page, and it shows nothing the tool could not show this window
   under the same checks. A paired remote window has no dock and gets none of it.
-- **The Browser card** shows the page's title, or its host, with the profile's
+- **The Browser card** shows the page's title, or its host, with the page's own
+  16px favicon before it when the host fetched one (see
+  [Architecture: favicons](../architecture.md#process-topology); the globe
+  otherwise), with the profile's
   name beside it where the page lives in one (a signed-in page acts as the
   person's account) and the page count past one, over a picture of the page
   cropped to the preview from its top left, never stretched. It reads the same host
   snapshot the Browser pane reads (a page that lives in a Browser context of its
   own is read by that context, as the pane reads it, never through the thread's
   current context, which leaves such pages out; a context that is gone or stopped
-  makes the preview say "Page not available" instead of holding a skeleton), and asks for a fresh picture only while the
+  makes the preview say "Page not available" instead of holding a skeleton; the host takes a fresh picture for that read of a native page too, because a minimised page's surface is detached and the card is the only place it is seen); in the desktop app the card first asks its own window for a display-only picture of the page (at most one every 2 seconds, scaled to the card, refused to a window or thread that does not own the page), which never passes through the host or an observation and so is not withheld by the credential-field check that kept almost every real page's card empty; with no picture at all the card shows the page's icon and title, never an empty box, and asks for a fresh picture only while the
   card is on screen: no card, no request for one. It polls every second while a
   session is live and every five otherwise, backs off while the page does not
   change, and pauses with the window. A stale or missing picture is a neutral
@@ -1402,7 +1712,7 @@ thread's open tools; the bottom panel never has one.
   being brought forward when the agent hands the page over to sign in, and it
   does not stop a new session opening the Browser tool once, except that a
   session announced while the person has the Browser minimised leaves it
-  minimised, its card or the dock toggle's dot being the sign (the sign-in
+  minimised, its card being the sign (the sign-in
   hand-over, which the person has to act on, still restores it). That holds only
   where the shelf is drawn: the narrow window's modal dock has neither card nor
   dot, so there a new session opens the Browser like any other tab, which clears
@@ -1412,10 +1722,10 @@ thread's open tools; the bottom panel never has one.
   because the dock remounts; a later session shows it again. A Browser whose
   session is not live is a card only if the person minimised it. The thread pane
   keeps polling for the session without asking for a picture, and tells the dock.
-- **The dock toggle.** The dock is closed on a thread whose agent Browser is live
-  and has a tab: its card cannot be seen, so the window's dock toggle carries one
-  quiet dot described as "Browser is active". It is a dot, never a count or an
-  accent ring, and the modal dock, which draws no shelf, shows none.
+- **A closed dock shows no sign.** The window has no dock toggle to carry a dot,
+  and the Browser button in the thread header's row marks only a Browser the
+  person has open or minimised, so a live agent Browser behind a closed dock is
+  not signalled until the dock opens and its card shows.
 - **The Terminal card** shows the shell's current tail, live, in a read-only
   instance of the terminal engine at the smallest type the terminal settings
   allow, filling the preview (the shell's last lines, as many as the 104px preview holds), with no input, no focus and no resize sent to the shell.
@@ -1482,8 +1792,9 @@ carries a count while the agent drives the page; the status icon and the
 Browser card name a stored profile while the agent drives it. **Take over.**
 While a page is open, the toolbar carries a **Take over** icon button after the
 address field (in the More menu when the trailing icons do not fit). One click
-holds every agent Browser call on the page; the status icon then reads "You have
-the page" and **Hand back** replaces Take over. While the agent's own sign-in ask is open,
+gives the person the page until they hand it back or the agent's next call takes
+it back; the status icon then reads "You have the page" and **Hand back**
+replaces Take over. While the agent's own sign-in ask is open,
 neither shows. While a remote owner holds the page, **Reclaim locally** is the trailing
 button in place of Take over and Hand back, which moves into the More menu. The person's typing and clicking in the page while the agent
 acts is delivered, never dropped, and the indicator keeps saying "Agent active".
@@ -1581,14 +1892,19 @@ later** and **New routine**, and then lists every active and paused routine of
 the thread's Project, not only those this thread created, in this order: this
 thread's pending follow-ups, then routines created from this thread, then the
 rest of the Project's routines (another thread's follow-up among them); within
-each group, soonest next run first. The header shows the count. Each entry has
-its name, Active or Paused, a small line saying how it relates to the thread
-("Follow-up here", "From this thread", "Follow-up in another thread", or
-nothing for the rest), the schedule in plain words with the next run (and the
-time zone of a weekly one), and **Open in Automation Center**. A follow-up here
-has **Change time** and **Cancel**, because a one-time turn is moved or
-cancelled rather than paused; every other entry has **Pause** or **Resume**.
-These are the ordinary Automation commands. Past five entries the row shows
+each group, soonest next run first. The header shows the count. Each entry is
+its name over one quiet line joining how it relates to the thread ("Follow-up
+here", "From this thread", "Follow-up in another thread", or nothing for the
+rest), the schedule in plain words with the next run (and the time zone of a
+weekly one), and Paused when it is paused. Its actions sit in a "…" menu in a
+fixed slot at the row's end: **Change time** and **Cancel follow-up** for a
+follow-up here, because a one-time turn is moved or cancelled rather than
+paused, **Pause** or **Resume** for every other entry, and **Open in
+Automations** (maintainer request, 2026-11-17). These are the ordinary
+Automation commands. In Work the "+" menu also offers **Set a goal…** while the
+thread has no goal; Work's Goal group appears only once a goal exists or one is
+being set, and a thread without one re-reads it while the window is visible,
+stopping once a read is refused. Past five entries the row shows
 the first five and **Show all**. A Project with no routines shows only the two
 actions. The row reads the Project's whole list, page by page, so a busy
 Project cannot push this thread's older routine out of it.
@@ -1634,7 +1950,7 @@ Needs attention and Did not succeed; the latest-run line carries the outcome.
 ### Subagents
 
 Environment belongs to a
-thread as a context-aware dock tab opened from the title band's tool row. Its
+thread as a context-aware dock tab opened from the thread header's tool row. Its
 Subagents row counts the active thread's server-authored child AgentRuns
 (working, to review, done) and opens into the full list, working and finished;
 a row opens that subagent in the Agents dock, where reading, steering, and every
@@ -1649,8 +1965,13 @@ keeps completed history reachable. Chat admits Agents as its only dock tool;
 opening it does not expose Work or Code tools or the bottom panel. Every
 subagent of the thread is one row in the same list, whether Octant started it
 through `octant_agents` or the thread's provider runtime started it itself, and
-every row names its provider and its model ("Model unknown" when the runtime
-does not report one). A provider-started row reads "Started by <provider>",
+every row in the Agents tool names its provider and its model ("Model unknown"
+when the runtime does not report one); the Environment strip's narrower rows
+carry them in the tooltip and accessible name. Each list row also leads with the provider's logo beside
+its status mark, when the "Provider icons in thread list" setting is on, and
+names the model as the picker does; a run that reports no provider or model
+draws no logo and no model, never its parent's (maintainer request,
+2026-11-16). A provider-started row reads "Started by <provider>",
 sits under the run or subagent that started it, and has no managed controls;
 it offers Stop only when the thread's running turn can stop that one subagent
 on its own (built for Claude and OpenCode), and keeps its reported state until
@@ -1715,7 +2036,7 @@ Work and Code have server-authoritative thread boards
 Chat has no board. The boards are the bundled Board plugin. Switching it off
 is a presentation switch only: the Work and Code board views, the sidebar
 Board row, and every other way to open them (the Running tile and cards on the
-start screen, the Inbox's Open the Board button, back and forward, keyboard and
+start screen, back and forward, keyboard and
 command palette) are gone, and a board that is open closes. Running tiles and
 cards lead to the Activity list instead, as they do in Chat. Nothing is
 deleted, and the host keeps deriving the board data and status policy
@@ -1751,36 +2072,75 @@ sees a per-poll event; it stores only the user's opt-in toggle and exact PR
 identities already produced by Code operations. The bounded list cache survives
 host restart and is cleared when GitHub authority is revoked.
 
-**The Pull requests and Issues lists.** The Pull requests page is a dense, calm list in the reading
-measure, at most 720px and left-aligned in the page. Its title band carries the
-count; at the trailing edge sit a Sort menu, a Filter menu, Repository settings
-(only while the list is not grouped) and Refresh, each an icon button with a
-tooltip. A row is two lines. Line one is the title at medium weight, cut after
-two lines, and at its trailing edge the one thing that needs attention, in
-words and as the quiet chip (Draft, Conflicts, Checks failing, Changes
-requested, Checks pending, Review pending), or a small check when the pull
-request is mergeable and nothing blocks it. Line two is one meta line: a state
-glyph coloured by state, the repository's name, the author, the age ("2h",
+**The Pull requests and Issues lists.** The Pull requests destination is a
+list column and a reading pane, not a full-width list. The list column is
+384px with its own scroll (the same width whether or not a row is chosen, so choosing one moves
+nothing): a header with Back first when the page can close (its glyph on the
+column's left edge, as on every destination; maintainer request, 2026-11-16),
+then the title and, as icon buttons with
+tooltips, Sort, Filter, Repository settings (only while the list is not
+grouped) and Refresh, on a 16px inset line
+that the title, the count, the search field and the chips share, the icons ending on the search
+field's right edge, the count under the title; a search field that also takes
+a pasted pull-request link and narrows the list to the one it names; quiet
+status chips with counts (All, Open, Drafts, bound to the Filter menu's
+Status; each counts the rows the list would hold under every other choice, so a
+chip never promises rows the list lacks); a **Repository** control beside the
+count (below); then the rows and, once more than 50 are listed, a quiet **Show more**.
+A soft one-line note at the foot says when some Project repositories could not
+be refreshed and that their cached pull requests are still shown. The pane is
+described under **The Pull requests reading pane** below. Before any Project has been
+refreshed the page is one centred empty state, a single sentence and a **Refresh** button,
+without the header's menus, the count or the search field. With rows listed and none chosen,
+the pane holds the panes' one empty state, centred. Under 760px the page
+is one column, the list or the pull request, with a back button over the
+pane.
+
+A row is two lines. Line one is the title at medium weight, cut after
+two lines in the page's list (one line in the dock), and at its trailing edge the one thing that needs attention, in
+words and as the quiet chip (Conflicts, Checks failing, Changes
+requested, Checks pending, Review pending; a draft has none, its glyph says it), or a small check when the pull
+request is mergeable and nothing blocks it. A state
+glyph coloured by state sits at the row's start across both lines. Line two is one meta line: the repository's name, the author, the age ("2h",
 "5d") and a link mark when a thread is linked, with the number (`#2344`) in
 tabular numerals at the trailing edge. The repository's name is the bare name
 in a group and `owner/name` on an ungrouped list that spans repositories, in both
 lists. Every row, flagged or not, is one tooltip trigger that opens on hover and
 on keyboard focus of the whole row, with the status sentence and then
 "head → base", and the same text is visually hidden text of the row, so no fact
-is pointer-only. A row has no hairline under it, the row under the pointer takes the
-control hover fill with the row radius, and clicking it opens the pull request
-exactly as before.
+is pointer-only. A row has no hairline under it, rows are 4px apart, the row under the pointer
+takes the hover wash and the open row `--oct-wash-selected`, and clicking a row
+opens that pull request in the reading pane (from anywhere else, the dock's
+Review tool opens it as before).
 
 Sort offers Recently updated (the default), Least recently updated, Newest,
 Oldest and Repository, and a **Group by repository** check item. Newest and
 Oldest order by creation time, which the snapshot carries beside each
-pull request's last update. Filter offers State (open, draft), Review (needs review, changes
+pull request's last update. Filter offers Status (any, open, draft), Involvement
+(anyone, involving me, review requested, authored by me; only when the
+signed-in GitHub login is known, and answered from the row's author and
+requested reviewers), Review (needs review, changes
 requested, approved), Checks (passing, failing, pending) and **Mine**, which
 keeps the pull requests whose author is the signed-in GitHub account
 (maintainer request, 2026-11-12). Not built yet: today the snapshot carries no
+The **Repository** control is a menu in the list header, at one fixed width, on
+the count's row. It lists every repository the list spans, each with how many
+rows it holds under the other choices, as check items: **All repositories** (the
+default and an empty choice) or any number of repositories. The trigger names
+the choice ("All repositories", the repository, or "2 repositories") and never
+changes size, and it is there whenever the list spans two or more repositories
+whatever a chip or filter has narrowed the list to. The choice is remembered in
+this window's local storage. Issues share the control's place and look. Grouping
+is a **Group by repository** check item in the Sort menu: each group head is the
+repository's name at 12px in the meta ink with its count at the right edge.
+
 creation time and the author is not compared with the account, so Newest,
-Oldest and Mine are not offered. Sort, grouping and filters are remembered in this window's
-local storage, and a filter that is narrowing the list marks its button.
+Oldest and Mine are not offered. Sort, grouping, the status choice and the
+repositories are remembered in this window's local storage; Involvement, Review
+and Checks last for the visit only, because kept across visits they hid every row
+behind chips that counted the unfiltered list. A filter that is narrowing the
+list marks its button, and an empty list names the choices that are narrowing it
+beside Clear filters.
 Searching is unchanged and covers the title, author, branches, repository,
 number and linked threads.
 
@@ -1874,11 +2234,16 @@ commands, so completing device sign-in does not require a workspace reload.
 Catalogue reads stay on the existing GitHub catalogue read
 ([route](host-reads-and-commands.md#github-issues)): the issue list includes
 optional server-composed search, and an issue returns a bounded detail. The
-browser renders title, body, and comments as plain text; links stay inert full
-URLs.
+browser renders the body and comments as markdown with the shared renderer (raw
+HTML is skipped, images are named and never fetched); the issue's own address is
+shown as text and is never followed from inside a Code thread.
 
-Create-from-issue is implemented. The composer `Create from…` Issues tab
-attaches only `{ owner, name, number }` to the draft. At creation the server
+Create-from-issue is implemented. The composer `Create from…` popup is one
+fixed 420 by 400 frame with provider tabs (GitHub, Linear, Terminal), a search
+field and a scrolling list; the lists are read when the start composer mounts
+or the Project changes (and on hovering or focusing the trigger), kept per host
+connection and shown at once on open while they refresh behind the rows. The
+GitHub tab attaches only `{ owner, name, number }` to the draft. At creation the server
 reauthorizes `issues-read`, frames redacted issue text as external content,
 and journals that ingestion
 ([details](host-reads-and-commands.md#github-issues)). Refusal fails creation visibly. The
@@ -2019,7 +2384,7 @@ inline and the rest under More, and entries in the command palette's Actions
 group. More is the header's one menu for this group: it also holds where the
 actions run ("Run in") and the task's Worktrees setup, which used to be text
 controls of their own in the title bar. Where to run is offered only when there
-is an action to run; with none, the header shows Worktrees alone; the Project overview's Actions section edits them and offers suggestions
+is an action to run; with none, the header shows no control here (Worktrees setup is also a row of Environment's Changes group, the one place it is always found); the Project overview's Actions section edits them and offers suggestions
 the person confirms. Choosing one previews its actual folder and branch,
 then starts a dedicated run beside the task. A Code thread defaults to its
 active checkout; the Project folder and approved extra folders remain explicit
@@ -2034,7 +2399,7 @@ Project browsing context rule in the same section.
 
 ## Project planner
 
-The Code Project overview's **Project planner** section designates an existing
+The Code Project overview's **Planner** card designates an existing
 thread of that Project, shows its current proposals and offers versioned
 approve/decline decisions. Proposal review keeps the exact intent and Project
 fixed while reusing the ordinary provider/model, checkout and access controls.
@@ -2122,8 +2487,8 @@ authenticated, thread-scoped answer routes and one-use request identity.
 Provider-native question formats keep their existing adapter contracts; the
 questionnaire capability uses the provider-neutral app tool boundary.
 
-A Code task's **Worktrees** control (in the header's More menu, or alone in the
-header when the Project has no saved action) opens its Setup tab beside
+A Code task's **Worktrees** control (a row of Environment's Changes group, and
+an entry of the header's More menu when the Project has saved actions) opens its Setup tab beside
 that task, including a selector for its child checkouts. It shows the reviewed
 command and relative folder, bounded output, exit result, Retry, Cancel and
 explicit Skip. The Project overview's Actions list lets the person review and
@@ -2150,13 +2515,31 @@ the central workspace. The central pane remains the thread, board, Project
 overview, or Project-level list. An unsplit conversation uses the title band
 for the Project/thread breadcrumb and compact thread strip, so the transcript
 does not repeat a second title block. Split panes and utility surfaces retain
-their own pane headers and lifecycle controls. Capability-gated toggles for
-Open in, bottom panel, and right dock remain window chrome. Several Browsers are one Browser
+their own pane headers and lifecycle controls. Open in remains window chrome;
+the bottom panel and the right dock have no title-band switch, and their tools
+open from the thread header's tool row. Several Browsers are one Browser
 tool: their pages sit in a row of their own at the top of the Browser, with a +
-for a new page, and closing the Browser closes every page.
+for a new page, and closing the Browser closes every page. A page opened from
+a new Browser tab (an address, a local server) stays that tab, and the tab
+takes the page's title. A Browser tab is named for its page's live title, as
+the pane reports it, else the page's host, and reads "New tab" only while it
+has no page; the dock's tab row, a tile's bar, the minimised card and its
+pages menu and a tab's close label all use that one name, and the server's last
+read of the thread's pages names only a tab whose pane has not reported. The
+title is page-authored text: shown as plain text, trimmed, on one line, with
+control and bidirectional-control characters removed and capped at 200
+characters, and used for nothing but display. A name outlives its pane (a pane
+that has nothing to report never clears it) and goes when the tab leaves the
+thread's stored tabs. Every Browser page tab has one fixed width (160px, the
+label ellipsizing inside it), so a title arriving moves nothing (maintainer
+request, 2026-11-16). The host announces that page as it announces an
+agent's session; an announcement whose every session is already a tab of the
+dock's Browser opens nothing, where it used to open the thread's shared
+Browser tab and leave an empty "New tab" beside the page.
 The Browser's toolbar is one row of plain icon buttons, the address field and
-trailing icons, as the Browser toolbar rules above set out. The right dock's tools are opened from a **tool row** at the right of the
-title band, before the bottom-panel and dock toggles: icon buttons for
+trailing icons, as the Browser toolbar rules above set out. The right dock's tools are opened from a **tool row** at the
+end of the title band (in the thread pane's header where the window has no
+band slot; see "Shell grid and tool row" above): icon buttons for
 Environment, Terminal, Review, Browser, Files, then a **More tools** menu of
 checkbox items for every other tool the thread can use (grouped as the launcher
 groups them), then the pull requests the thread is about under "Relevant to this
@@ -2177,12 +2560,15 @@ remains in the bottom-left identity menu.
 
 ### Content tabs
 
-Workspace content and dock tool tabs share a compact 26px recipe for height,
-spacing, selected fill and edge, and close controls. A pane's conversation tabs
-then become a row of equal soft tabs with the control corner, 28px tall at a shared 196px (never
+Workspace content and dock tool tabs share a compact recipe for height,
+spacing, selected fill and edge, and close controls: panel tabs are 28px with a
+raised selected fill and a 16px close (see DESIGN.md, Panel tabs), and a Files
+tab with unsaved edits shows a dot and asks Save, Don't save or Cancel before it
+closes. A pane's own tabs (its conversation and the files, previews and canvases opened over it)
+are a row of equal soft tabs with the control corner, 28px tall at a shared 196px (never
 narrower than 112px), 8px apart: every tab carries a faint wash of the ink, the
 hovered one a little more, and the open one the brightest wash with a hairline
-edge, so the row reads as a set of open conversations rather than a line of
+edge, so the row reads as a set of open things rather than a line of
 links with one highlighted. A pane tab's own button spans the whole tab with
 the × laid over its end, so the shared keyboard focus edge outlines the whole
 tab: drawn on the label alone it boxed the title and left the × outside. A tab whose
@@ -2194,7 +2580,7 @@ width; inactive controls appear on hover or keyboard focus and stay visible on
 touch devices. Thread tabs retain provider marks when enabled. The pane's drag
 handle stays quiet: an environment mark (a 20px neutral tile, laptop for this
 computer, cloud for another host), the thread title as a navigation name (13px,
-regular weight), a chip naming the Project in meta ink, and in Code a second
+medium weight), a chip naming the Project in meta ink, and in Code a second
 chip naming the checkout's branch in the mono identifier face — no provider
 mark. The two chips shrink before the title does. While the host projects the
 thread as executing, a "Running" chip with a small spinner follows the chips.
@@ -2232,6 +2618,12 @@ link; starting a Work Project stays on the section header. Code does not
 mirror that hint. The Projects directory and the selected Project overview
 occupy the main workspace in turn, following the
 [workspace navigation rule](#navigation-and-projects).
+The sidebar slides open and shut like a Mac sidebar: the stage's left edge moves
+with it over `--oct-motion-panel` (300ms) on `--oct-ease-panel`, and the stage's
+left corners and clip follow without a notch (they leave at the start of an
+opening and arrive after the slide has landed when it shuts). The title band's
+drag strip and the traffic-light reserve do not move. The slide is for opening and shutting only: dragging the sidebar's edge or resizing the window follows the pointer exactly. The sidebar keeps its full width through the slide and its column clips it, so its contents travel with the edge. There is no motion under
+the system's reduced-motion setting or the app's own.
 The directory provides search and All, Chat, Work, and Code filters. Project
 detail is thread-first, with memory, provider access, and canvases in compact
 expandable rows below the primary work; its layout is in
@@ -2246,11 +2638,31 @@ height or indentation. What a thread row carries — its Project
 attribution, branch, linked pull request, last updated, or status mark — is the
 view's own choice, edited in Settings › Sidebar › Thread rows or the
 view filter menu's Property visibility submenu; a hidden property is omitted
-rather than left as a gap. The Project tree and the Activity feed draw the same
-row: the provider mark in the icon column every navigation row uses, the title
-alone on its line, and the shown facts on one line beneath it in a fixed order
-(Project, pull request, branch, then the age at the end); with no facts shown
-the age sits beside the status instead of opening a line of its own. Thread rows
+rather than left as a gap. Every view shows the last-updated age by
+default (a saved choice that is still the old Activity default, which a host
+stored whole without the person choosing it, is read as never chosen and
+moves to the new default once; a choice that differs, or one made after, stays).
+The age reads now, 12m, 5h, 3d, 2w, 52w, 2y, flooring each unit and never
+longer than three characters; it updates once a minute from one shared clock
+and carries the full date and time as its tooltip and accessible label. It is
+12px meta ink, right-aligned in a slot of fixed width, so a title never moves
+as an age changes, and it ends at the same edge on every row, left of the
+provider mark. The end of a row is one fixed order, never changed by hover,
+focus or an open menu: the title, then the slot (the age, or the thread's state
+in words in its place, or the row's hover actions, which fade in over the age
+inside a slot sized for them), then the provider mark. The provider mark and the
+title's truncation never move when the pointer arrives. The Project tree and the Activity feed draw the same
+row: up to three lines (see [the sidebar in DESIGN.md](../../DESIGN.md)). A small top
+line names where the thread lives, in a fixed order (the Project's mark and name,
+then the branch in the mono face) and ends with the thread's state in words
+(Working 14m, Needs you) or, with none to report, how long ago it moved. The
+title is the strongest text on a line of its own. A third line appears only for
+the pull request and its state, who started the thread or a worker's
+coordinator, and the provider's mark ends the last line. The Project tree's top
+line is the branch alone, because the Project is its heading. A row with no place
+to name carries its state or time at the end of the title line. The row is one
+button whose accessible name reads title, Project, branch, pull request, then
+state or time; a state is never colour alone. Thread rows
 are not indented under their Project, so every row's fill sits the same
 distance from both edges of the sidebar. In Code, a Project whose threads run
 in two or more checkouts nests them under one heading per checkout, primary
@@ -2268,9 +2680,10 @@ rounded letter tile: the Project's first letter, white, on the colour the person
 picked from the theme palette, or a neutral tile when none is set. The same tile
 heads the Project overview, where it is the colour picker; the row's actions menu
 offers Colour with a No colour choice, and an archived Project cannot change it.
-A Project whose folder holds a favicon or app icon shows that picture, drawn as
-an image at the same 20px, in place of the tile (and in place of the folder
-glyph in lists); the tile and glyph remain for a Project without one.
+A Project with an icon (one a person chose, else the favicon or app icon in its
+folder) shows that picture, drawn as an image at the same 20px, in place of the
+tile (and in place of the folder glyph in lists); the tile and glyph remain for a
+Project without one.
 The colour is identity, never status: it never stands in for a warning, a
 selection, or an activity mark. One fixed trailing
 status position shows a working spinner, an attention symbol, a clock when a
@@ -2284,7 +2697,8 @@ Project Overview are real features, not
 decorative shortcuts.
 
 The sidebar header carries the mode switcher, Search, and New thread (New
-chat in Chat, New task in Work and Code); no New thread row repeats it. Under the header sit four count tiles in a 2×2 grid: Inbox (the
+chat in Chat, New task in Work and Code), which the New thread row at the head of the list repeats
+(see above). Under the header sit four count tiles in a 2×2 grid: Inbox (the
 threads that need the person: an approval, a question, a follow-up that is due,
 or a subagent request waiting on them; a finished turn is not one, and the
 dock badge counts the same threads), Running (threads the host projects as
@@ -2342,12 +2756,15 @@ The jump happens once; a turn the thread no longer holds (an edit or rewind
 removed it) leaves the thread at its newest turns
 ([Host reads and commands](host-reads-and-commands.md)). The list's three
 arrangements, Status (the default), the Project tree, and the Activity feed,
-are a visible Status/Projects/Activity switch on the row the Project view
-picker uses, not an icon in the header. The phone's Work and Code tabs offer the
+are the first group of the list's filter menu on the row the Project view
+picker uses ("Show threads as", a radio group; the button's count is for filters
+only), not a three-button switch and not an icon in the header. A list with no
+Project views to filter keeps the choice behind one glyph on that row
+(maintainer request, 2026-11-16). The phone's Work and Code tabs offer the
 same three as a segmented control above their thread list
 ([Mobile maturity](mobile-maturity.md#exists-today)). That row stands in the same place in
-all three, with the Project tree's own Projects heading under it, so pressing
-the switch moves nothing but the list. Status headings carry their count in
+all three, with the Project tree's own Projects heading under it, so choosing
+an arrangement moves nothing but the list. Status headings carry their count in
 meta ink after the label ("Needs input 2"), the same face as the feed's folded
 Earlier count. A row whose pull request's checks pass adds a 12px check in the
 success ink after the PR number.
@@ -2361,25 +2778,30 @@ window and cut the last destination through its icon at the window's edge.
 
 **Icon rail.** By default (Settings › Sidebar › Icon rail: Always) an icon
 rail stands in its own column in front of the open sidebar. It is exactly as
-wide as the title band is tall (44px), open or collapsed, so the frame's two
-arms match. In the desktop app the traffic lights sit in the title band above
+wide as the title band is tall (38px), open or collapsed, so the frame's two
+arms match. It stands on the window's own ground with no fill and no line of its
+own; the framed panel (the sidebar and the stage, one outline) begins at its
+right edge. In the desktop app the traffic lights sit in the title band above
 it, and the sidebar's head, or with the sidebar hidden the window chrome,
 keeps the rest of their width clear. Beside the sidebar it
-carries the places: the count tiles as icons with badges (under Colour the
-four icons take the tiles' hues, Inbox blue, Running amber, To review purple,
-and Done green, from the same palette roles; the hover and current fills and the
-count badge stay neutral, and under Mono and increased contrast the icons stay
-grey), the destination
+carries the places only: Home, the Inbox as an icon with its count badge (under
+Colour the icon takes the Inbox tile's blue; the hover and current fills and
+the badge stay neutral, and under Mono and increased contrast the icon stays
+grey), the Board, which stands for Running, To review and Done today (three
+look-alike count icons made the rail the busiest column in the window; they
+stay as tiles in a sidebar with no rail beside it, maintainer request,
+2026-11-17), the destination
 rows the person keeps shown (Settings › Sidebar › Sidebar destinations decides
 which and in what order, for the rail as for the sidebar), the Activity feed,
 Projects, a tile for each Project the person pinned (its icon or initial on the
 same 32px face, after the divider; a context menu on the tile unpins it; the
 collapsed rail lists pinned Projects first and draws six Project tiles at most
-so Settings and the rings stay in the window), More (the menu-only destinations and Customize sidebar), the usage
-rings, and Settings. The sidebar keeps its header (modes, search, new thread,
-hide), the Project list with its view, filter, and Activity controls, the
-threads, and the profile, so nothing is offered twice. Rail icons are 16px on
-a 32px face; every rail control names itself in its accessible name and in a
+so the account face stays in the window), More (the menu-only destinations and Customize sidebar), and the
+account face. The sidebar keeps its header (modes, search, new thread,
+hide), the Project list with its view, filter, and Activity controls, and the
+threads; its profile row is not drawn beside the rail, whose account face is
+the same control, so nothing is offered twice. Rail icons are 16px on a 36px face, and a selected place keeps its glyph and takes the
+face's fill and the primary ink; every rail control names itself in its accessible name and in a
 label that opens beside the rail on hover or keyboard focus. Destinations
 have their own marks: Inbox a tray, Running a spinner, To review a checked
 clipboard, Done today a double check, Board a kanban, Issues the issue dot,
@@ -2397,18 +2819,20 @@ under the tray instead of sliding beneath it. The tray's row stays first at the
 top of the sidebar, and the header keeps its full wrapped height however long
 the thread list is, so the list always starts under both rows.
 
-**Usage rings.** Above Settings, at the foot of either rail, each provider
-that reports a plan window with a figure gets a ring in its identity colour
-around its 12px logo:
-the outer arc is what is left of the longest window (the week), the inner arc
-what is left of the shortest (five hours), chosen by each window's length, and
-a window near or at its limit takes the danger ink. Hovering or focusing a
-ring opens a card with every window, its share left, and when it resets;
-clicking opens Settings › Usage. A provider with no figure gets no ring,
-because an empty ring would claim a limit nobody reported. The rings read the
-host's last observation every few minutes, never a fresh provider call. The
-host keeps that observation across restarts, so the rings are there on launch;
-when the reading is more than a few hours old the card says "Last read 5h ago".
+**Account face.** The foot of either rail is one round face: the person's
+picture, else the initials of the name they gave, else a person glyph (24px).
+A thin ring around it shows what is left of their tightest plan window across
+every provider that reports one, in the meta ink, or the danger ink when that
+window is near or at its limit; with no reported figure there is no ring,
+because an empty ring would claim a limit nobody reported. Its accessible name
+says the share left. It opens the account menu, the same one the sidebar's
+profile row opens, beside the rail: a Plan usage group first (each account that
+reports a window, with its lowest window's share and when it resets; a row
+opens Settings › Usage), then the Workspace and Octant groups (Settings among
+them). It replaced a Settings gear and one ring per provider, two kinds of
+thing at the foot where one does (maintainer request, 2026-11-17). The reading
+is the host's last observation, the one the composer and the Inbox read, never
+a fresh provider call, and it survives a restart.
 
 **Back and forward.** Back and Forward sit in the title band beside the
 sidebar control (beside Show sidebar while the sidebar is hidden, with or
@@ -2437,9 +2861,130 @@ drawer.
 
 ### Right dock and bottom panel
 
-The right dock defaults to 640px when open, and opening a Browser or a
-Terminal widens a narrower dock to 640px once (the person can drag it back;
-the next such opening widens it again). A terminal in the dock is an inset,
+The right dock is two things side by side, left to right: the **Environment
+section** and the **tool columns**. Environment is not a pane. It is the thread's
+own surface continued to the right: 300px wide (`ENVIRONMENT_STRIP_WIDTH`; the
+shell sets it as `--octant-dock-env-width`), on the thread's fill, with the
+thread's one hairline on its leading edge running from under the title band to
+the window's bottom. It has no header, close button, resize handle, expand,
+arrange or pop-out control, and draws nothing in the title band; a single
+pane's header runs on above it, the tool buttons in the header toggle it,
+and its landmark is the region named
+Environment. Closing the last tool leaves it alone at exactly 300px, and with
+only Environment open the dock is exactly its width. It is hidden in the narrow
+layout (`isNarrow`: windows 960px wide or less, where the dock becomes a sheet), where the
+thread would otherwise drop below its minimum.
+
+Its content is a flat list that takes its own height (the section scrolls as
+one). The first section ("Environment") carries the thread's place as rows:
+the computer it runs on (and, where a thread can move, the row that moves it),
+the Project (folder icon, its name, then its folder
+path in muted ink, home shortened to `~`, the path cut before the name), the
+branch with its checkout kind (Worktree, Main folder or Shared folder), then
+the checkout's state. The computer was a section of its own, a label over one
+row and a hairline, 68px for one fact. An unavailable checkout is one muted warning row whose
+short text has the full reason as tooltip and description. "Changes" follows,
+with Commit or push and Create pull request as plain action rows only where they could do something (see "What the strip shows at rest"). A section is a
+muted 12px sentence-case label over rows; a row is a 16px muted icon, a 14px
+medium label in body ink and an optional right-aligned detail in muted ink as plain
+text (no chip, no border), 28px tall, filled across its width by the pointer
+only, with no ring on click and a chevron only on hover for a row that opens
+something. The label ellipsises first; the detail keeps its whole value. A
+hairline sets sections apart and rows have none. Minimised Browsers and
+terminals appear after the last section, set off by the same hairline, as live
+previews that flow with the list: a head row (the page's mark or the tool's
+icon, its title, then show and close), and a rounded 16:10 picture below with no
+box around the head. Minimising a tool opens the section when it is closed, so a
+card always stands in it; only in the drawer, which has no section, do the cards
+keep their place at the foot of the dock. The list used to be as tall as the
+section, which put the cards under the fold: a minimised Browser stood 944px
+down a 952px section and read as missing (measured 2026-11-15).
+
+Environment is never a tile. The dock keeps it apart from the tool tiles in
+every state (`environmentApart`): it does not count toward the tile caps, a
+tool placed beside it makes no second column, and no press can replace it. Its
+button opens and closes the section and arranges nothing. As a tile it could
+be the one a press replaced, which took the section off screen while its tab
+stayed open.
+
+Every tool has one of two size classes (`rightUtilityDockModel.ts`). **Fixed**
+tools are Environment (300px) and the panel tools (Vitals, Plan, Agents,
+Delivery, Side Chat, Artifacts, Pull requests, Tests and Debug) at 360px
+(`COMPACT_DOCK_WIDTH`): they never change width whatever opens or closes beside
+them and have no resize handle. **Flexible** tools (Browser, Terminal, Review,
+Canvas, Document, Files, iOS Simulator, Android Emulator and Desktop;
+`FLEXIBLE_DOCK_SURFACES`) open at 640px, resize between 480px
+(`FLEXIBLE_DOCK_MIN_WIDTH`) and the dock's ceiling, and carry the handle on
+their column's edge. When a flexible and a fixed tool share the tool column, the
+column follows the flexible rules; when only fixed tools are open it is fixed at
+360px with no handle. Opening or closing any tool never changes the Environment
+section's width, and the section stays on the thread's right edge.
+
+**How the width is shared.** One rule, in this order. The thread keeps its
+minimum whatever is open: 560px from 1100px up, 360px below
+(`--octant-wide-primary-min`, `WIDE_PRIMARY_MIN`); there is no smaller minimum
+beside two columns. Environment keeps 300px. The tool columns take what is
+left, up to the one width they ask for (640px, the width a person dragged to,
+or 360px for fixed tools) and, for one column, half the workspace; however
+many tools are open, that width does not change. Tools stack in one column:
+a press opens a tool under the focused tile, and only a column at its cap of
+three sends the next one beside. A second column is the person's own
+arrangement (Move right, or a drop on the right), and its columns stand side
+by side only where the tool columns can be 960px (`TILED_DOCK_WIDTH`, two
+columns at the flexible minimum) beside the thread's minimum and Environment;
+the dock then takes 960px (or a wider dragged width), and elsewhere it keeps
+the one-column width and the second column's tiles stack under the first's.
+When the window cannot hold even the dock's own minimum (Environment and one
+280px tool column) beside the thread's 560px, the thread gives first, never
+under 360px, and only then the sidebar, down to its 220px minimum. Measured before
+(1600px window, 2026-11-15): a second tool took the thread from 560px to 440px
+and moved Environment 120px, and the two tools then stacked anyway; at 1280px
+the sidebar was drawn 88px wide. With the sidebar giving first (1400px window,
+2026-11-16), opening Environment beside a tool moved the thread, its title and
+its tool row 60px.
+
+**A window too narrow for both.** The Environment section stands beside a tool
+column only where the workspace holds the thread's 360px, the section's 300px
+and a 280px tool column together (940px; with the sidebar open at 280px, a
+window of about 1276px). In a narrower workspace the section **gives way**
+while a tool pane is shown: the dock draws the tool panes alone, the section's
+tab stays open, and the section is back when the last pane leaves the view or
+the window widens. Its button then reads not pressed, carries the open dot
+when the section is open behind the pane, and is disabled with the reason ("No
+room beside a tool in this window. Close the tool, hide the sidebar or widen
+the window."). Alone, the section opens at any width above the drawer's. So
+nothing runs past the window's edge and no pane control meets the window's
+trailing controls. Measured before (sidebar open, Environment and Files, 2026-11-16): at
+1100px and 1000px the dock ended 112px and 212px outside the window with
+Files' Close under the toggles; at 1212px the sidebar gave 60px to make it
+fit. After: at 1000px, 1100px and 1212px the dock ends on the window's inner
+edge, Close stands 12px before the trailing controls, and the sidebar keeps its width.
+
+**The thread box and the tool row.** The thread and its Environment section,
+open or not, are one box, and that box has a narrowest width for a window
+(`threadBoxMinimum`, `--octant-thread-box-min`): the thread's own minimum, or
+what a tool region at its asked width (640px) leaves where that is more, up to
+the thread's minimum and the section together (860px, from a 1500px workspace
+up). The tool region takes only the room past that line, whether Environment is
+open or closed, in one column or two, and the resize handle stops there
+(`dockWidthCeiling`). The tool row itself stands at the end of the title band
+and is moved by none of this (measured 2026-11-16 at 1800px with the sidebar
+open: x 1604 to 1792 with nothing open, with Environment, with Review beside
+it, and on a new task). Where a window has no band slot the row is in the
+pane's header and ends on the line, 8px in, measured from the pane's left
+edge, as it did everywhere before: there no click moves it either, and a pane
+narrower than the line (one of a split) ends its row at its own edge.
+Measured for that header placement (2026-11-16, sidebar open): at 1800px the row's left
+edge was at x 1532 with nothing open, 960 with one tool and 996 with
+Environment beside it, and is 960 in every state; at 1400px it was 1132, 696
+and 920, and is 696 in every state; at 2400px it is 996 with nothing open, one
+tool, two stacked, two columns, and two columns beside Environment.
+
+The tool columns' handle stands on the seam between the strip and
+the tools, and with Environment closed on the dock's own edge (and the shelf stays
+at the foot of the dock body, as before). Opening a flexible tool
+widens a narrower tool column to 640px once (the person can drag it back; the
+next such opening widens it again). A terminal in the dock is an inset,
 rounded plate rather than an edge-to-edge slab; under Glass the plate and
 its cells are the page colour with 12% of the ink, a grey that sits with the
 frosted panels instead of a black slab. A fresh window
@@ -2456,13 +3001,11 @@ quarter of the viewport there. Both keep their tabs and their height and return
 with the thread, and their toggle leaves the reader rather than closing a
 region that was only stepped aside.
 On wide windows it may use at most half of the workspace beside the sidebar
-(`dockWidthCeiling`, never under the sidebar minimum or over its maximum), which
-keeps the thread readable beside any tool, and the resize handle stops there
-too; with two columns of tool tiles shown it may take all the thread's own
-minimum leaves (the thread keeps 440px beside two columns from 1100px up and
-360px below, which the stylesheet's grid mirrors as `--octant-tiled-primary-min`;
-one column keeps 560px from 1100px up. At 560px two tools could never stand side by
-side in a 1440px window, so a second column asks the thread for less); the bottom panel may use at most 38 percent of the
+(`dockWidthCeiling`, never under the sidebar minimum or over its maximum; the
+Environment strip is not part of that half, so the tool columns shrink first),
+which keeps the thread readable beside any tool, and the resize handle stops there
+too; with two columns of tool tiles shown side by side it may take all the thread's own
+minimum leaves (560px from 1100px up and 360px below, the same minimum one column keeps); the bottom panel may use at most 38 percent of the
 viewport height while preserving 320px for the primary workspace, and it hosts
 exactly Review, Terminal, Browser, Files and Side chat. The dock can host
 Review, Pull requests (open rows for a Code thread's Project), Files, Document
@@ -2504,7 +3047,7 @@ one "N finished" row; a row opens that run in Agents.
 **Running now** lists the other threads the window knows are working (any
 mode, at most five, newest first, never the thread on screen), each a spinner,
 title, Project, and age, and opens that thread. Model and access are not
-repeated here: they are on the composer. Tools open from the title band's tool row. More tools opens a menu in a
+repeated here: they are on the composer. Tools open from the thread header's tool row. More tools opens a menu in a
 portal anchored to its button, aligned to its end edge and kept inside the
 window by collision handling; it takes focus on its first item, closes on a pick,
 on Escape or on an outside press, and returns focus to its button. The bottom
@@ -2535,24 +3078,26 @@ Files, Document, Review, Agents, Canvas,
 Plan, Delivery, Simulator, and Side chat are singleton destinations. One instance
 still appears in only one region at a time.
 
-The right dock has one width whatever it shows, so a click inside it moves
-nothing: the launcher and every tool use the width the person last dragged it to.
-It never takes more than half the workspace, and its handle stops at the same
-half. A Browser or Terminal tab that needs more holds 640px while that tab stays
-open, including one restored after a restart, and does not save it. A width the
-person drags to stands until the next Browser or Terminal opens.
+The tool columns have one width whatever they show, so a click inside them moves
+nothing: the launcher and every tool use the width the person last dragged them
+to. They never take more than half the workspace, and their handle stops at the
+same half. Any open flexible tool holds 640px (and a column of only fixed tools 360px) while that tab stays
+open, including one restored after a restart, and does not save it. A second column never changes that
+width unless the window has room for two side by side (see "How the width is shared"). A width the
+person drags to stands until the next tool opens. A pane appears at its final
+size: no width animates from narrow to wide.
 
 Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed. The bottom panel starts closed. An explicit dock show or hide is restored per window; merely mounting the default records no choice, so an initial narrow frame does not become a saved close. The active-pane eligibility rules below still determine whether dock chrome is shown.
 
 A welcome, Project, or other pane with neither a bound thread nor a valid
-launchable tool keeps the dock closed and omits its toggle. A new Code task's
-pane before its thread exists keeps the toggle but starts closed, whatever the
+launchable tool keeps the dock closed and draws no tool row. A new Code task's
+pane before its thread exists keeps the dock available but starts closed, whatever the
 window's saved choice: it has nothing of a thread's to show, and opened by
 default it covered a third of a blank start screen to say its tools were not
-available yet. Opened there by the person, its title band shows the common
-tools disabled ("Available once the task starts") and its body says so (or,
-once the start screen has a Project, holds that Project's quick tools). That
-show or hide belongs to the draft and is never saved as the window's choice;
+available yet. The window has no dock switch; the
+draft's dock opens from the Project terminal and Project browser buttons in the pane header once the start
+screen has a Project (they open the Project's quick tools straight into the tool pressed), and without a
+Project every button waits ("Available once the task starts") and the dock stays closed. A show or hide there belongs to the draft and is never saved as the window's choice;
 once the task has a thread the window's own choice applies again. Restored presentation for another subject never makes unavailable
 chrome visible.
 
@@ -2566,15 +3111,27 @@ them, so open tools can also be shown together as tiles, each one live, beside
 the one tool row. At most two columns of at most three tiles are shown; a
 request past either cap is refused, except that "beside" with two columns present
 puts the tool below in the last column. A tile is a region named for its tool
-with **one bar**, the tool's own header, 32px high in every tile so neighbouring
-bars line up. Its leading edge names the tool once (the icon and name; for the
-Browser the bar is its row of pages, each with its close, and the new-page
-control, and with one page the page's title is the name) and its trailing edge
-holds the tile's controls: an **Arrange <tool>** menu button and a **Close
+with **one bar**, the tool's own header, as tall as the title band and the
+thread's header (44px) in every pane (a tool alone has the same bar as a tiled
+one), so neighbouring bars line up, the top pane's bar and the thread's header
+are one line across the window, and nothing in a pane moves when a neighbour
+opens or closes. Docked, the dock has no head over its panes: they start at the
+window's top, a top pane's bar stands in the title band on the band's ground,
+and the last column's top bar ends before the window's trailing controls. Its leading edge names the tool once (the icon and name; for the
+Browser the bar is its row of pages, each named for what it shows, with its close, and the new-page
+control; a shell's sessions and Files' open files lead their bars the same way) and its trailing edge
+holds the tile's controls: **Minimise <tool>** on a Browser or Terminal and a **Close
 <tool>** button that closes the tool as pressing its button again does (every
-page for the Browser). Stacked, a page showed four bars (a strip, a "Browser"
+page for the Browser). The bar has no Arrange button: a pane is arranged by
+dragging its bar, and **Arrange <tool>** is the bar's context menu (right
+click, the menu key, or Shift+F10 on any control of the bar). Where there is
+something to arrange the bar is a Tab stop of its own, a group named
+"<tool> bar" that says it has a menu, and Enter or Space on it opens Arrange:
+a tool opened from More tools has no button in the thread's header to arrange
+it from, and Shift+F10 on a control is nothing a person finds. Enter on a
+control of the bar stays that control's. Stacked, a page showed four bars (a strip, a "Browser"
 caption, the Browser's own page row and its toolbar) and named the tool three
-times, so the dock has no strip and a tile has no caption over its bar. A tool alone has no tile bar and keeps the one slim row below. The Arrange menu holds **Move
+times, so the dock has no strip and a tile has no caption over its bar. Alone, a tool's Arrange menu holds only **Minimise to card** (Browser and Terminal) and otherwise does not open. The Arrange menu holds **Move
 left**, **Move right**, **Move up** and **Move down**, each present only when
 that move is possible within the caps (a one-column layout moved sideways makes the
 second column, and a column left empty goes), then **Show alone**, **Hide
@@ -2590,10 +3147,8 @@ of the range the floors allow), each named for the two tools it sits between
 ("Resize Environment and Vitals") and reporting the range it can really reach; no tile
 is shorter than 140px or column narrower than 280px (the dock's own minimum
 width) while the dock has the room, and the columns stack when the tile area
-cannot give two columns 280px each. Columns therefore stand side by side only
-when the tile area has the width: at 1440px with the sidebar open a second
-column widens the dock to about 620px and the columns stand side by side at about
-306px each (they stacked at 500px while the thread kept 560px), and in a narrower
+cannot give two columns 480px each (see "How the width is shared"). Columns therefore stand side by side only
+when the window has the width, and in a narrower
 window "beside" stacks, which is why the head control promises no direction;
 a tool button's menu keeps an explicit Show below. Stacked columns stay
 resizable by a separator between them along the vertical axis, and no tile is
@@ -2614,23 +3169,48 @@ positioned children of one element, so a tool is never remounted when a
 neighbour joins or leaves, when it moves between columns, or when focus or a
 divider moves; only choosing another tool for a tile replaces it.
 
+**Arranging by drag.** A pane is picked up by its bar: its name, a tab's label
+or the bar's empty run, never a control in it (an action, Arrange, Close, a
+tab's close). A press becomes a drag once the pointer has travelled 6px; short
+of that it is a click, and nothing lifts or moves. The drag follows the
+pointer itself, as the workspace's tab drags do, and uses no platform
+drag-and-drop session, so it behaves the same in the desktop window, in a
+browser and under a test. While it is dragged the pane reads lifted (a step
+back in opacity), a small label with the tool's name follows the pointer, and
+nothing else moves. The pane under the pointer shows the place
+the dragged one would take as a quiet highlight of that half: above or below
+it, and left or right of it only where the window holds two columns of tools
+side by side beside the thread's minimum and Environment (elsewhere the result
+would stack, so no place beside is offered, in the drag or in the Arrange
+menu). A drop on the right of the last column makes the second column. A pane
+of a tool the bottom panel can hold (Review, Terminal, Browser, Files, Side
+chat) is also offered the panel, as a zone over the foot of the thread's
+column that is marked for the whole drag and lit while the pointer is in it.
+Escape, a window that loses focus, or a drop outside every zone, cancels. The drop goes through
+the same tile model the Arrange menu uses, which stays the keyboard's route,
+and a pane moved within its own column shares it evenly with the others. A
+drop never closes or minimises another pane; Environment is not a pane, so it
+is never dragged and never a place; a minimised card is not a place either.
+A pane alone can only go to the bottom panel.
+
 A tool's button carries the placement a tab menu once did. Its context
 menu (right click, the menu key or Shift+F10) offers **Show below** for an open
 tool that is not on screen (disabled when the caps refuse it), and, for a tile in
 a layout, **Show alone**, **Hide from view** and the moves that are possible,
-then **New Terminal** on Terminal and **New Browser page** on Browser, then
-**Close <tool>**; what does not apply is absent. These menus, and dragging,
+then **Move to bottom panel** where the drag to the foot is offered (a shown tool the panel holds a tab for, on its
+own first tab, and not Browser; not in the drawer), **Move to the side** on a tool the bottom panel holds, then **New Terminal** on Terminal and
+**New Browser page** on Browser, then **Close <tool>**; what does not apply is absent. The bottom panel is
+reached by this item or the drag, and the tool's button then toggles it; the window has no switch that opens it empty. These menus, and dragging,
 belong to the five tools with a button of their own (Environment, Terminal,
 Review, Browser, Files); a tool opened from More tools is shown the same way
 and is then arranged, hidden and closed from its own tile's bar, a tool alone
 having no bar and being closed by picking it again in More tools. Pressing a
-button shows a tool beside the focused tile in one step (opening it first when
-needed), beside it when the columns stand side by side and below it when they
-stack; when the tile caps are full it shows the tool in the focused tile's place
+button shows a tool under the focused tile in one step (opening it first when
+needed), and beside it only when that column is at its cap; when the tile caps are full it shows the tool in the focused tile's place
 and the tool it replaces stays open, hidden from view. Dragging an open tool's
 button onto the dock body does the same: the right third shows it
-beside, the lower third below, and anywhere else replaces the focused tile. With two columns shown and no width the person
-has chosen, the dock widens to 840px (not saved), under the ceiling above;
+beside, the lower third below, and anywhere else replaces the focused tile. With two columns shown, no width the person
+has chosen and room for them side by side, the tool columns widen to 960px (not saved), under the ceiling above;
 showing a tool beside, which makes the second column, clears the person's
 sizing the way opening a Browser or Terminal does, and a drag afterwards holds. The
 narrow modal presentation has room for one tool and draws only the focused tile;
@@ -2661,9 +3241,10 @@ frosted parts and no new fill, an 8px inset round a 28px bar over a 104px previe
 title or host with the profile name beside it where the page lives in one, or
 "Terminal"), a detail word (such as "Exited (1)"), a quiet 6px dot named "New
 output" for a shell that printed while nobody looked, an expand icon button
-(**Show Browser**, **Show Terminal**) and a hide icon button (**Hide Browser card**,
-**Hide Terminal card**, which removes the card and closes or stops nothing: the
-tool stays open and its button in the title band's tool row reads open but not shown; every button a 24px target), then a preview that is itself the expand button (named
+(**Show Browser**, **Show Terminal**) and one more icon button: **Close Browser** on
+the Browser card, which closes the page it shows, and **Hide Terminal card** on the
+Terminal card, which removes the card and stops nothing: the shell stays open and
+its button in the thread header's tool row reads open but not shown; every button a 24px target), then a preview that is itself the expand button (named
 "Show Browser, live preview"; its corner is the card's 12px minus the 8px inset, 4px). The name truncates with an ellipsis
 before a detail word or a button moves. The Browser's picture is cropped to the preview from its top left, never stretched, a neutral skeleton while stale or missing; the
 Terminal shows its last lines in the smallest terminal type, read-only, or "No
@@ -2678,14 +3259,13 @@ button for it. Show on a card returns the tool as a
 tile of its own, to the place it left while that place still exists and else as
 the last tile, focused, without taking a shown tool's tile.
 While an agent's Browser session is live and the thread's Browser is out of sight
-the Browser shows as a card without being minimised; with the dock closed, the
-window's dock toggle (not in the modal dock, which has no shelf) carries one quiet
-dot described as "Browser is active". The
+the Browser shows as a card without being minimised; with the dock closed nothing
+in the window signals it. The
 rules, reads and limits are in [Workspace](#tool-lifecycles).
 
 ### Environment tool
 
-Environment is a right-dock tool, opened from the title band's tool row and
+Environment is a right-dock tool, opened from the thread header's tool row and
 nowhere else. It reads
 top to bottom as cards in the Settings kit's grouped-card look: one header card,
 then two captioned cards of rows. A card is a faint wash of the ink over the
@@ -2699,12 +3279,14 @@ changes with its added and removed counts under it, and a chevron, opening
 Review; No uncommitted changes when clean), a detached HEAD or separate
 worktree when true, and Commit or push and Create pull request sit under it as
 two equal buttons. The rows follow in two cards, Running (Local servers, open by
-default only when this checkout is serving something; Subagents, one row with
-its working / to review / done counts that opens the Agents tool — reading and
-steering a subagent belongs there; Computer use) and Delivery (Pull requests,
-Sources, Delivers, Working folder, and Usage, closed by default; totals, the
-spend ceiling form for tokens, turns, hours, and US dollars, whose fields wrap
-two by two in a narrow rail, and Open Usage dashboard inside). A card with no
+default only when this checkout is serving something; Subagents; Computer use) and Delivery (Pull requests,
+Sources, Delivers, Working folder, and Usage, closed by default; totals, one
+Spend ceiling row whose popover holds the form for tokens, turns, hours, and US
+dollars, and Open Usage dashboard inside). Delivers is one row that opens its
+choices as a menu. A fixed Working folder says "Fixed for this task. Start a
+new task to change it." and keeps the longer caveat in the row's tooltip. Chat
+shows a Memory row only when memory is unavailable (maintainer request,
+2026-11-17). A card with no
 rows to show is omitted with its caption. Every row has one grammar: a 26px
 glyph tile, the name, the row's state as a small neutral chip, and a trailing
 chevron where the row opens (a row's own action, such as All pull requests,
@@ -2720,6 +3302,115 @@ control (see [Minimised tools](#minimised-tools) and
 Environment, and hiding one never stops its session. Computer-use approval and
 stop controls stay with its card. It does not duplicate the Agents dock. Missing checkout context
 is neutral explanatory text rather than a warning callout.
+
+**Folding sections, and Context.** Every section title of the strip (Environment,
+Context, Changes, Running, Delivery) is a button that folds its rows away. Folded,
+the section is one row: the title, a small right-pointing chevron straight after
+it, and at the right edge a short summary in the meta ink: the Project's name
+(or "This computer") for Environment; the percent used with a small meter for
+Context; the counts the Changes row shows, "Clean", "Uncommitted" when there are
+changes the host has not counted, or "Unavailable"; "N running"
+(servers serving this checkout, working subagents, a live computer-use session)
+or "Nothing running"; and the pull request state ("N pull requests", "Not on
+GitHub"). A summary appears only when something true is already known, so
+nothing is claimed before a read answers. Open, the strip looks as it did and
+the chevron (pointing down) shows only while the title row is pointed at or
+holds the keyboard, and always on touch. The title row keeps one height. The
+rows stay mounted while folded, so a summary keeps following them, but they
+leave the tab order; no section folds or unfolds by itself (a subagent starting
+under a folded Running changes its summary to "1 running" and nothing else).
+The choice is this device's, kept in local storage per window and per mode and
+never sent to the host; it defaults to all open. The dock overview's
+Environment card is its own summary and does not follow it.
+
+Context sits after Environment. It says how full the thread's context window is
+from what the host or the provider reported, read through the same selector as
+the composer's ring: "N% used" with "used / maximum" at the right, one 4px
+meter (segmented by category in the categorical hues only when categories are
+reported), and one row per reported category (swatch, name, tokens, percent).
+With used tokens but no named maximum it shows the used figure alone, with no
+percent and no meter; with nothing reported it is one meta line saying so, with
+no meter, no zero and no summary. It never estimates. A Compact session button
+sits at its foot where the thread offers one, through the composer's own
+confirmation and host path (maintainer request, 2026-11-16).
+
+**Subagents in Environment.** The Subagents row carries the working, to
+review and done counts. It opens by itself when a subagent starts working and
+then stays as the person left it; it never closes by itself, so the rows and
+the result lines do not vanish when the last run ends. Open, it holds one 28px
+row per running subagent, at most five and then "+N more": the provider's logo
+(the status mark when the host reported no provider), the title on one line,
+and at the right edge how long it has run, or its state word when the host
+does not say when it began. The model is in the row's tooltip and name, not
+its text, because the strip is 300px wide. Under the rows stand "N to review"
+and "N finished", each on a line of its own. A row opens that subagent in the
+Agents tool and the lines open the tool; the strip has no Stop, and reading and
+steering a subagent belong in Agents (maintainer request, 2026-11-16).
+
+**What the strip shows at rest.** A thread with nothing running, no pull
+request and no changes shows only what is true and what can be started
+(maintainer request, 2026-11-16). Local servers is a row only while a server
+runs on this computer, and Computer use only while a session exists; Running's
+folded summary says "Nothing running" otherwise. Subagents stays as "None", and
+with nothing to open it is a plain row with no chevron and no button, as is any
+group whose opened body would only repeat its value. Pull requests is absent
+when the Project is not on GitHub (Delivery's summary says "Not on GitHub");
+when it is, "All pull requests" is the last row of its opened body and the
+count is not said again. Usage's own value is the total, or "No usage yet";
+its body is one line of the request count ("· N without usage" when some
+requests reported none) and Open Usage dashboard, and the input and output
+split lives in the dashboard. Its Spend ceiling row shows only when Settings
+› Usage › Show spend ceiling is on (off by default) or a ceiling is set on the
+thread or its Project, or has refused a turn; the Project page's row follows
+the same rule, so a ceiling set earlier always keeps a place to raise or clear
+it (maintainer request, 2026-11-17). Its Spend ceiling is one row (label, and "None" or a short reading such as
+"2M tokens · $5") that opens a popover under it holding the four fields, Set,
+Raise and Clear, the money note and every refusal message, with the same
+handlers; Escape or a press outside closes it and leaves the ceiling as it was.
+Commit or push shows for a checkout with changes or a named branch, and Create
+pull request for a named branch, because the section reads the working tree and
+the branch only, not how far the branch is ahead. Neither shows for an
+unreadable checkout. New task in this Project and Worktrees are the items of a
+"…" menu (More for changes) at the right end of the Changes title row, shown
+while the section is open. Routines keeps its row; Follow up later and New
+routine are the two items of one "+" menu (Add a routine) at its right end.
+
+**The thread's pull requests.** Under its other rows, a Code thread's Changes
+section lists the pull requests this thread opened or is tied to, newest first,
+under a small "Pull requests" caption: each is one row of fixed height with the
+state's mark in its colour (open, draft, merged, closed, or a neutral mark when
+the state is not known), the title on one line, then the repository, the
+number and the state in the meta ink, with "Ready to merge" and a stale or
+unavailable reading said in words, then the pull request's added and removed
+lines as "+A −D" in the two inks of the changes row. An open pull request that
+is on its way in says so instead of "Open": "Merging" while it sits in the
+repository's merge queue (with the merge glyph in the pending tone), "Merges
+when ready" while auto-merge is switched on. An open or draft pull request ends
+with a small dot for its checks (passing, failing, pending), preceded by
+"passed/total" in tabular digits (19/26) until every counted check has passed;
+skipped, neutral and cancelled checks are not counted. The trailing cluster
+holds one width on every row, so a count arriving moves nothing. The row's name
+says the state, the checks, the counts and the lines in words, so colour is
+never the only sign. The host sends each of these facts only when its refresh
+read it: the line counts and checks come with the list read, auto-merge with it
+and with the single-pull-request read, and the merge queue from one read-only
+GraphQL query per refreshed repository through the same `gh`, on the same
+explicit or background refresh; that query reads the 100 most recently updated
+open pull requests, so one in the queue beyond them reads as open. A snapshot from before a fact was recorded, a
+pull request known only from a thread, and a failed queue read send nothing for
+it, and an absent fact draws nothing (never a zero, never "0/0"). A merged or
+closed pull request keeps its line counts and has no checks or merging state.
+Pressing a row
+opens that pull request in the app; a "…" menu beside it (More for pull request
+#N), shown on hover and keyboard focus and always on touch, offers Open on
+GitHub and Copy link. The list is the host's cached reading: opening the strip
+reaches no forge, and the link is built from the repository and number, never
+taken as text. The host sends at most three and a count of the rest, which the
+list says as "N more not shown". A thread with no pull request shows no caption
+and no row, and the folded Changes summary adds the count ("Clean · 1 PR").
+The Project's own open pull requests stay under Delivery (maintainer request,
+2026-11-16).
+Chat's fact list leaves out a fact whose value is none.
 
 On the phone, a thread's header button (Views and panes) is the one way to
 reach anything beside the conversation. Its sheet lists the full-screen views
@@ -2777,6 +3468,30 @@ stands on the bar's 12px lead inset and its last button ends 8px from the edge,
 as the bar's does, with 4px between controls. With no page open the row is the history buttons, the
 empty field and the profile icon.
 
+**Page tools.** Under a page the Browser pane ends in one band, 44px high, with
+one toolbar centred in it ("Page tools"): a pill, a wash of the ink with no
+edge and no shadow, holding round 28px icon buttons with a 16px glyph and the
+platform's own tooltip. In order: **Pick element** and **Point at something**
+(the two ways of pointing at an element: for the message, or to leave a note),
+a hairline, **Draw on page**, **Box on page** and **Text on page** (each opens
+the drawing on that tool), a hairline, **Refresh notes**, a hairline, and
+**Cancel**, which ends whatever is armed (pointing, picking, or the open
+drawing, where it reads **Discard the drawing**) and is disabled while nothing
+is. Each stands for something the Browser could already do, and a tool the
+page, the thread or this build cannot offer is not drawn; with none the band is
+absent. An armed tool is pressed (`aria-pressed`) and a tool that must wait
+says why in its tooltip. The band has one height whatever is armed, said or
+counted: what the armed tool waits for, or what the host last said about a
+note, reads as one muted line at its left, and the count of notes ("2 notes",
+whose tooltip says they go with the next message) at its right opens and closes
+their list. A live page is a window-level view placed by its rectangle, and
+nothing can be drawn over it, so the toolbar stands under the page and never
+floats on it, and arming a tool resizes nothing. The note being written, and
+the list of notes when it is open, stand between the page and the band at
+their own height (at most 45% of the pane, 420px, scrolling past it) and keep
+the height they had for as long as pointing is armed. Pick element and Draw on
+page stay in More Browser actions as well.
+
 ### Board
 
 The Board is an operational reading surface with four fixed,
@@ -2792,7 +3507,7 @@ none is, Waiting a filled dot, Done a check. Under the Colour style the marks
 take palette colours (Ready stays grey, In Progress orange, Waiting purple,
 Done green). A Board/List toggle leads the toolbar, and every control on it
 (the segmented choices, search, Filters, Refresh, View) is one rail control
-(`--oct-rail-button-h`). A card is a raised object inside its well: the card fill, a hairline,
+(`--oct-rail-button-h`). A card is a flat object inside its well: the card fill, a hairline,
 `--oct-radius-inset`, and 12px of padding. It carries the Project as an
 eyebrow, the title, and, while the thread is executing, a live line under the
 title (a small turning arc and the latest sub-agent line in the mono meta voice,
@@ -2886,30 +3601,55 @@ the global preview bound. Known closed or merged identities are recovered
 separately. Stale cached data is visibly stale. Provider usage follows the same
 provider-neutral context/limit model and preserves unavailable values.
 
-The Issues surface reads like GitHub's issue list: one toolbar with a
-repository chooser (All recent repositories, or one repository, from the same
-popover), state, sort, and search; then a bordered two-pane card with rows on
-the left (state glyph, `#number title`, repository and author beneath) and the
-reader on the right (kicker, title, state and dates, labels, Start a Code
-thread, the body and each comment in their own cards). With no recent
+The Issues surface is laid out as the Pull requests page is: a 384px list
+column with the title and count, the Repository control in the same place and
+at the same fixed width (All repositories, or one repository, from the picker),
+Sort, a search field at the column's width, and Open, Closed and All as the
+same chips; rows are the shared row (state glyph, title, one meta line). The
+reading pane shares the pull request pane's columns: the text column (720px) and
+a 260px facts column, centred together with a 32px gap, and the action (Start a
+Code thread) at the facts column's right edge. The title, state pill and meta
+line sit above the description, which is rendered as markdown by the same
+renderer as a pull request's description, with its task list as read-only
+checkboxes, in a plain reading column with no border and no card. Comments are
+quiet rows (author, age, body as markdown), not cards. With no recent
 repository the page asks for one in a single panel rather than opening on the
 whole catalogue. Start a Code thread leaves the surface with the issue
 attached to a new draft as its Create from context.
 
-The Pull requests page is a dense list in a 720px reading measure at the
-page's leading edge: a title band with the count and Sort, Filter, Repository
-settings and Refresh icon buttons; rows of a medium-weight title (two lines at
-most) and one 12px meta line (state glyph, repository, author, age, and the
-number in tabular numerals at the trailing edge); one quiet chip or a success
-check at the trailing edge of the title line instead of three chips; no hairline
-between rows and the control hover fill with the row radius under the pointer.
-Grouping by repository gives each group a slim header with a "..." menu holding
+The Pull requests page is the list column and reading pane above: rows of a
+13px title (up to two lines in the page's list, one in the dock) and one 12px meta line (repository, author, age, and the
+number in tabular numerals at the trailing edge), 52px tall (a two-line title makes it taller) with 8px above and
+below; the state (open, draft, merged, closed) is a 16px glyph at the row's start
+in the meta ink or its semantic ink, so a draft has no pill; one
+quiet chip for what needs the person (Review pending, Conflicts) or a success
+check at the trailing edge of the title line instead of three chips; no hairline between rows. Rows carry no avatar or folder mark and
+the filter has no Labels submenu or Closed and Merged status, because the
+snapshot holds no avatar, label or closed pull request. Grouping by repository gives each group a slim header with a "..." menu holding
 Auto-refresh, Agents may merge, Agents may comment on pull requests and Refresh. A Project that is not on GitHub is
 one notice at the foot, never an empty block. Where agents may merge is on, the
 group shows a quiet chip and the Repository settings button a dot. The Issues
 place uses the same row, group head and Sort menu. The dock packs its search,
 freshness and rows at the top of its scroll area in the same row anatomy, one
 flat list with no menus.
+
+Pull-request state is one shared mapping (`code/pullRequestState.ts`: state to
+glyph, words and token) used by the review panes, the lists, the chips and the
+Inbox's GitHub rows. Open is green (`--oct-pr-open`) with the pull-request
+glyph, merged purple (`--oct-pr-merged`) with the merge glyph, closed red
+(`--oct-pr-closed`) with the closed glyph, draft grey (`--oct-pr-draft`) with
+the draft glyph; links are blue (`--oct-link`). At the head of a request's own
+page or pane the state is a filled badge in the state's fill with white text,
+the title is the largest text with its number after it in meta ink, the two
+branches are mono chips, and the lines added and removed stand in the open and
+closed inks with tabular figures; Merge is the one filled button. The description, checks, changed files, commits, diff and conversation
+come first and the person's own actions (labels, comment, review) last; the
+labels a repository offers stay folded under "Add a label" until asked for,
+because thirty of them in the open buried the request's text. Passing checks
+use the success ink, failing checks the danger ink, pending checks the
+warning ink. In the Mono style open, merged and links fall back to greys and keep
+their glyphs; closed and failures keep red. The snapshot holds no label, so no
+surface draws one.
 
 The pull-request merge warning stays inline and nonmodal. Opening it focuses
 Cancel; Tab can leave the warning to continue reviewing. Escape within the warning
@@ -2924,9 +3664,16 @@ allowed) and what the host checks are owned by
 
 History uses the existing interface face and monospace identifiers, semantic
 text/status tokens, and shared `OctantInput`, `OctantSelectField`,
-`OctantToggleGroup`, and `OctantButton` controls. A semantic commit table owns
-its vertical scroller and virtualizes fixed-height rows. Author, date, and SHA
-columns progressively give space to the commit message in narrow docks.
+`OctantToggleGroup`, and `OctantButton` controls. One 36px toolbar row holds the
+search field (it takes the width; Enter searches, emptying it returns the whole
+history), the branch as a compact select and a Refresh icon button; one 28px
+status line follows ("13 commits · main"). A semantic commit table owns
+its vertical scroller and virtualizes fixed-height 40px rows of two columns: the
+graph, whose first lane starts on the pane's 12px inset, and the commit as two
+lines, the subject cut with an ellipsis over one meta line (refs, author, date,
+SHA; a pane under 360px keeps the refs and the date). The whole row opens the
+commit. Three stacked rows of controls took 190px before the first commit, and
+a subject was clipped mid-word (measured 2026-11-15).
 
 A row opens an immutable commit comparison inside Review. Back restores the
 history list and keyboard focus; search, branch choice, and loaded pages stay
@@ -2938,10 +3685,40 @@ diff presentation; file disclosures mount only their open preview. Unified and
 Side by side are a compact Settings row on Code, used only until this window
 stores a layout for that thread.
 
+### Review layout
+
+Review is its pane bar, one status line and the diffs. The bar holds the view
+switch (Working tree, Local commits, History) after the name and, for the
+working tree, the diff's actions as icon buttons with tooltips: Show side by
+side or Show unified (one button that names the other layout), an Ignore
+whitespace toggle, a refresh that
+re-reads the comparison, findings and checks, and Select Git
+hunks; they fold into the bar's More menu when it is narrow. A row of their own
+under the bar held four icons at its right end and nothing else. Where no pane
+bar hosts them (the bottom panel) the review keeps one 36px toolbar row. One 32px status line follows and never wraps (the marks shorten first): "N files changed · +a −d" at the left and, at
+the right, the recorded checks ("No tests run") and the finding count ("No
+findings") as quiet meta text with icons (in a tile narrower than 520px the
+words leave and the icons stay, the words kept as each mark's name and tooltip,
+before any text is cut), then an info icon whose tooltip carries
+the scope sentences (checkout changes only; extra Project folders are not
+included; local only, GitHub review mutation unavailable). No paragraph states
+an empty result: a "Findings" header with its count appears only when findings
+exist. The changed files are a list of rows (status letter M, A, D or R in the
+diff tokens, the folder muted and the name strong, the counts at the right) that
+takes the diff to that file: a 220px left column when the pane is at least 640px
+wide, a short scrolling list above the diffs when narrower. A path is cut from
+its start and keeps its own order (a dot-folder's leading dot stays where it is:
+`.config/settings.json` drew as `config/settings.json.`). Diffs run edge to
+edge of the pane, each file under a sticky 28px header, with hunks in the existing diff
+colours and line numbers in meta ink. Every diff line, in Review, a commit and a
+pull request's diff, is one height, `--oct-line-diff` (the body leading on the 12px
+size, in whole pixels): since 2026-11-16, because two panels drew the same line
+at 28px (the line-number buttons set the row) and 22px.
+
 ### What's new card and announcement
 
 After an update the person chose finishes applying, the full sidebar shows one
-small raised card above the profile row. A 64px band carries the Octant
+small flat card above the profile row. A 64px band carries the Octant
 aperture on a soft wash of the theme's ink with a hint of the accent, so the
 card is depth and not an accent banner. Under it sit a "New · v{version}" line,
 the notes' first line as a one-line strong headline, the next paragraph as a
@@ -3004,6 +3781,59 @@ make the Next button wait on disk. The rule is in
 When a verified app update finishes downloading, its notice offers a direct
 link to the Updates control; applying the update still requires an explicit
 request from the person.
+
+### Guided tour
+
+A short tour points at the real controls, once, on the first start. A card
+stands beside the control with a 2px ring in the accent around it (with a soft
+glow of the accent outside it, the spotlight), and nothing else on the page is
+dimmed. The card has one 1px hairline and the 16px floating corner, and a 20px
+title; its picture band is about two fifths of its height, a faint dotted grid
+under a soft glow of the accent. The card is a floating surface (the shared recipe in
+`components.css`, 336px wide) at `--oct-z-floating`: over the page, under a
+notice or a menu. It holds a picture of the feature, a label ("2 of 5 · Projects"
+in the accent text colour), a title, one or two short lines, progress dots, a
+quiet Back (absent on the first step), a filled Next (Done on the last), and a
+Close button. The picture is drawn from rows, chips and lines over a faint dotted
+grid, in ink and the accent, so it follows the theme in both schemes. The card
+never covers the control it points at (with its ring) or the account row: on its
+side of the control it slides along until it clears, and a side where nothing
+clears is passed over. It takes the desktop's dense float fill, so no text shows
+through it.
+
+| Step | Points at                                               | Says                                                                    |
+| ---- | ------------------------------------------------------- | ----------------------------------------------------------------------- |
+| 1    | New chat or New task                                    | Start work in Chat, Work or Code; pick the agent and model              |
+| 2    | The Projects list in the sidebar (or the rail's button) | Each Project keeps its threads, files and settings together             |
+| 3    | The Tools buttons in the thread's header                | Environment, Terminal, Review, Browser and Files open beside the thread |
+| 4    | The composer                                            | Attach files, choose the mode, see what the agent may do                |
+| 5    | The account face or row, whose menu holds Settings      | Providers, look and feel, and permissions                               |
+
+A step whose control is not drawn (a hidden sidebar, a narrow window, a Chat
+thread with no tool buttons, a hidden tool) is skipped, and the label counts
+only the steps shown, so it never points at nothing. The ring and card follow the
+control as the window is resized or the layout changes; a step that loses its
+control mid-tour drops out, and the tour ends when none is left.
+
+Focus moves to Next when the card opens and returns to where it was when the
+tour closes (the account menu row when that element is gone). Escape closes the
+tour; Left and Right move between steps unless focus is in a field or a menu;
+Tab stays within the card. The card is a non-modal dialog: it does not trap
+the pointer, and the page behind stays usable. It fades in over 150ms and under
+reduced motion, from the system or the setting, it does not fade.
+
+It is offered once, to an installation that starts fresh: while first-run setup
+is unanswered the window records that the tour is due, and once the host reports
+setup completed or skipped the tour opens as soon as the window is quiet. It
+waits, and does not give up, while a dialog or menu is open, Settings or Project
+create is up, a What's new announcement is showing, Zen is active, or the Inbox
+counts anything that needs attention, and it closes if a dialog opens over it.
+A person who finished setup before the tour existed has no record and is never
+offered it. Showing the tour, however it was opened, records it as seen in the
+same renderer-local storage the host notices use for their dismissals; where the
+storage cannot be read the offer may come back, which is harmless. The account
+menu's "Take the tour" opens it again at any time, in any window with the
+sidebar showing, and records nothing else.
 
 ### Mode-specific utility chrome
 

@@ -67,13 +67,13 @@ describe("moving a No-project Chat thread into a Project from its actions menu",
   const projectId = "20000000-0000-4000-8000-000000000001" as never;
   const projects = [{ id: projectId, name: "Trip planning" }];
 
-  it("moves the thread into the Project the person picks and says it gains no folder access", async () => {
+  it("moves the thread into the Project the person picks and says it gets no folder access", async () => {
     const user = userEvent.setup();
     const onMove = vi.fn(async () => true);
     render(<ChatThreadActionsMenu moveToProject={{ projects, onMove }} view={view} />);
     await user.click(screen.getByRole("button", { name: "Thread actions" }));
     await user.click(await screen.findByRole("menuitemradio", { name: "Move to Project…" }));
-    expect(await screen.findByText(/gains no folder access/)).toBeVisible();
+    expect(await screen.findByText(/gets no folder access/)).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Trip planning" }));
     expect(onMove).toHaveBeenCalledWith(projectId);
   });

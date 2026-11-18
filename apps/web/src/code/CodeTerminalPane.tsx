@@ -9,7 +9,7 @@ import type {
   TerminalBrowserGrantOutcome,
   TerminalBrowserGrantRefusalReason,
 } from "@octant/contracts/terminal-browser-grants";
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal } from "../ui/icons";
 import { useEffect, useRef, useState } from "react";
 import { OctantContextMenu } from "../ui/base/OctantContextMenu";
 import { OctantMenu } from "../ui/base/OctantMenu";
@@ -671,12 +671,13 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
         </div>
       )}
       {result.transcript?.truncated === true ? (
-        <OctantAlert className="code-delivery-pane__warning" tone="warning">
+        <OctantAlert layout="row" className="code-delivery-pane__warning" tone="warning">
           Terminal output is truncated. Earlier output is no longer available.
         </OctantAlert>
       ) : null}
       {browserOn ? (
         <OctantAlert
+          layout="row"
           action={
             <OctantButton
               disabled={browserPending}
@@ -696,14 +697,20 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
         </OctantAlert>
       ) : null}
       {browserRefusal === undefined ? null : (
-        <OctantAlert className="code-terminal-pane__browser" tone="warning">
+        <OctantAlert layout="row" className="code-terminal-pane__browser" tone="warning">
           {browserRefusal}
         </OctantAlert>
       )}
-      {failure === undefined ? null : <OctantAlert tone="warning">{failure}</OctantAlert>}
+      {failure === undefined ? null : (
+        <OctantAlert layout="row" tone="warning">
+          {failure}
+        </OctantAlert>
+      )}
       {notice === undefined ? null : <p role="status">{notice}</p>}
       {props.executionPolicy === "plan" ? (
-        <p className="code-delivery-pane__notice">Plan mode keeps terminal replay read-only.</p>
+        <OctantAlert layout="row" tone="neutral">
+          Plan mode keeps terminal replay read-only.
+        </OctantAlert>
       ) : null}
       {replayReady ? (
         <XtermTerminalAdapter

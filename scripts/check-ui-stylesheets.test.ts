@@ -499,6 +499,27 @@ describe("UI stylesheet check", () => {
     });
   });
 
+  it("flags a floating surface whose corner is not the large radius, and leaves its descendants alone", () => {
+    const radii = (css: string) =>
+      findStylesheetFindings({ [CSS]: css }).map((finding) => finding.rule);
+    expect(radii('[data-slot="popover-content"] { border-radius: var(--oct-radius-md); }')).toEqual(
+      ["radius-token"],
+    );
+    expect(radii(".workspace-disclosure { border-radius: var(--oct-radius-sm); }")).toEqual([
+      "radius-token",
+    ]);
+    // A slot that only ends in "-content" is not a float.
+    expect(radii('[data-slot="card-content"] { border-radius: var(--oct-radius-md); }')).toEqual(
+      [],
+    );
+    expect(radii('[data-slot="popover-content"] { border-radius: var(--oct-radius-lg); }')).toEqual(
+      [],
+    );
+    expect(
+      radii('[data-slot="menu-content"] .row { border-radius: var(--oct-radius-sm); }'),
+    ).toEqual([]);
+  });
+
   it("flags a corner that is not a radius token, and keeps the allowed shapes", () => {
     const findings = findStylesheetFindings({
       [CSS]: [
@@ -641,8 +662,8 @@ describe("UI stylesheet check", () => {
 
   it("flags a recipe height off the 20, 24, 28, 32 scale and only in the shared recipes", () => {
     const recipe = [
-      'const ok = "h-[round(2.154rem,2px)] size-[round(up,1.538rem,2px)] h-[28px] h-(--oct-space-5)";',
-      'const off = "h-[round(1.25rem,2px)] size-[1.15rem] h-[30px] min-h-[4rem]";',
+      'const ok = "h-[round(2rem,2px)] size-[round(up,1.42rem,2px)] h-[28px] h-(--oct-space-5)";',
+      'const off = "h-[round(1.143rem,2px)] size-[1.15rem] h-[30px] min-h-[4rem]";',
     ].join("\n");
     const findings = findComponentScaleFindings({
       "apps/web/src/ui/base/OctantThing.tsx": recipe,
@@ -658,8 +679,8 @@ describe("UI stylesheet check", () => {
   it("judges a rounded recipe height by its rounded result at the 13px root", () => {
     const findings = findComponentScaleFindings({
       "apps/web/src/ui/base/OctantThing.tsx": [
-        'const ok = "h-[round(1.5rem,2px)] h-[round(nearest,1.85rem,4px)] h-[round(up,1.4rem,2px)] h-[round(to-zero,2.5rem,2px)]";',
-        'const off = "h-[round(down,1.538rem,2px)] h-[round(to-zero,1.538rem,2px)] h-[round(up,1.6rem,2px)]";',
+        'const ok = "h-[round(1.4rem,2px)] h-[round(nearest,1.7rem,4px)] h-[round(up,1.3rem,2px)] h-[round(to-zero,2.3rem,2px)]";',
+        'const off = "h-[round(down,1.42rem,2px)] h-[round(to-zero,1.42rem,2px)] h-[round(up,1.5rem,2px)]";',
         'const open = "h-[round(var(--x),2px)] h-[round(1.5rem,var(--step))]";',
       ].join("\n"),
     });

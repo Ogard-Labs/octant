@@ -5,7 +5,7 @@ import type {
   CodeProjectPullRequestView,
   ProjectId,
 } from "@octant/contracts";
-import { ArrowUpRight, GitPullRequest, RefreshCw } from "lucide-react";
+import { ArrowUpRight, GitPullRequest, RefreshCw } from "../ui/icons";
 import { useEffect, useRef, useState } from "react";
 import {
   checksStatus,
@@ -23,6 +23,7 @@ import {
 } from "../code/CodeProjectPullRequests";
 import { OctantButton } from "../ui/base/OctantButton";
 import { EnvironmentGroup } from "./EnvironmentGroup";
+import { useReportSummary } from "./environmentSections";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface EnvironmentPullRequestsProps {
@@ -145,6 +146,22 @@ export function EnvironmentPullRequests(props: EnvironmentPullRequestsProps) {
         : rows.length === 0
           ? "None"
           : `${String(rows.length)} open`;
+  // The Delivery section says this while it is folded; before the first read
+  // answers there is nothing true to say.
+  useReportSummary(
+    view === undefined
+      ? undefined
+      : !connected
+        ? "Not on GitHub"
+        : rows.length === 0
+          ? "No pull requests"
+          : `${String(rows.length)} pull ${rows.length === 1 ? "request" : "requests"}`,
+  );
+
+  // Not on GitHub is the Delivery section's own line; a row saying so again,
+  // with a button to a list this Project has nothing in, was two lines for
+  // nothing. The summary is reported above, so the folded section still says it.
+  if (view !== undefined && !connected) return null;
 
   return (
     <EnvironmentGroup
@@ -164,18 +181,6 @@ export function EnvironmentPullRequests(props: EnvironmentPullRequestsProps) {
               <RefreshCw aria-hidden="true" size={14} />
             </OctantButton>
           ) : null}
-          {props.onOpenAll === undefined ? null : (
-            <OctantButton
-              className="environment-pull-requests__all"
-              onClick={props.onOpenAll}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              <span>All pull requests</span>
-              <ArrowUpRight aria-hidden="true" size={14} />
-            </OctantButton>
-          )}
         </>
       }
       icon={GitPullRequest}
@@ -191,15 +196,17 @@ export function EnvironmentPullRequests(props: EnvironmentPullRequestsProps) {
           <OctantAlert className="environment-pull-requests__status" tone="warning">
             {state.status === "error" ? state.message : "Pull requests unavailable."}
           </OctantAlert>
-        ) : !connected ? (
-          <p className="environment-pull-requests__status" role="status">
-            This Project is not on GitHub.
-          </p>
-        ) : (
+        ) : !connected ? null : (
           <>
+            {/* The count is the row's value; what the body adds is which
+                repository this is and how old the reading is. */}
             <p className="environment-pull-requests__status" role="status">
-              {`${pullRequestCountCopy(freshness ?? view.freshness, rows.length)} in this Project (${connection.repositoryOwner}/${connection.repositoryName}).`}
-              {` ${freshnessCopy(freshness ?? view.freshness)}`}
+              {/* A stale list is the one case where the value alone misleads:
+                  "cached" says these rows may be out of date. */}
+              {(freshness ?? view.freshness).status === "stale"
+                ? `${pullRequestCountCopy(freshness ?? view.freshness, rows.length)}. `
+                : ""}
+              {`${connection.repositoryOwner}/${connection.repositoryName}. ${freshnessCopy(freshness ?? view.freshness)}`}
               {truncationCopy(view, true)}
             </p>
             {state.status === "error" ? (
@@ -208,9 +215,13 @@ export function EnvironmentPullRequests(props: EnvironmentPullRequestsProps) {
               </OctantAlert>
             ) : null}
             {rows.length === 0 ? (
-              <p className="environment-pull-requests__status">
-                {projectEmptyCopy(freshness ?? view.freshness)}
-              </p>
+              // "No open or draft pull requests." only says the value "None".
+              projectEmptyCopy(freshness ?? view.freshness) ===
+              "No open or draft pull requests." ? null : (
+                <p className="environment-pull-requests__status">
+                  {projectEmptyCopy(freshness ?? view.freshness)}
+                </p>
+              )
             ) : (
               <ul className="environment-pull-requests__list">
                 {rows.map((row) => (
@@ -224,6 +235,20 @@ export function EnvironmentPullRequests(props: EnvironmentPullRequestsProps) {
               </ul>
             )}
           </>
+        )}
+        {/* One place in the tree for every state, so it neither goes missing
+            while the list loads or fails to read nor moves when it connects. */}
+        {props.onOpenAll === undefined ? null : (
+          <OctantButton
+            className="environment-pull-requests__all"
+            onClick={props.onOpenAll}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <span>All pull requests</span>
+            <ArrowUpRight aria-hidden="true" size={14} />
+          </OctantButton>
         )}
       </div>
     </EnvironmentGroup>

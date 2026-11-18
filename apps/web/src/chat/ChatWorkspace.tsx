@@ -672,7 +672,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       );
     } catch {
       setBrowserApprovalMessage(
-        "Browser approval could not be sent. Keep this request open and retry.",
+        "Could not send the browser approval. Keep this open and try again.",
       );
     } finally {
       setToolApprovalBusy(false);
@@ -812,7 +812,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     if (String(activeChatTurns(view?.turns ?? []).at(-1)?.id) !== open.tailTurnId) {
       setRewind({
         ...open,
-        message: "The conversation changed while this was open. Close it and try again.",
+        message: "The conversation changed. Close this and try again.",
       });
       return;
     }
@@ -990,7 +990,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const submitTurn = async (draft: string, toolCatalogHandoff = false): Promise<boolean> => {
     if (props.controller.draftSideChatReturnsInvalid) {
       setSendNotice(
-        "The saved Side Chat reference is unreadable. Clear this draft and return the reply again before sending.",
+        "The Side Chat link is broken. Clear this draft and return the reply again before sending.",
       );
       return false;
     }
@@ -1143,7 +1143,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                           ? {}
                           : {
                               unavailableReason:
-                                "Turn off the model pool first; its models stay on the current account.",
+                                "Turn off the model pool first. Its models stay on this account.",
                             }),
                         accounts: accountMoveTargets.map((group) => ({
                           id: group.instance.id,
@@ -1614,7 +1614,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     ? {}
                     : {
                         unavailableReason:
-                          "Turn off the model pool first; its models stay on the current account.",
+                          "Turn off the model pool first. Its models stay on this account.",
                       })}
                   onUsageLimitHandoffChange={async (providerInstanceId) => {
                     const result = await props.controller.execute({
@@ -1904,7 +1904,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                       ? "Waiting for the host to reconnect."
                       : "The host message queue is unavailable."
                     : messageQueue.uncertain
-                      ? "Check the previous queue change before sending another message."
+                      ? "Check the last queue change before sending another message."
                       : "Waiting for the host queue…",
                 })}
             onRemoveExtensionSelection={removeExtensionSelection}
@@ -2251,7 +2251,7 @@ function researchBackend(
     return !webSearchReady || !effectiveAppManagedTools
       ? {
           kind: "unavailable",
-          reason: "No web search backend is ready for this provider under the data policy.",
+          reason: "No web search is available for this provider under the data policy.",
         }
       : { kind: "selected", backend: "searxng" };
   }

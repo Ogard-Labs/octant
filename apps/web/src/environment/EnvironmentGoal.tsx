@@ -1,5 +1,5 @@
 import type { GoalClient } from "@octant/client-runtime/goal-client";
-import { Target } from "lucide-react";
+import { Target } from "../ui/icons";
 import { GoalCard } from "../goal/GoalCard";
 import { goalCriteriaSummary } from "../goal/GoalCriteria";
 import { useGoalController } from "../goal/useGoalController";

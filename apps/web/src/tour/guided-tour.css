@@ -1,0 +1,203 @@
+/*
+ * The guided tour: a ring around the real control and a card beside it.
+ *
+ * The card is a floating surface, so its fill, corner, shadow and the reduced
+ * transparency fallbacks come from the shared floating-surface rules in
+ * components.css. It stands at the floating layer: over the page, under a
+ * notice or a menu. Nothing here dims the window, so the control it points at
+ * stays in its own colours.
+ */
+.guided-tour__ring {
+  position: fixed;
+  z-index: var(--oct-z-floating);
+  pointer-events: none;
+  box-sizing: border-box;
+  border: 2px solid var(--oct-accent);
+  /* A thin page-coloured line outside the accent keeps the ring readable on a
+     fill of its own colour, such as the filled composer or a selected row. */
+  box-shadow:
+    0 0 0 1px var(--oct-bg),
+    0 0 0 6px color-mix(in oklab, var(--oct-accent) 18%, transparent);
+}
+
+/* One hairline and the 16px corner, restated over the shared float recipe,
+   which draws a card with no border at all. */
+.guided-tour .guided-tour__card {
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-lg);
+}
+
+.guided-tour__card {
+  position: fixed;
+  z-index: var(--oct-z-floating);
+  box-sizing: border-box;
+  inline-size: min(336px, calc(100vw - 24px));
+  padding: var(--oct-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-3);
+  color: var(--oct-fg);
+  /* The recipe in components.css sets no width; restate the tour's type size
+     so a themed body size does not widen the copy. */
+  font-size: var(--oct-text-sm);
+  transition: opacity var(--oct-motion-fast) var(--oct-ease-motion);
+}
+
+@starting-style {
+  .guided-tour__card {
+    opacity: 0;
+  }
+}
+
+.guided-tour__picture {
+  position: relative;
+  border-radius: var(--oct-radius-md);
+  background-color: color-mix(in oklab, var(--oct-fg) 4%, transparent);
+  /* The illustration band is a faint dotted grid under a soft glow of the
+     accent, about two fifths of the card's height. */
+  background-image:
+    radial-gradient(
+      ellipse 70% 80% at 50% 0%,
+      color-mix(in oklab, var(--oct-accent) 22%, transparent),
+      transparent 75%
+    ),
+    radial-gradient(
+      circle at center,
+      color-mix(in oklab, var(--oct-fg) 16%, transparent) 1px,
+      transparent 1.5px
+    );
+  background-size:
+    100% 100%,
+    14px 14px;
+  background-position:
+    0 0,
+    7px 7px;
+  overflow: hidden;
+}
+
+.guided-tour__picture-art {
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+}
+
+/* The picture's parts: one set of fills so every step is drawn in the same
+   hand, all from ink and accent so both schemes and every theme work. */
+.guided-tour__picture-art .gt-line {
+  fill: var(--octant-float);
+  stroke: color-mix(in oklab, var(--oct-fg) 22%, transparent);
+  stroke-width: 1;
+}
+
+.guided-tour__picture-art .gt-fill.gt-soft {
+  fill: color-mix(in oklab, var(--oct-fg) 8%, transparent);
+}
+
+.guided-tour__picture-art .gt-fill.gt-soft-2 {
+  fill: color-mix(in oklab, var(--oct-fg) 14%, transparent);
+}
+
+.guided-tour__picture-art .gt-fill.gt-strong {
+  fill: var(--oct-accent);
+}
+
+.guided-tour__picture-art .gt-fill.gt-accent {
+  fill: var(--oct-accent);
+}
+
+.guided-tour__picture-art .gt-fill.gt-accent-soft {
+  fill: color-mix(in oklab, var(--oct-accent) 24%, transparent);
+  stroke: var(--oct-accent);
+  stroke-width: 1;
+}
+
+.guided-tour__picture-art .gt-text {
+  fill: color-mix(in oklab, var(--oct-fg) 60%, transparent);
+}
+
+.guided-tour__picture-art .gt-text.gt-faint {
+  fill: color-mix(in oklab, var(--oct-fg) 30%, transparent);
+}
+
+.guided-tour__picture-art .gt-text.gt-accent {
+  fill: var(--oct-accent);
+}
+
+.guided-tour__picture-art .gt-on-strong {
+  fill: var(--oct-accent-on);
+}
+
+.guided-tour__close {
+  position: absolute;
+  inset-block-start: var(--oct-space-3);
+  inset-inline-end: var(--oct-space-3);
+}
+
+.guided-tour__copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  padding-inline: var(--oct-space-1);
+}
+
+.guided-tour__label {
+  margin: 0;
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  color: var(--oct-accent-fg);
+}
+
+.guided-tour__title {
+  margin: 0;
+  font-size: var(--oct-text-xl);
+  font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-snug);
+}
+
+.guided-tour__body {
+  margin: 0;
+  color: var(--oct-muted);
+  line-height: var(--oct-leading-snug);
+}
+
+.guided-tour__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  padding-inline: var(--oct-space-1);
+}
+
+.guided-tour__dots {
+  display: flex;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.guided-tour__dot {
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: var(--oct-radius-pill);
+  background: color-mix(in oklab, var(--oct-fg) 24%, transparent);
+}
+
+.guided-tour__dot[data-active="true"] {
+  background: var(--oct-accent);
+}
+
+.guided-tour__actions {
+  display: flex;
+  gap: var(--oct-space-1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guided-tour__card {
+    transition: none;
+  }
+}
+
+html[data-octant-reduced-motion="true"] .guided-tour__card {
+  transition: none;
+}

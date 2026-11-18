@@ -108,6 +108,10 @@ export function composeThreadBoardPullRequestSummaries(
           freshness,
         }),
         ...(relationship === undefined ? {} : { relationship }),
+        ...(row.additions === undefined ? {} : { additions: row.additions }),
+        ...(row.deletions === undefined ? {} : { deletions: row.deletions }),
+        ...(row.checkCounts === undefined ? {} : { checkCounts: row.checkCounts }),
+        ...(row.merging === undefined ? {} : { merging: row.merging }),
       };
     });
   return { items, hiddenCount };

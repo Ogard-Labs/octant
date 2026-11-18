@@ -17,10 +17,7 @@ export default function ProjectPullRequestsModule(props: Props) {
     return unavailable("Pull requests", "Pull requests open from a Code thread.");
   }
   if (props.subject.projectId === undefined) {
-    return unavailable(
-      "Pull requests",
-      "This thread has no Project whose pull requests could be listed.",
-    );
+    return unavailable("Pull requests", "This thread has no Project to list pull requests for.");
   }
   const codeClient = props.codeClient;
   if (codeClient === undefined) {

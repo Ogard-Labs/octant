@@ -143,8 +143,8 @@ describe("SideTaskInline", () => {
     const { client } = setup(() => [
       task({ status: "continued-here", continuedDelivery: "unconfirmed" }),
     ]);
-    expect(await screen.findByText(/Delivery is unconfirmed/)).toBeVisible();
-    expect(screen.getByText(/Check this thread and its queued messages/)).toBeVisible();
+    expect(await screen.findByText(/Not sure it was delivered/)).toBeVisible();
+    expect(screen.getByText(/Check this thread and its queue/)).toBeVisible();
     expect(screen.queryByRole("button", { name: "Do it here" })).toBeNull();
     expect(screen.queryByRole("button", { name: "New worktree" })).toBeNull();
     expect(client.continueHere).not.toHaveBeenCalled();
@@ -183,7 +183,7 @@ describe("SideTaskInline", () => {
       readable = true;
       act(() => window.dispatchEvent(new Event("online")));
       if (status === "continued-here") {
-        expect(await screen.findByText(/Delivery is unconfirmed/)).toBeVisible();
+        expect(await screen.findByText(/Not sure it was delivered/)).toBeVisible();
         expect(screen.queryByRole("button", { name: "Do it here" })).toBeNull();
       } else {
         await waitFor(() =>
@@ -207,7 +207,7 @@ describe("SideTaskInline", () => {
         "Update README.md so the install steps match scripts/setup.ts.",
       ),
     );
-    expect(await screen.findByRole("alert")).toHaveTextContent("did not go out");
+    expect(await screen.findByRole("alert")).toHaveTextContent("was not sent");
   });
 
   it("holds stale choices when delivery was recorded but its following status read fails", async () => {

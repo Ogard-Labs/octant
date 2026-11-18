@@ -157,7 +157,7 @@ const FIRST_RUN_ENABLED_DRIVER_KINDS: ReadonlySet<ProviderDriverKind> = new Set(
 ]);
 
 /**
- * Whether this scan may create Claude Code or Codex CLI enabled.
+ * Whether this scan may create Claude Code or Codex enabled.
  *
  * Eligibility is a one-shot host fact: first-run onboarding still pending,
  * and no provider instance of any driver has been recorded yet. An empty

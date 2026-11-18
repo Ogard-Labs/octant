@@ -1,18 +1,12 @@
 import { useMinuteNow } from "../polling/useMinuteTick";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import { Activity } from "lucide-react";
+import { Activity } from "../ui/icons";
 import { useMemo } from "react";
 import { elapsedLabel, relativeTimeLabel } from "../lib/relativeTime";
-import { ProviderGlyph } from "../providers/ProviderGlyph";
-import { OctantButton } from "../ui/base/OctantButton";
-import type { HomeCardContent, HomeCardDefinition } from "./homeCards";
+import type { HomeListCardDefinition, HomeListRead } from "./homeCards";
+import { workingNowListRow } from "./homeListRows";
 import { useActiveAgentRuns } from "./useActiveAgentRuns";
-import {
-  buildWorkingNowRows,
-  WORKING_NOW_ROW_LIMIT,
-  type WorkingNowInput,
-  type WorkingNowRow,
-} from "./workingNow";
+import { buildWorkingNowRows, type WorkingNowInput, type WorkingNowRow } from "./workingNow";
 
 export const WORKING_NOW_CARD_ID = "working-now";
 
@@ -38,16 +32,25 @@ export interface WorkingNowCardSource extends Omit<WorkingNowInput, "runs"> {
  * Needs you it leaves the grid while nothing runs: an empty card saying so
  * stood beside the start screen's other cards on every visit.
  */
-export function createWorkingNowCard(source: WorkingNowCardSource): HomeCardDefinition {
+export function createWorkingNowCard(source: WorkingNowCardSource): HomeListCardDefinition {
   return {
     id: WORKING_NOW_CARD_ID,
     title: "Working now",
     icon: Activity,
     defaultOn: true,
     available: true,
-    hideWhenEmpty: true,
-    emptyLabel: WORKING_NOW_EMPTY_LABEL,
-    useContent: () => useWorkingNowContent(source),
+    useListRows: () => useWorkingNowListRows(source),
+  };
+}
+
+/** The rows the card lists, for the start screen's list; "See all" is the Running view. */
+function useWorkingNowListRows(source: WorkingNowCardSource): HomeListRead {
+  const now = useMinuteNow(source.now);
+  const rows = useWorkingNowRows(source);
+  return {
+    status: "ready",
+    seeAll: { "in-progress": { label: "See all", onSelect: source.onOpenRunning } },
+    rows: rows.map((row) => workingNowListRow(row, now, () => source.onOpenRow(row))),
   };
 }
 
@@ -70,98 +73,6 @@ export function useWorkingNowRows(source: WorkingNowCardSource): ReadonlyArray<W
         ...(host === undefined ? {} : { host }),
       }),
     [boardFacts, host, modes, projectNames, providers, runs, threads],
-  );
-}
-
-function useWorkingNowContent(source: WorkingNowCardSource): HomeCardContent {
-  const now = useMinuteNow(source.now);
-  const rows = useWorkingNowRows(source);
-  return {
-    status: "ready",
-    count: rows.length,
-    body: (
-      <WorkingNowRows
-        now={now}
-        onOpenRow={source.onOpenRow}
-        onOpenRunning={source.onOpenRunning}
-        rows={rows}
-      />
-    ),
-  };
-}
-
-function WorkingNowRows(props: {
-  readonly rows: ReadonlyArray<WorkingNowRow>;
-  readonly now: number;
-  readonly onOpenRow: (row: WorkingNowRow) => void;
-  readonly onOpenRunning: () => void;
-}) {
-  const shown = props.rows.slice(0, WORKING_NOW_ROW_LIMIT);
-  const hidden = props.rows.length - shown.length;
-  return (
-    <>
-      <ul className="working-now__list">
-        {shown.map((row) => (
-          <li key={row.key}>
-            <OctantButton
-              className="working-now__row window-no-drag"
-              onClick={() => props.onOpenRow(row)}
-              type="button"
-              variant="bare"
-            >
-              <span className="working-now__face">
-                <span className="working-now__head">
-                  {row.provider === undefined ? null : (
-                    <ProviderGlyph
-                      className="working-now__provider"
-                      displayName={row.provider.displayName}
-                      driverKind={row.provider.driverKind}
-                      size={16}
-                    />
-                  )}
-                  <span className="oct-row-label working-now__title">{row.title}</span>
-                  <WorkingNowTime now={props.now} row={row} />
-                </span>
-                {row.step === undefined &&
-                row.projectName === undefined &&
-                row.host === undefined ? null : (
-                  <span className="working-now__line">
-                    {row.step === undefined ? (
-                      <span className="oct-meta working-now__step">{row.projectName}</span>
-                    ) : (
-                      <span
-                        className={
-                          row.stepKind === "status"
-                            ? "oct-meta working-now__step"
-                            : "oct-meta oct-meta--mono working-now__step"
-                        }
-                        title={row.step}
-                      >
-                        {row.step}
-                      </span>
-                    )}
-                    {row.host === undefined ? null : (
-                      <span className="oct-meta working-now__host">{row.host}</span>
-                    )}
-                  </span>
-                )}
-              </span>
-            </OctantButton>
-          </li>
-        ))}
-      </ul>
-      {hidden <= 0 ? null : (
-        <OctantButton
-          className="working-now__more window-no-drag"
-          onClick={props.onOpenRunning}
-          size="sm"
-          type="button"
-          variant="link"
-        >
-          {`+${String(hidden)} more`}
-        </OctantButton>
-      )}
-    </>
   );
 }
 

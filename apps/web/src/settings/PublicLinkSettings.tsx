@@ -122,7 +122,7 @@ export function PublicLinkSettings(props: PublicLinkSettingsProps) {
         />
       </SettingRow>
       <SettingRow
-        description="Where public links are published: a service you run, or another one you trust. Empty means no service is set and no link can be published."
+        description="Where public links are published: a service you run or trust. Empty means no links can be published."
         focused={props.focusedSetting === "public-link-service"}
         htmlFor={urlId}
         label="Service address"

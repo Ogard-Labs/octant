@@ -105,6 +105,11 @@ export interface ShellControllerOptions {
      * person minimised minimised, since its card says the session is there.
      */
     readonly offered: boolean;
+    /**
+     * The sessions an offer announces (their Browser context ids). A page the
+     * person opened themselves is announced too, and is already a tab.
+     */
+    readonly sessionIds?: ReadonlyArray<string>;
   }) => boolean;
   readonly serverUrl: string;
   readonly windowCapability?: string;
@@ -325,9 +330,10 @@ export function useShellController(options: ShellControllerOptions) {
       );
   }, [authoritative, contentStorageKey, contentTabs]);
 
-  // Threads opened with a single click from the sidebar; the next open in
-  // their pane takes their tab. A double click keeps one (see workspace.md,
-  // Opening into tabs). Read at commit time, so a ref rather than state.
+  // Threads opened with a single click from the sidebar. A pane keeps one
+  // conversation however it was opened (see workspace.md, One conversation to
+  // a pane); the preview only decides whether its reference is written to
+  // storage. Read at commit time, so a ref rather than state.
   const previewThreads = useRef<ThreadPreview>({});
   // Stable, so the sidebar rows reading them through context do not re-render
   // with every shell render.
@@ -335,7 +341,7 @@ export function useShellController(options: ShellControllerOptions) {
   const openThreadAsPreview = useCallback((threadId: string) => {
     previewThreads.current = { ...previewThreads.current, pending: threadId };
   }, []);
-  /** A double click on the thread's row or tab keeps its tab. */
+  /** A double click on the thread's row or tab stops it being the preview. */
   const keepThreadTab = useCallback((threadId: string) => {
     const { current, pending } = previewThreads.current;
     previewThreads.current = {
@@ -400,10 +406,8 @@ export function useShellController(options: ShellControllerOptions) {
             ? undefined
             : readWorkspaceContent(contentStorageKey, next.workspace);
           contentOwner.current = contentStorageKey;
-          // Read the preview before settling it: the updater runs later.
-          const preview = currentPreviewSet(previewThreads.current);
           setContentTabs((tabs) =>
-            rememberWorkspaceContent(restored ?? tabs, previousWorkspace, next.workspace, preview),
+            rememberWorkspaceContent(restored ?? tabs, previousWorkspace, next.workspace),
           );
           previewThreads.current = settleThreadPreview(previewThreads.current, next.workspace);
           committedShell.current = next;
@@ -550,10 +554,7 @@ export function useShellController(options: ShellControllerOptions) {
         workspaceVersion: result.version,
       };
       committedShell.current = next;
-      const preview = currentPreviewSet(previewThreads.current);
-      setContentTabs((tabs) =>
-        rememberWorkspaceContent(tabs, previous.workspace, next.workspace, preview),
-      );
+      setContentTabs((tabs) => rememberWorkspaceContent(tabs, previous.workspace, next.workspace));
       previewThreads.current = settleThreadPreview(previewThreads.current, next.workspace);
       setAuthoritative(next);
       setStatus("ready");
@@ -886,6 +887,7 @@ export function useShellController(options: ShellControllerOptions) {
     readonly paneId?: PaneId;
     readonly threadId: string;
     readonly offered?: boolean;
+    readonly sessionIds?: ReadonlyArray<string>;
   }): void {
     const latest = committedShell.current;
     if (latest !== undefined && threadHasBrowserSurface(latest.workspace, input.threadId)) {
@@ -898,6 +900,7 @@ export function useShellController(options: ShellControllerOptions) {
       options.openDockBrowser?.({
         threadId: input.threadId,
         offered: input.offered === true,
+        ...(input.sessionIds === undefined ? {} : { sessionIds: input.sessionIds }),
       }) === true
     ) {
       return;
@@ -1423,6 +1426,9 @@ function createWorkspaceMutation(
           message: `Draft mode ${intent.mode} does not match the active workspace.`,
         };
       }
+      // A new task takes the whole window. Started from a split, it would
+      // otherwise land in one half, beside a thread the person did not ask to
+      // keep in view; the threads that leave the panes stay in the list.
       const surface: WorkspaceTab = {
         kind: "draft-thread",
         id: newTabId(),
@@ -1436,7 +1442,7 @@ function createWorkspaceMutation(
         latest.workspace.contextByMode.chat.projectId !== null
       ) {
         return {
-          operation: { kind: "switch-project-surface", mode, surface },
+          operation: { kind: "switch-project-surface", mode, surface, alone: true },
           message: "New Chat thread draft opened without a Project.",
         };
       }
@@ -1447,7 +1453,7 @@ function createWorkspaceMutation(
       // is a refusal of something they had just asked for.
       if (isDifferentProject(latest.workspace, mode, intent.projectId)) {
         return {
-          operation: { kind: "switch-project-surface", mode, surface },
+          operation: { kind: "switch-project-surface", mode, surface, alone: true },
           message: `New ${modeLabel(mode)} thread draft opened.`,
         };
       }
@@ -1458,6 +1464,7 @@ function createWorkspaceMutation(
           mode,
           paneId: (existing ?? preferredPane(latest.workspace, mode)).paneId,
           surface,
+          alone: true,
         },
         message:
           existing === undefined

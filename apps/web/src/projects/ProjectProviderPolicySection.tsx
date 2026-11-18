@@ -141,8 +141,8 @@ export function ProjectProviderPolicySection(props: ProjectProviderPolicySection
       ) : null}
       {policy.mode === "eu-zdr" ? (
         <p className="project-provider-policy__hint">
-          Tag providers or individual models as EU or ZDR in Settings → Providers &amp; Models.
-          Untagged choices are refused when this policy is active.
+          Tag providers or models as EU or ZDR in Settings → Providers &amp; Models. Untagged
+          choices are refused when this policy is active.
         </p>
       ) : null}
       {policy.mode === "whitelist" && selected.size === 0 ? (

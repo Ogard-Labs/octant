@@ -93,12 +93,9 @@ describe("Project action buttons", () => {
         onSetup={onSetup}
       />,
     );
-    // Nothing to run: no choice of where to run it, only the task's setup.
-    expect(
-      within(host)
-        .getAllByRole("button")
-        .map((button) => button.textContent),
-    ).toEqual(["Worktrees"]);
+    // Nothing to run: the band holds no control. Worktree setup is a row of
+    // Environment, not a text button in the title bar.
+    expect(within(host).queryAllByRole("button")).toEqual([]);
 
     rerender(
       <ProjectActionButtons

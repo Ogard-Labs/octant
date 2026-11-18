@@ -102,7 +102,7 @@ export function ChildRunRequests(props: {
       );
       return accepted;
     } catch {
-      setNotice("The response could not be confirmed. Check the request before trying again.");
+      setNotice("Could not confirm your answer. Check the request, then try again.");
       return false;
     } finally {
       await reload();

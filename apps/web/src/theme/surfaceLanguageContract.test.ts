@@ -45,20 +45,22 @@ describe("surface language", () => {
     ]) {
       expect(surface).toContain(role);
     }
-    // Only the large title carries the title weight; a display header's title
-    // is the strong weight.
+    // Only the large title carries the title weight; a page header's title is
+    // the strong weight.
     const title = surface.match(/font-weight: var\(--oct-weight-title\)/g) ?? [];
     expect(title).toHaveLength(1);
     expect(surface).not.toContain("text-transform: uppercase");
     expect(surface).not.toMatch(/font-size:\s*1[12]\.5px/);
   });
 
-  it("sets the start screen's question in the primary ink at regular weight, in every style", () => {
+  it("sets the start screen's question in the primary ink at regular weight and a window title's size, in every style", () => {
     const question = read("composer/welcome-heading.css");
     const rule = question.match(/\.welcome__question \{[^}]*\}/)?.[0] ?? "";
     expect(rule).toContain("color: var(--oct-fg);");
     expect(rule).toContain("font-weight: var(--oct-weight-regular);");
-    expect(rule).toContain("font-size: var(--oct-text-2xl);");
+    expect(rule).toContain("font-size: var(--oct-text-xl);");
+    // One size at every width: no narrower step to swap to.
+    expect(question).not.toMatch(/@media/);
     expect(rule).toContain("letter-spacing: -0.012em;");
     // No style recolours the question with its accent.
     expect(read("styles/colour.css")).not.toMatch(/oct-title--hero/);
@@ -78,8 +80,9 @@ describe("surface language", () => {
   it("gives destinations and Settings one page title", () => {
     const surface = read("styles/surface.css");
     const title = surface.match(/\.oct-page-title \{[^}]*\}/)?.[0] ?? "";
-    expect(title).toContain("font-size: var(--oct-text-sm);");
+    expect(title).toContain("font-size: var(--oct-text-2xl);");
     expect(title).toContain("font-weight: var(--oct-weight-strong);");
+    expect(title).toContain("letter-spacing: var(--oct-tracking-sf-26);");
     expect(read("surface/SurfaceHeader.tsx")).toContain('className="oct-page-title"');
     expect(read("shell/SettingsView.tsx")).toContain('<h1 className="oct-page-title"');
   });
@@ -93,11 +96,13 @@ describe("surface language", () => {
     }
     const surface = read("styles/surface.css");
     const role = (name: string) => surface.match(new RegExp(`\\.${name} \\{[^}]*\\}`))?.[0] ?? "";
-    // A name in navigation: the interface size, regular weight, no tracking.
+    // A name in navigation: the interface size, medium weight (the weak
+    // regular names read faint beside their icons, maintainer feedback), no
+    // tracking.
     const name = role("oct-nav-name");
     expect(name).toContain("font-size: var(--oct-text-detail);");
-    expect(name).toContain("font-weight: var(--oct-weight-regular);");
-    expect(name).toContain("letter-spacing: 0;");
+    expect(name).toContain("font-weight: var(--oct-weight-medium);");
+    expect(name).toContain("letter-spacing: var(--oct-tracking-sf-14);");
     // A group label: a quiet 12px caption, not a Section label.
     const group = role("oct-nav-group");
     expect(group).toContain("font-size: var(--oct-text-xs);");
@@ -107,7 +112,7 @@ describe("surface language", () => {
     const activity = role("oct-activity-line");
     expect(activity).toContain("font-size: var(--oct-text-detail);");
     expect(activity).toContain("color: var(--oct-meta);");
-    // A menu option: 13px at medium weight.
+    // A menu option: the interface size at medium weight.
     const option = role("oct-menu-option");
     expect(option).toContain("font-size: var(--oct-text-detail);");
     expect(option).toContain("font-weight: var(--oct-weight-medium);");

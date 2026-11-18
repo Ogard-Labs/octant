@@ -5,6 +5,9 @@ import {
   INITIAL_SIDEBAR_MATERIAL_PREFERENCE,
   MACOS_TRAFFIC_LIGHT_BUTTON_HEIGHT,
   createWindowPresentationController,
+  describeGlassGate,
+  glassSafeAtStart,
+  resolveGlassRefusal,
   nativeTitlebarContainerHeight,
   observeThermalPerformance,
   resolveWindowPresentation,
@@ -39,6 +42,7 @@ describe("resolveWindowPresentation", () => {
       },
       material: "translucent",
       vibrancy: "sidebar",
+      glassRefusal: null,
     });
     expect(presentation.browserWindow).not.toHaveProperty("trafficLightPosition");
     expect(nativeTitlebarContainerHeight(undefined)).toBe("appkit-default");
@@ -114,6 +118,7 @@ describe("window presentation controller", () => {
       setVibrancy: vi.fn(),
       publishResolvedMaterial: vi.fn(),
       publishSidebarVibrancy: vi.fn(),
+      publishGlassRefusal: vi.fn(),
     };
     const controller = createWindowPresentationController({
       window,
@@ -127,7 +132,6 @@ describe("window presentation controller", () => {
     const stopThermal = observeThermalPerformance({
       platform: "darwin",
       powerMonitor,
-      richEffectsAllowed: true,
       updatePerformanceSafe: (performanceSafe) => controller.update({ performanceSafe }),
     });
 
@@ -162,6 +166,7 @@ describe("window presentation controller", () => {
       setVibrancy: vi.fn(),
       publishResolvedMaterial: vi.fn(),
       publishSidebarVibrancy: vi.fn(),
+      publishGlassRefusal: vi.fn(),
     };
 
     const controller = createWindowPresentationController({
@@ -219,7 +224,6 @@ describe("observeThermalPerformance", () => {
     const stop = observeThermalPerformance({
       platform: "darwin",
       powerMonitor,
-      richEffectsAllowed: true,
       updatePerformanceSafe,
     });
 
@@ -237,6 +241,97 @@ describe("observeThermalPerformance", () => {
 
     stop();
     expect(powerMonitor.off).toHaveBeenCalledWith("thermal-state-change", listener);
+  });
+
+  it("starts a cool Mac's window without a thermal refusal, and a hot one with it", () => {
+    const at = (state: "nominal" | "serious") => ({ getCurrentThermalState: () => state });
+    expect(glassSafeAtStart("darwin", at("nominal"))).toBe(true);
+    expect(glassSafeAtStart("darwin", at("serious"))).toBe(false);
+    expect(glassSafeAtStart("linux", at("nominal"))).toBe(false);
+  });
+});
+
+describe("why Glass is refused", () => {
+  it.each([
+    ["nothing in the way", {}, null],
+    ["not macOS", { platform: "linux" }, "unsupported-platform"],
+    ["no composition", { compositionSupported: false }, "unsupported-platform"],
+    ["Reduce transparency", { prefersReducedTransparency: true }, "reduced-transparency"],
+    ["Increase contrast", { highContrast: true }, "increased-contrast"],
+    ["thermal pressure", { performanceSafe: false }, "thermal-pressure"],
+  ])("names the reason for %s", (_name, override, reason) => {
+    expect(resolveGlassRefusal(system(override as never))).toBe(reason);
+    expect(resolveWindowPresentation(system(override as never)).glassRefusal).toBe(reason);
+  });
+
+  it("names the refusal whatever the person chose, so Settings can say why", () => {
+    expect(
+      resolveWindowPresentation(system({ sidebarVibrancyMode: "off", performanceSafe: false }))
+        .glassRefusal,
+    ).toBe("thermal-pressure");
+  });
+
+  it("publishes the reason with the material and logs each change of the gate's inputs once", () => {
+    const lines: string[] = [];
+    const nativeTheme: NativeThemePort = {
+      prefersReducedTransparency: false,
+      shouldUseHighContrastColors: false,
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const window: PresentationWindowPort = {
+      setVibrancy: vi.fn(),
+      publishResolvedMaterial: vi.fn(),
+      publishSidebarVibrancy: vi.fn(),
+      publishGlassRefusal: vi.fn(),
+    };
+    const controller = createWindowPresentationController({
+      window,
+      nativeTheme,
+      platform: "darwin",
+      sidebarMaterial: "system",
+      sidebarVibrancyMode: "strong",
+      compositionSupported: true,
+      performanceSafe: false,
+      report: (line) => lines.push(line),
+    });
+    expect(window.publishGlassRefusal).toHaveBeenLastCalledWith("thermal-pressure");
+    controller.refresh();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("performanceSafe=false");
+    expect(lines[0]).toContain("refused: thermal-pressure");
+
+    controller.update({ performanceSafe: true });
+    expect(window.publishGlassRefusal).toHaveBeenLastCalledWith(null);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain("-> translucent");
+  });
+
+  it("describes every input the gate read and nothing else", () => {
+    const line = describeGlassGate(system(), resolveWindowPresentation(system()));
+    expect(line).toBe(
+      "[octant] window glass gate: platform=darwin material=system mode=subtle composition=true performanceSafe=true reducedTransparency=false increasedContrast=false -> translucent",
+    );
+  });
+});
+
+describe("the thermal gate", () => {
+  it("does not ask the system's rich-animation hint, which reads false over screen sharing", () => {
+    const powerMonitor: PowerMonitorPort = {
+      getCurrentThermalState: () => "nominal",
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const lines: string[] = [];
+    const updatePerformanceSafe = vi.fn();
+    observeThermalPerformance({
+      platform: "darwin",
+      powerMonitor,
+      updatePerformanceSafe,
+      report: (line) => lines.push(line),
+    });
+    expect(updatePerformanceSafe).toHaveBeenLastCalledWith(true);
+    expect(lines).toEqual(["[octant] window glass gate: thermalState=nominal"]);
   });
 });
 

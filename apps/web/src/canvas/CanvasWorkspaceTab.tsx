@@ -38,7 +38,7 @@ import type {
   CanvasShareSnapshotRevokeRequest,
 } from "@octant/contracts/canvas-share-snapshot";
 import type { WorkspaceTab } from "@octant/contracts/shell";
-import { ChevronDown, Globe, MessageSquare, MoreHorizontal, X } from "lucide-react";
+import { ChevronDown, Globe, MessageSquare, MoreHorizontal, X } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantMenu } from "../ui/base/OctantMenu";

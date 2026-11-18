@@ -193,7 +193,7 @@ function SyncStoreSections(
   if (client === undefined) {
     return (
       <SettingsSection
-        description="Choosing a store and turning sync on happen in the Octant app on the host machine."
+        description="Choose a store and turn sync on in the Octant app on the host computer."
         title="Store"
       />
     );
@@ -321,7 +321,7 @@ function SyncStoreSections(
       >
         <div className="setgroup">
           <SettingRow
-            description="Once this computer belongs to a replica, sync on copies artifact versions and comments to the store and brings in your other computers'."
+            description="Once this computer has joined, sync copies artifact versions and comments to the store and brings in your other computers'."
             focused={props.focusedSetting === "sync-enabled"}
             label="Sync artifacts"
             labelledBySection
@@ -421,7 +421,7 @@ function SyncStoreSections(
         {pickingFolder && props.folderBrowse !== undefined ? (
           <FolderPicker
             client={props.folderBrowse}
-            hint="Pick a folder your sync client watches. Octant writes inside an Octant Sync folder there."
+            hint="Pick a folder your sync app watches. Octant writes to an Octant Sync folder inside it."
             hostId={view.hostId}
             mode={view.mode}
             onCancel={() => setPickingFolder(false)}

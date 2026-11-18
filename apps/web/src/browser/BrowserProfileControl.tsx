@@ -1,7 +1,7 @@
 import type { BrowserProfileSummary } from "@octant/contracts/browser-profiles";
 import { decodeBrowserProfileChoice } from "@octant/contracts/project-browser";
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
-import { EyeOff, FolderOpen, LogOut, UserRound } from "lucide-react";
+import { EyeOff, FolderOpen, LogOut, UserRound } from "../ui/icons";
 import { useEffect, useRef, useState } from "react";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";

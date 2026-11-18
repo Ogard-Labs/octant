@@ -83,7 +83,7 @@ describe("ComposerContextMeter", () => {
     await user.click(screen.getByRole("button", { name: /Usage not reported/ }));
     const popover = screen.getByRole("dialog", { name: "Provider usage" });
     expect(popover).toHaveTextContent(
-      "This runtime reports no usage, so this thread has no context window to show.",
+      "This provider reports no usage, so there is no context meter.",
     );
     expect(popover).not.toHaveTextContent("No usage has been reported for this thread.");
   });
@@ -116,9 +116,9 @@ describe("ComposerContextMeter", () => {
     await user.click(screen.getByRole("button", { name: /Show context usage/i }));
     const popover = screen.getByRole("dialog", { name: "Context used" });
     expect(popover).toHaveTextContent(
-      "This runtime reports no usage, so this thread has no context window to show.",
+      "This provider reports no usage, so there is no context meter.",
     );
-    expect(popover).not.toHaveTextContent("No model has reported a context-window maximum");
+    expect(popover).not.toHaveTextContent("No model has reported a context size");
   });
 
   it.each([undefined, 0])(
@@ -203,7 +203,7 @@ describe("ComposerContextMeter", () => {
     await user.click(button);
     const popover = screen.getByRole("dialog", { name: "Context used" });
     expect(popover).toHaveTextContent("Context used34.3K");
-    expect(popover).toHaveTextContent("no share of a window to show");
+    expect(popover).toHaveTextContent("nothing to show");
     expect(popover).not.toHaveTextContent("4.1K");
     expect(within(popover).queryByRole("meter", { name: /Context window/ })).toBeNull();
   });
@@ -1398,7 +1398,7 @@ describe("Compact session", () => {
     expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
     await openPopover(user);
     expect(screen.getByRole("dialog", { name: "Context window" })).toHaveTextContent(
-      "Compaction state unknown: the host stopped answering.",
+      "The host stopped answering, so compaction status is unknown.",
     );
     expect(screen.queryByRole("button", { name: "Compact session" })).not.toBeInTheDocument();
   });

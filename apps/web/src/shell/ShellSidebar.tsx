@@ -6,12 +6,14 @@ import type { SettingsDeepLink } from "@octant/contracts";
 import type { ShellSettings, WindowWorkspace } from "@octant/contracts/shell";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import type { ResolvedSidebarBackground } from "@octant/theme/backgrounds";
-import { House, PanelLeftClose, Search, SquarePen, X } from "lucide-react";
+import { House, PanelLeftClose, Search, SquarePen, X } from "../ui/icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AUTOMATION_CENTER_NAVIGATION_ENABLED } from "../automation/automationCenterGate";
 import { AGENTS_CENTER_NAVIGATION_ENABLED } from "../agents/agentsCenterGate";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
+import { useActionShortcut } from "../keybindings/useActionShortcut";
 import {
   resolveSidebarContributions,
   type FirstPartyPluginComponentId,
@@ -28,7 +30,7 @@ import { SidebarCountTiles, type SidebarTile } from "./SidebarCountTiles";
 import { SidebarRail, type SidebarRailProject } from "./SidebarRail";
 import type { VisibleMode } from "./workKind";
 import { SidebarMore } from "./SidebarMore";
-import { SidebarProfile } from "./SidebarProfile";
+import { RailAccount, SidebarProfile } from "./SidebarProfile";
 import { SidebarWhatsNew, type SidebarWhatsNewProps } from "./SidebarWhatsNew";
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
 import {
@@ -147,8 +149,6 @@ export interface ShellSidebarProps {
    * of its own and leaving it used to strand the person.
    */
   readonly home?: { readonly onOpen: () => void; readonly active: boolean };
-  /** Plan usage rings for the icon rail, in either placement. */
-  readonly railUsage?: ReactNode;
   /** Absent leaves the card out; the collapsed rail never draws it either way. */
   readonly whatsNew?: SidebarWhatsNewProps;
   /**
@@ -172,6 +172,8 @@ export interface ShellSidebarProps {
 const NEW_THREAD_DESTINATIONS = new Set(["new-chat", "new-code-thread", "new-work-thread"]);
 
 export function ShellSidebar(props: ShellSidebarProps) {
+  const newThreadShortcut = useActionShortcut("new-thread");
+  const paletteShortcut = useActionShortcut("command-palette");
   const hostFirstPartyPluginsEffective = useFirstPartyPluginsEffective();
   const modes = enabledModes(props.settings);
   const searchAlwaysShown = props.settings.sidebarSearchPresentation === "field";
@@ -326,7 +328,15 @@ export function ShellSidebar(props: ShellSidebarProps) {
     const action = navigationActions[descriptor.id];
     return action === undefined ? [] : [{ ...descriptor, onSelect: action }];
   });
-  const railDestinations = destinationRows.flatMap((id) => {
+  // The rail lists places only. Running, To review and Done today are views of
+  // the Board, and three look-alike count icons made the rail the busiest
+  // column in the window, so the rail keeps the Inbox tile and draws the Board
+  // as the one place those statuses live. The open sidebar keeps all four.
+  const railTiles = tiles.filter((tile) => tile.id === "inbox");
+  const railRows = destinationLayout.rows.filter(
+    (id) => !NEW_THREAD_DESTINATIONS.has(id) && !(tilesShown && id === "inbox"),
+  );
+  const railDestinations = railRows.flatMap((id) => {
     const action = navigationActions[id];
     return id === "projects" || action === undefined
       ? []
@@ -364,6 +374,16 @@ export function ShellSidebar(props: ShellSidebarProps) {
     props.railPins === undefined
       ? {}
       : { pinnedProjects: props.railPins.projects, onUnpinProject: props.railPins.onUnpin };
+  const accountProps = {
+    navigatorAvailable: props.navigatorAvailable === true,
+    ...(props.onOpenArchive === undefined ? {} : { onOpenArchive: props.onOpenArchive }),
+    onOpenNavigator: props.onOpenNavigator,
+    onOpenSettings: props.onOpenSettings,
+    ...(props.onOpenZen === undefined ? {} : { onOpenZen: props.onOpenZen }),
+    profile: props.settings?.userProfile ?? defaultShellSettings().userProfile,
+    secondaryActions,
+  };
+  const railAccount = <RailAccount {...accountProps} />;
   const besideRail =
     props.railBeside === undefined ? null : (
       <SidebarRail
@@ -383,12 +403,12 @@ export function ShellSidebar(props: ShellSidebarProps) {
           : {})}
         {...(railMore === undefined ? {} : { more: railMore })}
         onOpenSettings={() => props.onOpenSettings()}
-        usage={props.railUsage}
+        account={railAccount}
         onSelectMode={props.onSelectMode}
         placement="beside"
         projects={[]}
         {...railPinProps}
-        tiles={tiles}
+        tiles={railTiles}
       />
     );
   // Beside the rail the sidebar would repeat what the rail already shows:
@@ -402,7 +422,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
       <SidebarRail
         activeMode={activeMode}
         {...(props.home === undefined ? {} : { home: props.home })}
-        destinations={destinationRows.flatMap((id) => {
+        destinations={railRows.flatMap((id) => {
           const action = navigationActions[id];
           return id === "projects" || action === undefined
             ? []
@@ -430,11 +450,11 @@ export function ShellSidebar(props: ShellSidebarProps) {
         {...(props.onOpenSearch === undefined ? {} : { onOpenSearch: props.onOpenSearch })}
         {...(railMore === undefined ? {} : { more: railMore })}
         onOpenSettings={() => props.onOpenSettings()}
-        usage={props.railUsage}
+        account={railAccount}
         onSelectMode={props.onSelectMode}
         projects={props.rail.projects}
         {...railPinProps}
-        tiles={tiles}
+        tiles={railTiles}
       />
     );
   }
@@ -476,7 +496,6 @@ export function ShellSidebar(props: ShellSidebarProps) {
                   history={props.history}
                 />
               )}
-              <span aria-hidden="true" className="sidebar__drag-surface window-drag-region" />
             </div>
           ) : null}
           {props.applicationIdentity !== undefined ? (
@@ -487,7 +506,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
               />
             </div>
           ) : null}
-          <div className="sidebar__content window-no-drag" data-octant-sidebar-content>
+          <div className="sidebar__content" data-octant-sidebar-content>
             {props.environments === undefined || props.environments.hostStates.length < 2 ? null : (
               <EnvironmentFilter
                 hostStates={props.environments.hostStates}
@@ -513,31 +532,41 @@ export function ShellSidebar(props: ShellSidebarProps) {
                     )}
                     {filter === undefined || searchAlwaysShown ? (
                       filter === undefined ? (
+                        <OctantTooltip label="Search" shortcut={paletteShortcut}>
+                          <IconButton
+                            data-navigation-id="search"
+                            icon={Search}
+                            label="Search"
+                            onClick={props.onOpenSearch}
+                            title=""
+                          />
+                        </OctantTooltip>
+                      ) : null
+                    ) : (
+                      <OctantTooltip label="Search" shortcut={paletteShortcut}>
                         <IconButton
+                          aria-expanded={searchOpen}
                           data-navigation-id="search"
                           icon={Search}
                           label="Search"
-                          onClick={props.onOpenSearch}
+                          onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+                          ref={searchToggle}
+                          title=""
                         />
-                      ) : null
-                    ) : (
-                      <IconButton
-                        aria-expanded={searchOpen}
-                        data-navigation-id="search"
-                        icon={Search}
-                        label="Search"
-                        onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
-                        ref={searchToggle}
-                      />
+                      </OctantTooltip>
                     )}
                     {newThread === undefined || newThreadLabel === undefined ? null : (
-                      <IconButton
-                        className="sidebar__new-thread"
-                        data-navigation-id={newThreadId}
-                        icon={SquarePen}
-                        label={newThreadLabel}
-                        onClick={() => newThread()}
-                      />
+                      <OctantTooltip label={newThreadLabel} shortcut={newThreadShortcut}>
+                        <IconButton
+                          className="sidebar__new-thread"
+                          data-navigation-id={newThreadId}
+                          icon={SquarePen}
+                          label={newThreadLabel}
+                          onClick={() => newThread()}
+                          // The tooltip names the button; a native title would say it twice.
+                          title=""
+                        />
+                      </OctantTooltip>
                     )}
                     {props.nativeHost === true || props.onCollapseSidebar === undefined ? null : (
                       <IconButton
@@ -577,7 +606,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
                     }
                   }}
                   placeholder="Filter threads"
-                  title="Type to filter this list. Enter searches every thread."
+                  title="Type to filter. Press Enter to search all threads."
                   ref={searchField}
                   type="search"
                   value={filter.query}
@@ -600,6 +629,15 @@ export function ShellSidebar(props: ShellSidebarProps) {
               actions={navigationActions}
               {...(navigationCounts === undefined ? {} : { counts: navigationCounts })}
               input={navigationInput}
+              {...(newThread === undefined || newThreadLabel === undefined
+                ? {}
+                : {
+                    newThread: {
+                      label: newThreadLabel,
+                      ...(newThreadShortcut === undefined ? {} : { shortcut: newThreadShortcut }),
+                      onSelect: () => newThread(),
+                    },
+                  })}
               {...(moreActions.length === 0 || besideRail !== null
                 ? {}
                 : {
@@ -646,19 +684,13 @@ export function ShellSidebar(props: ShellSidebarProps) {
               </div>
             )}
             {props.whatsNew === undefined ? null : <SidebarWhatsNew {...props.whatsNew} />}
-            <SidebarProfile
-              navigatorAvailable={props.navigatorAvailable === true}
-              {...(props.onOpenArchive === undefined ? {} : { onOpenArchive: props.onOpenArchive })}
-              onOpenNavigator={props.onOpenNavigator}
-              onOpenSettings={props.onOpenSettings}
-              {...(props.onOpenZen === undefined ? {} : { onOpenZen: props.onOpenZen })}
-              profile={props.settings?.userProfile ?? defaultShellSettings().userProfile}
-              secondaryActions={secondaryActions}
-            />
+            {/* Beside the rail the person's face is the rail's foot; a second
+                one here said the same thing twice. */}
+            {besideRail === null ? <SidebarProfile {...accountProps} /> : null}
           </div>
         </div>
         {props.projectsDirectory === undefined ? null : (
-          <section aria-label="Projects sidebar" className="sidebar__projects-pane window-no-drag">
+          <section aria-label="Projects sidebar" className="sidebar__projects-pane">
             {props.projectsDirectory}
           </section>
         )}

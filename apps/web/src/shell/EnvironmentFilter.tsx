@@ -7,7 +7,7 @@ import {
   type EnvironmentSelection,
 } from "@octant/client-runtime/environment-selection";
 import type { FederatedHostState } from "@octant/client-runtime";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown } from "../ui/icons";
 import {
   OctantMenuRoot,
   OctantMenuTrigger,

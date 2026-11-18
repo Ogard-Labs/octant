@@ -4,6 +4,9 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { COORDINATOR_STARTING_OPTIONS } from "./CodeSettingsView";
 import type { CodeController } from "./useCodeController";
 
+const STARTING_RULE =
+  "Whether this Project's coordinators start each worker themselves or propose it for you to approve.";
+
 type ProjectStartingChoice = CoordinatorStartingChoice | "use-settings";
 
 /**
@@ -61,9 +64,9 @@ export function CodeProjectCoordinatorStarting(props: {
       <header className="code-project-overview__section-header">
         <h2>Starting workers</h2>
       </header>
-      <p className="oct-row-detail">
-        Whether this Project's coordinators start each worker themselves or propose it for you to
-        approve.
+      <p className="oct-row-detail code-project-planner__help" title={STARTING_RULE}>
+        Start each worker, or ask first.
+        <span className="sr-only"> {STARTING_RULE}</span>
       </p>
       <div className="code-project-planner__controls">
         <OctantSelectField
@@ -84,11 +87,10 @@ export function CodeProjectCoordinatorStarting(props: {
           value={value}
         />
       </div>
-      {refused ? (
-        <p className="oct-row-detail" role="status">
-          This choice could not be saved.
-        </p>
-      ) : null}
+      {/* The line is always there, so a refusal fills it instead of growing the card. */}
+      <p className="oct-row-detail code-project-planner__status" role="status">
+        {refused ? "This choice could not be saved." : ""}
+      </p>
     </section>
   );
 }

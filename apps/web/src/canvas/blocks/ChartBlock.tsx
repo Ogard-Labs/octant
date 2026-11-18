@@ -1,4 +1,4 @@
-import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Minus } from "../../ui/icons";
 import { useId, useLayoutEffect, useRef, useState, type SVGAttributes } from "react";
 import type {
   CanvasChartBlock,

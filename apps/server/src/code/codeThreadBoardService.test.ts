@@ -902,13 +902,23 @@ describe("boardRuntimeActivityFromWorks", () => {
     });
   });
 
-  it("keeps a thread executing while other work runs beside a parked turn", () => {
+  it("does not call a thread executing for a running terminal after its turn finished", () => {
+    expect(
+      boardRuntimeActivityFromWorks([
+        work("provider-turn", "completed", 1),
+        work("terminal", "running", 2),
+        work("test", "running", 3),
+      ]),
+    ).toEqual({ executing: false, awaitingInput: false, interrupted: false });
+  });
+
+  it("does not call a parked turn executing because other work runs beside it", () => {
     expect(
       boardRuntimeActivityFromWorks(
         [work("provider-turn", "running", 1), work("terminal", "running", 2)],
         { turnParkedOnPerson: true },
       ),
-    ).toMatchObject({ executing: true, awaitingInput: true });
+    ).toMatchObject({ executing: false, awaitingInput: true });
   });
 
   it("keeps the thread Waiting for the latest interrupted provider turn", () => {
@@ -950,12 +960,11 @@ describe("boardRuntimeActivityFromWorks", () => {
     });
   });
 
-  it("reports executing work without a blocking reason", () => {
-    expect(
-      boardRuntimeActivityFromWorks([
-        work("provider-turn", "interrupted", 1),
-        work("terminal", "running", 2),
-      ]),
-    ).toEqual({ executing: true, awaitingInput: false, interrupted: true });
+  it("reports a running turn executing without a blocking reason", () => {
+    expect(boardRuntimeActivityFromWorks([work("provider-turn", "running", 1)])).toEqual({
+      executing: true,
+      awaitingInput: false,
+      interrupted: false,
+    });
   });
 });

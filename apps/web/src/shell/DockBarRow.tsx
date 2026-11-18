@@ -1,4 +1,4 @@
-import { ChevronDown, Ellipsis } from "lucide-react";
+import { ChevronDown, Ellipsis } from "../ui/icons";
 import {
   useLayoutEffect,
   useRef,
@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   OctantMenuGroup,
+  OctantMenuCheckboxItem,
   OctantMenuGroupLabel,
   OctantMenuItem,
   OctantMenuPopup,
@@ -30,8 +31,10 @@ const CONTROL = 24;
 const GAP = 4;
 /** The bar's own inset: 12 leading, 8 trailing. */
 const INSETS = 20;
-/** Arrange and Close with the gaps around them. */
-export const TILE_CONTROLS = 2 * CONTROL + 2 * GAP;
+/** Close with the gap before it. */
+export const TILE_CONTROLS = CONTROL + GAP;
+/** A pane that can become a card has one more: Minimise, before Close. */
+export const TILE_MINIMISE_CONTROL = CONTROL + GAP;
 
 /**
  * How much of a tool's controls a bar shows: every control as it is (`full`),
@@ -51,6 +54,13 @@ const isWords = (item: DockBarItem) => item.kind === "button" && item.words === 
 /** What moves to the secondary row, whole, when the bar cannot hold it: never cut. */
 const isRowable = (item: DockBarItem): boolean =>
   item.kind === "node" || isWords(item) || (item.kind === "text" && item.cue === true);
+/**
+ * In the last step the view switch moves too: folded to a named button it is
+ * the one control that is still cut ("W⌄" in a 280px Review tile), so it goes
+ * to the row beside the other things that must stay whole.
+ */
+const movesToRow = (item: DockBarItem, fold: DockBarFold): boolean =>
+  isRowable(item) || (fold === "row" && item.kind === "choice");
 const isSwitch = (item: DockBarItem): item is DockBarChoice =>
   item.kind === "choice" && item.compact !== true;
 
@@ -63,7 +73,7 @@ function widthOf(items: ReadonlyArray<DockBarItem>, fold: DockBarFold, rulers: R
     moreWidth +
     items.reduce((sum, item) => {
       if (isAction(item)) return fold === "menu" || fold === "row" ? sum : sum + GAP + CONTROL;
-      if (isRowable(item) && fold === "row") return sum;
+      if (fold === "row" && movesToRow(item, fold)) return sum;
       if (item.kind === "node") return sum + GAP + (rulers.get(`node:${item.id}`) || item.width);
       if (item.kind === "choice") {
         const named = fold !== "full" || item.compact === true;
@@ -123,10 +133,13 @@ export function useFoldedControls(
       const padded = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
       const insets = Number.isFinite(padded) && padded > 0 ? padded : INSETS;
       const name = node.querySelector<HTMLElement>(".dock-tile__name");
-      const lead = name === null ? 0 : 14 + GAP + name.scrollWidth;
+      // The name's 16px icon and the 8px between them.
+      const lead = name === null ? 0 : 16 + 2 * GAP + name.scrollWidth;
       const room = node.clientWidth - insets - lead - trailing;
       // The row exists only for something that must move to it.
-      const steps = items.some(isRowable) ? FOLDS : FOLDS.filter((step) => step !== "row");
+      const steps = items.some((item) => movesToRow(item, "row"))
+        ? FOLDS
+        : FOLDS.filter((step) => step !== "row");
       const fits = steps.find((step) => widthOf(items, step, rulers) <= room);
       setFold(fits ?? steps.at(-1) ?? "menu");
     };
@@ -258,6 +271,9 @@ function ActionMenu(props: { readonly item: Extract<DockBarItem, { kind: "menu" 
     <OctantMenuRoot>
       <OctantMenuTrigger
         aria-label={item.label}
+        {...(item.active === undefined
+          ? {}
+          : { "aria-description": item.active, "data-active": "true" })}
         className="shell-icon-button dock-tile__control window-no-drag"
         title={item.label}
       >
@@ -266,16 +282,7 @@ function ActionMenu(props: { readonly item: Extract<DockBarItem, { kind: "menu" 
       <OctantMenuPortal>
         <OctantMenuPositioner>
           <OctantMenuPopup aria-label={item.label}>
-            {item.items.map((entry) => (
-              <OctantMenuItem
-                className="workspace-disclosure__action window-no-drag"
-                disabled={entry.disabled === true}
-                key={entry.id}
-                onClick={() => item.onSelect(entry.id)}
-              >
-                <span>{entry.label}</span>
-              </OctantMenuItem>
-            ))}
+            <MenuEntries item={item} />
           </OctantMenuPopup>
         </OctantMenuPositioner>
       </OctantMenuPortal>
@@ -283,15 +290,86 @@ function ActionMenu(props: { readonly item: Extract<DockBarItem, { kind: "menu" 
   );
 }
 
+/**
+ * The rows of one menu control: actions, settings that are on or off, and
+ * runs of choices where exactly one holds. A radio group needs its rows
+ * together, so consecutive `radio` rows are gathered into one group.
+ */
+export function MenuEntries(props: { readonly item: Extract<DockBarItem, { kind: "menu" }> }) {
+  const { item } = props;
+  const out: ReactNode[] = [];
+  for (let index = 0; index < item.items.length; index += 1) {
+    const entry = item.items[index];
+    if (entry === undefined) continue;
+    if (entry.choice === "radio") {
+      const run: Array<(typeof item.items)[number]> = [];
+      while (item.items[index]?.choice === "radio") {
+        const next = item.items[index];
+        if (next !== undefined) run.push(next);
+        index += 1;
+      }
+      index -= 1;
+      out.push(
+        <OctantMenuRadioGroup
+          key={run.map((row) => row.id).join(":")}
+          onValueChange={(value) => item.onSelect(String(value))}
+          value={run.find((row) => row.checked === true)?.id ?? ""}
+        >
+          {run.map((row) => (
+            <OctantMenuRadioItem
+              className="workspace-disclosure__action window-no-drag"
+              closeOnClick
+              disabled={row.disabled === true}
+              key={row.id}
+              value={row.id}
+            >
+              <span>{row.label}</span>
+            </OctantMenuRadioItem>
+          ))}
+        </OctantMenuRadioGroup>,
+      );
+    } else if (entry.choice === "check") {
+      out.push(
+        <OctantMenuCheckboxItem
+          checked={entry.checked === true}
+          className="workspace-disclosure__action window-no-drag"
+          closeOnClick
+          disabled={entry.disabled === true}
+          key={entry.id}
+          onCheckedChange={() => item.onSelect(entry.id)}
+        >
+          <span>{entry.label}</span>
+        </OctantMenuCheckboxItem>,
+      );
+    } else {
+      out.push(
+        <OctantMenuItem
+          className="workspace-disclosure__action window-no-drag"
+          disabled={entry.disabled === true}
+          key={entry.id}
+          onClick={() => item.onSelect(entry.id)}
+        >
+          <span>{entry.label}</span>
+        </OctantMenuItem>,
+      );
+    }
+  }
+  return <>{out}</>;
+}
+
 function MoreMenu(props: {
   readonly items: ReadonlyArray<DockBarItem>;
   readonly toolLabel: string;
 }) {
   const name = `More ${props.toolLabel} actions`;
+  const active = props.items
+    .flatMap((item) => (item.kind === "menu" && item.active !== undefined ? [item.active] : []))
+    .join(", ");
   return (
     <OctantMenuRoot>
       <OctantMenuTrigger
         aria-label={name}
+        {...(active === "" ? {} : { "aria-description": active, "data-active": "true" })}
         className="shell-icon-button dock-tile__control window-no-drag"
         title={name}
       >
@@ -314,16 +392,7 @@ function MoreMenu(props: {
                 <OctantMenuGroup key={item.id}>
                   {index === 0 ? null : <OctantMenuSeparator />}
                   <OctantMenuGroupLabel>{item.label}</OctantMenuGroupLabel>
-                  {item.items.map((entry) => (
-                    <OctantMenuItem
-                      className="workspace-disclosure__action window-no-drag"
-                      disabled={entry.disabled === true}
-                      key={entry.id}
-                      onClick={() => item.onSelect(entry.id)}
-                    >
-                      <span>{entry.label}</span>
-                    </OctantMenuItem>
-                  ))}
+                  <MenuEntries item={item} />
                 </OctantMenuGroup>
               ) : null,
             )}
@@ -427,8 +496,8 @@ export function DockBarRow(props: {
 }) {
   if (props.items.length === 0) return null;
   const actions = props.items.filter(isAction);
-  const lead = props.items.filter((item) => !isAction(item) && !isRowable(item));
-  const rowable = props.items.filter(isRowable);
+  const lead = props.items.filter((item) => !isAction(item) && !movesToRow(item, props.fold));
+  const rowable = props.items.filter((item) => movesToRow(item, props.fold));
   const drawItem = (item: DockBarItem) => {
     if (item.kind === "text")
       return (
@@ -494,6 +563,7 @@ export function DockBarRow(props: {
           actions.map((item) =>
             item.kind === "button" ? (
               <IconButton
+                {...(item.pressed === undefined ? {} : { "aria-pressed": item.pressed })}
                 className="dock-tile__control window-no-drag"
                 disabled={item.disabled === true}
                 icon={item.icon}

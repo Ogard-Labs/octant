@@ -10,7 +10,7 @@ import type {
 } from "@octant/contracts";
 import type { WorkFileListingClient } from "@octant/client-runtime";
 import { createWorkFileListingClient } from "@octant/client-runtime/work-file-listing-client";
-import { FolderOpen, RefreshCw } from "lucide-react";
+import { FolderOpen, RefreshCw } from "../ui/icons";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { FileName, pathBasename, pathParent } from "../lib/fileName";

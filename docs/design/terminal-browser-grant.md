@@ -62,12 +62,11 @@ it exactly that one tool family, as that thread, and nothing wider.
   not copies. The first effect on an origin asks the person through the host's
   Browser approval service, bound to that window and thread; an origin the person
   chose to always allow is not asked again. A context a managed turn approved is
-  asked about again, because the grant keeps its own approval bindings. On a
-  thread at Full access a Private page needs no site approval and may navigate
-  across origins, for the grant as for a managed turn
-  ([the Full access rule](../architecture.md#security-and-authority);
-  maintainer request, 2026-11-12; not built yet, today the first effect on an
-  origin asks at every level). A page
+  asked about again, because the grant keeps its own approval bindings. A
+  Private page needs no site approval at any level and may navigate across
+  origins, for the grant as for a managed turn, so these asks are a profile
+  page's only (maintainer decision, 2026-11-17; built). A grant's call does
+  not take a page back from the person's Take over; it waits for Hand back. A page
   read marks the thread `thread.external-content-ingested@1`, because the Browser
   service records that on every observation whoever asked. In Plan a call may
   read the page already open and nothing else

@@ -1,5 +1,5 @@
 import type { ProjectAction } from "@octant/contracts/projects";
-import { ChevronDown, Play } from "lucide-react";
+import { ChevronDown, Play } from "../ui/icons";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -62,7 +62,9 @@ export function ProjectActionButtons(props: ProjectActionButtonsProps) {
       : "";
   const run = (action: ProjectAction) =>
     folder === "" ? props.onRun(action) : props.onRun(action, folder);
-  if (host === null || (props.actions.length === 0 && props.onSetup === undefined)) return null;
+  // With nothing to run the band holds no control here: worktree setup alone
+  // was a text button in the title bar, and it is a row of Environment now.
+  if (host === null || props.actions.length === 0) return null;
   const inline = props.actions.slice(0, INLINE_ACTIONS);
   const rest = props.actions.slice(INLINE_ACTIONS);
   const folderChoices: ReadonlyArray<{ readonly label: string; readonly value: string }> =
@@ -162,11 +164,7 @@ export function ProjectActionButtons(props: ProjectActionButtonsProps) {
             </OctantMenuPositioner>
           </OctantMenuPortal>
         </OctantMenuRoot>
-      ) : onSetup === undefined ? null : (
-        <OctantButton onClick={onSetup} size="sm" type="button" variant="ghost">
-          Worktrees
-        </OctantButton>
-      )}
+      ) : null}
     </div>,
     host,
   );

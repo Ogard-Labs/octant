@@ -1,4 +1,4 @@
-import { AlertTriangle, CircleCheck, Loader, PauseCircle } from "lucide-react";
+import { AlertTriangle, CircleCheck, Loader, PauseCircle } from "../ui/icons";
 import {
   isActiveAgentHierarchyStatus,
   type AgentHierarchyInputEntry,

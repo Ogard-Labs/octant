@@ -54,8 +54,7 @@ export interface AutomationDefinitionEditorProps {
   readonly generateId?: () => string;
 }
 
-const FULL_ACCESS_NOTE =
-  "Full access profiles are not eligible for automations. Choose an approval-gated profile.";
+const FULL_ACCESS_NOTE = "Automations cannot use Full access. Pick a profile that asks first.";
 const SERVER_FILE_TRIGGER_NOTE =
   "A file routine watches a folder on this computer, so a Project on a server offers no file trigger.";
 
@@ -443,7 +442,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
         />
         {executionOptions.length === 0 ? (
           <p className="automation-editor__note" role="status">
-            No eligible execution profiles are available for this selection.
+            No profiles fit this choice.
           </p>
         ) : null}
       </div>
@@ -470,7 +469,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
         )}
         {authorityOptions.length === 0 ? (
           <p className="automation-editor__note" role="status">
-            No eligible authority profiles are available for this selection.
+            No access profiles fit this choice.
           </p>
         ) : null}
         {anyFullAccessExcluded ? (
@@ -501,10 +500,10 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
         />
         <p className="automation-editor__note">
           {mode === "chat"
-            ? "Every run starts a new Chat thread with this delivery target."
+            ? "Each run starts a new Chat thread with this delivery target."
             : mode === "work"
-              ? "Every run starts a new thread with this delivery target. It is Done when you mark it Done."
-              : "Every run starts a new thread with this delivery target. It is Done when the target is met."}
+              ? "Each run starts a new thread with this target. It is Done when you mark it Done."
+              : "Each run starts a new thread with this target. It is Done when the target is met."}
         </p>
       </div>
 

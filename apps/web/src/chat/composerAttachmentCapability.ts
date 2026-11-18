@@ -81,7 +81,7 @@ export function buildImageAttachmentCapability(
   if (!(model?.inputModalities.includes("image") ?? false)) {
     return {
       kind: "unavailable",
-      reason: "The selected model does not accept images. Choose an image-capable model.",
+      reason: "This model cannot read images. Pick one that can.",
     };
   }
   return { kind: "supported" };

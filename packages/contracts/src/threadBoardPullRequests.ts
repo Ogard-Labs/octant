@@ -65,6 +65,40 @@ export const ThreadBoardPullRequestReviewSummary = Schema.Literal(
 export type ThreadBoardPullRequestReviewSummary = typeof ThreadBoardPullRequestReviewSummary.Type;
 
 /**
+ * Largest line count the host reports for one side of a pull request, and the
+ * most checks it counts. The host clamps to these so a very large pull request
+ * is reported as large instead of failing a whole snapshot to decode.
+ */
+export const MAX_PULL_REQUEST_LINE_COUNT = 100_000_000;
+export const MAX_PULL_REQUEST_CHECK_COUNT = 10_000;
+
+/** Added or removed lines of the whole pull request, as the forge counts them. */
+export const PullRequestLineCount = Schema.Int.pipe(Schema.between(0, MAX_PULL_REQUEST_LINE_COUNT));
+
+/**
+ * How many checks passed out of how many were counted. A check is counted when
+ * the forge has decided it as passed or failed, or it is still running or
+ * waiting; a skipped, neutral, cancelled or stale check is left out, because it
+ * neither passes nor holds the pull request back. So a pull request whose
+ * checks read "passing" always has `passed === total`.
+ */
+export const PullRequestCheckCounts = Schema.Struct({
+  passed: Schema.Int.pipe(Schema.between(0, MAX_PULL_REQUEST_CHECK_COUNT)),
+  total: Schema.Int.pipe(Schema.between(1, MAX_PULL_REQUEST_CHECK_COUNT)),
+})
+  .pipe(Schema.filter((counts) => counts.passed <= counts.total))
+  .annotations(strict);
+export type PullRequestCheckCounts = typeof PullRequestCheckCounts.Type;
+
+/**
+ * Why an open pull request is on its way in: `auto-merge` means auto-merge is
+ * switched on, so it merges by itself once its requirements pass; `queued`
+ * means it is in the repository's merge queue.
+ */
+export const PullRequestMerging = Schema.Literal("auto-merge", "queued");
+export type PullRequestMerging = typeof PullRequestMerging.Type;
+
+/**
  * How a Work board card reaches pull-request evidence through a Code thread.
  * Code board cards omit this field.
  */
@@ -87,6 +121,16 @@ export const ThreadBoardPullRequestSummary = Schema.Struct({
   freshness: ThreadBoardPullRequestFreshness,
   readyToMerge: Schema.Boolean,
   relationship: Schema.optional(ThreadBoardPullRequestRelationship),
+  /**
+   * Added lines, removed lines, checks passed out of counted, and why an open
+   * pull request is merging. Each is absent when the host has not read it (a
+   * snapshot from before the fact was recorded, or a pull request known only
+   * from a thread); absent never means zero, no checks, or not merging.
+   */
+  additions: Schema.optional(PullRequestLineCount),
+  deletions: Schema.optional(PullRequestLineCount),
+  checkCounts: Schema.optional(PullRequestCheckCounts),
+  merging: Schema.optional(PullRequestMerging),
 }).annotations(strict);
 export type ThreadBoardPullRequestSummary = typeof ThreadBoardPullRequestSummary.Type;
 

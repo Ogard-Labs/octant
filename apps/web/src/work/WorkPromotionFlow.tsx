@@ -63,7 +63,7 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
       <SurfaceSection
         className="work-promotion__propose"
         label="Continue in Code"
-        note="Work never turns into Code on its own: propose a linked Code thread, then approve or dismiss it. The new thread starts approval-gated with none of this Project's file authority."
+        note="Work never becomes Code by itself. A linked Code thread is proposed; you approve or dismiss it. It starts asking first, with no access to this Project's files."
       >
         <form
           noValidate
@@ -197,7 +197,7 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
                       );
                       if (deliveryTarget === undefined) {
                         setLocalError(
-                          "Approving needs a confirmed delivery on the Code Project you chose.",
+                          "Approving needs a confirmed delivery on the Code Project you picked.",
                         );
                         return;
                       }

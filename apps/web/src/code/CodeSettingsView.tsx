@@ -465,12 +465,12 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     <section aria-label="Code defaults" className="code-settings">
       <h2 className="sr-only">Code defaults</h2>
       <SettingsSection
-        description="The mode new threads start in. A Project can choose its own, and any thread can switch from its composer. Existing threads keep their mode."
+        description="The mode new threads start in. Projects and threads can switch it. Existing threads keep theirs."
         title="Access"
       >
         <div className="setgroup">
           <SettingRow
-            description="Auto lets a reviewer approve each action: the provider's own or Octant Shield. Where none can run, threads ask first."
+            description="Auto lets a reviewer approve actions: the provider's own or Octant Shield. If none can run, threads ask you."
             label="Default mode"
             scope="mode"
             settingId="code-default-access"
@@ -491,7 +491,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             />
           </SettingRow>
           <SettingRow
-            description="Who approves actions at Auto. Provider's own uses the provider's reviewer where it has one and Octant Shield elsewhere. A Project can choose its own."
+            description="Who approves at Auto. Provider's own uses the provider's reviewer, or Octant Shield if it has none. Projects can choose their own."
             focused={props.focusedSetting === "code-auto-reviewer"}
             label="Auto reviewer"
             scope="mode"
@@ -534,12 +534,12 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       </SettingsSection>
       {fullAccessWarning.dialog}
       <SettingsSection
-        description="The diff layout default is used until a thread has its own choice."
+        description="Default diff layout, until a thread picks its own."
         title="Thread defaults"
       >
         <div className="setgroup">
           <SettingRow
-            description="Off lets a Code thread start in a plain folder, the default folder included; branches, diffs, and pull requests stay unavailable there."
+            description="Off lets Code threads start in a plain folder, including the default folder. Branches, diffs, and pull requests are not available there."
             label="Code needs a Git repository"
             focused={props.focusedSetting === "code-require-git"}
             scope="mode"
@@ -600,7 +600,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       >
         <div className="setgroup">
           <SettingRow
-            description="Whether a coordinator starts each worker itself or proposes it for you to approve. A Project can choose its own in its overview."
+            description="Whether a coordinator starts workers itself or asks you first. Projects can choose their own."
             focused={props.focusedSetting === "code-coordinator-starting"}
             label="Starting workers"
             scope="mode"
@@ -622,7 +622,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             />
           </SettingRow>
           <SettingRow
-            description="Workers live inside their coordinator's thread. Choose where else they are listed. Requests from workers always reach Needs you. A Project can choose its own in its overview."
+            description="Workers live in their coordinator's thread. Choose where else they show. Their requests always reach Needs you. Projects can choose their own."
             focused={props.focusedSetting === "code-coordinator-show-workers"}
             label="Show workers"
             scope="mode"
@@ -639,7 +639,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             />
           </SettingRow>
           <SettingRow
-            description="How many workers one coordinator may have open at once. A worker that is Done, put away, or archived no longer counts."
+            description="How many workers one coordinator may have open. Done, put-away, and archived workers don't count."
             focused={props.focusedSetting === "code-coordinator-open-workers"}
             label="Open workers per coordinator"
             scope="mode"
@@ -707,7 +707,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         <SettingsSection title="Terminal">
           <div className="setgroup">
             <SettingRow
-              description="The shell a Code or Project terminal opens on this computer. Terminals run only at Full access on Windows."
+              description="The shell Code and Project terminals open. On Windows, terminals run only at Full access."
               focused={props.focusedSetting === "code-terminal-shell"}
               label="Terminal shell"
               scope="mode"

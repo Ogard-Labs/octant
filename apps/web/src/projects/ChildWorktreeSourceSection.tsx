@@ -40,7 +40,7 @@ export function ChildWorktreeSourceSection(props: {
       })
       .catch(() => {
         if (!abort.signal.aborted)
-          setFailure("Child source could not be read. Refresh before making a decision.");
+          setFailure("Could not read the helper's source. Refresh before you decide.");
       });
     return () => abort.abort();
   }, [props.client, props.target, refresh]);
@@ -68,9 +68,7 @@ export function ChildWorktreeSourceSection(props: {
             : "Child source is unavailable.",
         );
     } catch {
-      setFailure(
-        "The reply was lost. Refresh the recorded source before another decision. Nothing was retried.",
-      );
+      setFailure("The reply was lost. Refresh before you decide again. Nothing was retried.");
     } finally {
       submitted.current = false;
       setBusy(false);
@@ -80,8 +78,8 @@ export function ChildWorktreeSourceSection(props: {
     <section className="worktree-child-source">
       <h2>Child worktree source</h2>
       <p>
-        Choose the source for children prepared from this task. Existing children keep their own
-        copy. Committed revision is the default.
+        Choose the source for helpers prepared from this task. Existing helpers keep their own copy.
+        Committed revision is the default.
       </p>
       {review === undefined ? (
         <p role="status">
@@ -104,7 +102,7 @@ export function ChildWorktreeSourceSection(props: {
         <OctantAlert tone="danger">{review.refusal}</OctantAlert>
       )}
       {busy ? (
-        <p role="status">Recording child source… A capture may take up to thirty seconds.</p>
+        <p role="status">Saving the helper's source. This can take up to 30 seconds.</p>
       ) : null}
       {failure === undefined ? null : <OctantAlert tone="danger">{failure}</OctantAlert>}
       <div className="project-dialog__actions">

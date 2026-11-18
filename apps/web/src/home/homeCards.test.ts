@@ -1,14 +1,14 @@
-import { Activity } from "lucide-react";
+import { Activity } from "../ui/icons";
 import { describe, expect, it } from "vitest";
 import {
   arrangeHomeCards,
   isDefaultHomeCardCustomization,
   moveHomeCard,
   setHomeCardVisible,
-  type HomeCardDefinition,
+  type HomeGridCardDefinition,
 } from "./homeCards";
 
-function card(id: string, overrides: Partial<HomeCardDefinition> = {}): HomeCardDefinition {
+function card(id: string, overrides: Partial<HomeGridCardDefinition> = {}): HomeGridCardDefinition {
   return {
     id,
     title: id,

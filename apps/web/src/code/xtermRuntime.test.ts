@@ -227,7 +227,7 @@ describe("Xterm runtime", () => {
           foreground: "#f5f5f7",
           black: "#151515",
           red: "#d95778",
-          brightBlack: "#949494",
+          brightBlack: "#a8a8ad",
         }),
       }),
     );

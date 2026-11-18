@@ -370,8 +370,20 @@ function agentTool(
     /** How the person answers an origin question; approved when absent. */
     readonly originAnswer?: "approved" | "denied";
     readonly plan?: boolean;
+    /**
+     * Open the page holding only the test server's origin, the reach a page in
+     * a stored profile has. The headless runtime cannot open a stored profile,
+     * so the same origin limit is set on the page's policy directly; the
+     * runtime enforces it the same way.
+     */
+    readonly holdSite?: boolean;
     /** The thread runs at Full access. */
     readonly fullAccess?: boolean;
+    /**
+     * Whether the port may take the page back from the person, as the agent
+     * tools' ports may; a terminal grant's and a reviewed run's may not.
+     */
+    readonly canTakeBack?: boolean;
     /** How the person answers a declared tool's call; approved when absent. */
     readonly pageToolAnswer?: "approved" | "denied";
     /** Where the thread keeps captures; absent, none are kept. */
@@ -443,6 +455,9 @@ function agentTool(
       create: (input) =>
         service.create({
           ...input,
+          ...(options.holdSite === true
+            ? { policy: { ...input.policy, allowedOrigins: [origin] } }
+            : {}),
           ...(flowCustody === undefined ? {} : { flowRun: flowCustody }),
         }),
       act: (input) =>
@@ -450,6 +465,16 @@ function agentTool(
       saveDownload: (input) => service.saveDownload(input),
       releaseThread: (window, thread) => service.releaseThread(window, thread),
       holdForPerson: (window, thread) => service.holdForPerson(window, thread),
+      ...(options.canTakeBack === false
+        ? {}
+        : {
+            // A reviewed run's steps reach the tool under its custody; that
+            // caller's port has no take-back, so it answers with the page as is.
+            takeBack: (window: typeof windowId, thread: typeof threadId) =>
+              flowCustody === undefined
+                ? service.takeBack(window, thread)
+                : service.inspectThread(window, thread),
+          }),
     },
     approvals: {
       isUnattendedScope: () => options.unattended === true,
@@ -560,13 +585,13 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
   });
 
   it("reads and acts inside a same-origin frame and an open shadow root, and leaves out a frame it may not load", async () => {
-    const tool = agentTool();
+    const tool = agentTool({ holdSite: true });
     await tool.call({ operation: "navigate", url: `${origin}/framed` });
     const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot ?? "";
     expect(outline).toMatch(/^- iframe "Search"$/m);
     expect(outline).toMatch(/^ {2}- textbox "Query" \[ref=e\d+\]$/m);
     expect(outline).toMatch(/^ {2}- button "Find" \[ref=e\d+\]$/m);
-    // The headless Browser loads nothing outside the page's own origin.
+    // A page that holds its site loads nothing outside that origin.
     expect(outline).toMatch(/^- iframe .*not included$/m);
     expect(outline).toMatch(/- button "Shadow save" \[ref=e\d+\]/);
     expect(outline).toMatch(/- text "Slotted note"/);
@@ -588,6 +613,17 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
       conditions: [{ ref: refFor(outline, /"Find"/), state: "visible" }],
     });
     expect(waited.isError).toBe(false);
+    await tool.stop();
+  });
+
+  it("reads a frame of any origin on a Private page, with no approval", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/framed` });
+    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot ?? "";
+    expect(outline).toMatch(/^- iframe "Elsewhere"$/m);
+    expect(outline).not.toMatch(/^- iframe .*not included$/m);
+    expect(outline.match(/^ {2}- button "Find" \[ref=e\d+\]$/gm)).toHaveLength(2);
+    expect(tool.asked).toEqual([]);
     await tool.stop();
   });
 
@@ -836,7 +872,7 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
   });
 
   it("opens, lists, switches, and closes tabs, each one inside the page's allowed origin", async () => {
-    const tool = agentTool();
+    const tool = agentTool({ holdSite: true });
     await tool.call({ operation: "navigate", url: `${origin}/form` });
     const opened = await tool.call({ operation: "tab-open", url: `${origin}/other` });
     expect(opened.result.page?.tabs).toEqual([
@@ -864,6 +900,20 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     const wandered = await tool.call({ operation: "tab-list" });
     expect(JSON.stringify(wandered.result.page?.tabs)).not.toContain("localhost");
     expect(JSON.stringify(wandered.result.page?.tabs)).not.toContain("Other");
+    await tool.stop();
+  });
+
+  it("opens a tab on any site on a Private page, with no approval", async () => {
+    const tool = agentTool();
+    const elsewhere = origin.replace("127.0.0.1", "localhost");
+    await tool.call({ operation: "navigate", url: `${origin}/form` });
+    const opened = await tool.call({ operation: "tab-open", url: `${elsewhere}/other` });
+    expect(opened.isError).toBe(false);
+    expect(opened.result.page?.tabs).toEqual([
+      { tabId: "t1", url: `${origin}/form`, title: "Form", active: false },
+      { tabId: "t2", url: `${elsewhere}/other`, title: "Other", active: true },
+    ]);
+    expect(tool.asked).toEqual([]);
     await tool.stop();
   });
 
@@ -1180,6 +1230,7 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
   it("keeps no frame of a page off the approved origin, or of one whose origin cannot be told", async () => {
     const kept: string[] = [];
     const tool = agentTool({
+      holdSite: true,
       captures: {
         keep: async (input) => {
           kept.push(input.dataUrl);
@@ -1368,8 +1419,8 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     await declined.stop();
   });
 
-  it("holds the agent while the person has the page, keeps the person's typing, and resumes with a fresh snapshot", async () => {
-    const tool = agentTool();
+  it("holds a caller that cannot take the page back while the person has it, keeps the person's typing, and resumes with a fresh snapshot", async () => {
+    const tool = agentTool({ canTakeBack: false });
     await tool.call({ operation: "navigate", url: `${origin}/form` });
     const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot;
     const nameRef = refFor(outline, /"Name"/);
@@ -1927,6 +1978,31 @@ describe.skipIf(!available)("recording and replaying a Browser flow on a real pa
     return saved;
   }
 
+  it("takes the page back for the agent's own call, but a replayed flow waits for the person's Hand back", async () => {
+    const flows = flowPort();
+    await recordOrderCheck(flows);
+    const tool = agentTool({ flows });
+    await tool.call({ operation: "navigate", url: `${origin}/form` });
+
+    // The person takes the page; a replay does not take it from them.
+    expect(tool.service.takeOver(windowId, threadId).waitingForPerson).toBe("take-over");
+    const replayed = await tool.call({ operation: "flow-run", name: "Order check" });
+    expect(replayed).toMatchObject({
+      isError: true,
+      result: {
+        completed: [],
+        failedStep: { step: 1, answer: { error: "browser-person-took-over" } },
+      },
+    });
+    expect(tool.service.inspectThread(windowId, threadId).waitingForPerson).toBe("take-over");
+
+    // The agent's own call does take it back, and runs.
+    const read = await tool.call({ operation: "read-page" });
+    expect(read.isError).toBe(false);
+    expect(tool.service.inspectThread(windowId, threadId).waitingForPerson).toBeUndefined();
+    await tool.stop();
+  });
+
   it("saves a run without snapshots, reads, or ref ids, and replays it on a fresh page", async () => {
     const flows = flowPort();
     const saved = await recordOrderCheck(flows);
@@ -2150,7 +2226,7 @@ describe.skipIf(!available)("recording and replaying a Browser flow on a real pa
     }
   });
 
-  it("asks the person before a replayed navigation to an origin that is not approved", async () => {
+  it("replays a navigation to another origin on a Private page without asking", async () => {
     const flows = flowPort();
     const elsewhere = origin.replace("127.0.0.1", "localhost");
     const recorder = agentTool({ flows });
@@ -2158,19 +2234,11 @@ describe.skipIf(!available)("recording and replaying a Browser flow on a real pa
     await recorder.call({ operation: "flow-save", name: "Elsewhere" });
     await recorder.stop();
 
-    const declined = agentTool({ flows, originAnswer: "denied" });
-    const stopped = await declined.call({ operation: "flow-run", name: "Elsewhere" });
-    expect(declined.asked.map((request) => request.origin)).toEqual([elsewhere]);
-    expect(stopped.result).toMatchObject({
-      completed: [],
-      failedStep: { step: 1, operation: "navigate", answer: { error: "browser-approval-denied" } },
-    });
-
-    const allowed = agentTool({ flows });
-    const ran = await allowed.call({ operation: "flow-run", name: "Elsewhere" });
-    expect(allowed.asked.map((request) => request.origin)).toEqual([elsewhere]);
+    const replaying = agentTool({ flows, originAnswer: "denied" });
+    const ran = await replaying.call({ operation: "flow-run", name: "Elsewhere" });
+    expect(replaying.asked).toEqual([]);
     expect(ran.isError).toBe(false);
-    await allowed.stop();
+    await replaying.stop();
   });
 
   it("refuses to save or run in Plan mode but lists, and refuses to save or run for a paired device", async () => {

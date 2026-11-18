@@ -14,10 +14,10 @@ import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { FULL_ACCESS_WARNING, useFullAccessWarning } from "../code/FullAccessWarning";
 
 const ACCESS_NOTES: Readonly<Record<WorkDefaultAccess, string>> = {
-  auto: "The provider's own reviewer approves each command and file change. Providers without a reviewer ask first.",
-  "ask-first": "The agent asks before it runs a command or changes a file in the Project folder.",
+  auto: "The provider's own reviewer approves each command and file change. Without one, it asks you.",
+  "ask-first": "Asks before running a command or changing a file in the Project folder.",
   "auto-accept-edits":
-    "The agent edits files inside the Project folder without asking, and asks before commands. Anything outside the folder is still refused.",
+    "Edits files in the Project folder without asking. Asks before commands. Anything outside the folder is refused.",
   "full-access": FULL_ACCESS_WARNING,
 };
 
@@ -65,7 +65,7 @@ export function WorkSettingsView(props: {
 
   return (
     <SettingsSection
-      description="What a new Work thread starts with. Threads that already exist keep what they started with."
+      description="What new Work threads start with. Existing threads keep theirs."
       title="New threads"
     >
       <div className="settings-feedback-slot" aria-live="polite">

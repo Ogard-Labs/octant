@@ -11,7 +11,7 @@ describe("useProviderBootstrap", () => {
     const instance = {
       id: "00000000-0000-4000-8000-000000000901",
       driverKind: "codex",
-      displayName: "Codex CLI",
+      displayName: "Codex",
       enabled: true,
       version: 1,
       configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
@@ -63,7 +63,7 @@ describe("useProviderBootstrap", () => {
     const instance = {
       id: "00000000-0000-4000-8000-000000000902",
       driverKind: "codex",
-      displayName: "Codex CLI",
+      displayName: "Codex",
       enabled: true,
       version: 1,
       configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
@@ -110,7 +110,7 @@ describe("useProviderBootstrap", () => {
     const first = {
       id: "00000000-0000-4000-8000-000000000902",
       driverKind: "codex",
-      displayName: "Codex CLI",
+      displayName: "Codex",
       enabled: true,
       version: 1,
       configuration: { kind: "codex-cli", binaryPath: "/usr/local/bin/codex" },
@@ -121,7 +121,7 @@ describe("useProviderBootstrap", () => {
       ...first,
       id: "00000000-0000-4000-8000-000000000903",
       driverKind: "opencode",
-      displayName: "OpenCode CLI",
+      displayName: "OpenCode",
       configuration: { kind: "opencode-cli", binaryPath: "/usr/local/bin/opencode" },
     } as ProviderInstance;
     const probe = vi.fn(async (instanceId) => instanceId === second.id);
@@ -174,7 +174,7 @@ describe("useProviderBootstrap", () => {
     const first = {
       id: "00000000-0000-4000-8000-000000000904",
       driverKind: "codex",
-      displayName: "Codex CLI",
+      displayName: "Codex",
       enabled: true,
       version: 1,
       configuration: { kind: "codex-cli", binaryPath: "/usr/local/bin/codex" },
@@ -185,7 +185,7 @@ describe("useProviderBootstrap", () => {
       ...first,
       id: "00000000-0000-4000-8000-000000000905",
       driverKind: "opencode",
-      displayName: "OpenCode CLI",
+      displayName: "OpenCode",
       configuration: { kind: "opencode-cli", binaryPath: "/usr/local/bin/opencode" },
     } as ProviderInstance;
     const probe = vi.fn(async () => true);

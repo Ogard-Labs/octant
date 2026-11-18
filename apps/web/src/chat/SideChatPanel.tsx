@@ -5,7 +5,7 @@ import type {
   SideChatSidecar,
   ThreadMentionRequestId,
 } from "@octant/contracts";
-import { MessagesSquare } from "lucide-react";
+import { MessagesSquare } from "../ui/icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useDockBarPlacement } from "../shell/dockBarControls";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -21,7 +21,16 @@ export interface SideChatPanelProps {
    * sidecar's identity and lifecycle; the caller owns the Chat controller, so
    * the sidecar is a real Chat thread rather than a second chat implementation.
    */
-  readonly renderSidecar: (sidecarThreadId: ChatThreadId, sidecar: SideChatSidecar) => ReactNode;
+  readonly renderSidecar: (
+    sidecarThreadId: ChatThreadId,
+    sidecar: SideChatSidecar,
+    /**
+     * What this Side Chat can read. The caller draws it only while the
+     * conversation has no message: once there is one, the answers show what it
+     * could read, and the notice would be a permanent line said twice.
+     */
+    notice: ReactNode,
+  ) => ReactNode;
   /** Called with the host's sidecar so the shell can persist the tab identity. */
   readonly onSidecarOpened?: (sidecar: SideChatSidecar) => void;
   readonly requestId?: () => ThreadMentionRequestId;
@@ -106,9 +115,6 @@ export function SideChatPanel(props: SideChatPanelProps) {
           </span>
         </p>
       </header>
-      <p className="side-chat__notice">
-        {sideChatNotice(state.kind === "open" ? state.sidecar.sourceMode : undefined)}
-      </p>
       {renderBody(state, props, () => setRetryToken((current) => current + 1))}
     </section>
   );
@@ -119,7 +125,7 @@ export function SideChatPanel(props: SideChatPanelProps) {
  * the source. A Chat thread has no files or checkout, so claiming them there
  * would promise answers the Side Chat cannot give.
  */
-function sideChatNotice(sourceMode: SideChatSidecar["sourceMode"] | undefined): string {
+function sideChatNotice(sourceMode: SideChatSidecar["sourceMode"]): string {
   const limits = "It can read them but can\u2019t change, steer, or approve anything.";
   if (sourceMode === "code") {
     return `Ask about this thread: its conversation, changes, files, and subagent results. ${limits}`;
@@ -130,7 +136,7 @@ function sideChatNotice(sourceMode: SideChatSidecar["sourceMode"] | undefined): 
   if (sourceMode === "chat") {
     return `Ask about this thread: its conversation and subagent results. ${limits}`;
   }
-  return "Ask about this thread. It can read it but can\u2019t change, steer, or approve anything.";
+  return `Ask about this thread. ${limits}`;
 }
 
 function renderBody(state: SideChatState, props: SideChatPanelProps, retry: () => void): ReactNode {
@@ -165,7 +171,11 @@ function renderBody(state: SideChatState, props: SideChatPanelProps, retry: () =
       </div>
     );
   }
-  return props.renderSidecar(state.sidecar.sidecarThreadId, state.sidecar);
+  return props.renderSidecar(
+    state.sidecar.sidecarThreadId,
+    state.sidecar,
+    <p className="side-chat__notice">{sideChatNotice(state.sidecar.sourceMode)}</p>,
+  );
 }
 
 function defaultRequestId(): ThreadMentionRequestId {

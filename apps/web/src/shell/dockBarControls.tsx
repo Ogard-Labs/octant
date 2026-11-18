@@ -1,4 +1,4 @@
-import type { LucideIcon } from "lucide-react";
+import type { IconComponent } from "../ui/icons";
 import {
   createContext,
   useCallback,
@@ -18,9 +18,11 @@ export interface DockBarButton {
   /** The accessible name and, unless `title` says more, the tooltip. */
   readonly label: string;
   readonly title?: string;
-  readonly icon: LucideIcon;
+  readonly icon: IconComponent;
   readonly onSelect: () => void;
   readonly disabled?: boolean;
+  /** A toggle that is on (Ignore whitespace): the button reads pressed. */
+  readonly pressed?: boolean;
   /**
    * A state that must read at a glance (View only) stays in words: the button
    * shows its label, never folds into the More menu while it is there and, as a
@@ -34,13 +36,26 @@ export interface DockBarMenu {
   readonly kind: "menu";
   readonly id: string;
   readonly label: string;
-  readonly icon: LucideIcon;
+  readonly icon: IconComponent;
   readonly items: ReadonlyArray<{
     readonly id: string;
     readonly label: string;
     readonly disabled?: boolean;
+    /**
+     * A row that holds a setting rather than starting an action. `radio` rows
+     * that follow one another are one choice; `check` is a switch. Both read
+     * `checked` and report a change through `onSelect` with their id.
+     */
+    readonly choice?: "radio" | "check";
+    readonly checked?: boolean;
   }>;
   readonly onSelect: (item: string) => void;
+  /**
+   * Words for a setting in the menu that is not at its default (Review's
+   * layout, whitespace). A menu that hides a setting says so on its button: a
+   * dot, and these words as its description.
+   */
+  readonly active?: string;
 }
 
 /**
@@ -98,20 +113,33 @@ export interface DockBarNode {
 export type DockBarItem = DockBarButton | DockBarMenu | DockBarChoice | DockBarText | DockBarNode;
 
 /**
- * Where a tool's controls stand: in its tile's bar beside the other tiles'
- * (`tiled`), in the one slim row a tool shown alone gets (`alone`), or in the
- * bottom panel's bar (`bottom`).
+ * Where a tool's controls stand: in its pane's bar (`tiled`, whether the tool
+ * is shown alone or among tiles) or in the bottom panel's bar (`bottom`).
  */
-export type DockBarPlacement = "tiled" | "alone" | "bottom";
+export type DockBarPlacement = "tiled" | "bottom";
 
 export interface DockBarHost {
   readonly placement: DockBarPlacement;
   /** One registrant's items, or undefined to clear them. */
   readonly set: (owner: string, items: ReadonlyArray<DockBarItem> | undefined) => void;
+  /**
+   * The bar's leading slot, where a tool with tabs of its own (Files' open
+   * files) draws them in place of its name. Absent where the host has none.
+   */
+  readonly lead?: HTMLElement | null;
 }
 
 /** Provided by a tile (and the bottom panel) around its tool. */
 export const DockBarContext = createContext<DockBarHost | undefined>(undefined);
+
+/**
+ * The element a tool portals its own tabs into, so they stand in the pane's
+ * bar where the Browser's pages do. Null where the host has no such slot (the
+ * bottom panel, a central tab): the tool then draws its tab row itself.
+ */
+export function useDockBarLead(): HTMLElement | null {
+  return useContext(DockBarContext)?.lead ?? null;
+}
 
 /** Where the tool's controls would stand, or undefined where nothing hosts them. */
 export function useDockBarPlacement(): DockBarPlacement | undefined {
@@ -136,9 +164,16 @@ export function useDockBarControls(
     items.map((item) => {
       switch (item.kind) {
         case "button":
-          return [item.id, item.label, item.title, item.disabled === true, item.words === true];
+          return [
+            item.id,
+            item.label,
+            item.title,
+            item.disabled === true,
+            item.words === true,
+            item.pressed,
+          ];
         case "menu":
-          return [item.id, item.label, item.items];
+          return [item.id, item.label, item.items, item.active];
         case "choice":
           return [item.id, item.label, item.value, item.options, item.compact === true];
         case "text":
@@ -233,7 +268,10 @@ export function mergeDockBarItems(
 export function useDockBarSlot(placement: DockBarPlacement): {
   readonly host: DockBarHost;
   readonly items: ReadonlyArray<DockBarItem> | undefined;
+  /** Give this to the bar's leading slot element to let a tool draw its tabs there. */
+  readonly leadRef: (node: HTMLElement | null) => void;
 } {
+  const [lead, setLead] = useState<HTMLElement | null>(null);
   const [byOwner, setByOwner] = useState<ReadonlyMap<string, ReadonlyArray<DockBarItem>>>(
     new Map(),
   );
@@ -245,7 +283,7 @@ export function useDockBarSlot(placement: DockBarPlacement): {
       return next;
     });
   }, []);
-  const host = useMemo(() => ({ placement, set }), [placement, set]);
+  const host = useMemo(() => ({ placement, set, lead }), [placement, set, lead]);
   const items = useMemo(() => mergeDockBarItems(byOwner), [byOwner]);
-  return { host, items };
+  return { host, items, leadRef: setLead };
 }

@@ -1,6 +1,8 @@
 import type { CodeAttachmentReference, CodeThreadId } from "@octant/contracts";
 import type { CodeClient } from "@octant/client-runtime";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { OctantButton } from "../ui/base/OctantButton";
+import { ImagePreviewDialog } from "../composer/ImagePreviewDialog";
 
 export type CodeAttachmentReader = Pick<CodeClient, "attachment">;
 
@@ -17,12 +19,41 @@ export function CodeAttachmentGallery(props: {
   readonly client?: CodeAttachmentReader;
   readonly threadId: CodeThreadId;
 }) {
+  const [sources, setSources] = useState<Readonly<Record<string, string>>>({});
+  const [previewIndex, setPreviewIndex] = useState<number>();
+  const onSource = useCallback((id: string, url: string | undefined) => {
+    setSources((previous) => {
+      const { [id]: _removed, ...rest } = previous;
+      return url === undefined ? rest : { ...rest, [id]: url };
+    });
+  }, []);
   if (props.attachments.length === 0) return null;
+  // Only the pictures that loaded can be previewed; the arrows step through them.
+  const loaded = props.attachments.filter(
+    (attachment) => sources[attachment.attachmentId] !== undefined,
+  );
   return (
     <div aria-label="Attached images" className="code-thread-workspace__attachments">
+      <ImagePreviewDialog
+        images={loaded.map((attachment) => ({
+          id: attachment.attachmentId,
+          name: attachment.displayName,
+          url: sources[attachment.attachmentId] ?? "",
+          bytes: attachment.byteLength,
+        }))}
+        index={previewIndex}
+        onClose={() => setPreviewIndex(undefined)}
+        onIndexChange={setPreviewIndex}
+      />
       {props.attachments.map((attachment) => (
         <CodeAttachmentImage
           attachment={attachment}
+          onOpen={() =>
+            setPreviewIndex(
+              loaded.findIndex((candidate) => candidate.attachmentId === attachment.attachmentId),
+            )
+          }
+          onSource={onSource}
           {...(props.client === undefined ? {} : { client: props.client })}
           key={attachment.attachmentId}
           threadId={props.threadId}
@@ -34,10 +65,12 @@ export function CodeAttachmentGallery(props: {
 
 function CodeAttachmentImage(props: {
   readonly attachment: CodeAttachmentReference;
+  readonly onOpen: () => void;
+  readonly onSource: (id: string, url: string | undefined) => void;
   readonly client?: CodeAttachmentReader;
   readonly threadId: CodeThreadId;
 }) {
-  const { attachment, client, threadId } = props;
+  const { attachment, client, onSource, threadId } = props;
   const [source, setSource] = useState<string>();
   const [unavailable, setUnavailable] = useState(false);
 
@@ -54,18 +87,21 @@ function CodeAttachmentImage(props: {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mediaType }));
         setSource(objectUrl);
+        onSource(attachment.attachmentId, objectUrl);
       })
       .catch(() => {
         if (!cancelled) setUnavailable(true);
       });
     return () => {
       cancelled = true;
+      onSource(attachment.attachmentId, undefined);
       if (objectUrl !== undefined) URL.revokeObjectURL(objectUrl);
     };
-  }, [attachment, client, threadId]);
+  }, [attachment, client, onSource, threadId]);
 
-  return (
-    <span className="code-thread-workspace__attachment">
+  const name = unavailable ? `${attachment.displayName} (unavailable)` : attachment.displayName;
+  const content = (
+    <>
       {source === undefined ? (
         <span className="code-thread-workspace__attachment-thumb" role="img" aria-hidden="true" />
       ) : (
@@ -75,9 +111,24 @@ function CodeAttachmentImage(props: {
           src={source}
         />
       )}
-      <span className="code-thread-workspace__attachment-name">
-        {unavailable ? `${attachment.displayName} (unavailable)` : attachment.displayName}
-      </span>
+      <span className="code-thread-workspace__attachment-name">{name}</span>
+    </>
+  );
+  return (
+    <span className="code-thread-workspace__attachment">
+      {source === undefined ? (
+        content
+      ) : (
+        <OctantButton
+          aria-label={`Preview ${attachment.displayName}`}
+          className="image-preview-trigger window-no-drag"
+          onClick={props.onOpen}
+          type="button"
+          variant="bare"
+        >
+          {content}
+        </OctantButton>
+      )}
     </span>
   );
 }

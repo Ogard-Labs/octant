@@ -85,6 +85,9 @@
 .canvas-start-from__option:hover {
   background: color-mix(in oklab, var(--oct-fg) 4%, var(--oct-surface));
 }
+.canvas-start-from__option:active {
+  background: var(--oct-wash-pressed);
+}
 
 /* Focus is a quiet fill, not a drawn halo, like every other ghost control. */
 

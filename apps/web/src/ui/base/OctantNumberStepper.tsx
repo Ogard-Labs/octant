@@ -1,15 +1,21 @@
-import { Minus, Plus } from "lucide-react";
+import { Minus, Plus } from "../icons";
 import { useEffect, useState } from "react";
 import { OctantButton } from "./OctantButton";
 import { OctantInput } from "./OctantInput";
 
 export interface OctantNumberStepperProps {
+  /**
+   * Draws a plain right-aligned number field, with the unit inside it and no
+   * buttons: the arrow keys step it. Settings rows use it, because a minus and
+   * a plus beside a number made every numeric row louder than its label.
+   */
+  readonly field?: boolean;
   readonly label: string;
   readonly max: number;
   readonly min: number;
   readonly onChange: (value: number) => void;
   readonly step?: number;
-  readonly suffix?: string;
+  readonly suffix?: string | undefined;
   readonly value: number;
 }
 
@@ -24,6 +30,43 @@ export function OctantNumberStepper(props: OctantNumberStepperProps) {
     setDraft(String(normalized));
     props.onChange(normalized);
   };
+
+  if (props.field === true) {
+    return (
+      <span className="octant-number-field window-no-drag">
+        <OctantInput
+          aria-label={props.label}
+          className="octant-number-field__input"
+          unstyled
+          max={props.max}
+          min={props.min}
+          onChange={(event) => {
+            const nextDraft = event.currentTarget.value;
+            setDraft(nextDraft);
+            const next = Number(nextDraft);
+            if (
+              nextDraft !== "" &&
+              Number.isFinite(next) &&
+              next >= props.min &&
+              next <= props.max
+            ) {
+              props.onChange(Number(next.toFixed(decimals)));
+            }
+          }}
+          onBlur={() => {
+            const next = Number(draft);
+            commit(Number.isFinite(next) ? next : props.value);
+          }}
+          step={step}
+          type="number"
+          value={draft}
+        />
+        {props.suffix === undefined ? null : (
+          <span className="octant-number-field__suffix">{props.suffix}</span>
+        )}
+      </span>
+    );
+  }
 
   return (
     <span className="octant-number-stepper window-no-drag">

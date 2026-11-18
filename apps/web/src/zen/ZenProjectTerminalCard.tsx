@@ -6,7 +6,7 @@ import type {
   ProjectTerminalResult,
   ProjectTerminalView,
 } from "@octant/contracts/project-terminals";
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal } from "../ui/icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { XtermTerminalAdapter, type XtermAdapterRuntime } from "../code/XtermTerminalAdapter";
 import { OctantMenu } from "../ui/base/OctantMenu";

@@ -365,7 +365,8 @@ describe("MonacoEditorPane", () => {
 
     act(() => fixture.options?.onChange("temporary edit"));
     act(() => fixture.options?.onChange("const answer = 43;\n"));
-    expect(screen.getByRole("button", { name: "Save src/index.ts" })).toBeDisabled();
+    // Nothing left to save: the button leaves rather than standing disabled.
+    expect(screen.queryByRole("button", { name: "Save src/index.ts" })).not.toBeInTheDocument();
   });
 
   it("handles the platform save shortcut and keeps Plan mode read-only", async () => {
@@ -410,6 +411,7 @@ describe("MonacoEditorPane", () => {
     );
     await waitFor(() => expect(gatedRuntime.options?.readOnly).toBe(false));
     expect(screen.queryByText(/read-only/)).not.toBeInTheDocument();
+    act(() => gatedRuntime.options?.onChange("edited under approval"));
     expect(screen.getByRole("button", { name: "Save src/index.ts" })).toBeInTheDocument();
   });
 
@@ -574,15 +576,50 @@ describe("MonacoEditorPane", () => {
     expect(fixture.loadRuntime).not.toHaveBeenCalled();
   });
 
-  it("keeps Save on the header line beside the file name in a narrow pane", () => {
+  it("keeps the header's actions on one line beside the file name in a narrow pane", () => {
     const narrow = /@container workspace \(max-width: 520px\) \{([\s\S]*?)\n\}/.exec(
       codeStyles,
     )?.[1];
     expect(narrow).toBeDefined();
     // Stacking the header put Save on a line of its own at phone width.
     expect(narrow).not.toContain(".code-editor-pane__toolbar");
-    expect(codeStyles).toMatch(/\.code-editor-pane__toolbar > div \{[^}]*flex: 1 1 auto;/);
-    expect(codeStyles).toMatch(/\.code-editor-pane__toolbar > :not\(div\) \{[^}]*flex: none;/);
+    expect(codeStyles).toMatch(/\.code-editor-pane__toolbar > h1 \{[^}]*flex: 1 1 auto;/);
+    expect(codeStyles).toMatch(
+      /\.code-editor-pane__toolbar > \.code-editor-pane__actions \{[^}]*flex: none;/,
+    );
+  });
+
+  it("offers every editor command in one File actions menu", async () => {
+    const user = userEvent.setup();
+    const fixture = runtime();
+    render(
+      <MonacoEditorPane
+        client={client()}
+        file={textFile()}
+        loadRuntime={fixture.loadRuntime}
+        onAddSelectionToChat={vi.fn()}
+        onOpenExternalEditor={vi.fn(async () => undefined)}
+        onOpenInMainArea={vi.fn()}
+      />,
+    );
+    await screen.findByRole("region", { name: "Editor for src/index.ts" });
+    expect(screen.getByRole("button", { name: "Open src/index.ts externally" })).toBeVisible();
+    expect(screen.queryByText("Code file")).not.toBeInTheDocument();
+    expect(screen.queryByRole("toolbar", { name: "Editor commands" })).not.toBeInTheDocument();
+    await waitFor(() => expect(fixture.options).toBeDefined());
+    await user.click(screen.getByRole("button", { name: "File actions" }));
+    for (const name of [
+      "Commands",
+      "Find",
+      "Replace",
+      "Format",
+      "Go to line",
+      "Send selection to agent",
+      "Editor settings",
+      "Open in main area",
+    ]) {
+      expect(await screen.findByRole("menuitem", { name })).toBeVisible();
+    }
   });
 });
 

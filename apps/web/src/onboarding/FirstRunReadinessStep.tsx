@@ -1,4 +1,4 @@
-import { Check, CircleDashed } from "lucide-react";
+import { Check, CircleDashed } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import type { FirstRunHandoff, FirstRunHandoffSetupTarget } from "./firstRunHandoffModel";

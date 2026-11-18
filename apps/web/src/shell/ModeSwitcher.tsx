@@ -1,6 +1,6 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ModeSwitcherPresentation } from "@octant/contracts/shell";
-import { ChevronDown, CodeXml, FolderOpen, MessageSquare, type LucideIcon } from "lucide-react";
+import { ChevronDown, CodeXml, FolderOpen, MessageSquare, type IconComponent } from "../ui/icons";
 import type { ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
@@ -17,7 +17,7 @@ const modeDescriptions: Readonly<Record<OctantMode, string>> = {
   work: "Chat, or work with the files in a folder",
   code: "Build, debug, and ship software",
 };
-export const modeIcons: Readonly<Record<OctantMode, LucideIcon>> = {
+export const modeIcons: Readonly<Record<OctantMode, IconComponent>> = {
   chat: MessageSquare,
   work: FolderOpen,
   code: CodeXml,
@@ -148,7 +148,7 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
  * Work is a conversation surface beside Code; keep the folder mark when Chat stands apart.
  * The icon rail reads this too, so a collapsed sidebar shows the same Work mark as the switcher.
  */
-export function iconForVisibleMode(mode: OctantMode, separate: boolean): LucideIcon {
+export function iconForVisibleMode(mode: OctantMode, separate: boolean): IconComponent {
   if (mode === "work" && !separate) return MessageSquare;
   return modeIcons[mode];
 }

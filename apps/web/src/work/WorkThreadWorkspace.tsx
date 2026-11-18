@@ -1,4 +1,5 @@
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
+import { TurnSubagentRows } from "../agents/threadSubagents";
 import { attachAllowingFiles, attachmentMediaType } from "../composer/attachmentMediaType";
 import {
   ProjectMemoryProposalPrompt,
@@ -78,7 +79,7 @@ import type {
   ThreadMentionClient,
 } from "@octant/client-runtime";
 import { announceShellSettingsWritten } from "../shell/shellSettingsNotifications";
-import { Check, CirclePause, FileText, FolderOpen } from "lucide-react";
+import { Check, CirclePause, FileText, FolderOpen } from "../ui/icons";
 import {
   useCallback,
   useEffect,
@@ -194,6 +195,7 @@ import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
 import { SideTaskInline, sideTasksAfterTurn, useThreadSideTasks } from "../followUps/SideTaskCards";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
+import { TurnActions } from "../transcript/TurnActions";
 import {
   TurnHeader,
   TurnTime,
@@ -363,7 +365,6 @@ function withNewestWorkTurns(
 function WorkTurnHeader(props: {
   readonly serverUrl?: string | undefined;
   readonly windowCapability?: string | undefined;
-  readonly copyValue?: string;
   readonly turn: WorkTurnState;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   /** Puts the stopped turn's prompt back in the composer to send again. */
@@ -382,7 +383,6 @@ function WorkTurnHeader(props: {
     <>
       <TurnHeader
         at={props.turn.updatedAt}
-        copyValue={props.copyValue}
         outcome={outcome}
         provider={providerModelLabel(props.providerGroups, props.turn.authority)}
         {...(workedFor === undefined ? {} : { workedFor })}
@@ -449,8 +449,15 @@ function WorkTurnHeader(props: {
  * runs; a settled turn folds behind "N tool calls" and shows a tool it never
  * saw end as unfinished.
  */
+/** The next turn's start, as an optional prop: the latest turn owns everything after it. */
+function subagentsUntil(at: string | undefined): { readonly subagentsUntil?: string } {
+  return at === undefined ? {} : { subagentsUntil: at };
+}
+
 function WorkToolGroup(props: {
   readonly turn: WorkTurnState;
+  /** When the next turn started; the subagents this turn started fall before it. */
+  readonly subagentsUntil?: string;
   readonly canvasClient?: CanvasClient;
   readonly serverUrl?: string | undefined;
   readonly windowCapability?: string | undefined;
@@ -463,7 +470,12 @@ function WorkToolGroup(props: {
     threadId: String(props.turn.threadId),
     turnId: String(props.turn.requestId),
   });
-  if (activity === undefined) return null;
+  const subagents = {
+    from: props.turn.acceptedAt,
+    ...(props.subagentsUntil === undefined ? {} : { until: props.subagentsUntil }),
+  };
+  // A turn whose subagents left no tool row still lists them.
+  if (activity === undefined) return <TurnSubagentRows window={subagents} />;
   const status = props.turn.status;
   const canvasClient = props.canvasClient;
   const threadId = String(props.turn.threadId);
@@ -476,6 +488,7 @@ function WorkToolGroup(props: {
       running={status === "accepted" || status === "running"}
       settled={status === "completed" || status === "failed" || status === "cancelled"}
       {...(toolCallRecords === undefined ? {} : { toolCallRecords })}
+      subagents={subagents}
     />
   );
 }
@@ -891,6 +904,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   });
   const [loaded, setLoaded] = useState<WorkLoadedTurns>(NO_LOADED_TURNS);
   const turns = loaded.turns;
+  // Each turn owns the subagents started between its start and the next
+  // turn's: the host links a subagent to the thread, not to a turn.
+  const nextTurnStart = useMemo(
+    () => new Map(turns.map((turn, index) => [workTurnKey(turn), turns[index + 1]?.acceptedAt])),
+    [turns],
+  );
   const setTurns = useCallback(
     (update: (current: ReadonlyArray<WorkTurnState>) => ReadonlyArray<WorkTurnState>) =>
       setLoaded((current) => {
@@ -1163,6 +1182,23 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (rewindFrom !== undefined && props.turnClient?.rewindThread !== undefined)
       actions.push({ label: "Rewind to here…", value: "rewind" });
     return { actions, forkPoint, rewindFrom };
+  }
+
+  /** The action row that ends a turn's reply, the same one Chat and Code draw. */
+  function workTurnActions(turn: WorkTurnState, copyValue: string | undefined) {
+    const canFork = turnActionsFor("assistant", turn).actions.some(
+      (action) => action.value === "fork",
+    );
+    return (
+      <TurnActions
+        at={turn.updatedAt}
+        copyValue={copyValue}
+        forkDisabled={forking}
+        latest={String(turn.turnId) === String(turns.at(-1)?.turnId)}
+        onFork={canFork ? () => onTurnAction("fork", "assistant", turn) : undefined}
+        outcome={turnHeaderOutcome(turn)}
+      />
+    );
   }
 
   function onTurnAction(value: string, role: "user" | "assistant", turn: WorkTurnState) {
@@ -1814,7 +1850,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       if (decision === "approved" && remember !== undefined) announceShellSettingsWritten();
     } catch {
       setBrowserApprovalMessage(
-        "Browser approval could not be sent. Keep this request open and retry.",
+        "Could not send the browser approval. Keep this open and try again.",
       );
     } finally {
       setBrowserApprovalBusy(false);
@@ -1864,9 +1900,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             : "Model options saved for the next Work turn.",
         );
       } catch {
-        setErrorMessage(
-          "The selected Work provider could not be applied. Choose a ready provider and model.",
-        );
+        setErrorMessage("Could not use that provider. Pick a ready provider and model.");
       } finally {
         setProviderChanging(false);
       }
@@ -1966,7 +2000,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         props.turnClient !== undefined
       ) {
         setErrorMessage(
-          "This task must be rebound before sending a follow-up. Its Project folder is no longer authorized.",
+          "The Project folder is no longer approved. Rebind this task before sending.",
         );
         return false;
       }
@@ -1985,7 +2019,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       );
       if (composerDraft.sideChatReturnsInvalid) {
         setErrorMessage(
-          "The saved Side Chat reference is unreadable. Clear this draft and return the reply again before sending.",
+          "The Side Chat link is broken. Clear this draft and return the reply again before sending.",
         );
         return false;
       }
@@ -2180,7 +2214,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       setStatus(`Created ${reply.outcome.artifact.displayName} in the bound folder.`);
       textareaRef.current?.focus();
     } catch {
-      setErrorMessage("The artifact could not be created. Review the Work project status.");
+      setErrorMessage("Could not create the artifact. Check the Project status.");
     } finally {
       setCreating(false);
     }
@@ -2293,7 +2327,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (items === null) return false;
     if (!clipboardHasImage(items)) return false;
     if (imageSupport === false) {
-      images.refuse("The selected model does not accept images. Choose an image-capable model.");
+      images.refuse("This model cannot read images. Pick one that can.");
       return true;
     }
     return images.consumePaste(items);
@@ -2368,20 +2402,6 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   // subfolder that happens to share the Project's name is still named.
   const folderRepeatsProject =
     path !== undefined && (folder === undefined || folder === ".") && folderLabel === projectLabel;
-  const placeName = [
-    projectLabel,
-    path === undefined || folderRepeatsProject ? undefined : folderLabel,
-  ]
-    .filter((part): part is string => part !== undefined)
-    .join(" / ");
-  // The full place for a pointer user when the row cuts the name short; the
-  // spans inside the button carry no title of their own.
-  const placeTooltip = [
-    "Thread info",
-    [projectLabel, path].filter((part): part is string => part !== undefined).join(" · "),
-  ]
-    .filter((part) => part !== "")
-    .join(": ");
   const placeControl = (
     <>
       <span className="composer-place__icon">
@@ -2588,7 +2608,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               if (row.kind === "empty") {
                 return (
                   <p className="work-thread-workspace__opening">
-                    Describe what you want made. Files this task writes stay inside its folder.
+                    Describe what to make. Files stay in this task’s folder.
                   </p>
                 );
               }
@@ -2652,7 +2672,6 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                           <WorkTurnHeader
                             serverUrl={props.serverUrl}
                             windowCapability={props.windowCapability}
-                            copyValue={row.entry.text}
                             onRestorePrompt={composerDraft.setDraft}
                             onCancelResume={cancelUsageResume}
                             onScheduleResume={scheduleUsageResume}
@@ -2676,6 +2695,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                           <WorkToolGroup
                             serverUrl={props.serverUrl}
                             turn={row.head}
+                            {...subagentsUntil(nextTurnStart.get(workTurnKey(row.head)))}
                             windowCapability={props.windowCapability}
                             {...(props.canvasClient === undefined
                               ? {}
@@ -2686,6 +2706,10 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       {row.entry.text === "" ? null : (
                         <AssistantMessageBody body={row.entry.text} streaming={row.streaming} />
                       )}
+                      {row.turn.transcript.findLast((entry) => entry.role === "assistant") ===
+                      row.entry
+                        ? workTurnActions(row.turn, row.entry.text)
+                        : null}
                     </TurnActionMenu>
                   </article>
                 );
@@ -2719,11 +2743,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     <WorkToolGroup
                       serverUrl={props.serverUrl}
                       turn={row.turn}
+                      {...subagentsUntil(nextTurnStart.get(workTurnKey(row.turn)))}
                       windowCapability={props.windowCapability}
                       {...(props.canvasClient === undefined
                         ? {}
                         : { canvasClient: props.canvasClient })}
                     />
+                    {workTurnActions(row.turn, undefined)}
                   </div>
                 );
               }
@@ -2757,8 +2783,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         {/* "More changed" claims a file changed. A watcher that
                         failed establishes no such thing. */}
                         {row.wrote.paths.length === 0
-                          ? "Octant could not watch the folder while this ran. Open Files for the folder itself."
-                          : "More changed than Octant could record. Open Files for the folder itself."}
+                          ? "Octant could not watch the folder during this run. Open Files to see it."
+                          : "More changed than Octant could record. Open Files to see it."}
                       </p>
                     ) : null}
                   </section>
@@ -2915,8 +2941,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               busy={rewind?.busy === true}
               files={{
                 kind: "unavailable",
-                reason:
-                  "Work takes no file checkpoints, so only the conversation can be rewound. Files stay as they are.",
+                reason: "Work keeps no file checkpoints. Rewind changes the conversation only.",
               }}
               {...(rewind?.message === undefined ? {} : { message: rewind.message })}
               onClose={() => {
@@ -3084,7 +3109,6 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         composerDraft.setDraft(next, next.length);
                       },
                     }}
-                    place={{ label: placeName, content: placeControl, tooltip: placeTooltip }}
                   >
                     <ThreadGuardrailLevel
                       factsVersion={thread.version}
@@ -3155,8 +3179,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   </ThreadInfo>
                 ),
               })}
+          // A local thread's Project and folder are in the Environment panel. A
+          // thread on a server has no such panel row, so the row keeps saying
+          // where it runs.
           context={
-            thread === undefined ? (
+            thread === undefined || serverWorkProject !== undefined ? (
               <div className="composer-place" role="group" aria-label="Project and folder">
                 {placeControl}
               </div>
@@ -3294,7 +3321,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       imageSupport,
                       images.attach,
                       images.refuse,
-                      "The selected model does not accept images. Choose an image-capable model.",
+                      "This model cannot read images. Pick one that can.",
                     )
                   }
                   threadActions={taskActions}

@@ -1,4 +1,4 @@
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "../ui/icons";
 import type { ReactNode } from "react";
 import { OctantIconButton } from "../ui/base/OctantButton";
 
@@ -37,11 +37,6 @@ export interface SurfaceHeaderProps {
    */
   readonly detail?: string;
   readonly titleId?: string;
-  /**
-   * The page's own title at the display step, with the detail on its baseline.
-   * For a page that opens as a place to read, not a toolbar over a list.
-   */
-  readonly display?: boolean;
   /** Primary actions for the whole surface, at the trailing edge. */
   readonly actions?: ReactNode;
   /**
@@ -58,11 +53,7 @@ export interface SurfaceHeaderProps {
  */
 export function SurfaceHeader(props: SurfaceHeaderProps) {
   return (
-    <header
-      className={
-        props.display === true ? "surface-header surface-header--display" : "surface-header"
-      }
-    >
+    <header className="surface-header">
       {props.onBack === undefined ? null : (
         <OctantIconButton
           className="surface-header__back"

@@ -1,6 +1,6 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
-import { Folder, FolderPlus, PanelLeftClose, Plus, Search } from "lucide-react";
+import { Folder, FolderPlus, PanelLeftClose, Plus, Search } from "../ui/icons";
 import { useDeferredValue, useState } from "react";
 import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -12,6 +12,8 @@ type ProjectModeFilter = "all" | ProjectSummary["type"];
 
 export interface ProjectsDirectoryProps {
   readonly availabilityByProject?: ReadonlyMap<ProjectId, ProjectAvailability>;
+  /** Threads per Project, where the window knows them; a Project absent here shows no count. */
+  readonly threadCountByProject?: ReadonlyMap<string, number>;
   readonly onAddProject?: () => void;
   /** Leaves the page for the workspace; the same ghost control every destination page offers. */
   readonly onBack?: () => void;
@@ -136,6 +138,15 @@ export function ProjectsDirectory(props: ProjectsDirectoryProps) {
           {visibleProjects.map((project) => {
             const selected = String(project.id) === String(props.selectedProjectId);
             const status = projectStatus(project, props.availabilityByProject?.get(project.id));
+            const count = props.threadCountByProject?.get(String(project.id));
+            // A healthy Project shows how many threads it holds; only a state
+            // that needs the person (archived, relink) is said in words.
+            const trailing =
+              status === "Available"
+                ? count === undefined
+                  ? undefined
+                  : `${String(count)} ${count === 1 ? "thread" : "threads"}`
+                : status;
             return (
               <li className="surface-row" key={String(project.id)}>
                 <OctantButton
@@ -155,9 +166,11 @@ export function ProjectsDirectory(props: ProjectsDirectoryProps) {
                     <span className="oct-row-label">{project.name}</span>
                     <span className="oct-meta">{projectModeLabel(project.type)}</span>
                   </span>
-                  <span className="oct-meta projects-directory__status" data-status={status}>
-                    {status}
-                  </span>
+                  {trailing === undefined ? null : (
+                    <span className="oct-meta projects-directory__status" data-status={status}>
+                      {trailing}
+                    </span>
+                  )}
                 </OctantButton>
               </li>
             );

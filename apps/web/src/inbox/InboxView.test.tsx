@@ -4,7 +4,8 @@ import type { LinearIssueRow } from "@octant/contracts/linear-issues";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { ComposerPlanUsage } from "../usage/ComposerPlanUsage";
-import { RailUsageRings } from "../usage/RailUsageRings";
+import { defaultShellSettings } from "@octant/domain/shell-policy";
+import { RailAccount } from "../shell/SidebarProfile";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -160,7 +161,7 @@ describe("InboxView Project icon", () => {
     const { container } = inbox(source);
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     expect(container.querySelector(".inbox-group__head img.project-icon")).toBeNull();
-    expect(container.querySelector(".inbox-group__head svg.lucide-folder")).not.toBeNull();
+    expect(container.querySelector(".inbox-group__head svg.octant-icon-folder")).not.toBeNull();
   });
 });
 
@@ -355,14 +356,14 @@ describe("InboxView waiting agent approvals", () => {
 });
 
 describe("InboxView", () => {
-  it("offers a real button to the Board when nothing is waiting", async () => {
+  it("offers a button that starts a thread when nothing is waiting", async () => {
     const user = userEvent.setup();
-    const onOpenBoard = vi.fn();
+    const onStartThread = vi.fn();
     render(
       <InboxView
         attentionItems={[]}
         onClose={vi.fn()}
-        onOpenBoard={onOpenBoard}
+        onStartThread={onStartThread}
         onOpenThread={vi.fn()}
       />,
     );
@@ -370,8 +371,8 @@ describe("InboxView", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "Threads that need an answer, an approval or a look show up here.",
     );
-    await user.click(screen.getByRole("button", { name: "Open the Board" }));
-    expect(onOpenBoard).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: "Start a thread" }));
+    expect(onStartThread).toHaveBeenCalledOnce();
   });
 
   it("announces unseen GitHub and Linear rows to assistive technology", async () => {
@@ -417,6 +418,64 @@ describe("InboxView", () => {
     }
   });
 
+  it("draws an assigned pull request and issue with the list's open glyph and a state name", async () => {
+    document.head.insertAdjacentHTML("beforeend", `<style>${stylesheet}</style>`);
+    const base = {
+      owner: "octant",
+      name: "octant",
+      author: "octocat",
+      updatedAt: "2026-08-28T10:00:00.000Z",
+    };
+
+    render(
+      <InboxView
+        attentionItems={[]}
+        loadAssignedGithubWork={vi.fn(async () => ({
+          kind: "assigned-work" as const,
+          page: {
+            items: [
+              {
+                ...base,
+                category: "pull-request" as const,
+                number: 9,
+                title: "Colour the list",
+                url: "https://github.com/octant/octant/pull/9",
+              },
+              {
+                ...base,
+                category: "issue" as const,
+                number: 7,
+                title: "Fix inbox",
+                url: "https://github.com/octant/octant/issues/7",
+              },
+              {
+                ...base,
+                category: "pull-request" as const,
+                draft: true,
+                number: 11,
+                title: "Sketch the list",
+                url: "https://github.com/octant/octant/pull/11",
+              },
+            ],
+            freshness: { status: "fresh" as const },
+          },
+        }))}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+      />,
+    );
+
+    const draft = await screen.findByRole("link", { name: /Draft pull request.*Sketch the list/ });
+    expect(within(draft).getByRole("img")).toHaveAttribute("data-state", "draft");
+    const pull = await screen.findByRole("link", { name: /Open pull request.*Colour the list/ });
+    const issue = screen.getByRole("link", { name: /Open issue.*Fix inbox/ });
+    for (const link of [pull, issue]) {
+      expect(within(link).getByRole("img")).toHaveAttribute("data-state", "open");
+      expect(link.querySelector(".work-list__state")).not.toBeNull();
+    }
+    expect(pull).toHaveTextContent("#9 · octant/octant");
+  });
+
   it("says when assigned Linear issues were truncated and offers to open Linear", async () => {
     document.head.insertAdjacentHTML("beforeend", `<style>${stylesheet}</style>`);
     const onOpenLinearIssues = vi.fn();
@@ -454,12 +513,18 @@ function waitingThread(id: string) {
 }
 
 describe("InboxView page", () => {
-  it("says the date and that nothing waits when no thread needs the person", () => {
+  it("says the date and how many threads wait when a thread needs the person", () => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     vi.setSystemTime(new Date(2026, 10, 11, 12, 0, 0));
     try {
-      render(<InboxView attentionItems={[]} onClose={vi.fn()} onOpenThread={vi.fn()} />);
-      const state = screen.getByText(/Nothing is waiting on you\./);
+      render(
+        <InboxView
+          attentionItems={[waitingThread("a")]}
+          onClose={vi.fn()}
+          onOpenThread={vi.fn()}
+        />,
+      );
+      const state = screen.getByText(/1 thread is waiting on you\./);
       expect(state).toHaveTextContent(/Wednesday/);
       expect(state).toHaveTextContent(/November/);
     } finally {
@@ -467,16 +532,31 @@ describe("InboxView page", () => {
     }
   });
 
+  it("says it once, in the card, when nothing waits on the person", () => {
+    render(<InboxView attentionItems={[]} onClose={vi.fn()} onOpenThread={vi.fn()} />);
+    expect(screen.queryByText(/Nothing is waiting on you/)).toBeNull();
+    expect(
+      screen.getByText("Threads that need an answer, an approval or a look show up here."),
+    ).toBeVisible();
+    expect(document.querySelector(".surface-header__detail")).toBeNull();
+  });
+
   it("changes its date after midnight in a window with no decision source", () => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     vi.setSystemTime(new Date(2026, 10, 11, 23, 59, 30));
     try {
-      render(<InboxView attentionItems={[]} onClose={vi.fn()} onOpenThread={vi.fn()} />);
-      expect(screen.getByText(/Nothing is waiting on you\./)).toHaveTextContent(/Wednesday/);
+      render(
+        <InboxView
+          attentionItems={[waitingThread("a")]}
+          onClose={vi.fn()}
+          onOpenThread={vi.fn()}
+        />,
+      );
+      expect(screen.getByText(/1 thread is waiting on you\./)).toHaveTextContent(/Wednesday/);
       act(() => {
         vi.advanceTimersByTime(60_000);
       });
-      expect(screen.getByText(/Nothing is waiting on you\./)).toHaveTextContent(/Thursday/);
+      expect(screen.getByText(/1 thread is waiting on you\./)).toHaveTextContent(/Thursday/);
     } finally {
       vi.useRealTimers();
     }
@@ -641,23 +721,35 @@ describe("InboxView page", () => {
       updatedAt: observedAt,
     });
     const list = vi.fn(() => Promise.resolve(snapshot));
+    const onOpenSettings = vi.fn();
     render(
       <PlanUsageProvider
         barStyle="smooth"
         client={{ list } as unknown as ProviderUsageLimitsClient}
         instances={[account]}
       >
-        <RailUsageRings instances={[account]} />
+        <RailAccount
+          onOpenNavigator={vi.fn()}
+          onOpenSettings={onOpenSettings}
+          profile={{ ...defaultShellSettings().userProfile, displayName: "Ada" }}
+        />
         <ComposerPlanUsage providerInstanceId={accountId} />
         <InboxView attentionItems={[]} onClose={vi.fn()} onOpenThread={vi.fn()} />
       </PlanUsageProvider>,
     );
     expect(await screen.findByRole("region", { name: "Plan usage" })).toHaveTextContent("60%");
     expect(screen.getAllByLabelText("Plan usage left").length).toBeGreaterThan(1);
+    // The rail's face rings the tightest window and lists each account's
+    // reading in its menu, which leads to Settings › Usage.
+    await userEvent.click(
+      screen.getByRole("button", { name: "Account menu, Ada, 60% of plan usage left" }),
+    );
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Claude Max, 5h 60% left" }));
+    expect(onOpenSettings).toHaveBeenCalledWith({ section: "usage" });
     expect(list).toHaveBeenCalledTimes(1);
   });
 
-  it("reads title, state, Needs you, GitHub in that order", async () => {
+  it("reads title, Needs you, GitHub in that order", async () => {
     render(
       <InboxView
         attentionItems={[]}
@@ -670,13 +762,11 @@ describe("InboxView page", () => {
       />,
     );
     const title = screen.getByRole("heading", { level: 1, name: "Inbox" });
-    const state = screen.getByText(/Nothing is waiting on you\./);
     const needs = screen.getByRole("heading", { level: 2, name: "Needs you" });
     const github = screen.getByRole("heading", { level: 2, name: "GitHub" });
     const follows = (a: Element, b: Element) =>
       Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(follows(title, state)).toBe(true);
-    expect(follows(state, needs)).toBe(true);
+    expect(follows(title, needs)).toBe(true);
     expect(follows(needs, github)).toBe(true);
     await screen.findByText("Nothing is assigned to you.");
   });

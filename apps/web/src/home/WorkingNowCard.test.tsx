@@ -2,7 +2,7 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunCenterSummary } from "@octant/contracts";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Activity } from "lucide-react";
+import { Activity } from "../ui/icons";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { createComputersCard } from "./ComputersCard";
@@ -77,11 +77,10 @@ describe("the Working now card", () => {
       />,
     );
     await screen.findByRole("region", { name: "Beside" });
-    expect(screen.queryByRole("region", { name: "Working now" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Nothing is running right now.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "In progress" })).not.toBeInTheDocument();
   });
 
-  it("lists a running thread with its provider, current step, and when it last moved", async () => {
+  it("lists a running thread with its current step and when it last moved", async () => {
     renderCard(
       createWorkingNowCard(
         source({
@@ -97,15 +96,13 @@ describe("the Working now card", () => {
         }),
       ),
     );
-    const card = await screen.findByRole("region", { name: "Working now" });
+    const card = await screen.findByRole("region", { name: "In progress" });
     const row = within(card).getByRole("button", { name: /Task 4/ });
-    expect(within(row).getByText("Running the web tests")).toBeInTheDocument();
-    expect(within(row).getByText("Active 4m ago")).toBeInTheDocument();
+    expect(row).toHaveTextContent("octant · Running the web tests · Active 4m");
     expect(within(card).getByText("1")).toBeInTheDocument();
-    expect(row.querySelector(".working-now__step")).toHaveClass("oct-meta--mono");
   });
 
-  it("shows the running command in monospace and how long the turn has really run", async () => {
+  it("shows the running command and how long the turn has really run", async () => {
     renderCard(
       createWorkingNowCard(
         source({
@@ -119,9 +116,8 @@ describe("the Working now card", () => {
       ),
     );
     const row = await screen.findByRole("button", { name: /Task 1/ });
-    expect(within(row).getByText("Command: bun run test")).toHaveClass("oct-meta--mono");
-    expect(within(row).getByText("Running 7m")).toBeInTheDocument();
-    expect(within(row).queryByText(/Active/)).toBeNull();
+    expect(row).toHaveTextContent("Command: bun run test · Running 7m");
+    expect(row).not.toHaveTextContent("Active");
   });
 
   it("says a turn that is waiting on the person in plain words, not code", async () => {
@@ -138,7 +134,7 @@ describe("the Working now card", () => {
       ),
     );
     const row = await screen.findByRole("button", { name: /Task 1/ });
-    expect(within(row).getByText("Waiting for approval")).not.toHaveClass("oct-meta--mono");
+    expect(row).toHaveTextContent("Waiting for approval");
   });
 
   it("falls back to the Project name when the host reports no step, and names a remote host", async () => {
@@ -152,8 +148,7 @@ describe("the Working now card", () => {
       ),
     );
     const row = await screen.findByRole("button", { name: /Task 1/ });
-    expect(within(row).getByText("octant")).toBeInTheDocument();
-    expect(within(row).getByText("Studio Mac")).toBeInTheDocument();
+    expect(row).toHaveTextContent("octant · Studio Mac");
   });
 
   it("opens the thread that was clicked", async () => {
@@ -166,7 +161,7 @@ describe("the Working now card", () => {
     );
   });
 
-  it("shows at most five rows, counts them all, and opens Running from +N more", async () => {
+  it("shows at most five rows, counts them all, and opens Running from See all", async () => {
     const user = userEvent.setup();
     const onOpenRunning = vi.fn();
     renderCard(
@@ -177,20 +172,20 @@ describe("the Working now card", () => {
         }),
       ),
     );
-    const card = await screen.findByRole("region", { name: "Working now" });
+    const card = await screen.findByRole("region", { name: "In progress" });
     expect(within(card).getAllByRole("listitem")).toHaveLength(5);
     expect(within(card).getByText("7")).toBeInTheDocument();
     expect(within(card).getByText("Task 1")).toBeInTheDocument();
     expect(within(card).queryByText("Task 6")).toBeNull();
 
-    await user.click(within(card).getByRole("button", { name: "+2 more" }));
+    await user.click(within(card).getByRole("button", { name: "See all in In progress" }));
     expect(onOpenRunning).toHaveBeenCalledTimes(1);
   });
 
-  it("offers no more-link when everything fits", async () => {
+  it("offers no See all when everything fits", async () => {
     renderCard(createWorkingNowCard(source({ threads: [1, 2, 3, 4, 5].map((i) => thread(i)) })));
-    await screen.findByRole("region", { name: "Working now" });
-    expect(screen.queryByRole("button", { name: /more/ })).toBeNull();
+    await screen.findByRole("region", { name: "In progress" });
+    expect(screen.queryByRole("button", { name: /See all/ })).toBeNull();
   });
 
   it("adds agent runs from the AgentRun projection and says how long a run has run", async () => {
@@ -217,8 +212,7 @@ describe("the Working now card", () => {
       ),
     );
     const row = await screen.findByRole("button", { name: /Resting thread/ });
-    expect(within(row).getByText("reviewer: Review the diff")).toBeInTheDocument();
-    expect(within(row).getByText("Running 12m")).toBeInTheDocument();
+    expect(row).toHaveTextContent("reviewer: Review the diff · Running 12m");
     expect(reader.center).toHaveBeenCalledWith({ status: "active", mode: "all", limit: 50 });
   });
 
@@ -310,7 +304,7 @@ describe("the Working now card", () => {
       );
     };
     const { rerender } = render(startScreen(0));
-    await screen.findByRole("region", { name: "Working now" });
+    await screen.findByRole("region", { name: "In progress" });
     await screen.findByRole("region", { name: "Computers" });
     expect(reader.center).toHaveBeenCalledTimes(1);
     // A streaming Chat reply moves the navigation topics on every delta.

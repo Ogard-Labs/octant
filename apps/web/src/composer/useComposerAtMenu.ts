@@ -1,5 +1,5 @@
 import { createElement, useId, useState, type KeyboardEvent } from "react";
-import { File, Folder, Globe2, Monitor, Plug, Sparkles } from "lucide-react";
+import { File, Folder, Globe2, Monitor, Plug, Sparkles } from "../ui/icons";
 import { filterOctantCommands } from "../palette/commandModel";
 import { useOctantCommands } from "../palette/CommandRegistry";
 import { readPathMentionQuery, type PathMentionCandidate } from "../code/pathMentions";

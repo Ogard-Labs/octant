@@ -17,7 +17,7 @@ import type { DiscoveryCandidate, DiscoverySnapshot } from "@octant/contracts";
 function makeCandidate(overrides?: Partial<DiscoveryCandidate>): DiscoveryCandidate {
   return {
     driverKind: "codex",
-    displayName: "Codex CLI",
+    displayName: "Codex",
     binaryPath: "/usr/local/bin/codex",
     readiness: "ready",
     pathSummary: "/usr/local/bin/codex",
@@ -127,12 +127,12 @@ describe("selectPreferredCandidate", () => {
       }),
       makeCandidate({
         driverKind: "opencode",
-        displayName: "OpenCode CLI",
+        displayName: "OpenCode",
         binaryPath: "/usr/local/bin/opencode" as DiscoveryCandidate["binaryPath"],
       }),
     ]);
 
-    expect(preferred?.displayName).toBe("OpenCode CLI");
+    expect(preferred?.displayName).toBe("OpenCode");
     expect(preferred?.binaryPath).toBe("/usr/local/bin/opencode");
   });
 
@@ -179,7 +179,7 @@ describe("selectPreferredCandidate", () => {
       }),
       makeCandidate({
         driverKind: "opencode",
-        displayName: "OpenCode CLI",
+        displayName: "OpenCode",
         binaryPath: "/opt/homebrew/bin/opencode2" as DiscoveryCandidate["binaryPath"],
       }),
     ]);
@@ -216,7 +216,7 @@ describe("first-run discovery enablement", () => {
     ).toBe(false);
   });
 
-  it("enables only Claude Code and Codex CLI when the scan is first-run eligible", () => {
+  it("enables only Claude Code and Codex when the scan is first-run eligible", () => {
     expect(
       initialEnabledForDiscovery({ driverKind: "claude", firstRunEnablementEligible: true }),
     ).toBe(true);

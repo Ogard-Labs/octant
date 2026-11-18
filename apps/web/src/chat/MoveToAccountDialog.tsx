@@ -37,7 +37,7 @@ export function MoveToAccountDialog(props: MoveToAccountDialogProps) {
       if (refused === undefined) props.onClose();
       else setRefusal(refused);
     } catch {
-      setRefusal("The conversation could not be moved. Nothing changed; try again.");
+      setRefusal("Could not move the conversation. Nothing changed. Try again.");
     } finally {
       setBusy(false);
     }

@@ -107,7 +107,7 @@ export function isNativeToolRuntimeDriver(driverKind: ProviderDriverKind): boole
   return nativeToolRuntimeDrivers.has(driverKind);
 }
 
-// Native agent runtimes (Codex CLI, Claude SDK, OpenCode, ACP drivers) supply
+// Native agent runtimes (Codex, Claude SDK, OpenCode, ACP drivers) supply
 // tool execution from the provider runtime rather than a direct-model
 // tool-calling loop, so their probes intentionally omit model-level
 // tool-calling evidence. For those drivers a ready probe with a verified

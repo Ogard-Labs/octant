@@ -120,4 +120,13 @@ describe("Create from Linear issue picker", () => {
     await user.click(await screen.findByRole("button", { name: "Load more issues" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Linear rate limited");
   });
+
+  it("shows read-ahead issues on the first frame without a loading state", async () => {
+    const { loadLinearIssues } = await import("./CreateFromLinearIssuePicker");
+    const client = makeClient();
+    await loadLinearIssues(client);
+    render(<CreateFromLinearIssuePicker client={client} onSelect={() => undefined} />);
+    expect(screen.getByRole("button", { name: /ENG-12 Browse issues/ })).toBeVisible();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
 });

@@ -58,7 +58,7 @@ describe("CodeWorktreeSourceControl", () => {
     });
     const control = screen.getByRole("switch", { name: "Start from origin" });
     expect(control).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByText(/No usable remote is configured for this branch/)).toBeDefined();
+    expect(screen.getByText(/This branch has no usable remote/)).toBeDefined();
   });
 
   it("labels a disabled source as local and warns it may differ from the remote", () => {

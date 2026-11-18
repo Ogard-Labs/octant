@@ -3,7 +3,7 @@ import type { ProjectBrowserClient } from "@octant/client-runtime/project-browse
 import type { BrowserAutomationSnapshot } from "@octant/contracts/browser-automation-rpc";
 import type { ProjectAgentPage, ProjectBrowserMode } from "@octant/contracts/project-browser";
 import type { ProjectId } from "@octant/contracts/projects";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink } from "../ui/icons";
 import { useEffect, useState } from "react";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";

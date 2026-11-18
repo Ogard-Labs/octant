@@ -60,7 +60,7 @@ const settings = {
   modeSwitcherPresentation: "dropdown",
   projectViewSwitcherPresentation: "dropdown",
   transcriptTextSize: "medium",
-  transcriptWidth: "narrow",
+  transcriptWidth: "medium",
   usageBars: "smooth",
   replyDetail: "low",
   threadReplyDetail: [],
@@ -73,7 +73,7 @@ const settings = {
       project: true,
       branch: false,
       pullRequest: false,
-      lastUpdated: false,
+      lastUpdated: true,
       status: true,
     },
   },
@@ -88,6 +88,7 @@ const settings = {
   sidebarPinnedProjects: [],
   sidebarMoreEnabled: true,
   sidebarCountTiles: true,
+  spendCeilingShown: false,
   sidebarSearchPresentation: "icon",
   sidebarCollapsedPresentation: "rail",
   environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
@@ -1299,9 +1300,9 @@ describe("environment presentation contracts", () => {
   it("keeps each view's sidebar row defaults for a store that never chose any", () => {
     const { sidebarRowProperties: _omit, ...withoutRowProperties } = settings;
 
-    // A store persisted before the choice shipped decodes to exactly the rows
-    // those views already carried: the Project tree never showed a Project
-    // name, and the Activity feed never showed a branch, pull request, or age.
+    // A store that never chose decodes to each view's defaults: the Project
+    // tree shows no Project name, and the Activity feed shows no branch or pull
+    // request but does carry the short age.
     expect(decodeShellSettings(withoutRowProperties).sidebarRowProperties).toEqual({
       projects: {
         project: false,
@@ -1314,7 +1315,7 @@ describe("environment presentation contracts", () => {
         project: true,
         branch: false,
         pullRequest: false,
-        lastUpdated: false,
+        lastUpdated: true,
         status: true,
       },
     });
@@ -1463,6 +1464,19 @@ describe("sidebar pinned Projects", () => {
         ],
       }),
     ).toThrow();
+  });
+});
+
+describe("spend ceiling row preference", () => {
+  it("decodes a store that predates it with the row hidden", () => {
+    const { spendCeilingShown: _shown, ...predatesIt } = settings;
+    expect(decodeShellSettings(predatesIt).spendCeilingShown).toBe(false);
+  });
+
+  it("keeps the row shown once it is turned on", () => {
+    expect(decodeShellSettings({ ...settings, spendCeilingShown: true }).spendCeilingShown).toBe(
+      true,
+    );
   });
 });
 
