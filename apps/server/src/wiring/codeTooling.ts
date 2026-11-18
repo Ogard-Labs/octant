@@ -97,6 +97,7 @@ import { createCodeThreadLocalServerScopeResolver } from "../localServers/localS
 import { createRunningServiceScopeResolver } from "../localServers/runningServiceScopeResolver";
 import { LocalServerService } from "../localServers/localServerService";
 import { defaultShellSettings, enabledModes, projectExtraFolderRoots } from "@octant/domain";
+import { windowAdmitsProject } from "@octant/domain/shell-policy";
 import { pathIsProjectConfined } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -857,6 +858,15 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       listProjects: async (windowId) =>
         (await projectService.bootstrap(windowId)).active.map((project) => String(project.id)),
       canReadThread: async ({ windowId, mode, threadId, projectId }) => {
+        // A projection can still hold a purged thread's row, so the tombstone
+        // — not the projection alone — is the purge authority, as the
+        // AgentRun parent-thread check treats it.
+        if (
+          persistence.connection
+            .prepare("SELECT 1 FROM thread_purge_tombstone WHERE thread_id = ?")
+            .get(threadId) !== undefined
+        )
+          return false;
         if (mode === "code") {
           const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
           if (thread === undefined) return false;
@@ -870,7 +880,11 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
           if (thread === undefined) return false;
           return (
             String(thread.projectId) === projectId &&
-            canAccessCodeProject(windowId, thread.projectId)
+            (personPairedDevice(windowId) ||
+              windowCanAccessWorkProject({
+                workspace: persistence.readWindowWorkspace(windowId)?.workspace,
+                projectId: thread.projectId,
+              }))
           );
         }
         const thread = persistence.readChatThread(decodeChatThreadId(threadId));
@@ -883,8 +897,11 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         // A projectless Chat turn is the person's own; the route already
         // admits only the host person and paired devices acting as them.
         if (thread.projectId === undefined) return projectId === null;
+        const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
         return (
-          String(thread.projectId) === projectId && canAccessCodeProject(windowId, thread.projectId)
+          String(thread.projectId) === projectId &&
+          (personPairedDevice(windowId) ||
+            (workspace !== undefined && windowAdmitsProject(workspace, "chat", thread.projectId)))
         );
       },
       readFacts: (input) => readActivityFacts(persistence.connection, input),
