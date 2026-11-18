@@ -863,25 +863,30 @@ ordinary notice content cannot issue an approval receipt.
 
 ### Project trust prompt
 
-When a Work or Code thread opens and its Project holds untrusted Project code
-for the thread's key provider, the composer shows one quiet notice card above
-the box (maintainer decision, 2026-11-14: one trust prompt per Project). It is
-the neutral card, announced as a status rather than an alert, and names the
-provider and what would load: "This Project has its own Claude Code settings
-and MCP servers. They load once you trust this Project for Claude Code." Its
-actions are **Trust for <provider>** (secondary) and **Not now** (ghost) at the
-trailing edge. Trust sends the Project's trust command, the same one Project
-settings' Trusted providers sends, and the card goes once the Project lists
-the provider. Not now hides it for that Project and provider in this viewer's
-browser only; Trusted providers in Project settings still offers the trust. A
-window with no Project controller shows the words and Not now without Trust,
-and the host refuses the command from anyone but its own person. The card never
-shows for a trusted Project, a Project folder without that provider's Project
-code, or a provider whose trust loads none (any provider that is not a key
-provider, and Codex). Every ACP agent is a key provider, so the card names
-Gemini CLI, Goose, Kimi Code, and the others for the Project files their
-launches hold until trust (maintainer decision, 2026-11-14). The host's answer and the entries it reads are
-in [Architecture: Key providers run as themselves](../architecture.md#providers).
+Adding a Project, or an extra folder, is the person's trust decision for every
+agent on its threads, so outside Strict no thread asks to trust its Project
+(maintainer decision, 2026-11-18, replacing the one trust prompt per Project of
+2026-11-14). When a Strict Work or Code thread opens and its Project holds Project
+code for the thread's key provider that the person has not allowed, the composer
+shows one quiet notice card above the box. It is the neutral card, announced as a
+status rather than an alert, and names the provider and what Strict holds:
+"Strict holds this Project's own Claude Code settings and MCP servers until you
+allow this Project's code. Its instruction files, such as AGENTS.md, already
+load." Its actions are **Allow Project code** (secondary) and **Not now** (ghost)
+at the trailing edge. Allow sends the Project's trust command, the same one
+Project settings' Trusted providers sends, listing every key provider, so one
+confirmation covers the Project; the card goes once the Project lists the
+provider. Not now hides it for that Project in this viewer's browser only;
+Trusted providers in Project settings still offers the list. A window with no
+Project controller shows the words and Not now without Allow, and the host
+refuses the command from anyone but its own person. The card never shows outside
+Strict, for a Project that lists the provider, a Project folder without that
+provider's Project code, or a provider that is not a key provider. Every ACP
+agent is a key provider, so the card names Gemini CLI, Goose, Kimi Code, and the
+others for the Project files their launches hold until then, and Codex for
+`.codex/config.toml`, which refuses its Strict thread until allowed. The host's
+answer and the entries it reads are in
+[Architecture: Key providers run as themselves](../architecture.md#providers).
 
 ## Turn menu panels
 

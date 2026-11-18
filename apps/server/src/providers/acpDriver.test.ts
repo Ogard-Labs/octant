@@ -2671,10 +2671,10 @@ describe("ACP provider driver profile quirks", () => {
     // cannot raise, and the pin keeps a session that fails to select its mode
     // on `ask` rather than fx's default `auto`.
     expect(fx.process.guards.FX_PERMISSION_MODE).toBe("ask");
+    // The workspace AGENTS.md is instruction text and stays readable.
     expect(fx.process.forbiddenRootEntries).toEqual([
       ".fx.json",
       ".mcp.json",
-      "AGENTS.md",
       ".agents",
       ".claude/skills",
     ]);

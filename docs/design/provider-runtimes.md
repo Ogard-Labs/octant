@@ -1593,27 +1593,39 @@ the turn reports completed, so a follow-up such as "fix those findings" sees
 them; where they cannot be appended the turn still completes, after a note
 that a follow-up turn will not see them.
 
-**Codex's own Project configuration** (maintainer decision, 2026-11-16;
-built). In a Project the person trusted for Codex, outside Plan and Strict,
-Codex loads its own Project configuration as it does on its own (the
-project-local configuration codex-rs's loader reads for a project Codex
-trusts, less the keys codex-rs refuses from a Project, `PROJECT_LOCAL_CONFIG_DENYLIST`
-in `config/src/loader/mod.rs`, rust-v0.162.1), and the trust prompt lists its
-entry, `.codex/config.toml`. Octant reports `projectCode` supported, and such
-a thread's `thread/start` and `thread/resume` config records the Project
-folder as `projects.<root>.trust_level = "trusted"` (`codexProjectTrustConfig`),
+**Codex's own Project configuration** (maintainer decisions, 2026-11-16 and
+2026-11-18; built). Adding a Project, or an extra folder, in Octant is the
+person's trust decision for every agent on its threads, so outside Plan
+every Codex Work and Code thread's `thread/start` and `thread/resume` config
+records the Project folder and each extra folder as
+`projects.<folder>.trust_level = "trusted"` (`codexProjectTrustConfig`),
 which Codex reads before it loads Project layers (`project_trust_context`).
-Measured on codex-cli 0.169.0: a `read-only` thread loaded the Project's
-`model` with the override and not without it, and nothing was written to the
-account's `config.toml`. Under Strict and in Plan Octant adds no trust. Known
-limit: Codex's app-server trusts a Project folder by itself, and records it in
-the account's Codex `config.toml`, when a thread starts with a sandbox that can
-write the folder (`workspace-write` or `danger-full-access`) and no trust
-decision exists (measured on 0.169.0; `thread_processor.rs` `thread_start`).
-Marking the folder `untrusted` would withhold that, but Codex then also skips
-the Project's `AGENTS.md` (`load_project_instructions`), so Octant leaves it;
-a folder Codex recorded that way also loads its configuration under Strict and
-in Plan.
+Codex then reads the Project's `AGENTS.md` and loads its own Project
+configuration as it does on its own (the project-local configuration
+codex-rs's loader reads for a project Codex trusts, less the keys codex-rs
+refuses from a Project, `PROJECT_LOCAL_CONFIG_DENYLIST` in
+`config/src/loader/mod.rs`, rust-v0.162.1), and Octant reports `projectCode`
+supported. Measured on codex-cli 0.169.0: a `read-only` thread loaded the
+Project's `model` with the override and not without it, and nothing was
+written to the account's `config.toml`.
+
+This resolves the earlier gap: without a decision, Codex's app-server trusts
+a Project folder by itself, and records it in the account's Codex
+`config.toml`, when a thread starts with a sandbox that can write the folder
+(`workspace-write` or `danger-full-access`; measured on 0.169.0,
+`thread_processor.rs` `thread_start`). With the trust stated per thread it
+never needs to, and Octant never marks a folder `untrusted`, because Codex
+then also skips the Project's `AGENTS.md` (`load_project_instructions`).
+Plan records no trust: its thread starts `read-only`, so Codex trusts no
+folder by itself, still reads `AGENTS.md` of a folder with no decision, and
+loads no Project configuration, as Plan loads no Project code. Under Strict
+the trust is recorded the same way, so a Strict thread whose Project root
+holds `.codex/config.toml` is refused before its thread starts until the
+person allows the Project's code (`codexStrictProjectConfigRefusal`, category
+`incompatible`, naming **Allow Project code**); the trust cannot leave the
+file out without marking the folder untrusted. A folder the person trusted
+in their own Codex CLI keeps that record, so in Plan such a folder's
+configuration loads, inside Plan's read-only profile.
 
 **Codex sessions started outside Octant** (maintainer request, 2026-11-18;
 built). An empty Work or Code thread can continue one of the person's own
@@ -2198,8 +2210,9 @@ keeps each message as sent. Pi passes an agent's text on as sent.
 
 Every ACP agent is a key provider (maintainer decision, 2026-11-14): its
 account and thread switches work as the other key providers' do, and a
-Project trusted for it loads that Project's own files in Work and Code
-outside Plan. Each profile's `nativeSetup` releases what its launch
+trusted Project loads that Project's own files in Work and Code outside
+Plan. Every Project the person added is trusted outside Strict; under Strict
+only one whose code the person allowed (maintainer decision, 2026-11-18). Each profile's `nativeSetup` releases what its launch
 otherwise holds back, and its `nativeSetupSupport` reports only those
 features:
 
@@ -2208,16 +2221,23 @@ features:
   hooks, plugins, and agent files as it does on its own, under its own folder
   trust where it keeps one. Each agent's entries are listed in
   `PROJECT_CODE_ENTRIES` (`packages/domain/src/projectCodeTrustPolicy.ts`),
-  so the one trust prompt names them; a test holds the two lists together.
+  so the Strict prompt names them; a test holds the two lists together, and
+  another that no profile holds back a Project instruction file.
   Gemini CLI and Qwen Code start in a trusted Project instead of refusing it.
   Grok Build's `trusted_folders.toml` becomes readable, so its own trust list
-  decides. In Plan, in Chat, and in an untrusted Project every entry stays
-  held, and the two refusals stay.
+  decides; Grok reads a Project's instructions only in a folder that list
+  trusts, so a folder the person never trusted in Grok gets none (not
+  built: telling Grok the folder is trusted at launch). In Plan, in Chat,
+  and in a Strict thread whose Project's code is not allowed every entry
+  stays held, and the two refusals stay.
 - **The person's own home.** Kimi Code reads its home `AGENTS.md` with any of
   the setup, `skills` with skills, `mcp.json` and `plugins` with tool servers,
   and `hooks` with hooks (never in Chat or Plan). Kilo unsets
-  `KILO_DISABLE_EXTERNAL_SKILLS` with skills. fx reads the Project's
-  `AGENTS.md`, instruction text, with any of the setup.
+  `KILO_DISABLE_EXTERNAL_SKILLS` with skills.
+- **Instruction files.** A Project's instruction text is never held back:
+  fx reads the Project's `AGENTS.md`, and Mistral Vibe its Project context
+  (no `VIBE_INCLUDE_PROJECT_CONTEXT` guard), in every mode, with or without
+  the person's setup, Strict and Plan included.
 - **Not lifted.** Kilo's and Devin's managed configuration stays, because it
   carries the level's permission and the agent or mode Octant selects, which
   the person's own configuration would replace; so their home configuration
