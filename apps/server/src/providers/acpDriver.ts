@@ -1875,13 +1875,17 @@ function makeConnection(
                 `${name} does not offer the ${modeValue} mode this thread needs.`,
               );
             const setModeCall = profile.setModeCall?.(source.sessionId, modeValue);
-            if (setModeCall === undefined) {
-              const result = await awaitStartup(() =>
-                client.setConfigOption(source.sessionId, "mode", modeValue),
-              );
-              configOptions = result.configOptions;
-            } else {
-              await awaitStartup(() => client.call(setModeCall.method, setModeCall.params));
+            // A profile that selects no mode leaves the session in the mode it
+            // opened with.
+            if (profile.selectsNoMode !== true) {
+              if (setModeCall === undefined) {
+                const result = await awaitStartup(() =>
+                  client.setConfigOption(source.sessionId, "mode", modeValue),
+                );
+                configOptions = result.configOptions;
+              } else {
+                await awaitStartup(() => client.call(setModeCall.method, setModeCall.params));
+              }
             }
             // Turns carry only the prompt. Restore model settings against the
             // selected session's fresh choices before it can send; apply effort

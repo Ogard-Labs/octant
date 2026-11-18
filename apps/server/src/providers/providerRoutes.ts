@@ -256,12 +256,17 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
         // claude.ai account, so it is the same person's decision, and so is
         // letting a key provider run as itself, which loads code and tool
         // servers Octant did not review, and turning on a provider's own
-        // memory, which follows the provider's rules into every Project. Remote
-        // forwarding never admits provider commands; the route refuses these
-        // too.
+        // memory, which follows the provider's rules into every Project. Adding,
+        // installing and trusting any ACP agent are the steps of admitting a
+        // program Octant did not review, so they are the same person's too.
+        // Remote forwarding never admits provider commands; the route refuses
+        // these too.
         const principal = readPrincipalRouteContext(request)?.principal;
         if (
-          (command.kind === "create-outside-harness-endpoint-provider" ||
+          (command.kind === "add-acp-agent" ||
+            command.kind === "install-acp-agent" ||
+            command.kind === "set-acp-agent-trust" ||
+            command.kind === "create-outside-harness-endpoint-provider" ||
             command.kind === "change-outside-harness-endpoint-configuration" ||
             command.kind === "verify-model-tools" ||
             command.kind === "set-claude-artifact-delivery" ||

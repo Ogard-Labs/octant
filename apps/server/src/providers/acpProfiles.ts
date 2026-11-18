@@ -25,8 +25,11 @@ import type {
 } from "@octant/contracts";
 import type { AcpInitializeResult } from "./acpProtocol";
 
-/** Every ACP agent, plus OpenCode, whose 2.x turns run on this stack. */
-export type AcpProviderKind = AcpAgentKind | "opencode";
+/**
+ * Every ACP agent, plus OpenCode, whose 2.x turns run on this stack, and any
+ * agent the person added (`acp-agent`), whose profile is built per instance.
+ */
+export type AcpProviderKind = AcpAgentKind | "opencode" | "acp-agent";
 export type AcpSessionMode = "chat" | "work" | "code";
 
 export interface AcpManagedFile {
@@ -67,6 +70,12 @@ export interface AcpProcessProfile {
   readonly verifyAgentInfo?: (initialized: AcpInitializeResult) => boolean;
   /** `--version` output contract; groups 1-3 are major, minor, patch. */
   readonly versionPattern: RegExp;
+  /**
+   * An added agent's `--version` is read where it answers and is otherwise
+   * "unknown", and its `initialize` reply's `agentInfo.version` then names
+   * it. A reviewed profile fails closed on a version it cannot read.
+   */
+  readonly versionProbe?: "best-effort";
   readonly minimumVersion: readonly [number, number, number];
   /** When set, version is read from the matching npm `package.json` instead of `--version`. */
   readonly npmPackageName?: string;
@@ -187,6 +196,12 @@ export interface AcpProviderProfile {
     policy: ProviderExecutionPolicy,
     autoReview?: boolean,
   ) => string;
+  /**
+   * No mode is selected: an added agent's own modes were never mapped onto
+   * Chat, Work, Code and Plan, so its session keeps the mode it opens with
+   * and Octant's sandbox and approvals hold the thread's level.
+   */
+  readonly selectsNoMode?: true;
   /**
    * The agent has a mode of its own that answers its approval prompts, which
    * Reviewed may use as its reviewer in Code (`harnessAutoReview`).
@@ -1658,7 +1673,9 @@ const kimiProfile: AcpProviderProfile = {
   },
 };
 
-export const acpProviderProfiles: Readonly<Record<AcpProviderKind, AcpProviderProfile>> = {
+export const acpProviderProfiles: Readonly<
+  Record<Exclude<AcpProviderKind, "acp-agent">, AcpProviderProfile>
+> = {
   opencode: opencodeProfile,
   kilo: kiloProfile,
   devin: devinProfile,
@@ -1675,5 +1692,5 @@ export const acpProviderProfiles: Readonly<Record<AcpProviderKind, AcpProviderPr
 };
 
 export function isAcpProviderKind(kind: ProviderDriverKind): kind is AcpProviderKind {
-  return kind in acpProviderProfiles;
+  return kind === "acp-agent" || kind in acpProviderProfiles;
 }

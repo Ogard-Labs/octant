@@ -24,7 +24,7 @@ export function providerDriverHostRuntime(
   driverKind: ProviderDriverKind,
 ): ProviderDriverHostRuntime {
   if (driverKind === "outside-harness-endpoint") return "outside-endpoint";
-  if (isAcpAgentKind(driverKind)) return "acp-host-profile";
+  if (isAcpAgentKind(driverKind) || driverKind === "acp-agent") return "acp-host-profile";
   const descriptor = DISCOVERY_DESCRIPTORS.find((entry) => entry.driverKind === driverKind);
   if (descriptor?.isDirectEndpoint === true) return "direct-endpoint";
   return "managed-process";

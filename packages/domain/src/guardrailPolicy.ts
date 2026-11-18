@@ -143,6 +143,7 @@ export function fullAccessSandboxSupported(driverKind: ProviderDriverKind): bool
     driverKind === "pi" ||
     driverKind === "opencode" ||
     isAcpAgentKind(driverKind) ||
+    driverKind === "acp-agent" ||
     isNativeHarnessDriverKind(driverKind)
   );
 }
@@ -602,7 +603,12 @@ export function chosenAutoReviewer(input: {
  * confirmation).
  */
 export function shieldRoutesApprovals(driverKind: ProviderDriverKind): boolean {
-  if (isNativeHarnessDriverKind(driverKind) || isAcpAgentKind(driverKind)) return true;
+  if (
+    isNativeHarnessDriverKind(driverKind) ||
+    isAcpAgentKind(driverKind) ||
+    driverKind === "acp-agent"
+  )
+    return true;
   return (
     driverKind === "claude" ||
     driverKind === "codex" ||
