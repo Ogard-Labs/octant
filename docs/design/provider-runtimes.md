@@ -2629,8 +2629,12 @@ its status are in
   Claude with no file or shell tool in its session's tool list
   (`claudeExecutionOptions` leaves out `Read`, `Grep`, `Glob`, `LS`, `Edit`,
   `Write`, `NotebookEdit`, `Bash` and the task tools on Windows). OpenCode
-  and the ACP agents keep their own file and shell tools whatever they are
-  told, so their Chat launch is refused by name.
+  and the ACP agents stay refused by name in Chat: OpenCode's permission
+  rules can deny its file and shell tools, but its command templates run
+  shell substitutions and its plugins run code in its own process outside
+  those rules, and an ACP agent's client capabilities decide only whether it
+  uses Octant's file and terminal methods, never its own built-in tools,
+  which no reviewed profile can be told to drop.
 - **Refused by name:** Strict at every level ("Strict needs a sandbox
   Windows doesn't have yet"), Full access with the sandbox kept, and a Chat
   launch on OpenCode or an ACP agent. A launch that does not carry its Strict

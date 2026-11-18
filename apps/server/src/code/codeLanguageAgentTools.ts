@@ -98,6 +98,7 @@ export function createCodeLanguageAgentTools(
     !options.language.servesAgentsIn(options.folders, {
       projectId: options.thread.projectId,
       posture: options.thread.executionPolicy,
+      threadId: options.thread.id,
     })
   ) {
     return undefined;
@@ -389,7 +390,8 @@ const REFUSAL_MESSAGES: Readonly<
   "no-language-server": "No language server reads this kind of file.",
   "confinement-unavailable":
     "The host cannot confine a language server, so none runs. Continue without it.",
-  "unsupported-platform": "Language services run only on macOS and Linux hosts.",
+  "unsupported-platform":
+    "Language services run on macOS and Linux, and on Windows only outside Strict, which needs a sandbox Windows does not have yet.",
   "plan-read-only":
     "The language server for this file runs repository tooling, which Plan refuses.",
   "local-host-required":

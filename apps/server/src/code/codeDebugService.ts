@@ -213,6 +213,12 @@ export interface CodeDebugServiceOptions {
   };
   readonly records: Pick<DebugSessionRecords, "started" | "ended">;
   readonly platform: DebugSessionHostPlatform;
+  /**
+   * A thread's resolved Strict value. On Windows a session runs unconfined
+   * for a thread outside Strict and is refused under it. Absent, or a read
+   * that throws, counts as Strict.
+   */
+  readonly threadStrict?: (threadId: CodeThreadId) => boolean;
   /** Parent of every session's state folder. */
   readonly stateRoot: string;
   readonly uuid: () => string;
@@ -317,6 +323,7 @@ export class CodeDebugService {
   readonly #processes: CodeDebugServiceOptions["processes"];
   readonly #records: CodeDebugServiceOptions["records"];
   readonly #platform: DebugSessionHostPlatform;
+  readonly #threadStrict: (threadId: CodeThreadId) => boolean;
   readonly #stateRoot: string;
   readonly #uuid: () => string;
   readonly #files: CodeTestSourcePort;
@@ -337,6 +344,7 @@ export class CodeDebugService {
     this.#processes = options.processes;
     this.#records = options.records;
     this.#platform = options.platform;
+    this.#threadStrict = options.threadStrict ?? (() => true);
     this.#stateRoot = options.stateRoot;
     this.#uuid = options.uuid;
     this.#files = options.files ?? liveCodeTestSourcePort;
@@ -423,14 +431,26 @@ export class CodeDebugService {
   }
 
   /**
-   * Whether a session could start on this host at all: a platform sessions
-   * run on, with an adapter effective in Code. The agent's tool is offered
-   * only where this holds.
+   * Whether a session could start for this thread on this host at all: a
+   * platform sessions run on (Windows for a thread outside Strict), with an
+   * adapter effective in Code. The agent's tool is offered only where this
+   * holds.
    */
-  get offersSessions(): boolean {
-    return (
-      (this.#platform === "macos" || this.#platform === "linux") && this.#adapters().length > 0
-    );
+  offersSessions(threadId: CodeThreadId): boolean {
+    const platformRuns =
+      this.#platform === "macos" ||
+      this.#platform === "linux" ||
+      (this.#platform === "windows" && !this.#strictOf(threadId));
+    return platformRuns && this.#adapters().length > 0;
+  }
+
+  /** A thread's resolved Strict value; a read that throws counts as Strict. */
+  #strictOf(threadId: CodeThreadId): boolean {
+    try {
+      return this.#threadStrict(threadId);
+    } catch {
+      return true;
+    }
   }
 
   /** The thread's one running session, for a caller that may reach the thread. */
@@ -628,6 +648,7 @@ export class CodeDebugService {
     const outcome = await this.#processes.launch({
       ...(sandbox === undefined ? {} : { sandboxPolicy: sandbox }),
       sessionId: String(sessionId),
+      ...(this.#platform === "windows" ? { unconfined: true as const } : {}),
       executable,
       installRoot: adapter.installRoot,
       checkoutRoot: paths.checkoutRoot,
@@ -959,6 +980,7 @@ export class CodeDebugService {
       configurationPaths: "resolve",
       debugPorts: adapter.declaration.debugPorts,
       adapterRuntimes: adapter.declaration.runtimes.map(String),
+      strict: this.#strictOf(authorized.thread.id),
     });
   }
 
@@ -1393,7 +1415,14 @@ export class CodeDebugService {
     if (stored === undefined || !isActiveThread(stored)) return "thread-inactive";
     const thread = this.#authority.effectiveThread(record.startedBy, stored);
     if (thread.executionPolicy === "plan") return "plan-read-only";
-    const network = thread.executionPolicy === "full-access" ? "allow" : "proxied";
+    // A Windows session runs unconfined on the open network at every level
+    // outside Strict, having no proxy to hold it to; Strict turned on since
+    // takes that reach away, so the session ends as one whose network changed.
+    if (this.#platform === "windows" && this.#strictOf(record.threadId)) return "network-changed";
+    const network =
+      this.#platform === "windows" || thread.executionPolicy === "full-access"
+        ? "allow"
+        : "proxied";
     if (record.sandboxSessionId === undefined && network !== record.network)
       return "network-changed";
     const checkout = this.#authority.readCheckout(record.checkoutId);

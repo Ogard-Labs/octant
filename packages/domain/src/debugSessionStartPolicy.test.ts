@@ -272,6 +272,37 @@ describe("debug session start policy", () => {
     }
   });
 
+  it("starts a session unconfined on Windows outside Strict with the level's confirmation, and refuses under Strict", () => {
+    expect(
+      decideDebugSessionStart(
+        request({ platform: "windows", strict: false, debugPorts: 1, adapterRuntimes: ["native"] }),
+      ),
+    ).toEqual({
+      status: "launch",
+      shape: {
+        confinement: "none",
+        capsule: "adapter-and-program",
+        checkout: "read-write",
+        writes: "checkout-and-session-state",
+        execution: "confined-as-terminal",
+        network: "allow",
+        debugPort: "host-chosen-localhost-port",
+      },
+    });
+    expect(
+      decideDebugSessionStart(request({ platform: "windows", strict: false, approvals: [] })),
+    ).toEqual({ status: "refused", reason: "approval-required" });
+    expect(
+      decideDebugSessionStart(request({ platform: "windows", strict: false, posture: "plan" })),
+    ).toEqual({ status: "refused", reason: "plan-read-only" });
+    for (const strict of [true, undefined]) {
+      expect(decideDebugSessionStart(request({ platform: "windows", strict }))).toEqual({
+        status: "refused",
+        reason: "unsupported-platform",
+      });
+    }
+  });
+
   it("refuses an adapter that debugs native code on macOS until its Seatbelt rights are measured, and starts it on Linux", () => {
     const native = { adapterRuntimes: ["native", "rust"] };
     expect(decideDebugSessionStart(request({ ...native, platform: "macos" }))).toEqual({
