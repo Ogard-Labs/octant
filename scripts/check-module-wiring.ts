@@ -86,6 +86,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "apps/desktop/src/browserDownloadSource.native-smoke.ts",
     "Isolated Electron main entry bundled by scripts/smoke-browser-download-source.ts for the CI-only native HTTPS redirect proof. Remove when the smoke is retired or this entry is imported by product code.",
   ],
+  [
+    "apps/desktop/src/browserLocalNavigation.native-smoke.ts",
+    "Isolated Electron main entry bundled by scripts/smoke-browser-local-navigation.ts for the CI-only native page-started local-navigation proof. Remove when the smoke is retired or this entry is imported by product code.",
+  ],
   // ── Remaining ──
   [
     "apps/server/src/remote/remoteExitEvidenceADriver.ts",
