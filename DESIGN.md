@@ -1942,9 +1942,11 @@ the merge queue, it reports passed without drawing, since the pull request's own
 run already compared the change. The scenes (`apps/web/visual-check.html`, source in
 `apps/web/src/visualCheck/`) are the start screen, the Code side panel, the
 Appearance and Usage Settings pages, the Agents, Artifacts and Automations
-tables, the Where, Project and approval menus open, and the icon rail with the
-account face. Each is drawn in light and dark at 1280 by 800, and the tables and
-the side panel again at 760 wide, from fixed data, a fixed clock, bundled fonts
+tables, the Where, Project and approval menus open, the icon rail with the
+account face, and a thread's subagent progress (the transcript rows, a finished
+child's result line and the composer's folded card). Each is drawn in light and
+dark at 1280 by 800, and the tables, the side panel and the subagent progress
+again at 760 wide, from fixed data, a fixed clock, bundled fonts
 and no motion, with no host behind them. A picture fails when more than 50 of
 its pixels differ by more than 24 in any channel, or its size changes. The run
 then uploads the `visual-check` artifact with the actual, baseline and diff

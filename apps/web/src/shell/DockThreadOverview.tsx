@@ -55,8 +55,8 @@ export interface DockThreadBackgroundTask {
   readonly task: string;
   /** "Working", "Done", "To review": the word the Environment tab uses. */
   readonly state: string;
-  /** Compact age of the run's last change, such as "4m ago". */
-  readonly age?: string;
+  /** How long the run took or has run so far, such as "4m 05s"; empty when unreadable. */
+  readonly runTime: string;
   readonly onOpen: () => void;
 }
 
@@ -283,7 +283,7 @@ export function DockThreadOverview(props: DockThreadOverviewProps) {
 }
 
 /**
- * Running runs lead, each with a spinner and its age; finished ones fold under
+ * Running runs lead, each with a spinner and its run time; finished ones fold under
  * one "N finished" row, since the Agents tool is where they are read.
  */
 function BackgroundTasksCard(props: {
@@ -297,7 +297,7 @@ function BackgroundTasksCard(props: {
       {...(props.running.length === 0
         ? {}
         : { meta: `${props.running.length.toLocaleString("en")} running` })}
-      title="Background tasks"
+      title="Subagents"
     >
       {props.running.map((task) => (
         <TaskRow key={task.id} running task={task} />
@@ -327,7 +327,7 @@ function TaskRow(props: { readonly task: DockThreadBackgroundTask; readonly runn
   const { task } = props;
   return (
     <OctantButton
-      aria-label={`${task.task}. ${task.state}. Open in Agents`}
+      aria-label={`${task.task}. ${task.state}${task.runTime === "" ? "" : `, ${task.runTime}`}. Open in Agents`}
       className="dock-card__row dock-card__action"
       onClick={task.onOpen}
       title={task.task}
@@ -340,8 +340,9 @@ function TaskRow(props: { readonly task: DockThreadBackgroundTask; readonly runn
         <Check aria-hidden="true" className="dock-card__icon" size={14} />
       )}
       <span className="dock-card__label">{task.task}</span>
-      <span className="dock-card__meta">
-        {props.running ? (task.age ?? task.state) : task.state}
+      {props.running ? null : <span className="dock-card__meta">{task.state}</span>}
+      <span aria-hidden="true" className="dock-card__meta dock-card__time">
+        {task.runTime}
       </span>
     </OctantButton>
   );
