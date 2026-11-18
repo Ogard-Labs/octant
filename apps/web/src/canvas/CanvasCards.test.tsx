@@ -616,6 +616,20 @@ describe("Canvas create panel and card list", () => {
     });
   });
 
+  it("offers a paired browser, which has no plain create, the HTML import alone", () => {
+    const client = { importHtml: vi.fn() } as unknown as CanvasClient;
+    render(<CanvasCreatePanel client={client} context={chatContext} />);
+    expect(screen.getByRole("button", { name: "Import HTML…" })).toBeInTheDocument();
+    expect(screen.queryByTestId("create-button")).toBeNull();
+  });
+
+  it("offers nothing to a client with neither a create nor an import", () => {
+    const { container } = render(
+      <CanvasCreatePanel client={{} as CanvasClient} context={chatContext} />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it("loads and renders durable thread cards", async () => {
     const card = referenceCardFixture();
     const client = {

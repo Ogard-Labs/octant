@@ -128,7 +128,11 @@ type OpenTool =
  * leaving the start screen) stops the shell rather than leave it running
  * unseen.
  */
-export function StartQuickTools(props: { readonly projectId: ProjectId }) {
+export function StartQuickTools(props: {
+  readonly projectId: ProjectId;
+  /** The line under the list; a start screen says other tools wait for the task. */
+  readonly note?: string;
+}) {
   const services = useContext(StartQuickToolsContext);
   const [open, setOpen] = useState<OpenTool>();
   const [starting, setStarting] = useState(false);
@@ -291,7 +295,7 @@ export function StartQuickTools(props: { readonly projectId: ProjectId }) {
             </OctantAlert>
           )}
           <p className="oct-row-detail start-quick-tools__note">
-            Other tools open once the task starts
+            {props.note ?? "Other tools open once the task starts"}
           </p>
         </div>
       </aside>

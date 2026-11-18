@@ -2230,8 +2230,10 @@ artifact format and copies no other product's identifiers.
   stays owned by the thread it names, which the create policy checks), and
   journals the create with the device as actor while the version keeps the
   person as its author. A device the hub's roster introduced has no window
-  context and is refused. A device's plain create, and an import control in
-  the paired browser, are not built.
+  context and is refused. The paired browser offers **Import HTML…** in a
+  Chat thread's Canvas tools to a device that acts as the host's person, on
+  its own: a device's plain create is not built, so no create draft is
+  shown beside it.
 - **Bounds and refusals.** The page is at most 256 KiB of UTF-8
   (`CANVAS_HTML_IMPORT_MAX_BYTES`), checked on the host; a body past the
   route's 1 MiB read is answered as too large too. What survives the import
