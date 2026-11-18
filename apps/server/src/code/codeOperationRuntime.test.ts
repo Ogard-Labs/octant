@@ -15037,7 +15037,11 @@ it("requests a preview through the actual app-managed terminal write composition
         }),
       ),
     );
-    await vi.waitFor(() => expect(provider.answerTool).toHaveBeenCalledTimes(2));
+    // The write runs a real terminal command; a loaded CI runner took longer
+    // than the default second to answer it.
+    await vi.waitFor(() => expect(provider.answerTool).toHaveBeenCalledTimes(2), {
+      timeout: 5_000,
+    });
     await vi.waitFor(
       () => expect(f.conversation().turns[0]?.reviewPreview?.capture?.version).toBe(1),
       { timeout: 3_000 },
