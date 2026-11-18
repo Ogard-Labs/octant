@@ -267,7 +267,14 @@ describe("the phone's Private page across a close and reopen", () => {
           projectId,
         }),
       });
-    const root = await render(sheet(true).props.children);
+    const root = await render(
+      createElement(ProjectPageSheet, {
+        visible: true,
+        onClose: () => undefined,
+        transport,
+        projectId,
+      }),
+    );
     await type("mobile-project-page-address", "old.example");
     await press("mobile-project-page-open");
     await act(async () => root.render(sheet(false)));
