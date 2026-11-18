@@ -1,5 +1,5 @@
 import type { HomeCardCustomization } from "@octant/contracts/shell";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { HomeCard } from "./HomeCard";
 import { HomeCustomize } from "./HomeCustomize";
 import { HomeList } from "./HomeList";
@@ -26,6 +26,11 @@ export interface HomeDashboardProps {
   readonly cacheScope?: string | undefined;
   /** Injectable for tests; defaults to the browser's local storage. */
   readonly cacheStorage?: Pick<Storage, "getItem" | "setItem"> | undefined;
+  /**
+   * A section below the cards, drawn only on screens that have one — Code
+   * Home's activity panel. It shares the first-paint wait.
+   */
+  readonly activity?: ReactNode;
 }
 
 /**
@@ -72,7 +77,12 @@ export function HomeDashboard(props: HomeDashboardProps) {
     ],
     [placements, extraRows],
   );
-  if (!painted || (placements.length === 0 && contributors.length === 0)) return null;
+  if (
+    !painted ||
+    (placements.length === 0 && contributors.length === 0 && props.activity === undefined)
+  ) {
+    return null;
+  }
   const grid = placements.flatMap((placement) =>
     placement.visible && isGridCard(placement.definition) ? [placement.definition] : [],
   );
@@ -105,6 +115,7 @@ export function HomeDashboard(props: HomeDashboardProps) {
           ))}
         </div>
       )}
+      {props.activity}
     </section>
   );
 }

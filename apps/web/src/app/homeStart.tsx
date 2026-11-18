@@ -104,6 +104,8 @@ export interface HomeStartInput {
   /** The clients the Needs you card answers a host-held ask through, kept by identity. */
   readonly needsYouAskClients: WaitingAskAnswerClients;
   readonly now: number;
+  /** The shell's safe door for a link the records point at; absent leaves anchors. */
+  readonly onOpenExternal?: (url: string) => void;
   readonly openRunningServiceLive:
     | ((service: RunningService, mode: RemoteOpenMode) => Promise<RemoteOpenOutcome>)
     | undefined;
@@ -389,6 +391,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
       },
     }),
   ];
+  const readHomeActivity = codeClient.readHomeActivity;
   const homeStart: DraftThreadWorkspaceProps["homeStart"] =
     activeMode === "chat" || activeMode === "code" || activeMode === "work"
       ? {
@@ -396,6 +399,24 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
           cardCustomization: settings.homeCards,
           onCardCustomizationChange: (homeCardChoice) =>
             void actions.updateSettings({ homeCards: homeCardChoice }),
+          // Only the Code Home welcome mounts the activity panel; every other
+          // surface the model reaches drops this source on the way down.
+          ...(activeMode === "code" && readHomeActivity !== undefined
+            ? {
+                codeActivity: {
+                  read: (query) => readHomeActivity(query),
+                  openThread: (mode, threadId) => {
+                    actions.closeWorkspaceReaders();
+                    if (mode === "chat") actions.selectChatThread(threadId);
+                    else if (mode === "work") actions.selectWorkThread(threadId);
+                    else actions.selectCodeThread(threadId);
+                  },
+                  ...(input.onOpenExternal === undefined
+                    ? {}
+                    : { openExternal: input.onOpenExternal }),
+                },
+              }
+            : {}),
         }
       : undefined;
   return homeStart;

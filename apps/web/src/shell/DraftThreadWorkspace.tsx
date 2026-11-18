@@ -60,7 +60,7 @@ import type {
   ProviderModelOptionValues,
 } from "@octant/contracts/providers";
 import { LOCAL_HOST_ID, type HostId, type HostIdentity } from "@octant/contracts/host";
-import type { HomeCardCustomization } from "@octant/contracts/shell";
+import type { HomeStartModel } from "./HomeStart";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { GithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import type {
@@ -139,7 +139,6 @@ import {
   useContinueRows,
   useOpenIssueRows,
 } from "../home/useStartListRows";
-import type { HomeCardDefinition } from "../home/homeCards";
 import type { OctantHostBridge } from "./hostBridge";
 import {
   serverCodeProjectFor,
@@ -287,12 +286,7 @@ export interface DraftThreadWorkspaceProps {
    * What a start screen offers under the composer besides its own sections:
    * the card area.
    */
-  readonly homeStart?: {
-    /** The card registry for this screen; absent leaves the card area out. */
-    readonly cards?: ReadonlyArray<HomeCardDefinition>;
-    readonly cardCustomization: HomeCardCustomization;
-    readonly onCardCustomizationChange: (next: HomeCardCustomization) => void;
-  };
+  readonly homeStart?: HomeStartModel;
   /**
    * What the Code start screen shows under the composer: the threads to
    * continue, the Linear loader for Up next, names for cards, and the openers

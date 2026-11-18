@@ -1,5 +1,8 @@
+import type { CodeClient } from "@octant/client-runtime/code-client";
+import type { OctantMode } from "@octant/contracts/modes";
 import type { HomeCardCustomization } from "@octant/contracts/shell";
 import type { ReactNode } from "react";
+import { CodeHomeActivity } from "../home/CodeHomeActivity";
 import { HomeDashboard } from "../home/HomeDashboard";
 import type { HomeCardDefinition, HomeListContributor } from "../home/homeCards";
 
@@ -17,12 +20,25 @@ export function HomeStart(props: HomeStartProps) {
   return <div className="home-start">{props.dashboard}</div>;
 }
 
+/**
+ * What the Code Home activity panel reads and where it navigates — wired on
+ * the app side, where the client and the thread selectors live. Absent on
+ * every surface that is not the Code Home welcome.
+ */
+export interface CodeHomeActivitySource {
+  readonly read: NonNullable<CodeClient["readHomeActivity"]>;
+  readonly openThread: (mode: OctantMode, threadId: string) => void;
+  readonly openExternal?: ((url: string) => void) | undefined;
+}
+
 /** The start screen's card registry and the person's choices over it. */
 export interface HomeStartModel {
   /** The card registry for this screen; absent leaves the card area out. */
   readonly cards?: ReadonlyArray<HomeCardDefinition>;
   readonly cardCustomization: HomeCardCustomization;
   readonly onCardCustomizationChange: (next: HomeCardCustomization) => void;
+  /** The Code Home activity panel's read and navigation; Code Home only. */
+  readonly codeActivity?: CodeHomeActivitySource | undefined;
 }
 
 const NO_HOME_CARDS: ReadonlyArray<HomeCardDefinition> = [];
@@ -40,10 +56,28 @@ export function HomeStartList(props: {
   /** The host and Project the list is read for: the key its last answer is kept under. */
   readonly cacheScope: string;
 }) {
+  const codeActivity = props.homeStart?.codeActivity;
   return (
     <HomeStart
       dashboard={
         <HomeDashboard
+          {...(codeActivity === undefined
+            ? {}
+            : {
+                activity: (
+                  <CodeHomeActivity
+                    customization={props.homeStart?.cardCustomization ?? NO_HOME_CARD_CHOICE}
+                    onCustomizationChange={
+                      props.homeStart?.onCardCustomizationChange ?? ignoreCardChoice
+                    }
+                    onOpenThread={codeActivity.openThread}
+                    {...(codeActivity.openExternal === undefined
+                      ? {}
+                      : { onOpenExternal: codeActivity.openExternal })}
+                    read={codeActivity.read}
+                  />
+                ),
+              })}
           cards={props.homeStart?.cards ?? NO_HOME_CARDS}
           customization={props.homeStart?.cardCustomization ?? NO_HOME_CARD_CHOICE}
           cacheScope={props.cacheScope}
