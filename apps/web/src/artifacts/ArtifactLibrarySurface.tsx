@@ -24,6 +24,7 @@ import { useArtifactMirror } from "./useArtifactMirror";
 import { SyncedArtifactDialog } from "./SyncedArtifactDialog";
 import { useSyncedArtifacts } from "./useSyncedArtifacts";
 import {
+  copyClaudePageToCanvas,
   loadClaudePageSnapshot,
   type executeSyncedArtifactCommand,
 } from "@octant/client-runtime/artifact-library-client";
@@ -39,6 +40,8 @@ export interface ArtifactLibrarySurfaceProps {
   readonly execute?: typeof executeSyncedArtifactCommand;
   /** Injected in tests; the host's Claude page snapshot read otherwise. */
   readonly loadSnapshot?: typeof loadClaudePageSnapshot;
+  /** Injected in tests; the host's Copy into Canvas otherwise. */
+  readonly copyToCanvas?: typeof copyClaudePageToCanvas;
   /** Injected in tests; the renderer's local storage otherwise. */
   readonly storage?: Pick<Storage, "getItem" | "setItem">;
 }
@@ -173,6 +176,24 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
                     },
                     { mode: entry.mode, threadId: entry.threadId, toolCallId: entry.toolCallId },
                   ),
+                onCopyToCanvas: async (entry, title) => {
+                  const result = await (props.copyToCanvas ?? copyClaudePageToCanvas)(
+                    {
+                      baseUrl: props.serverUrl ?? "",
+                      fetch,
+                      windowCapability: props.windowCapability ?? "",
+                    },
+                    {
+                      mode: entry.mode,
+                      threadId: entry.threadId,
+                      toolCallId: entry.toolCallId,
+                      title,
+                    },
+                  );
+                  // The new Canvas is listed beside the page it came from.
+                  if (result.kind === "imported") library.refresh();
+                  return result;
+                },
               },
             })}
       />

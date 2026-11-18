@@ -5,6 +5,7 @@ import { createArtifactLibraryRouteHandler } from "./artifactLibraryRoutes";
 import type { ArtifactLibraryService } from "./canvas/artifactLibraryService";
 import type { CanvasTagService } from "./canvas/canvasTagService";
 import type { ClientPrincipal } from "./clientPrincipal";
+import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -283,5 +284,54 @@ describe("reading a Claude page's snapshot from the library", () => {
     );
     expect(refused?.status).toBe(401);
     expect((await handler(post({ ...request, mode: "chat" }, {}, snapshotUrl)))?.status).toBe(400);
+  });
+});
+
+describe("copying a Claude page into a Canvas from the library", () => {
+  const copyUrl = "http://127.0.0.1/api/artifacts/claude-copy";
+  const request = {
+    mode: "work",
+    threadId: "22222222-2222-4222-8222-222222222222",
+    toolCallId: "call-1",
+    title: "Launch plan",
+  };
+
+  it("hands a window's copy to the host with the window that asked", async () => {
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: 0 });
+    const copyClaudePage = vi.fn(async () => ({
+      kind: "refused" as const,
+      reason: "not-html" as const,
+      message: "Only an HTML page can be copied into a Canvas.",
+    }));
+    const handler = createArtifactLibraryRouteHandler({
+      library: {} as unknown as ArtifactLibraryService,
+      windowAuthorityStore: store,
+      copyClaudePage,
+      now: () => 1,
+    });
+    const response = await handler(post(request, {}, copyUrl));
+    expect(await response?.json()).toMatchObject({ kind: "refused", reason: "not-html" });
+    expect(copyClaudePage).toHaveBeenCalledWith(windowId, request);
+  });
+
+  it("refuses a paired device, which never reads the kept snapshot", async () => {
+    const copyClaudePage = vi.fn();
+    const handler = createArtifactLibraryRouteHandler({
+      library: {} as unknown as ArtifactLibraryService,
+      windowAuthorityStore: new WindowAuthorityStore(),
+      copyClaudePage,
+      now: () => 1,
+    });
+    const remote = post(request, {}, copyUrl);
+    bindPrincipalRouteContext(remote, {
+      principal: { kind: "remote-device" } as never,
+      scopeId: windowId,
+    });
+    expect(await (await handler(remote))?.json()).toMatchObject({
+      kind: "denied",
+      denialCode: "unavailable",
+    });
+    expect(copyClaudePage).not.toHaveBeenCalled();
   });
 });

@@ -617,6 +617,38 @@ describe("Amazon Bedrock with cloud single sign-on, end to end", () => {
     ).toBe(false);
   });
 
+  it("names why a profile's role could not be assumed instead of a generic refusal", async () => {
+    const scene = await host();
+    scene.terms.acknowledgeTerms({
+      principalKind: "local-window",
+      actorId: String(windowId),
+      descriptor: {
+        descriptorId: AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.descriptorId,
+        termsId: AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.termsId,
+      } as never,
+    });
+    for (const reason of ["mfa-required", "role-refused"] as const) {
+      const refusing = new Proxy(scene.cloudIam.broker, {
+        get(target, property) {
+          if (property === "connect") return async () => ({ kind: "refused", reason });
+          const value: unknown = Reflect.get(target, property);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      expect(
+        await answerCloudIamSettingsCommand({
+          dependencies: { ...scene.cloudIam, broker: refusing },
+          instanceId,
+          kind: "connect-aws-profile",
+          principal: "local-window",
+          actorId: String(windowId),
+          awsProfile: "bedrock",
+        }),
+      ).toEqual({ kind: "refused", reason: `aws-${reason}` });
+    }
+    await expect(scene.credentials.resolve(String(instanceId))).rejects.toBeDefined();
+  });
+
   it("never begins a cloud sign-in from Settings' route", async () => {
     const scene = await host();
     for (const descriptorId of ["amazon-bedrock-cloud-iam", "azure-foundry-directory"]) {
