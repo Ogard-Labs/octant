@@ -227,8 +227,14 @@ describe("CodeHomeActivityService", () => {
         kind: "read",
         card: "prs-merged",
         source: "octant",
-        current: { from: "2026-08-18T00:00:00.000Z", until: "2026-08-25T00:00:00.000Z" },
-        comparison: { from: "2026-08-11T00:00:00.000Z", until: "2026-08-18T00:00:00.000Z" },
+        current: {
+          from: decodeUtcTimestamp("2026-08-18T00:00:00.000Z"),
+          until: decodeUtcTimestamp("2026-08-25T00:00:00.000Z"),
+        },
+        comparison: {
+          from: decodeUtcTimestamp("2026-08-11T00:00:00.000Z"),
+          until: decodeUtcTimestamp("2026-08-18T00:00:00.000Z"),
+        },
       },
       () => true,
     );
