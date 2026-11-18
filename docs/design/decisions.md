@@ -31,7 +31,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | ------------------------------------------------------------------------------------- | --------- | ------- | ------------ | ------------------- |
 | [Principles and hard lines](#principles-and-hard-lines)                               | 7         | 5       | 2            | 0                   |
 | [Guardrails and review](#guardrails-and-review)                                       | 9         | 3       | 6            | 0                   |
-| [Key providers](#key-providers)                                                       | 9         | 4       | 4            | 1                   |
+| [Key providers](#key-providers)                                                       | 9         | 5       | 3            | 1                   |
 | [Release scope](#release-scope)                                                       | 8         | 2       | 5            | 1                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 6       | 1            | 0                   |
 | [App-managed tools](#app-managed-tools)                                               | 6         | 4       | 2            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **281**   | **165** | **111**      | **5**               |
+| **All areas**                                                                         | **281**   | **166** | **110**      | **5**               |
 
 ## Principles and hard lines
 
@@ -449,15 +449,15 @@ Status: Built. Since: 2026-11-16. Detail: [Provider runtimes: Claude Code](provi
 
 ### Codex's own review runs in Octant
 
-Codex's built-in `/review` works in Octant: in Work and Code, at the thread's level, Octant starts Codex's review run (`review/start`) on the thread's checkout (maintainer decision, 2026-11-16).
+Codex's built-in `/review` works in Octant as it does in Codex on its own: in every Work and Code mode, Plan and Strict included, Octant starts Codex's review run (`review/start`) on the thread's checkout and never refuses it there (maintainer decisions, 2026-11-16 and 2026-11-18).
 
-- The run is read-only whatever the level, as Codex's own review is.
-- Its findings show in the thread as a review result, not as edits or a plan.
-- Plan and Chat do not start one.
-- Built: Codex's commands list `/review`, and a Work or Code turn opening with it starts the review on a thread of its own, started read-only with no approvals, because an inline review takes the sandbox of the thread it runs on; its findings read under a **Codex review** heading.
-- Codex's read-only sandbox can start only on a process outside Octant's profile, so a review is refused with a sentence under Strict and at Full access that keeps the sandbox, rather than run where it could write.
+- The review runs at the thread's level with no approvals, as Codex's own review agent does: outside Octant's sandbox in Codex's own read-only sandbox, inside it (Strict, Plan, Full access that keeps the sandbox) under Octant's sandbox, which keeps Plan read-only.
+- Its findings show in the thread as a review result, not as edits or a plan, and reach the session's own thread so a follow-up turn sees them.
+- What the turn carries (Octant's context, waiting messages, a handoff, attached images) reaches the session's thread before the review starts. A Codex release that cannot take it there still reviews, says so in the reply, and the driver sends it with the thread's next turn.
+- Chat, which has no Project, does not start one; only a release without `review/start` reports the review unsupported.
+- Built: Codex's commands list `/review`, a Work or Code turn opening with it starts the review on an ephemeral thread of its own, and its findings read under a **Codex review** heading.
 
-Status: Partly built. Since: 2026-11-16. Detail: [Provider runtimes: Codex](provider-runtimes.md#codex).
+Status: Built. Since: 2026-11-16. Detail: [Provider runtimes: Codex](provider-runtimes.md#codex).
 
 ### Codex loads its own Project configuration
 
