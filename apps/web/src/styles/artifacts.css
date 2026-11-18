@@ -113,6 +113,14 @@
   gap: 0.25rem;
 }
 
+/* Copy into Canvas: its title field, then the outcome, under the page. */
+.artifact-library__claude-copy {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 36rem;
+  padding-top: 0.25rem;
+}
+
 /* The list answer to the card grid: one compact row per artifact, its facts
    on one line, the tags it carries beside them. */
 .artifact-library__list {

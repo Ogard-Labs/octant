@@ -1,6 +1,6 @@
 # Custom grounds
 
-Status: Building (slice 1 of 3)
+Status: Building (slice 2 of 3)
 Size: Full — it changes a wire contract, the renderer, Settings, the theme file and the plugin seam
 Owner: maintainers · Started: 2026-11-18 · Approved: 2026-11-18, maintainers ("go with your recommendations")
 
@@ -205,11 +205,11 @@ Consequences: one new kind in plugin-api and plugin-host activation, in its own 
 
 ## 7. Build plan
 
-| Slice | What it delivers                                                                                                               | Requirement IDs                                   | Status   |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- | -------- |
-| 1     | Characters, density and speed end to end: contract, policy, field, Customize fold with starter sets, live preview, spec update | FR-1, FR-2, FR-3, FR-5, FR-6, NFR-1, NFR-2, NFR-3 | Building |
-| 2     | Pattern choice; theme import falls back for a missing photo                                                                    | FR-4, FR-7                                        | Planned  |
-| 3     | Plugin grounds as a data-only component kind (own PR, extends the seam)                                                        | FR-8                                              | Planned  |
+| Slice | What it delivers                                                                                                               | Requirement IDs                                   | Status       |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- | ------------ |
+| 1     | Characters, density and speed end to end: contract, policy, field, Customize fold with starter sets, live preview, spec update | FR-1, FR-2, FR-3, FR-5, FR-6, NFR-1, NFR-2, NFR-3 | Done (#2655) |
+| 2     | Pattern choice; theme import falls back for a missing photo                                                                    | FR-4, FR-7                                        | Building     |
+| 3     | Plugin grounds as a data-only component kind (own PR, extends the seam)                                                        | FR-8                                              | Planned      |
 
 Each slice gets a rendered check on the mini and a new visual-check scene for the Customize fold (with the `design change` label).
 
@@ -288,17 +288,67 @@ coverage measure includes whatever was drawn.
 - Settings: typing `01` updates the draft; an emoji shows the note and keeps the set; Reset clears the three fields.
 - Visual check: the Appearance scene with Customize open, committed with the `design change` label.
 
+### Slice 2
+
+**Pattern** (FR-4). Contract: `characterPattern: Schema.optional(Schema.Literal("cycle", "blotches", "currents", "rings"))` in `AppBackgroundTuning`; absent = `cycle`, today's field. The resolver carries it on `characters`. The field draws only the chosen pattern with no cross-fade, or cycles as now. `meanStrength` takes the pattern too, so the density scale (FR-6) holds for each pattern: one cached value per pattern and density. Settings: a Pattern select in Customize, between Characters and Density ("All in turn", "Blotches", "Currents", "Rings"), saved on pick; Reset clears it too. Example row: `{ "kind": "characters", "characterPattern": "rings" }`.
+
+**Theme file with a missing photo** (FR-7). `importThemeSettings(input, { photoIds })` in `packages/theme/src/import.ts` stays pure: given the ids in this host's photo library, it returns `{ settings, missing: ReadonlyArray<"background-photo" | "sidebar-photo"> }`. A `photo` ground whose id is not listed becomes `{ kind: "none" }` with the same tuning; a Pixels ground's Picture photo is dropped (the Picture scene without a photo already draws Drift); a sidebar photo falls back to the sidebar's default. Without `photoIds` (no library read yet) nothing is changed, as today. The web import reads the library listing the shell already loads (`/api/theme/sidebar-backgrounds`) and shows one line after import: "The theme's photo is not on this computer, so the background is plain." (or "…the sidebar keeps its own look.").
+
+**Tests**: contract decode and refusal of an unknown pattern; the field draws only rings for `rings` (no cross-fade at the pattern change time); `meanStrength` per pattern keeps FR-6; import with and without `photoIds`, for the ground, the Picture scene and the sidebar; the Settings select saves once; the web import shows the note.
+
+### Slice 3
+
+**Contract** (`packages/contracts/src/extensions.ts`): a new component kind `ground` and `ExtensionGroundDeclaration`:
+
+```ts
+{ characterSet, characterDensity?, characterSpeed?, characterPattern? }
+```
+
+with the same field schemas as the ground's tuning (imported from the theme contract, not copied). A `ground` component must carry `ground`, and must not carry an entry point, a configuration or content reference, or any declared capability; a `ground` on another kind is refused. Example component:
+`{ "id": "dots", "kind": "ground", "displayName": "Night dots", "declaredCapabilities": [], "ground": { "characterSet": "·•●", "characterDensity": 60 } }`.
+
+**Activation** (`packages/plugin-host`): `ground` is a renderer kind like `theme`; a pure `groundContributions(states)` lists the grounds of effective components only (installed, trusted, enabled), as `themeContributions` does for themes.
+
+**Settings**: when any are listed, the Customize fold's starter menu gains a "From plugins" group with each ground's display name and plugin name. Picking one copies its values into the person's ground and saves once (D-3); disabling the plugin removes it from the menu and leaves the copy. A plugin can never set colours, motion past Speed 100, or anything outside the four values.
+
+**Specs**: the plugin component table in `docs/architecture.md` (extensions and skills), `application-ground.md`, `decisions.md`.
+
+**Tests**: plugin-api decodes a ground manifest and refuses one with an entry point, a capability, a content reference, colours, an emoji set, or a `ground` on another kind; activation lists only effective grounds; Settings shows them, a pick copies and saves once, and a disabled plugin's ground leaves the menu while the copy stays.
+
+## 10. Verification
+
+| Criterion                                                                             | Test                                                                                                                                                                                                          | Result       | Change      |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ----------- |
+| FR-1 Typing `01` draws only `0` and `1`; Reset restores the default                   | `AppBackgroundSettings.test.tsx`: updates the ground as a person types their own characters; resets the characters, density and speed to the default field                                                    | Pass         | #2655       |
+| FR-2 Higher density lights more cells, lower fewer                                    | `appBackdropAscii.test.ts`: lights more cells at the highest density than at the default, and fewer at the lowest                                                                                             | Pass         | #2655       |
+| FR-3 Speed 0 holds one frame                                                          | `appBackdropAscii.test.ts`: holds one frame at speed zero, however long it runs; `themePolicy.test.ts`: gives the character field the default set, density and speed, and carries a person's own              | Pass         | #2655       |
+| FR-5 Edits preview live and save once                                                 | `AppBackgroundSettings.test.tsx`: previews slider and typing changes and saves once when the person lets go                                                                                                   | Pass         | #2655       |
+| FR-6 Average ink never above the default field's                                      | `appBackdropAscii.test.ts`: never inks more on average than the default field, at any density or set                                                                                                          | Pass         | #2655       |
+| NFR-1 One alpha value per cell per frame; a set change repaints once                  | `appBackdropAscii.test.ts`: keeps the field running when the set changes, repainting its glyphs once                                                                                                          | Pass         | #2655       |
+| NFR-2 Old rows draw today's field                                                     | `theme.test.ts`: keeps the character field's set, density and speed, and decodes older rows without them                                                                                                      | Pass         | #2655       |
+| NFR-3 Unsafe characters are refused                                                   | `theme.test.ts`: refuses character sets that are emoji, controls, bidi overrides, spaces or too long; `themePolicy.test.ts`: cleans typed characters and refuses what the field cannot draw                   | Pass         | #2655       |
+| FR-4 Rings draws only rings and never cross-fades                                     | `appBackdropAscii.test.ts`: draws a held pattern alone, with no cross-fade where the cycle blends two; redraws a still field in place when the pattern changes                                                | Pass         | This change |
+| FR-4 Unknown pattern refused, absent means all in turn                                | `theme.test.ts`: keeps the character field's chosen pattern and refuses one it does not draw; `themePolicy.test.ts`: gives the character field the default set, density and speed, and carries a person's own | Pass         | This change |
+| FR-4 Density scale holds for each pattern (FR-6)                                      | `appBackdropAscii.test.ts`: never inks more on average than the default field, for any held pattern and density                                                                                               | Pass         | This change |
+| FR-4 The Pattern select saves once; Reset clears it                                   | `AppBackgroundSettings.test.tsx`: saves the chosen pattern once on pick, and shows all in turn when none is stored; resets the characters, density and speed to the default field                             | Pass         | This change |
+| FR-7 Missing ground, Picture and sidebar photos fall back; no library means no change | `import.test.ts`: importing a theme file whose photos this computer lacks (five cases)                                                                                                                        | Pass         | This change |
+| FR-7 The web import reads the library and shows one line                              | `ThemeAppearanceEditor.test.tsx`: importing a theme file whose photo is not on this computer (two cases)                                                                                                      | Pass         | This change |
+| Visual: Customize row gains Pattern                                                   | Scene `settings-background-custom` changes by one row; baseline decided by the `design change` label in CI                                                                                                    | Not run here | This change |
+
 ## 11. Codebase deltas and change log
 
 ### Codebase deltas
 
-| Where code and plan differ                                                                                  | Ruling                                                                       |
-| ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| The Octant theme file (`serializeOctantTheme`) already holds the whole `ThemeSettings`, the ground included | Step 2 of the plan shrinks to the missing-photo fallback (FR-7)              |
-| Plugin themes already carry `patternPalette`, inks for the ground's dither                                  | Kept; a plugin ground uses the theme's ink and accent, never its own colours |
-| What import does today with a photo id this host lacks was not checked                                      | Slice 2 starts with a test that shows it                                     |
+| Where code and plan differ                                                                                                                                                                                                                                                                                                                                                                                                 | Ruling                                                                                                     |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| The Octant theme file (`serializeOctantTheme`) already holds the whole `ThemeSettings`, the ground included                                                                                                                                                                                                                                                                                                                | Step 2 of the plan shrinks to the missing-photo fallback (FR-7)                                            |
+| Plugin themes already carry `patternPalette`, inks for the ground's dither                                                                                                                                                                                                                                                                                                                                                 | Kept; a plugin ground uses the theme's ink and accent, never its own colours                               |
+| Today (before slice 2) a theme with a photo id this host lacks imports without complaint: the server's theme service never checks that a `backgroundId` exists, so the row is saved as it is. The ground's photo fetch then answers 404, the renderer catches it and draws nothing (the plain page), while the stored row keeps the dead id and Settings still reads as Photo. A sidebar photo's fetch path was not traced | Slice 2 replaces the dead id on import and says so (FR-7)                                                  |
+| `importThemeSettings` returned the settings alone                                                                                                                                                                                                                                                                                                                                                                          | It returns `{ settings, missing }`; its one caller (the web import) and its tests follow                   |
+| The density scale was referenced to the chosen pattern in the plan's wording                                                                                                                                                                                                                                                                                                                                               | Referenced to the default field (all in turn, density 50) so a held pattern never inks more than it (FR-6) |
 
 ### Change log
 
 - 2026-11-18: first draft.
 - 2026-11-18: approved; Q-1 and Q-2 answered; D-1 to D-4 accepted; slice 1 detailed design; NFR-1 arithmetic corrected (the glyph layer is the whole field, not an atlas).
+- 2026-11-18: slice 2 built: pattern choice and the missing-photo fallback; section 10 records verification for slices 1 and 2.

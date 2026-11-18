@@ -46,17 +46,53 @@ export function supportsAttachmentFile(
 }
 
 /**
- * Attachment capability for the composer's paperclip control.
+ * Whether bytes are text: valid UTF-8 with no NUL byte. The host decides
+ * the same way at send; the composer asks first so a file Chat cannot give
+ * the model is refused when it is chosen, not after the message is written.
  */
-export function buildAttachmentCapability(
+export function isTextContent(bytes: Uint8Array): boolean {
+  if (bytes.includes(0)) return false;
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The document types whose text the host reads out for a model that does not
+ * take them natively: PDF, Word, PowerPoint and Excel. The host checks the
+ * bytes themselves at send.
+ */
+const EXTRACTED_DOCUMENT_MEDIA_TYPES: ReadonlyArray<string> = [
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+];
+
+/**
+ * Why Chat cannot give a file that is not an image to the selected model, or
+ * undefined when it can: natively where the provider and model take its type,
+ * otherwise as text when its bytes are text or it is a document whose text the
+ * host reads out. Chat has no folder for the model to open any other file
+ * from, so that file belongs in a Work or Code thread.
+ */
+export function chatFileRefusal(
   observation: ProviderObservedState | undefined,
-): ChatComposerAttachmentCapability {
-  return observation?.capabilities.nativeAttachments === "supported"
-    ? { kind: "supported" }
-    : {
-        kind: "unavailable",
-        reason: "The selected provider and model cannot accept native attachments.",
-      };
+  modelId: string,
+  file: { readonly type: string },
+  bytes: Uint8Array,
+  displayName: string,
+): string | undefined {
+  if (
+    supportsAttachmentFile(observation, modelId, file) ||
+    EXTRACTED_DOCUMENT_MEDIA_TYPES.includes(file.type) ||
+    isTextContent(bytes)
+  )
+    return undefined;
+  return `${displayName} is not text, and the selected model does not read this kind of file. Attach it in a Work or Code thread, where the agent opens it from the thread's attachments folder.`;
 }
 
 /**

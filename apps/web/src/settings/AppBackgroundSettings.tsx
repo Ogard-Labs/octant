@@ -1,5 +1,6 @@
 import type {
   AppBackground,
+  AppBackgroundCharacterPattern,
   AppBackgroundEffect,
   AppBackgroundPercent,
   AppBackgroundScene,
@@ -104,6 +105,9 @@ function carry(background: AppBackground) {
     ...(background.characterSpeed === undefined
       ? {}
       : { characterSpeed: background.characterSpeed }),
+    ...(background.characterPattern === undefined
+      ? {}
+      : { characterPattern: background.characterPattern }),
   };
 }
 
@@ -115,6 +119,14 @@ const STARTER_SETS = [
   { id: "shades", label: "Shades", characters: "░▒▓█" },
   { id: "lines", label: "Lines", characters: "─│┼╱╲" },
 ] as const;
+
+/** What the character field draws; all in turn is what it did before the choice. */
+const CHARACTER_PATTERNS = [
+  { id: "cycle", label: "All in turn" },
+  { id: "blotches", label: "Blotches" },
+  { id: "currents", label: "Currents" },
+  { id: "rings", label: "Rings" },
+] as const satisfies ReadonlyArray<{ id: AppBackgroundCharacterPattern; label: string }>;
 
 const CHARACTERS_HINT = "Up to 64 characters. The field draws only these.";
 // Shorter than the hint, so swapping one for the other never wraps the row.
@@ -760,6 +772,28 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                 </span>
               </SettingRow>
               <SettingRow
+                description="The shape its patches take."
+                label="Pattern"
+                scope="app"
+                settingId="app-background-character-pattern"
+              >
+                <OctantSelectField
+                  aria-label="Character pattern"
+                  className="settings-view__select"
+                  onValueChange={(next) => {
+                    const pattern = CHARACTER_PATTERNS.find((option) => option.id === next);
+                    if (pattern !== undefined) {
+                      saveCharacters({ ...background, characterPattern: pattern.id });
+                    }
+                  }}
+                  options={CHARACTER_PATTERNS.map((option) => ({
+                    id: option.id,
+                    label: option.label,
+                  }))}
+                  value={background.characterPattern ?? "cycle"}
+                />
+              </SettingRow>
+              <SettingRow
                 description="How much of the field shows."
                 label="Density"
                 scope="app"
@@ -810,7 +844,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                 />
               </SettingRow>
               <SettingRow
-                description="Back to the default letters and digits at the default density and speed."
+                description="Back to the default letters and digits, all patterns in turn, at the default density and speed."
                 label="Reset"
                 scope="app"
                 settingId="app-background-characters-reset"
@@ -821,6 +855,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                       characterSet: _set,
                       characterDensity: _density,
                       characterSpeed: _speed,
+                      characterPattern: _pattern,
                       ...rest
                     } = background;
                     setTyped(DEFAULT_CHARACTER_SET);

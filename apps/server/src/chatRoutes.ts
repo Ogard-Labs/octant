@@ -1,4 +1,5 @@
 import {
+  ATTACHMENT_MEDIA_TYPE_PATTERN,
   CHAT_ATTACHMENT_MEDIA_TYPES,
   decodeChatAttachmentId,
   decodeChatCommand,
@@ -39,7 +40,6 @@ const JSON_BODY_LIMIT = 1_048_576;
 const METHODS = "DELETE, GET, POST, OPTIONS";
 const HEADERS =
   "content-type, x-octant-window-capability, x-octant-chat-thread-id, x-octant-chat-attachment-id, x-octant-chat-display-name";
-const SUPPORTED_ATTACHMENT_MEDIA_TYPES = new Set<string>(CHAT_ATTACHMENT_MEDIA_TYPES);
 const MAX_REPLAY_FRAMES = 100;
 const decodeGlobalSequence = Schema.decodeUnknownSync(GlobalSequence);
 
@@ -504,7 +504,16 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
           status: 200,
           headers: {
             ...Object.fromEntries(corsHeaders(origin).entries()),
-            "content-type": metadata?.mediaType ?? "application/octet-stream",
+            // A file of any type may be attached, so only the types a model
+            // takes natively are served as themselves: an attached HTML or
+            // script file is handed back as bytes, never as a page this
+            // origin would render.
+            "content-type":
+              metadata !== undefined &&
+              (CHAT_ATTACHMENT_MEDIA_TYPES as ReadonlyArray<string>).includes(metadata.mediaType)
+                ? metadata.mediaType
+                : "application/octet-stream",
+            "x-content-type-options": "nosniff",
             "content-length": String(bytes.byteLength),
           },
         });
@@ -617,7 +626,9 @@ async function readAttachmentUpload(
       throw new Error("invalid display name");
     }
     mediaType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-    if (!SUPPORTED_ATTACHMENT_MEDIA_TYPES.has(mediaType)) {
+    // Chat takes a file of any type; whether a turn can give it to the model
+    // is decided at send, against the model the turn runs on.
+    if (!ATTACHMENT_MEDIA_TYPE_PATTERN.test(mediaType)) {
       return { kind: "invalid", message: "Attachment media type is unsupported." };
     }
   } catch {

@@ -205,7 +205,7 @@ describe("chat contracts", () => {
     expect(() => decodeChatSettings({ ...settingsFixture, secretToken: "token" })).toThrow();
   });
 
-  it("exports the exact attachment media-type allow-list", () => {
+  it("exports the native attachment types and takes a file of any type", () => {
     expect(CHAT_ATTACHMENT_MEDIA_TYPES).toEqual([
       "text/plain",
       "image/png",
@@ -217,11 +217,13 @@ describe("chat contracts", () => {
     for (const mediaType of CHAT_ATTACHMENT_MEDIA_TYPES) {
       expect(decodeChatAttachmentMediaType(mediaType)).toBe(mediaType);
     }
-    expect(() =>
+    // Chat takes a file of any type; only a malformed media type is refused.
+    expect(
       decodeChatAttachmentMediaType(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       ),
-    ).toThrow();
+    ).toBe("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    expect(() => decodeChatAttachmentMediaType("not a type")).toThrow();
   });
 
   it("decodes bounded ChatContentReference values and rejects raw or unbounded bodies", () => {

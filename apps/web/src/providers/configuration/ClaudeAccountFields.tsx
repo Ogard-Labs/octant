@@ -1,17 +1,79 @@
-import type { ClaudeAccountAccent, ProviderInstanceId } from "@octant/contracts";
+import type { ClaudeAccountAccent, DiscoverySnapshot, ProviderInstanceId } from "@octant/contracts";
 import {
   CLAUDE_ACCOUNT_ACCENT_VALUES,
   CLAUDE_ACCOUNT_PROFILE,
+  claudeGatewayAddressWarning,
   CODEX_ACCOUNT_PROFILE,
   formatProviderAccountSignInCommand,
   formatProviderAccountStatusCommand,
   type ProviderAccountProfile,
 } from "@octant/domain";
+import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { SettingRow } from "../../settings/primitives";
 import { CLAUDE_ACCOUNT_ACCENT_LABELS } from "./claudeAccountValues";
 import { moveWithinRadioGroup } from "../../ui/base/radioGroupKeys";
+
+/**
+ * A Claude gateway account's address. When the host's own environment names a
+ * gateway, a button offers that address; nothing fills the field until the
+ * person chooses it, and only the address is offered, never a token.
+ */
+export function ClaudeGatewayAddressField(props: {
+  readonly id: string;
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+  readonly hostGateway?: DiscoverySnapshot["claudeHostGateway"];
+  readonly disabled?: boolean;
+}) {
+  const warning = claudeGatewayAddressWarning(props.value);
+  const hostGateway = props.hostGateway;
+  return (
+    <div className="claude-gateway-address">
+      <label htmlFor={props.id}>Gateway address</label>
+      <OctantInput
+        aria-describedby={`${props.id}-hint`}
+        autoComplete="off"
+        className="settings-view__text-input"
+        disabled={props.disabled === true}
+        id={props.id}
+        inputMode="url"
+        onChange={(event) => props.onChange(event.currentTarget.value)}
+        placeholder="https://gateway.example.com"
+        spellCheck={false}
+        value={props.value}
+      />
+      <span className="provider-settings__field-guidance" id={`${props.id}-hint`}>
+        Claude Code calls this address instead of Anthropic&apos;s API, with the token below. It
+        needs HTTPS unless it is on this computer or your local network.
+      </span>
+      {hostGateway === undefined || hostGateway.baseUrl === props.value.trim() ? null : (
+        <OctantButton
+          disabled={props.disabled === true}
+          onClick={() => props.onChange(hostGateway.baseUrl)}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
+          Use the address from this computer&apos;s environment
+        </OctantButton>
+      )}
+      {hostGateway !== undefined && hostGateway.baseUrl === props.value.trim() ? (
+        <span className="provider-settings__field-guidance">
+          {hostGateway.tokenVariable
+            ? "This computer also sets a gateway token. Octant does not read it: enter the token here so this account keeps its own."
+            : "Enter the gateway's token below."}
+        </span>
+      ) : null}
+      {warning === undefined ? null : (
+        <OctantAlert className="provider-settings__alert" tone="warning">
+          {warning}
+        </OctantAlert>
+      )}
+    </div>
+  );
+}
 
 export function ClaudeAccountAccentPicker(props: {
   readonly id: string;

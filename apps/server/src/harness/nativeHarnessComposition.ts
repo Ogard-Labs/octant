@@ -121,6 +121,16 @@ export interface NativeHarnessCompositionOptions {
    */
   readonly fullAccessShell?: NativeHarnessShellPort;
   /**
+   * Why this host refuses a Work or Code thread's command at the level it
+   * runs at, read for each command, or undefined when it may run: on a host
+   * whose shell runs with no Octant sandbox, a command under Strict or with
+   * the sandbox kept. Absent, nothing is refused here.
+   */
+  readonly hostCommandRefusal?: (input: {
+    readonly threadId: string;
+    readonly executionPolicy: ProviderExecutionPolicy | undefined;
+  }) => string | undefined;
+  /**
    * Journals a command that reached a server over `ssh`, with its host and
    * how it ended, at every level. `unavailable` means the record could not
    * be kept, and the command's output is withheld as an unmarked result is.
@@ -924,6 +934,32 @@ export function createNativeHarnessComposition(
           : shell.run(input),
     };
   };
+  /**
+   * The shell with each command the host refuses at its level answered as
+   * never run, with the reason the lead reads. The level is read when the
+   * command runs, so Strict turned on mid-turn holds the next command.
+   */
+  const refusingOnHost = (
+    threadId: string,
+    executionPolicy: () => ProviderExecutionPolicy | undefined,
+    shell: NativeHarnessShellPort | undefined,
+  ): NativeHarnessShellPort | undefined => {
+    const refusalOf = options.hostCommandRefusal;
+    if (refusalOf === undefined || shell === undefined) return shell;
+    return {
+      run: async (input) => {
+        const message = refusalOf({ threadId, executionPolicy: executionPolicy() });
+        return message === undefined
+          ? shell.run(input)
+          : {
+              status: "unavailable",
+              output: "",
+              truncated: false,
+              refusal: { reason: "host-sandbox-missing", message },
+            };
+      },
+    };
+  };
   const codeEgress = (threadId: string, windowId?: string) => {
     const executionPolicy = options.readCodeExecutionPolicy?.(threadId, windowId);
     return executionPolicy === undefined
@@ -944,15 +980,19 @@ export function createNativeHarnessComposition(
       scope.threadId,
       recordingRemoteCommands(
         scope.threadId,
-        options.proxiedShell === undefined
-          ? taggingAtFullAccess(scope.threadId, options.shell, () =>
-              codeEgress(scope.threadId, windowId),
-            )
-          : postureShell(
-              { threadId: scope.threadId, readerThreadIds: [scope.threadId] },
-              options.proxiedShell(scope),
-              () => codeEgress(scope.threadId, windowId),
-            ),
+        refusingOnHost(
+          scope.threadId,
+          () => options.readCodeExecutionPolicy?.(scope.threadId, windowId),
+          options.proxiedShell === undefined
+            ? taggingAtFullAccess(scope.threadId, options.shell, () =>
+                codeEgress(scope.threadId, windowId),
+              )
+            : postureShell(
+                { threadId: scope.threadId, readerThreadIds: [scope.threadId] },
+                options.proxiedShell(scope),
+                () => codeEgress(scope.threadId, windowId),
+              ),
+        ),
       ),
       () => options.readCodeExecutionPolicy?.(scope.threadId, windowId) === "full-access",
     );
@@ -975,13 +1015,17 @@ export function createNativeHarnessComposition(
       scope.threadId,
       recordingRemoteCommands(
         scope.threadId,
-        options.proxiedShell === undefined
-          ? taggingAtFullAccess(scope.threadId, options.shell, () => workEgress(scope.threadId))
-          : postureShell(
-              { threadId: scope.threadId, readerThreadIds: [scope.threadId] },
-              options.proxiedShell(scope),
-              () => workEgress(scope.threadId),
-            ),
+        refusingOnHost(
+          scope.threadId,
+          () => options.readWorkExecutionPolicy?.(scope.threadId),
+          options.proxiedShell === undefined
+            ? taggingAtFullAccess(scope.threadId, options.shell, () => workEgress(scope.threadId))
+            : postureShell(
+                { threadId: scope.threadId, readerThreadIds: [scope.threadId] },
+                options.proxiedShell(scope),
+                () => workEgress(scope.threadId),
+              ),
+        ),
       ),
       () => options.readWorkExecutionPolicy?.(scope.threadId) === "full-access",
     );
@@ -1444,22 +1488,28 @@ export function createNativeHarnessComposition(
         parentThreadId,
         recordingRemoteCommands(
           parentThreadId,
-          !authority.network
-            ? options.offlineShell
-            : options.proxiedShell === undefined
-              ? options.shell
-              : projectId === undefined
-                ? unavailableShell
-                : postureShell(
-                    // A child's own reads count beside its parent's.
-                    { threadId: parentThreadId, readerThreadIds: [parentThreadId, runId] },
-                    options.proxiedShell({
-                      threadId: runId,
-                      projectId: String(projectId),
-                      parentThreadId,
-                    }),
-                    childEgress,
-                  ),
+          // A child's commands are held to its parent's Strict value and
+          // kept sandbox, read at its own level.
+          refusingOnHost(
+            parentThreadId,
+            () => authority.executionPolicy,
+            !authority.network
+              ? options.offlineShell
+              : options.proxiedShell === undefined
+                ? options.shell
+                : projectId === undefined
+                  ? unavailableShell
+                  : postureShell(
+                      // A child's own reads count beside its parent's.
+                      { threadId: parentThreadId, readerThreadIds: [parentThreadId, runId] },
+                      options.proxiedShell({
+                        threadId: runId,
+                        projectId: String(projectId),
+                        parentThreadId,
+                      }),
+                      childEgress,
+                    ),
+          ),
         ),
         () => authority.executionPolicy === "full-access",
       );
