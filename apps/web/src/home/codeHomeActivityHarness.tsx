@@ -4,6 +4,7 @@ import "../styles/dock.css";
 import "../styles/panels.css";
 import "../styles/environment.css";
 import "../styles/components.css";
+import { Schema } from "effect";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
@@ -14,7 +15,7 @@ import {
   type ActivityWindow,
   type HomeActivityCustomization,
 } from "@octant/contracts/code-home-activity";
-import type { ProjectId, ProjectSummary } from "@octant/contracts/projects";
+import { ProjectSummary, type ProjectId } from "@octant/contracts/projects";
 import type { HomeCardCustomization } from "@octant/contracts/shell";
 import { CircleDot } from "../ui/icons";
 import { IconDefaults } from "../ui/IconDefaults";
@@ -78,7 +79,7 @@ const needsYouCard: HomeListCardDefinition = {
   }),
 };
 
-const projects = [
+const projects: ReadonlyArray<ProjectSummary> = [
   {
     id: codeProjectId,
     type: "code",
@@ -89,10 +90,11 @@ const projects = [
     version: 1,
     createdAt: "2026-07-28T12:00:00.000Z",
     updatedAt: "2026-07-28T12:00:00.000Z",
+    bindingRevisionId: "80000000-0000-4000-8000-000000000111",
     binding: { canonicalRoot: "/Users/example/Dev/Repos/octant" },
     codeAccessPersistence: "current-session",
   },
-] as unknown as ReadonlyArray<ProjectSummary>;
+].map((project) => Schema.decodeUnknownSync(ProjectSummary)(project));
 
 const runRecord = (
   id: string,
