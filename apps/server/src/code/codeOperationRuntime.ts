@@ -5438,6 +5438,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     active: ActiveTurn,
     approvalId: string,
     decision: "approved" | "denied",
+    levelChangeApplied?: "in-place" | "next-turn",
   ): void {
     try {
       const frame = this.#appendTurnEvent(active, {
@@ -5445,6 +5446,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           kind: "approval-answered",
           approvalId: CodeApprovalId.make(approvalId),
           decision,
+          ...(levelChangeApplied === undefined ? {} : { levelChangeApplied }),
         },
       });
       active.cursor = frame.cursor;
@@ -5456,11 +5458,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   /**
    * The person answered the agent's ask to plan first or to leave Plan. An
    * approval journals the level change as the person's own, through the
-   * thread's ordinary access command, and then ends the turn: Plan's
-   * read-only rule rests on the tool set and sandbox profile a session
-   * launches with, so the new level applies from the next turn's session and
-   * never inside this one. The runtime is told what was decided and never
-   * switches its own mode.
+   * thread's ordinary access command. Entering Plan applies inside the turn
+   * where the driver can hold its session to Plan; otherwise the turn ends,
+   * because the session's tool set and sandbox are the old level's, and the
+   * new level applies from the next turn's session. The runtime never
+   * switches its own mode unasked.
    */
   async #answerLevelChange(
     active: ActiveTurn,
@@ -5512,7 +5514,34 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         message: "The thread's level could not be changed. Change it from the level menu.",
       });
     }
+    // Entering Plan narrows what the session may do, so a driver whose gate
+    // can hold the running session to Plan applies it there and the turn goes
+    // on; before the agent hears the answer, so it never acts as approved at
+    // the old level. Leaving Plan, or a driver without that change, ends the
+    // turn and the next one launches at the new level.
+    const inPlace =
+      change.to === "plan" &&
+      connection.changeLevelInPlace !== undefined &&
+      (active.state === "running" || active.state === "waiting") &&
+      (
+        await Effect.runPromise(
+          connection.changeLevelInPlace({
+            sessionId: active.sessionId as never,
+            change: "enter-plan",
+          }),
+        )
+      ).status === "applied";
     await answer(true);
+    this.#recordApprovalAnswered(
+      active,
+      input.approvalId,
+      "approved",
+      inPlace ? "in-place" : "next-turn",
+    );
+    if (inPlace) {
+      this.#revokeBrowserGrants(active);
+      return answeredTurnState(active.state);
+    }
     if (active.state !== "running" && active.state !== "waiting")
       return answeredTurnState(active.state);
     const lostText = this.#flushBeforeStop(active);

@@ -73,6 +73,9 @@ function createService(
         readonly requestId: string;
         readonly kind: "approval" | "user-input";
       }) => Promise<void>;
+      changeLevelInPlace: (input: {
+        readonly sessionId: string;
+      }) => Promise<{ readonly status: "applied" | "refused" | "failed" }>;
     }>;
     levelChanges?: WorkRequestLevelChangePort;
     eventStore?: {
@@ -1648,7 +1651,17 @@ describe("an agent's ask to plan first or to leave Plan", () => {
     levelChange: { to: "auto-accept-edits", plan: "1. Edit src/main.ts" },
   } as const;
 
-  function recordLevelChange(service: WorkRequestService) {
+  const enterPlan = {
+    ...approvalDetail,
+    action: "EnterPlanMode",
+    description: "Claude asks to plan first.",
+    levelChange: { to: "plan" },
+  } as const;
+
+  function recordLevelChange(
+    service: WorkRequestService,
+    detail: typeof exitPlan | typeof enterPlan = exitPlan,
+  ) {
     const recorded = service.record({
       requestId: ids.request,
       projectId: ids.project,
@@ -1656,7 +1669,7 @@ describe("an agent's ask to plan first or to leave Plan", () => {
       providerInstanceId: ids.provider,
       providerSessionId: ids.session,
       providerCallbackId: "exit-plan-1",
-      detail: exitPlan,
+      detail,
     });
     if (recorded.status !== "ok") throw new Error("setup failed");
     return recorded.request;
@@ -1698,6 +1711,75 @@ describe("an agent's ask to plan first or to leave Plan", () => {
 
     expect(result.status).toBe("ok");
     expect(order).toEqual(["level:exit-plan:remote-device", "provider:true", "end-turn"]);
+  });
+
+  function inPlaceHarness(inPlace: "applied" | "refused" | "failed") {
+    const order: Array<string> = [];
+    const harness = createService({
+      providerSessions: {
+        answerApproval: async (input) => {
+          order.push(`provider:${String(input.approved)}`);
+        },
+        changeLevelInPlace: async () => {
+          order.push("in-place");
+          return { status: inPlace };
+        },
+      },
+      levelChanges: {
+        change: (input) => {
+          order.push(`level:${input.kind}`);
+          return { status: "changed" };
+        },
+        endTurn: () => order.push("end-turn"),
+        enteredPlanInPlace: () => order.push("entered-plan"),
+      },
+    });
+    return { ...harness, order };
+  }
+
+  it("enters Plan inside the running turn where the provider can hold its session to Plan", async () => {
+    const { service, order } = inPlaceHarness("applied");
+    const request = recordLevelChange(service, enterPlan);
+
+    const result = await service.resolve({
+      kind: "resolve-work-request",
+      requestId: request.requestId,
+      expectedVersion: request.version,
+      resolution: { kind: "approval", approved: true },
+    });
+
+    expect(result).toMatchObject({ status: "ok", request: { levelChangeApplied: "in-place" } });
+    expect(order).toEqual(["level:enter-plan", "in-place", "provider:true", "entered-plan"]);
+  });
+
+  it("ends the turn when the provider fails to enter Plan in place", async () => {
+    const { service, order } = inPlaceHarness("failed");
+    const request = recordLevelChange(service, enterPlan);
+
+    const result = await service.resolve({
+      kind: "resolve-work-request",
+      requestId: request.requestId,
+      expectedVersion: request.version,
+      resolution: { kind: "approval", approved: true },
+    });
+
+    expect(result).toMatchObject({ status: "ok", request: { levelChangeApplied: "next-turn" } });
+    expect(order).toEqual(["level:enter-plan", "in-place", "provider:true", "end-turn"]);
+  });
+
+  it("ends the turn on leaving Plan without trying an in-place change", async () => {
+    const { service, order } = inPlaceHarness("applied");
+    const request = recordLevelChange(service);
+
+    const result = await service.resolve({
+      kind: "resolve-work-request",
+      requestId: request.requestId,
+      expectedVersion: request.version,
+      resolution: { kind: "approval", approved: true },
+    });
+
+    expect(result).toMatchObject({ status: "ok", request: { levelChangeApplied: "next-turn" } });
+    expect(order).toEqual(["level:exit-plan", "provider:true", "end-turn"]);
   });
 
   it("leaves the ask waiting when the host cannot change the level, and tells the provider nothing", async () => {

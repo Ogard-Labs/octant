@@ -176,8 +176,10 @@ export interface ProviderSessionStart {
   readonly outlivesTurn?: boolean;
   /**
    * The host answers the runtime's own asks to change the thread's level
-   * (`approval-request` with `levelChange`): it changes the level from the
-   * next session when the person approves, and ends the turn. A driver offers
+   * (`approval-request` with `levelChange`): when the person approves it
+   * changes the level, in place through {@link ProviderConnection.changeLevelInPlace}
+   * where the driver offers that change, and otherwise from the next session,
+   * ending the turn. A driver offers
    * its runtime's plan-mode tools only to a session that carries this, and
    * never lets the runtime switch its own mode.
    */
@@ -318,6 +320,19 @@ export interface ProviderSessionResume {
   /** As on {@link ProviderSessionStart}; restated on every resume. */
   readonly levelChanges?: boolean;
 }
+
+/**
+ * How an in-place level change ended. `applied`: the runtime switched its
+ * mode inside the running turn and the driver's gate holds every later call
+ * of that session to the new level. `refused`: the driver did not try (no
+ * running turn, or a session it cannot hold to the new level). `failed`: the
+ * runtime did not accept the switch; the gate still holds the session to the
+ * new level, and the host ends the turn.
+ */
+export type ProviderInPlaceLevelChange =
+  | { readonly status: "applied" }
+  | { readonly status: "refused"; readonly reason: string }
+  | { readonly status: "failed"; readonly reason: string };
 
 export interface ProviderSessionCompactionRequest {
   readonly sessionId: ProviderSessionId;
@@ -644,6 +659,20 @@ export interface ProviderConnection {
   readonly compact?: (
     input: ProviderSessionCompactionRequest,
   ) => Effect.Effect<ProviderSessionCompaction, ProviderFailure>;
+  /**
+   * Moves a session to a narrower level inside its running turn, so an
+   * approved level change need not end the turn. Present only on a connection
+   * whose runtime can switch its mode in a running session and whose gate can
+   * hold that session to the new level's rules without launching it again,
+   * though the session keeps the tools and sandbox it launched with. The only
+   * change is `enter-plan`: leaving Plan widens what a session may do, which
+   * no session can be given in place. Absent, or anything but `applied`, and
+   * the host ends the turn and launches the next one at the new level.
+   */
+  readonly changeLevelInPlace?: (input: {
+    readonly sessionId: ProviderSessionId;
+    readonly change: "enter-plan";
+  }) => Effect.Effect<ProviderInPlaceLevelChange>;
   readonly interrupt: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
   readonly stop: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
   /**

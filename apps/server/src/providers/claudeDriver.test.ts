@@ -48,6 +48,7 @@ import {
   claudeMemoryWriteRefusal,
   CLAUDE_PLAN_CAPTURED_MESSAGE,
   CLAUDE_PLAN_MCP_SERVER_REFUSAL,
+  CLAUDE_IN_PLACE_PLAN_REFUSAL,
   claudeExecutionOptions,
   claudeSandboxSettings,
   claudeFileToolSecretRefusal,
@@ -184,7 +185,7 @@ class FakeQuery implements ClaudeQueryPort {
     Effect.succeed("backgrounded" as "backgrounded" | "not-found" | "unsupported"),
   );
   readonly forceKill = vi.fn(() => Effect.void);
-  readonly setPermissionMode = vi.fn(() => Effect.void);
+  readonly setPermissionMode = vi.fn<ClaudeQueryPort["setPermissionMode"]>(() => Effect.void);
   readonly supportedModels = vi.fn(() => Effect.succeed(this.initialization.models));
   readonly accountInfo = vi.fn<ClaudeQueryPort["accountInfo"]>(() =>
     Effect.succeed(this.initialization.account),
@@ -7389,6 +7390,161 @@ describe("Claude's own plan mode as level changes", () => {
     });
     await Effect.runPromise(Scope.close(scope, Exit.void));
     await acquired.close();
+  });
+
+  async function enteredPlanInPlace(failSwitch = false) {
+    const f = harness("subscription", "current-session", {
+      planMcpServers: () => ["docs-search"],
+    });
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: "full-access",
+        levelChanges: true,
+        nativeSetup: {
+          subagents: true,
+          webTools: true,
+          skills: true,
+          toolServers: true,
+          hooks: false,
+          projectCode: false,
+        },
+      }),
+    );
+    const seen: ProviderRuntimeEvent[] = [];
+    const scope = Effect.runSync(Scope.make());
+    const events = await Effect.runPromise(Scope.extend(acquired.connection.subscribe, scope));
+    Effect.runFork(Stream.runForEach(events, (event) => Effect.sync(() => seen.push(event))));
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "fix it", attachments: [], tools: [] }),
+    );
+    const open = f.opens[0]!;
+    const query = f.queries[0]!;
+    if (failSwitch) {
+      query.setPermissionMode.mockImplementation(() =>
+        Effect.fail({ category: "protocol", message: "Claude rejected the permission update." }),
+      );
+    }
+    const signal = new AbortController().signal;
+    const call = (toolName: string, input: Readonly<Record<string, unknown>>, toolUseId: string) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName,
+        input,
+        toolUseId,
+        signal,
+      });
+    expect(await call("EnterPlanMode", {}, "level-1")).toEqual({ behavior: "ask" });
+    const decision = open.canUseTool({
+      toolName: "EnterPlanMode",
+      input: {},
+      toolUseId: "level-1",
+      signal,
+    });
+    await vi.waitFor(() =>
+      expect(seen.some((event) => event.kind === "approval-request")).toBe(true),
+    );
+    const request = seen.find((event) => event.kind === "approval-request");
+    const changed = await Effect.runPromise(
+      acquired.connection.changeLevelInPlace!({ sessionId, change: "enter-plan" }),
+    );
+    await Effect.runPromise(
+      acquired.connection.answerApproval({
+        sessionId,
+        requestId: request?.kind === "approval-request" ? request.requestId : "",
+        approved: true,
+      }),
+    );
+    return { acquired, query, call, changed, decision, scope };
+  }
+
+  it("enters Plan inside the running turn and refuses every write, command, unmarked server and subagent for the rest of it", async () => {
+    const { acquired, open, query, call, changed, decision, scope } = await enteredPlanInPlace();
+    try {
+      expect(changed).toEqual({ status: "applied" });
+      expect(query.setPermissionMode).toHaveBeenCalledWith("plan");
+      await expect(decision).resolves.toEqual({
+        behavior: "deny",
+        message: expect.stringContaining("in Plan now"),
+      });
+      const file = `${projectRoot}/src/a.ts`;
+      const refused: ReadonlyArray<readonly [string, Readonly<Record<string, unknown>>]> = [
+        ["Write", { file_path: file, content: "x" }],
+        ["Edit", { file_path: file, old_string: "a", new_string: "b" }],
+        ["NotebookEdit", { notebook_path: `${projectRoot}/a.ipynb`, new_source: "x" }],
+        ["Bash", { command: "ls" }],
+        ["Bash", { command: "ls ~", dangerouslyDisableSandbox: true }],
+        ["Agent", { description: "edit", prompt: "edit a.ts", subagent_type: "general-purpose" }],
+        ["Workflow", { script: "await agent('x')" }],
+      ];
+      for (const [index, [toolName, input]] of refused.entries()) {
+        await expect(call(toolName, input, `refused-${index}`)).resolves.toEqual({
+          behavior: "deny",
+          message: CLAUDE_IN_PLACE_PLAN_REFUSAL,
+        });
+      }
+      await expect(call("mcp__linear__update", { id: "1" }, "unmarked")).resolves.toEqual({
+        behavior: "deny",
+        message: CLAUDE_PLAN_MCP_SERVER_REFUSAL,
+      });
+      // What Plan holds still runs, judged at Plan rather than the Full
+      // access the session launched at: a read unasked, a marked server asked.
+      await expect(call("Read", { file_path: file }, "read")).resolves.toEqual({
+        behavior: "allow",
+      });
+      await expect(call("mcp__docs-search__query", { query: "x" }, "marked")).resolves.toEqual({
+        behavior: "ask",
+      });
+    } finally {
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      await acquired.close();
+    }
+  });
+
+  it("reports a refused plan-mode switch as failed and still holds the session to Plan", async () => {
+    const { acquired, call, changed, decision, scope } = await enteredPlanInPlace(true);
+    try {
+      expect(changed).toMatchObject({ status: "failed" });
+      await expect(decision).resolves.toEqual({
+        behavior: "deny",
+        message: expect.stringContaining("next turn runs in Plan"),
+      });
+      await expect(
+        call("Write", { file_path: `${projectRoot}/a.ts`, content: "x" }, "w"),
+      ).resolves.toEqual({
+        behavior: "deny",
+        message: CLAUDE_IN_PLACE_PLAN_REFUSAL,
+      });
+    } finally {
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      await acquired.close();
+    }
+  });
+
+  it("refuses an in-place change on a session with no running turn", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          levelChanges: true,
+        }),
+      );
+      await expect(
+        Effect.runPromise(
+          acquired.connection.changeLevelInPlace!({ sessionId, change: "enter-plan" }),
+        ),
+      ).resolves.toMatchObject({ status: "refused" });
+      expect(f.queries[0]!.setPermissionMode).not.toHaveBeenCalled();
+    } finally {
+      await acquired.close();
+    }
   });
 
   it("withholds both plan-mode tools from a session whose host does not answer level changes", async () => {

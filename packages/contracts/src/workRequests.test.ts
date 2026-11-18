@@ -147,6 +147,27 @@ describe("WorkRequestDetail", () => {
     ).toThrow();
   });
 
+  it("records how an approved level change applied only on that approval", () => {
+    const resolved = {
+      ...pendingApproval,
+      detail: { ...approvalDetail, levelChange: { to: "plan" } },
+      status: "resolved",
+      resolution: { kind: "approval", approved: true },
+      settledAt,
+      version: 2,
+      levelChangeApplied: "in-place",
+    } as const;
+    expect(decodeWorkRequest(resolved)).toMatchObject({ levelChangeApplied: "in-place" });
+    // Not on an ordinary approval, a declined change, or a request still pending.
+    expect(() => decodeWorkRequest({ ...resolved, detail: approvalDetail })).toThrow();
+    expect(() =>
+      decodeWorkRequest({ ...resolved, resolution: { kind: "approval", approved: false } }),
+    ).toThrow();
+    expect(() =>
+      decodeWorkRequest({ ...pendingApproval, levelChangeApplied: "next-turn" }),
+    ).toThrow();
+  });
+
   it("refuses a level change to Full access, or a plan handed over on the way into Plan", () => {
     expect(() =>
       decodeWorkRequestDetail({ ...approvalDetail, levelChange: { to: "full-access" } }),
