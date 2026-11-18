@@ -56,7 +56,7 @@ const SCENES: ReadonlyArray<Scene> = [
   },
   { name: "customize", widths: [{ width: 1100, height: 800 }] },
   { name: "records", widths: [{ width: 1100, height: 800 }] },
-  { name: "states", widths: [{ width: 1100, height: 800 }] },
+  { name: "states", widths: [{ width: 1100, height: 1000 }] },
 ];
 
 async function findChromium(): Promise<string | undefined> {

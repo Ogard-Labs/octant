@@ -724,18 +724,26 @@ function ActivityRecordsDialog(props: {
             {finished.successful} successful · {finished.failed} failed · {finished.canceled}{" "}
             canceled
           </p>
-          <OctantSwitch
-            checked={allFinished}
-            label="All finished"
-            onCheckedChange={(next) => {
-              setAllFinished(next);
-              // The list must never show one mode's rows under the other
-              // mode's switch: it clears and refills from the same snapshot.
-              setRecords([]);
-              setNextOffset(undefined);
-              load(0, next ? "all" : "filtered", false);
-            }}
-          />
+          <label className="code-home-activity-records__all-finished">
+            {/* The label wraps the switch so its text toggles it; the switch
+                already speaks "All finished", so the visible copy stays out of
+                the accessible tree to keep the name from doubling. */}
+            <span aria-hidden="true" className="oct-row-detail">
+              All finished
+            </span>
+            <OctantSwitch
+              checked={allFinished}
+              label="All finished"
+              onCheckedChange={(next) => {
+                setAllFinished(next);
+                // The list must never show one mode's rows under the other
+                // mode's switch: it clears and refills from the same snapshot.
+                setRecords([]);
+                setNextOffset(undefined);
+                load(0, next ? "all" : "filtered", false);
+              }}
+            />
+          </label>
         </div>
       ) : null}
       {pageError !== undefined ? (
@@ -786,12 +794,13 @@ function ActivityRecordRow(props: {
   const record = props.record;
   return (
     <li className="code-home-activity-record">
-      <span className="oct-meta code-home-activity-record__time">
-        {absoluteTimeFormatter.format(new Date(record.occurredAt))}
-      </span>
-      <span className="code-home-activity-record__main">
+      <span className="code-home-activity-record__head">
         <span className="oct-row-label code-home-activity-record__title">{record.label}</span>
-        <span className="code-home-activity-record__nav">{recordNav(record, props)}</span>
+        <span className="code-home-activity-record__nav">{recordActions(record, props)}</span>
+      </span>
+      <span className="oct-meta code-home-activity-record__meta">
+        {absoluteTimeFormatter.format(new Date(record.occurredAt))}
+        {recordMeta(record)}
       </span>
     </li>
   );
@@ -845,7 +854,7 @@ function ThreadLink(props: {
   );
 }
 
-function recordNav(
+function recordActions(
   record: ActivityRecord,
   props: {
     readonly onOpenThread: CodeHomeActivityProps["onOpenThread"];
@@ -906,18 +915,23 @@ function recordNav(
       );
     case "runs":
       return (
-        <>
-          <ThreadLink
-            mode={record.mode}
-            onOpenThread={props.onOpenThread}
-            threadId={record.threadId}
-          />
-          <span className="oct-meta code-home-activity-record__run">
-            {record.finish} · run {record.runId}
-          </span>
-        </>
+        <ThreadLink
+          mode={record.mode}
+          onOpenThread={props.onOpenThread}
+          threadId={record.threadId}
+        />
       );
   }
+}
+
+function recordMeta(record: ActivityRecord): ReactNode {
+  if (record.kind !== "runs") return null;
+  return (
+    <>
+      {" · "}
+      {record.finish} · run {record.runId}
+    </>
+  );
 }
 
 function ActivityCustomizeDialog(props: {
@@ -962,9 +976,12 @@ function ActivityCustomizeDialog(props: {
         </OctantButton>
       </div>
       <div className="code-home-activity-customize__source">
-        <span className="oct-row-label">History from</span>
+        <span className="oct-row-label code-home-activity-customize__source-label">
+          History from
+        </span>
         <OctantSelectField
           aria-label="History source"
+          className="code-home-activity-customize__source-field"
           onValueChange={(id) => {
             if (id === "github" || id === "octant") {
               props.onActivityChange({ ...settings, source: id });
