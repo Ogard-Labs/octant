@@ -500,9 +500,11 @@
   flex: 0 0 auto;
 }
 
+/* A cap per name, so one long task cannot squeeze the next one to a few letters. */
 .composer-subagents__name {
   flex: 0 1 auto;
   min-width: 0;
+  max-width: 28ch;
   overflow: hidden;
   text-overflow: ellipsis;
 }

@@ -369,7 +369,9 @@ function WaitingLine(props: {
   const joiner = (index: number) =>
     index === 0 ? null : (
       <span className="composer-subagents__waiting-text" key={`join:${index}`}>
-        {others === 0 && index === shown.length - 1 ? " and " : ", "}
+        {/* Non-breaking: a flex item trims its own edge spaces, which glued
+            the comma to the next name in the drawn head. */}
+        {others === 0 && index === shown.length - 1 ? "\u00a0and\u00a0" : ",\u00a0"}
       </span>
     );
   return (
@@ -378,7 +380,7 @@ function WaitingLine(props: {
       {shown.flatMap((row, index) => [joiner(index), name(row)])}
       {others === 0 ? null : (
         <span className="composer-subagents__waiting-text">
-          {` and ${others} other${others === 1 ? "" : "s"}`}
+          {`\u00a0and ${others} other${others === 1 ? "" : "s"}`}
         </span>
       )}
     </span>
