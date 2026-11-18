@@ -5,3 +5,5 @@ dist
 coverage
 apps/docs/dist
 apps/docs/.vitepress/cache
+# Compose settings hold the operator token; never copy them into an image
+**/.env

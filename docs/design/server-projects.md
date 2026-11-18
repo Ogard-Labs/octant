@@ -52,6 +52,14 @@ unverified host identities require correction through their existing owners.
 The entry explains unsupported server-Project capabilities and uncertain-result
 recovery without implying parity or retrying a command.
 
+**Private network guides.** Below the journeys, searchable guides explain
+Tailscale and Cloudflare private routing, each with a button that opens the
+provider's own page in the person's browser. Sign-in and network enrollment
+happen with the network provider, never in Octant. A guide only explains: it
+grants no device or server access, starts no connection, and changes no
+listener. A client without local administration names Settings on the host
+for the listener step.
+
 **Read-only checks.** Each server journey can check a registered alias and user
 without binding a Project or starting a task. Only an authenticated local window
 may call `/api/remote-setup-check`; paired clients, agents and routines cannot

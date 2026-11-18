@@ -139,6 +139,7 @@ describe("octantSettingsRegistry", () => {
       "protected-files-add",
       "public-links",
       "public-link-service",
+      "public-link-setup",
       "browser-site-approvals",
       "browser-agent-downloads",
       "browser-captures-per-thread",
