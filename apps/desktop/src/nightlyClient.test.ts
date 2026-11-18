@@ -90,6 +90,7 @@ const fixture = {
   }),
   menus: [] as unknown[],
   openExternal: vi.fn(async (_url: string) => {}),
+  powerMonitor: Object.assign(new EventEmitter(), { getCurrentThermalState: () => "nominal" }),
   dataId: randomUUID(),
   updater: new EventEmitter(),
   handlers: new Map<string, (event: unknown, ...values: unknown[]) => unknown>(),
@@ -114,7 +115,7 @@ vi.mock("electron", () => ({
     prefersReducedTransparency: false,
     shouldUseHighContrastColors: false,
   }),
-  powerMonitor: Object.assign(new EventEmitter(), { getCurrentThermalState: () => "nominal" }),
+  powerMonitor: fixture.powerMonitor,
   screen: {
     getAllDisplays: () => [{ workArea: { x: 0, y: 0, width: 2000, height: 1200 } }],
     getCursorScreenPoint: () => ({ x: 0, y: 0 }),
@@ -395,4 +396,76 @@ it("registers no Linux window while its renderers would run without Chromium's s
     fixture.app.commandLine.hasSwitch.mockImplementation(() => false);
     Object.defineProperty(process, "platform", { value: original });
   }
+});
+
+it("asks its windows' Files drafts before an unmarked macOS quit", async () => {
+  const f = await open("darwin");
+  fixture.app.quit.mockClear();
+  const preventDefault = vi.fn();
+  fixture.app.emit("before-quit", { preventDefault });
+  expect(preventDefault).toHaveBeenCalledOnce();
+  // The Dock's Quit carries no mark, so the Files preflight asks the window.
+  let requestId = -1;
+  await vi.waitFor(() => {
+    const pushed = f.window.webContents.sent.find(
+      ([channel, payload]) =>
+        channel === DESKTOP_IPC_CHANNELS.filesCloseRequest &&
+        (payload as { kind: string }).kind === "check",
+    );
+    expect(pushed).toBeDefined();
+    requestId = (pushed![1] as { requestId: number }).requestId;
+  });
+  await expect(
+    invoke(DESKTOP_IPC_CHANNELS.filesCloseReply, f.event, {
+      requestId,
+      answer: "checking",
+    }),
+  ).resolves.toBe(true);
+  await expect(
+    invoke(DESKTOP_IPC_CHANNELS.filesCloseReply, f.event, { requestId, answer: "allow" }),
+  ).resolves.toBe(true);
+  await vi.waitFor(() => expect(fixture.app.quit).toHaveBeenCalled());
+});
+
+it("keeps its windows when Files cancel an unmarked macOS quit", async () => {
+  const f = await open("darwin");
+  fixture.app.quit.mockClear();
+  fixture.app.emit("before-quit", { preventDefault: vi.fn() });
+  let requestId = -1;
+  await vi.waitFor(() => {
+    const pushed = f.window.webContents.sent.find(
+      ([channel, payload]) =>
+        channel === DESKTOP_IPC_CHANNELS.filesCloseRequest &&
+        (payload as { kind: string }).kind === "check",
+    );
+    expect(pushed).toBeDefined();
+    requestId = (pushed![1] as { requestId: number }).requestId;
+  });
+  await expect(
+    invoke(DESKTOP_IPC_CHANNELS.filesCloseReply, f.event, {
+      requestId,
+      answer: "checking",
+    }),
+  ).resolves.toBe(true);
+  await expect(
+    invoke(DESKTOP_IPC_CHANNELS.filesCloseReply, f.event, { requestId, answer: "cancel" }),
+  ).resolves.toBe(true);
+  // The cancelled preflight settles on microtasks; no quit may follow it.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(fixture.app.quit).not.toHaveBeenCalled();
+  expect(f.window.isDestroyed()).toBe(false);
+});
+
+it("lets a system shutdown close without asking about Files", async () => {
+  const f = await open("darwin");
+  fixture.app.quit.mockClear();
+  fixture.powerMonitor.emit("shutdown");
+  fixture.app.emit("before-quit", { preventDefault: vi.fn() });
+  await vi.waitFor(() => expect(fixture.app.quit).toHaveBeenCalled());
+  // The machine's quit never put the person's question to the window.
+  expect(
+    f.window.webContents.sent.some(
+      ([channel]) => channel === DESKTOP_IPC_CHANNELS.filesCloseRequest,
+    ),
+  ).toBe(false);
 });

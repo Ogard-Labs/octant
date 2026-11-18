@@ -8,6 +8,7 @@ import {
   screen,
   dialog,
   ipcMain,
+  powerMonitor,
   session,
   shell,
 } from "electron";
@@ -20,7 +21,8 @@ import { clearSecretServiceTestData, type DesktopIdentity } from "@octant/host-r
 import { decodeAppVersion } from "@octant/contracts/app-updates";
 import type { NightlyWindowBootstrap } from "@octant/contracts/nightly-browser";
 import { createNativeMainAuthority } from "./nightlyNativeMainAuthority";
-import { createDesktopFilesClose } from "./desktopFilesClose";
+import { createDesktopFilesClose, shouldPreflightNativeQuit } from "./desktopFilesClose";
+import { watchSystemShutdown } from "./personQuitReport";
 import { installNightlyBrokeredFlows } from "./nightlyBrokeredFlows";
 import { installNightlyProviderCredentials } from "./nightlyProviderCredentials";
 import { installNightlyCodeApprovals } from "./nightlyCodeApprovals";
@@ -142,25 +144,61 @@ export async function runNightlyClient(
   // ordinary close or an explicit Quit may go through.
   const filesClose = createDesktopFilesClose();
   const liveWindows = () => [...windows.values()].filter((window) => !window.isDestroyed());
-  // Set only by the menu Quit that a Files preflight just approved; any other
-  // quit path is noninteractive and releases whatever question stands open.
+  // Only an approved Files preflight sets this flag before calling app.quit().
   let filesQuitApproved = false;
+  let acceptedQuit = false;
+  let quitRequested = false;
+  let updating = false;
+  // The Nightly data switch quits through the same app.quit() route; its own
+  // mark keeps it from being mistaken for the person's Quit.
+  let relaunching = false;
+  const systemShuttingDown = watchSystemShutdown({
+    powerMonitor,
+    onSessionEnd: (listener) =>
+      app.on("browser-window-created", (_event, window) => {
+        window.on("query-session-end", listener);
+        window.on("session-end", listener);
+      }),
+  });
+  // One Files question for the whole client: the menu's Quit and the Dock's
+  // both come through here.
+  const requestFilesQuit = () => {
+    if (
+      filesClose.preflighting() ||
+      filesQuitApproved ||
+      quitRequested ||
+      acceptedQuit ||
+      updating ||
+      relaunching ||
+      systemShuttingDown()
+    )
+      return;
+    void filesClose.prepareAll(liveWindows).then(
+      (allowed) => {
+        if (
+          !allowed ||
+          quitRequested ||
+          acceptedQuit ||
+          updating ||
+          relaunching ||
+          systemShuttingDown()
+        ) {
+          // The quit this preflight asked for is gone; its holds go back.
+          if (allowed) filesClose.releaseAll();
+          return;
+        }
+        filesQuitApproved = true;
+        app.quit();
+      },
+      () => undefined,
+    );
+  };
   const surfaces = installNightlyClientSurfaces({
     identity,
     platform: process.platform,
     register,
     owns,
-    quit: () => {
-      if (filesClose.preflighting() || filesQuitApproved) return;
-      void filesClose.prepareAll(liveWindows).then(
-        (allowed) => {
-          if (!allowed) return;
-          filesQuitApproved = true;
-          app.quit();
-        },
-        () => undefined,
-      );
-    },
+    quit: requestFilesQuit,
   });
   // The inbox holds each link until the first window has loaded.
   launchLinks.handOff(surfaces.acceptCodeLink);
@@ -319,7 +357,10 @@ export async function runNightlyClient(
   // The client's quit always completes once asked, so the relaunch is armed
   // only when its cleanup finishes and the quit is accepted.
   const relaunch = createRelaunchIntent({
-    quit: () => app.quit(),
+    quit: () => {
+      relaunching = true;
+      app.quit();
+    },
     relaunch: () => app.relaunch(),
   });
   const offersTestData = nightlyTestDataSupported(identity, process.platform);
@@ -362,9 +403,6 @@ export async function runNightlyClient(
       throw new Error(message);
     });
   }
-  let acceptedQuit = false;
-  let quitRequested = false;
-  let updating = false;
   let cleanupFailed = false;
   let opening = true;
   const closeClientResources = async () => {
@@ -386,6 +424,21 @@ export async function runNightlyClient(
     if (acceptedQuit) return;
     event.preventDefault();
     if (quitRequested) return;
+    // The Dock's Quit on macOS arrives unmarked; the Files-approved quit, a
+    // data relaunch, an updater exit and a system shutdown carry their own
+    // marks, so an unmarked quit with live windows asks the same question the
+    // menu's Quit does.
+    if (
+      shouldPreflightNativeQuit({
+        platform: process.platform,
+        hasWindows: liveWindows().length > 0,
+        systemShuttingDown: systemShuttingDown(),
+        internalQuit: filesQuitApproved || relaunching || updating,
+      })
+    ) {
+      requestFilesQuit();
+      return;
+    }
     quitRequested = true;
     if (!filesQuitApproved) filesClose.releaseAll();
     filesQuitApproved = false;
@@ -509,7 +562,8 @@ export async function runNightlyClient(
             // Quit, updater and recovery close the window directly; only the
             // person's own close asks about unsaved Files drafts first.
             window.on("close", (event) => {
-              if (quitRequested || updating || acceptedQuit) return;
+              if (quitRequested || updating || acceptedQuit || relaunching || systemShuttingDown())
+                return;
               // While a Quit preflight owns the question, a manual close may
               // not consume the approval another window is being asked about.
               if (filesClose.preflighting()) {
@@ -621,6 +675,7 @@ export async function runNightlyClient(
     },
     prepare: async () => {
       updating = true;
+      filesClose.releaseAll();
       return closeClientResources();
     },
     canApply: () => updating && !quitRequested,

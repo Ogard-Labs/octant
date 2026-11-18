@@ -1089,6 +1089,23 @@ export function useShellController(options: ShellControllerOptions) {
   }
 
   /**
+   * The Files close scopes a pane covers: the shown surface plus every content
+   * tab, deduplicated. A main-area file tab showing instead of the thread's
+   * overview does not hide the overview's Files drafts from a pane close.
+   */
+  function paneFilesScopes(paneId: PaneId, surface: WorkspaceTab): ReadonlyArray<string> {
+    const tabs = contentTabsRef.current.get(paneId) ?? [];
+    return [
+      ...new Set(
+        [surface, ...tabs].flatMap((tab) => {
+          const scope = filesCloseScopeOfSurface(tab);
+          return scope === undefined ? [] : [scope];
+        }),
+      ),
+    ];
+  }
+
+  /**
    * Resolves to whether the pane's surface actually left the workspace. When
    * the pane showed the last remaining welcome surface, closing it recreates
    * the default welcome pane and this reports `false` — nothing was lost.
@@ -1098,13 +1115,21 @@ export function useShellController(options: ShellControllerOptions) {
     const before = committedShell.current;
     const surface =
       before === undefined ? undefined : findPaneInWorkspace(before.workspace, paneId)?.surface;
-    const scope = surface === undefined ? undefined : filesCloseScopeOfSurface(surface);
-    if (surface !== undefined && scope !== undefined) {
-      if (!(await confirmFilesClose(scope))) return false;
+    if (surface === undefined) return false;
+    const scopes = paneFilesScopes(paneId, surface);
+    const paneStillStands = (): boolean => {
       const latest = committedShell.current;
       const current =
-        latest === undefined ? undefined : findPaneInWorkspace(latest.workspace, paneId)?.surface;
-      if (current?.id !== surface.id) return false;
+        latest === undefined ? undefined : findPaneInWorkspace(latest.workspace, paneId);
+      if (current?.surface.id !== surface.id) return false;
+      const now = paneFilesScopes(paneId, current.surface);
+      return now.length === scopes.length && scopes.every((scope) => now.includes(scope));
+    };
+    for (const scope of scopes) {
+      if (!(await confirmFilesClose(scope))) return false;
+      // The person took time to answer: the pane and the surfaces the next
+      // question — or the removal — would cover must still be the same.
+      if (!paneStillStands()) return false;
     }
     return removePaneUnchecked(paneId);
   }

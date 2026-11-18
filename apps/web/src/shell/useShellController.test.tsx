@@ -1961,6 +1961,79 @@ describe("useShellController", () => {
     }
   });
 
+  it("asks the hidden overview's Files when a main-area file shows in its pane", async () => {
+    const { result, threadId } = await readyBoundCodeShell();
+    const pane = firstPane(result.current.workspace!.layouts.code);
+    // A main-area file now shows where the thread's overview did.
+    await act(async () =>
+      result.current.openCodeSurface({
+        kind: "code-file",
+        threadId,
+        title: "README.md",
+        relativePath: "README.md" as never,
+      }),
+    );
+    expect(firstPane(result.current.workspace!.layouts.code).surface.kind).toBe("code-file");
+    let otherDirty = true;
+    const other = {
+      isDirty: () => otherDirty,
+      save: vi.fn(async () => true),
+      discard: vi.fn(),
+    };
+    const releaseOther = registerFilesCloseEntry({
+      scope: filesCloseScope(undefined, "00000000-0000-4000-8000-000000000888"),
+      key: "other-doc",
+      name: "other.ts",
+      ...other,
+    });
+    let ownDirty = true;
+    const own = {
+      isDirty: () => ownDirty,
+      save: vi.fn(async () => true),
+      discard: vi.fn(() => {
+        ownDirty = false;
+      }),
+    };
+    const releaseOwn = registerFilesCloseEntry({
+      scope: filesCloseScope(undefined, String(threadId)),
+      key: "own-doc",
+      name: "draft.ts",
+      ...own,
+    });
+    try {
+      let closing!: Promise<boolean>;
+      await act(async () => {
+        closing = result.current.closePane(pane.paneId);
+      });
+      await vi.waitFor(() => expect(filesClosePromptSnapshot()?.name).toBe("draft.ts"));
+      let closed!: boolean;
+      await act(async () => {
+        filesClosePromptSnapshot()?.answer("cancel");
+        closed = await closing;
+      });
+      expect(closed).toBe(false);
+      // Cancel kept the pane, still showing the main-area file.
+      expect(firstPane(result.current.workspace!.layouts.code).surface.kind).toBe("code-file");
+
+      await act(async () => {
+        closing = result.current.closePane(pane.paneId);
+      });
+      await vi.waitFor(() => expect(filesClosePromptSnapshot()?.name).toBe("draft.ts"));
+      await act(async () => {
+        filesClosePromptSnapshot()?.answer("discard");
+        closed = await closing;
+      });
+      expect(closed).toBe(true);
+      expect(own.discard).toHaveBeenCalledTimes(1);
+      expect(other.discard).not.toHaveBeenCalled();
+    } finally {
+      otherDirty = false;
+      ownDirty = false;
+      releaseOther();
+      releaseOwn();
+    }
+  });
+
   it("asks before the thread's shown tab closes and hands the pane to its neighbour", async () => {
     const { result, threadId } = await readyBoundCodeShell();
     const pane = firstPane(result.current.workspace!.layouts.code);

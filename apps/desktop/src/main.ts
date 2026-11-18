@@ -1,7 +1,7 @@
 import { storedBrowserProfileOfPartitionFolder } from "@octant/domain";
 import { createDesktopBrowserCredentialFill } from "./desktopBrowserCredentialFill";
 import { createDesktopClientLifetime } from "./desktopClientLifetime";
-import { createDesktopFilesClose } from "./desktopFilesClose";
+import { createDesktopFilesClose, shouldPreflightNativeQuit } from "./desktopFilesClose";
 import { readHostStartupRefusal } from "./hostRecovery";
 import { showHostRecovery } from "./hostRecoveryWindow";
 import {
@@ -1502,6 +1502,9 @@ let quitAfterFailedStartup: (() => void) | undefined;
 // Whether the system announced a restart, shutdown or session end. Until the
 // app is ready nothing is watching, and nothing has announced one.
 let systemShuttingDown: () => boolean = () => false;
+// Electron's native updater announces its restart just before closing
+// windows itself; that exit is internal and never asks about Files.
+let quittingForNativeUpdate = false;
 let handlersInstalled = false;
 let projectRootPicker: ReturnType<typeof createProjectRootPicker> | undefined;
 const projectWindowLifecycle = createProjectWindowAuthorityLifecycle();
@@ -2752,6 +2755,9 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
       window.on("close", (event) => {
         if (quitPrepared) return;
         event.preventDefault();
+        // An internal exit — updater restart or OS shutdown — never asks
+        // about Files and never waits behind a question already standing.
+        const bypassFiles = quittingForNativeUpdate || systemShuttingDown();
         const closeDirectly = () => {
           if (windowCloseFlush) return;
           windowCloseFlush = true;
@@ -2770,6 +2776,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
               filesClose.holds(window) ||
               quitPrepared ||
               closingWindowsForRetainedHost ||
+              bypassFiles ||
               (preparingQuit && (interactiveQuitWindows === undefined || quitAccepted))
             )
               window.destroy();
@@ -2781,12 +2788,15 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
         // same `preparingQuit` covers both an interactive quit's pending
         // confirmation and a shutdown that never asked.
         if (
-          filesClose.preflighting() ||
-          (interactiveQuitWindows !== undefined && !quitAccepted && !closingWindowsForRetainedHost)
+          !bypassFiles &&
+          (filesClose.preflighting() ||
+            (interactiveQuitWindows !== undefined &&
+              !quitAccepted &&
+              !closingWindowsForRetainedHost))
         )
           return;
         // Noninteractive shutdown never waits on a Files answer.
-        if (preparingQuit || closingWindowsForRetainedHost) {
+        if (bypassFiles || preparingQuit || closingWindowsForRetainedHost) {
           closeDirectly();
           return;
         }
@@ -3098,22 +3108,26 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         reportWindowActive(window);
         window.on("close", (event) => {
           if (quitPrepared) return;
+          // An internal exit — updater restart or OS shutdown — never asks
+          // about Files and never waits behind a question already standing.
+          const bypassFiles = quittingForNativeUpdate || systemShuttingDown();
           // While a Quit preflight owns the question, or holds approvals the
           // quit has not yet committed, a manual close may not consume one.
           // This stands ahead of the noninteractive bypass: `preparingQuit`
           // covers an interactive quit's pending confirmation as well.
           if (
-            filesClose.preflighting() ||
-            (interactiveQuitWindows !== undefined &&
-              !quitAccepted &&
-              !closingWindowsForRetainedHost)
+            !bypassFiles &&
+            (filesClose.preflighting() ||
+              (interactiveQuitWindows !== undefined &&
+                !quitAccepted &&
+                !closingWindowsForRetainedHost))
           ) {
             event.preventDefault();
             return;
           }
           // Shutdown closes the window the way it always did; only the
           // person's own close asks about unsaved Files first.
-          if (preparingQuit || closingWindowsForRetainedHost) return;
+          if (bypassFiles || preparingQuit || closingWindowsForRetainedHost) return;
           if (filesClose.holds(window)) return;
           event.preventDefault();
           void filesClose.prepare(window).then((allowed) => {
@@ -5396,8 +5410,17 @@ const quitShortcutGuard = createQuitShortcutGuard({
 
 /** A person's quit: it may close only local windows, and asks before stopping running work. */
 function requestInteractiveQuit(): void {
-  // A quit already running or accepted never re-enters the Files question.
-  if (preparingQuit || quitPrepared || quitAccepted || quitCanPrompt) return;
+  // A quit already running or accepted never re-enters the Files question,
+  // and internal exits — updater restart, OS shutdown — never ask it.
+  if (
+    preparingQuit ||
+    quitPrepared ||
+    quitAccepted ||
+    quitCanPrompt ||
+    quittingForNativeUpdate ||
+    systemShuttingDown()
+  )
+    return;
   // One preflight owns the question at a time; a second ask joins nothing —
   // and must not cancel the relaunch the in-flight preflight owns.
   if (filesClose.preflighting() || interactiveQuitWindows !== undefined) return;
@@ -5412,6 +5435,8 @@ function requestInteractiveQuit(): void {
         !preparingQuit &&
         !quitPrepared &&
         !quitAccepted &&
+        !quittingForNativeUpdate &&
+        !systemShuttingDown() &&
         expected.length === live.length &&
         expected.every((window) => live.includes(window) && filesClose.holds(window));
       if (!committed) {
@@ -5519,6 +5544,14 @@ function startDesktopInstance(): void {
             window.on("session-end", listener);
           }),
       });
+      if (process.platform === "darwin") {
+        // The update restart closes windows itself before `before-quit` runs:
+        // anything a Files question still holds is released, not asked.
+        electronAutoUpdater.on("before-quit-for-update", () => {
+          quittingForNativeUpdate = true;
+          filesClose.releaseAll();
+        });
+      }
       const withoutWindow = hostOnly(process.argv.slice(1));
       if (withoutWindow) {
         // The background service's host has no Nightly client to wait for: it
@@ -5637,6 +5670,19 @@ app.on("before-quit", (event) => {
         logQuitProblem("Octant could not finish closing its local windows.");
       }
     });
+    return;
+  }
+  if (
+    shouldPreflightNativeQuit({
+      platform: process.platform,
+      hasWindows: desktopWindows.active().length > 0,
+      systemShuttingDown: systemShuttingDown(),
+      internalQuit: quittingForNativeUpdate,
+    })
+  ) {
+    // The Dock's Quit arrives without the app menu's intent flag. Known
+    // updater and system exits are excluded before we ask.
+    requestInteractiveQuit();
     return;
   }
   // A noninteractive quit supersedes any Files question still open.

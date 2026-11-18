@@ -87,6 +87,27 @@ export interface DesktopFilesClose {
   readonly prepareAll: (currentWindows: () => ReadonlyArray<BrowserWindow>) => Promise<boolean>;
 }
 
+/**
+ * Whether an unmarked native quit — the Dock's Quit on macOS arrives through
+ * `before-quit` with nothing that names it — should run the Files preflight
+ * like the app's own Quit. Updater restarts, data relaunches and OS shutdowns
+ * are the caller's internal quits and bypass it; platforms without the
+ * ambiguous route keep theirs, and a quit with no windows has nobody to ask.
+ */
+export function shouldPreflightNativeQuit(options: {
+  readonly platform: NodeJS.Platform | string;
+  readonly hasWindows: boolean;
+  readonly systemShuttingDown: boolean;
+  readonly internalQuit: boolean;
+}): boolean {
+  return (
+    options.platform === "darwin" &&
+    options.hasWindows &&
+    !options.systemShuttingDown &&
+    !options.internalQuit
+  );
+}
+
 export function createDesktopFilesClose(options?: {
   readonly timer?: DeliveryTimer;
   readonly ackTimeoutMs?: number;

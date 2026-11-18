@@ -1,6 +1,6 @@
 import type { BrowserWindow, WebContents } from "electron";
 import { describe, expect, it, vi } from "vitest";
-import { createDesktopFilesClose } from "./desktopFilesClose";
+import { createDesktopFilesClose, shouldPreflightNativeQuit } from "./desktopFilesClose";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 
 type NavigationListener = (
@@ -256,4 +256,63 @@ describe("desktopFilesClose", () => {
     window.emitClosed();
     expect(filesClose.holds(window)).toBe(false);
   });
+});
+
+describe("the native quit preflight policy", () => {
+  const cases: ReadonlyArray<
+    readonly [string, Parameters<typeof shouldPreflightNativeQuit>[0], boolean]
+  > = [
+    [
+      "an unmarked macOS quit with windows asks",
+      {
+        platform: "darwin",
+        hasWindows: true,
+        systemShuttingDown: false,
+        internalQuit: false,
+      },
+      true,
+    ],
+    [
+      "a system shutdown never asks",
+      {
+        platform: "darwin",
+        hasWindows: true,
+        systemShuttingDown: true,
+        internalQuit: false,
+      },
+      false,
+    ],
+    [
+      "an updater or relaunch exit never asks",
+      {
+        platform: "darwin",
+        hasWindows: true,
+        systemShuttingDown: false,
+        internalQuit: true,
+      },
+      false,
+    ],
+    [
+      "a non-Mac quit never asks",
+      {
+        platform: "linux",
+        hasWindows: true,
+        systemShuttingDown: false,
+        internalQuit: false,
+      },
+      false,
+    ],
+    [
+      "a macOS quit without windows asks nobody",
+      {
+        platform: "darwin",
+        hasWindows: false,
+        systemShuttingDown: false,
+        internalQuit: false,
+      },
+      false,
+    ],
+  ];
+  for (const [title, input, expected] of cases)
+    it(title, () => expect(shouldPreflightNativeQuit(input)).toBe(expected));
 });
