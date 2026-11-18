@@ -342,10 +342,16 @@ the page, the workspace, or the person is reached.
   admitted page-started main navigation supersedes that named load, and a
   main document commit ends it. A renderer start, a subframe, an
   extension's load, a script, and a held or reopened page never borrow the
-  named-load exception. A headless page the host did not open — a popup —
-  has no document guard of its own: its first refused-address request is
-  aborted on the context's route and the page is closed anyway, but a
-  redirect that request then takes is the one hop the route cannot see.
+  named-load exception. On the headless Browser the tab's document guard
+  does not pause a committed out-of-process frame's own moves, so a
+  subframe hop onto this computer or its network is refused on the
+  context's route instead — subframes never earn the named or exact-origin
+  continuation, so the verdict is unchanged — while a redirect inside such
+  a frame's own chain is a hop neither layer sees. A headless page the
+  host did not open — a popup — has no document guard of its own: its
+  first refused-address request is aborted on the context's route and the
+  page is closed anyway, but a redirect that request then takes is the one
+  hop the route cannot see.
 - After a page expires, ordinary agent calls answer `context-expired` and name
   its former Private, Project, or Personal profile, rather than claiming it
   never opened. Reopening requires an explicit `navigate`; a stored profile

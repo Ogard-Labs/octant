@@ -236,7 +236,7 @@ export interface PlaywrightContextPort {
         url(): string;
         isNavigationRequest(): boolean;
         /** Throws for a request that owns no page; an unguarded one is treated as a popup's. */
-        frame?(): { page(): PlaywrightPagePort };
+        frame?(): { page(): PlaywrightPagePort; parentFrame?(): unknown };
       };
     }) => Promise<void>,
   ): Promise<unknown>;
@@ -490,17 +490,25 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
           await route.abort();
           return;
         }
-        // An adopted tab's own protocol guard judges its document hops before
-        // they are sent. A page with no guard — a popup not yet closed — gets
-        // the page-started local refusal here, on its request's first hop.
+        // An adopted tab's own protocol guard judges its main-frame document
+        // hops before they are sent. A subframe hop is judged here instead: the
+        // guard never pauses a committed out-of-process frame's own moves, and
+        // subframes never earn the named or exact-origin continuation anyway,
+        // so the refusal verdict is the same. A page with no guard — a popup
+        // not yet closed — gets the same treatment.
         if (
           request.isNavigationRequest() &&
           refusesPageNavigation(request.url(), policy.allowedOrigins)
         ) {
           let unguarded = true;
           try {
-            const page = request.frame?.().page();
-            unguarded = !owned.tabs.some((tab) => tab.page === page);
+            const frame = request.frame?.();
+            if (frame !== undefined) {
+              const page = frame.page();
+              unguarded = !(
+                frame.parentFrame?.() === null && owned.tabs.some((tab) => tab.page === page)
+              );
+            }
           } catch {
             unguarded = true;
           }

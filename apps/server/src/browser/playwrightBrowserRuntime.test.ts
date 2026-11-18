@@ -1342,6 +1342,33 @@ describe("the headless page-started navigation guard", () => {
     await f.runtime.closeAll();
   });
 
+  it("refuses a committed frame's own hop onto this computer at the context route", async () => {
+    const f = await guardedTab();
+    const abort = vi.fn(async () => undefined);
+    const continueRequest = vi.fn(async () => undefined);
+    const route = (frame: unknown) =>
+      f.routeHandlers[0]!({
+        abort,
+        continue: continueRequest,
+        request: () => ({
+          isNavigationRequest: () => true,
+          url: () => local,
+          frame,
+        }),
+      });
+    // A frame committed out of process moves outside the tab's protocol
+    // guard; the route never treats it as covered.
+    await route(() => ({ page: () => f.page, parentFrame: () => ({}) }));
+    expect(abort).toHaveBeenCalledOnce();
+    // The tab's own main-frame hop still belongs to the document guard.
+    await route(() => ({ page: () => f.page, parentFrame: () => null }));
+    expect(continueRequest).toHaveBeenCalledOnce();
+    // A page the host never adopted stays unguarded even as a main frame.
+    await route(() => ({ page: () => fakePage("popup"), parentFrame: () => null }));
+    expect(abort).toHaveBeenCalledTimes(2);
+    await f.runtime.closeAll();
+  });
+
   it("refuses a document request the guard could not judge", async () => {
     const f = await guardedTab();
     f.session.emit("Fetch.requestPaused", {

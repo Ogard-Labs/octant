@@ -18,7 +18,10 @@ import { createOffscreenBrowserSurface } from "./offscreenBrowserSurface";
  * the context never observed the local page.
  */
 async function probe(root: string) {
-  app.commandLine.appendSwitch("host-resolver-rules", "MAP *.octant.test 127.0.0.1");
+  app.commandLine.appendSwitch(
+    "host-resolver-rules",
+    "MAP *.octant.test 127.0.0.1,MAP *.elsewhere.test 127.0.0.1",
+  );
   app.disableHardwareAcceleration();
   mkdirSync(join(root, "profile"), { mode: 0o700 });
   app.setPath("userData", join(root, "profile"));
@@ -49,6 +52,13 @@ async function probe(root: string) {
     if (path === "/pub-framed")
       return page(`<!doctype html><title>Public framed</title><p>Public framed page</p>
         <iframe src="http://127.0.0.1:${port}/local-frame"></iframe>`);
+    // A frame committed on another public site moves itself onto this computer.
+    if (path === "/pub-oopif")
+      return page(`<!doctype html><title>Public framed</title><p>Public framed page</p>
+        <iframe src="http://x.elsewhere.test:${port}/inner-mover"></iframe>`);
+    if (path === "/inner-mover")
+      return page(`<!doctype html><title>Inner mover</title><p>Elsewhere frame</p>
+        <script>setTimeout(() => { location.href = "http://127.0.0.1:${port}/local-frame"; }, 300);</script>`);
     if (path === "/pub-roundtrip") return moved(`http://127.0.0.1:${port}/local-final`);
     // The named load lands on a local origin no open has committed to yet.
     if (path === "/short-local") return moved(`http://localhost:${port}/local-short`);
@@ -203,6 +213,15 @@ async function probe(root: string) {
     const frameBefore = count("/local-frame");
     await settle();
     refused("subframe-to-local", frameBefore, "/local-frame", (current) =>
+      current.url.startsWith(`http://a.octant.test:${String(port)}`),
+    );
+
+    // A frame committed on another public site cannot move itself onto this
+    // computer either: its own hop is refused the same way.
+    await navigate(pub("a.octant.test", "/pub-oopif"));
+    const moverBefore = count("/local-frame");
+    await settle();
+    refused("cross-site-frame-self-hop", moverBefore, "/local-frame", (current) =>
       current.url.startsWith(`http://a.octant.test:${String(port)}`),
     );
 

@@ -236,7 +236,9 @@ const runtime = createPlaywrightBrowserRuntime();
  * local destinations the guard refuses.
  */
 const localRuntime = createPlaywrightBrowserRuntime({
-  launch: headlessBrowserLaunch(["--host-resolver-rules=MAP *.octant.test 127.0.0.1"]),
+  launch: headlessBrowserLaunch([
+    "--host-resolver-rules=MAP *.octant.test 127.0.0.1,MAP *.elsewhere.test 127.0.0.1",
+  ]),
 });
 const available = await runtime.available();
 let server: Server;
@@ -326,6 +328,22 @@ beforeAll(async () => {
       response.writeHead(200, { "content-type": "text/html" });
       response.end(`<!doctype html><title>Public framed</title><p>Public framed page</p>
         <iframe title="Local frame" src="http://127.0.0.1:${String(port)}/local-frame"></iframe>`);
+      return;
+    }
+    // A frame on a different public site commits out of process, then its own
+    // script aims it at this computer — the hop still never leaves.
+    if (path === "/pub-oopif") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html><title>Public framed</title><p>Public framed page</p>
+        <iframe title="Mover" src="http://x.elsewhere.test:${String(port)}/inner-mover"></iframe>`);
+      return;
+    }
+    if (path === "/inner-mover") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html><title>Inner mover</title><p>Elsewhere frame</p>
+        <script>setTimeout(() => { location.href = "http://127.0.0.1:${String(port)}/local-frame"; }, 300);</script>`);
       return;
     }
     if (path === "/pub-popup") {
@@ -2549,6 +2567,17 @@ describe.skipIf(!available)("the headless Browser's page-started local-navigatio
     const tool = localTool();
     const before = hitCount("/local-frame");
     await tool.call({ operation: "navigate", url: named("a.octant.test", "/pub-framed") });
+    await settle();
+    expect(hitCount("/local-frame")).toBe(before);
+    const page = (await tool.call({ operation: "snapshot" })).result.page;
+    expect(page?.snapshot ?? "").not.toContain("Local intranet panel");
+    await tool.stop();
+  });
+
+  it("refuses a committed cross-site frame's own hop onto this computer", async () => {
+    const tool = localTool();
+    await tool.call({ operation: "navigate", url: named("a.octant.test", "/pub-oopif") });
+    const before = hitCount("/local-frame");
     await settle();
     expect(hitCount("/local-frame")).toBe(before);
     const page = (await tool.call({ operation: "snapshot" })).result.page;
