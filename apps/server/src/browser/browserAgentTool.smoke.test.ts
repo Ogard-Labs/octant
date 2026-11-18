@@ -21,7 +21,7 @@ import { createBrowserAppManagedTools } from "./browserAppManagedTools";
 import { BrowserFlowRecorder, type BrowserFlowToolPort } from "./browserFlows";
 import { BrowserAutomationService, type BrowserFlowCustody } from "./browserAutomationService";
 import { BrowserFlowRuns } from "./browserFlowRuns";
-import { createPlaywrightBrowserRuntime } from "./playwrightBrowserRuntime";
+import { createPlaywrightBrowserRuntime, headlessBrowserLaunch } from "./playwrightBrowserRuntime";
 
 /**
  * The agent's Browser tool, end to end: the tool executor, the server's
@@ -183,6 +183,22 @@ const pages: Record<string, string> = {
   "/framed-login": `<!doctype html><title>Framed sign-in</title>
     <label for="mail">Email</label><input id="mail" value="ada@example.com">
     <iframe title="Sign-in" src="/inner-login"></iframe>`,
+  "/pub-b": `<!doctype html><title>Public B</title><p>Public page B</p>`,
+  "/pub-link-red": `<!doctype html><title>Public link</title><p>Public linked page</p>
+    <a id="go" href="/red-local">Go local</a>`,
+  "/local-next": `<!doctype html><title>Local next</title><p>Local next page</p>
+    <a id="deeper" href="/local-redir">Deeper</a>`,
+  "/local-deep": `<!doctype html><title>Local deep</title><p>Local deep page</p>
+    <a id="round" href="/local">Back</a>`,
+  "/local-else": `<!doctype html><title>Local else</title><p>Elsewhere on the network</p>`,
+  "/local-final": `<!doctype html><title>Local final</title><p>Back on the local page</p>`,
+  "/local-short": `<!doctype html><title>Local short</title><p>Named landing on the network</p>
+    <a id="next" href="/local-short-next">Next</a>`,
+  "/local-short-next": `<!doctype html><title>Local short next</title><p>Continuation of the named landing</p>`,
+  "/local-meta": `<!doctype html><title>Local meta</title><p>Local intranet panel</p>`,
+  "/local-red": `<!doctype html><title>Local red</title><p>Local intranet panel</p>`,
+  "/local-frame": `<!doctype html><title>Local frame</title><p>Local intranet panel</p>`,
+  "/local-popup": `<!doctype html><title>Local popup</title><p>Local intranet panel</p>`,
 };
 
 const PDF_BYTES = Buffer.from("%PDF-1.4\n1 0 obj << >> endobj\n%%EOF\n");
@@ -213,13 +229,26 @@ const authority = {
 } as unknown as ToolActionAuthority;
 
 const runtime = createPlaywrightBrowserRuntime();
+/**
+ * A second runtime for the page-started local-navigation block: its Chromium
+ * resolves `*.octant.test` to this computer so a public-looking address can
+ * live on the same fixture server while `127.0.0.1` and `localhost` stay the
+ * local destinations the guard refuses.
+ */
+const localRuntime = createPlaywrightBrowserRuntime({
+  launch: headlessBrowserLaunch(["--host-resolver-rules=MAP *.octant.test 127.0.0.1"]),
+});
 const available = await runtime.available();
 let server: Server;
 let origin = "";
+/** Requests the fixture server actually received, by path — a refused navigation must leave its path's count untouched. */
+const hits = new Map<string, number>();
+const hitCount = (path: string) => hits.get(path) ?? 0;
 
 beforeAll(async () => {
   server = createServer((request, response) => {
     const path = new URL(request.url ?? "/", "http://localhost").pathname;
+    hits.set(path, hitCount(path) + 1);
     // A page on this origin that sends the browser to another one: the same
     // server under its other name is a different origin.
     // A page with a frame on this origin, one on the server's other name, and
@@ -230,7 +259,7 @@ beforeAll(async () => {
       response.end(`<!doctype html><title>Framed</title>
         <h1>Framed</h1>
         <iframe title="Search" src="/inner"></iframe>
-        <iframe title="Elsewhere" src="http://localhost:${String(port)}/inner"></iframe>
+        <iframe title="Elsewhere" src="http://elsewhere.octant.test:${String(port)}/inner"></iframe>
         <shadow-card id="card"><span slot="note">Slotted note</span></shadow-card>
         <div id="closed"></div>
         <script>
@@ -258,6 +287,79 @@ beforeAll(async () => {
     if (path === "/leave") {
       const port = (server.address() as AddressInfo).port;
       response.writeHead(302, { location: `http://localhost:${String(port)}/other` });
+      response.end();
+      return;
+    }
+    // The page-started local-navigation fixtures. The same listener serves the
+    // public-looking `*.octant.test` pages and the `127.0.0.1`/`localhost`
+    // destinations the guard must refuse; only the Host header and the path
+    // separate them, so each refused hop has a path of its own to count.
+    if (path === "/pub-a") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html><title>Public A</title><p>Public page A</p>
+        <a id="away" href="http://b.octant.test:${String(port)}/pub-b">Elsewhere</a>`);
+      return;
+    }
+    if (path === "/pub-idle") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html><title>Public idle</title><p>Public idle page</p>
+        <script>setTimeout(() => { location.href = "http://127.0.0.1:${String(port)}/local"; }, 200);</script>`);
+      return;
+    }
+    if (path === "/pub-meta") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html><title>Public meta</title><p>Public meta page</p>
+        <meta http-equiv="refresh" content="0; url=http://127.0.0.1:${String(port)}/local-meta">`);
+      return;
+    }
+    if (path === "/red-local") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(302, { location: `http://127.0.0.1:${String(port)}/local-red` });
+      response.end();
+      return;
+    }
+    if (path === "/pub-framed") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html><title>Public framed</title><p>Public framed page</p>
+        <iframe title="Local frame" src="http://127.0.0.1:${String(port)}/local-frame"></iframe>`);
+      return;
+    }
+    if (path === "/pub-popup") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html><title>Public popup</title><p>Public popup page</p>
+        <button id="pop" onclick="window.open('http://127.0.0.1:${String(port)}/local-popup')">Open</button>`);
+      return;
+    }
+    if (path === "/pub-roundtrip") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(302, { location: `http://127.0.0.1:${String(port)}/local-final` });
+      response.end();
+      return;
+    }
+    if (path === "/short-local") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(302, { location: `http://127.0.0.1:${String(port)}/local-short` });
+      response.end();
+      return;
+    }
+    if (path === "/local") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html><title>Local</title><p>Local intranet panel</p>
+        <a id="next" href="/local-next">Next</a>
+        <a id="deeper" href="/local-redir">Deeper</a>
+        <a id="else" href="http://localhost:${String(port)}/local-else">Elsewhere</a>
+        <a id="round" href="http://a.octant.test:${String(port)}/pub-roundtrip">Round trip</a>`);
+      return;
+    }
+    if (path === "/local-redir") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(302, { location: `http://127.0.0.1:${String(port)}/local-deep` });
       response.end();
       return;
     }
@@ -301,24 +403,30 @@ beforeAll(async () => {
   // launch alone took the first test past its 30 s budget, so it is paid here,
   // in a hook with its own budget, and each test times only its own steps.
   if (available) {
-    const warmup = randomUUID() as BrowserContextId;
-    await runtime.createContext(
-      warmup,
-      {
-        profileMode: "isolated",
-        allowedOrigins: [origin],
-        credentialFieldProtection: true,
-        maxConcurrentTabs: 1,
-        sessionTimeoutMs: 60_000,
-      },
-      new AbortController().signal,
-    );
-    await runtime.closeContext(warmup);
+    const warm = async (warmed: typeof runtime, id: string) => {
+      const warmup = id as BrowserContextId;
+      await warmed.createContext(
+        warmup,
+        {
+          profileMode: "isolated",
+          allowedOrigins: [origin],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 60_000,
+        },
+        new AbortController().signal,
+      );
+      await warmed.closeContext(warmup);
+    };
+    // In sequence: every headless Browser shares one download-hold folder,
+    // which a launch empties and recreates.
+    await warm(runtime, randomUUID());
+    await warm(localRuntime, randomUUID());
   }
 }, 120_000);
 
 afterAll(async () => {
-  await runtime.closeAll();
+  await Promise.all([runtime.closeAll(), localRuntime.closeAll()]);
   await new Promise((resolve) => server.close(resolve));
 });
 
@@ -388,6 +496,8 @@ function agentTool(
     readonly pageToolAnswer?: "approved" | "denied";
     /** Where the thread keeps captures; absent, none are kept. */
     readonly captures?: ConstructorParameters<typeof BrowserAutomationService>[0]["captures"];
+    /** The runtime the tools drive; the shared one when absent. */
+    readonly runtime?: typeof runtime;
   } = {},
 ) {
   let flowCustody: BrowserFlowCustody | undefined;
@@ -395,7 +505,7 @@ function agentTool(
   const ingested: Array<string | undefined> = [];
   const journal = { saved: vi.fn(), refused: vi.fn() };
   const service = new BrowserAutomationService({
-    runtime,
+    runtime: options.runtime ?? runtime,
     recordExternalContentIngestion: (input) => {
       const provenance = input.provenance;
       ingested.push(
@@ -616,20 +726,12 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     await tool.stop();
   });
 
-  it("reads a frame of any origin on a Private page, with no approval", async () => {
-    const tool = agentTool();
-    await tool.call({ operation: "navigate", url: `${origin}/framed` });
-    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot ?? "";
-    expect(outline).toMatch(/^- iframe "Elsewhere"$/m);
-    expect(outline).not.toMatch(/^- iframe .*not included$/m);
-    expect(outline.match(/^ {2}- button "Find" \[ref=e\d+\]$/gm)).toHaveLength(2);
-    expect(tool.asked).toEqual([]);
-    await tool.stop();
-  });
-
   it("protects a credential field inside a frame and withholds every value on the page", async () => {
-    const tool = agentTool();
-    await tool.call({ operation: "navigate", url: `${origin}/framed-login` });
+    // On a public-looking name: a frame onto this computer is refused now, so
+    // the frame the field sits in has to be a public one too.
+    const tool = agentTool({ runtime: localRuntime });
+    const port = new URL(origin).port;
+    await tool.call({ operation: "navigate", url: `http://a.octant.test:${port}/framed-login` });
     const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot ?? "";
     expect(outline).toMatch(/^ {2}- textbox "Password" \[ref=e\d+\] protected$/m);
     expect(outline).toMatch(/^- textbox "Email" \[ref=e\d+\]$/m);
@@ -2378,5 +2480,136 @@ describe.skipIf(!available)("recording and replaying a Browser flow on a real pa
     await replay.stop();
     const handTotal = byHand.reduce((sum, bytes) => sum + bytes, 0);
     expect(flowBytes).toBeLessThan(handTotal * 0.6);
+  });
+});
+
+describe.skipIf(!available)("the headless Browser's page-started local-navigation guard", () => {
+  const named = (host: string, path: string) => `http://${host}:${new URL(origin).port}${path}`;
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 1_200));
+  const localTool = () => agentTool({ runtime: localRuntime });
+
+  it("reads a frame of any origin on a Private page, with no approval", async () => {
+    const tool = localTool();
+    await tool.call({ operation: "navigate", url: named("a.octant.test", "/framed") });
+    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot ?? "";
+    expect(outline).toMatch(/^- iframe "Elsewhere"$/m);
+    expect(outline).not.toMatch(/^- iframe .*not included$/m);
+    expect(outline.match(/^ {2}- button "Find" \[ref=e\d+\]$/gm)).toHaveLength(2);
+    expect(tool.asked).toEqual([]);
+    await tool.stop();
+  });
+
+  it("follows a link between two public pages", async () => {
+    const tool = localTool();
+    await tool.call({ operation: "navigate", url: named("a.octant.test", "/pub-a") });
+    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot ?? "";
+    await tool.call({ operation: "click", ref: refFor(outline, /link "Elsewhere"/) });
+    const page = (await tool.call({ operation: "snapshot" })).result.page;
+    expect(page?.url).toBe(named("b.octant.test", "/pub-b"));
+    expect(page?.snapshot).toContain("Public page B");
+    await tool.stop();
+  });
+
+  it("refuses an idle public page's own hop onto this computer before any request leaves", async () => {
+    const tool = localTool();
+    const before = hitCount("/local");
+    await tool.call({ operation: "navigate", url: named("a.octant.test", "/pub-idle") });
+    await settle();
+    expect(hitCount("/local")).toBe(before);
+    const page = (await tool.call({ operation: "snapshot" })).result.page;
+    expect(page?.snapshot ?? "").not.toContain("Local intranet panel");
+    await tool.stop();
+  });
+
+  it("refuses a meta refresh onto this computer before any request leaves", async () => {
+    const tool = localTool();
+    const before = hitCount("/local-meta");
+    await tool.call({ operation: "navigate", url: named("a.octant.test", "/pub-meta") });
+    await settle();
+    expect(hitCount("/local-meta")).toBe(before);
+    const page = (await tool.call({ operation: "snapshot" })).result.page;
+    expect(page?.snapshot ?? "").not.toContain("Local intranet panel");
+    await tool.stop();
+  });
+
+  it("refuses a public link's redirect onto this computer before the local hop leaves", async () => {
+    const tool = localTool();
+    const before = hitCount("/local-red");
+    await tool.call({ operation: "navigate", url: named("a.octant.test", "/pub-link-red") });
+    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot ?? "";
+    await tool.call({ operation: "click", ref: refFor(outline, /link "Go local"/) });
+    await settle();
+    expect(hitCount("/local-red")).toBe(before);
+    const page = (await tool.call({ operation: "snapshot" })).result.page;
+    expect(page?.snapshot ?? "").not.toContain("Local intranet panel");
+    await tool.stop();
+  });
+
+  it("refuses a public page's frame onto this computer", async () => {
+    const tool = localTool();
+    const before = hitCount("/local-frame");
+    await tool.call({ operation: "navigate", url: named("a.octant.test", "/pub-framed") });
+    await settle();
+    expect(hitCount("/local-frame")).toBe(before);
+    const page = (await tool.call({ operation: "snapshot" })).result.page;
+    expect(page?.snapshot ?? "").not.toContain("Local intranet panel");
+    await tool.stop();
+  });
+
+  it("lets the agent's named local page continue on its exact origin and nowhere else", async () => {
+    const tool = localTool();
+    await tool.call({ operation: "navigate", url: named("127.0.0.1", "/local") });
+    let page = (await tool.call({ operation: "snapshot" })).result.page;
+    expect(page?.snapshot).toContain("Local intranet panel");
+    await tool.call({ operation: "click", ref: refFor(page?.snapshot, /link "Next"/) });
+    page = (await tool.call({ operation: "snapshot" })).result.page;
+    expect(page?.snapshot).toContain("Local next page");
+    await tool.call({ operation: "click", ref: refFor(page?.snapshot, /link "Deeper"/) });
+    await settle();
+    page = (await tool.call({ operation: "snapshot" })).result.page;
+    expect(page?.snapshot).toContain("Local deep page");
+    // A different name on the same port is a different local origin.
+    await tool.call({ operation: "click", ref: refFor(page?.snapshot, /link "Back"/) });
+    await settle();
+    const elsewhereBefore = hitCount("/local-else");
+    page = (await tool.call({ operation: "snapshot" })).result.page;
+    await tool.call({ operation: "click", ref: refFor(page?.snapshot, /link "Elsewhere"/) });
+    await settle();
+    expect(hitCount("/local-else")).toBe(elsewhereBefore);
+    // A hop out that redirects back is refused on the return hop.
+    await tool.call({ operation: "navigate", url: named("127.0.0.1", "/local") });
+    const finalBefore = hitCount("/local-final");
+    page = (await tool.call({ operation: "snapshot" })).result.page;
+    await tool.call({ operation: "click", ref: refFor(page?.snapshot, /link "Round trip"/) });
+    await settle();
+    expect(hitCount("/local-final")).toBe(finalBefore);
+    page = (await tool.call({ operation: "snapshot" })).result.page;
+    expect(page?.snapshot ?? "").not.toContain("Back on the local page");
+    await tool.stop();
+  });
+
+  it("follows a named public address's own redirect onto this computer but no further", async () => {
+    const tool = localTool();
+    await tool.call({ operation: "navigate", url: named("a.octant.test", "/short-local") });
+    const page = (await tool.call({ operation: "snapshot" })).result.page;
+    expect(page?.snapshot).toContain("Named landing on the network");
+    const before = hitCount("/local-short-next");
+    await tool.call({ operation: "click", ref: refFor(page?.snapshot, /link "Next"/) });
+    await settle();
+    expect(hitCount("/local-short-next")).toBe(before);
+    const after = (await tool.call({ operation: "snapshot" })).result.page;
+    expect(after?.snapshot ?? "").not.toContain("Continuation of the named landing");
+    await tool.stop();
+  });
+
+  it("refuses a popup a public page opens onto this computer", async () => {
+    const tool = localTool();
+    await tool.call({ operation: "navigate", url: named("a.octant.test", "/pub-popup") });
+    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot ?? "";
+    const before = hitCount("/local-popup");
+    await tool.call({ operation: "click", ref: refFor(outline, /button "Open"/) });
+    await settle();
+    expect(hitCount("/local-popup")).toBe(before);
+    await tool.stop();
   });
 });

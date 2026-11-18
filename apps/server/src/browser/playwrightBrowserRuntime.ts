@@ -1,4 +1,9 @@
-import { captureBrowserFeedbackPoint } from "@octant/host-runtime";
+import {
+  captureBrowserFeedbackPoint,
+  normalizeNavigationUrl,
+  onThisComputerOrNetwork,
+  refusesPageNavigation,
+} from "@octant/host-runtime";
 import { createHash } from "node:crypto";
 import {
   awaitQuietPage,
@@ -138,6 +143,8 @@ export interface PlaywrightPagePort {
    * is not holding for an agent action.
    */
   on?(event: "download", listener: (download: PlaywrightDownloadPort) => void): void;
+  /** The page closed; the navigation guard's protocol session ends with it. */
+  on?(event: "close", listener: () => void): void;
   locator(selector: string): {
     evaluate<T>(expression: (element: Element) => T): Promise<T>;
     waitFor(options?: { readonly timeout: number }): Promise<void>;
@@ -204,8 +211,11 @@ export interface PlaywrightElementPort {
 export interface PlaywrightProtocolSessionPort {
   send(method: string, parameters?: Record<string, unknown>): Promise<unknown>;
   /** Only the owner of a dedicated session detaches it. */
-  /** Protocol events; optional because only a recording listens, and a double need not. */
-  on?(event: "Page.screencastFrame", listener: (parameters: unknown) => void): unknown;
+  /** Protocol events; optional because only a recording and the navigation guard listen, and a double need not. */
+  on?(
+    event: "Page.screencastFrame" | "Page.frameNavigated" | "Fetch.requestPaused",
+    listener: (parameters: unknown) => void,
+  ): unknown;
   detach?(): Promise<void>;
 }
 
@@ -222,7 +232,12 @@ export interface PlaywrightContextPort {
     handler: (route: {
       abort(): Promise<unknown>;
       continue(): Promise<unknown>;
-      request(): { url(): string; isNavigationRequest(): boolean };
+      request(): {
+        url(): string;
+        isNavigationRequest(): boolean;
+        /** Throws for a request that owns no page; an unguarded one is treated as a popup's. */
+        frame?(): { page(): PlaywrightPagePort };
+      };
     }) => Promise<void>,
   ): Promise<unknown>;
   routeWebSocket(
@@ -261,6 +276,35 @@ export interface PlaywrightBrowserRuntimeOptions {
   readonly downloadFolder?: string;
 }
 
+/**
+ * One tab's navigation authority on the headless Browser. The tab's own
+ * protocol session pauses every document request and redirect hop before it
+ * is sent, and these fields decide it the way the desktop tab's do.
+ */
+interface HeadlessTabNavigation {
+  /**
+   * The one load the host itself named on this tab — the agent's `navigate`,
+   * or `tab-open` with a target. Its first request claims it by `networkId`;
+   * only that chain may follow it onto this computer or its network.
+   */
+  namedLoad?: { readonly url: string; networkId?: string | undefined } | undefined;
+  /** Exact local origin acquired by a committed named load in this live tab. */
+  openedLocalOrigin?: string | undefined;
+  /** The redirect chain continuing the opened local page, by its stable networkId. */
+  continuingChain?: string | undefined;
+  /** The frame id Fetch reports for the tab's top document. */
+  mainFrameId?: string | undefined;
+  /** Settled once the tab's document guard is live; every goto on it waits on it. */
+  guardReady: Promise<void>;
+}
+
+/** One tab of a context: the page, the id the agent knows it by, and its navigation guard state. */
+interface OwnedBrowserTab {
+  readonly tabId: string;
+  readonly page: PlaywrightPagePort;
+  readonly navigation: HeadlessTabNavigation;
+}
+
 interface OwnedRuntimeContext {
   readonly context: PlaywrightContextPort;
   readonly allowedOrigins: ReadonlyArray<string>;
@@ -269,7 +313,7 @@ interface OwnedRuntimeContext {
   /** The tab in front, the one every action but a tab action acts on. */
   page: PlaywrightPagePort | undefined;
   /** Every tab the agent opened, in order, with the id it knows each by. */
-  tabs: Array<{ readonly tabId: string; readonly page: PlaywrightPagePort }>;
+  tabs: OwnedBrowserTab[];
   nextTabOrdinal: number;
   /**
    * Set while the agent's own new tab is opening. The context reports every
@@ -446,6 +490,25 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
           await route.abort();
           return;
         }
+        // An adopted tab's own protocol guard judges its document hops before
+        // they are sent. A page with no guard — a popup not yet closed — gets
+        // the page-started local refusal here, on its request's first hop.
+        if (
+          request.isNavigationRequest() &&
+          refusesPageNavigation(request.url(), policy.allowedOrigins)
+        ) {
+          let unguarded = true;
+          try {
+            const page = request.frame?.().page();
+            unguarded = !owned.tabs.some((tab) => tab.page === page);
+          } catch {
+            unguarded = true;
+          }
+          if (unguarded) {
+            await route.abort();
+            return;
+          }
+        }
         await route.continue();
       });
       // A WebSocket handshake never reaches the request guard above: Playwright
@@ -467,7 +530,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         route.connectToServer();
       });
       owned.page = await context.newPage();
-      this.#adoptTab(owned, owned.page);
+      const firstTab = this.#adoptTab(owned, owned.page);
       this.#collectDiagnostics(owned, owned.page);
       context.on("page", (candidate) => {
         // Listen before adopting or closing: a popup can log an error or fail
@@ -489,6 +552,9 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         }
         if (candidate !== owned.page) void candidate.close().catch(() => undefined);
       });
+      // The document guard must be live before the page may be driven; a
+      // context whose first tab cannot be guarded is no context.
+      await firstTab.navigation.guardReady;
       throwIfAborted(signal);
       this.#contexts.set(contextId, owned);
       return "headless";
@@ -649,14 +715,24 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     let recording: BrowserRuntimeRecording | undefined;
     let pageToolCall: BrowserPageToolsResult | undefined;
     switch (request.kind) {
-      case "navigate":
+      case "navigate": {
+        const tab = owned?.tabs.find((candidate) => candidate.page === page);
+        await tab?.navigation.guardReady;
+        const named: NonNullable<HeadlessTabNavigation["namedLoad"]> = {
+          url: required(request.target, "Navigate actions require a URL."),
+        };
+        if (tab !== undefined) tab.navigation.namedLoad = named;
         try {
-          await page.goto(required(request.target, "Navigate actions require a URL."));
+          await page.goto(named.url);
         } catch (error) {
           const blocked = this.#contexts.get(contextId)?.blockedNavigationUrl;
           throw blocked === undefined ? error : new BrowserNavigationBlockedError(blocked);
+        } finally {
+          if (tab !== undefined && tab.navigation.namedLoad === named)
+            tab.navigation.namedLoad = undefined;
         }
         break;
+      }
       case "click":
         if (
           this.#emulation.get(page)?.touch === true &&
@@ -810,15 +886,22 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
           tabs.openingTab = false;
         }
         this.#collectDiagnostics(tabs, opened);
-        this.#adoptTab(tabs, opened);
+        const adopted = this.#adoptTab(tabs, opened);
+        // The new tab is never driven unguarded: a guard that cannot attach
+        // has already closed it and rejects here.
+        await adopted.navigation.guardReady;
         await this.#leaveRecordedTab(tabs, opened);
         tabs.page = opened;
         if (request.target !== undefined) {
+          const named: NonNullable<HeadlessTabNavigation["namedLoad"]> = { url: request.target };
+          adopted.navigation.namedLoad = named;
           try {
             await opened.goto(request.target);
           } catch (error) {
             const blocked = tabs.blockedNavigationUrl;
             throw blocked === undefined ? error : new BrowserNavigationBlockedError(blocked);
+          } finally {
+            if (adopted.navigation.namedLoad === named) adopted.navigation.namedLoad = undefined;
           }
         }
         await leaveUnapprovedLanding(opened, tabs.allowedOrigins);
@@ -1327,12 +1410,23 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     const owned = this.#contexts.get(contextId);
     if (owned === undefined) throw new Error("Browser context is unavailable.");
     if (owned.page === undefined) {
-      owned.page = await owned.context.newPage();
-      this.#adoptTab(owned, owned.page);
-      this.#collectDiagnostics(owned, owned.page);
+      const created = await owned.context.newPage();
+      const tab = this.#adoptTab(owned, created);
+      owned.page = created;
+      this.#collectDiagnostics(owned, created);
+      try {
+        await tab.navigation.guardReady;
+      } catch (error) {
+        if (owned.page === created) owned.page = undefined;
+        throw error;
+      }
     }
+    // A tab the context's page event adopted waits on its guard here too.
+    await owned.tabs.find((tab) => tab.page === owned.page)?.navigation.guardReady;
     throwIfAborted(signal);
-    return owned.page;
+    const page = owned.page;
+    if (page === undefined) throw new Error("Browser context is unavailable.");
+    return page;
   }
 
   /**
@@ -1457,13 +1551,119 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     }
   }
 
-  /** Give a page the agent will act on an id it can name it by. */
-  #adoptTab(owned: OwnedRuntimeContext, page: PlaywrightPagePort): void {
+  /**
+   * Give a page the agent will act on an id it can name it by, and start
+   * arming its navigation guard: a protocol session of the tab's own pauses
+   * every document hop before it is sent.
+   */
+  #adoptTab(owned: OwnedRuntimeContext, page: PlaywrightPagePort): OwnedBrowserTab {
     // The context reports a page before newPage() resolves, so the same page
     // can arrive here twice; it is one tab.
-    if (owned.tabs.some((tab) => tab.page === page)) return;
-    owned.tabs.push({ tabId: `t${String(owned.nextTabOrdinal)}`, page });
+    const known = owned.tabs.find((tab) => tab.page === page);
+    if (known !== undefined) return known;
+    const tab: OwnedBrowserTab = {
+      tabId: `t${String(owned.nextTabOrdinal)}`,
+      page,
+      navigation: { guardReady: Promise.resolve() },
+    };
+    owned.tabs.push(tab);
     owned.nextTabOrdinal += 1;
+    // The attach runs with the adopting call's await points, which are before
+    // every goto the tab drives; the handler below also closes a tab the
+    // guard could not arm, so one is never left live and unguarded.
+    tab.navigation.guardReady = this.#attachNavigationGuard(owned, tab).then(
+      () => undefined,
+      async (error: unknown) => {
+        owned.tabs = owned.tabs.filter((candidate) => candidate !== tab);
+        if (owned.page === page) owned.page = undefined;
+        await page.close().catch(() => undefined);
+        throw error;
+      },
+    );
+    void tab.navigation.guardReady.catch(() => undefined);
+    return tab;
+  }
+
+  /**
+   * The headless page-started-navigation guard: a CDP session of the tab's
+   * own that pauses every document request and redirect hop before it is
+   * sent, since `context.route` never sees the hops inside a redirect. It is
+   * judged by the address text with the desktop host's rules: a load the
+   * host itself named follows its own top-level chain, a local document
+   * committed by an explicit open may continue only inside its exact origin,
+   * and every other page-started hop onto this computer or its network is
+   * refused before the request leaves. Every paused event is answered, and a
+   * failure while judging is a refusal.
+   */
+  async #attachNavigationGuard(owned: OwnedRuntimeContext, tab: OwnedBrowserTab): Promise<void> {
+    const page = tab.page;
+    const nav = tab.navigation;
+    const opening = page.context?.().newCDPSession(page);
+    if (opening === undefined) throw new Error("Browser navigation guard is unavailable.");
+    const session = await opening;
+    if (session.on === undefined) {
+      await session.detach?.().catch(() => undefined);
+      throw new Error("Browser navigation guard is unavailable.");
+    }
+    page.on?.("close", () => {
+      void session.detach?.().catch(() => undefined);
+    });
+    session.on("Fetch.requestPaused", (parameters) => {
+      const paused = (parameters ?? {}) as PausedDocumentRequest;
+      const requestId = paused.requestId;
+      let admitted = true;
+      try {
+        admitted = admitPausedDocument(owned, nav, paused);
+      } catch {
+        admitted = false;
+      }
+      if (requestId === undefined) return;
+      void session
+        .send(
+          admitted ? "Fetch.continueRequest" : "Fetch.failRequest",
+          admitted ? { requestId } : { requestId, errorReason: "BlockedByClient" },
+        )
+        .catch(() =>
+          session
+            .send("Fetch.failRequest", { requestId, errorReason: "BlockedByClient" })
+            .catch(() => undefined),
+        );
+    });
+    session.on("Page.frameNavigated", (parameters) => {
+      const frame = (parameters as FrameNavigatedEvent).frame;
+      if (
+        frame === undefined ||
+        frame.parentId !== undefined ||
+        frame.id !== nav.mainFrameId ||
+        typeof frame.url !== "string"
+      ) {
+        return;
+      }
+      const committed = navigationOriginOf(frame.url);
+      const namedHere =
+        nav.namedLoad?.networkId !== undefined &&
+        navigationOriginOf(nav.namedLoad.url) === committed;
+      nav.openedLocalOrigin =
+        committed !== undefined &&
+        (committed === nav.openedLocalOrigin || (namedHere && onThisComputerOrNetwork(committed)))
+          ? committed
+          : undefined;
+      nav.namedLoad = undefined;
+      nav.continuingChain = undefined;
+    });
+    await session.send("Page.enable");
+    const tree = (await session.send("Page.getFrameTree")) as
+      | { frameTree?: { frame?: { id?: unknown } } }
+      | undefined;
+    const mainFrameId = tree?.frameTree?.frame?.id;
+    if (typeof mainFrameId !== "string") {
+      await session.detach?.().catch(() => undefined);
+      throw new Error("Browser navigation guard is unavailable.");
+    }
+    nav.mainFrameId = mainFrameId;
+    await session.send("Fetch.enable", {
+      patterns: [{ urlPattern: "*", resourceType: "Document", requestStage: "Request" }],
+    });
   }
 
   /** The tabs as they now stand, after a tab action, with the one in front. */
@@ -2003,6 +2203,111 @@ async function checkConditions(
   return { mode: "check", met };
 }
 
+/** A Fetch.requestPaused event's fields the document guard reads. */
+interface PausedDocumentRequest {
+  readonly requestId?: string;
+  readonly frameId?: string;
+  readonly networkId?: string;
+  readonly redirectedRequestId?: string;
+  readonly request?: { readonly url?: string };
+}
+
+/** A Page.frameNavigated event's fields the document guard reads. */
+interface FrameNavigatedEvent {
+  readonly frame?: {
+    readonly id?: string;
+    readonly parentId?: string;
+    readonly url?: string;
+  };
+}
+
+/** The exact origin — scheme, host, port — of an http(s) address text. */
+function navigationOriginOf(target: string): string | undefined {
+  try {
+    return new URL(normalizeNavigationUrl(target)).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The load this tab was asked to open is the request Chromium reports,
+ * spelling aside — and fragment aside: a fragment never reaches the wire, so
+ * the reported request's address has none while the asked one may carry it.
+ */
+function sameNamedNavigationTarget(observed: string, named: string): boolean {
+  try {
+    const seen = new URL(normalizeNavigationUrl(observed));
+    const asked = new URL(normalizeNavigationUrl(named));
+    seen.hash = "";
+    asked.hash = "";
+    return seen.toString() === asked.toString();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Decide one paused document hop on a guarded tab. Only the load the host
+ * itself named may go anywhere its own top-level redirect chain goes; a local
+ * document it committed keeps page-started hops on its exact origin within the
+ * same chain; every other page-started hop — subframe hops included — onto
+ * this computer or its network is refused before the request leaves. Headless
+ * cannot see which frame started a main-frame move, so the exact-origin
+ * continuation is admitted whichever frame started it.
+ */
+function admitPausedDocument(
+  owned: OwnedRuntimeContext,
+  nav: HeadlessTabNavigation,
+  paused: PausedDocumentRequest,
+): boolean {
+  const target = paused.request?.url;
+  if (typeof target !== "string" || !/^https?:/i.test(target)) return true;
+  const main = paused.frameId !== undefined && paused.frameId === nav.mainFrameId;
+  if (main && paused.redirectedRequestId === undefined) {
+    // A new top-level start supersedes the redirect chain that was in flight.
+    nav.continuingChain = undefined;
+    const named = nav.namedLoad;
+    if (
+      named !== undefined &&
+      named.networkId === undefined &&
+      sameNamedNavigationTarget(target, named.url)
+    ) {
+      named.networkId = paused.networkId;
+      return true;
+    }
+    const continues =
+      nav.openedLocalOrigin !== undefined && navigationOriginOf(target) === nav.openedLocalOrigin;
+    if (refusesPageNavigation(target, owned.allowedOrigins) && !continues) {
+      owned.blockedNavigationUrl = target;
+      return false;
+    }
+    // An admitted page-started main start supersedes the named load still in
+    // flight; a refused one does not.
+    nav.namedLoad = undefined;
+    nav.continuingChain = continues ? paused.networkId : undefined;
+    return true;
+  }
+  if (main) {
+    // The named load's own chain follows its redirects wherever they go.
+    if (paused.networkId !== undefined && paused.networkId === nav.namedLoad?.networkId) {
+      return true;
+    }
+    if (paused.networkId !== undefined && paused.networkId === nav.continuingChain) {
+      if (navigationOriginOf(target) === nav.openedLocalOrigin) return true;
+      // A chain that left the exact origin cannot return to a local address.
+      nav.continuingChain = undefined;
+    }
+    if (refusesPageNavigation(target, owned.allowedOrigins)) {
+      owned.blockedNavigationUrl = target;
+      return false;
+    }
+    return true;
+  }
+  // A subframe hop never inherits the named load or the continuation.
+  return !refusesPageNavigation(target, owned.allowedOrigins);
+}
+
 /**
  * Chromium follows a redirect inside the routed request, so a top-level
  * document can land on an origin the request guard never saw. The allowlist is
@@ -2017,6 +2322,12 @@ async function leaveUnapprovedLanding(
   if (/^https?:/i.test(landed) && !originAllowed(landed, allowedOrigins)) {
     await page.goto("about:blank").catch(() => undefined);
     throw new BrowserNavigationBlockedError(landed);
+  }
+  // A refused navigation leaves Chromium's own error page behind, and its
+  // title can still name the refused address; the tab is left blank like any
+  // landing it was not approved for.
+  if (landed.startsWith("chrome-error:")) {
+    await page.goto("about:blank").catch(() => undefined);
   }
 }
 
@@ -2079,14 +2390,56 @@ function jpegDataUrl(bytes: Uint8Array): string {
   return `data:image/jpeg;base64,${Buffer.from(bytes).toString("base64")}`;
 }
 
+/**
+ * The production headless launch. `chromiumArgs` exists for tests that need a
+ * Chromium switch — the local-navigation smoke maps a public-looking name
+ * onto this computer with it; production callers get none.
+ */
+export function headlessBrowserLaunch(
+  chromiumArgs: ReadonlyArray<string> = [],
+): PlaywrightBrowserRuntimeOptions["launch"] {
+  return async (executablePath, onProcessStarted) => {
+    const downloadsPath = await prepareBrowserDownloadHoldRoot("headless");
+    // Loaded at first launch: evaluating it costs boot time a host that never
+    // opens a browser should not pay.
+    const { chromium } = await import("playwright-core");
+    const browser = await chromium.launch({
+      executablePath,
+      headless: true,
+      downloadsPath,
+      args: [...chromiumArgs],
+      handleSIGINT: false,
+      handleSIGTERM: false,
+      handleSIGHUP: false,
+    });
+    try {
+      const pid = launchedBrowserPid(browser);
+      if (pid === undefined) throw new Error("Owned browser process identity is unavailable.");
+      const exited = new Promise<void>((resolveExit) => {
+        browser.on("disconnected", () => resolveExit());
+      });
+      await onProcessStarted?.({ pid, exited });
+      const ownedBrowser = browser as unknown as PlaywrightBrowserPort & { pid?: number };
+      Object.defineProperty(ownedBrowser, "pid", { value: pid });
+      return ownedBrowser;
+    } catch (error) {
+      await browser.close().catch(() => undefined);
+      throw error;
+    }
+  };
+}
+
 export function createPlaywrightBrowserRuntime(
-  overrides: Pick<
-    PlaywrightBrowserRuntimeOptions,
-    | "receiptDirectory"
-    | "processIdentity"
-    | "processGroupExists"
-    | "killProcessGroup"
-    | "shutdownTimeoutMs"
+  overrides: Partial<
+    Pick<
+      PlaywrightBrowserRuntimeOptions,
+      | "launch"
+      | "receiptDirectory"
+      | "processIdentity"
+      | "processGroupExists"
+      | "killProcessGroup"
+      | "shutdownTimeoutMs"
+    >
   > = {},
 ): PlaywrightBrowserRuntime {
   return new PlaywrightBrowserRuntime({
@@ -2102,34 +2455,7 @@ export function createPlaywrightBrowserRuntime(
     // Downloads arrive here, in a private folder that is emptied when the
     // browser starts, and the runtime watches it to stop a file at the cap.
     downloadFolder: browserDownloadHoldRoot("headless"),
-    launch: async (executablePath, onProcessStarted) => {
-      const downloadsPath = await prepareBrowserDownloadHoldRoot("headless");
-      // Loaded at first launch: evaluating it costs boot time a host that never
-      // opens a browser should not pay.
-      const { chromium } = await import("playwright-core");
-      const browser = await chromium.launch({
-        executablePath,
-        headless: true,
-        downloadsPath,
-        handleSIGINT: false,
-        handleSIGTERM: false,
-        handleSIGHUP: false,
-      });
-      try {
-        const pid = launchedBrowserPid(browser);
-        if (pid === undefined) throw new Error("Owned browser process identity is unavailable.");
-        const exited = new Promise<void>((resolveExit) => {
-          browser.on("disconnected", () => resolveExit());
-        });
-        await onProcessStarted?.({ pid, exited });
-        const ownedBrowser = browser as unknown as PlaywrightBrowserPort & { pid?: number };
-        Object.defineProperty(ownedBrowser, "pid", { value: pid });
-        return ownedBrowser;
-      } catch (error) {
-        await browser.close().catch(() => undefined);
-        throw error;
-      }
-    },
+    launch: headlessBrowserLaunch(),
     ...overrides,
   });
 }

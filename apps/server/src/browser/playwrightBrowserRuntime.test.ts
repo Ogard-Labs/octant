@@ -23,10 +23,39 @@ const policy = {
   sessionTimeoutMs: 300_000,
 };
 
+/**
+ * A page-scoped protocol session: the navigation guard's first, then any the
+ * test's runtime code opens. Listeners are kept per event and sends recorded;
+ * `paused` emits a Fetch.requestPaused for the guard.
+ */
+function fakeProtocolSession() {
+  const listeners = new Map<string, (parameters: unknown) => void>();
+  const sent: Array<{ method: string; parameters?: Record<string, unknown> | undefined }> = [];
+  const session = {
+    send: vi.fn(async (method: string, parameters?: Record<string, unknown>) => {
+      sent.push({ method, parameters });
+      if (method === "Page.getFrameTree") {
+        return { frameTree: { frame: { id: "frame-main", url: "about:blank" } } };
+      }
+      return undefined;
+    }),
+    on: vi.fn((event: string, listener: (parameters: unknown) => void) =>
+      listeners.set(event, listener),
+    ),
+    detach: vi.fn(async () => undefined),
+    emit(event: string, parameters: unknown) {
+      listeners.get(event)?.(parameters);
+    },
+    sent,
+  };
+  return session;
+}
+
 function fakePage(name: string): PlaywrightPagePort {
   let url = "about:blank";
   let title = name;
   let viewport = { width: 1280, height: 720 };
+  const sessions: Array<ReturnType<typeof fakeProtocolSession>> = [];
   const locator = vi.fn((selector: string) => ({
     evaluate: vi.fn(async (expression: (element: Element) => unknown) =>
       expression({
@@ -74,8 +103,54 @@ function fakePage(name: string): PlaywrightPagePort {
     // The runtime attaches its diagnostic listeners here. Present so a test
     // can count the attachments; this fake never emits an event.
     on: vi.fn(),
+    context: () => ({
+      newCDPSession: vi.fn(async () => {
+        const session = fakeProtocolSession();
+        sessions.push(session);
+        return session;
+      }),
+    }),
     close: vi.fn(async () => undefined),
+    // The sessions this page opened, in order: index 0 is the navigation
+    // guard's, so a test can emit its paused events and read its answers.
+    sessions,
   } as unknown as PlaywrightPagePort;
+}
+
+/** The page's guard session — the first one its context opened for it. */
+function guardSession(page: PlaywrightPagePort) {
+  const sessions = (page as unknown as { sessions: Array<ReturnType<typeof fakeProtocolSession>> })
+    .sessions;
+  const session = sessions[0];
+  if (session === undefined) throw new Error("The page's guard session never attached.");
+  return session;
+}
+
+/** A paused document request delivered to the guard's listener. */
+function pausedDocument(
+  session: ReturnType<typeof fakeProtocolSession>,
+  paused: {
+    requestId: string;
+    url: string;
+    frameId?: string;
+    networkId?: string;
+    redirectedRequestId?: string;
+  },
+) {
+  session.emit("Fetch.requestPaused", {
+    requestId: paused.requestId,
+    frameId: paused.frameId,
+    networkId: paused.networkId,
+    redirectedRequestId: paused.redirectedRequestId,
+    request: { url: paused.url },
+  });
+}
+
+function sentCalls(
+  session: ReturnType<typeof fakeProtocolSession>,
+  method: string,
+): Array<Record<string, unknown> | undefined> {
+  return session.sent.filter((entry) => entry.method === method).map((entry) => entry.parameters);
 }
 
 function harness() {
@@ -854,21 +929,30 @@ async function recordingHarness(options: { readonly startFrame?: boolean } = {})
       locator: page.locator,
     },
   ] as any);
-  let frameListener: ((parameters: unknown) => void) | undefined;
   let stopScreencast = () => {};
+  const listeners = new Map<string, (parameters: unknown) => void>();
+  const frameListener = () => listeners.get("Page.screencastFrame");
   const session = {
     send: vi.fn(async (method: string) => {
       if (method === "Page.stopScreencast") stopScreencast();
+      // The navigation guard opens first; it needs the frame tree to attach.
+      if (method === "Page.getFrameTree") {
+        return { frameTree: { frame: { id: "frame-main", url: "about:blank" } } };
+      }
       // A page that does not repaint sends one frame as the screencast starts,
       // and starting a recording waits for it to be looked at.
       if (method === "Page.startScreencast" && options.startFrame !== false) {
         queueMicrotask(() =>
-          frameListener?.({ data: Buffer.from(onePixelPng()).toString("base64"), sessionId: 0 }),
+          frameListener()?.({
+            data: Buffer.from(onePixelPng()).toString("base64"),
+            sessionId: 0,
+          }),
         );
       }
+      return undefined;
     }),
-    on: vi.fn((_event: string, listener: (parameters: unknown) => void) => {
-      frameListener = listener;
+    on: vi.fn((event: string, listener: (parameters: unknown) => void) => {
+      listeners.set(event, listener);
     }),
     detach: vi.fn(async () => undefined),
   };
@@ -898,7 +982,10 @@ async function recordingHarness(options: { readonly startFrame?: boolean } = {})
     /** Send a frame `width` pixels wide; a different width is a resized page. */
     frame(width = 1) {
       holdNextCheck = true;
-      frameListener?.({ data: Buffer.from(onePixelPng(width)).toString("base64"), sessionId: 1 });
+      frameListener()?.({
+        data: Buffer.from(onePixelPng(width)).toString("base64"),
+        sessionId: 1,
+      });
     },
     /** How many frames the runtime has finished looking at. */
     looked() {
@@ -1126,5 +1213,168 @@ describe("bounded headless element feedback", () => {
     await vi.waitFor(() => expect(f.detach).toHaveBeenCalledOnce());
     expect(f.send).not.toHaveBeenCalled();
     await f.runtime.closeAll();
+  });
+});
+
+describe("the headless page-started navigation guard", () => {
+  const local = "http://127.0.0.1:4101/";
+  const otherLocal = "http://192.168.1.5:4101/";
+
+  async function guardedTab() {
+    const f = harness();
+    const signal = new AbortController().signal;
+    await f.runtime.createContext(firstId, { ...policy, allowedOrigins: ["*"] }, signal);
+    const page = f.pages[0];
+    if (page === undefined) throw new Error("No fixture page");
+    const session = guardSession(page);
+    const start = (url: string, networkId: string, frameId = "frame-main") =>
+      pausedDocument(session, {
+        requestId: `req-${networkId}`,
+        url,
+        frameId,
+        networkId,
+      });
+    const hop = (url: string, networkId: string, requestId: string, frameId = "frame-main") =>
+      pausedDocument(session, {
+        requestId,
+        url,
+        frameId,
+        networkId,
+        redirectedRequestId: `prior-${requestId}`,
+      });
+    const commit = (url: string) =>
+      session.emit("Page.frameNavigated", { frame: { id: "frame-main", url } });
+    const continued = () =>
+      sentCalls(session, "Fetch.continueRequest").map((parameters) => parameters?.requestId);
+    const failed = () =>
+      sentCalls(session, "Fetch.failRequest").map((parameters) => parameters?.requestId);
+    return { ...f, signal, page, session, start, hop, commit, continued, failed };
+  }
+
+  it("follows the load the agent named but refuses the page's own start onto this computer", async () => {
+    const f = await guardedTab();
+    vi.mocked(f.page.goto).mockImplementationOnce(async (url) => {
+      pausedDocument(f.session, {
+        requestId: "named-1",
+        url,
+        frameId: "frame-main",
+        networkId: "n1",
+      });
+      f.commit(url);
+    });
+    await f.runtime.act(firstId, action("navigate", local), f.signal);
+    expect(f.continued()).toContain("named-1");
+    expect(f.failed()).toEqual([]);
+
+    f.start(otherLocal, "n2");
+    expect(f.failed()).toContain("req-n2");
+    await f.runtime.closeAll();
+  });
+
+  it("follows the named load's own redirect onto this computer but acquires no continuation", async () => {
+    const f = await guardedTab();
+    vi.mocked(f.page.goto).mockImplementationOnce(async (url) => {
+      pausedDocument(f.session, {
+        requestId: "named-1",
+        url,
+        frameId: "frame-main",
+        networkId: "n1",
+      });
+      pausedDocument(f.session, {
+        requestId: "named-hop",
+        url: local,
+        frameId: "frame-main",
+        networkId: "n1",
+        redirectedRequestId: "named-1",
+      });
+      f.commit(local);
+    });
+    await f.runtime.act(firstId, action("navigate", "https://short.example/"), f.signal);
+    expect(f.continued()).toContain("named-hop");
+
+    f.start(`${local}next`, "n2");
+    expect(f.failed()).toContain("req-n2");
+    await f.runtime.closeAll();
+  });
+
+  it("lets the explicitly opened local document continue on its exact origin only", async () => {
+    const f = await guardedTab();
+    vi.mocked(f.page.goto).mockImplementationOnce(async (url) => {
+      pausedDocument(f.session, {
+        requestId: "named-1",
+        url,
+        frameId: "frame-main",
+        networkId: "n1",
+      });
+      f.commit(local);
+    });
+    await f.runtime.act(firstId, action("navigate", local), f.signal);
+
+    f.start(`${local}next`, "n2");
+    expect(f.continued()).toContain("req-n2");
+    f.hop(`${local}deeper`, "n2", "hop-1");
+    expect(f.continued()).toContain("hop-1");
+    // A chain that hops off the exact origin ends; it cannot hop back.
+    f.hop("https://moved.example.net/", "n2", "hop-2");
+    expect(f.continued()).toContain("hop-2");
+    f.hop(`${local}back`, "n2", "hop-3");
+    expect(f.failed()).toContain("hop-3");
+    f.start("http://127.0.0.1:9999/", "n3");
+    expect(f.failed()).toContain("req-n3");
+    await f.runtime.closeAll();
+  });
+
+  it("never lets a subframe continue the local document's chain", async () => {
+    const f = await guardedTab();
+    vi.mocked(f.page.goto).mockImplementationOnce(async (url) => {
+      pausedDocument(f.session, {
+        requestId: "named-1",
+        url,
+        frameId: "frame-main",
+        networkId: "n1",
+      });
+      f.commit(local);
+    });
+    await f.runtime.act(firstId, action("navigate", local), f.signal);
+
+    f.start(local, "n2", "frame-sub");
+    expect(f.failed()).toContain("req-n2");
+    await f.runtime.closeAll();
+  });
+
+  it("refuses a document request the guard could not judge", async () => {
+    const f = await guardedTab();
+    f.session.emit("Fetch.requestPaused", {
+      requestId: "unjudgeable",
+      frameId: "frame-main",
+      networkId: "n1",
+      get request() {
+        throw new Error("unreadable event");
+      },
+    });
+    expect(f.failed()).toContain("unjudgeable");
+    await f.runtime.closeAll();
+  });
+
+  it("does not hand over a context whose first tab the guard could not attach to", async () => {
+    const f = harness();
+    const page = f.pages[0];
+    if (page === undefined) throw new Error("No fixture page");
+    page.context = () => ({
+      newCDPSession: vi.fn(async (): Promise<never> => {
+        throw new Error("protocol unavailable");
+      }),
+    });
+    await expect(
+      f.runtime.createContext(
+        firstId,
+        { ...policy, allowedOrigins: ["*"] },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      f.runtime.act(firstId, action("navigate", local), new AbortController().signal),
+    ).rejects.toThrow();
+    expect(vi.mocked(page.close)).toHaveBeenCalled();
   });
 });

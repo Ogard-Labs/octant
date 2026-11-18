@@ -73,7 +73,8 @@
     "computer-use:prepare": "bun scripts/prepare-computer-use-driver.ts",
     "docs:theme": "bun scripts/export-docs-theme.ts",
     "smoke:browser-download-manifest-ui": "bun scripts/smoke-browser-download-manifest-ui.ts",
-    "smoke:browser-download-source": "bun scripts/smoke-browser-download-source.ts"
+    "smoke:browser-download-source": "bun scripts/smoke-browser-download-source.ts",
+    "smoke:browser-local-navigation": "bun scripts/smoke-browser-local-navigation.ts"
   },
   "devDependencies": {
     "@types/node": "catalog:",
