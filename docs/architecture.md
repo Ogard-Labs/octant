@@ -14867,8 +14867,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
 
   **Provider reach Octant no longer narrows** (maintainer decision,
   2026-11-16; partly built: Ollama off loopback, Bedrock's AWS profile and
-  access keys, and Kimi Code's unverified command inventory are built, as
-  each item says):
+  access keys, Kimi Code's unverified command inventory and an ACP probe's
+  exact-release claims are built, as each item says):
   - **Ollama off loopback.** An Ollama address on the local network or a
     hosted Ollama is allowed, and plain HTTP to a private-network address is
     allowed with a warning; a public address still needs HTTPS
@@ -14883,8 +14883,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     OpenCode's Octant tools, an ACP probe's claims); below Full access the
     pin holds ([Provider runtimes](design/provider-runtimes.md)). Built for
     Kimi Code's command inventory; OpenCode's Octant tools were already
-    offered at Full access on any release that accepts them (`mixed`). Not
-    built yet for an ACP probe's exact-release claims.
+    offered at Full access on any release that accepts them (`mixed`). Built
+    for an ACP probe's exact-release claims: the probe gives Full access its
+    own value (`atFullAccess`) for usage, forms and Octant's tools, and warm
+    reuse follows; compaction and file review keep the pin, since the host
+    runs them on a session it resumes below Full access.
   - **Linux parity.** Octant's tools reach OpenCode and ACP agents on Linux
     as on macOS (built: the launch reaches the tool bridge on the shared host
     network, or through the egress forwarder's loopback relay for the

@@ -2225,11 +2225,29 @@ pinned is offered as "unverified" instead of refused, under
 Full access the pin holds. Built for Kimi Code's reviewed command inventory:
 a release that lists another inventory passes the probe, the runtime card
 says it is unverified and names the commands it added, a session below Full
-access is refused, and at Full access its listed commands run with it. Not
-built yet for the exact-release claims a profile pins (usage, compaction,
-file review, forms, warm reuse, unadvertised HTTP tools): the probe reports
-each one for every level, so offering it at Full access alone needs a Full
-access value of its own, as `appManagedToolsAtFullAccess` is.
+access is refused, and at Full access its listed commands run with it.
+
+Built for the exact-release claims a profile pins (`acpExactReleaseClaim` in
+`apps/server/src/providers/acpProfiles.ts`): a release newer than every
+release a claim was reviewed on keeps that claim at Full access, offered as
+unverified, and below Full access the pin holds; an older or unparseable
+release never inherits newer evidence. The probe gives Full access its own
+value, `capabilities.atFullAccess` (`release: "unverified"` with usage,
+forms as `userQuestions`, and Octant's tools as `appManagedTools`), present
+only where it differs from the other levels, and the runtime card says which
+features the release keeps at Full access. A Full access session then
+counts usage, asks the agent's session forms, takes Octant's tools over the
+unadvertised HTTP transport (the tool gate reads `atFullAccess` through
+`threadAppToolSupport`), and is retained warm on the newer release.
+Compaction and file review keep the pin at Full access too: the host runs
+both on a session it resumes for them tool-free or under Plan, not on the
+thread's Full access session, so the release is judged below Full access
+there. A spend ceiling still counts a provider whose usage reads
+unsupported below Full access as not measured. Rationale: the probe used to
+report one value for every level, so an unreviewed release lost these
+features at Full access as well, where the person already runs the agent
+open; Mistral Vibe 3.0.3, newer than the 2.25.0 its HTTP tool evidence
+pinned, is now offered Octant's tools at Full access as unverified.
 
 A profile ships only after a live probe against a signed-in install on Apple
 Silicon shows each of the following, recorded as a smoke test beside
