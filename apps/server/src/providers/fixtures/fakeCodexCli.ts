@@ -6,6 +6,35 @@ import { join } from "node:path";
 
 const mode = process.env.FAKE_CODEX_MODE ?? "ready";
 const root = process.env.FAKE_CODEX_ROOT;
+const version = process.env.FAKE_CODEX_VERSION ?? "0.144.4";
+
+/**
+ * The account's stored threads in `sessions` mode: the person's own session in
+ * the Project, one Octant started there, a subagent's, and the person's
+ * session in another folder.
+ */
+function storedThread(id: string, cwd: string, originator: string, parent: string | null = null) {
+  return {
+    id,
+    cwd,
+    preview: `First request of ${id}\nsecond line`,
+    name: id === "person-1" ? "Fix the login form" : null,
+    updatedAt: id === "person-1" ? 1_795_028_942 : 1_795_028_000,
+    ephemeral: false,
+    parentThreadId: parent,
+    originator,
+    gitInfo: id === "person-1" ? { branch: "fix-login" } : null,
+    turns: [],
+  };
+}
+
+function storedThreads(cwd: string) {
+  return [
+    storedThread("person-1", cwd, "codex_cli_rs"),
+    storedThread("octant-1", cwd, "Octant"),
+    storedThread("subagent-1", cwd, "codex_cli_rs", "person-1"),
+  ];
+}
 
 function record(value: Record<string, unknown>): void {
   if (root !== undefined) appendFileSync(join(root, "records.jsonl"), `${JSON.stringify(value)}\n`);
@@ -61,7 +90,7 @@ if (process.argv.slice(2).join(" ") === "--version") {
     process.stdout.write("codex-cli 0.144.4\n");
     process.exit(0);
   } else {
-    console.log(mode === "version-malformed" ? "Codex build 0.144.4" : "codex-cli 0.144.4");
+    console.log(mode === "version-malformed" ? "Codex build 0.144.4" : `codex-cli ${version}`);
     process.exit(0);
   }
 } else {
@@ -120,11 +149,16 @@ if (process.argv.slice(2).join(" ") === "--version") {
         });
         if (!mode.startsWith("initialize-timeout")) {
           const params = message.params as
-            | { readonly cwd?: string; readonly model?: string; readonly threadId?: string }
+            | {
+                readonly cwd?: string;
+                readonly model?: string;
+                readonly threadId?: string;
+                readonly cwds?: ReadonlyArray<string>;
+              }
             | undefined;
           const result =
             message.method === "initialize"
-              ? { userAgent: "fake-codex/0.144.4" }
+              ? { userAgent: `fake-codex/${version}` }
               : message.method === "account/read"
                 ? { account: { type: "chatgpt" }, requiresOpenaiAuth: true }
                 : message.method === "model/list"
@@ -148,26 +182,100 @@ if (process.argv.slice(2).join(" ") === "--version") {
                   : message.method === "config/read"
                     ? { config: {} }
                     : message.method === "skills/list"
-                      ? { data: [{ skills: [], errors: [] }] }
-                      : message.method === "thread/start"
+                      ? {
+                          data: [
+                            {
+                              skills:
+                                mode === "sessions"
+                                  ? [
+                                      {
+                                        name: "tidy",
+                                        description: "Tidy the code",
+                                        path: "/home/person/.codex/skills/tidy/SKILL.md",
+                                        scope: "user",
+                                        enabled: true,
+                                      },
+                                      ...(params?.cwds?.length === 1
+                                        ? [
+                                            {
+                                              name: "local",
+                                              description: "A Project skill",
+                                              path: `${params.cwds[0]}/.agents/skills/local/SKILL.md`,
+                                              scope: "repo",
+                                              enabled: true,
+                                            },
+                                          ]
+                                        : []),
+                                    ]
+                                  : [],
+                              errors: [],
+                            },
+                          ],
+                        }
+                      : message.method === "plugin/installed"
                         ? {
-                            thread: { id: "thread-1" },
-                            model: params?.model ?? "gpt-5.4",
-                            modelProvider: "openai",
-                            serviceTier: null,
-                            cwd: params?.cwd ?? "/tmp/octant-codex-project",
+                            marketplaces:
+                              mode === "sessions"
+                                ? [
+                                    {
+                                      plugins: [
+                                        {
+                                          id: "docs@local",
+                                          name: "docs",
+                                          installed: true,
+                                          enabled: true,
+                                          interface: { shortDescription: "Search the docs" },
+                                        },
+                                      ],
+                                    },
+                                  ]
+                                : [],
+                            marketplaceLoadErrors: [],
                           }
-                        : message.method === "thread/resume"
-                          ? {
-                              thread: { id: params?.threadId ?? "thread-1" },
-                              model: "gpt-5.4",
-                              modelProvider: "openai",
-                              serviceTier: null,
-                              cwd: "/tmp/octant-codex-project",
-                            }
-                          : message.method === "turn/start"
-                            ? { turn: { id: "turn-1", status: "inProgress" } }
-                            : {};
+                        : message.method === "thread/list"
+                          ? { data: storedThreads(params?.cwd ?? ""), nextCursor: null }
+                          : message.method === "thread/read"
+                            ? {
+                                thread:
+                                  params?.threadId === "person-elsewhere"
+                                    ? storedThread(
+                                        "person-elsewhere",
+                                        "/tmp/another-project",
+                                        "codex_cli_rs",
+                                      )
+                                    : storedThread(
+                                        params?.threadId ?? "person-1",
+                                        "/tmp/octant-codex-project",
+                                        params?.threadId === "octant-1" ? "Octant" : "codex_cli_rs",
+                                      ),
+                              }
+                            : message.method === "thread/fork"
+                              ? {
+                                  thread: { id: `copy-of-${params?.threadId ?? "thread-1"}` },
+                                  model: "gpt-5.4",
+                                  modelProvider: "openai",
+                                  serviceTier: null,
+                                  cwd: params?.cwd ?? "/tmp/octant-codex-project",
+                                }
+                              : message.method === "thread/start"
+                                ? {
+                                    thread: { id: "thread-1" },
+                                    model: params?.model ?? "gpt-5.4",
+                                    modelProvider: "openai",
+                                    serviceTier: null,
+                                    cwd: params?.cwd ?? "/tmp/octant-codex-project",
+                                  }
+                                : message.method === "thread/resume"
+                                  ? {
+                                      thread: { id: params?.threadId ?? "thread-1" },
+                                      model: "gpt-5.4",
+                                      modelProvider: "openai",
+                                      serviceTier: null,
+                                      cwd: "/tmp/octant-codex-project",
+                                    }
+                                  : message.method === "turn/start"
+                                    ? { turn: { id: "turn-1", status: "inProgress" } }
+                                    : {};
           process.stdout.write(`${JSON.stringify({ id: message.id, result })}\n`);
         }
       } else {

@@ -1756,7 +1756,10 @@ starts a Code session at the same level, and a Work turn journals `shell` and
   approval policy and sandbox the level maps to in Code; `command` and
   `permissions` requests inside the root reach the person at Guarded. A Work
   thread reads the folder's `AGENTS.md` as Code does (maintainer decision,
-  2026-11-14).
+  2026-11-14). An empty Work or Code thread can continue one of the person's
+  own Codex sessions in its folder, and a Code fork continues a copy of
+  Codex's own thread
+  ([Provider runtimes: Codex](design/provider-runtimes.md#codex)).
 - **OpenCode:** the session rules no longer deny `bash` and `task` in Work;
   the posture's rules apply as in Code (`task` is to be allowed outside Plan
   at every level; designed, not built,
@@ -4423,9 +4426,14 @@ Draft edits and ordinary image attachments survive validation and refusal.
 Unknown `@` text stays ordinary text. `@` is the one composer
 picker in every composer: it lists the effective snapshot's available skills,
 effective plugin MCP servers, and connectors the person added (a disabled or
-untrusted item is absent), plus the thread's files in Work and Code. Choosing a
-row makes a structured selection chip that the host re-resolves at send; it
-never installs, trusts, enables, or elevates anything. `/` lists Octant's
+untrusted item is absent), then the thread's provider's own skills and plugins
+its runtime listed on the observation (`mentions`; Codex's account skills and
+installed plugins), labelled as the provider's, plus the thread's files in Work
+and Code. Choosing an Octant row makes a structured selection chip that the
+host re-resolves at send; choosing a provider's row writes the runtime's own
+reference (`$name`, `@name`), which its driver resolves against its own listing
+at send ([Provider runtimes: Codex](design/provider-runtimes.md#codex)). Neither
+installs, trusts, enables, or elevates anything. `/` lists Octant's
 commands and, beside them, the thread's provider's own slash commands,
 labelled as the provider's (maintainer principle, 2026-11-14: a workflow
 that works in the provider's own app works in Octant); `$skill` stays a

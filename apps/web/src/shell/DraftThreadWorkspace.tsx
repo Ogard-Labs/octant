@@ -24,7 +24,11 @@ import {
   useComposerSlashCommands,
   composerProviderCommands,
 } from "../composer/useComposerSlashCommands";
-import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
+import {
+  ComposerAtTypeahead,
+  composerProviderMentions,
+  useComposerAtMenu,
+} from "../composer/useComposerAtMenu";
 import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections";
 import { providerFamilyForThread } from "../providers/providerFamily";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
@@ -1265,6 +1269,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     ...(draftProviderFamily === undefined ? {} : { providerFamily: draftProviderFamily }),
   });
   const atMenu = useComposerAtMenu({
+    provider: composerProviderMentions(props.providerGroups, props.selectedProviderInstanceId),
     draft: prompt,
     onDraftChange: setPrompt,
     textarea: () => textareaRef.current,
