@@ -173,7 +173,11 @@ describe("sandbox restrictions settings", () => {
     await user.type(input, "/shared/new-folder");
     await user.click(screen.getByRole("button", { name: "Add" }));
     await user.click(screen.getByRole("button", { name: "Save sandbox restrictions" }));
-    expect(await screen.findByText("Settings changed. Reload before saving.")).toBeVisible();
+    expect(
+      await screen.findByText(
+        "Settings changed. Reload before saving. Reload discards your draft.",
+      ),
+    ).toBeVisible();
     expect(screen.getByText("/shared/new-folder")).toBeVisible();
     expect(client.change).toHaveBeenCalledWith(
       expect.objectContaining({
