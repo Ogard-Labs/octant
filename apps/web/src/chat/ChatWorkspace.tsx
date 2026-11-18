@@ -28,11 +28,12 @@ import type {
 } from "@octant/contracts";
 import type { ThreadMentionClient } from "@octant/client-runtime";
 import {
-  buildAttachmentCapability,
   buildImageAttachmentCapability,
+  chatFileRefusal,
   COMPOSER_IMAGE_MEDIA_TYPES,
   supportsAttachmentFile,
 } from "./composerAttachmentCapability";
+import { attachmentMediaType, isImageAttachment } from "../composer/attachmentMediaType";
 import { useSeesImages } from "../harness/useSeesImages";
 import { pastedImageName } from "./composerImagePaste";
 import { RewindDialog, composerAfterRewind } from "../transcript/RewindDialog";
@@ -714,9 +715,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       modelId: view.thread.modelId,
     },
   });
-  const attachmentCapability: ChatComposerAttachmentCapability = describesImages
-    ? { kind: "supported" }
-    : buildAttachmentCapability(providerState.observation);
+  // Chat takes a file of any type: the model gets it natively where it takes
+  // the type, and otherwise as text when it is text, which any model reads.
+  const attachmentCapability: ChatComposerAttachmentCapability = { kind: "supported" };
   // Images ride the ordinary attachment path but need their own honest check:
   // a provider can accept documents while the selected model rejects images.
   const imageAttachmentCapability: ChatComposerAttachmentCapability = describesImages
@@ -1691,11 +1692,15 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               // A pasted image usually has no file name; name it once so the chip,
               // its remove control, and any failure message all agree.
               const displayName = pastedImageName(file);
+              const mediaType = attachmentMediaType(file);
               const describedImage =
-                describesImages && COMPOSER_IMAGE_MEDIA_TYPES.includes(file.type);
+                describesImages && COMPOSER_IMAGE_MEDIA_TYPES.includes(mediaType);
               if (
+                isImageAttachment(file) &&
                 !describedImage &&
-                !supportsAttachmentFile(providerState.observation, view.thread.modelId, file)
+                !supportsAttachmentFile(providerState.observation, view.thread.modelId, {
+                  type: mediaType,
+                })
               ) {
                 setAttachmentStatus({
                   kind: "failed",
@@ -1716,6 +1721,24 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               void (async () => {
                 try {
                   const buffer = await file.arrayBuffer();
+                  // A file that is not an image goes to the model natively or
+                  // as text; one that is neither is refused before upload.
+                  const refusal = isImageAttachment(file)
+                    ? undefined
+                    : chatFileRefusal(
+                        providerState.observation,
+                        view.thread.modelId,
+                        { type: mediaType },
+                        new Uint8Array(buffer),
+                        displayName,
+                      );
+                  if (refusal !== undefined) {
+                    cancelledUploadsRef.current.delete(String(attachmentId));
+                    settleUpload();
+                    if (mountedRef.current && activeThreadIdRef.current === String(view.thread.id))
+                      setAttachmentStatus({ kind: "failed", message: refusal });
+                    return;
+                  }
                   if (
                     !mountedRef.current ||
                     activeThreadIdRef.current !== String(view.thread.id) ||
@@ -1732,7 +1755,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     threadId: view.thread.id,
                     attachmentId,
                     displayName,
-                    mediaType: file.type,
+                    mediaType,
                     bytes: new Uint8Array(buffer),
                   });
                   if (

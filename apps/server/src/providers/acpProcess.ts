@@ -84,6 +84,11 @@ export interface AcpConfinementInput {
   readonly root: string;
   /** The Project's extra folders, granted what `root` is granted. */
   readonly extraFolders?: ReadonlyArray<string>;
+  /**
+   * Folders the agent reads at every level and never writes: the thread's
+   * attachments folder, under the host's data directory.
+   */
+  readonly readOnlyFolders?: ReadonlyArray<string>;
   readonly managedHome: string;
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
@@ -139,6 +144,11 @@ export interface AcpProcessStartInput {
   readonly root: string;
   /** The Project's extra folders, granted what `root` is granted. */
   readonly extraFolders?: ReadonlyArray<string>;
+  /**
+   * Folders the agent reads at every level and never writes: the thread's
+   * attachments folder, under the host's data directory.
+   */
+  readonly readOnlyFolders?: ReadonlyArray<string>;
   readonly managedHome: string;
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
@@ -718,6 +728,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 configuredBinaryDirectory,
                 temporaryDirectory,
                 ...(input.servers === undefined ? [] : [input.servers.folder]),
+                ...(input.readOnlyFolders ?? []),
               ],
               privateHomeAllowPaths: [
                 root,
@@ -727,6 +738,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 binaryRuntimeDirectory,
                 configuredBinaryDirectory,
                 ...(input.servers === undefined ? [] : [input.servers.folder]),
+                ...(input.readOnlyFolders ?? []),
               ],
               ...(extraRules.length === 0 ? {} : { extraRules }),
             }),
@@ -1463,6 +1475,9 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           binaryPath: input.binaryPath,
           root: input.root,
           ...(input.extraFolders === undefined ? {} : { extraFolders: input.extraFolders }),
+          ...(input.readOnlyFolders === undefined
+            ? {}
+            : { readOnlyFolders: input.readOnlyFolders }),
           managedHome: input.managedHome,
           mode: input.mode,
           executionPolicy: input.executionPolicy,

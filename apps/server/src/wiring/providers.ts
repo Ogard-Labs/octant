@@ -107,6 +107,7 @@ import {
 } from "../providers/oauth/providerCloudIamSignIn";
 import { makeAmazonBedrockDriver } from "../providers/amazonBedrockDriver";
 import { readDirectoryOAuthCredential } from "@octant/provider-sdk/directory-oauth";
+import type { ProviderSessionOwnership } from "@octant/provider-sdk/driver";
 import type { CompatibleFetch } from "../providers/openAiCompatibleEndpoint";
 import { type ClaudeAgentSdkPort, makeClaudeAgentSdkPort } from "../providers/claudeAgentSdkPort";
 import type { ClaudeResumeIdentityPort } from "../providers/claudeDriver";
@@ -120,6 +121,7 @@ import { personSshAgentSocket } from "../shield/shieldServerStore";
 import { makeServerSshKeysBrokerClient } from "../shield/sshKeyBrokerClient";
 import { resolveRuntimeProject } from "./runtimeNetwork";
 import { ClaudeResumeIdentityJournal } from "../providers/claudeResumeIdentityJournal";
+import { JournalProviderSessionOwnership } from "../providers/providerSessionHolds";
 import { ClaudeResumeIdentityStore } from "../providers/claudeResumeIdentityStore";
 import { type CodexProcessPort, makeCodexProcessLive } from "../providers/codexProcess";
 import { type AcpProcessPort, makeAcpProcessLive } from "../providers/acpProcess";
@@ -237,6 +239,7 @@ import {
   appToolThreadLevel,
   accountKeepsOwnMemory,
   browserToolTransport,
+  claudeAccountUsesStoredKey,
   claudePlanUsageStateDirectory,
   defaultShellSettings,
   effectiveClaudeAccountConfigDirectory,
@@ -276,6 +279,8 @@ export interface ConfiguredProviderDriverOptions {
   /** The Project's registered servers, for Claude's own `ssh` below Full access. */
   readonly claudeServerAccess?: ProviderServerAccessPort;
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
+  /** Which runtime sessions an Octant thread holds, handed to every driver that takes up its own. */
+  readonly sessionOwnership?: ProviderSessionOwnership;
   /** The host's process authority clock, which Claude's pre-tool grants expire on. */
   readonly claudeAuthorityNow?: () => number;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
@@ -463,6 +468,9 @@ export function makeConfiguredProviderDriver(
       ...(options.claudeResumeIdentityPort === undefined
         ? {}
         : { claudeResumeIdentityPort: options.claudeResumeIdentityPort }),
+      ...(options.sessionOwnership === undefined
+        ? {}
+        : { sessionOwnership: options.sessionOwnership }),
       ...(options.claudeAuthorityNow === undefined
         ? {}
         : { claudeAuthorityNow: options.claudeAuthorityNow }),
@@ -1710,6 +1718,7 @@ export function wireProviders(deps: ProvidersDependencies) {
           clock: () => new Date().toISOString(),
         }),
       });
+    const sessionOwnership = new JournalProviderSessionOwnership(persistence.connection);
     const nativeHarnessTranscripts = new JournalNativeHarnessTranscriptStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -1950,6 +1959,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             claudeRuntimeNetwork: runtimeNetwork,
             claudeServerAccess: serverAccess,
             claudeResumeIdentityPort: claudeResumeIdentityStore,
+            sessionOwnership,
             claudeAuthorityNow: processAuthorityTime,
             isProjectConfinedPath,
             protectedPaths: hostProtectedPaths,
@@ -2216,6 +2226,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       claudeRuntimeNetwork: runtimeNetwork,
       claudeServerAccess: serverAccess,
       claudeResumeIdentityPort: claudeResumeIdentityStore,
+      sessionOwnership,
       claudeAuthorityNow: processAuthorityTime,
       isProjectConfinedPath,
       protectedPaths: hostProtectedPaths,
@@ -2330,7 +2341,8 @@ export function wireProviders(deps: ProvidersDependencies) {
           .filter((instance) => !isImageProfileDriverKind(instance.driverKind)),
       now: () => new Date().toISOString() as UtcTimestamp,
       unavailableReason: (instance) =>
-        instance.driverKind === "claude" && instance.configuration.authentication === "api-key"
+        instance.driverKind === "claude" &&
+        claudeAccountUsesStoredKey(instance.configuration.authentication)
           ? "plan-limits-do-not-apply"
           : unavailableLimitsReason(
               instance.driverKind,
@@ -2339,7 +2351,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       observe: async (instance, signal, { onDemand }) => {
         if (
           instance.driverKind === "claude" &&
-          instance.configuration.authentication === "api-key"
+          claudeAccountUsesStoredKey(instance.configuration.authentication)
         ) {
           return { source: "provider-runtime", unavailableReason: "plan-limits-do-not-apply" };
         }

@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import {
   ProviderPolicyRejected,
   ollamaAddressWarning,
+  claudeGatewayAddressWarning,
   changeAcpAgentConfiguration,
   createAcpAgentProvider,
   isAcpAgentInstance,
@@ -1890,7 +1891,7 @@ describe("provider instance policy", () => {
         expectedVersion: version(0),
         createdAt,
       }),
-    ).toThrow("Claude authentication must be subscription or api-key.");
+    ).toThrow("Claude authentication must be subscription, api-key, or gateway.");
   });
 
   it("creates and immutably updates Mistral Vibe with explicit selected authentication", () => {
@@ -2409,6 +2410,54 @@ describe("provider instance policy", () => {
     expect(ollamaAddressWarning("http://192.168.1.20:11434")).toContain("unencrypted");
     expect(ollamaAddressWarning("http://127.0.0.1:11434")).toBeUndefined();
     expect(ollamaAddressWarning("https://ollama.com")).toBeUndefined();
+  });
+
+  it("accepts a Claude gateway over HTTPS anywhere and plain HTTP only on this computer or a private network", () => {
+    const gateway = (gatewayBaseUrl: string | undefined) =>
+      createClaudeProvider({
+        id: ids.local,
+        displayName: "Team gateway",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "gateway",
+          gatewayBaseUrl,
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }).configuration;
+    expect(gateway("https://gateway.example.com/anthropic/").gatewayBaseUrl).toBe(
+      "https://gateway.example.com/anthropic",
+    );
+    expect(gateway("http://127.0.0.1:4000").gatewayBaseUrl).toBe("http://127.0.0.1:4000");
+    expect(gateway("http://192.168.1.20:4000").gatewayBaseUrl).toBe("http://192.168.1.20:4000");
+    for (const refused of [
+      undefined,
+      "http://gateway.example.com",
+      "https://user:secret@gateway.example.com",
+      "https://gateway.example.com?key=secret",
+      "ftp://gateway.example.com",
+    ]) {
+      expect(() => gateway(refused)).toThrow(ProviderPolicyRejected);
+    }
+    expect(claudeGatewayAddressWarning("http://192.168.1.20:4000")).toContain("unencrypted");
+    expect(claudeGatewayAddressWarning("https://gateway.example.com")).toBeUndefined();
+    expect(() =>
+      createClaudeProvider({
+        id: ids.local,
+        displayName: "Key account",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "api-key",
+          gatewayBaseUrl: "https://gateway.example.com",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }),
+    ).toThrow("Only a gateway account has a gateway address.");
   });
 
   it("keeps a Claude account pinned to the config directory and accent it was given", () => {

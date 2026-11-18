@@ -983,7 +983,7 @@ describe("ProviderSettingsView", () => {
     expect(props.onCreateAcpAgent).not.toHaveBeenCalled();
   });
 
-  it("says why a provider that needs a key cannot be added where keys cannot be stored", async () => {
+  it("adds a browser Claude key profile without its key and says how to store it on the host", async () => {
     const user = userEvent.setup();
     renderProviderSettings(
       <ProviderSettingsView {...fixture({ credentialManagementAvailable: false })} />,
@@ -994,8 +994,9 @@ describe("ProviderSettingsView", () => {
     await user.click(within(dialog).getByRole("button", { name: "Next" }));
     await user.click(within(dialog).getByRole("radio", { name: /^Anthropic API key/ }));
     expect(within(dialog).getByLabelText("Anthropic API key")).toBeDisabled();
+    expect(within(dialog).getByText(/octant provider key set/)).toBeVisible();
     await user.click(within(dialog).getByRole("button", { name: "Next" }));
-    expect(within(dialog).getByRole("alert")).toHaveTextContent("this browser cannot store one");
+    expect(within(dialog).getByLabelText("Provider name")).toBeVisible();
   });
 
   it("suggests the next free number when a second account already exists", async () => {

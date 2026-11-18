@@ -251,7 +251,7 @@ export function CanvasHtmlImport(props: CanvasHtmlImportProps) {
 }
 
 /** What the import took out, kind by kind, with a few of the addresses as text. */
-function DroppedSummary(props: { readonly dropped: ReadonlyArray<CanvasHtmlImportDrop> }) {
+export function DroppedSummary(props: { readonly dropped: ReadonlyArray<CanvasHtmlImportDrop> }) {
   if (props.dropped.length === 0) {
     return (
       <p className="canvas-start-from__note" data-testid="canvas-import-html-dropped">

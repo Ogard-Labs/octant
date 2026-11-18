@@ -5238,6 +5238,16 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   background: var(--claude-account-accent);
 }
 
+.claude-gateway-address {
+  display: grid;
+  gap: var(--oct-space-1);
+  justify-items: start;
+}
+
+.claude-gateway-address > input {
+  justify-self: stretch;
+}
+
 .claude-account-accent-picker {
   display: flex;
   flex-wrap: wrap;

@@ -3210,6 +3210,92 @@ describe("ChatService", () => {
     );
   });
 
+  it("gives a model that does not read a file's type the file's text in the message", async () => {
+    const textOnly = probeFixture({
+      models: [
+        {
+          id: decodeProviderModelId("model-a"),
+          displayName: "Model A",
+          contextLimit: 8_000,
+          reasoning: "supported",
+          inputModalities: ["text"],
+          options: [],
+          source: "discovered",
+          verification: "verified",
+        },
+      ],
+    });
+    const { service, fakeDriver } = openFixture({ probe: textOnly });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Files",
+      projectId: ids.project,
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const upload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "deploy.yaml",
+      mediaType: "application/yaml",
+      bytes: new TextEncoder().encode("replicas: 3\n"),
+    });
+    expect(upload.mediaType).toBe("application/yaml");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Is this right?",
+      attachmentIds: [upload.id],
+    });
+    const sent = fakeDriver.sentTurns[0];
+    expect(sent?.attachments).toEqual([]);
+    expect(sent?.prompt).toBe("Is this right?");
+    // The file's text goes with the person's message, marked as the file's.
+    const fileText = (sent?.context ?? []).find((block) => block.text.includes("deploy.yaml"));
+    expect(fileText).toMatchObject({ kind: "user-message" });
+    expect(fileText?.text).toContain(
+      'The person attached a file, "deploy.yaml" (application/yaml). Its text follows',
+    );
+    expect(fileText?.text).toContain("```\nreplicas: 3\n\n```");
+    // The file stays on the turn for the record.
+    expect(service.read(created.thread.id).turns[0]?.attachmentIds).toEqual([upload.id]);
+  });
+
+  it("refuses a binary file the model cannot read before any turn is journaled", async () => {
+    const { service, fakeDriver } = openFixture();
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Files",
+      projectId: ids.project,
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const upload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "bundle.zip",
+      mediaType: "application/zip",
+      bytes: new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0xff]),
+    });
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: service.read(created.thread.id).thread.version,
+        prompt: "Unpack this",
+        attachmentIds: [upload.id],
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "unsupported",
+        message: expect.stringMatching(/^bundle\.zip is not text.*Work or Code thread/),
+      },
+    });
+    expect(service.read(created.thread.id).turns).toEqual([]);
+    expect(fakeDriver.sentTurns).toEqual([]);
+  });
+
   it("refuses an image Sees images cannot describe, with its reason, before any turn is journaled", async () => {
     const textOnly = probeFixture({
       capabilities: { ...searxngResearchProbe().capabilities, nativeAttachments: "unsupported" },

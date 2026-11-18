@@ -84,6 +84,7 @@ import {
   providerProcessFailureSummary,
   providerRowReadinessLabel,
   titleCase,
+  claudeAuthenticationLabel,
 } from "./providerSettingsPresentation";
 import type { ProviderSettingsViewProps } from "./ProviderSettingsView";
 import type { LocateBinaryOutcome } from "./useDiscoveryController";
@@ -923,7 +924,7 @@ function ProviderRow(props: ProviderRowProps) {
     isAnthropicHttp ||
     isFoundry ||
     isImageProfile ||
-    (isClaude && props.instance.configuration.authentication === "api-key") ||
+    (isClaude && props.instance.configuration.authentication !== "subscription") ||
     acpInstance?.configuration.authentication === "api-key";
   const browserClaudeKeySetup = isClaude && usesCredential && !props.credentialManagementAvailable;
   const credential = useCredentialStatus(props, !usesCredential);
@@ -1826,10 +1827,11 @@ function ProviderRow(props: ProviderRowProps) {
                   <div className="provider-card__facts provider-card__facts--claude">
                     <span>
                       Authentication:{" "}
-                      {props.instance.configuration.authentication === "api-key"
-                        ? "Anthropic API key"
-                        : "Claude subscription"}
+                      {claudeAuthenticationLabel(props.instance.configuration.authentication)}
                     </span>
+                    {props.instance.configuration.gatewayBaseUrl === undefined ? null : (
+                      <span>Gateway: {props.instance.configuration.gatewayBaseUrl}</span>
+                    )}
                     {props.usageLimitsClient === undefined ? null : (
                       <ProviderUsageLimitsPanel
                         client={props.usageLimitsClient}
@@ -2326,7 +2328,9 @@ function authenticationGuidance(
     case "claude":
       return instance.configuration.authentication === "api-key"
         ? `Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in ${hostCredentialStore(hostPlatform)}, then check the connection again.`
-        : "Authenticate with the official Claude Code app or CLI, then check the connection again.";
+        : instance.configuration.authentication === "gateway"
+          ? `Add or replace the gateway token in the Octant host. It remains write-only and is stored in ${hostCredentialStore(hostPlatform)}, then check the connection again.`
+          : "Authenticate with the official Claude Code app or CLI, then check the connection again.";
     case "anthropic-compatible":
       return `Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in ${hostCredentialStore(hostPlatform)}, then check the connection again.`;
     case "azure-foundry":

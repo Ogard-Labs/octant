@@ -241,6 +241,10 @@ function codexWindowsLaunch(authority: CodexLaunchAuthority): WindowsProviderLau
     executionPolicy: authority.executionPolicy,
     fullAccessSandbox: authority.fullAccessSandbox,
     strict: authority.strict,
+    // A Chat thread gives Codex no execution environment and turns its shell,
+    // image, plugin and app features off on every start and resume, so it
+    // has no folder or shell without Octant's sandbox.
+    chatWithoutFolderOrShell: true,
   });
 }
 
