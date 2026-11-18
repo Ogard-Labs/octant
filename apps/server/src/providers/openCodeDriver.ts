@@ -1864,7 +1864,7 @@ function makeConnection(
     // but is admitted here only for the native process that earned it: the
     // ledger belongs to this connection's running generation, and is retired
     // the moment that process ends so no later generation inherits a grant.
-    let rememberedEdits = new RememberedOpenCodeEdits();
+    const rememberedEdits = new RememberedOpenCodeEdits();
     let sessionSetupInFlight = false;
     let closing = false;
     let client: OpenCodeClientPort | undefined;
@@ -2120,17 +2120,10 @@ function makeConnection(
     const samePorts = (left: ReadonlyArray<number>, right: ReadonlyArray<number>): boolean =>
       left.length === right.length && left.every((port, index) => port === right[index]);
     const closeRuntime = async (): Promise<void> => {
-      // A deliberate close retires the runtime generation. The cancelled
-      // process monitor and the aborted event stream belong to the closed
-      // runtime; their callbacks must not record an unexpected exit against
-      // the connection, or the next start on this connection is poisoned by
-      // a failure that was never real. The next runtime subscribes fresh.
+      // A deliberate close is not a runtime failure. Fence off the cancelled
+      // monitor and event stream before releasing the process.
       runtimeGeneration += 1;
-      // The grant stays in OpenCode's own store; what retires with the
-      // closed process is Octant's ledger of it, replaced before the next
-      // generation's sessions get theirs.
       rememberedEdits.retire();
-      rememberedEdits = new RememberedOpenCodeEdits();
       const outgoingSubscription = subscriptionAbort;
       subscriptionAbort = new AbortController();
       outgoingSubscription.abort();
@@ -3537,10 +3530,12 @@ function mapAndOffer(
     const reply = textProperty(event.properties, "reply");
     const grant = state.pendingEditGrants.get(settled);
     if (grant !== undefined && !state.answeredRequests.has(settled)) {
-      // The grant is taken whole or not at all: a batch the ledger cannot
-      // hold stays unadmitted, and a change no grant names fails the turn.
-      if (reply === "always") state.rememberedEdits.add(grant);
-      else if (reply === "once") state.unreportedEditGrants.push(...grant);
+      // The grant is taken whole or not at all. OpenCode already settled
+      // this request, so a batch the ledger cannot still remember keeps the
+      // same one-use admission a `once` answer gives, rather than being lost.
+      if (reply === "once" || (reply === "always" && !state.rememberedEdits.add(grant))) {
+        state.unreportedEditGrants.push(...grant);
+      }
     }
     state.approvals.delete(settled);
     state.pendingEditGrants.delete(settled);

@@ -1596,7 +1596,10 @@ it, so a later connection of the same Project admits nothing the earlier
 process remembered, and after a host restart or process exit such an edit
 fails the turn until it is approved again. The ledger holds at most 1,024
 file names per process and fails closed: a request whose new names would not
-fit whole is answered `once` instead of being remembered by half. Approval-gated on
+fit whole is answered `once` instead of being remembered by half, and a
+request OpenCode settles by itself cannot be re-answered, so the same full
+ledger leaves it the one-use admission a `once` answer gives rather than
+nothing. Approval-gated on
 2.x honours permission grants the person saved in OpenCode itself for the
 same repository: OpenCode keys them by the repository's root commit, keeps
 them in its own data store (shared with the person's own use because
@@ -1731,7 +1734,10 @@ fails as `stale-resume` and the driver never resumes that session again (in
 this host process), so the thread starts on a new session. The denial is a
 tombstone the driver keeps for the host's whole life rather than a list it
 can evict, and a `session.deleted` the provider reports clears the session's
-own tombstone — a deletion is an ending, not a doubt. The tool catalogue a
+own tombstone — a deletion is an ending, not a doubt. The tombstones are
+bounded to 4,096; a 4,097th distinct denial cannot be represented, so
+refusal latches for every resume — an id the cap dropped or one never seen
+— until the host restarts, while a new session may still start. The tool catalogue a
 session's resume may reuse is bounded to 128 catalogues held for 30 minutes
 each, dropped oldest-first past that; a resume that misses simply installs
 no app tools rather than another session's, and a deleted or stale session's

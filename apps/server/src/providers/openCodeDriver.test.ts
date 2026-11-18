@@ -2417,82 +2417,104 @@ describe("OpenCode driver", () => {
     expect(locked.approvals.at(-1)).not.toContain("OpenCode's own settings");
   });
 
-  it("admits the edits OpenCode makes later on a grant it remembers from an always answer, and the requests it settles by itself", async () => {
-    const asked = (id: string, file: string) =>
-      ({
-        type: "permission.v2.asked",
-        properties: { id, sessionID: "provider-session", action: "edit", resources: [file] },
-      }) as unknown as Event;
-    const fixture = betaDriver({
-      permissionPersistence: "project-default",
-      events: [asked("perm-a", "/tmp/project/a.ts"), asked("perm-b", "/tmp/project/b.ts")],
-      eventsOnReply: [
-        {
-          type: "permission.v2.replied",
-          properties: { sessionID: "provider-session", requestID: "perm-a", reply: "always" },
-        } as unknown as Event,
-        // OpenCode settles the other pending request by the remembered grant.
-        {
-          type: "permission.v2.replied",
-          properties: { sessionID: "provider-session", requestID: "perm-b", reply: "always" },
-        } as unknown as Event,
-        {
+  it.each([false, true])(
+    "admits the edits OpenCode makes later on a grant it remembers from an always answer, and the requests it settles by itself (full ledger: %s)",
+    async (fullLedger) => {
+      const asked = (id: string, files: ReadonlyArray<string>) =>
+        ({
+          type: "permission.v2.asked",
+          properties: { id, sessionID: "provider-session", action: "edit", resources: [...files] },
+        }) as unknown as Event;
+      const edited = (file: string) =>
+        ({
           type: "file.edited",
-          properties: { sessionID: "provider-session", file: "/tmp/project/a.ts" },
-        } as unknown as Event,
-        // A later edit of the same file asks nothing: OpenCode applies its grant.
-        {
-          type: "file.edited",
-          properties: { sessionID: "provider-session", file: "/tmp/project/a.ts" },
-        } as unknown as Event,
-        {
-          type: "file.edited",
-          properties: { sessionID: "provider-session", file: "/tmp/project/b.ts" },
-        } as unknown as Event,
-        { type: "session.idle", properties: { sessionID: "provider-session" } } as unknown as Event,
-      ],
-    });
-    const output = await Effect.runPromise(
-      Effect.scoped(
-        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
-          Effect.flatMap((connection) =>
-            Effect.gen(function* () {
-              const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
-                Stream.runCollect(
-                  stream.pipe(
-                    Stream.takeUntil((event) =>
-                      ["completed", "failed", "interrupted"].includes(event.kind),
+          properties: { sessionID: "provider-session", file },
+        }) as unknown as Event;
+      const fixture = betaDriver({
+        permissionPersistence: "project-default",
+        events: [
+          asked(
+            "perm-a",
+            fullLedger
+              ? [
+                  "/tmp/project/a.ts",
+                  ...Array.from({ length: 1023 }, (_, index) => `/tmp/project/f${index}.ts`),
+                ]
+              : ["/tmp/project/a.ts"],
+          ),
+          asked("perm-b", ["/tmp/project/b.ts"]),
+        ],
+        eventsOnReply: [
+          {
+            type: "permission.v2.replied",
+            properties: { sessionID: "provider-session", requestID: "perm-a", reply: "always" },
+          } as unknown as Event,
+          // OpenCode settles the other pending request by the remembered grant.
+          {
+            type: "permission.v2.replied",
+            properties: { sessionID: "provider-session", requestID: "perm-b", reply: "always" },
+          } as unknown as Event,
+          edited("/tmp/project/a.ts"),
+          // A later edit of the same file asks nothing: OpenCode applies its grant.
+          edited("/tmp/project/a.ts"),
+          edited("/tmp/project/b.ts"),
+          // A full ledger leaves the settled b.ts grant one-use only: its
+          // first change spends it, so a second has nothing left to admit it.
+          ...(fullLedger ? [edited("/tmp/project/b.ts")] : []),
+          {
+            type: "session.idle",
+            properties: { sessionID: "provider-session" },
+          } as unknown as Event,
+        ],
+      });
+      const output = await Effect.runPromise(
+        Effect.scoped(
+          fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+            Effect.flatMap((connection) =>
+              Effect.gen(function* () {
+                const stream = yield* connection.subscribe;
+                const collector = yield* Effect.fork(
+                  Stream.runCollect(
+                    stream.pipe(
+                      Stream.takeUntil((event) =>
+                        ["completed", "failed", "interrupted"].includes(event.kind),
+                      ),
                     ),
                   ),
-                ),
-              );
-              yield* connection.start({
-                sessionId,
-                modelId,
-                executionPolicy: "approval-gated",
-                nativeSetup: {
-                  subagents: false,
-                  webTools: true,
-                  skills: true,
-                  toolServers: true,
-                  hooks: true,
-                  projectCode: false,
-                },
-              });
-              yield* Effect.sleep("20 millis");
-              yield* connection.answerApproval({ sessionId, requestId: "perm-a", approved: true });
-              return yield* Fiber.join(collector);
-            }),
+                );
+                yield* connection.start({
+                  sessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                  nativeSetup: {
+                    subagents: false,
+                    webTools: true,
+                    skills: true,
+                    toolServers: true,
+                    hooks: true,
+                    projectCode: false,
+                  },
+                });
+                yield* Effect.sleep("20 millis");
+                yield* connection.answerApproval({
+                  sessionId,
+                  requestId: "perm-a",
+                  approved: true,
+                });
+                return yield* Fiber.join(collector);
+              }),
+            ),
           ),
         ),
-      ),
-    );
-    const events = Array.from(output);
-    expect(fixture.calls).toContain("permission.reply:always");
-    expect(events.filter((event) => event.kind === "file-change")).toHaveLength(3);
-    expect(events.some((event) => event.kind === "failed")).toBe(false);
-  });
+      );
+      const events = Array.from(output);
+      expect(fixture.calls).toContain("permission.reply:always");
+      expect(events.filter((event) => event.kind === "file-change")).toHaveLength(3);
+      // Only under a full ledger does the second b.ts report find its
+      // one-use grant spent and fail the turn.
+      expect(events.some((event) => event.kind === "failed")).toBe(fullLedger);
+    },
+  );
 
   it("does not admit an always-remembered edit on a fresh connection of the same Project", async () => {
     const asked = (id: string, file: string) =>

@@ -93,7 +93,12 @@ describe("OpenCodeRetainedSessions", () => {
       retained.markStale(`ses_${index}`);
     }
 
+    // Forgetting one known tombstone does not prove the id the cap dropped,
+    // or any other id the overflow can no longer name, is safe to resume.
+    retained.sessionRemoved("ses_1");
+
     expect(retained.refusesResume("ses_0")).toBe(true);
+    expect(retained.refusesResume("ses_4096")).toBe(true);
     expect(retained.refusesResume("never-seen")).toBe(true);
   });
 });
