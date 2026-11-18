@@ -1,4 +1,5 @@
 import type {
+  AccountMoveTextHandoffCause,
   CodeConversationTurnHandoff,
   CodeForkMergeBack,
   CodeForkMergeBackOutcome,
@@ -21,6 +22,9 @@ export function handoffSummary(
         externalContentIngested: event.externalContentIngested,
         ...(event.inputReceipt === undefined ? {} : { inputReceipt: event.inputReceipt }),
         ...(event.inherited === undefined ? {} : { inherited: event.inherited }),
+        ...(event.accountMoveTextCause === undefined
+          ? {}
+          : { accountMoveTextCause: event.accountMoveTextCause }),
       };
     case "fork":
       return {
@@ -39,6 +43,13 @@ export function handoffSummary(
         previousSessionId: event.previousSessionId,
         throughOperationId: event.throughOperationId,
       };
+    case "account-move-native-session":
+      return {
+        reason: event.reason,
+        previousProviderInstanceId: event.previousProviderInstanceId,
+        previousModelId: event.previousModelId,
+        previousSessionId: event.previousSessionId,
+      };
   }
 }
 
@@ -48,7 +59,12 @@ function count(value: number, one: string, many: string): string {
 
 type TextHandoff = Exclude<
   CodeConversationTurnHandoff,
-  { readonly reason: "fork-native-session" | "rewind-native-session" }
+  {
+    readonly reason:
+      | "fork-native-session"
+      | "rewind-native-session"
+      | "account-move-native-session";
+  }
 >;
 
 /** Every omission the host counted, named, so a short handoff never reads as a short conversation. */
@@ -112,6 +128,7 @@ export function conversationHandoffDisclosure(
           ? " The thread it was forked from has taken in outside content."
           : "",
         " Hidden reasoning, tool activity and the previous session did not transfer.",
+        accountMoveTextCauseDisclosure(handoff.accountMoveTextCause),
       ].join("");
     case "fork":
       return [
@@ -134,6 +151,41 @@ export function conversationHandoffDisclosure(
       ].join("");
     case "rewind-native-session":
       return "After the rewind, the provider continued its own session cut back to the last kept reply, with its messages and tool activity. The removed turns did not transfer.";
+    case "account-move-native-session":
+      return accountMoveSessionDisclosure(handoff, label);
+  }
+}
+
+/**
+ * A move to another account of the same provider that took the provider's own
+ * session along: the account change is still said, and that the session's
+ * files were copied into the new account.
+ */
+export function accountMoveSessionDisclosure(
+  handoff: {
+    readonly previousProviderInstanceId: string;
+    readonly previousModelId: string;
+  },
+  label: (selection: { readonly providerInstanceId: string; readonly modelId: string }) => string,
+): string {
+  return `Moved from ${label({ providerInstanceId: handoff.previousProviderInstanceId, modelId: handoff.previousModelId })}. The provider's own session was copied into this account and continued, with its messages and tool activity.`;
+}
+
+/** Why a move to another account of the same provider handed over as text, when it did. */
+export function accountMoveTextCauseDisclosure(
+  cause: AccountMoveTextHandoffCause | undefined,
+): string {
+  switch (cause) {
+    case undefined:
+      return "";
+    case "provider-cannot-carry":
+      return " This provider's session cannot be copied to another account.";
+    case "account-unavailable":
+      return " The previous account is no longer set up, so its session could not be copied.";
+    case "session-not-copied":
+      return " The previous account's session could not be copied safely.";
+    case "session-not-adopted":
+      return " The new account could not continue the copied session.";
   }
 }
 

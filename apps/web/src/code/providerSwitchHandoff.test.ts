@@ -16,7 +16,7 @@ const none = {
 
 type SwitchHandoff = Extract<
   CodeConversationTurnHandoff,
-  { readonly previousProviderInstanceId: unknown }
+  { readonly previousProviderInstanceId: unknown; readonly messages: unknown }
 >;
 
 const label = () => "Local — One";
@@ -34,6 +34,29 @@ function handoff(overrides: Partial<SwitchHandoff> = {}): SwitchHandoff {
 }
 
 describe("provider switch handoff disclosure", () => {
+  it("says a move to another account carried the provider's own session", () => {
+    const text = conversationHandoffDisclosure(
+      {
+        reason: "account-move-native-session",
+        previousProviderInstanceId: "80000000-0000-4000-8000-0000000000a1" as never,
+        previousModelId: "model-one" as never,
+        previousSessionId: "80000000-0000-4000-8000-0000000000b1" as never,
+      },
+      label,
+    );
+    expect(text).toContain("Moved from Local — One.");
+    expect(text).toContain("copied into this account and continued");
+  });
+
+  it("says why a move to another account handed over as text", () => {
+    const text = conversationHandoffDisclosure(
+      handoff({ accountMoveTextCause: "provider-cannot-carry" }),
+      label,
+    );
+    expect(text).toContain("Handed over 2 recent messages");
+    expect(text).toContain("This provider's session cannot be copied to another account.");
+  });
+
   it("says a fresh session after a rewind carried only the kept turns", () => {
     const text = conversationHandoffDisclosure(handoff({ reason: "rewind" }), label);
     expect(text).toContain("After the rewind, a fresh session started with 2 recent messages");

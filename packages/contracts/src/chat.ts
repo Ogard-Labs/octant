@@ -21,6 +21,7 @@ import { ContextCompactionSettledRecord, ContextManifestId } from "./context";
 import {
   ContextHandoffMessages,
   ContextHandoffOmissions,
+  AccountMoveSessionHandoff,
   ProviderSwitchConversationHandoff,
   RewindConversationHandoff,
 } from "./contextHandoff";
@@ -305,6 +306,7 @@ export type ChatBranchConversationHandoff = typeof ChatBranchConversationHandoff
  */
 export const ChatAttemptHandoff = Schema.Union(
   ProviderSwitchConversationHandoff,
+  AccountMoveSessionHandoff,
   ChatBranchConversationHandoff,
   RewindConversationHandoff,
 );

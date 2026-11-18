@@ -258,6 +258,7 @@ function openFixture(options?: {
   readonly responseFragments?: ReadonlyArray<string>;
   readonly verifyModelToolsOnFirstUse?: ChatServiceOptions["verifyModelToolsOnFirstUse"];
   readonly inputTransfer?: (directory: string) => Pick<ConversationInputTransfer, "prepare">;
+  readonly accountSessionCarrier?: ChatServiceOptions["accountSessionCarrier"];
   readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly nativeConversation?: boolean;
   readonly toolCatalogContinuation?: ProviderDriver["toolCatalogContinuation"];
@@ -734,6 +735,9 @@ function openFixture(options?: {
     ...(options?.verifyModelToolsOnFirstUse === undefined
       ? {}
       : { verifyModelToolsOnFirstUse: options.verifyModelToolsOnFirstUse }),
+    ...(options?.accountSessionCarrier === undefined
+      ? {}
+      : { accountSessionCarrier: options.accountSessionCarrier }),
     ...(options?.inputTransfer === undefined
       ? {}
       : { conversationInputTransfer: options.inputTransfer(dataDirectory) }),
@@ -12084,6 +12088,99 @@ describe("handing a Chat conversation to a new provider session", () => {
         },
       });
       expect(fixture.fakeDriver.resumeInputs).toEqual([]);
+    });
+
+    it("continues the provider's own session in the new account when its files are carried there", async () => {
+      const carried: Array<{ readonly from: string; readonly to: string }> = [];
+      const fixture = openMoving({
+        nativeConversationFor: ownsConversation,
+        accountSessionCarrier: {
+          sameProvider: () => true,
+          carry: async (request) => {
+            carried.push({
+              from: String(request.fromInstanceId),
+              to: String(request.toInstanceId),
+            });
+            return {
+              status: "carried",
+              resumeCursor: { ...request.resumeCursor, value: "carried-session" },
+            };
+          },
+        },
+      });
+      const threadId = await answeredThread(fixture);
+      const firstSession = fixture.fakeDriver.sentTurns[0]?.sessionId;
+
+      await moveAccount(fixture, threadId, { actor: person });
+      await sendFollowUp(fixture, threadId);
+
+      expect(carried).toEqual([{ from: native, to: otherNative }]);
+      // The same session, resumed under the new account; nothing handed over as text.
+      expect(fixture.fakeDriver.startedSessionIds).toHaveLength(1);
+      expect(fixture.fakeDriver.resumeInputs).toHaveLength(1);
+      expect(fixture.fakeDriver.resumeInputs[0]?.resumeCursor.value).toBe("carried-session");
+      expect(fixture.fakeDriver.sentTurns[1]?.sessionId).toBe(firstSession);
+      expect(
+        fixture.fakeDriver.sentTurns[1]?.context?.some(
+          (block) => block.kind === "conversation-summary",
+        ),
+      ).toBe(false);
+      expect(lastAttempt(fixture, threadId)).toMatchObject({
+        providerInstanceId: otherNative,
+        handoff: {
+          reason: "account-move",
+          previousProviderInstanceId: native,
+          previousModelId: "model-a",
+          nativeSessionTransferred: true,
+        },
+      });
+    });
+
+    it("hands over as text and says why when the session cannot be carried to the new account", async () => {
+      const fixture = openMoving({
+        nativeConversationFor: ownsConversation,
+        accountSessionCarrier: {
+          sameProvider: () => true,
+          carry: async () => ({ status: "text", cause: "session-not-copied" }),
+        },
+      });
+      const threadId = await answeredThread(fixture);
+
+      await moveAccount(fixture, threadId, { actor: person });
+      await sendFollowUp(fixture, threadId);
+
+      expect(fixture.fakeDriver.resumeInputs).toEqual([]);
+      expect(lastAttempt(fixture, threadId)?.handoff).toMatchObject({
+        reason: "provider-switch",
+        previousProviderInstanceId: native,
+        nativeSessionTransferred: false,
+        accountMoveTextCause: "session-not-copied",
+      });
+    });
+
+    it("never tries to carry a session to another provider", async () => {
+      let tried = false;
+      const fixture = openMoving({
+        nativeConversationFor: ownsConversation,
+        accountSessionCarrier: {
+          sameProvider: () => false,
+          carry: async () => {
+            tried = true;
+            return { status: "text", cause: "provider-cannot-carry" };
+          },
+        },
+      });
+      const threadId = await answeredThread(fixture);
+      await moveTo(fixture, threadId, otherNative);
+      await sendFollowUp(fixture, threadId);
+
+      expect(tried).toBe(false);
+      const handoff = lastAttempt(fixture, threadId)?.handoff;
+      expect(handoff).toMatchObject({
+        reason: "provider-switch",
+        nativeSessionTransferred: false,
+      });
+      expect(handoff).not.toHaveProperty("accountMoveTextCause");
     });
 
     it("refuses a move nobody asked for, from the host itself or from an agent", async () => {
