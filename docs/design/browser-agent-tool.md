@@ -324,12 +324,14 @@ the page, the workspace, or the person is reached.
   read, never a resolver, and only http(s) addresses get the decision. A
   context approved for exactly one origin keeps hops to that origin — a page
   opened for its own local server may reach it; every wider allowlist, the
-  any-site one included, admits no page-started hop. Only the top-level
-  redirect chain of a load the host itself named may hop there, and only in
-  its own tab: the agent's `navigate` or `tab-open` under the context's
-  allowlist, the person's typed address within the origin they typed. The
-  name ends with the load — an admitted page-started main navigation
-  supersedes it, and a committed main document ends it — and a renderer
+  any-site one included, admits no page-started hop. Open link in the context
+  menu follows the clicked-link rule because the page supplied the address.
+  Only the top-level redirect chain of a load the host itself named may hop
+  there, and only in its own tab: the agent's `navigate` or `tab-open` under
+  the context's allowlist, and a person's typed address within the exact
+  scheme, host, and port they typed. The name ends with the load — an admitted
+  page-started main navigation supersedes it, and a committed main document
+  ends it — and a renderer
   start, a subframe, an extension's load, a script, and a held or reopened
   page never borrow it.
 - After a page expires, ordinary agent calls answer `context-expired` and name

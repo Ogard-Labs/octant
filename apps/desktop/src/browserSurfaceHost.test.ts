@@ -1506,6 +1506,96 @@ describe("BrowserSurfaceHost", () => {
     host.closeContext(contextId);
   });
 
+  it("does not open a new tab from a local page link on a Private page", async () => {
+    let receive:
+      | ((image: {
+          getSize: () => { width: number; height: number };
+          toJPEG: () => Uint8Array;
+        }) => void)
+      | undefined;
+    const first = view();
+    const second = view();
+    const ports = [first, second];
+    const input = vi.fn((event: { readonly type: string; readonly button?: string }) => {
+      if (event.type === "mouseUp" && event.button === "right")
+        for (const [name, listener] of vi.mocked(first.webContents.on).mock.calls)
+          if (name === "context-menu")
+            listener(
+              {},
+              {
+                frame: first.webContents.mainFrame,
+                isEditable: false,
+                linkURL: "http://192.168.1.1/",
+              },
+            );
+    });
+    const createView = vi.fn(() => {
+      const port = ports.shift();
+      if (port === undefined) throw new Error("The page asked for another view");
+      return {
+        ...port,
+        human: {
+          input,
+          visible: vi.fn(),
+          bounds: vi.fn(),
+          frames: (listener: NonNullable<typeof receive>) => {
+            receive = listener;
+            return () => {};
+          },
+        },
+      };
+    });
+    const host = createBrowserSurfaceHost({
+      isEmbeddedOwner: () => true,
+      isOwnerWindowAvailable: () => true,
+      createView,
+    });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["*"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 4,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const request = (value: Readonly<Record<string, unknown>>) =>
+      decodeHumanBrowserRequest({ contextId, threadId, ...value });
+    const attached = await host.humanPresentation(request({ kind: "attach" }), "window-a");
+    if (attached.status !== "attached") throw new Error("Attachment refused");
+    const send = (value: Readonly<Record<string, unknown>>) =>
+      host.humanPresentation(
+        request({ presentationId: attached.presentationId, ...value }),
+        "window-a",
+      );
+    await send({ kind: "layout", layout: { width: 800, height: 600, visible: true } });
+    receive?.({ getSize: () => ({ width: 800, height: 600 }), toJPEG: () => new Uint8Array([1]) });
+    await send({ kind: "frame", acknowledgement: 0 });
+    for (const type of ["mouseDown", "mouseUp"])
+      expect(
+        await send({
+          kind: "input",
+          frameSequence: 1,
+          input: { type, x: 40, y: 60, button: "right", clickCount: 1 },
+        }),
+      ).toEqual({ status: "accepted" });
+    const menu = await send({ kind: "popup" });
+    if (menu.status !== "popup" || menu.popup.kind !== "context")
+      throw new Error("Expected the page's link menu");
+    expect(
+      await send({
+        kind: "popup-answer",
+        popupId: menu.popup.id,
+        answer: { kind: "context", action: "open-link" },
+      }),
+    ).toEqual({ status: "refused" });
+    expect(createView).toHaveBeenCalledOnce();
+    expect((await host.act(contextId, { kind: "tab-list" })).tabs).toHaveLength(1);
+    host.closeContext(contextId);
+  });
+
   it("refuses a composition edit when an agent action takes the surface while the edit awaits its field", async () => {
     let receive:
       | ((image: {
@@ -2456,6 +2546,28 @@ describe("BrowserSurfaceHost", () => {
       ).rejects.toMatchObject({
         name: "BrowserNavigationBlockedError",
         url: "http://192.168.1.1/",
+      });
+    });
+
+    it("keeps a typed load's local redirect on its exact origin even in a one-site context", async () => {
+      const { created, host, hop } = await opened(["http://localhost:4101"]);
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
+        expect(hop("http://localhost:4101/next")).toBe(true);
+        // The allowlist forgives an http page's https upgrade; the person
+        // typed the http origin, so the hop is not theirs.
+        expect(hop("https://localhost:4101/next")).toBe(false);
+        throw new Error("ERR_ABORTED (-3) loading 'http://localhost:4101/'");
+      });
+      await expect(
+        host.act(contextId, {
+          kind: "navigate",
+          target: "http://localhost:4101/",
+          startedBy: "person",
+        }),
+      ).rejects.toMatchObject({
+        name: "BrowserNavigationBlockedError",
+        url: "https://localhost:4101/next",
       });
     });
 

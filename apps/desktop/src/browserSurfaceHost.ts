@@ -2,6 +2,7 @@ import {
   captureBrowserFeedbackPoint,
   navigationOriginAllowed,
   normalizeNavigationUrl as normalizeUrl,
+  onThisComputerOrNetwork,
   refusesPageNavigation,
   type BrowserFeedbackPointObservation,
 } from "@octant/host-runtime";
@@ -1732,12 +1733,19 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       top: boolean,
       named?: NamedBrowserLoad,
     ): boolean => {
-      const namesLocalHop =
-        (named?.kind === "agent" && owned.activeTabId === tab.tabId) ||
-        (named?.kind === "person" &&
-          named.origin !== undefined &&
-          originAllowed(target, [named.origin]));
-      if (!namesLocalHop && refusesPageNavigation(target, owned.policy.allowedOrigins)) {
+      if (named?.kind === "person") {
+        // A typed load's local redirects depend on what the person typed,
+        // not on the ordinary page-navigation exception for a one-site context.
+        if (
+          onThisComputerOrNetwork(target) &&
+          (named.origin === undefined || originOf(target) !== named.origin)
+        ) {
+          return false;
+        }
+      } else if (
+        !(named?.kind === "agent" && owned.activeTabId === tab.tabId) &&
+        refusesPageNavigation(target, owned.policy.allowedOrigins)
+      ) {
         return false;
       }
       return owned.ownerNavigationRestricted || ownerControls.holdsPage(owned)
@@ -2064,6 +2072,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     queueSurfaceAction(owned, async () => {
       if (surfaces.get(contextId) !== owned || owned.control === "agent") return false;
       if (owned.tabs.length >= owned.policy.maxConcurrentTabs) return false;
+      // The link came from the page, even though the person chose the menu action.
+      if (refusesPageNavigation(url, owned.policy.allowedOrigins)) return false;
       // A person's chosen link is their own browsing, as following it would be.
       owned.control = "user";
       if (!admitNavigation(owned, url)) return false;
