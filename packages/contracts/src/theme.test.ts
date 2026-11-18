@@ -499,6 +499,15 @@ describe("application background contracts", () => {
     expect(() => decodeAppBackground({ kind: "characters", characterSpeed: -1 })).toThrow();
   });
 
+  it("keeps the character field's chosen pattern and refuses one it does not draw", () => {
+    for (const characterPattern of ["cycle", "blotches", "currents", "rings"]) {
+      expect(decodeAppBackground({ kind: "characters", characterPattern })).toMatchObject({
+        characterPattern,
+      });
+    }
+    expect(() => decodeAppBackground({ kind: "characters", characterPattern: "spiral" })).toThrow();
+  });
+
   it("refuses character sets that are emoji, controls, bidi overrides, spaces or too long", () => {
     const refused = ["😀", "a\u0007", "a\u202e", "a b", "", "a\u0301", "x".repeat(65)];
     for (const characterSet of refused) {

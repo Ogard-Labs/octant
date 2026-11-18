@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AppBackgroundCharacterPattern } from "@octant/contracts/theme";
 import {
   CENTRE_SHARE,
+  type AsciiFieldOptions,
   PEAK_ALPHA,
   fieldPixelRatio,
   densityScale,
@@ -436,6 +438,7 @@ describe("character ground click rings", () => {
       characterSet: "01",
       density: 50,
       speed: 0,
+      pattern: "cycle",
     }));
     vi.advanceTimersByTime(3000);
     expect(writes.frames).toBe(1);
@@ -452,7 +455,12 @@ describe("character ground click rings", () => {
 
   it("keeps the field running when the set changes, repainting its glyphs once", () => {
     const writes = recordingCanvases();
-    let options = { characterSet: "ab", density: 50, speed: 50 };
+    let options: AsciiFieldOptions = {
+      characterSet: "ab",
+      density: 50,
+      speed: 50,
+      pattern: "cycle",
+    };
     const stop = runAsciiField(sizedCanvas(), true, undefined, () => options);
     vi.advanceTimersByTime(500);
     const before = writes.frames;
@@ -475,9 +483,70 @@ describe("character ground click rings", () => {
     expect(densityScale(0)).toBe(1);
   });
 
+  it("never inks more on average than the default field, for any held pattern and density", () => {
+    const defaultInk = meanStrength(50);
+    const patterns: ReadonlyArray<AppBackgroundCharacterPattern> = [
+      "blotches",
+      "currents",
+      "rings",
+    ];
+    for (const pattern of patterns) {
+      for (const density of [0, 50, 100]) {
+        expect(meanStrength(density, pattern) * densityScale(density, pattern)).toBeLessThanOrEqual(
+          defaultInk + 1e-9,
+        );
+      }
+    }
+  });
+
+  it("draws a held pattern alone, with no cross-fade where the cycle blends two", () => {
+    const sum = (t: number, pattern: AppBackgroundCharacterPattern) => {
+      const thresholds = patchThresholds(50);
+      let total = 0;
+      const cells: number[] = [];
+      for (let row = 0; row < 40; row += 1) {
+        for (let column = 0; column < 120; column += 1) {
+          const value = patchStrength(column, row, t, thresholds, pattern);
+          total += value;
+          cells.push(value);
+        }
+      }
+      return { total, cells };
+    };
+    // At 45 s the cycle is in the middle of its rings, so a held ring field is the same.
+    expect(sum(45, "rings").cells).toEqual(sum(45, "cycle").cells);
+    // At 5 s the cycle draws blotches, not rings.
+    expect(sum(5, "rings").cells).not.toEqual(sum(5, "cycle").cells);
+    // At 18 s the cycle is blending blotches into currents; a held pattern is not.
+    expect(sum(18, "blotches").cells).not.toEqual(sum(18, "cycle").cells);
+    expect(sum(18, "blotches").cells).toEqual(sum(18, "blotches").cells);
+  });
+
+  it("redraws a still field in place when the pattern changes", () => {
+    const writes = recordingCanvases();
+    let options: AsciiFieldOptions = {
+      characterSet: "ab",
+      density: 50,
+      speed: 0,
+      pattern: "blotches",
+    };
+    const stop = runAsciiField(sizedCanvas(), false, undefined, () => options);
+    vi.advanceTimersByTime(100);
+    const before = writes.masks.at(-1)?.alphas.join(",");
+    options = { ...options, pattern: "rings" };
+    stop.redraw();
+    expect(writes.masks.at(-1)?.alphas.join(",")).not.toBe(before);
+    stop();
+  });
+
   it("redraws a still field in place when the density changes, without rebuilding or re-rolling it", () => {
     const writes = recordingCanvases();
-    let options = { characterSet: "ab", density: 50, speed: 0 };
+    let options: AsciiFieldOptions = {
+      characterSet: "ab",
+      density: 50,
+      speed: 0,
+      pattern: "cycle",
+    };
     const stop = runAsciiField(sizedCanvas(), false, undefined, () => options);
     vi.advanceTimersByTime(100);
     const surfaces = writes.surfaces;
