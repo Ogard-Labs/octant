@@ -144,6 +144,7 @@ export function applyActivityEvent(
         id: event.taskId,
         state: event.state,
         summary: event.summary,
+        ...(event.runningSummary === undefined ? {} : { runningSummary: event.runningSummary }),
       }),
     };
   }

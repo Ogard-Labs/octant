@@ -892,7 +892,16 @@ function checklistEvents(
     }
     position += 1;
     taskIds.push(taskId);
-    results.push(event(context, { kind: "task-progress", taskId, status, summary }));
+    const running = normalized(jsonString(todo, "activeForm") ?? "", SUMMARY_MAX_CHARACTERS);
+    results.push(
+      event(context, {
+        kind: "task-progress",
+        taskId,
+        status,
+        summary,
+        ...(running === undefined ? {} : { runningSummary: running }),
+      }),
+    );
   }
   // A list with items but none readable is one Claude refuses; keep the panel.
   if (results.length === 0 && todos.length > 0) return [{ kind: "ignored" }];
@@ -913,7 +922,19 @@ function taskListEvents(context: ClaudeEventContext): ReadonlyArray<ClaudeMapped
     if (summary === undefined || status === undefined) continue;
     const taskId = context.taskList.panelTaskId(task.id, context.makeTaskId);
     taskIds.push(taskId);
-    results.push(event(context, { kind: "task-progress", taskId, status, summary }));
+    const running =
+      task.activeForm === undefined
+        ? undefined
+        : normalized(task.activeForm, SUMMARY_MAX_CHARACTERS);
+    results.push(
+      event(context, {
+        kind: "task-progress",
+        taskId,
+        status,
+        summary,
+        ...(running === undefined ? {} : { runningSummary: running }),
+      }),
+    );
   }
   return [...results, event(context, { kind: "task-list", taskIds })];
 }

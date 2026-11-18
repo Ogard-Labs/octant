@@ -24,6 +24,8 @@ export type ClaudeTaskStatus = "pending" | "in_progress" | "completed";
 export interface ClaudeTask {
   readonly id: string;
   readonly subject: string;
+  /** Claude's wording for the task while it runs; absent when it gave none. */
+  readonly activeForm?: string;
   readonly status: ClaudeTaskStatus;
 }
 
@@ -40,6 +42,7 @@ export type ClaudeTaskToolOutput =
       readonly task: {
         readonly id: string;
         readonly subject: string;
+        readonly activeForm?: string;
         readonly status?: ClaudeTaskStatus;
       } | null;
     }
@@ -81,14 +84,24 @@ function status(value: unknown): ClaudeTaskStatus | undefined {
 }
 
 /** The task a `TaskCreate`, `TaskGet`, or `TaskList` result names; undefined for any other shape. */
-function outputTask(value: unknown) {
+function outputTask(value: unknown):
+  | {
+      readonly id: string;
+      readonly subject: string;
+      readonly activeForm?: string;
+      readonly status?: ClaudeTaskStatus;
+    }
+  | undefined {
   const task = record(value);
   const id = taskId(task?.id);
   const text = subject(task?.subject);
   if (task === undefined || id === undefined || text === undefined) return undefined;
-  if (task.status === undefined) return { id, subject: text };
+  const form = subject(task.activeForm);
+  const named =
+    form === undefined ? { id, subject: text } : { id, subject: text, activeForm: form };
+  if (task.status === undefined) return named;
   const state = status(task.status);
-  return state === undefined ? undefined : { id, subject: text, status: state };
+  return state === undefined ? undefined : { ...named, status: state };
 }
 
 export function claudeTaskToolOutput(value: unknown): ClaudeTaskToolOutput | undefined {
@@ -105,7 +118,12 @@ export function claudeTaskToolOutput(value: unknown): ClaudeTaskToolOutput | und
     for (const value of output.tasks) {
       const task = outputTask(value);
       if (task?.status === undefined) return undefined;
-      tasks.push({ id: task.id, subject: task.subject, status: task.status });
+      tasks.push({
+        id: task.id,
+        subject: task.subject,
+        ...(task.activeForm === undefined ? {} : { activeForm: task.activeForm }),
+        status: task.status,
+      });
     }
     return { kind: "list", tasks };
   }
@@ -194,9 +212,13 @@ export class ClaudeTaskList {
         if (output.kind !== "task" || output.task === null) return false;
         // A task created with `_internal` metadata is one `TaskList` hides.
         if (record(input?.metadata)?._internal) return false;
+        // The runtime's result may leave the running wording out; the call's
+        // own input carries it.
+        const created = output.task.activeForm ?? subject(input?.activeForm);
         this.#tasks.set(output.task.id, {
           id: output.task.id,
           subject: output.task.subject,
+          ...(created === undefined ? {} : { activeForm: created }),
           status: output.task.status ?? "pending",
         });
         return true;
@@ -205,17 +227,24 @@ export class ClaudeTaskList {
         if (output.kind !== "task" || output.task?.status === undefined) return false;
         const known = this.#tasks.get(output.task.id);
         if (known === undefined) return false;
+        const form = output.task.activeForm ?? known.activeForm;
         this.#tasks.set(output.task.id, {
           id: output.task.id,
           subject: output.task.subject,
+          ...(form === undefined ? {} : { activeForm: form }),
           status: output.task.status,
         });
         return true;
       }
       case "TaskList": {
         if (output.kind !== "list") return false;
+        // A listing may omit the running wording a task was created with.
+        const known = new Map(this.#tasks);
         this.#tasks.clear();
-        for (const task of output.tasks) this.#tasks.set(task.id, task);
+        for (const task of output.tasks) {
+          const form = task.activeForm ?? known.get(task.id)?.activeForm;
+          this.#tasks.set(task.id, form === undefined ? task : { ...task, activeForm: form });
+        }
         return true;
       }
       case "TaskUpdate": {
@@ -230,9 +259,13 @@ export class ClaudeTaskList {
           ? subject(input?.subject)
           : undefined;
         const moved = output.updatedFields.includes("status") ? status(output.statusTo) : undefined;
+        const form = output.updatedFields.includes("activeForm")
+          ? subject(input?.activeForm)
+          : known.activeForm;
         this.#tasks.set(output.taskId, {
           id: known.id,
           subject: renamed ?? known.subject,
+          ...(form === undefined ? {} : { activeForm: form }),
           status: moved ?? known.status,
         });
         return true;
@@ -369,7 +402,14 @@ export async function readClaudeStoredTaskList(
     }
     // `TaskList` leaves out a task whose `_internal` metadata is set.
     if (task.metadata?._internal) continue;
-    tasks.push({ id: task.id, subject: task.subject, status: task.status });
+    tasks.push({
+      id: task.id,
+      subject: task.subject,
+      ...(task.activeForm === undefined || task.activeForm.length > MAX_SUBJECT_CHARACTERS
+        ? {}
+        : { activeForm: task.activeForm }),
+      status: task.status,
+    });
   }
   return { status: "read", tasks: tasks.sort(byClaudeOrder) };
 }

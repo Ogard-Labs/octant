@@ -1960,6 +1960,8 @@ const TaskProgressEvent = Schema.Struct({
   taskId: boundedNonEmptyText(255),
   state: Schema.Literal("pending", "running", "waiting", "completed", "failed"),
   summary: boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES),
+  /** The provider's wording while the task runs; absent in journals written before it existed. */
+  runningSummary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
 }).annotations(strict);
 /**
  * The provider restated its plan: the turn's tasks are now exactly these ids,

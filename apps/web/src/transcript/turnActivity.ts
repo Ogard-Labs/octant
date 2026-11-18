@@ -39,6 +39,8 @@ export type TurnActivityRow =
       readonly id: string;
       readonly state: "pending" | "running" | "waiting" | "completed" | "failed";
       readonly summary: string;
+      /** The provider's wording while the task runs; shown only while the turn is running. */
+      readonly runningSummary?: string;
     }
   | {
       /** An approval a reviewer answered, in the reviewer's own name: Octant Shield or the provider. */

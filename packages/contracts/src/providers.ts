@@ -3170,6 +3170,8 @@ export const ProviderRuntimeEvent = Schema.Union(
     taskId: Schema.NonEmptyTrimmedString,
     status: Schema.Literal("pending", "in-progress", "completed", "failed"),
     summary: Schema.NonEmptyTrimmedString,
+    /** The provider's wording for the task while it runs ("Running the tests"); absent when it has none. */
+    runningSummary: Schema.optional(Schema.NonEmptyTrimmedString),
   }).annotations(strict),
   /**
    * The provider restated its whole plan: the turn's tasks are now exactly

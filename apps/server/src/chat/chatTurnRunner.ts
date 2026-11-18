@@ -1556,6 +1556,9 @@ export class ChatTurnRunner {
                     taskId: event.taskId,
                     state: event.status === "in-progress" ? "running" : event.status,
                     summary: event.summary,
+                    ...(event.runningSummary === undefined
+                      ? {}
+                      : { runningSummary: event.runningSummary }),
                   };
                   const nextTasks = upsertThreadTaskProgress(currentAttempt.tasks, task);
                   if (nextTasks === currentAttempt.tasks) {

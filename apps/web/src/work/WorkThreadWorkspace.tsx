@@ -2817,6 +2817,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         id: task.taskId,
                         state: task.state,
                         summary: task.summary,
+                        ...(task.runningSummary === undefined
+                          ? {}
+                          : { runningSummary: task.runningSummary }),
                       })),
                     }}
                   />

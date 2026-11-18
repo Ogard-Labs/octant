@@ -630,7 +630,15 @@ counts visible while folded. An unfinished list after a settled turn says
 Incomplete; it does not claim that the agent is still running. The open list
 shows the recorded ordered steps in a bounded, scrollable list: the running
 step at Medium (500), finished steps struck through in secondary ink, and no
-fill on any row. Neither this list nor the journaled plan borrows progress,
+fill on any row. A provider that words a task for while it runs (Claude's
+`activeForm`: "Running the test suite" for "Run the test suite") has that
+wording shown for the running task, and in the header when nothing failed or
+waits, only while the turn is running; once the turn has stopped the task is
+named plainly, so a stopped turn never reads as still working. A provider
+without running wording (Codex) shows the plain wording throughout. The
+running wording is untrusted provider text, bounded and redacted like the
+plain one, optional in every journaled task so older journals replay
+unchanged, and task rows never count as tool calls or steps. Neither this list nor the journaled plan borrows progress,
 completion, or authority from the subagent group.
 
 ## Message queue and Stop
