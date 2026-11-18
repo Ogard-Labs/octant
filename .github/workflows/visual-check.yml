@@ -47,8 +47,10 @@ jobs:
             # design change still waiting for its pictures must not stop the queue.
             merge_group) draw=false ;;
             pull_request)
-              if gh api --paginate "repos/${{ github.repository }}/pulls/${PULL}/files" --jq '.[].filename' \
-                | grep -qE '^(apps/web/|packages/theme/|packages/contracts/src/theme\.ts$|DESIGN\.md$|\.github/workflows/visual-check\.yml$)'; then
+              # Read the list on its own line, so a failed request fails the
+              # step instead of reading as "no screen files changed".
+              files="$(gh api --paginate "repos/${{ github.repository }}/pulls/${PULL}/files" --jq '.[].filename')"
+              if grep -qE '^(apps/web/|packages/theme/|packages/contracts/src/theme\.ts$|DESIGN\.md$|\.github/workflows/visual-check\.yml$)' <<< "$files"; then
                 draw=true
               else
                 draw=false
