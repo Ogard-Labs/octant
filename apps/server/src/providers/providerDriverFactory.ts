@@ -12,6 +12,7 @@ import {
   defaultProviderAccountDirectory,
   effectiveClaudeAccountConfigDirectory,
   isAcpAgentInstance,
+  isAddedAcpAgentInstance,
   isImageProfileDriverKind,
 } from "@octant/domain";
 import type { ProviderDriver, ProviderSessionOwnership } from "@octant/provider-sdk/driver";
@@ -39,6 +40,7 @@ import { withAccountSignIn } from "./accountSignIn";
 import { isolatedClaudeAccountEnvironment } from "./claudeAccountIsolation";
 import type { CodexProcessPort } from "./codexProcess";
 import { makeAcpDriver } from "./acpDriver";
+import { addedAcpAgentProfile, withAddedAcpAgentLaunch } from "./addedAcpAgent";
 import type { AcpProcessPort } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind } from "./acpProfiles";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
@@ -156,6 +158,29 @@ export function makeProviderDriver(
         }
       : driver;
   }
+  if (isAddedAcpAgentInstance(instance)) {
+    const install = instance.configuration.install;
+    if (
+      options.acpProcess === undefined ||
+      options.acpHome === undefined ||
+      install === undefined
+    ) {
+      throw new ProviderDriverConfigurationError(
+        install === undefined ? `Install ${instance.displayName} before starting it.` : undefined,
+      );
+    }
+    return withAddedAcpAgentLaunch(
+      makeAcpDriver({
+        profile: addedAcpAgentProfile(instance),
+        instanceId: instance.id,
+        binaryPath: install.executable,
+        managedHome: options.acpHome("acp-agent", instance.id),
+        process: options.acpProcess,
+        runtimeRegistry: options.runtimeRegistry,
+      }),
+      instance,
+    );
+  }
   const readPlanMcpServers = options.planMcpServers;
   switch (instance.driverKind) {
     case "opencode":
@@ -214,6 +239,7 @@ export function makeProviderDriver(
       }
       const codexHome = effectiveCodexAccountHome(instance, hostEnvironment, homedir());
       const readCodexOwnMemory = options.providerOwnMemory;
+      const readProtectedPaths = options.protectedPaths;
       const codexEnvironment = codexAccountProcessEnvironment({
         binaryPath: instance.configuration.binaryPath,
         hostEnvironment,
@@ -243,6 +269,9 @@ export function makeProviderDriver(
         ...(options.credentialResolver === undefined
           ? {}
           : { credentialResolver: options.credentialResolver }),
+        ...(readProtectedPaths === undefined
+          ? {}
+          : { protectedSignIns: () => readProtectedPaths().atFullAccess }),
       });
       // Settings signs the account in with its own `codex login`, under its home.
       return withAccountSignIn(codexDriver, {

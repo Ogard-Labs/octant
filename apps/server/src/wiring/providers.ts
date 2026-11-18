@@ -15,6 +15,9 @@ import {
 import { randomUUID } from "node:crypto";
 import { bindGeneratedMcpSignInPolicy } from "../extensions/generatedMcpSignInPolicy";
 import { lstatSync, realpathSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import { acpRegistryAgent } from "@octant/plugin-host/acp-agents";
+import { installAcpAgent, makeAcpAgentInstallPorts } from "../providers/acpAgentInstall";
 import { homedir, tmpdir } from "node:os";
 import {
   makeAccountSessionCarrier,
@@ -44,6 +47,7 @@ import {
   decodeUtcTimestamp,
 } from "@octant/contracts";
 import type { McpPlanServerProvider } from "@octant/contracts/mcp-plan-read-only";
+import type { BlockableToolProvider } from "@octant/contracts/blocked-tools";
 import { ExtensionProviderFamily } from "@octant/contracts/extensions";
 import type {
   HarnessEndpointDriver,
@@ -161,6 +165,9 @@ import { ProviderAvailabilityMarks } from "../providers/providerAvailabilityMark
 import { ProviderRuntimeUsageLimitsStore } from "../providers/providerRuntimeUsageLimitsStore";
 import { attachProviderRuntimeUsageLimits } from "../providers/providerRuntimeUsageLimitsDriver";
 import { compactionPointFor, withCompactionPoint } from "../providers/compactionPointDriver";
+import { withBlockedTools } from "../providers/blockedToolsDriver";
+import { BlockedToolsService } from "../providers/blockedToolsService";
+import { createBlockedToolsRouteHandler } from "../blockedToolsRoutes";
 import { redactProviderRuntimeSecrets } from "../providers/secretRedactingDriver";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
@@ -288,6 +295,8 @@ export interface ConfiguredProviderDriverOptions {
   readonly protectedPaths?: () => OpenCodeProtectedPaths;
   /** The provider's own MCP servers the person let into Plan, read at each launch. */
   readonly planMcpServers?: (provider: McpPlanServerProvider) => ReadonlyArray<string>;
+  /** The tools the person blocked for a provider in Settings, read at each launch. */
+  readonly blockedTools?: (provider: BlockableToolProvider) => ReadonlyArray<string>;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   readonly codexInstances?: ReadonlyArray<ProviderInstance>;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
@@ -549,6 +558,13 @@ export function makeConfiguredProviderDriver(
       },
     );
   }
+  // The person's blocked tools ride on every launch of a provider that can
+  // keep them out; a provider not offered in Settings never gets a list.
+  const blockedTools = options.blockedTools;
+  const blockable = blockableToolProvider(instance.driverKind);
+  if (blockedTools !== undefined && blockable !== undefined) {
+    driver = withBlockedTools(driver, () => blockedTools(blockable));
+  }
   // Redaction comes first, so every consumer of the stream, the usage tap
   // included, reads the redacted events.
   const redacted = redactProviderRuntimeSecrets(driver);
@@ -749,6 +765,16 @@ export function wireProviders(deps: ProvidersDependencies) {
     });
     const planMcpServers = (provider: McpPlanServerProvider) =>
       mcpPlanReadOnly.serversFor(provider);
+    // The provider tools the person blocked. Hydrated before any driver is
+    // built, so the first launch already carries them.
+    const blockedToolsService = new BlockedToolsService({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      clock: () => decodeUtcTimestamp(new Date().toISOString()),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const blockedTools = (provider: BlockableToolProvider) =>
+      blockedToolsService.toolsFor(provider);
     // What each provider-owned session already holds outlives this process, as
     // the runtime's own history does, so a resumed session's first turn after
     // a restart is sent only what is new.
@@ -1377,8 +1403,14 @@ export function wireProviders(deps: ProvidersDependencies) {
         }),
       }),
     });
+    const blockedToolsRoutes = createBlockedToolsRouteHandler({
+      service: blockedToolsService,
+      windowAuthorityStore,
+    });
     const providerToolingRoutes = async (request: Request): Promise<Response | undefined> =>
-      (await mcpPlanReadOnlyRoutes(request)) ?? (await providerToolingCommandRoutes(request));
+      (await mcpPlanReadOnlyRoutes(request)) ??
+      (await blockedToolsRoutes(request)) ??
+      (await providerToolingCommandRoutes(request));
     const extensionRoutes = createExtensionRouteHandler({
       service: extensionApiService,
       windowAuthorityStore,
@@ -1915,8 +1947,30 @@ export function wireProviders(deps: ProvidersDependencies) {
       }
       await credentialResolver.delete(instanceId);
     };
+    const acpAgentInstallPorts = makeAcpAgentInstallPorts({
+      fetchesAllowed: isMarketplaceFetchAllowed,
+    });
     const providerService = new ProviderService({
       latestNpmVersion: createProviderLatestVersionCheck({ isAllowed: isMarketplaceFetchAllowed }),
+      acpAgentInstall: {
+        install: (instance) =>
+          installAcpAgent(
+            {
+              configuration: instance.configuration,
+              listing:
+                instance.configuration.source.kind === "registry"
+                  ? acpRegistryAgent(instance.configuration.source.registryId)
+                  : undefined,
+              root: join(providerDataDirectory, "acp-agent-installs", instance.id),
+            },
+            acpAgentInstallPorts,
+          ),
+        remove: (instanceId) =>
+          rm(join(providerDataDirectory, "acp-agent-installs", instanceId), {
+            recursive: true,
+            force: true,
+          }),
+      },
       persistence,
       runtimeRegistry: providerRuntimeRegistry,
       isProviderExecutableAvailable,
@@ -1964,6 +2018,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             isProjectConfinedPath,
             protectedPaths: hostProtectedPaths,
             planMcpServers,
+            blockedTools,
             get claudeInstances() {
               return persistence.readProviderInstances();
             },
@@ -2231,6 +2286,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       isProjectConfinedPath,
       protectedPaths: hostProtectedPaths,
       planMcpServers,
+      blockedTools,
       runtimeRegistry: providerRuntimeRegistry,
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
       onRuntimeEvent: recordProviderRuntimeUsage,
@@ -2507,3 +2563,10 @@ export function wireProviders(deps: ProvidersDependencies) {
 }
 
 export type ProvidersWiring = Effect.Effect.Success<ReturnType<typeof wireProviders>>;
+
+/** The Settings key for a driver whose tools a person may block, if it is one. */
+function blockableToolProvider(kind: ProviderDriverKind): BlockableToolProvider | undefined {
+  return kind === "claude" || kind === "codex" || kind === "opencode" || kind === "pi"
+    ? kind
+    : undefined;
+}

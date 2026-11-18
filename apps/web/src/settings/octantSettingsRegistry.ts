@@ -417,6 +417,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "background characters ascii letters glyphs symbols custom pattern",
         },
         {
+          id: settingId("app-background-character-pattern"),
+          label: "Character pattern",
+          scope: "app",
+          keywords:
+            "background characters pattern blotches currents rings all in turn shape ascii glyphs custom",
+        },
+        {
           id: settingId("app-background-character-density"),
           label: "Character density",
           scope: "app",
@@ -1409,6 +1416,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Protect another path",
           scope: "host",
           keywords: "protected files add path folder secret deny agents",
+        },
+        {
+          id: settingId("blocked-tools"),
+          label: "Blocked tools",
+          scope: "host",
+          keywords:
+            "blocked tools block disallow deny provider tool claude code codex opencode pi mcp server webfetch shell bash",
+        },
+        {
+          id: settingId("blocked-tools-add"),
+          label: "Block a tool",
+          scope: "host",
+          keywords: "blocked tools block add provider tool deny disallowedTools",
         },
         {
           id: settingId("public-links"),

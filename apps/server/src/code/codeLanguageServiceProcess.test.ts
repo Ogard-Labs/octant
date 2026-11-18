@@ -175,6 +175,11 @@ function harness(input: {
   readonly approvals?: CodeLanguageServiceOptions["approvals"];
   readonly egress?: LanguageServerEgress;
   readonly threadTainted?: CodeLanguageServiceOptions["threadTainted"];
+  readonly threadStrict?: CodeLanguageServiceOptions["threadStrict"];
+  readonly processes?: Pick<
+    NonNullable<ConstructorParameters<typeof LanguageServerProcessPort>[0]>,
+    "platform" | "stopWindowsTree"
+  >;
   readonly usesProjectToolchain?: CodeLanguageServiceOptions["usesProjectToolchain"];
 }): Harness {
   const state = {
@@ -192,6 +197,7 @@ function harness(input: {
     confinement: input.confinement,
     ...(input.receipts === undefined ? {} : { receiptDirectory: input.receipts }),
     ...(input.egress === undefined ? {} : { egress: input.egress }),
+    ...input.processes,
   });
   const service = new CodeLanguageService({
     authority: {
@@ -234,6 +240,7 @@ function harness(input: {
     ...(input.watcher === undefined ? {} : { watcher: input.watcher }),
     ...(input.approvals === undefined ? {} : { approvals: input.approvals }),
     ...(input.threadTainted === undefined ? {} : { threadTainted: input.threadTainted }),
+    ...(input.threadStrict === undefined ? {} : { threadStrict: input.threadStrict }),
     ...(input.usesProjectToolchain === undefined
       ? {}
       : { usesProjectToolchain: input.usesProjectToolchain }),
@@ -630,6 +637,39 @@ describe("Code language service authority", () => {
       reason: "unsupported-platform",
     });
     expect(other.test.launches()).toBe(0);
+  });
+
+  it("starts a server unconfined on Windows for a thread outside Strict, stops its tree, and refuses a Strict thread", async () => {
+    let strict = false;
+    const stopped: number[] = [];
+    const { test } = fake("normal", {
+      platform: "windows",
+      threadStrict: () => strict,
+      confinement: {
+        prepare: () => {
+          throw new Error("A Windows language server is never prepared through confinement.");
+        },
+      },
+      processes: {
+        platform: "win32",
+        stopWindowsTree: async (pid) => {
+          stopped.push(pid);
+          process.kill(pid, "SIGKILL");
+          return "stopped";
+        },
+      },
+    });
+    const fileId = syncedFileId(await test.open("b.ts"));
+    expect(test.launches()).toBe(1);
+    expect((await test.diagnostics(fileId)).status).toBe("diagnostics");
+
+    strict = true;
+    expect(await test.diagnostics(fileId)).toEqual({
+      status: "refused",
+      reason: "unsupported-platform",
+    });
+    await test.service.close();
+    expect(stopped.length).toBeGreaterThan(0);
   });
 
   it("answers turned-off once the person turns the server off, and stops the one running", async () => {

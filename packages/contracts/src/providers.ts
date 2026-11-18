@@ -72,6 +72,10 @@ export const ProviderDriverKind = Schema.Literal(
   "oh-my-pi",
   "ollama",
   ...ACP_AGENT_KINDS,
+  // Any ACP agent the person added from the public ACP registry or as their
+  // own local command. Which agent an instance runs is configuration, never a
+  // new value here, as for `outside-harness-endpoint` below.
+  "acp-agent",
   "openai-compatible",
   "anthropic-compatible",
   "azure-foundry",
@@ -399,6 +403,101 @@ export const AcpAgentConfiguration = Schema.Struct({
     }),
   );
 export type AcpAgentConfiguration = typeof AcpAgentConfiguration.Type;
+
+// oxlint-disable-next-line no-control-regex -- an added agent's argv refuses control characters.
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
+const AcpAgentArgument = Schema.String.pipe(
+  Schema.maxLength(1_024),
+  Schema.filter((value) => !CONTROL_CHARACTER.test(value)),
+);
+const AcpAgentArguments = Schema.Array(AcpAgentArgument).pipe(Schema.maxItems(32));
+const AcpRegistryAgentId = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(128),
+  Schema.pattern(/^[a-z0-9][a-z0-9._-]*$/u),
+);
+
+/**
+ * How the install step vouched for the executable an added agent runs:
+ * `package-manager` (npm or uv installed the exact pinned release),
+ * `sha256-verified` (the archive matched the ACP registry's checksum),
+ * `unverified-download` (the registry lists no checksum; only HTTPS vouched
+ * for it), or `local-command` (the person's own executable).
+ */
+export const AcpAgentInstallIntegrity = Schema.Literal(
+  "package-manager",
+  "sha256-verified",
+  "unverified-download",
+  "local-command",
+);
+export type AcpAgentInstallIntegrity = typeof AcpAgentInstallIntegrity.Type;
+
+/**
+ * Where an added agent came from. A registry agent names the registry entry
+ * and the exact release the host's listing pinned when it was added; a local
+ * agent names the person's own absolute executable. Package names, archive
+ * URLs and checksums are never stored here: the host reads them from its own
+ * listing, so no client can point an install anywhere else.
+ */
+export const AcpAgentSource = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("registry"),
+    registryId: AcpRegistryAgentId,
+    version: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+    distribution: Schema.Literal("npx", "uvx", "binary"),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("local"),
+    command: AbsoluteBinaryPath.pipe(
+      Schema.maxLength(4_096),
+      Schema.filter((value) => !CONTROL_CHARACTER.test(value)),
+    ),
+  }).annotations(strict),
+);
+export type AcpAgentSource = typeof AcpAgentSource.Type;
+
+/**
+ * An agent the person added (Provider runtimes: "Any ACP agent"). The three
+ * steps are separate: `install` is present once the executable is on disk,
+ * `trusted` records the Trust step, and the instance's own `enabled` the
+ * last. `args` and the registry entry's `environment` are copied from the
+ * host's listing when the agent is added; a local agent carries only the
+ * arguments the person typed, and never an environment, so nothing a client
+ * sends can place a key in the journal.
+ */
+export const AddedAcpAgentConfiguration = Schema.Struct({
+  kind: Schema.Literal("acp-agent"),
+  source: AcpAgentSource,
+  args: AcpAgentArguments,
+  environment: Schema.optional(
+    Schema.Record({
+      key: Schema.String.pipe(Schema.pattern(/^[A-Z][A-Z0-9_]{0,127}$/u)),
+      value: AcpAgentArgument,
+    }),
+  ),
+  install: Schema.optional(
+    Schema.Struct({
+      executable: AbsoluteBinaryPath.pipe(Schema.maxLength(4_096)),
+      integrity: AcpAgentInstallIntegrity,
+    }).annotations(strict),
+  ),
+  trusted: Schema.Boolean,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((configuration) => {
+      if (configuration.source.kind === "local") {
+        return (
+          configuration.environment === undefined &&
+          (configuration.install === undefined ||
+            (configuration.install.integrity === "local-command" &&
+              configuration.install.executable === configuration.source.command))
+        );
+      }
+      return configuration.install?.integrity !== "local-command";
+    }),
+    Schema.filter((configuration) => configuration.install !== undefined || !configuration.trusted),
+  );
+export type AddedAcpAgentConfiguration = typeof AddedAcpAgentConfiguration.Type;
 
 export const PiProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("pi-rpc"),
@@ -1090,6 +1189,24 @@ export const AcpAgentProviderInstance = Schema.Struct({
   );
 export type AcpAgentProviderInstance = typeof AcpAgentProviderInstance.Type;
 
+/**
+ * An agent the person added. It is not a key provider: Octant holds no
+ * switch for its own setup, so it carries no `nativeSetup`. The host turns it
+ * on only once it is installed and trusted; untrusting it later leaves it on,
+ * starting in Octant's sandbox and remembering nothing, so a stored instance
+ * may be on and untrusted but never on and not installed.
+ */
+export const AddedAcpAgentProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("acp-agent"),
+  configuration: AddedAcpAgentConfiguration,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((instance) => !instance.enabled || instance.configuration.install !== undefined),
+  );
+export type AddedAcpAgentProviderInstance = typeof AddedAcpAgentProviderInstance.Type;
+
 export const PiProviderInstance = Schema.Struct({
   ...ProviderInstanceFields,
   driverKind: Schema.Literal("pi"),
@@ -1195,6 +1312,7 @@ export const ProviderInstance = Schema.Union(
   CodexProviderInstance,
   ClaudeProviderInstance,
   AcpAgentProviderInstance,
+  AddedAcpAgentProviderInstance,
   PiProviderInstance,
   OhMyPiProviderInstance,
   OllamaProviderInstance,
@@ -1298,6 +1416,7 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
     IdeogramImageProviderInstance,
     ClaudeProviderInstance,
     AcpAgentProviderInstance,
+    AddedAcpAgentProviderInstance,
     PiProviderInstance,
     OhMyPiProviderInstance,
     OllamaProviderInstance,
@@ -2464,6 +2583,46 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("set-provider-enabled"),
     ...ProviderInstanceCommandFields,
     enabled: Schema.Boolean,
+  }).annotations(strict),
+  /**
+   * Adds any ACP agent, installed nothing, untrusted and off. A registry agent
+   * is named by its registry id alone: its name, release, distribution,
+   * arguments and environment come from the host's own listing. A local agent
+   * is the person's absolute executable and literal arguments; it takes no
+   * environment, so no key travels in it. The host refuses it, and the
+   * install and trust steps below, from a client that does not act as the
+   * host's own person.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("add-acp-agent"),
+    ...ProviderInstanceCommandFields,
+    source: Schema.Union(
+      Schema.Struct({
+        kind: Schema.Literal("registry"),
+        registryId: AcpRegistryAgentId,
+      }).annotations(strict),
+      Schema.Struct({
+        kind: Schema.Literal("local"),
+        displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(80)),
+        command: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096)),
+        args: AcpAgentArguments,
+      }).annotations(strict),
+    ),
+  }).annotations(strict),
+  /**
+   * Installs an added agent into Octant's managed folder (a registry agent) or
+   * checks the person's executable is on disk (a local agent). Nothing the
+   * install puts on disk is run.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("install-acp-agent"),
+    ...ProviderInstanceCommandFields,
+  }).annotations(strict),
+  /** Trusts an installed agent, or takes that trust back. */
+  Schema.Struct({
+    kind: Schema.Literal("set-acp-agent-trust"),
+    ...ProviderInstanceCommandFields,
+    trusted: Schema.Boolean,
   }).annotations(strict),
   /**
    * Enables or disables Claude artifacts for one Claude account. Only a person

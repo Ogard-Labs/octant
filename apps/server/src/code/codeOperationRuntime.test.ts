@@ -4559,6 +4559,53 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("records what Strict kept with a Strict launch's session, and nothing for a launch outside Strict", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    let strict = true;
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      resolveStrict: () => strict,
+    });
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "linux" } }));
+    try {
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(18),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() =>
+        expect(fixture.conversation().turns[0]?.strictKept).toEqual(
+          expect.arrayContaining(["octant-sandbox", "protected-files"]),
+        ),
+      );
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() => expect(fixture.conversation().turns[0]?.status).toBe("completed"));
+      strict = false;
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(19),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() => expect(fixture.conversation().turns).toHaveLength(2));
+      expect(fixture.conversation().turns[1]).not.toHaveProperty("strictKept");
+    } finally {
+      vi.unstubAllGlobals();
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it("runs a Windows Code turn below Full access outside Strict with the provider's own approvals", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -15147,7 +15194,11 @@ it("requests a preview through the actual app-managed terminal write composition
         }),
       ),
     );
-    await vi.waitFor(() => expect(provider.answerTool).toHaveBeenCalledTimes(2));
+    // The write runs a real terminal command; a loaded CI runner took longer
+    // than the default second to answer it.
+    await vi.waitFor(() => expect(provider.answerTool).toHaveBeenCalledTimes(2), {
+      timeout: 5_000,
+    });
     await vi.waitFor(
       () => expect(f.conversation().turns[0]?.reviewPreview?.capture?.version).toBe(1),
       { timeout: 3_000 },

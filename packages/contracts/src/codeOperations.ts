@@ -77,6 +77,7 @@ import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMenti
 import { ThreadBoardReason, ThreadBoardStatus } from "./threadBoard";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
 import { ThreadWindowBoundsFields } from "./threadWindow";
+import { StrictKeptProtections } from "./strictNotice";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
@@ -2087,6 +2088,12 @@ const ProviderSessionReadyEvent = Schema.Struct({
   modelId: ProviderModelId,
   checkoutId: CodeCheckoutId,
   resumeCursor: Schema.optional(ProviderResumeCursor),
+  /**
+   * What Strict kept for this launch, as the host decided it when the session
+   * started. Absent when the launch was not Strict, and on every launch
+   * journaled before the host recorded it.
+   */
+  strictKept: Schema.optional(StrictKeptProtections),
 }).annotations(strict);
 
 /** The omissions a Code handoff counts; Chat and Work journal the same shape. */
@@ -2511,6 +2518,11 @@ export const CodeConversationTurn = Schema.Struct({
    * started an unforked thread.
    */
   handoff: Schema.optional(CodeConversationTurnHandoff),
+  /**
+   * What Strict kept for the provider launch this turn ran on. Absent when
+   * the launch was not Strict or the host did not record it.
+   */
+  strictKept: Schema.optional(StrictKeptProtections),
   /**
    * Forks of this thread whose conversation this turn carried because a
    * person merged it back, oldest first. Absent on every other turn.

@@ -330,7 +330,7 @@ describe("application background policy", () => {
     expect(resolveAppBackground(settings)).toEqual({
       ...resolvedDefaults,
       kind: "characters",
-      characters: { characterSet: DEFAULT_CHARACTER_SET, density: 50, speed: 50 },
+      characters: { characterSet: DEFAULT_CHARACTER_SET, density: 50, speed: 50, pattern: "cycle" },
       backgroundId: null,
       backgroundAnimated: true,
     });
@@ -361,6 +361,7 @@ describe("application background policy", () => {
       characterSet: DEFAULT_CHARACTER_SET,
       density: 50,
       speed: 50,
+      pattern: "cycle",
     });
     const own = resolveAppBackground({
       ...settings,
@@ -369,9 +370,15 @@ describe("application background policy", () => {
         characterSet: "01",
         characterDensity: 80,
         characterSpeed: 0,
+        characterPattern: "rings",
       },
     });
-    expect(own.characters).toEqual({ characterSet: "01", density: 80, speed: 0 });
+    expect(own.characters).toEqual({
+      characterSet: "01",
+      density: 80,
+      speed: 0,
+      pattern: "rings",
+    });
     expect(own.backgroundAnimated).toBe(false);
   });
 

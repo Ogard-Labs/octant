@@ -1,4 +1,5 @@
 import { OwnerApprovalId } from "@octant/contracts/owner-approvals";
+import { strictKeptForLaunch } from "../strictResolution";
 import type { StalledTurnScope } from "../providers/turnBudget";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import type { DesignSystemTurnContext } from "../designSystems/designSystemContext";
@@ -6283,6 +6284,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const harnessAutoReviewEnabled = this.#resolveHarnessAutoReview(active.thread);
     const nativeSetup = this.#options.resolveProviderNativeSetup?.(active.thread);
     const wakeups = this.#options.resolveThreadWakeups?.(active.thread);
+    // Read once as the turn launches: the session starts with it, and the
+    // journal records what it kept beside the session it opened.
+    const launchStrict = this.#strict(active.thread.id);
+    const strictKept = strictKeptForLaunch({
+      strict: launchStrict,
+      driverKind: active.driver.kind,
+      executionPolicy: active.thread.executionPolicy,
+      fullAccessSandbox: active.thread.fullAccessSandbox,
+    });
     const contextAccount: CodeTurnContextAccount = {
       carried: active.carriedSentContext,
       // A turn the runtime started sends nothing, so it counts no copy.
@@ -6381,6 +6391,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                     modelId: active.thread.modelId,
                     checkoutId: active.thread.checkoutId,
                     ...(resumeCursor === undefined ? {} : { resumeCursor }),
+                    ...(strictKept === undefined ? {} : { strictKept }),
                   },
                 });
                 active.cursor = frame.cursor;
@@ -6453,7 +6464,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               }),
           ...(attachments === undefined ? {} : { attachments }),
           ...(harnessAutoReviewEnabled ? { harnessAutoReviewEnabled: true } : {}),
-          strict: this.#strict(active.thread.id),
+          strict: launchStrict,
           ...(nativeSetup === undefined ? {} : { nativeSetup }),
           ...(wakeups === undefined ? {} : { wakeups }),
           ...(active.runtimeTurn === true ? { runtimeTurn: true as const } : {}),

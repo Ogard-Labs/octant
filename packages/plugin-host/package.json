@@ -23,7 +23,8 @@
     "./cloud-machine-targets": "./src/cloudMachineTargets.ts",
     "./first-party-plugins": "./src/firstPartyPlugins.ts",
     "./code-tools": "./src/codeTools.ts",
-    "./themes": "./src/themeContributions.ts"
+    "./themes": "./src/themeContributions.ts",
+    "./grounds": "./src/groundContributions.ts"
   },
   "scripts": {
     "fmt": "oxfmt",

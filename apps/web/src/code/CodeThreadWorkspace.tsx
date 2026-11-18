@@ -38,6 +38,8 @@ import {
   permissionModeOf,
   startedCodeThreadPickerGroups,
   threadAccessOf,
+  showsStrictNotice,
+  strictKeptSentence,
   type PickerGroup,
 } from "@octant/domain";
 import { ChevronDown, CirclePause, FileText, X } from "../ui/icons";
@@ -2048,6 +2050,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         serverUrl={props.serverUrl}
                         windowCapability={props.windowCapability}
                       />
+                    ) : null}
+                    {message.role === "assistant" &&
+                    message.strictKept !== undefined &&
+                    showsStrictNotice(message.strictKept, previousAssistant?.strictKept) ? (
+                      <p className="code-thread-workspace__handoff" role="note">
+                        {strictKeptSentence(message.strictKept)}
+                      </p>
                     ) : null}
                     {message.role === "assistant" && message.handoff !== undefined ? (
                       <p className="code-thread-workspace__handoff" role="note">

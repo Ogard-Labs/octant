@@ -88,10 +88,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   ],
   // ── Remaining ──
   [
-    "packages/plugin-host/src/acpAgents.ts",
-    "Launch policy and registry list for adding any ACP agent, ahead of its host side (Settings' add, trust and enable flow and a provider instance on the shared ACP stack), which Provider runtimes: Any ACP agent records as not built. Remove once that host side imports it.",
-  ],
-  [
     "apps/server/src/remote/remoteExitEvidenceADriver.ts",
     "Browser-realm bundle entry built by remoteExitEvidenceA.smoke.test.ts via `bun build`; excluded from the server tsconfig on purpose. Remove once that evidence is served by a product caller or the smoke is retired.",
   ],

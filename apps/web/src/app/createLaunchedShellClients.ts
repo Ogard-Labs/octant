@@ -21,6 +21,10 @@ import {
   type ProtectedFilesClient,
 } from "@octant/client-runtime/protected-files-client";
 import {
+  createBlockedToolsClient,
+  type BlockedToolsClient,
+} from "@octant/client-runtime/blocked-tools-client";
+import {
   createArchivedWorktreesClient,
   type ArchivedWorktreesClient,
 } from "@octant/client-runtime/archived-worktrees-client";
@@ -258,6 +262,7 @@ export interface LaunchedShellClients {
   readonly spendCeilingClient: ReturnType<typeof createSpendCeilingClient>;
   readonly agentGrantClient: ReturnType<typeof createAgentGrantClient>;
   readonly protectedFilesClient: ProtectedFilesClient;
+  readonly blockedToolsClient: BlockedToolsClient;
   readonly sandboxRestrictionsClient: SandboxRestrictionsClient;
   readonly archivedWorktreesClient: ArchivedWorktreesClient;
   readonly diskCleanupClient: DiskCleanupClient;
@@ -437,6 +442,7 @@ export function createLaunchedShellClients(
     spendCeilingClient: createSpendCeilingClient(port),
     agentGrantClient: createAgentGrantClient(port),
     protectedFilesClient: createProtectedFilesClient(port),
+    blockedToolsClient: createBlockedToolsClient(port),
     sandboxRestrictionsClient: createSandboxRestrictionsClient(port),
     archivedWorktreesClient: createArchivedWorktreesClient(port),
     diskCleanupClient: createDiskCleanupClient(port),

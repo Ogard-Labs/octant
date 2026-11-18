@@ -251,6 +251,18 @@ export const AppBackgroundCharacterSet = Schema.String.pipe(
 );
 export type AppBackgroundCharacterSet = typeof AppBackgroundCharacterSet.Type;
 
+/**
+ * Which pattern the character field draws: each of its three in turn
+ * (`cycle`, what an absent value means) or one of them held.
+ */
+export const AppBackgroundCharacterPattern = Schema.Literal(
+  "cycle",
+  "blotches",
+  "currents",
+  "rings",
+);
+export type AppBackgroundCharacterPattern = typeof AppBackgroundCharacterPattern.Type;
+
 const AppBackgroundTuning = {
   // Retired with the drawn dot pattern: rows written while it existed carry
   // these, so they still decode, and nothing reads them.
@@ -275,6 +287,7 @@ const AppBackgroundTuning = {
   characterSet: Schema.optional(AppBackgroundCharacterSet),
   characterDensity: Schema.optional(AppBackgroundPercent),
   characterSpeed: Schema.optional(AppBackgroundPercent),
+  characterPattern: Schema.optional(AppBackgroundCharacterPattern),
 };
 
 /** Retired: the drawn dot pattern. It decodes and resolves to the plain page. */

@@ -131,6 +131,15 @@ export interface ProviderSessionStart {
    */
   readonly strict?: boolean;
   /**
+   * Tools the person blocked for this provider in Settings, by the name its
+   * runtime gives them, or `server__tool` for a tool of the provider's own
+   * MCP server. A driver keeps each one from the session at every level, in
+   * and out of Strict, through its runtime's own deny configuration or its
+   * own gate, and fails the start rather than run a session in which a
+   * blocked tool would still run. Absent or empty blocks nothing.
+   */
+  readonly blockedTools?: ReadonlyArray<string>;
+  /**
    * User-chosen values for options the model declares (`ProviderModel.options`),
    * keyed by option id. Drivers apply the ids they understand and ignore the
    * rest; absent means provider defaults.
@@ -294,6 +303,8 @@ export interface ProviderSessionResume {
   readonly fullAccessSandbox?: boolean;
   /** Same meaning as in {@link ProviderSessionStart.strict}. */
   readonly strict?: boolean;
+  /** As on {@link ProviderSessionStart}; restated on every resume. */
+  readonly blockedTools?: ReadonlyArray<string>;
   /**
    * The thread's current model. A driver that reports `modelSwitch` as
    * supported runs the resumed session on it; any other driver keeps the model

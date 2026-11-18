@@ -39,6 +39,7 @@ import {
   type WorkTurnState,
   type WorkTurnStreamFrame,
   type HarnessRetryNotice,
+  type StrictKeptProtections,
 } from "@octant/contracts";
 import type { ProjectSummary, ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
@@ -60,6 +61,8 @@ import {
   workThreadAccessOf,
   type PickerGroup,
   resolveStrict,
+  showsStrictNotice,
+  strictKeptSentence,
 } from "@octant/domain";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import {
@@ -370,6 +373,8 @@ function WorkTurnHeader(props: {
   readonly serverUrl?: string | undefined;
   readonly windowCapability?: string | undefined;
   readonly turn: WorkTurnState;
+  /** What Strict kept for the turn before this one, so the notice shows once per change. */
+  readonly previousStrictKept?: StrictKeptProtections | undefined;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   /** Puts the stopped turn's prompt back in the composer to send again. */
   readonly onRestorePrompt?: (prompt: string) => void;
@@ -412,6 +417,12 @@ function WorkTurnHeader(props: {
         className="work-thread-workspace__handoff"
         images={props.turn.describedImages}
       />
+      {props.turn.strictKept === undefined ||
+      !showsStrictNotice(props.turn.strictKept, props.previousStrictKept) ? null : (
+        <p className="work-thread-workspace__handoff" role="note">
+          {strictKeptSentence(props.turn.strictKept)}
+        </p>
+      )}
       {props.turn.handoff === undefined ? null : (
         <p className="work-thread-workspace__handoff" role="note">
           {threadHandoffDisclosure(props.turn.handoff, (selection) =>
@@ -926,6 +937,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     () => new Map(turns.map((turn, index) => [workTurnKey(turn), turns[index + 1]?.acceptedAt])),
     [turns],
   );
+  // Each turn's Strict notice is read against the turn before it.
+  const previousStrictKept = useMemo(
+    () => new Map(turns.map((turn, index) => [workTurnKey(turn), turns[index - 1]?.strictKept])),
+    [turns],
+  );
+  const previousStrictKeptOf = (turn: WorkTurnState) => previousStrictKept.get(workTurnKey(turn));
   const setTurns = useCallback(
     (update: (current: ReadonlyArray<WorkTurnState>) => ReadonlyArray<WorkTurnState>) =>
       setLoaded((current) => {
@@ -2700,6 +2717,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                               ? { onSnoozeAtReset: snoozeAtUsageReset }
                               : {})}
                             turn={row.head}
+                            previousStrictKept={previousStrictKeptOf(row.head)}
                             {...(thread?.usageResume === undefined ||
                             String(thread.usageResume.record.turnId) !== String(row.head.turnId)
                               ? {}
@@ -2748,6 +2766,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         ? { onSnoozeAtReset: snoozeAtUsageReset }
                         : {})}
                       turn={row.turn}
+                      previousStrictKept={previousStrictKeptOf(row.turn)}
                       {...(thread?.usageResume === undefined ||
                       String(thread.usageResume.record.turnId) !== String(row.turn.turnId)
                         ? {}
