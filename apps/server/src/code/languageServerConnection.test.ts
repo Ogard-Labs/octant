@@ -160,6 +160,58 @@ describe("language server connection", () => {
     ]);
   });
 
+  it("answers requests and server requests fed through byte-at-a-time and batched chunks", async () => {
+    const { connection, fromServer, sent } = harness();
+    const pending = connection.request("textDocument/definition", {});
+    await settle();
+    const id = sent[0]?.id;
+    const stream = Buffer.concat([
+      frame({ jsonrpc: "2.0", id, result: "answer" }),
+      frame({ jsonrpc: "2.0", method: "window/logMessage", params: { message: "x" } }),
+      frame({
+        jsonrpc: "2.0",
+        id: "cfg",
+        method: "workspace/configuration",
+        params: { items: [{ section: "typescript" }] },
+      }),
+    ]);
+    for (const byte of stream) fromServer.write(Buffer.from([byte]));
+    expect(await pending).toEqual({ status: "answered", result: "answer" });
+    await settle();
+    expect(sent.at(-1)).toEqual({ jsonrpc: "2.0", id: "cfg", result: [null] });
+  });
+
+  it("settles a request as closed when the stream ends inside a frame", async () => {
+    const { connection, fromServer } = harness();
+    const pending = connection.request("textDocument/diagnostic", {});
+    fromServer.write('Content-Length: 40\r\n\r\n{"jsonrpc":"2.0","id":1,"re');
+    fromServer.end();
+    expect(await pending).toEqual({ status: "closed" });
+    expect(connection.closed).toBe(true);
+  });
+
+  it("ends the connection on a header that declares the length twice, badly, or not at all", async () => {
+    for (const header of [
+      "Content-Length: 5\r\nContent-Length: 5\r\n\r\n",
+      "Content-Length: five\r\n\r\n",
+      "Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n",
+    ]) {
+      const { connection, fromServer, violations } = harness();
+      fromServer.write(header);
+      await settle();
+      expect(violations).toEqual(["malformed-frame"]);
+      expect(connection.closed).toBe(true);
+    }
+  });
+
+  it("ends the connection on a header that fills the header bound without a delimiter", async () => {
+    const { connection, fromServer, violations } = harness();
+    fromServer.write(`Content-Length: 1\r\nContent-Name: ${"x".repeat(8 * 1024)}`);
+    await settle();
+    expect(violations).toEqual(["malformed-frame"]);
+    expect(connection.closed).toBe(true);
+  });
+
   it("ends the connection on a frame declared past the cap, before its body arrives", async () => {
     const { connection, fromServer, violations } = harness();
     const pending = connection.request("textDocument/diagnostic", { textDocument: { uri: "x" } });
@@ -167,6 +219,20 @@ describe("language server connection", () => {
     expect(await pending).toEqual({ status: "closed" });
     expect(violations).toEqual(["oversize-frame"]);
     expect(connection.closed).toBe(true);
+  });
+
+  it("assembles a body that arrives in more fragments than the queue holds", async () => {
+    const { connection, fromServer, sent } = harness();
+    const pending = connection.request("textDocument/definition", {});
+    await settle();
+    const id = sent[0]?.id;
+    const framed = frame({ jsonrpc: "2.0", id, result: "x".repeat(400) });
+    const bodyStart = framed.indexOf("\r\n\r\n") + 4;
+    fromServer.write(framed.subarray(0, bodyStart));
+    for (let index = bodyStart; index < framed.byteLength; index += 3) {
+      fromServer.write(framed.subarray(index, index + 3));
+    }
+    expect(await pending).toEqual({ status: "answered", result: "x".repeat(400) });
   });
 
   it("ends the connection on a frame that is not JSON-RPC", async () => {

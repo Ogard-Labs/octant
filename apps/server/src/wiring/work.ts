@@ -1104,10 +1104,12 @@ export function wireWork(deps: WorkDependencies) {
       clock: () => new Date().toISOString(),
     });
     // An approved ask to plan first or to leave Plan moves the thread as the
-    // person who answered, then ends the turn that asked.
+    // person who answered, then ends the turn that asked, unless it entered
+    // Plan in place.
     workLevelChangeHolder.port = {
       change: (input) => workThreadService.changeLevelAtAgentRequest(input),
       endTurn: (threadId) => workTurnService.endTurnForLevelChange(threadId),
+      enteredPlanInPlace: (threadId) => workTurnService.enteredPlanInPlace(threadId),
     };
     const fileMentionService = new FileMentionService({
       authority: {

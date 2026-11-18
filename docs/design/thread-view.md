@@ -772,8 +772,23 @@ change and journals it as the device. Approving a plan, which widens what
 the next turn may do, asks for the phone's own confirmation (Face ID, Touch
 ID or passcode) first; switching to Plan and keeping the level do not. A
 Code thread's level-change ask stays with the desktop, like the phone's
-other Code approvals, and the phone shows no other Work approval or
-question yet.
+other Code approvals.
+
+Every other request a Work agent waits on draws on the same screen, oldest
+first, with the desktop's words: a tool call as **Provider approval** (the
+action and what it does, **Approve** and **Deny**), a question as its prompt,
+each offered answer and **Type your own answer** with **Submit**, and a
+questionnaire as each question with its limits (**Choose one**, **Select
+1–n options**, a **(Recommended)** option, **Write another answer**), the
+optional **Anything to add?**, **Send answers** and **Dismiss**, which ends
+the question unanswered as the desktop's does. Each sends the answer and the
+version it read through the same request route a window uses, and the host
+journals it as the device. Approving a tool call lets the agent act, so it
+asks for the phone's own confirmation first; denying, answering a question
+and dismissing do not. A refusal (answered elsewhere, its version moved, the
+thread's permissions changed since it asked) shows the host's sentence under
+the card, which stays; an answer holding a path or link, which Work request
+text never carries, is refused on the phone before it is sent.
 
 ## Sessions started outside Octant
 

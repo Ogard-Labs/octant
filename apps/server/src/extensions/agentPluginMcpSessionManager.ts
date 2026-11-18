@@ -911,10 +911,11 @@ export class AgentPluginMcpSessionManager {
       clearTimeout(timeout);
     }
     const duplicateToolNames = duplicatedMcpToolNames(session.tools);
+    const compileInput = mcpCatalogueCompiler();
     const tools: PreparedMcpTool[] = [];
     for (const tool of session.tools) {
       if (duplicateToolNames.has(tool.name)) continue;
-      const prepared = await prepareMcpTool(target, tool);
+      const prepared = await prepareMcpTool(target, tool, compileInput);
       if (prepared !== undefined) tools.push(prepared);
     }
     const record: AgentPluginMcpSessionRecord = {
@@ -1262,7 +1263,7 @@ function localJsonPointerTarget(root: unknown, reference: string): unknown {
   return target;
 }
 
-type McpInputSchemaDialect = "draft-07" | "2019-09" | "2020-12";
+type McpSchemaDialect = NonNullable<ReturnType<typeof mcpInputSchemaDialect>>;
 
 let ajvDraft7Module: Promise<typeof import("ajv")> | undefined;
 let ajv2019Module: Promise<typeof import("ajv/dist/2019.js")> | undefined;
@@ -1282,7 +1283,7 @@ function loadAjv2020() {
 
 function mcpInputSchemaDialect(
   schema: Readonly<Record<string, unknown>>,
-): McpInputSchemaDialect | undefined {
+): "draft-07" | "2019-09" | "2020-12" | undefined {
   if (schema.$schema === undefined) return "2020-12";
   if (typeof schema.$schema !== "string") return undefined;
   const dialect = schema.$schema.endsWith("#") ? schema.$schema.slice(0, -1) : schema.$schema;
@@ -1292,34 +1293,63 @@ function mcpInputSchemaDialect(
   return undefined;
 }
 
-async function compileMcpInputSchema(
-  schema: Readonly<Record<string, unknown>>,
-): Promise<ValidateFunction<unknown> | undefined> {
-  const dialect = mcpInputSchemaDialect(schema);
-  if (dialect === undefined) return undefined;
+async function createMcpSchemaCompiler(dialect: McpSchemaDialect) {
   const options = {
     allErrors: false,
     strict: false,
     validateFormats: false,
     validateSchema: true,
   } as const;
-  let validateInput: ValidateFunction<unknown>;
   if (dialect === "draft-07") {
     const { default: AjvDraft7 } = await loadAjvDraft7();
-    validateInput = new AjvDraft7(options).compile<unknown>(schema as AnySchema);
-  } else if (dialect === "2019-09") {
-    const { default: Ajv2019 } = await loadAjv2019();
-    validateInput = new Ajv2019(options).compile<unknown>(schema as AnySchema);
-  } else {
-    const { default: Ajv2020 } = await loadAjv2020();
-    validateInput = new Ajv2020(options).compile<unknown>(schema as AnySchema);
+    return new AjvDraft7(options);
   }
-  return "$async" in validateInput ? undefined : validateInput;
+  if (dialect === "2019-09") {
+    const { default: Ajv2019 } = await loadAjv2019();
+    return new Ajv2019(options);
+  }
+  const { default: Ajv2020 } = await loadAjv2020();
+  return new Ajv2020(options);
+}
+
+/**
+ * One compiler per dialect for a whole catalogue: schema compilation is the
+ * hot cost of listing a server, and a pool pays it once per dialect instead
+ * of once per tool. Compiles run one after another inside a catalogue, and
+ * after each one `removeSchema()` drops the tool's untrusted registrations —
+ * non-meta schemas, `$id`s, aliases and the compile cache — without
+ * invalidating the validator it just returned, so a repeated `$id` cannot
+ * collide with one a previous tool already released and a nested alias can
+ * no longer resolve into the next tool's schema even where the input
+ * inspector missed it. The pool is one catalogue's own; nothing is shared
+ * across sessions.
+ */
+function mcpCatalogueCompiler() {
+  const compilers = new Map<McpSchemaDialect, ReturnType<typeof createMcpSchemaCompiler>>();
+  return async (
+    schema: Readonly<Record<string, unknown>>,
+  ): Promise<ValidateFunction<unknown> | undefined> => {
+    const dialect = mcpInputSchemaDialect(schema);
+    if (dialect === undefined) return undefined;
+    let pending = compilers.get(dialect);
+    if (pending === undefined) {
+      pending = createMcpSchemaCompiler(dialect);
+      compilers.set(dialect, pending);
+    }
+    const compiler = await pending;
+    try {
+      const validator = compiler.compile<unknown>(schema as AnySchema);
+      return "$async" in validator ? undefined : validator;
+    } finally {
+      compiler.removeSchema();
+    }
+  };
 }
 
 async function prepareMcpTool(
   record: Pick<AgentPluginMcpSessionRecord, "extensionId" | "packageId" | "componentId" | "scope">,
   tool: McpToolDefinition,
+  compileInput: ReturnType<typeof mcpCatalogueCompiler>,
 ): Promise<PreparedMcpTool | undefined> {
   try {
     if (
@@ -1336,7 +1366,7 @@ async function prepareMcpTool(
       inputSchema: tool.inputSchema,
     });
     if (mcpInputSchemaIsUnsafeToValidate(providerDefinition.inputSchema)) return undefined;
-    const validateInput = await compileMcpInputSchema(providerDefinition.inputSchema);
+    const validateInput = await compileInput(providerDefinition.inputSchema);
     if (validateInput === undefined) return undefined;
     return { listed: tool, providerDefinition, validateInput };
   } catch {

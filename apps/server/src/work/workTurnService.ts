@@ -2837,6 +2837,18 @@ export class WorkTurnService {
     if (running !== undefined) this.#controllers.get(running.requestId)?.abort();
   }
 
+  /**
+   * The thread's running turn entered Plan in place: its session's driver
+   * now holds it to Plan, so every check that reads the running turn's level
+   * reads Plan too. Narrowing only; nothing widens a running turn.
+   */
+  enteredPlanInPlace(threadId: WorkThreadId): void {
+    const running = this.#runningAccess.get(String(threadId));
+    if (running === undefined) return;
+    const { fullAccessSandbox: _sandbox, ...rest } = running;
+    this.#runningAccess.set(String(threadId), { ...rest, access: "plan" });
+  }
+
   /** The access the thread's running turn holds; undefined when none runs. */
   runningTurnAccess(threadId: string): WorkAccess | undefined {
     return this.#runningAccess.get(threadId)?.access;
