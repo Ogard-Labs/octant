@@ -52,11 +52,20 @@ import {
   type HomeCardPlacement,
 } from "./homeCards";
 
+/** Where a record's "Open thread" navigates: enough to find the thread in
+ * live navigation or reopen it from the archive. */
+export interface ActivityThreadTarget {
+  readonly mode: OctantMode;
+  readonly threadId: string;
+  readonly title: string;
+  readonly projectId?: string;
+}
+
 export interface CodeHomeActivityProps {
   readonly customization: HomeCardCustomization;
   readonly onCustomizationChange: (next: HomeCardCustomization) => void;
   readonly read: NonNullable<CodeClient["readHomeActivity"]>;
-  readonly onOpenThread: (mode: OctantMode, threadId: string) => void;
+  readonly onOpenThread: (target: ActivityThreadTarget) => void;
   readonly onOpenExternal?: ((url: string) => void) | undefined;
   /** Overrides the locale's week start; absent reads the client's own. */
   readonly weekStartsOn?: number;
@@ -226,7 +235,7 @@ function reasonLabel(view: ActivityView): string {
     case "read-failed":
       return "Could not be read.";
     case "expired":
-      return "This read expired — open it again to retry.";
+      return "This read expired. Open the records again to see the latest.";
     case "authorization-changed":
       return "Access changed — open it again to retry.";
     default:
@@ -390,6 +399,8 @@ interface ActivityCardView {
   readonly drill: { readonly view: ActivityView } | undefined;
   readonly openRecords: (view: ActivityView) => void;
   readonly closeRecords: () => void;
+  /** A records page found the snapshot expired: re-read so reopening retries. */
+  readonly renewAfterExpired: () => void;
 }
 
 /**
@@ -401,7 +412,9 @@ interface ActivityCardView {
 function useActivityCardContent(input: ActivityCardInput, epoch: number): ActivityCardView {
   const [read, setRead] = useState<CardRead>({ phase: "loading" });
   const [drill, setDrill] = useState<{ view: ActivityView } | undefined>(undefined);
+  const [renewed, setRenewed] = useState(0);
   const consumedEpoch = useRef(0);
+  const consumedRenew = useRef(0);
   const consumedScope = useRef<string | undefined>(undefined);
   const consumedReader = useRef(input.read);
   useEffect(() => {
@@ -415,16 +428,21 @@ function useActivityCardContent(input: ActivityCardInput, epoch: number): Activi
     consumedReader.current = input.read;
     const refresh = epoch > consumedEpoch.current;
     consumedEpoch.current = Math.max(consumedEpoch.current, epoch);
+    // A renew after an expired page is a quiet re-read of the same question:
+    // not a refresh, so the server cache decides, and the open dialog keeps
+    // its frozen view and its alert rather than closing under the warning.
+    const renew = renewed > consumedRenew.current;
+    consumedRenew.current = Math.max(consumedRenew.current, renewed);
     // A scope change — new timeframe, source or host — retires the view and
     // any drill-down it opened; an explicit refresh keeps the last answer up
     // only while it still answers the same scope.
-    if (scopeChanged || !refresh) setDrill(undefined);
+    if (scopeChanged || (!refresh && !renew)) setDrill(undefined);
     if (input.query === undefined) {
       setRead({ phase: "settled" });
       return undefined;
     }
     setRead((previous) =>
-      refresh && !scopeChanged && previous.view !== undefined
+      (refresh || renew) && !scopeChanged && previous.view !== undefined
         ? { phase: "refreshing", view: previous.view }
         : { phase: "loading" },
     );
@@ -450,12 +468,13 @@ function useActivityCardContent(input: ActivityCardInput, epoch: number): Activi
     return () => {
       active = false;
     };
-  }, [input, epoch]);
+  }, [input, epoch, renewed]);
   return {
     read,
     drill,
     openRecords: (view) => setDrill({ view }),
     closeRecords: () => setDrill(undefined),
+    renewAfterExpired: () => setRenewed((count) => count + 1),
   };
 }
 
@@ -473,7 +492,10 @@ function ActivityCard(props: {
 }) {
   const { definition } = props;
   const input = definition.input;
-  const { read, drill, openRecords, closeRecords } = useActivityCardContent(input, props.epoch);
+  const { read, drill, openRecords, closeRecords, renewAfterExpired } = useActivityCardContent(
+    input,
+    props.epoch,
+  );
   const titleId = useId();
   const Icon = definition.icon;
   const view = read.view;
@@ -606,6 +628,7 @@ function ActivityCard(props: {
           <ActivityRecordsDialog
             input={input}
             onClose={closeRecords}
+            onExpired={renewAfterExpired}
             onOpenExternal={props.onOpenExternal}
             onOpenThread={props.onOpenThread}
             view={drill.view}
@@ -641,6 +664,8 @@ function ActivityRecordsDialog(props: {
   readonly onClose: () => void;
   readonly onOpenThread: CodeHomeActivityProps["onOpenThread"];
   readonly onOpenExternal: CodeHomeActivityProps["onOpenExternal"];
+  /** A page answered `expired`: the card re-reads so the next open retries. */
+  readonly onExpired: () => void;
 }) {
   const titleId = useId();
   const [records, setRecords] = useState<ReadonlyArray<ActivityRecord>>(props.view.records);
@@ -679,6 +704,7 @@ function ActivityRecordsDialog(props: {
               setRecords([]);
               setNextOffset(undefined);
             }
+            if (page.reason === "expired") props.onExpired();
             setPageError(reasonLabel(page));
             return;
           }
@@ -840,14 +866,13 @@ function ExternalLink(props: {
 }
 
 function ThreadLink(props: {
-  readonly mode: OctantMode;
-  readonly threadId: string;
+  readonly target: ActivityThreadTarget;
   readonly onOpenThread: CodeHomeActivityProps["onOpenThread"];
 }) {
   return (
     <OctantButton
       className="code-home-activity-record__link window-no-drag"
-      onClick={() => props.onOpenThread(props.mode, props.threadId)}
+      onClick={() => props.onOpenThread(props.target)}
       size="sm"
       type="button"
       variant="link"
@@ -876,9 +901,13 @@ function recordActions(
           </ExternalLink>
           {record.threadId === undefined ? null : (
             <ThreadLink
-              mode="code"
               onOpenThread={props.onOpenThread}
-              threadId={String(record.threadId)}
+              target={{
+                mode: "code",
+                threadId: String(record.threadId),
+                title: record.label,
+                ...(record.projectId === undefined ? {} : { projectId: record.projectId }),
+              }}
             />
           )}
         </>
@@ -903,9 +932,13 @@ function recordActions(
           )}
           {record.threadId === undefined ? null : (
             <ThreadLink
-              mode="code"
               onOpenThread={props.onOpenThread}
-              threadId={String(record.threadId)}
+              target={{
+                mode: "code",
+                threadId: String(record.threadId),
+                title: record.label,
+                ...(record.projectId === undefined ? {} : { projectId: record.projectId }),
+              }}
             />
           )}
         </>
@@ -919,9 +952,13 @@ function recordActions(
     case "runs":
       return (
         <ThreadLink
-          mode={record.mode}
           onOpenThread={props.onOpenThread}
-          threadId={record.threadId}
+          target={{
+            mode: record.mode,
+            threadId: record.threadId,
+            title: record.label,
+            ...(record.projectId === undefined ? {} : { projectId: record.projectId }),
+          }}
         />
       );
   }

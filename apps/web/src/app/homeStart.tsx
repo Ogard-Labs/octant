@@ -59,6 +59,7 @@ export interface HomeStartInput {
     | "openSidebarList"
     | "openSubagentRequest"
     | "openThreadBoard"
+    | "openThreadRecord"
     | "resetNewTaskDraft"
     | "selectChatThread"
     | "selectCodeThread"
@@ -405,11 +406,9 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
             ? {
                 codeActivity: {
                   read: readHomeActivity,
-                  openThread: (mode, threadId) => {
+                  openThread: (target) => {
                     actions.closeWorkspaceReaders();
-                    if (mode === "chat") actions.selectChatThread(threadId);
-                    else if (mode === "work") actions.selectWorkThread(threadId);
-                    else actions.selectCodeThread(threadId);
+                    actions.openThreadRecord(target);
                   },
                   ...(input.onOpenExternal === undefined
                     ? {}

@@ -131,6 +131,8 @@ export type ShellActions = {
   readonly openAgentsCenter: () => void;
   readonly openArchive: () => void;
   readonly openArchivedThread: (entry: ArchivedThreadEntry) => void;
+  /** Opens a thread named by a record row — live navigation first, archive second. */
+  readonly openThreadRecord: (entry: ArchivedThreadEntry) => void;
   readonly openArtifactLibrary: () => void;
   readonly openAutomationCenter: () => void;
   /** Opens the Automation Center with one routine selected. */

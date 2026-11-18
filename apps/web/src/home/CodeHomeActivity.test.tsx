@@ -611,6 +611,67 @@ describe("the records drill-down", () => {
     );
   });
 
+  it("re-reads once when a records page finds the snapshot expired, and reopening uses the new one", async () => {
+    const user = userEvent.setup();
+    const oldView = view();
+    const newView = view({
+      count: 1,
+      nextOffset: undefined,
+      records: [
+        {
+          kind: "prs-merged",
+          occurredAt: "2026-11-04T08:00:00.000Z",
+          id: "octant/octant#77",
+          label: "Fresh merge",
+          repositoryOwner: "octant",
+          repositoryName: "octant",
+          number: 77,
+          mergedBy: "henrik",
+        },
+      ],
+      snapshotId: "20000000-0000-4000-8000-000000000002",
+    });
+    let first = true;
+    const source = reads((query) => {
+      if (query.kind === "page") {
+        return decodeActivityView({
+          status: "unavailable",
+          source: "github",
+          reason: "expired",
+          records: [],
+        });
+      }
+      const answer = first ? oldView : newView;
+      first = false;
+      return answer;
+    });
+    render(<Harness read={source.read} />);
+    const card = await screen.findByRole("region", { name: "Pull requests merged" });
+    await user.click(
+      within(card).getByRole("button", { name: "Pull requests merged: 2. Show records" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: /Pull requests merged/ });
+    await user.click(within(dialog).getByRole("button", { name: "Load more" }));
+    expect(
+      await within(dialog).findByText(
+        "This read expired. Open the records again to see the latest.",
+      ),
+    ).toBeInTheDocument();
+    const cardReads = () =>
+      source.calls().filter((query) => query.kind === "read" && query.card === "prs-merged");
+    await waitFor(() => expect(cardReads()).toHaveLength(2));
+    const reread = cardReads()[1];
+    expect(reread?.kind === "read" && "refresh" in reread && reread.refresh === true).toBe(false);
+
+    // Reopening reads from the renewed snapshot, not the dead one.
+    await user.click(within(dialog).getByRole("button", { name: "Close records" }));
+    await user.click(
+      within(card).getByRole("button", { name: "Pull requests merged: 1. Show records" }),
+    );
+    const reopened = await screen.findByRole("dialog", { name: /Pull requests merged/ });
+    expect(await within(reopened).findByText("Fresh merge")).toBeInTheDocument();
+  });
+
   it("opens the thread a run belongs to", async () => {
     const user = userEvent.setup();
     const onOpenThread = vi.fn();
@@ -641,7 +702,11 @@ describe("the records drill-down", () => {
     );
     const dialog = await screen.findByRole("dialog", { name: /Successful runs/ });
     await user.click(within(dialog).getByRole("button", { name: "Open thread" }));
-    expect(onOpenThread).toHaveBeenCalledWith("work", "10000000-0000-4000-8000-0000000000bb");
+    expect(onOpenThread).toHaveBeenCalledWith({
+      mode: "work",
+      threadId: "10000000-0000-4000-8000-0000000000bb",
+      title: "Draft the note",
+    });
     expect(within(dialog).getByText(/run-2/)).toBeInTheDocument();
   });
 });

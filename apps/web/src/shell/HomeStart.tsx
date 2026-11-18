@@ -1,8 +1,7 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
-import type { OctantMode } from "@octant/contracts/modes";
 import type { HomeCardCustomization } from "@octant/contracts/shell";
 import type { ReactNode } from "react";
-import { CodeHomeActivity } from "../home/CodeHomeActivity";
+import { CodeHomeActivity, type CodeHomeActivityProps } from "../home/CodeHomeActivity";
 import { HomeDashboard } from "../home/HomeDashboard";
 import type { HomeCardDefinition, HomeListContributor } from "../home/homeCards";
 
@@ -27,7 +26,7 @@ export function HomeStart(props: HomeStartProps) {
  */
 export interface CodeHomeActivitySource {
   readonly read: NonNullable<CodeClient["readHomeActivity"]>;
-  readonly openThread: (mode: OctantMode, threadId: string) => void;
+  readonly openThread: CodeHomeActivityProps["onOpenThread"];
   readonly openExternal?: ((url: string) => void) | undefined;
 }
 
