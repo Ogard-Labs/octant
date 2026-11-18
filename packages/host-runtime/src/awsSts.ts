@@ -107,7 +107,8 @@ export async function stsAssumeRoleWithWebIdentity(
 
 /**
  * A 400 or 403 is the service refusing (access denied, a malformed or expired
- * token); a 429, a 5xx, or no answer is transient.
+ * token) unless its error code names a throttle; a 429, a 5xx, or no answer
+ * is transient.
  */
 async function postSts(
   fetchImpl: typeof fetch,
@@ -128,10 +129,17 @@ async function postSts(
     return { kind: "unavailable" };
   }
   if (!response.ok) {
-    await response.body?.cancel().catch(() => undefined);
-    return response.status === 400 || response.status === 403
-      ? { kind: "refused" }
-      : { kind: "unavailable" };
+    if (response.status !== 400 && response.status !== 403) {
+      await response.body?.cancel().catch(() => undefined);
+      return { kind: "unavailable" };
+    }
+    // The token service answers a throttle, and a web identity provider it
+    // could not reach, with a 400 too; those are worth retrying, not a refusal.
+    const code = await readErrorCode(response);
+    if (code === undefined) {
+      return response.status === 403 ? { kind: "refused" } : { kind: "unavailable" };
+    }
+    return TRANSIENT_ERROR_CODES.has(code) ? { kind: "unavailable" } : { kind: "refused" };
   }
   let text: string;
   try {
@@ -141,6 +149,25 @@ async function postSts(
   }
   if (text.length > MAX_STS_RESPONSE_CHARS) return { kind: "unavailable" };
   return readStsCredentials(text);
+}
+
+const TRANSIENT_ERROR_CODES: ReadonlySet<string> = new Set([
+  "Throttling",
+  "ThrottlingException",
+  "RequestLimitExceeded",
+  "IDPCommunicationError",
+]);
+
+/** The `<Code>` of an error answer, read within the answer bound. */
+async function readErrorCode(response: Response): Promise<string | undefined> {
+  let text: string;
+  try {
+    text = await response.text();
+  } catch {
+    return undefined;
+  }
+  if (text.length > MAX_STS_RESPONSE_CHARS) return undefined;
+  return /<Code>\s*([A-Za-z.]{1,128})\s*<\/Code>/.exec(text)?.[1];
 }
 
 /** The `<Credentials>` element both answers carry. */

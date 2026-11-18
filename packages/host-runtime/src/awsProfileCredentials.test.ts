@@ -5,7 +5,7 @@ import {
   type AwsProfilePorts,
   type AwsSsoMintOutcome,
 } from "./awsProfileCredentials";
-import type { AwsStsOutcome } from "./awsSts";
+import { stsAssumeRole, type AwsStsOutcome } from "./awsSts";
 import { createCloudIamRuntime, isCloudIamGrantMaterial } from "./cloudIam";
 import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
 import { MODEL_HOST, MODEL_PATH, cloudDescriptor } from "./fakeCloudIam.test-support";
@@ -226,6 +226,35 @@ describe("a profile that assumes a role", () => {
     });
   });
 
+  it("signs with a source profile's own keys even when that source also names a role", async () => {
+    const assumeRole = vi.fn(async () => roleAnswer("ASIABEDROCK000000001"));
+    const resolved = await resolveAwsProfileCredentials(
+      "bedrock",
+      ports(
+        {
+          [`${HOME}/.aws/config`]: [
+            "[profile base]",
+            "role_arn = arn:aws:iam::123456789012:role/NotChained",
+            "source_profile = elsewhere",
+            "[profile bedrock]",
+            "role_arn = arn:aws:iam::210987654321:role/BedrockInvoke",
+            "source_profile = base",
+          ].join("\n"),
+          [`${HOME}/.aws/credentials`]: `[base]\naws_access_key_id = ${KEY_ID}\naws_secret_access_key = ${SECRET}\n`,
+        },
+        { assumeRole },
+      ),
+    );
+    expect(resolved).toMatchObject({ kind: "credentials", via: "assume-role" });
+    expect(assumeRole).toHaveBeenCalledTimes(1);
+    expect(assumeRole).toHaveBeenCalledWith(
+      expect.objectContaining({
+        roleArn: "arn:aws:iam::210987654321:role/BedrockInvoke",
+        source: { accessKeyId: KEY_ID, secretAccessKey: SECRET },
+      }),
+    );
+  });
+
   it("assumes a role with the web identity token file and with the broker's environment keys", async () => {
     const assumeRoleWithWebIdentity = vi.fn(async () => roleAnswer("ASIAWEBIDENTITY00001"));
     const assumeRole = vi.fn(async () => roleAnswer("ASIAENVIRONMENT00001"));
@@ -429,5 +458,24 @@ describe("a cloud grant from the person's own keys", () => {
     const renewed = await sign();
     expect(stsCalls).toHaveLength(2);
     expect(JSON.stringify(renewed)).toContain("ASIAROLE000000000002");
+  });
+
+  it("reads a throttle from the token service as worth retrying and access denied as a refusal", async () => {
+    const answer = (code: string) => async () =>
+      new Response(
+        `<ErrorResponse><Error><Type>Sender</Type><Code>${code}</Code><Message>m</Message></Error></ErrorResponse>`,
+        { status: code === "AccessDenied" ? 403 : 400, headers: { "content-type": "text/xml" } },
+      );
+    const input = {
+      region: "us-west-2",
+      roleArn: "arn:aws:iam::123456789012:role/BedrockInvoke",
+      roleSessionName: "person",
+      source: { accessKeyId: KEY_ID, secretAccessKey: SECRET },
+    };
+    expect(await stsAssumeRole(answer("Throttling"), NOW, input)).toEqual({ kind: "unavailable" });
+    expect(await stsAssumeRole(answer("AccessDenied"), NOW, input)).toEqual({ kind: "refused" });
+    expect(await stsAssumeRole(answer("ValidationError"), NOW, input)).toEqual({
+      kind: "refused",
+    });
   });
 });

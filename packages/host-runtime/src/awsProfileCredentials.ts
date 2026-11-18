@@ -200,7 +200,11 @@ async function resolveNamedProfile(
 
   // The AWS CLI merges a profile's two sections, the credentials file winning.
   const setting = (key: string) => fromShared?.get(key) ?? fromConfig?.get(key);
-  if (setting("role_arn") !== undefined) {
+  // A source profile that holds its own keys signs with them even when it
+  // also names a role: the AWS CLI chains into a source's role only when the
+  // source has no static keys.
+  const sourceWithKeys = assuming.length > 0 && setting("aws_access_key_id") !== undefined;
+  if (setting("role_arn") !== undefined && !sourceWithKeys) {
     return assumeProfileRole(profileName, setting, files, ports, assuming);
   }
   for (const section of [fromShared, fromConfig]) {
