@@ -17,9 +17,6 @@ export const DOCK_TOOL_BUTTON_ORDER: ReadonlyArray<RightUtilityDockSurfaceId> = 
   "files",
 ];
 
-/** Why a tool in the band cannot open yet while the pane's task has no thread. */
-export const DOCK_TOOLS_AWAIT_TASK_START = "Available once the task starts";
-
 /**
  * The Browser is one tool with pages. Showing it again returns to the page on
  * screen, else the focused one, else the page last shown, else the first.
@@ -63,10 +60,6 @@ export type DockToolPress =
   /** The tool is a card on the shelf: bring it back as a tile, and the dock with it. */
   | { readonly kind: "restore"; readonly tabId: string }
   | { readonly kind: "close-bottom" }
-  /** A new task's dock: open the Project's own terminal or browser, with no thread involved. */
-  | { readonly kind: "quick-open"; readonly tool: "terminal" | "browser" }
-  /** The Project tool the new task's dock shows is pressed again: the dock closes and stops it. */
-  | { readonly kind: "quick-close" }
   /** The bottom panel holds the tool behind its active one: show it there. */
   | { readonly kind: "select-bottom" }
   | { readonly kind: "refused" };
@@ -128,11 +121,6 @@ export interface DockToolButtonsInput {
   }>;
   /** Listed tools that cannot be pressed now, by tool, with the reason a tooltip gives. */
   readonly unavailable?: Readonly<Partial<Record<RightUtilityDockSurfaceId, string>>>;
-  /** Tools a draft task will have once its thread exists. */
-  readonly awaitingThread?: ReadonlyArray<{
-    readonly id: RightUtilityDockSurfaceId;
-    readonly label: string;
-  }>;
   /** The dock's open tabs as the person sees them. */
   readonly tabs: ReadonlyArray<{
     readonly id: string;
@@ -156,15 +144,6 @@ export interface DockToolButtonsInput {
   readonly layout?: DockTileLayout | undefined;
   /** The dock is on screen. */
   readonly dockPresentedOpen: boolean;
-  /**
-   * A new Code task whose Project is chosen: its Project terminal and browser
-   * stand in for the thread's, which does not exist yet. `open` is the one the
-   * dock shows now.
-   */
-  readonly quickTools?: {
-    readonly tools: ReadonlyArray<"terminal" | "browser">;
-    readonly open?: "terminal" | "browser" | undefined;
-  };
   /** Tools the bottom panel could take, so a shown tool's menu can offer to move there. */
   readonly bottomAccepts?: ReadonlyArray<RightUtilityDockSurfaceId>;
   /** Tools the open bottom panel holds. */
@@ -410,42 +389,7 @@ function toolMenu(
  * promises is what a press does.
  */
 export function buildDockToolButtons(input: DockToolButtonsInput): DockToolButtonsModel {
-  const awaiting = input.awaitingThread ?? [];
-  const tools = [
-    ...input.surfaces,
-    ...awaiting.filter((tool) => !input.surfaces.some((candidate) => candidate.id === tool.id)),
-  ];
-  const described = tools.map((tool): DockToolButton => {
-    const quick = input.quickTools;
-    if (
-      !input.surfaces.some((candidate) => candidate.id === tool.id) &&
-      quick !== undefined &&
-      (tool.id === "terminal" || tool.id === "browser") &&
-      quick.tools.includes(tool.id)
-    ) {
-      const isOpen = quick.open === tool.id;
-      return {
-        id: tool.id,
-        label: tool.id === "terminal" ? "Project terminal" : "Project browser",
-        pressed: isOpen,
-        open: false,
-        tabIds: [],
-        menu: [],
-        press: isOpen ? { kind: "quick-close" } : { kind: "quick-open", tool: tool.id },
-      };
-    }
-    if (!input.surfaces.some((candidate) => candidate.id === tool.id)) {
-      return {
-        id: tool.id,
-        label: tool.label,
-        pressed: false,
-        open: false,
-        tabIds: [],
-        menu: [],
-        disabledReason: DOCK_TOOLS_AWAIT_TASK_START,
-        press: { kind: "refused" },
-      };
-    }
+  const described = input.surfaces.map((tool): DockToolButton => {
     const unavailable = input.unavailable?.[tool.id];
     if (unavailable !== undefined) {
       return {

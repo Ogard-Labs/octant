@@ -9,7 +9,6 @@ import { DockToolIcon } from "./dockToolIcons";
 import { PageFavicon } from "./PageFavicon";
 import { PanelTab, PanelTabStrip } from "./PanelTabs";
 import { IconButton } from "./IconButton";
-import { StartQuickTools, StartQuickToolsPlacementContext } from "./StartQuickTools";
 import {
   MINIMISABLE_DOCK_SURFACES,
   moveUtilityTile,
@@ -159,20 +158,12 @@ export interface RightUtilityDockSurfaceProps {
    * over its panes.
    */
   readonly toolRow?: DockToolButtonsProps;
-  /**
-   * The active pane is a new Code task whose thread does not exist yet. The
-   * row shows these tools disabled and the body says when they open, so the
-   * dock keeps its place instead of closing and reopening around the first
-   * message.
-   */
-  readonly toolsAwaitingThread?: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
 }
 
 export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   const activeSurface = props.resolution.kind === "closed" ? undefined : props.resolution.surface;
   const activeTabId = props.activeTabId ?? activeSurface?.id;
   const activeTab = props.tabs.find((tab) => tab.id === activeTabId);
-  const quickToolsProjectId = useContext(StartQuickToolsPlacementContext)?.projectId;
   const toolPanel = useRef<HTMLElement>(null);
   // Every open Browser is one Browser tool with pages, the way a browser
   // keeps its tabs inside its own window: the title band's Browser button names
@@ -204,10 +195,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     split.environmentTabId === undefined
       ? undefined
       : props.tabs.find((tab) => tab.id === split.environmentTabId);
-  const strip =
-    environmentTab !== undefined &&
-    shelfDrawn &&
-    !(props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface");
+  const strip = environmentTab !== undefined && shelfDrawn;
   const drag = useDraggedDockTool();
   // A tool dragged from its button in the title band; a pane dragged by its
   // bar lands among the tiles, which take it themselves.
@@ -664,12 +652,11 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
 
   // Docked, a pane's bar stands in the title band, on the thread header's
   // line, so the tiles start at the dock's top. Everything else the dock shows
-  // (its overview, a start screen's quick tools, a notice) starts under the
+  // (its overview, a notice) starts under the
   // band, and the drawer keeps its own head with the tool row and Close.
   const tilesLead =
     tiles !== undefined &&
     !tiles.narrow &&
-    !(props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface") &&
     props.resolution.kind !== "closed" &&
     !(!tiled && props.resolution.kind === "unavailable") &&
     activeTab !== undefined;
@@ -685,17 +672,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
         className="dock-body right-utility-dock__content"
         data-shelf={shelfEntries.length === 0 ? undefined : "true"}
       >
-        {props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface" ? (
-          quickToolsProjectId === undefined ? (
-            // The dock's own state is a pane's state: the mark and the line
-            // in the dock's middle, where it stood top-left under the band.
-            <div className="right-utility-dock__tool" data-dock-state="true">
-              <OctantEmpty state="neutral" title="Tools open once the task starts" />
-            </div>
-          ) : (
-            <StartQuickTools projectId={quickToolsProjectId} />
-          )
-        ) : props.resolution.kind === "closed" ? (
+        {props.resolution.kind === "closed" ? (
           <div className="dock-start">{props.overview}</div>
         ) : !tiled && props.resolution.kind === "unavailable" ? (
           <div className="right-utility-dock__tool" data-dock-state="true">

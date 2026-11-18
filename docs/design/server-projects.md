@@ -332,7 +332,7 @@ checks never change registry/configuration or journal state.
   Full access. _Rationale:_ the posture says what holds the shell, and on a
   server nothing does: Octant has no sandbox there, and the person opening
   their own shell is the approval, as it is for a local Project terminal.
-  A Code Project opens it from the dock's quick tools. A Work Project opens
+  A Code Project opens it in Zen. A Work Project opens
   **Open terminal** in its Settings → Permissions → Servers row, only while this
   live local window holds that Work Project and its default-off **Developer
   tools** choice is on. Another Work Project offers its existing explicit

@@ -837,6 +837,58 @@ describe("WorkThreadWorkspace", () => {
     expect(note).toHaveTextContent("did not transfer");
   });
 
+  it("says once what Strict kept for a launch, and again only when what it kept changes", async () => {
+    const kept = ["octant-sandbox", "protected-files", "forge-asks"] as const;
+    const first = workTurn({ strictKept: kept });
+    const second = workTurn({
+      requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      turnId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      prompt: "Shorten it",
+      transcript: [
+        { role: "user", text: "Shorten it" },
+        { role: "assistant", text: "Here is the short one." },
+      ],
+      strictKept: kept,
+    });
+    const third = workTurn({
+      requestId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      turnId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      prompt: "Now at Full access",
+      transcript: [
+        { role: "user", text: "Now at Full access" },
+        { role: "assistant", text: "Done." },
+      ],
+      strictKept: ["protected-files", "forge-asks"],
+    });
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({ threadId, turns: [first, second, third], liveCursor: 0 })),
+    };
+
+    render(
+      <WorkThreadWorkspace
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    await screen.findByText("Done.");
+    const notes = screen
+      .getAllByRole("note")
+      .map((note) => note.textContent)
+      .filter((text) => text?.startsWith("Strict kept:"));
+    expect(notes).toEqual([
+      "Strict kept: Octant's sandbox, protected files, asks before pushes and merges.",
+      "Strict kept: protected files, asks before pushes and merges.",
+    ]);
+  });
+
   it("rewinds a Work thread to a message, conversation only, and returns that message to the composer", async () => {
     const user = userEvent.setup();
     const first = workTurn();

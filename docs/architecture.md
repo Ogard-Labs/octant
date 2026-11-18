@@ -5057,7 +5057,7 @@ thread's [guardrail level](#security-and-authority). New tasks may choose an app
   rule under [Security and authority](#security-and-authority). Every Project terminal
   binds all of the Project's folders that exist like the main folder, so the
   shell can move between them; the pick only chooses where it starts. The
-  header's action buttons and the start screen's quick tools offer the pick
+  header's action buttons offer the pick
   once a Project has an extra folder. A Code thread's terminal binds every
   Project folder that exists as a Project terminal does, and its start command
   may name an extra folder to start in, compared as the exact path the Project
@@ -14657,8 +14657,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   it, so no approval leaves the server's authority.
 
   **Octant adds no restrictions of its own unless Strict is on**
-  (maintainer decision, 2026-11-16; partly built: the Strict setting and
-  every item marked built below; not built yet: the opt-in extras). A
+  (maintainer decision, 2026-11-16; built: the Strict setting and every
+  item below, the opt-in extras included). A
   person who moves
   from a provider's own CLI to Octant keeps every workflow that worked
   there, and Octant restricts a provider no more than any other agent
@@ -14838,7 +14838,30 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     under Strict, and every turn below Full access, takes the stalled-turn
     limit).
   - **Opt-in extras.** A per-person list of provider tools to block, and in
-    Strict a notice saying what Strict withheld (not built yet).
+    Strict a notice saying what Strict withheld. Built: Settings ›
+    Permissions › Blocked tools holds the list, empty by default, per
+    provider (Claude Code, Codex, OpenCode, Pi: the providers with a way to
+    keep a named tool from their runtime) and per tool, by the runtime's own
+    name or `server__tool` for a tool of the provider's own MCP server. Each
+    change is journaled (`blocked-tools.tool-set@1`) and is the person's act
+    at a window or on a device the host's own person paired; an agent grant
+    or a hub-introduced device is refused. The host hands the list to every
+    session start and resume of that provider (`blockedTools` on
+    `ProviderSessionStart`), read at that launch, at every level and with or
+    without Strict. Claude Code gets it as `disallowedTools` and its gate
+    refuses a call to one, and a runtime that still lists one is refused as
+    widened; OpenCode denies each one last, after every allow, in its
+    session rules and its 2.x process configuration; Codex switches off its
+    shell, image view or web search, or names the tool in that MCP server's
+    `disabled_tools`; Pi leaves it out of its tool list and its approval
+    bridge refuses it before any other rule. Codex has no switch for its
+    other built-ins, so Settings refuses those names and a launch that
+    carries one fails rather than run it. Each Strict launch journals what
+    Strict kept for it (`strictKept` on a Code turn's
+    `provider-session-ready` and on a Work turn's update), computed from the
+    launch's Strict value, runtime family and whether it ran in Octant's
+    sandbox, and the thread shows it as a note ([Thread view: Strict
+    notice](design/thread-view.md#strict-notice)).
 
   Kept as product rules, since no provider feature depends on them: Plan is
   read-only, Chat has no folder or shell (it is an extra mode, not a limit
@@ -14915,8 +14938,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   import, whose request names its Project in its workspace scope; and Full
   access and extension install, built earlier. Each is journaled with the
   device as the actor. The paired browser offers the Project terminal and
-  Private page under **Project tools** in Work and Code, through the start
-  screen's quick tools, and **Import HTML…** alone in a Chat thread's Canvas
+  Private page under **Project tools** in Work and Code, as a list of the
+  Project's own tools, and **Import HTML…** alone in a Chat thread's Canvas
   tools. The phone offers the same three from a thread's Views and panes
   (the terminal as plain lines of output and a line to run), and answers
   every Work request a window can: the Plan block, a provider's tool

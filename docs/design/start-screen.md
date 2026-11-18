@@ -618,16 +618,14 @@ On Code and Work one quiet line under it, at the detail step in muted ink,
 says "Pick a project, or just start typing"; Chat's start screen is the
 heading alone, and its composer's placeholder carries the sentence. The start screen names no time of day
 and counts nothing: what is running and what waits for review live in the
-sidebar. Once a Code start screen has a Project chosen, its quick tools are
-the Project's own Terminal and Browser (a server Project's Terminal only) as plain rows in the right dock's body,
-above one muted line, "Other tools open once the task starts". They live only
-in the dock: a column beside the start screen squeezed the composer off centre
-and contradicted the dock, so with the dock closed the start screen stands
-alone. Each opens in the dock without starting a thread, the same window-local
-Project terminal and browser Zen uses, which no agent can see or reach;
-"Quick tools" returns to the list, and closing the terminal (or leaving the
-start screen) stops its shell, since nothing else could reopen it. The
-composer never remounts when the Project is chosen, so the draft stays. Send
+sidebar. A start screen, with a Project chosen or not, has no tools of its own: no
+right dock, no bottom panel, no tool row and no uncommitted-changes count in the
+title band, and nothing opens them (no switch, shortcut or menu item). It stays
+clean until a thread exists, and the tools come back with it (maintainer
+request, 2026-11-18; before, a Code start screen with a Project offered the
+Project's Terminal and Browser in the dock, and the title band showed the
+checkout's change count, and a press on that count opened the dock on the home
+screen). The composer never remounts when the Project is chosen, so the draft stays. Send
 on a Code start screen with no Project chosen stays live and answers with one
 card directly above the box, "Choose a Project first. A Code task works in a
 folder.", rather than greying out with no reason. Every
