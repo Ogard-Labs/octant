@@ -13,7 +13,7 @@ import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Profiler, useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ChatController } from "./useChatController";
 import { ChatWorkspace } from "./ChatWorkspace";
@@ -1140,6 +1140,13 @@ describe("ChatWorkspace", () => {
     vi.mocked(client.listToolApprovals).mockResolvedValue([approval]);
     const listToolApprovals = vi.mocked(client.listToolApprovals);
     const commits: Array<string> = [];
+    // A running turn's header shows its elapsed time and commits once a second
+    // as the clock moves; with the clock still, only the poll could commit.
+    // Polling keeps real timers.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
 
     render(
       <Profiler id="chat-workspace" onRender={(_, phase) => commits.push(phase)}>
