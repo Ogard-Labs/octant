@@ -964,7 +964,9 @@ Switching threads, hiding the dock and moving a tab do not ask. Desktop
 window close uses the same check for that window. See [Quitting](#quitting)
 for a quit across windows. If a window does not respond to the check, a
 native confirmation offers Cancel or Close anyway; a missing reply never
-approves a close on its own.
+approves a close on its own. A window closed anyway stops taking input
+until it closes or the close or quit is cancelled, so it cannot gain
+edits while another window asks.
 
 Unsaved text is kept locally on the client, separately from pane references,
 messages and the host journal. Code recovery keys include the endpoint, checkout

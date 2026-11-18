@@ -31,6 +31,7 @@ function fakeWindow() {
     restore: vi.fn(),
     show: vi.fn(),
     focus: vi.fn(),
+    setEnabled: vi.fn(),
     webContents: contents,
     once: vi.fn((channel: string, listener: () => void) => {
       onceHandlers.set(channel, listener);
@@ -534,5 +535,158 @@ describe("the unavailable-renderer fallback", () => {
     pending.respond(true);
     expect(await outcome).toBe(true);
     expect(filesClose.holds(window)).toBe(true);
+  });
+
+  it("keeps a window closed anyway from taking input until the close or a release", async () => {
+    const timers: Array<() => void> = [];
+    const pending = pendingConfirmation();
+    const filesClose = createDesktopFilesClose({
+      confirmUnavailable: pending.confirm,
+      timer: {
+        set: (callback) => {
+          timers.push(callback);
+          return 0 as never;
+        },
+        clear: () => undefined,
+      },
+    });
+    const window = fakeWindow();
+    const outcome = filesClose.prepare(window);
+    timers.forEach((fire) => fire());
+    await vi.waitFor(() => expect(pending.signal()).toBeDefined());
+    pending.respond(true);
+    expect(await outcome).toBe(true);
+    expect(filesClose.holds(window)).toBe(true);
+    expect(window.setEnabled).toHaveBeenCalledTimes(1);
+    expect(window.setEnabled).toHaveBeenLastCalledWith(false);
+    filesClose.release(window);
+    expect(filesClose.holds(window)).toBe(false);
+    expect(window.setEnabled).toHaveBeenLastCalledWith(true);
+  });
+
+  it("keeps the window closed anyway disabled while a later window asks, and enables it again when that window cancels", async () => {
+    const timers: Array<() => void> = [];
+    const pending = pendingConfirmation();
+    const filesClose = createDesktopFilesClose({
+      confirmUnavailable: pending.confirm,
+      timer: {
+        set: (callback) => {
+          timers.push(callback);
+          return 0 as never;
+        },
+        clear: () => undefined,
+      },
+    });
+    const first = fakeWindow();
+    const second = fakeWindow();
+    const windows = [first, second];
+    const outcome = filesClose.prepareAll(() => windows);
+    timers.forEach((fire) => fire());
+    await vi.waitFor(() => expect(pending.signal()).toBeDefined());
+    pending.respond(true);
+    await vi.waitFor(() => expect(sentChecks(second)).toHaveLength(1));
+    const secondId = sentChecks(second)[0]?.requestId;
+    expect(filesClose.reply(second, { requestId: secondId, answer: "checking" })).toBe(true);
+    expect(filesClose.reply(second, { requestId: secondId, answer: "prompting" })).toBe(true);
+    expect(filesClose.holds(first)).toBe(true);
+    expect(first.setEnabled).toHaveBeenCalledTimes(1);
+    expect(first.setEnabled).toHaveBeenLastCalledWith(false);
+    expect(filesClose.reply(second, { requestId: secondId, answer: "cancel" })).toBe(true);
+    expect(await outcome).toBe(false);
+    expect(filesClose.holds(first)).toBe(false);
+    expect(first.setEnabled).toHaveBeenLastCalledWith(true);
+  });
+
+  it("keeps the window closed anyway disabled when the remaining window allows the close", async () => {
+    const timers: Array<() => void> = [];
+    const pending = pendingConfirmation();
+    const filesClose = createDesktopFilesClose({
+      confirmUnavailable: pending.confirm,
+      timer: {
+        set: (callback) => {
+          timers.push(callback);
+          return 0 as never;
+        },
+        clear: () => undefined,
+      },
+    });
+    const first = fakeWindow();
+    const second = fakeWindow();
+    const windows = [first, second];
+    const outcome = filesClose.prepareAll(() => windows);
+    timers.forEach((fire) => fire());
+    await vi.waitFor(() => expect(pending.signal()).toBeDefined());
+    pending.respond(true);
+    await vi.waitFor(() => expect(sentChecks(second)).toHaveLength(1));
+    const secondId = sentChecks(second)[0]?.requestId;
+    filesClose.reply(second, { requestId: secondId, answer: "checking" });
+    filesClose.reply(second, { requestId: secondId, answer: "allow" });
+    expect(await outcome).toBe(true);
+    expect(filesClose.holds(first)).toBe(true);
+    expect(first.setEnabled).toHaveBeenCalledTimes(1);
+    expect(first.setEnabled).not.toHaveBeenCalledWith(true);
+  });
+
+  it("never re-enables a window that closed while held", async () => {
+    const timers: Array<() => void> = [];
+    const pending = pendingConfirmation();
+    const filesClose = createDesktopFilesClose({
+      confirmUnavailable: pending.confirm,
+      timer: {
+        set: (callback) => {
+          timers.push(callback);
+          return 0 as never;
+        },
+        clear: () => undefined,
+      },
+    });
+    const window = fakeWindow();
+    filesClose.install(window);
+    const outcome = filesClose.prepare(window);
+    timers.forEach((fire) => fire());
+    await vi.waitFor(() => expect(pending.signal()).toBeDefined());
+    pending.respond(true);
+    expect(await outcome).toBe(true);
+    expect(filesClose.holds(window)).toBe(true);
+    window.emitClosed();
+    expect(window.setEnabled).toHaveBeenCalledTimes(1);
+    expect(window.setEnabled).not.toHaveBeenCalledWith(true);
+  });
+
+  it("refuses a native approval whose window cannot be disabled", async () => {
+    const timers: Array<() => void> = [];
+    const pending = pendingConfirmation();
+    const filesClose = createDesktopFilesClose({
+      confirmUnavailable: pending.confirm,
+      timer: {
+        set: (callback) => {
+          timers.push(callback);
+          return 0 as never;
+        },
+        clear: () => undefined,
+      },
+    });
+    const window = fakeWindow();
+    vi.mocked(window.setEnabled).mockImplementation(() => {
+      throw new Error("window cannot take input changes");
+    });
+    const outcome = filesClose.prepare(window);
+    timers.forEach((fire) => fire());
+    await vi.waitFor(() => expect(pending.signal()).toBeDefined());
+    pending.respond(true);
+    expect(await outcome).toBe(false);
+    expect(filesClose.holds(window)).toBe(false);
+  });
+
+  it("leaves input to the renderer for a renderer-approved hold", async () => {
+    const filesClose = createDesktopFilesClose();
+    const window = fakeWindow();
+    const outcome = filesClose.prepare(window);
+    const id = sentChecks(window)[0]?.requestId;
+    filesClose.reply(window, { requestId: id, answer: "checking" });
+    filesClose.reply(window, { requestId: id, answer: "allow" });
+    expect(await outcome).toBe(true);
+    expect(filesClose.holds(window)).toBe(true);
+    expect(window.setEnabled).not.toHaveBeenCalled();
   });
 });

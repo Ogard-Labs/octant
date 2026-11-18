@@ -13,7 +13,9 @@ import {
  * person's `allow` or `cancel` with no deadline, `confirming-unavailable`
  * is a native dialog asking the person directly because the renderer could
  * not answer, and `held` is an `allow` still locking the window until the
- * close consumes it or `release` frees it. A reply only ever affects the
+ * close consumes it or `release` frees it — a renderer `allow` leaves its
+ * document inert, while a native `Close anyway` disables the window
+ * itself. A reply only ever affects the
  * request the registry holds for that same window and request id — a late,
  * malformed, or out-of-order one changes nothing — and an absent
  * acknowledgement never means allowed.
@@ -37,6 +39,8 @@ interface CloseRequest {
   confirmation?: AbortController | undefined;
   /** The renderer already announced its prompt once; retries do not refocus. */
   revealed?: boolean;
+  /** A native fallback hold disabled the window until release or close. */
+  inputDisabled?: boolean;
 }
 
 interface DeliveryTimer {
@@ -162,6 +166,13 @@ export function createDesktopFilesClose(options?: {
     request.confirmation?.abort();
     // A held request's prepare already resolved; only a pending one is answered.
     if (request.phase !== "held") request.resolve(false);
+    if (request.inputDisabled && !window.isDestroyed()) {
+      try {
+        window.setEnabled(true);
+      } catch {
+        // A window already leaving keeps its lock moot.
+      }
+    }
   }
 
   function send(window: BrowserWindow, payload: FilesCloseRequestPayload): void {
@@ -226,6 +237,21 @@ export function createDesktopFilesClose(options?: {
           return;
         request.confirmation = undefined;
         if (allowed) {
+          // The renderer that could not answer cannot lock itself, so the
+          // native window refuses input until release or close: on macOS
+          // Electron 43 backs this with an attached sheet, and close() ends
+          // attached sheets before closing.
+          if (window.isDestroyed()) {
+            dropRequest(window);
+            return;
+          }
+          try {
+            window.setEnabled(false);
+          } catch {
+            dropRequest(window);
+            return;
+          }
+          request.inputDisabled = true;
           request.phase = "held";
           request.resolve(true);
         } else {
