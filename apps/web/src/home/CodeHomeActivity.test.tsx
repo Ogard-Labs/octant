@@ -398,7 +398,7 @@ describe("the records drill-down", () => {
     const card = await screen.findByRole("region", { name: "Runs finished" });
     await user.click(within(card).getByRole("button", { name: "See all 1" }));
     const dialog = await screen.findByRole("dialog", { name: /Runs finished/ });
-    expect(within(dialog).getByText("1 finished · 2 failed · 1 canceled")).toBeInTheDocument();
+    expect(within(dialog).getByText("1 successful · 2 failed · 1 canceled")).toBeInTheDocument();
     expect(within(dialog).getByText("Fix the flaky test")).toBeInTheDocument();
 
     await user.click(within(dialog).getByRole("switch", { name: "All finished" }));
@@ -412,6 +412,143 @@ describe("the records drill-down", () => {
       ).toBe(true),
     );
     expect(await within(dialog).findByText("Broke the build")).toBeInTheDocument();
+  });
+
+  it("drops a stale page that lands after the mode it was read for changed", async () => {
+    const user = userEvent.setup();
+    const runsView = decodeActivityView({
+      status: "ready",
+      source: "octant",
+      count: 1,
+      finished: { successful: 1, failed: 0, canceled: 0 },
+      snapshotId: SNAPSHOT,
+      records: [
+        {
+          kind: "runs",
+          occurredAt: "2026-11-04T08:00:00.000Z",
+          id: "code:run-1",
+          label: "Successful run",
+          source: "code",
+          finish: "successful",
+          mode: "code",
+          threadId: "10000000-0000-4000-8000-0000000000aa",
+          runId: "run-1",
+        },
+      ],
+      nextOffset: 25,
+    });
+    const allView = decodeActivityView({
+      status: "ready",
+      source: "octant",
+      count: 2,
+      finished: { successful: 1, failed: 1, canceled: 0 },
+      snapshotId: SNAPSHOT,
+      records: [
+        {
+          kind: "runs",
+          occurredAt: "2026-11-04T09:00:00.000Z",
+          id: "code:run-9",
+          label: "Failed run",
+          source: "code",
+          finish: "failed",
+          mode: "code",
+          threadId: "10000000-0000-4000-8000-0000000000aa",
+          runId: "run-9",
+        },
+      ],
+    });
+    const stalePage = decodeActivityView({
+      status: "ready",
+      source: "octant",
+      count: 1,
+      snapshotId: SNAPSHOT,
+      records: [
+        {
+          kind: "runs",
+          occurredAt: "2026-11-03T08:00:00.000Z",
+          id: "code:run-old",
+          label: "Older successful run",
+          source: "code",
+          finish: "successful",
+          mode: "code",
+          threadId: "10000000-0000-4000-8000-0000000000aa",
+          runId: "run-old",
+        },
+      ],
+    });
+    let resolveStale: ((value: ActivityView) => void) | undefined;
+    const read: CodeHomeActivityProps["read"] = (query) => {
+      if (query.kind === "page" && query.allFinished === true) return Promise.resolve(allView);
+      if (query.kind === "page") {
+        return new Promise<ActivityView>((resolve) => {
+          resolveStale = resolve;
+        });
+      }
+      return Promise.resolve(runsView);
+    };
+    render(<Harness read={read} />);
+    const card = await screen.findByRole("region", { name: "Runs finished" });
+    await user.click(within(card).getByRole("button", { name: "See all 1" }));
+    const dialog = await screen.findByRole("dialog", { name: /Runs finished/ });
+    await user.click(within(dialog).getByRole("button", { name: "Load more" }));
+    await user.click(within(dialog).getByRole("switch", { name: "All finished" }));
+    expect(await within(dialog).findByText("Failed run")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Successful run")).toBeNull();
+
+    act(() => resolveStale?.(stalePage));
+    await waitFor(() => expect(within(dialog).queryByText("Older successful run")).toBeNull());
+    expect(within(dialog).getByText("Failed run")).toBeInTheDocument();
+  });
+
+  it("clears the frozen rows when the snapshot's access is gone", async () => {
+    const user = userEvent.setup();
+    const deadPage = decodeActivityView({
+      status: "unavailable",
+      source: "octant",
+      reason: "authorization-changed",
+      records: [],
+    });
+    const source = reads((query) =>
+      query.kind === "page" ? deadPage : view({ source: "octant" }),
+    );
+    render(<Harness read={source.read} />);
+    const card = await screen.findByRole("region", { name: "Pull requests merged" });
+    await user.click(within(card).getByRole("button", { name: "See all 2" }));
+    const dialog = await screen.findByRole("dialog", { name: /Pull requests merged/ });
+    expect(within(dialog).getByText("Ship the panel")).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Load more" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Access changed — open it again to retry.",
+    );
+    expect(within(dialog).queryByText("Ship the panel")).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: "Load more" })).toBeNull();
+  });
+
+  it("retires the open records when a refresh says the read is gone", async () => {
+    const user = userEvent.setup();
+    const pending: Array<(value: ActivityView) => void> = [];
+    const read: CodeHomeActivityProps["read"] = (query) =>
+      query.kind === "read" && query.refresh === true
+        ? new Promise<ActivityView>((resolve) => pending.push(resolve))
+        : Promise.resolve(view());
+    render(<Harness read={read} />);
+    const card = await screen.findByRole("region", { name: "Pull requests merged" });
+    await user.click(screen.getByRole("button", { name: "Refresh activity" }));
+    await user.click(within(card).getByRole("button", { name: "See all 2" }));
+    await screen.findByRole("dialog", { name: /Pull requests merged/ });
+
+    act(() => {
+      const gone = decodeActivityView({
+        status: "unavailable",
+        source: "octant",
+        records: [],
+      });
+      for (const resolve of pending) resolve(gone);
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: /Pull requests merged/ })).toBeNull(),
+    );
   });
 
   it("opens the thread a run belongs to", async () => {

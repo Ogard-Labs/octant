@@ -34,7 +34,8 @@ import {
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { IconButton } from "../shell/IconButton";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantAlert } from "../ui/base/OctantAlert";
+import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -356,6 +357,20 @@ export function CodeHomeActivity(props: CodeHomeActivityProps) {
 }
 
 /**
+ * The parts of a card read an explicit refresh may hold on to: same card,
+ * source and range choice. Any of them moving means the last answer belongs
+ * to a different question and must not stay on screen or keep its snapshot
+ * pageable.
+ */
+function activityScopeKey(input: ActivityCardInput): string {
+  return JSON.stringify({
+    card: input.meta.card,
+    range: input.range,
+    source: input.source,
+  });
+}
+
+/**
  * One card's read plus the body HomeCard draws under its count. The read is
  * keyed on the query alone: a reorder, a sibling card's change or a repaint
  * never re-reads, an explicit Refresh does (keeping the last answer on
@@ -370,18 +385,29 @@ function useActivityCardContent(
   const [read, setRead] = useState<CardRead>({ phase: "loading" });
   const [drill, setDrill] = useState<{ view: ActivityView } | undefined>(undefined);
   const consumedEpoch = useRef(0);
+  const consumedScope = useRef<string | undefined>(undefined);
+  const consumedReader = useRef(input.read);
   useEffect(() => {
+    const scope = activityScopeKey(input);
+    // A rebuilt read client is a new authority: the last answer and its
+    // snapshot belong to the old one and must not be retained on refresh.
+    const scopeChanged =
+      consumedReader.current !== input.read ||
+      (consumedScope.current !== undefined && consumedScope.current !== scope);
+    consumedScope.current = scope;
+    consumedReader.current = input.read;
     const refresh = epoch > consumedEpoch.current;
     consumedEpoch.current = Math.max(consumedEpoch.current, epoch);
     // A scope change — new timeframe, source or host — retires the view and
-    // any drill-down it opened; an explicit refresh keeps the last answer up.
-    if (!refresh) setDrill(undefined);
+    // any drill-down it opened; an explicit refresh keeps the last answer up
+    // only while it still answers the same scope.
+    if (scopeChanged || !refresh) setDrill(undefined);
     if (input.query === undefined) {
       setRead({ phase: "settled" });
       return undefined;
     }
     setRead((previous) =>
-      refresh && previous.view !== undefined
+      refresh && !scopeChanged && previous.view !== undefined
         ? { phase: "refreshing", view: previous.view }
         : { phase: "loading" },
     );
@@ -389,7 +415,11 @@ function useActivityCardContent(
     let active = true;
     input.read(query).then(
       (view) => {
-        if (active) setRead({ phase: "settled", view });
+        if (!active) return;
+        // A fresh answer with no navigable basis — unavailable or a labeled
+        // fallback — retires the last snapshot's open records dialog too.
+        if (view.status === "unavailable" || view.fallback !== undefined) setDrill(undefined);
+        setRead({ phase: "settled", view });
       },
       () => {
         if (!active) return;
@@ -541,6 +571,7 @@ function ActivityRecordsDialog(props: {
   const [allFinished, setAllFinished] = useState(false);
   const [loading, setLoading] = useState(false);
   const [pageError, setPageError] = useState<string | undefined>(undefined);
+  const requestId = useRef(0);
   const finished = props.view.finished;
 
   const load = (offset: number, mode: "filtered" | "all", append: boolean) => {
@@ -549,6 +580,9 @@ function ActivityRecordsDialog(props: {
       setPageError("This view cannot be paged.");
       return;
     }
+    // A slower earlier answer must never publish after a newer request (a
+    // mode switch or another page) has started.
+    const generation = ++requestId.current;
     setLoading(true);
     setPageError(undefined);
     props.input
@@ -560,8 +594,14 @@ function ActivityRecordsDialog(props: {
       })
       .then(
         (page) => {
+          if (generation !== requestId.current) return;
           setLoading(false);
           if (page.status === "unavailable") {
+            if (page.reason === "expired" || page.reason === "authorization-changed") {
+              // A dead snapshot's rows must not stay navigable.
+              setRecords([]);
+              setNextOffset(undefined);
+            }
             setPageError(reasonLabel(page));
             return;
           }
@@ -569,6 +609,7 @@ function ActivityRecordsDialog(props: {
           setNextOffset(page.nextOffset);
         },
         () => {
+          if (generation !== requestId.current) return;
           setLoading(false);
           setPageError("The page could not be read.");
         },
@@ -606,22 +647,34 @@ function ActivityRecordsDialog(props: {
       {props.input.meta.card === "runs" && finished !== undefined ? (
         <div className="code-home-activity-records__finished">
           <p className="oct-meta">
-            {finished.successful} finished · {finished.failed} failed · {finished.canceled} canceled
+            {finished.successful} successful · {finished.failed} failed · {finished.canceled}{" "}
+            canceled
           </p>
           <OctantSwitch
             checked={allFinished}
             label="All finished"
             onCheckedChange={(next) => {
               setAllFinished(next);
+              // The list must never show one mode's rows under the other
+              // mode's switch: it clears and refills from the same snapshot.
+              setRecords([]);
+              setNextOffset(undefined);
               load(0, next ? "all" : "filtered", false);
             }}
           />
         </div>
       ) : null}
+      {pageError !== undefined ? (
+        <OctantAlert className="code-home-activity-records__error" layout="row" tone="warning">
+          {pageError}
+        </OctantAlert>
+      ) : null}
       {records.length === 0 ? (
-        <p className="oct-row-detail code-home-activity-records__empty">
-          {pageError ?? "Nothing in this range."}
-        </p>
+        pageError === undefined ? (
+          <p className="oct-row-detail code-home-activity-records__empty">
+            {loading ? "Loading…" : "Nothing in this range."}
+          </p>
+        ) : null
       ) : (
         <ul aria-label="Records" className="code-home-activity-records__list">
           {records.map((record) => (
@@ -634,11 +687,6 @@ function ActivityRecordsDialog(props: {
           ))}
         </ul>
       )}
-      {records.length > 0 && pageError !== undefined ? (
-        <p className="oct-row-detail code-home-activity-records__error" role="alert">
-          {pageError}
-        </p>
-      ) : null}
       {nextOffset === undefined ? null : (
         <div className="code-home-activity-records__foot">
           <OctantButton
@@ -683,7 +731,7 @@ function ExternalLink(props: {
   if (props.onOpenExternal === undefined) {
     return (
       <a
-        className="code-home-activity-record__link"
+        className={`${octantButtonClassName({ size: "sm", variant: "link" })} code-home-activity-record__link`}
         href={props.href}
         rel="noreferrer"
         target="_blank"
@@ -693,13 +741,15 @@ function ExternalLink(props: {
     );
   }
   return (
-    <button
+    <OctantButton
       className="code-home-activity-record__link"
       onClick={() => props.onOpenExternal?.(props.href)}
+      size="sm"
       type="button"
+      variant="link"
     >
       {props.children}
-    </button>
+    </OctantButton>
   );
 }
 

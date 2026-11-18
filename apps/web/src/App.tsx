@@ -5943,7 +5943,7 @@ function LaunchedShell(
     needsYouThreadProviders,
     needsYouAskClients,
     now: snoozeClockNow.getTime(),
-    onOpenExternal: (url: string) => openExternalUrl(props.hostBridge, url),
+    onOpenExternal: rootLinkActions.openExternal,
     openRunningServiceLive,
     pendingRequestClient,
     remoteRunningServicesClient,

@@ -817,17 +817,8 @@
 }
 
 .code-home-activity-record__link.code-home-activity-record__link {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--oct-accent);
-  cursor: pointer;
   font: inherit;
   text-align: start;
-}
-
-.code-home-activity-record__link:hover {
-  text-decoration: underline;
 }
 
 .code-home-activity-record__run {

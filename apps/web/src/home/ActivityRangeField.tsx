@@ -1,6 +1,7 @@
 import type { ActivityRangeChoice } from "@octant/contracts/code-home-activity";
 import type { ActivityRangeResult } from "@octant/domain/activity-range-policy";
 import { useId, useState } from "react";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField, type OctantSelectOption } from "../ui/base/OctantSelect";
@@ -145,9 +146,14 @@ export function ActivityRangeField(props: ActivityRangeFieldProps) {
         </span>
       ) : null}
       {error === "" ? null : (
-        <span className="activity-range-field__error" id={errorId} role="alert">
+        <OctantAlert
+          className="activity-range-field__error"
+          id={errorId}
+          layout="row"
+          tone="warning"
+        >
           {error}
-        </span>
+        </OctantAlert>
       )}
     </span>
   );
