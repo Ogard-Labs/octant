@@ -8,8 +8,7 @@ import { createSpendCeilingRouteHandler } from "../spendCeilingRoutes";
 import { createUsageDashboardRouteHandler } from "../usageDashboardRoutes";
 import { resolveWindowProjectScope, type UsageProjectScope } from "../usageProjectScope";
 import { createDiagnosticsExportRouteHandler } from "../diagnosticsExportRoutes";
-import { createValidationEvidenceRouteHandler } from "../validationEvidenceRoutes";
-import { createValidationEvidenceLoader } from "../validation/validationEvidenceLoader";
+import type { createValidationEvidenceRouteHandler } from "../validationEvidenceRoutes";
 import { ValidationEventStore } from "../validation/validationEventStore";
 import { ZenEventStore } from "../zen/zenEventStore";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -79,25 +78,37 @@ export function wireUsage(deps: UsageDependencies) {
     windowAuthorityStore,
     octantVersion: version,
   });
-  const validationEvidenceRoutes = createValidationEvidenceRouteHandler({
-    windowAuthorityStore,
-    authorize: (windowId, authority) => {
-      const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
-      const context = workspace?.contextByMode[authority.mode];
-      return (
-        workspace !== undefined &&
-        context !== undefined &&
-        authority.projectId !== undefined &&
-        windowAdmitsProject(workspace, authority.mode, authority.projectId) &&
-        String(context.host) === String(authority.hostId)
-      );
-    },
-    maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
-    loadSnapshot: createValidationEvidenceLoader({
-      connection: persistence.connection,
-      clock: () => new Date().toISOString(),
-    }),
-  });
+  // Evidence reads are not part of opening a window or recovering the store.
+  // Load only for this route; its window and Project checks run after the import.
+  let evidenceRoute: Promise<ReturnType<typeof createValidationEvidenceRouteHandler>> | undefined;
+  const validationEvidenceRoutes = async (request: Request): Promise<Response | undefined> => {
+    if (new URL(request.url).pathname !== "/api/validation/evidence") return undefined;
+    evidenceRoute ??= Promise.all([
+      import("../validationEvidenceRoutes"),
+      import("../validation/validationEvidenceLoader"),
+    ]).then(([routes, loader]) =>
+      routes.createValidationEvidenceRouteHandler({
+        windowAuthorityStore,
+        authorize: (windowId, authority) => {
+          const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
+          const context = workspace?.contextByMode[authority.mode];
+          return (
+            workspace !== undefined &&
+            context !== undefined &&
+            authority.projectId !== undefined &&
+            windowAdmitsProject(workspace, authority.mode, authority.projectId) &&
+            String(context.host) === String(authority.hostId)
+          );
+        },
+        maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+        loadSnapshot: loader.createValidationEvidenceLoader({
+          connection: persistence.connection,
+          clock: () => new Date().toISOString(),
+        }),
+      }),
+    );
+    return (await evidenceRoute)(request);
+  };
   const validationEventStore = new ValidationEventStore({
     journal: persistence.journal,
     uuid: randomUUID,

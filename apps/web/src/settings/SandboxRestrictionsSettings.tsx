@@ -4,9 +4,13 @@ import {
   decodeSandboxRestrictionsCommand,
   type SandboxPolicy,
   type SandboxRestrictionsScope,
-  type SandboxRestrictionsSnapshot,
 } from "@octant/contracts/sandbox-policy";
 import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-restrictions-client";
+import {
+  publishSandboxRestrictionsSnapshot,
+  sandboxRestrictionsScopeKey,
+  useSandboxRestrictionsSnapshot,
+} from "../code/useSandboxRestrictionsSnapshot";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -56,8 +60,11 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
         ?.id ?? "code",
   );
   const scope = scopes.find((choice) => choice.id === scopeId)?.scope ?? defaultScopes[0]?.scope;
-  const [snapshot, setSnapshot] = useState<SandboxRestrictionsSnapshot>();
-  const [draft, setDraft] = useState<SandboxPolicy>(initialPolicy);
+  const {
+    snapshot,
+    failed: loadFailed,
+    refresh,
+  } = useSandboxRestrictionsSnapshot(props.client, scope);
   const [path, setPath] = useState("");
   const [access, setAccess] = useState("read-only");
   const [serviceAddress, setServiceAddress] = useState("");
@@ -65,12 +72,14 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
   const serviceInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string>();
-  const [loadFailed, setLoadFailed] = useState(false);
-  const [reload, setReload] = useState(0);
-  const drafts = useRef(new Map<string, SandboxPolicy>());
+  const [drafts, setDrafts] = useState(
+    () => new Map<string, { readonly policy: SandboxPolicy; readonly version: number }>(),
+  );
   const pathId = useId();
   const serviceId = useId();
-  const scopeKey = JSON.stringify(scope);
+  const scopeKey = scope === undefined ? "" : sandboxRestrictionsScopeKey(scope);
+  const savedDraft = drafts.get(scopeKey);
+  const draft = savedDraft?.policy ?? snapshot?.policy ?? initialPolicy();
   useEffect(() => {
     if (props.initialScope !== undefined) {
       const choice = scopes.find(
@@ -80,59 +89,22 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
     }
   }, [JSON.stringify(props.initialScope)]);
   const updateDraft = (next: SandboxPolicy) => {
-    drafts.current.set(scopeKey, next);
-    setDraft(next);
+    if (snapshot === undefined) return;
+    setDrafts((current) =>
+      new Map(current).set(scopeKey, {
+        policy: next,
+        version: current.get(scopeKey)?.version ?? snapshot.version,
+      }),
+    );
   };
-  useEffect(() => {
-    if (props.client === undefined || scope === undefined) return;
-    const controller = new AbortController();
-    setSnapshot(undefined);
-    setProblem(undefined);
-    setLoadFailed(false);
-    void props.client
-      .settings(scope, controller.signal)
-      .then((value) => {
-        if (controller.signal.aborted) return;
-        setSnapshot(value);
-        setDraft(drafts.current.get(scopeKey) ?? value.policy ?? initialPolicy());
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setLoadFailed(true);
-      });
-    const timer = setInterval(() => {
-      void props.client
-        ?.settings(scope, controller.signal)
-        .then((value) => {
-          if (controller.signal.aborted) return;
-          setSnapshot((previous) =>
-            previous === undefined
-              ? value
-              : {
-                  ...previous,
-                  denials: value.denials,
-                  running: value.running,
-                  strict: value.strict,
-                  strictSource: value.strictSource,
-                  legacyStrict: value.legacyStrict,
-                  activeStrict: value.activeStrict,
-                  activeLegacyStrict: value.activeLegacyStrict,
-                  activePolicy: value.activePolicy,
-                  pending: value.pending,
-                  summary: value.summary,
-                  runtimeDetails: value.runtimeDetails,
-                  capabilities: value.capabilities,
-                  limitations: value.limitations,
-                  enrollmentEnabled: value.enrollmentEnabled,
-                },
-          );
-        })
-        .catch(() => undefined);
-    }, 3000);
-    return () => {
-      controller.abort();
-      clearInterval(timer);
-    };
-  }, [props.client, scopeKey, reload]);
+  const clearDraft = () =>
+    setDrafts((current) => {
+      if (current.get(scopeKey) !== savedDraft || savedDraft === undefined) return current;
+      const next = new Map(current);
+      next.delete(scopeKey);
+      return next;
+    });
+  useEffect(() => setProblem(undefined), [props.client, scopeKey]);
 
   async function change(value: SandboxChange) {
     if (props.client === undefined || snapshot === undefined) return;
@@ -140,19 +112,25 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
     setProblem(undefined);
     try {
       const result = await props.client.change(
-        decodeSandboxRestrictionsCommand({ ...value, expectedVersion: snapshot.version }),
+        decodeSandboxRestrictionsCommand({
+          ...value,
+          expectedVersion:
+            value.kind === "set-policy"
+              ? (savedDraft?.version ?? snapshot.version)
+              : snapshot.version,
+        }),
       );
       if (result.kind === "sandbox-restrictions-refused") {
-        setProblem(result.message);
+        setProblem(
+          result.reason === "stale-version" && savedDraft !== undefined
+            ? `${result.message} Reload discards your draft.`
+            : result.message,
+        );
         return;
       }
-      const refreshed =
-        scope === undefined || JSON.stringify(scope) === JSON.stringify(result.scope)
-          ? result
-          : await props.client.settings(scope);
-      drafts.current.delete(scopeKey);
-      setSnapshot(refreshed);
-      setDraft(refreshed.policy ?? initialPolicy());
+      publishSandboxRestrictionsSnapshot(props.client, result);
+      if (value.kind === "set-policy" || value.kind === "inherit-policy") clearDraft();
+      if (sandboxRestrictionsScopeKey(result.scope) !== scopeKey) refresh();
     } catch {
       setProblem(
         "Sandbox restrictions could not be saved. Your draft is still here; retry or reload.",
@@ -253,9 +231,7 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
               {loadFailed
                 ? "Could not read sandbox restrictions."
                 : "Loading sandbox restrictions…"}
-              {loadFailed ? (
-                <OctantButton onClick={() => setReload((value) => value + 1)}>Retry</OctantButton>
-              ) : null}
+              {loadFailed ? <OctantButton onClick={refresh}>Retry</OctantButton> : null}
             </SettingsState>
           ) : (
             <>
@@ -602,8 +578,9 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                   disabled={busy}
                   variant="ghost"
                   onClick={() => {
-                    drafts.current.delete(scopeKey);
-                    setReload((value) => value + 1);
+                    clearDraft();
+                    setProblem(undefined);
+                    refresh();
                   }}
                 >
                   Reload

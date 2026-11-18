@@ -167,7 +167,11 @@ vi.mock("./automation/automationCenterGate", () => ({
 // first Settings query. Loading the chunk once here keeps that cost out of
 // every test's assertions; the lazy boundary still renders through Suspense.
 beforeAll(async () => {
-  await import("./shell/SettingsView");
+  await Promise.all([
+    import("./app/ReaderPagesContainer"),
+    import("./app/SettingsContainer"),
+    import("./shell/SettingsView"),
+  ]);
 });
 
 afterEach(() => {
@@ -792,8 +796,11 @@ describe("App", () => {
     const projectsDestination = screen.getByRole("button", { name: "Projects" });
     expect(projectsDestination).toBeVisible();
     await userEvent.click(projectsDestination);
-    const directory = document.querySelector<HTMLElement>(".projects-directory");
-    if (directory === null) throw new Error("Expected the Projects directory.");
+    const directory = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>(".projects-directory");
+      if (element === null) throw new Error("Expected the Projects directory.");
+      return element;
+    });
     expect(within(directory).getByRole("button", { name: /Octant, Code Project/ })).toBeVisible();
     expect(codeApi.thread).toHaveBeenCalledWith(codeThreadId, expect.any(AbortSignal));
     expect(codeApi.subscribe).toHaveBeenCalledWith(codeThreadId, 0, expect.any(AbortSignal));

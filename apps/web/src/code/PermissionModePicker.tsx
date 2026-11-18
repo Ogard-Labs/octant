@@ -16,9 +16,10 @@ import {
   ShieldQuestionMark,
   type IconComponent,
 } from "../ui/icons";
-import { useContext, useEffect, useId, useState } from "react";
+import { useContext, useEffect, useId } from "react";
 import { ComposerOutsideContentMark } from "../composer/OutsideContentNotice";
 import { TaskAccessContext } from "./TaskAccessContext";
+import { useSandboxRestrictionsSnapshot } from "./useSandboxRestrictionsSnapshot";
 import { useHostPlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";
 import { useFullAccessWarning, type FullAccessWarningScope } from "./FullAccessWarning";
@@ -195,46 +196,16 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
   const idPrefix = useId();
   const popupSide = useSideWithRoom<HTMLButtonElement>("top");
   const taskAccess = useContext(TaskAccessContext);
-  const [policySelected, setPolicySelected] = useState(false);
-  const [inheritedStrict, setInheritedStrict] = useState<{
-    readonly threadId: string;
-    readonly value: boolean;
-    readonly legacy: boolean;
-  }>();
-  const sandboxClient = taskAccess?.sandboxRestrictionsClient;
   const sandboxThreadId = taskAccess?.subject.aggregateId;
+  const { snapshot, refresh } = useSandboxRestrictionsSnapshot(
+    taskAccess?.sandboxRestrictionsClient,
+    sandboxThreadId === undefined ? undefined : { kind: "session", threadId: sandboxThreadId },
+  );
   useEffect(() => {
-    setPolicySelected(false);
-
-    if (sandboxClient === undefined || sandboxThreadId === undefined) return;
-    const controller = new AbortController();
-    const refresh = () => {
-      void sandboxClient
-        .settings({ kind: "session", threadId: sandboxThreadId }, controller.signal)
-        .then((snapshot) => {
-          if (!controller.signal.aborted) {
-            setPolicySelected(snapshot.strict === true && snapshot.policy !== undefined);
-            if (snapshot.strict !== undefined)
-              setInheritedStrict({
-                threadId: sandboxThreadId,
-                legacy: snapshot.running
-                  ? snapshot.activeLegacyStrict === true
-                  : snapshot.legacyStrict === true,
-                value: snapshot.running
-                  ? (snapshot.activeStrict ?? snapshot.strict)
-                  : snapshot.strict,
-              });
-          }
-        })
-        .catch(() => undefined);
-    };
-    refresh();
-    const timer = setInterval(refresh, 3000);
-    return () => {
-      controller.abort();
-      clearInterval(timer);
-    };
-  }, [sandboxClient, sandboxThreadId, props.strict]);
+    // A new thread reads on subscribe. A changed Strict value on a loaded
+    // thread also warrants a refresh, without waiting for the next poll.
+    if (snapshot !== undefined) refresh();
+  }, [props.strict]);
   const autoSupported =
     props.autoReview === undefined ? props.autoSupported : props.autoReview.status === "reviewer";
   const unsupportedReason =
@@ -248,13 +219,16 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
   // reason rather than offering a choice it refuses.
   const hostPlatform = useHostPlatform();
   const effectiveStrict =
-    inheritedStrict !== undefined && inheritedStrict.threadId === sandboxThreadId
-      ? inheritedStrict.value
-      : (props.strict ?? false);
+    snapshot?.strict === undefined
+      ? (props.strict ?? false)
+      : snapshot.running
+        ? (snapshot.activeStrict ?? snapshot.strict)
+        : snapshot.strict;
   const legacyStrict =
-    inheritedStrict !== undefined && inheritedStrict.threadId === sandboxThreadId
-      ? inheritedStrict.legacy
-      : props.legacyStrict === true;
+    snapshot?.strict === undefined
+      ? props.legacyStrict === true
+      : (snapshot.running ? snapshot.activeLegacyStrict : snapshot.legacyStrict) === true;
+  const policySelected = snapshot?.strict === true && snapshot.policy !== undefined;
   const sandboxed = props.value === "full-access" && (effectiveStrict || policySelected);
   const modeLabel = autoFallsBack ? "Ask first" : PERMISSION_MODE_LABEL[props.value];
   const triggerLabel = effectiveStrict

@@ -95,9 +95,8 @@ import { createLaunchedShellClients } from "./app/createLaunchedShellClients";
 import { DockContainer, type DockOverviewThread } from "./app/DockContainer";
 import { dockToolReads } from "./shell/dockModuleRegistry";
 import { useHomeStart } from "./app/homeStart";
-import { ReaderPagesContainer } from "./app/ReaderPagesContainer";
-import { SettingsContainer } from "./app/SettingsContainer";
 import { OctantSheet } from "./ui/base/OctantSheet";
+import { SurfaceLoading } from "./surface/SurfaceLoading";
 import type { ShellActions } from "./app/shellActions";
 import { SidebarContainer } from "./app/SidebarContainer";
 import { ThreadPaneContainer } from "./app/ThreadPaneContainer";
@@ -208,6 +207,7 @@ import { assertCreateDestinationFromHosts } from "./shell/assertCreateDestinatio
 import { resolveSidebarBackground } from "@octant/theme/backgrounds";
 import {
   Suspense,
+  lazy,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -689,6 +689,16 @@ const NO_IMAGE_PROFILES: ReadonlyArray<never> = [];
 const NO_CODE_THREADS: ReadonlyArray<never> = [];
 const NO_CODE_CHECKOUTS: ReadonlyArray<never> = [];
 const NO_COMPUTER_SNAPSHOTS: ReadonlyArray<never> = [];
+const ReaderPagesContainer = lazy(() =>
+  import("./app/ReaderPagesContainer").then(({ ReaderPagesContainer }) => ({
+    default: ReaderPagesContainer,
+  })),
+);
+const SettingsContainer = lazy(() =>
+  import("./app/SettingsContainer").then(({ SettingsContainer }) => ({
+    default: SettingsContainer,
+  })),
+);
 
 // Matches the desktop's double-press window for ⌘Q.
 const QUIT_HINT_VISIBLE_MS = 1500;
@@ -8488,43 +8498,51 @@ function LaunchedShell(
   // body does not keep that narrowing.
   const loadedSettings = controller.settings;
   const settingsContainer = (surface: "settings" | "usage", presentation: "page" | "sheet") => (
-    <SettingsContainer
-      onOpenServerProject={(project) => {
-        controller.closeSettings();
-        void openDraftInKnownProject(project.id, project.mode ?? "code", project.name);
-      }}
-      projectTerminalClient={projectTerminalClient}
-      projectActionStoragePrefix={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:server-settings`}
-      actions={actions}
-      allProjects={projectController.allProjects}
-      {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
-      backgroundImageLibrary={backgroundImageLibrary}
-      {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
-      chatController={chatController}
-      clients={launchedClients}
-      codeController={codeController}
-      controller={controller}
-      discoveryController={discoveryController}
-      githubClient={githubClient}
-      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-      {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
-      hostReservesTitlebarInset={(presentation === "page" || isNarrow) && hostReservesTitlebarInset}
-      isNarrow={isNarrow}
-      linearClient={linearClient}
-      nativeBoundsAvailable={nativeHost !== undefined}
-      {...(pendingUsageFilter === undefined ? {} : { pendingUsageFilter })}
-      projectNamesById={projectNamesById}
-      providerController={providerController}
-      settings={loadedSettings}
-      presentation={presentation}
-      surface={surface}
-      glassOffNote={glassOffNote(glassRefusal, props.hostBridge !== undefined)}
-      sidebarVibrancySupported={sidebarVibrancySupported}
-      themeController={themeController}
-      {...(props.typography === undefined ? {} : { typography: props.typography })}
-      workNavigation={workNavigation}
-      workSettings={workSettings}
-    />
+    <Suspense
+      fallback={
+        <SurfaceLoading label={surface === "settings" ? "Opening Settings" : "Opening Usage"} />
+      }
+    >
+      <SettingsContainer
+        onOpenServerProject={(project) => {
+          controller.closeSettings();
+          void openDraftInKnownProject(project.id, project.mode ?? "code", project.name);
+        }}
+        projectTerminalClient={projectTerminalClient}
+        projectActionStoragePrefix={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:server-settings`}
+        actions={actions}
+        allProjects={projectController.allProjects}
+        {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
+        backgroundImageLibrary={backgroundImageLibrary}
+        {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
+        chatController={chatController}
+        clients={launchedClients}
+        codeController={codeController}
+        controller={controller}
+        discoveryController={discoveryController}
+        githubClient={githubClient}
+        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+        {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
+        hostReservesTitlebarInset={
+          (presentation === "page" || isNarrow) && hostReservesTitlebarInset
+        }
+        isNarrow={isNarrow}
+        linearClient={linearClient}
+        nativeBoundsAvailable={nativeHost !== undefined}
+        {...(pendingUsageFilter === undefined ? {} : { pendingUsageFilter })}
+        projectNamesById={projectNamesById}
+        providerController={providerController}
+        settings={loadedSettings}
+        presentation={presentation}
+        surface={surface}
+        glassOffNote={glassOffNote(glassRefusal, props.hostBridge !== undefined)}
+        sidebarVibrancySupported={sidebarVibrancySupported}
+        themeController={themeController}
+        {...(props.typography === undefined ? {} : { typography: props.typography })}
+        workNavigation={workNavigation}
+        workSettings={workSettings}
+      />
+    </Suspense>
   );
 
   const shell = (
@@ -8728,73 +8746,79 @@ function LaunchedShell(
                   request={quickToolRequest}
                 >
                   <div className="primary-workspace-layer">
-                    <ReaderPagesContainer
-                      actions={actions}
-                      activeMode={activeMode}
-                      {...(activeProjectId === undefined ? {} : { activeProjectId })}
-                      agentsCenterVisible={agentsCenterVisible}
-                      allProjects={projectController.allProjects}
-                      archiveOpen={archiveOpen}
-                      artifactLibraryOpen={artifactLibraryOpen}
-                      automationCenterVisible={automationCenterVisible}
-                      {...(automationCenterFocusId === undefined
-                        ? {}
-                        : { automationCenterFocusId })}
-                      automationEditorCatalog={automationEditorCatalog}
-                      availabilityByProject={projectController.availabilityByProject}
-                      boundCodeProjectId={controller.boundCodeProjectId}
-                      clients={launchedClients}
-                      codeBoardOpen={codeBoardOpen}
-                      threadBoardAvailable={threadBoardAvailable}
-                      codeBoardProjects={codeBoardProjects}
-                      codeNavigationRows={codeController.navigation}
-                      {...(codeController.bootstrap?.settings === undefined
-                        ? {}
-                        : { codeWorkerListingSettings: codeController.bootstrap.settings })}
-                      codePullRequestsOpen={codePullRequestsOpen}
-                      codeProviderGroups={codeProviderGroups}
-                      codeThreads={codeController.bootstrap?.threads}
-                      environmentNames={environmentNames}
-                      githubClient={githubClient}
-                      githubIssuesOpen={githubIssuesOpen}
-                      githubIssuesReadAvailable={githubIssuesReadAvailable}
-                      {...(githubPullRequestCapability.login === undefined
-                        ? {}
-                        : { githubViewerLogin: githubPullRequestCapability.login })}
-                      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-                      imageLibraryOpen={imageLibraryOpen}
-                      imageProfiles={imageGenerationProfiles ?? NO_IMAGE_PROFILES}
-                      inboxAttentionItems={inboxAttentionItems}
-                      inboxOpen={inboxOpen}
-                      {...(todosOpen ? { todosPage } : {})}
-                      isNarrow={isNarrow}
-                      linearClient={linearClient}
-                      linearIssuesOpen={linearIssuesOpen}
-                      linearIssuesRead={linearIssuesRead}
-                      loadAssignedGithubWork={loadAssignedGithubWork}
-                      loadAssignedLinearIssues={loadAssignedLinearIssues}
-                      navigationRevision={pendingRequestFeedRevision}
-                      needsYouAskClients={needsYouAskClients}
-                      projectNames={workingNowProjectNames}
-                      projects={projectController.projects}
-                      projectsListOpen={projectsListOpen}
-                      {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
-                      reviewEntries={reviewEntries}
-                      reviewOpen={reviewOpen}
-                      reviewSource={reviewSource}
-                      {...(selectedProjectPullRequestKey === undefined
-                        ? {}
-                        : { selectedProjectPullRequestKey })}
-                      serverUrl={props.launch.serverUrl}
-                      settings={controller.settings}
-                      windowCapability={props.projectWindowCapability}
-                      workBoardOpen={workBoardOpen}
-                      workBoardProjects={workBoardProjects}
-                      workNavigationRows={workNavigation.navigation}
-                      workProviderGroups={workProviderGroups}
-                      workThreads={workNavigation.bootstrap?.threads}
-                      workspace={controller.workspace}
-                    />
+                    {readerOpen ? (
+                      <Suspense fallback={<SurfaceLoading label="Opening page" />}>
+                        <ReaderPagesContainer
+                          actions={actions}
+                          activeMode={activeMode}
+                          {...(activeProjectId === undefined ? {} : { activeProjectId })}
+                          agentsCenterVisible={agentsCenterVisible}
+                          allProjects={projectController.allProjects}
+                          archiveOpen={archiveOpen}
+                          artifactLibraryOpen={artifactLibraryOpen}
+                          automationCenterVisible={automationCenterVisible}
+                          {...(automationCenterFocusId === undefined
+                            ? {}
+                            : { automationCenterFocusId })}
+                          automationEditorCatalog={automationEditorCatalog}
+                          availabilityByProject={projectController.availabilityByProject}
+                          boundCodeProjectId={controller.boundCodeProjectId}
+                          clients={launchedClients}
+                          codeBoardOpen={codeBoardOpen}
+                          threadBoardAvailable={threadBoardAvailable}
+                          codeBoardProjects={codeBoardProjects}
+                          codeNavigationRows={codeController.navigation}
+                          {...(codeController.bootstrap?.settings === undefined
+                            ? {}
+                            : { codeWorkerListingSettings: codeController.bootstrap.settings })}
+                          codePullRequestsOpen={codePullRequestsOpen}
+                          codeProviderGroups={codeProviderGroups}
+                          codeThreads={codeController.bootstrap?.threads}
+                          environmentNames={environmentNames}
+                          githubClient={githubClient}
+                          githubIssuesOpen={githubIssuesOpen}
+                          githubIssuesReadAvailable={githubIssuesReadAvailable}
+                          {...(githubPullRequestCapability.login === undefined
+                            ? {}
+                            : { githubViewerLogin: githubPullRequestCapability.login })}
+                          {...(props.hostBridge === undefined
+                            ? {}
+                            : { hostBridge: props.hostBridge })}
+                          imageLibraryOpen={imageLibraryOpen}
+                          imageProfiles={imageGenerationProfiles ?? NO_IMAGE_PROFILES}
+                          inboxAttentionItems={inboxAttentionItems}
+                          inboxOpen={inboxOpen}
+                          {...(todosOpen ? { todosPage } : {})}
+                          isNarrow={isNarrow}
+                          linearClient={linearClient}
+                          linearIssuesOpen={linearIssuesOpen}
+                          linearIssuesRead={linearIssuesRead}
+                          loadAssignedGithubWork={loadAssignedGithubWork}
+                          loadAssignedLinearIssues={loadAssignedLinearIssues}
+                          navigationRevision={pendingRequestFeedRevision}
+                          needsYouAskClients={needsYouAskClients}
+                          projectNames={workingNowProjectNames}
+                          projects={projectController.projects}
+                          projectsListOpen={projectsListOpen}
+                          {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
+                          reviewEntries={reviewEntries}
+                          reviewOpen={reviewOpen}
+                          reviewSource={reviewSource}
+                          {...(selectedProjectPullRequestKey === undefined
+                            ? {}
+                            : { selectedProjectPullRequestKey })}
+                          serverUrl={props.launch.serverUrl}
+                          settings={controller.settings}
+                          windowCapability={props.projectWindowCapability}
+                          workBoardOpen={workBoardOpen}
+                          workBoardProjects={workBoardProjects}
+                          workNavigationRows={workNavigation.navigation}
+                          workProviderGroups={workProviderGroups}
+                          workThreads={workNavigation.bootstrap?.threads}
+                          workspace={controller.workspace}
+                        />
+                      </Suspense>
+                    ) : null}
                     <ThreadPaneContainer
                       actions={actions}
                       onOpenWorktrees={setPreparationTarget}
