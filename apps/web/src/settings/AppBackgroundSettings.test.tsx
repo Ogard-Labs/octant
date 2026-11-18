@@ -745,6 +745,7 @@ describe("AppBackgroundSettings", () => {
             characterSet: "01",
             characterDensity: 80,
             characterSpeed: 10,
+            characterPattern: "rings",
           }}
           onChange={onChange}
         />,
@@ -756,6 +757,26 @@ describe("AppBackgroundSettings", () => {
       expect(next).not.toHaveProperty("characterSet");
       expect(next).not.toHaveProperty("characterDensity");
       expect(next).not.toHaveProperty("characterSpeed");
+      expect(next).not.toHaveProperty("characterPattern");
+    });
+
+    it("saves the chosen pattern once on pick, and shows all in turn when none is stored", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      const onPreview = vi.fn();
+      render(
+        <AppBackgroundSettings background={characters} onChange={onChange} onPreview={onPreview} />,
+      );
+      await openCustomize(user);
+      const pattern = screen.getByRole("combobox", { name: "Character pattern" });
+      expect(pattern).toHaveTextContent("All in turn");
+      await user.click(pattern);
+      expect(await screen.findAllByRole("option")).toHaveLength(4);
+      await user.click(screen.getByRole("option", { name: "Rings" }));
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: "characters", characterPattern: "rings" }),
+      );
     });
 
     it("previews slider and typing changes and saves once when the person lets go", async () => {

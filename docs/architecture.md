@@ -6932,13 +6932,11 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
     `.vibe/hooks.toml`, `.vibe/plugins`, `.vibe/tools`, and `.vibe/agents`.
     OpenCode's `opencode.jsonc`, `opencode.json`, `.opencode/opencode.jsonc`,
     and `.opencode/opencode.json` (maintainer decision, 2026-11-14). Codex
-    lists none, because Octant's trust loads none of its Project
-    configuration (Codex's own folder trust decides it), and any other
-    provider answers none. Decided (maintainer decision, 2026-11-16; designed,
-    not built): in a Project trusted for Codex, outside Plan and Strict, Codex
-    loads its own Project configuration as it does on its own, and Codex then
-    lists its entries here
-    ([Provider runtimes: Codex](design/provider-runtimes.md#codex)).
+    lists `.codex/config.toml`: in a Project trusted for Codex, outside Plan
+    and Strict, Codex loads its own Project configuration as it does on its
+    own (maintainer decision, 2026-11-16; built,
+    [Provider runtimes: Codex](design/provider-runtimes.md#codex)). Any other
+    provider answers none.
     Untrusted Project code shows one quiet notice card above the thread's
     composer ([Thread view](design/thread-view.md#project-trust-prompt)):
     **Trust for <provider>** sends the same `change-project-native-providers`
@@ -14873,13 +14871,20 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   paired browser and phone, as the coordinator asked for it; Canvas HTML
   import, whose request names its Project in its workspace scope; and Full
   access and extension install, built earlier. Each is journaled with the
-  device as the actor. Not built yet: the Browser's Take over and Hand back,
-  `sign-in`, profile pages and saved flows, which drive the desktop's native
-  Browser and have no remote input path; finishing a connector sign-in,
-  whose redirect returns to this host's loopback; provider cloud sessions,
-  whose submission policy and job records know only a local window; and
-  server Projects beyond reading, whose journaled records name only a local
-  window. Each owning section keeps its own "not built yet" line until it is
+  device as the actor. The paired browser offers the Project terminal and
+  Private page under **Project tools** in Work and Code, as a list of the
+  Project's own tools, and **Import HTML…** alone in a Chat thread's Canvas
+  tools. Not built yet: the Browser's Take over and Hand back, `sign-in`,
+  profile pages and saved flows, which drive the desktop's native Browser in
+  the person's signed-in profiles and need a remote input stream and a rule
+  for what a device sees of a signed-in page, neither designed; finishing a
+  connector sign-in, whose redirect returns to this host's loopback and needs
+  a device-completable flow; provider cloud sessions, whose submission policy
+  and job records know only a local window; and server Projects beyond
+  reading, whose journaled records name only a local window. Each reason is
+  recorded in full in
+  [Decisions and requirements](design/decisions.md#paired-devices-act-as-the-person).
+  Each owning section keeps its own "not built yet" line until it is
   built. A device the host knows only through the hub's roster is unchanged.
 
   **Provider reach Octant no longer narrows** (maintainer decision,
@@ -15833,10 +15838,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `workspace-write`, with the approval policies above. That lease is keyed on
   Strict as well as root, mode and posture, so it never serves a Strict
   session. Plan and Chat stay in Octant's read-only profile at every Strict
-  value, and Strict keeps Octant's profile as described here. The
-  workspace-write policy a turn sends takes no deny rules, so Octant's
-  protected paths are not Codex deny rules (not built yet: a named Codex
-  permissions profile could carry them). Inside Octant's profile approving a
+  value, and Strict keeps Octant's profile as described here. From Codex
+  0.169.0, outside Windows, that sandbox runs as a named Codex permissions
+  profile carrying other providers' sign-ins as Codex deny rules, since the
+  built-in workspace-write policy has no deny field
+  ([Provider runtimes: Codex](design/provider-runtimes.md#codex)). Inside Octant's profile approving a
   command no longer lifts any sandbox: it runs inside Octant's profile. Under that
   profile a Codex command cannot read `HOME` outside the root and the account
   home, and cannot write the account home's configuration, `.env`, rules,
@@ -16399,7 +16405,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   | `nativeSetup.skills`          | `supported`; a Project's skills only in a trusted Project                                                                          | `supported`; no Project skill switched off by path                                                       | `supported`; `.claude` and `.agents` skills, the `skill` permission asked                                                                         | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `nativeSetup.toolServers`     | `supported`; the account's servers, connectors, and plugins, a Project's `.mcp.json` held until trusted                            | `supported`; the person's servers and plugins stay on in Chat                                            | `supported`; the MCP servers in the person's own OpenCode configuration, their tools following the level                                          | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, connectors included                                                                       | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `nativeSetup.hooks`           | `supported`                                                                                                                        | `supported`; the account home's hooks were never switched off                                            | `unsupported`                                                                                                                                     | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
-  | `nativeSetup.projectCode`     | `supported`; also starts the Project's MCP servers                                                                                 | `unsupported`; Codex's own folder trust decides                                                          | `unsupported`; project configuration and plugins stay off                                                                                         | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, under its own folder trust                                                                | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `nativeSetup.projectCode`     | `supported`; also starts the Project's MCP servers                                                                                 | `supported` outside Plan and Strict in a Project trusted for Codex; loads `.codex/config.toml`           | `unsupported`; project configuration and plugins stay off                                                                                         | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, under its own folder trust                                                                | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
 
   Which driver kinds each column covers, and how each may be used in a mode, as
   `providerCatalogCapabilities` in `@octant/domain` holds it. A runtime's Work and

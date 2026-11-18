@@ -17,6 +17,7 @@ import {
   readSidebarColumns,
   type ContentColumn,
 } from "./appBackdropColumn";
+import type { AppBackgroundCharacterPattern } from "@octant/contracts/theme";
 import { DEFAULT_CHARACTER_LEVEL, DEFAULT_CHARACTER_SET } from "@octant/domain/theme-policy";
 import { displayPixelRatio, watchDisplayPixelRatio } from "./appBackdropPhoto";
 import { parseColor } from "./appBackdropPrint";
@@ -91,12 +92,15 @@ export interface AsciiFieldOptions {
   readonly density: number;
   /** 0..100: how fast patches drift and glyphs change. 50 is the default; 0 is still. */
   readonly speed: number;
+  /** Which pattern shows; `cycle` takes each in turn, as the field always did. */
+  readonly pattern: AppBackgroundCharacterPattern;
 }
 
 export const DEFAULT_ASCII_OPTIONS: AsciiFieldOptions = {
   characterSet: DEFAULT_CHARACTER_SET,
   density: DEFAULT_CHARACTER_LEVEL,
   speed: DEFAULT_CHARACTER_LEVEL,
+  pattern: "cycle",
 };
 
 /** The two noise edges that decide where patches show, for a density in 0..100. */
@@ -108,33 +112,40 @@ export function patchThresholds(density: number): { readonly low: number; readon
 const STRENGTH_COLUMNS = 120;
 const STRENGTH_ROWS = 48;
 const STRENGTH_TIMES = [0, 5, 11, 17, 23, 31, 47];
-const strengthCache = new Map<number, number>();
+const strengthCache = new Map<string, number>();
 
 /**
  * The average patch strength over a fixed grid of cells and moments for a
- * density: how much of the field shows, on average. Density 50 is the
- * reference the other densities are held to.
+ * density and pattern: how much of the field shows, on average. The default
+ * field (all in turn, density 50) is the reference every other is held to.
  */
-export function meanStrength(density: number): number {
-  const known = strengthCache.get(density);
+export function meanStrength(
+  density: number,
+  pattern: AppBackgroundCharacterPattern = "cycle",
+): number {
+  const key = `${pattern}:${String(density)}`;
+  const known = strengthCache.get(key);
   if (known !== undefined) return known;
   const thresholds = patchThresholds(density);
   let total = 0;
   for (const t of STRENGTH_TIMES) {
     for (let row = 0; row < STRENGTH_ROWS; row += 1) {
       for (let column = 0; column < STRENGTH_COLUMNS; column += 1) {
-        total += patchStrength(column, row, t, thresholds);
+        total += patchStrength(column, row, t, thresholds, pattern);
       }
     }
   }
   const mean = total / (STRENGTH_TIMES.length * STRENGTH_ROWS * STRENGTH_COLUMNS);
-  strengthCache.set(density, mean);
+  strengthCache.set(key, mean);
   return mean;
 }
 
 /** A denser field draws fainter, so its average ink never exceeds the default field's. */
-export function densityScale(density: number): number {
-  const mean = meanStrength(density);
+export function densityScale(
+  density: number,
+  pattern: AppBackgroundCharacterPattern = "cycle",
+): number {
+  const mean = meanStrength(density, pattern);
   if (!(mean > 0)) return 1;
   return Math.min(1, meanStrength(DEFAULT_CHARACTER_LEVEL) / mean);
 }
@@ -215,6 +226,7 @@ function valueNoise(x: number, y: number, seed: number): number {
 
 /** The patterns the field cycles through: round blotches, long currents, rings. */
 const PATTERN_COUNT = 3;
+const HELD_PATTERN = { blotches: 0, currents: 1, rings: 2 } as const;
 
 function patternValue(pattern: number, column: number, row: number, t: number): number {
   if (pattern === 0) {
@@ -230,7 +242,7 @@ function patternValue(pattern: number, column: number, row: number, t: number): 
 /**
  * How much of the peak ink one cell shows, in [0, 1], at `t` seconds. The two
  * patterns around a change are blended across the end of the first, so the
- * field never jumps.
+ * field never jumps. A held pattern is drawn alone, with no blend.
  */
 export function patchStrength(
   column: number,
@@ -239,7 +251,15 @@ export function patchStrength(
   thresholds: { readonly low: number; readonly high: number } = patchThresholds(
     DEFAULT_CHARACTER_LEVEL,
   ),
+  pattern: AppBackgroundCharacterPattern = "cycle",
 ): number {
+  if (pattern !== "cycle") {
+    return smoothstep(
+      thresholds.low,
+      thresholds.high,
+      patternValue(HELD_PATTERN[pattern], column, row, t),
+    );
+  }
   const phase = t / PATTERN_SECONDS;
   const index = Math.floor(phase);
   const within = (phase - index) * PATTERN_SECONDS;
@@ -473,12 +493,14 @@ export function runAsciiField(
     // The patches drift slowly, so a ring's faster frames keep the last ones.
     if (seconds - fieldAt >= FRAME_MS / 1000 - 0.005 || seconds < fieldAt) {
       fieldAt = seconds;
-      const peak = PEAK_ALPHA * surface.peak * densityScale(options.density);
+      const peak = PEAK_ALPHA * surface.peak * densityScale(options.density, options.pattern);
       for (let row = 0; row < rows; row += 1) {
         for (let column = 0; column < columns; column += 1) {
           const index = row * columns + column;
           fieldAlpha[index] =
-            patchStrength(column, row, patchClock, thresholds) * (shares[index] ?? 1) * peak;
+            patchStrength(column, row, patchClock, thresholds, options.pattern) *
+            (shares[index] ?? 1) *
+            peak;
         }
       }
     }
