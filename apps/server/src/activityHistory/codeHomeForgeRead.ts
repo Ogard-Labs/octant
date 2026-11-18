@@ -130,6 +130,8 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
   };
 
   const forgeAccount = async (card: ForgeCard): Promise<string | undefined> => {
+    // A disabled or untrusted integration observes no credentials at all.
+    if (!ports.integrationEffective()) return undefined;
     try {
       const gated = gate(await ports.capabilitySnapshot(new AbortController().signal), card);
       return gated.kind === "ready" ? gated.account : undefined;
@@ -149,6 +151,9 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
   }): Promise<CodeHomeActivityForgeResult> => {
     const signal = input.signal ?? new AbortController().signal;
     const admitted = () => input.admission === undefined || input.admission();
+    // The integration switch comes before any credential observation, so a
+    // disabled integration never reaches GitHub for this read.
+    if (!ports.integrationEffective()) return { status: "unavailable", reason: "not-connected" };
     let snapshot: GithubAuthenticationSnapshot;
     try {
       snapshot = await ports.capabilitySnapshot(signal);

@@ -159,13 +159,14 @@ describe("createCodeHomeForgeRead", () => {
     expect(observe).not.toHaveBeenCalled();
   });
 
-  it("refuses when the bundled integration is not effective", async () => {
-    const { forgeRead, observe } = fixture({ effective: false });
+  it("refuses when the bundled integration is not effective, without observing credentials", async () => {
+    const { forgeRead, observe, ports } = fixture({ effective: false });
     expect(await read(forgeRead)).toEqual({
       status: "unavailable",
       reason: "not-connected",
     });
     expect(observe).not.toHaveBeenCalled();
+    expect(ports.capabilitySnapshot).not.toHaveBeenCalled();
   });
 
   it("reports a rate-limited capability snapshot honestly", async () => {
@@ -552,8 +553,9 @@ describe("createCodeHomeForgeRead", () => {
   });
 
   it("answers no account when the integration or capability gate is not effective", async () => {
-    const { forgeAccount } = fixture({ effective: false });
-    expect(await forgeAccount("prs-merged")).toBeUndefined();
+    const off = fixture({ effective: false });
+    expect(await off.forgeAccount("prs-merged")).toBeUndefined();
+    expect(off.ports.capabilitySnapshot).not.toHaveBeenCalled();
     const denied = fixture({
       snapshot: {
         state: "scope-limited",
