@@ -448,6 +448,26 @@ describe("the records drill-down", () => {
     expect(await within(dialog).findByText("Broke the build")).toBeInTheDocument();
   });
 
+  it("keeps the records button on a runs card whose only finishes failed or canceled", async () => {
+    const user = userEvent.setup();
+    const runsView = decodeActivityView({
+      status: "ready",
+      source: "octant",
+      count: 0,
+      finished: { successful: 0, failed: 1, canceled: 1 },
+      snapshotId: SNAPSHOT,
+      records: [],
+      nextOffset: 25,
+    });
+    render(<Harness read={() => Promise.resolve(runsView)} />);
+    const card = await screen.findByRole("region", { name: "Successful runs" });
+    await user.click(
+      within(card).getByRole("button", { name: "Successful runs: 0. Show records" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: /Successful runs/ });
+    expect(within(dialog).getByRole("switch", { name: "All finished" })).toBeInTheDocument();
+  });
+
   it("drops a stale page that lands after the mode it was read for changed", async () => {
     const user = userEvent.setup();
     const runsView = decodeActivityView({

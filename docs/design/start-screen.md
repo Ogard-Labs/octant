@@ -563,7 +563,7 @@ created it and it was published inside the range. A card reads partial
 only when a repository could not be read or a range outgrows its bounded
 walk — 200 matches per repository for each card — rather than presenting a truncated set as complete. A card says
 so when its read is partial, stale or unavailable instead of implying
-completeness. The choices are per device and travel
+completeness. A run counts as canceled when the person stopped it: Chat, Work and agent runs journal a cancelled outcome, and a Code turn counts as canceled when the journal recorded the person's stop request before it was interrupted. Any other interruption, such as a restart, counts as failed. The choices are per device and travel
 inside the existing card order/visibility store: every card follows one
 shared timeframe — **This week** by default — reading the signed-in GitHub
 account by default, and up to four cards may be pinned to their own

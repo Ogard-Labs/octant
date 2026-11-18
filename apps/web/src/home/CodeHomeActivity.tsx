@@ -489,12 +489,15 @@ function ActivityCard(props: {
         ? "empty"
         : "ready";
 
+  // A zero headline can still hold records: a runs card that finished only
+  // failed or canceled keeps its figure button so All finished stays
+  // reachable from the records dialog.
   const figure =
     loading || failed || unavailable ? (
       <p className="code-home-activity-card__figure code-home-activity-card__figure--muted">—</p>
-    ) : count === 0 ? (
-      <p className="code-home-activity-card__figure">0</p>
-    ) : view !== undefined && view.snapshotId !== undefined ? (
+    ) : view !== undefined &&
+      view.snapshotId !== undefined &&
+      (count > 0 || (view.finished?.failed ?? 0) + (view.finished?.canceled ?? 0) > 0) ? (
       <OctantButton
         aria-label={`${definition.title}: ${count}. Show records`}
         className="code-home-activity-card__figure"
