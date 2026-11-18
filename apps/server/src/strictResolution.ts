@@ -1,4 +1,9 @@
-import { resolveStrict } from "@octant/domain";
+import type {
+  ProviderDriverKind,
+  ProviderExecutionPolicy,
+  StrictKeptProtections,
+} from "@octant/contracts";
+import { resolveStrict, strictKeptAtLaunch } from "@octant/domain";
 import { activeSandboxStrict } from "./process/sandboxRuntimePolicy";
 
 /**
@@ -89,4 +94,25 @@ export function createProjectStrictResolver(reads: StrictReads): ProjectStrictRe
       settings: project.type === "code" ? reads.codeSettings() : reads.workSettings(),
     });
   };
+}
+
+/**
+ * What Strict kept for one provider launch, from the values the host started
+ * it with: its Strict value, its runtime family, and whether it ran inside
+ * Octant's sandbox (below Full access, or at Full access with the sandbox
+ * kept, on a platform where Octant has one). Undefined when the launch was
+ * not Strict. Journaled with the launch so the thread can say what Strict
+ * withheld.
+ */
+export function strictKeptForLaunch(input: {
+  readonly strict: boolean;
+  readonly driverKind: ProviderDriverKind;
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly fullAccessSandbox?: boolean | undefined;
+  readonly platform?: NodeJS.Platform;
+}): StrictKeptProtections | undefined {
+  const sandboxed =
+    (input.platform ?? process.platform) !== "win32" &&
+    (input.executionPolicy !== "full-access" || input.fullAccessSandbox === true);
+  return strictKeptAtLaunch({ strict: input.strict, driverKind: input.driverKind, sandboxed });
 }

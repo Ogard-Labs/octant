@@ -22,6 +22,19 @@ word carries colour. `TurnHeader` in `apps/web/src/transcript/` is the one
 recipe; a mode maps its own lifecycle onto its vocabulary and adds nothing of
 its own.
 
+## Strict notice
+
+When a provider launch was Strict, the host journals what Strict kept for it,
+and the turn shows one quiet note above its reply in Code and Work: "Strict
+kept: Octant's sandbox, protected files, a fixed environment, …". The words
+come from the protections the host applied to that launch (its runtime
+family, and whether it ran in Octant's sandbox), never from the level alone.
+The note shows on the first Strict launch in a thread and again only when what
+Strict kept differs from the turn before, so a thread says it once per change
+rather than on every turn; a launch outside Strict shows nothing. It is the
+same meta-ink note as a provider handoff's (`role="note"`), not a page banner
+or a card. `strictKeptSentence` in `@octant/domain` is the one wording.
+
 ## Reply actions
 
 A finished reply (completed, failed, interrupted or cancelled) ends with one
