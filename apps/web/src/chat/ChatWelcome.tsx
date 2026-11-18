@@ -4,7 +4,11 @@ import {
   useComposerSlashCommands,
   composerProviderCommands,
 } from "../composer/useComposerSlashCommands";
-import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
+import {
+  ComposerAtTypeahead,
+  composerProviderMentions,
+  useComposerAtMenu,
+} from "../composer/useComposerAtMenu";
 import { useExtensionDraftSelections } from "./useExtensionDraftSelections";
 import { providerFamilyForThread } from "../providers/providerFamily";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
@@ -108,6 +112,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
     ...(family === undefined ? {} : { providerFamily: family }),
   });
   const atMenu = useComposerAtMenu({
+    provider: composerProviderMentions(props.providerGroups, props.selectedProviderInstanceId),
     draft: prompt,
     onDraftChange: setPrompt,
     textarea: () => textareaRef.current,

@@ -10,7 +10,7 @@ import {
   subagentNeedsReview,
   type AgentHierarchyInputEntry,
 } from "./buildAgentHierarchyModel";
-import { SubagentStatusIcon, subagentElapsedLabel, subagentStatusWord } from "./subagentStatus";
+import { SubagentStatusIcon, subagentStatusWord } from "./subagentStatus";
 import { AgentResultPreview, latestResultPacket } from "./AgentRunResults";
 import { ObservedChildRow, type ObservedChildClient } from "./ObservedChildActivity";
 import type { SubagentProviderIdentity } from "./AgentRunDependencyGraph";
@@ -19,6 +19,8 @@ import {
   buildSubagentRows,
   groupSubagentRows,
   isActiveSubagentRow,
+  subagentRunTime,
+  subagentStartedAt,
   type SubagentListItem,
   type SubagentRow,
 } from "./subagentRows";
@@ -171,6 +173,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
     writeOpen(storage, next);
   };
   const count = trayStatus(props.entries, observations, props.observationsTruncated === true);
+  const waitingOn = open ? undefined : waitingRows(props.entries, observations, rows);
 
   return (
     <div
@@ -192,9 +195,14 @@ export function SubagentsTray(props: SubagentsTrayProps) {
           variant="ghost"
         >
           <span className="composer-subagents__label">Subagents</span>
-          <span className="composer-subagents__count">{count}</span>
+          {waitingOn === undefined ? (
+            <span className="composer-subagents__count">{count}</span>
+          ) : null}
           <ChevronDown aria-hidden="true" className="composer-subagents__chevron" size={12} />
         </OctantButton>
+        {waitingOn === undefined ? null : (
+          <WaitingLine rows={waitingOn} onOpenSubagent={props.onOpenSubagent} />
+        )}
         {props.onOpenSubagent === undefined ? null : (
           <OctantButton
             aria-label={`View all ${total} subagents in Agents`}
@@ -287,7 +295,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
                     <ObservedChildRow
                       child={item.row.child}
                       {...(props.stopClient === undefined ? {} : { client: props.stopClient })}
-                      now={now}
+                      runTime={subagentRunTime(item.row, now)}
                       providerName={item.row.providerName}
                       model={item.row.model}
                       {...(item.row.driverKind === undefined
@@ -328,6 +336,94 @@ export function SubagentsTray(props: SubagentsTrayProps) {
   );
 }
 
+/**
+ * The folded head's line while nothing needs the person and children work:
+ * what the parent waits on, the two longest-running by name and the rest
+ * counted. Each name opens its child, as the rows do.
+ */
+function WaitingLine(props: {
+  readonly rows: ReadonlyArray<SubagentRow>;
+  readonly onOpenSubagent?: ((runId?: string) => void) | undefined;
+}) {
+  const shown = props.rows.slice(0, 2);
+  const others = props.rows.length - shown.length;
+  const name = (row: SubagentRow) => {
+    const label = subagentTaskName(row);
+    return props.onOpenSubagent === undefined ? (
+      <span className="composer-subagents__name" key={row.id} title={row.task}>
+        {label}
+      </span>
+    ) : (
+      <OctantButton
+        className="composer-subagents__name composer-subagents__name--link"
+        key={row.id}
+        onClick={() => props.onOpenSubagent?.(row.id)}
+        title={row.task}
+        type="button"
+        variant="link"
+      >
+        {label}
+      </OctantButton>
+    );
+  };
+  const joiner = (index: number) =>
+    index === 0 ? null : (
+      <span className="composer-subagents__waiting-text" key={`join:${index}`}>
+        {/* Non-breaking: a flex item trims its own edge spaces, which glued
+            the comma to the next name in the drawn head. */}
+        {others === 0 && index === shown.length - 1 ? "\u00a0and\u00a0" : ",\u00a0"}
+      </span>
+    );
+  return (
+    <span className="composer-subagents__waiting">
+      <span className="composer-subagents__waiting-text">Waiting on&nbsp;</span>
+      {shown.flatMap((row, index) => [joiner(index), name(row)])}
+      {others === 0 ? null : (
+        <span className="composer-subagents__waiting-text">
+          {`\u00a0and ${others} other${others === 1 ? "" : "s"}`}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function subagentTaskName(row: SubagentRow): string {
+  return (
+    row.task
+      .split("\n")
+      .map((part) => part.trim())
+      .find((part) => part !== "") ?? row.task
+  );
+}
+
+/**
+ * The working children to name in the folded head, longest-running first, or
+ * nothing when the head must keep its counts: any child that failed, waits,
+ * has a result to review, stopped or has no known status is attention, and
+ * attention comes first.
+ */
+function waitingRows(
+  entries: ReadonlyArray<AgentHierarchyInputEntry>,
+  observations: ReadonlyArray<AgentObservedChild>,
+  rows: ReadonlyArray<SubagentRow>,
+): ReadonlyArray<SubagentRow> | undefined {
+  const working = new Set(["queued", "starting", "running"]);
+  const quiet = (status: string) => working.has(status) || status === "completed";
+  if (
+    [...entries, ...observations].some((child) => !quiet(child.lifecycleStatus)) ||
+    entries.some((entry) => entry.lifecycleStatus === "completed" && subagentNeedsReview(entry))
+  ) {
+    return undefined;
+  }
+  const active = rows.filter((row) => working.has(row.lifecycleStatus));
+  if (active.length === 0) return undefined;
+  const started = (row: SubagentRow) => {
+    const time = Date.parse(subagentStartedAt(row));
+    return Number.isFinite(time) ? time : Number.POSITIVE_INFINITY;
+  };
+  return [...active].sort((a, b) => started(a) - started(b));
+}
+
 function SubagentTrayRow(props: {
   readonly row: Extract<SubagentRow, { kind: "octant-started" }>;
   readonly now: number;
@@ -338,22 +434,24 @@ function SubagentTrayRow(props: {
   const { row } = props;
   const entry = row.entry;
   const word = subagentStatusWord(entry.lifecycleStatus);
-  const elapsed = subagentElapsedLabel(entry.updatedAt, props.now);
+  const ran = subagentRunTime(row, props.now);
   const meta = [
     word,
     subagentNeedsReview(entry) ? "Needs review" : undefined,
     row.providerName,
     row.model,
-    elapsed === "" ? undefined : `Updated ${elapsed} ago`,
   ]
     .filter((part) => part !== undefined)
     .join(" · ");
+  // The run time is drawn once, in the trailing slot; the slot is hidden from
+  // assistive technology, so the label carries it instead.
+  const spoken = ran === "" ? meta : `${meta} · Ran ${ran}`;
   const result = latestResultPacket(entry.resultPackets ?? []);
   const reason = entry.recoveryReason ?? entry.resultAcknowledgement.followUpReason;
   return (
     <li className="composer-subagents__row">
       <OctantButton
-        aria-label={`${entry.task}. ${meta}. ${reason === undefined ? "" : `${reason}. `}Opens it in Agents.`}
+        aria-label={`${entry.task}. ${spoken}. ${reason === undefined ? "" : `${reason}. `}Opens it in Agents.`}
         className="composer-subagents__open"
         onClick={() => props.onOpenSubagent?.(entry.runId)}
         size="xs"
@@ -374,6 +472,9 @@ function SubagentTrayRow(props: {
           {reason === undefined ? null : (
             <span className="composer-subagents__reason">{reason}</span>
           )}
+        </span>
+        <span aria-hidden="true" className="composer-subagents__time">
+          {ran}
         </span>
       </OctantButton>
       {entry.executionKind === "octant-managed" &&

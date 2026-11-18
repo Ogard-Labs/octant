@@ -743,6 +743,38 @@ describe("Pi process boundary", () => {
     );
   });
 
+  it("leaves a blocked tool out of Pi's list and has the bridge refuse it first, at Full access too", () => {
+    expect(
+      piArguments(
+        "/bridge.ts",
+        "/sessions",
+        "full-1",
+        "code",
+        "full-access",
+        [],
+        undefined,
+        undefined,
+        undefined,
+        ["bash", "deploy"],
+      ),
+    ).toEqual(expect.arrayContaining(["--tools", "edit,write,read,grep,find,ls"]));
+    for (const bridge of [
+      piExtensionSource([], ["bash", "deploy"]),
+      piExtensionSource(
+        [{ name: "octant_browser", inputSchema: { type: "object", properties: {} } }],
+        ["bash", "deploy"],
+      ),
+    ]) {
+      expect(bridge).toContain('const blocked = new Set(["bash","deploy"]);');
+      // The refusal comes before the reads, Octant's own tools and the Full
+      // access pass, so no later rule lets a blocked tool through.
+      const refusal = bridge.indexOf("if (blocked.has(event.toolName))");
+      expect(refusal).toBeGreaterThan(-1);
+      expect(refusal).toBeLessThan(bridge.indexOf("knownReads.has(event.toolName)"));
+      expect(refusal).toBeLessThan(bridge.indexOf('OCTANT_PI_APPROVALS === "disabled"'));
+    }
+  });
+
   it("maps modes to the minimum Pi tools and keeps full access genuine", async () => {
     expect(piArguments("/bridge.ts", "/sessions", "chat-1", "chat", "approval-gated")).toContain(
       "--no-tools",

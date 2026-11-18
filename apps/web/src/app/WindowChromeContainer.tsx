@@ -1,36 +1,14 @@
 import type { OctantMode } from "@octant/contracts/modes";
-import type { ProjectId } from "@octant/contracts";
-import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
-import { memo, useCallback, useMemo } from "react";
+import { memo } from "react";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "../shell/hostBridge";
 import { WindowChrome } from "../shell/WindowChrome";
-import type { TitleBandChangesFacts } from "../shell/TitleBandChanges";
 import type { WindowHistory } from "../shell/windowHistory";
-import { useProjectCheckoutChanges } from "../shell/useProjectCheckoutChanges";
 import type { ShellActions } from "./shellActions";
 
 export interface WindowChromeContainerProps {
-  readonly actions: Pick<
-    ShellActions,
-    "addDockTab" | "recoverZen" | "startNewThreadDraft" | "toggleDock"
-  >;
+  readonly actions: Pick<ShellActions, "recoverZen" | "startNewThreadDraft" | "toggleDock">;
   readonly activeMode: OctantMode;
   readonly activeSurface: string;
-  /** The Code thread on screen, whose checkout the band measures; absent for a draft or another mode. */
-  readonly activeCodeThreadId?: string;
-  readonly activeProjectId?: ProjectId;
-  /**
-   * The window is on the Code start screen or a draft, where the band reads the
-   * Project's own checkout because no thread has one yet.
-   */
-  readonly codeDraft?: boolean;
-  /** A Code Project's reading is wanted only when the Project is one. */
-  readonly activeProjectIsCode?: boolean;
-  readonly projectClient?: ProjectClient;
-  readonly serverUrl?: string;
-  readonly windowCapability?: string;
-  /** Moves when the host says the Code board changed, so the count is read again. */
-  readonly codeBoardRevision: number;
   readonly dockAvailable: boolean;
   readonly dockPresentedOpen: boolean;
   readonly hostBridge?: OctantHostBridge;
@@ -68,50 +46,8 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
     sidebarRail,
     zenRecoveryNeeded,
   } = props;
-  const codeThreadId = props.activeCodeThreadId;
-  const codeProjectId = props.activeProjectId;
-  const draftChanges = props.codeDraft === true && codeThreadId === undefined;
-  const projectClient = useMemo(
-    () =>
-      props.projectClient ??
-      (props.serverUrl === undefined || props.windowCapability === undefined
-        ? undefined
-        : createProjectClient({
-            baseUrl: props.serverUrl,
-            fetch: globalThis.fetch,
-            windowCapability: props.windowCapability,
-          })),
-    [props.projectClient, props.serverUrl, props.windowCapability],
-  );
-  const projectChanges = useProjectCheckoutChanges({
-    client: projectClient,
-    projectId: codeProjectId,
-    enabled: draftChanges && activeMode === "code" && props.activeProjectIsCode === true,
-    revision: props.codeBoardRevision,
-  });
-  const onOpenChanges = useCallback(() => actions.addDockTab("review"), [actions]);
-  // The count stands in the band on a Code start screen only. In a thread it is
-  // a row of Environment ("Uncommitted changes"), beside the actions that act on
-  // it, and the band repeated it a few pixels above (maintainer request,
-  // 2026-11-16). On the start screen a stale reading stays in meta ink and a
-  // checkout not read yet holds its place with a dash, so the band never gains,
-  // loses or resizes a control as the reading arrives; a Project with no Git
-  // checkout shows nothing.
-  const changes = useMemo((): TitleBandChangesFacts | undefined => {
-    if (activeMode !== "code") return undefined;
-    if (!draftChanges || props.activeProjectIsCode !== true) return undefined;
-    if (projectChanges.status === "none") return undefined;
-    if (projectChanges.status === "reading") return { updating: true, onOpen: onOpenChanges };
-    return {
-      ...(projectChanges.insertions === undefined ? {} : { insertions: projectChanges.insertions }),
-      ...(projectChanges.deletions === undefined ? {} : { deletions: projectChanges.deletions }),
-      updating: projectChanges.updating,
-      onOpen: onOpenChanges,
-    };
-  }, [activeMode, draftChanges, props.activeProjectIsCode, projectChanges, onOpenChanges]);
   return (
     <WindowChrome
-      {...(changes === undefined ? {} : { changes })}
       activeSurface={activeSurface}
       dockAvailable={dockAvailable}
       dockExpanded={dockPresentedOpen}

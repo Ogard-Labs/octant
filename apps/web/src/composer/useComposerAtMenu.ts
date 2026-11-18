@@ -1,4 +1,6 @@
 import { createElement, useId, useState, type KeyboardEvent } from "react";
+import type { ProviderInstanceId, ProviderMention } from "@octant/contracts";
+import type { PickerGroup } from "@octant/domain";
 import { File, Folder, Globe2, Monitor, Plug, Sparkles } from "../ui/icons";
 import { filterOctantCommands } from "../palette/commandModel";
 import { useOctantCommands } from "../palette/CommandRegistry";
@@ -19,6 +21,30 @@ export interface AtMenuRow {
   readonly choose: () => void;
 }
 
+/** The provider's own skills and plugins a composer offers beside Octant's. */
+export interface ComposerProviderMentions {
+  /** The provider's name, so each row says whose skill or plugin it is. */
+  readonly label: string;
+  readonly mentions: ReadonlyArray<ProviderMention>;
+}
+
+/** The selected provider's own skills and plugins, as its picker group carries them. */
+export function composerProviderMentions(
+  groups: ReadonlyArray<PickerGroup> | undefined,
+  instanceId: ProviderInstanceId | undefined,
+): ComposerProviderMentions | undefined {
+  if (instanceId === undefined) return undefined;
+  const group = groups?.find((candidate) => String(candidate.instance.id) === String(instanceId));
+  const mentions = group?.providerMentions;
+  if (group === undefined || mentions === undefined || mentions.length === 0) return undefined;
+  return { label: group.driverLabel, mentions };
+}
+
+/** The runtime's own reference for a skill or plugin, as its own composer writes it. */
+function providerMentionReference(mention: ProviderMention): string {
+  return mention.kind === "skill" ? `$${mention.name}` : `@${mention.name}`;
+}
+
 /** An application mention that is already open for the same `@` token. */
 export interface AtMenuApp {
   readonly kind: "computer" | "browser";
@@ -36,10 +62,14 @@ export interface AtMenuFiles {
  * The one `@` picker every composer shares.
  *
  * It lists what the host's effective snapshot already offers — skills, plugin
- * MCP servers, and connectors — plus the files the thread's confined listing
- * returned in Work and Code. Choosing a row only hands the reference to the
- * composer's ordinary draft-resolution path, which the host re-checks at send;
- * nothing here installs, trusts, enables, or elevates anything.
+ * MCP servers, and connectors — then the thread's provider's own skills and
+ * plugins, labelled as the provider's, plus the files the thread's confined
+ * listing returned in Work and Code. Choosing an Octant row only hands the
+ * reference to the composer's ordinary draft-resolution path, which the host
+ * re-checks at send; choosing a provider's row writes the runtime's own
+ * reference (`$name`, `@name`) into the draft, which its driver resolves
+ * against its own listing at send. Nothing here installs, trusts, enables, or
+ * elevates anything.
  */
 export function useComposerAtMenu(input: {
   readonly draft: string;
@@ -48,6 +78,7 @@ export function useComposerAtMenu(input: {
   readonly textarea?: () => HTMLTextAreaElement | null;
   readonly apps?: ReadonlyArray<AtMenuApp>;
   readonly files?: AtMenuFiles;
+  readonly provider?: ComposerProviderMentions | undefined;
 }) {
   const listId = useId();
   const commands = useOctantCommands();
@@ -103,6 +134,34 @@ export function useComposerAtMenu(input: {
           },
         });
       }
+    }
+    const query = token.query.toLowerCase();
+    const provider = input.provider;
+    for (const mention of (provider?.mentions ?? [])
+      .filter((candidate) => candidate.name.toLowerCase().includes(query))
+      .slice(0, MAX_EXTENSION_ROWS)) {
+      const reference = providerMentionReference(mention);
+      rows.push({
+        id: `provider-mention:${mention.kind}:${mention.name}`,
+        title: reference,
+        meta: [`${provider?.label ?? "Provider"}'s own ${mention.kind}`, mention.description]
+          .filter((part) => part !== undefined && part.length > 0)
+          .join(" · "),
+        icon: mention.kind === "skill" ? "skill" : "server",
+        choose: () => {
+          const start = token.start;
+          const written = `${reference} `;
+          const draft = `${input.draft.slice(0, start)}${written}${input.draft.slice(start + raw.length)}`;
+          const caret = start + written.length;
+          input.onDraftChange(draft, caret);
+          queueMicrotask(() => {
+            const textarea = input.textarea?.();
+            if (textarea?.isConnected !== true) return;
+            textarea.focus();
+            textarea.setSelectionRange(caret, caret);
+          });
+        },
+      });
     }
     if (input.files?.open === true) {
       const files = input.files;
