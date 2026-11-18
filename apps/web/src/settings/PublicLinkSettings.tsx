@@ -172,10 +172,13 @@ export function PublicLinkSettings(props: PublicLinkSettingsProps) {
           <li>
             From the repository root, run these commands in a shell. Replace the example names with
             your own. Compose starts the share service and Caddy, provisions HTTPS, and keeps
-            published pages and certificates in Docker volumes.
+            published pages and certificates in Docker volumes. Keep the operator token: you need it
+            to take a link down, and link pages show the abuse contact for reports.
             <pre className="settings-setup-command">
               <code>{`export SHARE_DOMAIN=share.example.com
 export CONTENT_DOMAIN=content.example.com
+export OCTANT_SHARE_ABUSE_CONTACT=abuse@example.com
+export OCTANT_SHARE_OPERATOR_TOKEN="$(openssl rand -hex 32)"
 docker compose -f apps/share/compose.yaml up -d --build`}</code>
             </pre>
           </li>

@@ -14,12 +14,19 @@ repository root, replace the example names and run:
 ```sh
 export SHARE_DOMAIN=share.example.com
 export CONTENT_DOMAIN=content.example.com
+export OCTANT_SHARE_ABUSE_CONTACT=abuse@example.com
+export OCTANT_SHARE_OPERATOR_TOKEN="$(openssl rand -hex 32)"
 docker compose -f apps/share/compose.yaml up -d --build
 curl --fail "https://$SHARE_DOMAIN/healthz"
 ```
 
 Once HTTPS is ready the health check returns `ok`. Only the proxy publishes
-ports. Named volumes persist pages and TLS certificates across restarts.
+ports. Named volumes persist pages and TLS certificates across restarts. Keep
+the operator token: Compose reads it again on every `up`, and a link is taken
+down from inside the running container with
+`docker compose -f apps/share/compose.yaml exec share bun apps/share/src/takedown.ts <share-id>`.
+Without a token the operator listener does not start and takedown is
+unavailable; without an abuse contact link pages name no one to report to.
 Enter `https://` followed by your viewer domain under **Settings › Permissions
 › Public links › Service address**. A Canvas with a design block exercises both
 origins. The same setup steps are available beside the address in Settings.

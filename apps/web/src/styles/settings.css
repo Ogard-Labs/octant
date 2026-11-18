@@ -4354,3 +4354,8 @@ html[data-octant-increased-contrast="true"]
   overflow-wrap: anywhere;
   user-select: text;
 }
+
+.settings-setup-action {
+  display: flex;
+  margin-block-start: var(--oct-space-2);
+}

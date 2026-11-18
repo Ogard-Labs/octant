@@ -198,11 +198,6 @@ Chat and Navigator defaults use the same compact model chooser as composers,
 with the current selection in the row and the searchable catalog in a bounded
 popup. Unconfigured defaults say Choose model.
 
-Remote access includes searchable setup guides for Tailscale and Cloudflare
-private routing alongside the host pairing and SSH workflows. Sign-in and
-network enrollment happen with the network provider. Opening a guide grants
-no Octant device or server access.
-
 Operational settings use progressive disclosure. Provider and skill lists lead
 with compact readiness counts. On Providers & Models each provider group is
 one aligned list on the Settings grouped-row surface, one row per provider,
