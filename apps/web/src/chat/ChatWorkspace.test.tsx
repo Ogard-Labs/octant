@@ -13,7 +13,7 @@ import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Profiler, useState } from "react";
-import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ChatController } from "./useChatController";
 import { ChatWorkspace } from "./ChatWorkspace";
@@ -1140,12 +1140,6 @@ describe("ChatWorkspace", () => {
     vi.mocked(client.listToolApprovals).mockResolvedValue([approval]);
     const listToolApprovals = vi.mocked(client.listToolApprovals);
     const commits: Array<string> = [];
-    // The streaming turn's header ticks its elapsed seconds every second, a
-    // commit of its own that landed inside the window measured below about a
-    // second after mount. A still clock leaves that tick nothing to change, so
-    // only the polling can commit.
-    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse(now));
-    onTestFinished(() => clock.mockRestore());
 
     render(
       <Profiler id="chat-workspace" onRender={(_, phase) => commits.push(phase)}>
