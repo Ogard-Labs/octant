@@ -3,7 +3,6 @@ import { strictKeptForLaunch } from "../strictResolution";
 import {
   attachedFilesMessage,
   partitionAttachedFiles,
-  SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
   type AttachedFileByPath,
 } from "../attachments/attachedFiles";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
@@ -313,7 +312,18 @@ export interface ServerWorkTurns {
     thread: WorkThread,
     turn: { readonly windowId: WindowId; readonly routineRun?: AutomationRunReference },
   ) =>
-    | { readonly status: "bound"; readonly folder: string; readonly tools: AppManagedToolSet }
+    | {
+        readonly status: "bound";
+        readonly folder: string;
+        readonly tools: AppManagedToolSet;
+        /** Copies files the turn names by path to the thread's attachments folder on the server. */
+        readonly transferAttachments: (
+          files: ReadonlyArray<ProviderAttachmentInput>,
+        ) => Promise<
+          | { readonly status: "transferred"; readonly files: ReadonlyArray<AttachedFileByPath> }
+          | { readonly status: "refused"; readonly message: string }
+        >;
+      }
     | { readonly status: "refused"; readonly message: string };
 }
 
@@ -1665,11 +1675,18 @@ export class WorkTurnService {
       (reference) => this.#takesFileNatively?.(command.authority, reference.mediaType) === true,
     );
     const filesByPath = files.filter((reference) => !nativeFiles.includes(reference));
-    if (server !== undefined && filesByPath.length > 0) {
-      throw this.#failure("unsupported", SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL);
-    }
     const attachedFileTexts: string[] = [];
-    if (filesByPath.length > 0) {
+    if (server !== undefined && filesByPath.length > 0) {
+      // A server thread's agent opens files with the server's tools, so the
+      // files are copied to the thread's attachments folder there first.
+      const inputs = await this.#attachmentInputs(command.threadId, filesByPath);
+      if (inputs === undefined) {
+        throw this.#failure("unavailable", "A file attached to this turn is unavailable.");
+      }
+      const transferred = await server.transferAttachments(inputs);
+      if (transferred.status === "refused") throw this.#failure("unavailable", transferred.message);
+      attachedFileTexts.push(attachedFilesMessage(transferred.files));
+    } else if (filesByPath.length > 0) {
       const named = await this.#attachedFilePaths(command.threadId, filesByPath);
       if (named === undefined) {
         throw this.#failure("unavailable", "A file attached to this turn is unavailable.");

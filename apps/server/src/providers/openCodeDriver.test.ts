@@ -571,6 +571,45 @@ describe("OpenCode driver", () => {
     ]);
   });
 
+  it("names the turn's last assistant message as where it ends in OpenCode's session, not a delegated session's", async () => {
+    const message = (id: string, role: "user" | "assistant", session: string) =>
+      ({
+        type: "message.updated",
+        properties: { sessionID: session, info: { id, role, sessionID: session } },
+      }) as unknown as Event;
+    const fixture = driverFixture({
+      events: [
+        message("msg_1", "user", "provider-session"),
+        message("msg_2", "assistant", "provider-session"),
+        message("msg_9", "assistant", "child-session"),
+        idleEvent("provider-session"),
+      ],
+    });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* fixture.driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+          });
+          const stream = yield* connection.subscribe;
+          const collector = yield* Effect.fork(
+            Stream.runCollect(
+              stream.pipe(
+                Stream.filter((event) => event.sessionId === sessionId),
+                Stream.takeUntil((event) => event.kind === "completed"),
+              ),
+            ),
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          return yield* Fiber.join(collector);
+        }),
+      ),
+    );
+    expect(Array.from(output).at(-1)).toMatchObject({ kind: "completed", nativeAnchor: "msg_2" });
+  });
+
   it("reports cumulative usage across every model step in one prompt", async () => {
     const fixture = driverFixture({
       events: [

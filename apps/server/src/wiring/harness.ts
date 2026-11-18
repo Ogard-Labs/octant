@@ -14,7 +14,7 @@ import { realpath, stat as statFromDisk } from "node:fs/promises";
 import { join } from "node:path";
 import { queueSteeringWhereDelivered, withSteerable } from "../harness/nativeHarnessSteerability";
 import { createHostShield, shieldRoutesApprovals } from "../shield/hostShield";
-import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
+import { chosenAutoReviewer, hostSandboxRefusal } from "@octant/domain/guardrail-policy";
 import { readsSecretsThenEgress } from "@octant/domain/shield-judge-policy";
 import { createAutomaticModelAccountCheck } from "../automaticModels/automaticModelAccount";
 import { createPersonMemorySweep } from "../personMemory/personMemoryWiring";
@@ -447,9 +447,9 @@ export function wireHarness(deps: HarnessDependencies) {
       platform: "win32",
       windowsShell: persistence.readCodeSettings()?.settings.windowsTerminalShell,
     });
-  // Full access on Windows runs harness commands in the terminal shell
-  // Settings › Code names; each keeps a receipt beside the other harness
-  // commands' so a restart finds and stops what a crash left running.
+  // On Windows harness commands run in the terminal shell Settings › Code
+  // names; each keeps a receipt beside the other harness commands' so a
+  // restart finds and stops what a crash left running.
   const windowsHarnessShellPort =
     process.platform === "win32"
       ? createWindowsFullAccessShellPort({
@@ -1064,6 +1064,29 @@ export function wireHarness(deps: HarnessDependencies) {
   });
   // A provider runtime's own shell reports a command only as it starts, so
   // its pushes and pull-request changes are recorded, never stopped.
+  // A running turn keeps the sandbox it started with, so turning it off
+  // never opens commands the turn has not run yet; turning it on applies
+  // at once, since that only narrows.
+  const threadKeepsSandbox = (threadId: string): boolean => {
+    const code = persistence.readCodeThread(threadId as never);
+    if (code !== undefined) {
+      return (codeParentActiveTurn?.(code) ?? code).fullAccessSandbox === true;
+    }
+    const stored = workThreadProjection.read(threadId as never)?.fullAccessSandbox === true;
+    return stored || runningWorkTurnSandbox(threadId) === true;
+  };
+  // Windows has no Octant sandbox, so every harness command there runs in the
+  // terminal shell Settings › Code names, unconfined, at every level outside
+  // Strict; the POSIX form runs `/bin/sh` inside a sandbox Windows lacks.
+  const windowsHarnessCommandShell =
+    windowsHarnessShellPort === undefined
+      ? undefined
+      : createNativeHarnessShell({
+          process: windowsHarnessShellPort,
+          scriptDirectory: harnessScriptDirectory,
+          scriptFileName: () => windowsScriptFileName(windowsHarnessShell()),
+          scriptText: (command) => windowsScriptText(windowsHarnessShell(), command),
+        });
   const runtimeForgeChanges = createRuntimeForgeChangeObserver({
     branches: (threadId) => codeThreadBranches(persistence, threadId),
     record: (input) => shieldServerStore.recordForgeChange(input),
@@ -1138,38 +1161,49 @@ export function wireHarness(deps: HarnessDependencies) {
         .observedState(providerInstanceId)
         ?.models.find((candidate) => String(candidate.id) === modelId)
         ?.inputModalities.includes("image") === true,
-    shell: createNativeHarnessShell({
-      process: harnessProcessPort,
-      scriptDirectory: harnessScriptDirectory,
-      sshAgentSocket,
-      cloudCliEnvironment,
-      googleCliCredentials: googleCliCommands.prepare,
-    }),
-    offlineShell: createNativeHarnessShell({
-      process: harnessOfflineProcessPort,
-      scriptDirectory: harnessScriptDirectory,
-      sshAgentSocket,
-      cloudCliEnvironment,
-      googleCliCredentials: googleCliCommands.prepare,
-    }),
-    // Full access on Windows runs commands in the terminal shell Settings ›
-    // Code names, since the POSIX form runs `/bin/sh`; the levels below
-    // refuse on Windows before any command is planned.
-    fullAccessShell:
-      windowsHarnessShellPort !== undefined
-        ? createNativeHarnessShell({
-            process: windowsHarnessShellPort,
-            scriptDirectory: harnessScriptDirectory,
-            scriptFileName: () => windowsScriptFileName(windowsHarnessShell()),
-            scriptText: (command) => windowsScriptText(windowsHarnessShell(), command),
-          })
-        : createNativeHarnessShell({
-            process: harnessFullAccessProcessPort,
+    shell:
+      windowsHarnessCommandShell ??
+      createNativeHarnessShell({
+        process: harnessProcessPort,
+        scriptDirectory: harnessScriptDirectory,
+        sshAgentSocket,
+        cloudCliEnvironment,
+        googleCliCredentials: googleCliCommands.prepare,
+      }),
+    // A child without network authority runs its commands where the sandbox
+    // closes the network; Windows has no such sandbox, so it runs none there.
+    ...(windowsHarnessCommandShell === undefined
+      ? {
+          offlineShell: createNativeHarnessShell({
+            process: harnessOfflineProcessPort,
             scriptDirectory: harnessScriptDirectory,
             sshAgentSocket,
             cloudCliEnvironment,
             googleCliCredentials: googleCliCommands.prepare,
           }),
+        }
+      : {
+          // Under Strict, or with the sandbox kept, a Windows command would
+          // need the sandbox it lacks, so it is refused before it is planned.
+          hostCommandRefusal: ({ threadId, executionPolicy }) =>
+            hostSandboxRefusal({
+              platform: "win32",
+              access: {
+                executionPolicy: executionPolicy ?? "plan",
+                fullAccessSandbox: threadKeepsSandbox(threadId),
+              },
+              strict: resolveThreadStrict(threadId),
+            }),
+        }),
+    fullAccessShell:
+      windowsHarnessCommandShell ??
+      createNativeHarnessShell({
+        process: harnessFullAccessProcessPort,
+        scriptDirectory: harnessScriptDirectory,
+        sshAgentSocket,
+        cloudCliEnvironment,
+        googleCliCredentials: googleCliCommands.prepare,
+      }),
     ...(harnessProxiedShell === undefined
       ? {}
       : {
@@ -1188,18 +1222,8 @@ export function wireHarness(deps: HarnessDependencies) {
       codeSessionAuthority,
       codeOperationRuntime: { threadWithActiveTurnPosture: codeParentActiveTurn },
     }),
-    // A running turn keeps the sandbox it started with, so turning it off
-    // never opens commands the turn has not run yet; turning it on applies
-    // at once, since that only narrows.
     readStrict: (threadId) => resolveThreadStrict(threadId),
-    readFullAccessSandbox: (threadId) => {
-      const code = persistence.readCodeThread(threadId as never);
-      if (code !== undefined) {
-        return (codeParentActiveTurn?.(code) ?? code).fullAccessSandbox === true;
-      }
-      const stored = workThreadProjection.read(threadId as never)?.fullAccessSandbox === true;
-      return stored || runningWorkTurnSandbox(threadId) === true;
-    },
+    readFullAccessSandbox: threadKeepsSandbox,
     resolveWebSearch: () =>
       harnessWebSearch({
         readEligible: () => webSearchSettings.eligible(),

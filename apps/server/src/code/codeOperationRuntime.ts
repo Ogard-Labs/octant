@@ -761,6 +761,8 @@ export interface CodeOperationRuntimeOptions {
    */
   /** Whether a thread runs in a server Project, on the checkout that Project derives. */
   readonly holdsServerThread?: (thread: CodeThread) => boolean;
+  /** Copies files a server thread's turn names by path to its attachments folder there. */
+  readonly transferServerAttachments?: CodeOperationServiceOptions["transferServerAttachments"];
   /** The login a server thread's terminal opens on its server. */
   readonly serverTerminalLogin?: CodeOperationServiceOptions["serverTerminalLogin"];
   /** Git on a server thread's server, for its Git panel. */
@@ -1480,11 +1482,17 @@ export function createCodeOperationRuntime(
   const operationAccess = (
     windowId: WindowId,
     command: CodeOperationCommand,
-  ): Pick<CodeThread, "executionPolicy" | "fullAccessSandbox" | "strict"> => {
+  ): {
+    readonly access: Pick<CodeThread, "executionPolicy" | "fullAccessSandbox" | "strict">;
+    readonly strict: boolean;
+  } => {
     const stored =
       "threadId" in command ? options.persistence.readCodeThread(command.threadId) : undefined;
-    if (stored === undefined) return { executionPolicy: "plan" };
-    return authorityForTurn.effectiveThread?.(windowId, stored) ?? stored;
+    if (stored === undefined) return { access: { executionPolicy: "plan" }, strict: true };
+    return {
+      access: authorityForTurn.effectiveThread?.(windowId, stored) ?? stored,
+      strict: options.resolveStrict?.(stored.id) ?? true,
+    };
   };
   const readRuntimeWorks = options.persistence.readCodeRuntimeWorks;
   const service = new CodeOperationService({
@@ -1529,6 +1537,9 @@ export function createCodeOperationRuntime(
     ...(options.holdsServerThread === undefined
       ? {}
       : { holdsServerThread: options.holdsServerThread }),
+    ...(options.transferServerAttachments === undefined
+      ? {}
+      : { transferServerAttachments: options.transferServerAttachments }),
     ...(options.serverTerminalLogin === undefined
       ? {}
       : { serverTerminalLogin: options.serverTerminalLogin }),
@@ -2070,17 +2081,17 @@ export function createCodeOperationRuntime(
       try {
         const command = decodeCodeOperationCommand(rawCommand);
         // A thread's terminals, tests and other operations run on a host
-        // without Octant's sandbox only at the level that uses none, read from
-        // the posture a live turn narrows it to. An operation that names no
-        // thread has no level to read, so it refuses there. A provider turn
-        // runs below Full access with the provider's own approvals, so it is
-        // judged by its own rule at its own clamped level when it starts.
+        // without Octant's sandbox outside Strict, at the posture a live turn
+        // narrows it to, and refuse under Strict or a kept sandbox. An
+        // operation that names no thread has no Strict value to read, so it
+        // refuses there. A provider turn is judged by its own rule at its own
+        // clamped level when it starts.
         const sandboxRefusal =
           command.kind === "start-provider-turn"
             ? undefined
             : hostSandboxRefusal({
                 platform: process.platform,
-                access: operationAccess(windowId, command),
+                ...operationAccess(windowId, command),
               });
         if (sandboxRefusal !== undefined)
           throw new CodeServiceError(

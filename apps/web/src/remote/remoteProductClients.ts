@@ -20,6 +20,14 @@ import { createChatClient, type ChatClient } from "@octant/client-runtime/chat-c
 import { createCanvasClient, type CanvasClient } from "@octant/client-runtime/canvas-client";
 import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
+import {
+  createProjectBrowserClient,
+  type ProjectBrowserClient,
+} from "@octant/client-runtime/project-browser-client";
+import {
+  createProjectTerminalClient,
+  type ProjectTerminalClient,
+} from "@octant/client-runtime/project-terminal-client";
 import { createProviderClient, type ProviderClient } from "@octant/client-runtime/provider-client";
 import {
   createPairedDeviceAdministrationClient,
@@ -71,6 +79,15 @@ export interface RemoteProductClients {
   readonly syncStatus: ReplicaSyncStatusClient;
   /** Read-only Reply detail; changing a level stays with a window on the host. */
   readonly replyDetail: ReplyDetailClient;
+  /**
+   * Importing an HTML page into a new Canvas, which the host takes only from
+   * a device its own person paired; the shell offers it to no other session.
+   */
+  readonly canvasImportHtml: NonNullable<CanvasClient["importHtml"]>;
+  /** The device's own shell in a local Project; the host refuses any other session. */
+  readonly projectTerminal: ProjectTerminalClient;
+  /** The device's own Private page for a Project; a profile page stays at a window. */
+  readonly projectBrowser: ProjectBrowserClient;
 }
 
 // The Work and Code clients refuse a non-loopback base URL because the window
@@ -193,5 +210,9 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
     workRequest: createWorkRequestClient(port),
     replyDetail: createReplyDetailClient(port),
     syncStatus: createReplicaSyncStatusClient(port),
+    canvasImportHtml: (request) =>
+      canvas.importHtml?.(request) ?? Promise.reject(new Error("Import is unavailable.")),
+    projectTerminal: createProjectTerminalClient(port),
+    projectBrowser: createProjectBrowserClient(port),
   };
 }
