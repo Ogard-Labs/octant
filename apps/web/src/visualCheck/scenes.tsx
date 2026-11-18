@@ -86,7 +86,7 @@ function themeController(): ThemeController {
     importJson: async () => undefined,
     exportJson: () => undefined,
     exportTokens: () => undefined,
-  } as unknown as ThemeController;
+  };
 }
 
 function Pane(props: { readonly children: ReactNode; readonly padded?: boolean }) {

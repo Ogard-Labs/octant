@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { createServer } from "vite";
 import { expect, it } from "vitest";
-import { NARROW, SCENE_LIST, WIDE } from "./sceneList";
+import { NARROW, SCENE_LIST, updateMode, WIDE } from "./sceneList";
 
 /**
  * Draws the key screens in a pinned Chromium and compares each picture with
@@ -143,7 +143,8 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
   "draws the key screens the way their baselines say",
   { timeout: 280_000 },
   async () => {
-    const update = process.env.OCTANT_VISUAL_UPDATE;
+    const mode = updateMode(process.env.OCTANT_VISUAL_UPDATE);
+    const update = mode !== "off";
     const artifacts = resolve(
       process.env.OCTANT_QA_ARTIFACTS ?? resolve(webRoot, "../../.artifacts/visual-check"),
     );
@@ -224,7 +225,7 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
           const baseline = existsSync(baselinePath) ? await readFile(baselinePath) : undefined;
           if (baseline === undefined) {
             await writeFile(actualPath, actual);
-            if (update === undefined) {
+            if (!update) {
               missing.push(shot.name);
             } else {
               await writeFile(baselinePath, actual);
@@ -232,7 +233,7 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
             }
             continue;
           }
-          if (update === "all") {
+          if (mode === "all") {
             await writeFile(actualPath, actual);
             await writeFile(baselinePath, actual);
             written.push(shot.name);
@@ -243,7 +244,7 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
           const share = result.total === 0 ? 1 : result.differing / result.total;
           if (result.sizesMatch && share <= PIXEL_BUDGET) continue;
           await writeFile(actualPath, actual);
-          if (update !== undefined) {
+          if (update) {
             await writeFile(baselinePath, actual);
             written.push(shot.name);
             continue;

@@ -77,9 +77,11 @@ jobs:
         env:
           CI: "true"
           OCTANT_VISUAL_CHECK: "1"
-          OCTANT_VISUAL_UPDATE: ${{ steps.mode.outputs.update == 'true' && '1' || '' }}
           OCTANT_QA_ARTIFACTS: ${{ runner.temp }}/visual-check
-        run: bun run --cwd apps/web visual:check
+        run: |
+          # Set only when writing: an empty value is still "set" to some readers.
+          if [ "${{ steps.mode.outputs.update }}" = "true" ]; then export OCTANT_VISUAL_UPDATE=1; fi
+          bun run --cwd apps/web visual:check
       - name: Explain how to accept the change
         if: failure()
         run: |

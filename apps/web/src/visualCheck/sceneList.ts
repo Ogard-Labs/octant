@@ -28,3 +28,16 @@ export const SCENE_LIST: ReadonlyArray<SceneMeta> = [
 /** The two window sizes a scene is drawn at. */
 export const WIDE = { width: 1280, height: 800 } as const;
 export const NARROW = { width: 760, height: 900 } as const;
+
+export type UpdateMode = "off" | "changed" | "all";
+
+/**
+ * Whether the visual check writes baselines. Only the exact words turn it on:
+ * CI passes an empty string on a run that must compare, and an empty string
+ * (or anything else) once wrote baselines and let a changed screen pass.
+ */
+export function updateMode(value: string | undefined): UpdateMode {
+  if (value === "1") return "changed";
+  if (value === "all") return "all";
+  return "off";
+}
