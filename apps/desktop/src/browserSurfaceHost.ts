@@ -1,5 +1,6 @@
 import {
   captureBrowserFeedbackPoint,
+  refusesPageNavigation,
   type BrowserFeedbackPointObservation,
 } from "@octant/host-runtime";
 import { createPersistentBrowserOwner, type BrowserExecutionOwner } from "./persistentBrowserOwner";
@@ -49,7 +50,6 @@ import {
   type HumanBrowserResult,
 } from "@octant/contracts/browser-presentation";
 import { createHash, randomUUID } from "node:crypto";
-import { isIP } from "node:net";
 import { BrowserCredentialFill } from "./browserCredentialFill";
 import type { BrowserSurfacePointSelection } from "@octant/contracts/desktop-bridge";
 import {
@@ -93,7 +93,6 @@ import {
   type BrowserTransferLimits,
 } from "@octant/domain";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
-import { isPrivateAddress } from "./privateAddress";
 import { DesktopDownloadHold, type DesktopDownloadItemPort } from "./browserDownloadHold";
 import {
   FAVICON_MIN_INTERVAL_MS,
@@ -428,9 +427,31 @@ interface HibernatedTab {
   readonly title: string;
 }
 
+/**
+ * The one load the host itself named on this tab: an explicit `navigate`, or
+ * the agent's `tab-open` with a target. Only its own top-level redirect chain
+ * may inherit its admission onto this computer or its network — the agent's
+ * follows any of them, the person's only the origin they typed. A renderer
+ * start or a subframe never carries it.
+ */
+interface NamedBrowserLoad {
+  readonly kind: "agent" | "person";
+  /** The origin the person typed; meaningful only for `person`. */
+  readonly origin: string | undefined;
+  readonly url: string;
+  started: boolean;
+  refusedUrl?: string;
+}
+
 /** One page of a context. Tabs share the context's session and its guards. */
 interface OwnedTab {
   readonly tabId: string;
+  /**
+   * The host-named load in flight on this tab, set and cleared around its
+   * `loadURL`, ended early when a renderer-started navigation is admitted or
+   * the main document commits.
+   */
+  namedLoad?: NamedBrowserLoad | undefined;
   /**
    * The page's declared icon and the address it came from, in memory only. An
    * address already fetched is not fetched again; a failed fetch keeps the
@@ -551,17 +572,14 @@ interface OwnedSurface {
   control: BrowserSurfaceState["control"];
   /**
    * True while a navigation the person started from the address bar loads.
-   * Its hops are the person's browsing, except onto this computer or its
-   * network; see `admitNavigation`.
+   * What it may download and what its answer may report follow this; which
+   * hops its load may follow is the tab's `namedLoad`, kept with the tab so
+   * no page-started move can borrow it.
    */
   personNavigation: boolean;
-  /** The origin the person typed, while `personNavigation` holds. */
-  personNavigationOrigin: string | undefined;
   /** Remote owner input never turns delayed page navigation into a local person's origin grant. */
   ownerNavigationRestricted: boolean;
   shellWindow: BrowserSurfaceShellWindowPort | undefined;
-  /** Last top-level navigation the allowlist guard cancelled during the current action. */
-  blockedNavigationUrl: string | undefined;
   /**
    * What the context's pages reported since the last diagnostics read. Bounded
    * on write, oldest first out, so a page that logs in a loop cannot grow this
@@ -1635,6 +1653,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           tab.documentRevision += 1;
           if (owned.pointSelection?.tabId === tabId) clearPointSelection(owned);
         }
+        // Committed: the named load this document belongs to names no further hops.
+        if (event === "did-navigate") tab.namedLoad = undefined;
         // A displayed frame belongs to this document, not its navigation successor.
         if (event === "did-start-loading") {
           void owned.textComposition.close();
@@ -1698,25 +1718,66 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         publish(contextId, owned);
       });
     });
-    const guardNavigation =
+    /**
+     * May this hop proceed? The shared local guard answers first for every
+     * http(s) navigation, before any allowlist or temporary grant — except
+     * the redirect chain of the one load the host itself named on this tab:
+     * the agent's named load follows its own top-level redirects (its target
+     * already passed the allowlist), and the person's follows only the
+     * origin they typed. Renderer-started moves and subframes never inherit
+     * it, and neither does a tab the person has moved off the front.
+     */
+    const admitPageNavigation = (
+      target: string,
+      top: boolean,
+      named?: NamedBrowserLoad,
+    ): boolean => {
+      const namesLocalHop =
+        (named?.kind === "agent" && owned.activeTabId === tab.tabId) ||
+        (named?.kind === "person" &&
+          named.origin !== undefined &&
+          originAllowed(target, [named.origin]));
+      if (!namesLocalHop && refusesPageNavigation(target, owned.policy.allowedOrigins)) {
+        return false;
+      }
+      return owned.ownerNavigationRestricted || ownerControls.holdsPage(owned)
+        ? originAllowed(target, owned.policy.allowedOrigins)
+        : admitNavigation(owned, target, top ? view : undefined, !scriptHolds.has(owned));
+    };
+    const refusePageNavigation = (event: unknown): void => {
+      (event as { preventDefault?: () => void }).preventDefault?.();
+    };
+    // These two events emit only for renderer-started navigations, never for
+    // the loadURL a `navigate` or `tab-open` drives.
+    const guardStartedNavigation =
       (knownMainFrame: boolean) =>
       (event: unknown, ...details: readonly unknown[]) => {
         const target = navigationUrl(event, details);
         const top = navigationMainFrame(event, details, knownMainFrame);
-        if (
-          typeof target === "string" &&
-          (owned.ownerNavigationRestricted || ownerControls.holdsPage(owned)
-            ? originAllowed(target, owned.policy.allowedOrigins)
-            : admitNavigation(owned, target, top ? view : undefined, !scriptHolds.has(owned)))
-        )
+        if (typeof target === "string" && admitPageNavigation(target, top)) {
+          // A page-started main navigation that is admitted supersedes the
+          // host-named load still in flight: its own later redirects may not
+          // borrow that load's admission.
+          if (top) tab.namedLoad = undefined;
           return;
-        (event as { preventDefault?: () => void }).preventDefault?.();
-        if (top && typeof target === "string") owned.blockedNavigationUrl = target;
+        }
+        refusePageNavigation(event);
       };
+    const guardRedirect = (event: unknown, ...details: readonly unknown[]) => {
+      const target = navigationUrl(event, details);
+      const top = navigationMainFrame(event, details, false);
+      const named =
+        top && tab.namedLoad?.started === true && !navigationHasInitiator(event)
+          ? tab.namedLoad
+          : undefined;
+      if (typeof target === "string" && admitPageNavigation(target, top, named)) return;
+      if (named !== undefined && typeof target === "string") named.refusedUrl = target;
+      refusePageNavigation(event);
+    };
     // Electron emits will-frame-navigate for the main frame too. Redirects can be subframes.
-    view.webContents.on("will-navigate", guardNavigation(true));
-    view.webContents.on("will-redirect", guardNavigation(false));
-    view.webContents.on("will-frame-navigate", guardNavigation(false));
+    view.webContents.on("will-navigate", guardStartedNavigation(true));
+    view.webContents.on("will-redirect", guardRedirect);
+    view.webContents.on("will-frame-navigate", guardStartedNavigation(false));
     view.webContents.on("login", (event: unknown, ...details: readonly unknown[]) => {
       (event as { preventDefault?: () => void }).preventDefault?.();
       const callback = details.find((detail): detail is () => void => typeof detail === "function");
@@ -1956,8 +2017,28 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       tab.releasePopups = watchHumanPagePopups(contextId, owned, view, popups);
     owned.tabs.push(tab);
     view.webContents.on("render-process-gone", () => forgetTab(String(contextId), owned, tab));
-    view.webContents.on("did-start-navigation", () => {
+    view.webContents.on("did-start-navigation", (event, ...details) => {
       scriptGenerations.set(view, (scriptGenerations.get(view) ?? 0) + 1);
+      const named = tab.namedLoad;
+      if (named === undefined || !navigationMainFrame(event, details, false)) return;
+      if (
+        typeof event === "object" &&
+        event !== null &&
+        "isSameDocument" in event &&
+        event.isSameDocument === true
+      )
+        return;
+      // A pending redirect from the previous document must not spend the
+      // next load's admission before Chromium reports the named start.
+      if (
+        !named.started &&
+        navigationUrl(event, details) === named.url &&
+        !navigationHasInitiator(event)
+      ) {
+        named.started = true;
+      } else {
+        tab.namedLoad = undefined;
+      }
     });
     view.webContents.on("destroyed", () => {
       retireScriptView(view);
@@ -3135,9 +3216,6 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         // computer's network, while the dialog guard below is still attaching.
         owned.control = personNavigation ? "user" : "agent";
         owned.personNavigation = personNavigation;
-        owned.personNavigationOrigin =
-          personNavigation && request.target !== undefined ? originOf(request.target) : undefined;
-        owned.blockedNavigationUrl = undefined;
         publish(contextId, owned);
         // Dialogs an earlier action answered before it failed come first.
         const dialogs: DialogReport[] = owned.unreportedDialogs.splice(0);
@@ -3152,7 +3230,6 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           // The action never began, so the `finally` below never runs: nothing
           // may be left reading the next hops as the person's.
           owned.personNavigation = false;
-          owned.personNavigationOrigin = undefined;
           owned.control = "idle";
           publish(contextId, owned);
           throw error;
@@ -3203,12 +3280,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 ) {
                   throw new Error("Navigation target origin is not in the allowlist.");
                 }
-                try {
-                  await contents.loadURL(normalizeUrl(request.target));
-                } catch (error) {
-                  if (owned.blockedNavigationUrl === undefined) throw error;
-                  throw new BrowserNavigationBlockedError(owned.blockedNavigationUrl);
-                }
+                await loadNamedBrowserUrl(
+                  activeTab(owned),
+                  request.target,
+                  personNavigation ? "person" : "agent",
+                );
                 break;
               }
               case "click":
@@ -3300,12 +3376,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 try {
                   checkObservation();
                   throwIfAborted(signal);
-                  await opened.view.webContents.loadURL(
-                    request.target === undefined ? "about:blank" : normalizeUrl(request.target),
-                  );
-                } catch (error) {
-                  if (owned.blockedNavigationUrl === undefined) throw error;
-                  throw new BrowserNavigationBlockedError(owned.blockedNavigationUrl);
+                  if (request.target === undefined) {
+                    await opened.view.webContents.loadURL("about:blank");
+                  } else {
+                    await loadNamedBrowserUrl(opened, request.target, "agent");
+                  }
                 } finally {
                   await releaseTabDialogs().catch(() => undefined);
                 }
@@ -3525,7 +3600,6 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           // A failed action stops holding too; its reports wait for the next answer.
           if (request.downloads === "hold") await owned.downloads.finish().catch(() => undefined);
           owned.personNavigation = false;
-          owned.personNavigationOrigin = undefined;
           owned.control = "idle";
           publish(contextId, owned);
         }
@@ -3964,10 +4038,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       humanInputTail: Promise.resolve(),
       control: "idle",
       personNavigation: false,
-      personNavigationOrigin: undefined,
       ownerNavigationRestricted: false,
       shellWindow: undefined,
-      blockedNavigationUrl: undefined,
       unreportedDialogs: [],
       consoleErrors: [],
       consoleWarnings: [],
@@ -4119,18 +4191,6 @@ function admitNavigation(
     originAllowed(target, temporary.origins)
   )
     return true;
-  // An address the person typed follows its redirects like any browsing, but
-  // never onto this computer or its network, whatever the page admits: a
-  // public page must not walk the person's view to an address only they can
-  // reach. A Private page admits every site, so this comes before that check;
-  // only the origin the person typed is exempt.
-  if (
-    owned.personNavigation &&
-    onThisComputerOrNetwork(target) &&
-    (owned.personNavigationOrigin === undefined ||
-      !originAllowed(target, [owned.personNavigationOrigin]))
-  )
-    return false;
   if (originAllowed(target, owned.policy.allowedOrigins)) return true;
   if (originAllowed(target, owned.userGrantedOrigins)) return true;
   // Only while the person is demonstrably driving. "idle" is nobody's action:
@@ -4161,31 +4221,6 @@ function refuseUnapprovedPage(
   const showing = contents.getURL();
   if (showing === "" || originAllowed(showing, owned.policy.allowedOrigins)) return;
   throw new Error("Octant Browser will not act on a page outside this context's allowed origins.");
-}
-
-/**
- * Whether an address names this computer or its network by its own text: an
- * IP literal outside the public ranges, localhost, a name under a suffix kept
- * for private networks, or a bare name with no dot. A public name that
- * resolves to a private address is not caught here.
- */
-export function onThisComputerOrNetwork(target: string): boolean {
-  let hostname: string;
-  try {
-    hostname = new URL(normalizeUrl(target)).hostname.toLowerCase().replace(/\.$/, "");
-  } catch {
-    return true;
-  }
-  const bare =
-    hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
-  if (isIP(bare) !== 0) return isPrivateAddress(bare);
-  return (
-    !bare.includes(".") ||
-    bare === "localhost" ||
-    [".localhost", ".local", ".internal", ".lan", ".home.arpa"].some((suffix) =>
-      bare.endsWith(suffix),
-    )
-  );
 }
 
 function originOf(target: string): string | undefined {
@@ -4280,6 +4315,36 @@ function originAllowed(target: string, allowedOrigins: ReadonlyArray<string>): b
   } catch {
     return false;
   }
+}
+
+async function loadNamedBrowserUrl(
+  tab: OwnedTab,
+  target: string,
+  kind: NamedBrowserLoad["kind"],
+): Promise<void> {
+  const url = normalizeUrl(target);
+  const named: NamedBrowserLoad = {
+    kind,
+    origin: kind === "person" ? originOf(url) : undefined,
+    url,
+    started: false,
+  };
+  tab.view.webContents.stop();
+  tab.namedLoad = named;
+  try {
+    await tab.view.webContents.loadURL(url);
+  } catch (error) {
+    if (named.refusedUrl !== undefined) throw new BrowserNavigationBlockedError(named.refusedUrl);
+    throw error;
+  } finally {
+    if (tab.namedLoad === named) tab.namedLoad = undefined;
+  }
+}
+
+function navigationHasInitiator(event: unknown): boolean {
+  return (
+    typeof event === "object" && event !== null && "initiator" in event && event.initiator != null
+  );
 }
 
 function navigationUrl(event: unknown, details: readonly unknown[]): unknown {

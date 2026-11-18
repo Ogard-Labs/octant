@@ -309,6 +309,11 @@ export {
 
 export * from "./browserPointCapture";
 export {
+  isPrivateAddress,
+  onThisComputerOrNetwork,
+  refusesPageNavigation,
+} from "./browserNavigation";
+export {
   createWindowsListenerTlsFiles,
   type WindowsListenerTlsFiles,
   type WindowsListenerTlsNative,

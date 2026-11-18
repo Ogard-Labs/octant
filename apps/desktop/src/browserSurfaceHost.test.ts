@@ -18,6 +18,15 @@ import {
 const contextId = "60000000-0000-4000-8000-000000000001";
 const threadId = "10000000-0000-4000-8000-000000000001";
 
+function namedStart(port: BrowserSurfaceViewPort, url: string): void {
+  vi.mocked(port.webContents.on).mock.calls.find(([name]) => name === "did-start-navigation")?.[1]({
+    url,
+    isMainFrame: true,
+    isSameDocument: false,
+    initiator: null,
+  });
+}
+
 function view(): BrowserSurfaceViewPort {
   const listeners = new Map<string, (...args: readonly unknown[]) => void>();
   let debuggerAttached = false;
@@ -1934,7 +1943,8 @@ describe("BrowserSurfaceHost", () => {
       .mock.calls.find(([event]) => event === "will-redirect")?.[1];
     // Chromium cancels the load when the guard refuses the redirect, so
     // loadURL rejects with an opaque ERR_ABORTED after the guard has run.
-    vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+    vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+      namedStart(created, url);
       // A site's own www host is the same place; a different site is not.
       redirectGuard?.({
         preventDefault: vi.fn(),
@@ -2124,7 +2134,8 @@ describe("BrowserSurfaceHost", () => {
       "http://LOCALHOST./",
     ])("refuses a hop to this computer or its network (%s)", async (privateHop) => {
       const { created, host, hop } = await opened();
-      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
         // A public hop first: the refusal is for the private one, not the chain.
         expect(hop("https://moved.example.net/")).toBe(true);
         expect(hop(privateHop)).toBe(false);
@@ -2142,7 +2153,8 @@ describe("BrowserSurfaceHost", () => {
 
     it("drops the dialogs of a navigation that failed, and treats the next action's hops as nobody's", async () => {
       const { created, host, hop, alert, misbehave } = await opened();
-      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
         expect(hop("https://moved.example.net/")).toBe(true);
         alert("Words from a site nobody approved");
         misbehave("https://moved.example.net");
@@ -2266,7 +2278,8 @@ describe("BrowserSurfaceHost", () => {
         return preventDefault.mock.calls.length === 0;
       };
       const followed: boolean[] = [];
-      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
         followed.push(hop("https://moved.example.net/"), hop("http://192.168.1.1/"));
         throw new Error("ERR_ABORTED (-3) loading 'https://short.example/'");
       });
@@ -2281,7 +2294,8 @@ describe("BrowserSurfaceHost", () => {
 
       // The person typed a local address themself: its own hops are followed.
       vi.mocked(created.webContents.getURL).mockReturnValue("http://127.0.0.1:4101/next");
-      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
         expect(hop("http://127.0.0.1:4101/next")).toBe(true);
       });
       await expect(
@@ -2293,7 +2307,8 @@ describe("BrowserSurfaceHost", () => {
       ).resolves.toMatchObject({ url: "http://127.0.0.1:4101/next" });
 
       // The agent's own navigation on such a page reaches any site, a local one too.
-      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
         expect(hop("http://192.168.1.1/")).toBe(true);
       });
       vi.mocked(created.webContents.getURL).mockReturnValue("http://192.168.1.1/");
@@ -2304,7 +2319,8 @@ describe("BrowserSurfaceHost", () => {
 
     it("still refuses the same redirect when the agent asked for the navigation", async () => {
       const { created, host, hop } = await opened();
-      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
         expect(hop("https://moved.example.net/")).toBe(false);
         throw new Error("ERR_ABORTED (-3) loading 'https://short.example/'");
       });
@@ -2337,6 +2353,145 @@ describe("BrowserSurfaceHost", () => {
         title: "Example",
         dialogs: [{ type: "alert", message: "Words from the approved site" }],
       });
+    });
+  });
+
+  describe("a page-started navigation to this computer or its network", () => {
+    const policy = {
+      profileMode: "isolated" as const,
+      allowedOrigins: ["*"],
+      credentialFieldProtection: true,
+      maxConcurrentTabs: 4,
+      sessionTimeoutMs: 300_000,
+    };
+    async function opened(allowedOrigins: ReadonlyArray<string> = policy.allowedOrigins) {
+      const created = view();
+      const host = createBrowserSurfaceHost({ createView: () => created });
+      await host.createContext({
+        contextId,
+        owner: { windowId: "window-a", threadId },
+        policy: { ...policy, allowedOrigins: [...allowedOrigins] },
+      });
+      const guardOf = (port: BrowserSurfaceViewPort, event: string) =>
+        vi.mocked(port.webContents.on).mock.calls.find(([name]) => name === event)?.[1];
+      const redirectGuard = guardOf(created, "will-redirect");
+      const startGuard = guardOf(created, "will-frame-navigate");
+      /** A server redirect hop; answers whether the guard let it pass. */
+      const hop = (url: string, top = true, initiator: object | null = null): boolean => {
+        const preventDefault = vi.fn();
+        redirectGuard?.({ preventDefault, isMainFrame: top, url, initiator });
+        return preventDefault.mock.calls.length === 0;
+      };
+      /** A navigation the page itself starts; answers whether the guard let it pass. */
+      const start = (url: string, top = true): boolean => {
+        const preventDefault = vi.fn();
+        startGuard?.({ preventDefault, isMainFrame: top, url });
+        return preventDefault.mock.calls.length === 0;
+      };
+      return { created, host, hop, start, guardOf };
+    }
+
+    it("refuses a move the page starts itself, even on a page that admits every site", async () => {
+      const { hop, start } = await opened();
+      expect(start("http://192.168.1.1/")).toBe(false);
+      expect(start("http://printer.local/", false)).toBe(false);
+      expect(hop("http://10.0.0.5/", false)).toBe(false);
+      expect(start("https://moved.example.net/")).toBe(true);
+      expect(start("https://frame.example.net/", false)).toBe(true);
+    });
+
+    it("lets only the load the host named follow a redirect onto it", async () => {
+      const { created, host, hop } = await opened();
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        expect(hop("http://192.168.1.1/")).toBe(false);
+        namedStart(created, url);
+        expect(hop("http://192.168.1.1/", true, {})).toBe(false);
+        expect(hop("http://192.168.1.1/")).toBe(true);
+        // A subframe hop in the same load is still a page-started move.
+        expect(hop("http://192.168.1.1/", false)).toBe(false);
+      });
+      await host.act(contextId, { kind: "navigate", target: "https://short.example/" });
+
+      // The name ended with the load: the same hop is a page-started move now.
+      expect(hop("http://192.168.1.1/")).toBe(false);
+    });
+
+    it("drops the named load when a page-started main navigation is admitted", async () => {
+      const { created, host, hop, start } = await opened();
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
+        expect(start("https://moved.example.net/")).toBe(true);
+        // The page's admitted move is its own: the named load's hops are spent.
+        expect(hop("http://192.168.1.1/")).toBe(false);
+      });
+      await host.act(contextId, { kind: "navigate", target: "https://short.example/" });
+    });
+
+    it("keeps local hops to the one origin a context was approved for, and no wider list", async () => {
+      const oneSite = await opened(["http://127.0.0.1:8080"]);
+      expect(oneSite.start("http://127.0.0.1:8080/admin")).toBe(true);
+      expect(oneSite.hop("http://127.0.0.1:8080/admin")).toBe(true);
+      expect(oneSite.start("http://192.168.1.1/")).toBe(false);
+
+      const twoSites = await opened(["http://127.0.0.1:8080", "https://short.example"]);
+      expect(twoSites.start("http://127.0.0.1:8080/admin")).toBe(false);
+    });
+
+    it("lets the person's typed local origin redirect to itself and no other local address", async () => {
+      const { created, host, hop } = await opened();
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
+        expect(hop("http://127.0.0.1:4101/next")).toBe(true);
+        expect(hop("http://192.168.1.1/")).toBe(false);
+        throw new Error("ERR_ABORTED (-3) loading 'http://127.0.0.1:4101/'");
+      });
+      await expect(
+        host.act(contextId, {
+          kind: "navigate",
+          target: "http://127.0.0.1:4101/",
+          startedBy: "person",
+        }),
+      ).rejects.toMatchObject({
+        name: "BrowserNavigationBlockedError",
+        url: "http://192.168.1.1/",
+      });
+    });
+
+    it("names only the tab the host loaded, not a neighbour", async () => {
+      const first = view();
+      const second = view();
+      const ports = [first, second];
+      const host = createBrowserSurfaceHost({ createView: () => ports.shift()! });
+      await host.createContext({
+        contextId,
+        owner: { windowId: "window-a", threadId },
+        policy,
+      });
+      const firstRedirect = vi
+        .mocked(first.webContents.on)
+        .mock.calls.find(([event]) => event === "will-redirect")?.[1];
+      const firstHop = (url: string): boolean => {
+        const preventDefault = vi.fn();
+        firstRedirect?.({ preventDefault, isMainFrame: true, url });
+        return preventDefault.mock.calls.length === 0;
+      };
+      vi.mocked(second.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(second, url);
+        const secondRedirect = vi
+          .mocked(second.webContents.on)
+          .mock.calls.find(([event]) => event === "will-redirect")?.[1];
+        const secondHop = (url: string): boolean => {
+          const preventDefault = vi.fn();
+          secondRedirect?.({ preventDefault, isMainFrame: true, url });
+          return preventDefault.mock.calls.length === 0;
+        };
+        expect(secondHop("http://192.168.1.1/")).toBe(true);
+        expect(firstHop("http://192.168.1.1/")).toBe(false);
+        throw new Error("ERR_TIMED_OUT");
+      });
+      await expect(
+        host.act(contextId, { kind: "tab-open", target: "https://short.example/" }),
+      ).rejects.toThrow("ERR_TIMED_OUT");
     });
   });
 
