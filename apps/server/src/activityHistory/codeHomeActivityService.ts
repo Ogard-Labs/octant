@@ -135,7 +135,6 @@ export type CodeHomeActivityForgeResult =
       /** The account whose `gh` answered, normalized; pages recheck it. */
       account: string;
       checkedAt: UtcTimestamp;
-      coverageFrom?: UtcTimestamp;
       records: ReadonlyArray<CodeHomeActivityForgeRecord>;
     }>;
 
@@ -388,12 +387,11 @@ export class CodeHomeActivityService {
     const capped = records.slice(0, MAX_SELECTED_RECORDS);
     const partial = forge.status === "partial" || capped.length < records.length;
 
+    // A partial view never claims a previous-window count: the search could
+    // not prove what it counted. A ready one always compares — the windowed
+    // read is exact, so a real zero is honest.
     let comparisonCount: number | undefined;
-    if (
-      query.comparison !== undefined &&
-      forge.coverageFrom !== undefined &&
-      forge.coverageFrom < query.comparison.until
-    ) {
+    if (query.comparison !== undefined && !partial) {
       const inComparison = (record: CodeHomeActivityForgeRecord) =>
         (query.comparison?.from === undefined ||
           query.comparison.from === null ||
@@ -443,7 +441,6 @@ export class CodeHomeActivityService {
       source: "github",
       ...(partial ? { reason: "incomplete" as const } : {}),
       checkedAt: forge.checkedAt,
-      ...(forge.coverageFrom === undefined ? {} : { coverageFrom: forge.coverageFrom }),
       count: capped.length,
       ...(comparisonCount === undefined ? {} : { comparisonCount }),
       snapshotId: snapshotId as ActivitySnapshotId,

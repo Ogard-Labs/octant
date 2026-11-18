@@ -559,10 +559,13 @@ fabricated zero.
 A run counts as canceled when the person stopped it: Chat, Work and agent runs journal a cancelled outcome, and a Code turn counts as canceled when the journal recorded the person's stop request before it was interrupted. Any other interruption, such as a restart, counts as failed.
 
 A GitHub source answers through the connected account's `gh` and counts
-only that account's own merges, closures and releases; release history only
-reaches what GitHub's event history exposes — roughly the last 30 days or
-300 events per repository — so release coverage is always reported as
-partial rather than presented as complete.
+only that account's own merges, closures and releases. Each card is a
+date-bounded read per connected repository: merges and closures through
+GitHub's issue search, releases through the repository's own list. A
+release counts when that account created it and it was published inside
+the range. A card reads partial only when a repository could not be read
+or a range holds more than 200 matches per repository, and a partial card
+shows no comparison.
 
 A timeframe resolves to a half-open
 `[start, end)` instant window plus an optional comparison window in the

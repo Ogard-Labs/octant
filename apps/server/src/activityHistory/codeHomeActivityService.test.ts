@@ -498,6 +498,69 @@ describe("CodeHomeActivityService", () => {
     expect(view.records).toHaveLength(1);
   });
 
+  it("counts a ready forge view's comparison window exactly", async () => {
+    const { read } = fixture([mergeFact()], {
+      forge: async () => ({
+        status: "ready",
+        account: "henrik",
+        checkedAt: now,
+        records: [
+          forgeRecord({ occurredAt: "2026-08-15T00:00:00.000Z" }),
+          forgeRecord({
+            occurredAt: "2026-07-15T00:00:00.000Z",
+            id: "octant-dev/octant#7",
+            number: 7,
+          }),
+        ],
+      }),
+      forgeAccount: async () => "henrik",
+    });
+    const view = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "github",
+      current: { from: decodeUtcTimestamp("2026-08-01T00:00:00.000Z"), until },
+      comparison: {
+        from: decodeUtcTimestamp("2026-07-01T00:00:00.000Z"),
+        until: decodeUtcTimestamp("2026-08-01T00:00:00.000Z"),
+      },
+    });
+    expect(view.status).toBe("ready");
+    expect(view.count).toBe(1);
+    expect(view.comparisonCount).toBe(1);
+  });
+
+  it("withholds a comparison count on a partial forge view", async () => {
+    const { read } = fixture([mergeFact()], {
+      forge: async () => ({
+        status: "partial",
+        account: "henrik",
+        checkedAt: now,
+        records: [
+          forgeRecord({ occurredAt: "2026-08-15T00:00:00.000Z" }),
+          forgeRecord({
+            occurredAt: "2026-07-15T00:00:00.000Z",
+            id: "octant-dev/octant#7",
+            number: 7,
+          }),
+        ],
+      }),
+      forgeAccount: async () => "henrik",
+    });
+    const view = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "github",
+      current: { from: decodeUtcTimestamp("2026-08-01T00:00:00.000Z"), until },
+      comparison: {
+        from: decodeUtcTimestamp("2026-07-01T00:00:00.000Z"),
+        until: decodeUtcTimestamp("2026-08-01T00:00:00.000Z"),
+      },
+    });
+    expect(view.status).toBe("partial");
+    expect(view.comparisonCount).toBeUndefined();
+  });
+
   it("labels an insecure forge account as a fallback on the Octant view", async () => {
     const { read } = fixture([], {
       forge: async () => ({ status: "fallback", fallback: "insecure-github-storage" }),

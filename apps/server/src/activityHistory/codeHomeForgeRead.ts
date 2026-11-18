@@ -3,7 +3,12 @@ import {
   type ActivityRecord,
   type ActivityWindow,
 } from "@octant/contracts/code-home-activity";
-import { decodeUtcTimestamp, type ProjectId, type WindowId } from "@octant/contracts";
+import {
+  decodeUtcTimestamp,
+  type ProjectId,
+  type UtcTimestamp,
+  type WindowId,
+} from "@octant/contracts";
 import type { GithubAuthenticationSnapshot } from "@octant/contracts";
 import { decideGithubCatalogueRead } from "@octant/domain";
 import type { GhHomeActivityPort, GhHomeActivityRow } from "../github/ghHomeActivityPort";
@@ -154,6 +159,24 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
     );
     if (repositories.length === 0) return { status: "unavailable", reason: "not-connected" };
 
+    // The read's lower bound is the earlier window start, floored to the
+    // second GitHub qualifiers use; an unbounded window walks back without
+    // one. It belongs to the cache key so a widened window cannot serve a
+    // narrower read's rows.
+    const froms = [input.current.from, input.comparison?.from];
+    const since =
+      input.current.from === null || input.comparison?.from === null
+        ? undefined
+        : new Date(
+            Math.floor(
+              Math.min(
+                ...froms
+                  .filter((from): from is UtcTimestamp => from !== undefined)
+                  .map((from) => Date.parse(from)),
+              ) / 1000,
+            ) * 1000,
+          ).toISOString();
+
     const records: CodeHomeActivityForgeRecord[] = [];
     let partial = false;
     let rateLimited = false;
@@ -161,7 +184,7 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
     for (const repository of repositories) {
       if (!admitted()) return { status: "unavailable", reason: "read-failed" };
       const repositoryKey = `${repository.repositoryOwner.toLowerCase()}/${repository.repositoryName.toLowerCase()}`;
-      const cacheKey = `${account}|${repositoryKey}|${input.card}`;
+      const cacheKey = `${account}|${repositoryKey}|${input.card}|${since ?? "all"}`;
       const cached = cache.get(cacheKey);
       const fresh =
         cached !== undefined && !input.refresh && ports.now() - cached.storedAtMs < CACHE_TTL_MS
@@ -173,6 +196,7 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
           owner: repository.repositoryOwner,
           name: repository.repositoryName,
           card: input.card,
+          since,
           signal,
         });
         if (result.status === "ready" || result.status === "partial") {
@@ -242,17 +266,10 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
             ? -1
             : 0) || (a.record.id < b.record.id ? -1 : a.record.id > b.record.id ? 1 : 0),
     );
-    let coverageFrom: string | undefined;
-    for (const entry of records) {
-      if (coverageFrom === undefined || entry.record.occurredAt < coverageFrom) {
-        coverageFrom = entry.record.occurredAt;
-      }
-    }
     return {
       status: partial ? "partial" : "ready",
       account,
       checkedAt: decodeUtcTimestamp(checkedAt),
-      ...(coverageFrom === undefined ? {} : { coverageFrom: decodeUtcTimestamp(coverageFrom) }),
       records,
     };
   };
