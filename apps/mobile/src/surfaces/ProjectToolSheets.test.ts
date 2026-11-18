@@ -218,6 +218,75 @@ describe("the phone's Private page", () => {
   });
 });
 
+describe("the phone's Private page across a close and reopen", () => {
+  it("drops a reply to an Open sent before the sheet closed instead of showing it on the reopened sheet", async () => {
+    const subjectId = "60000000-0000-4000-8000-000000000001";
+    const pageView = (title: string, url: string) => ({
+      kind: "project-browser",
+      browser: {
+        projectId,
+        mode: "work",
+        subjectId,
+        context: {
+          contextId: "70000000-0000-4000-8000-000000000001",
+          state: "active",
+          profile: "private",
+        },
+        page: { url, title },
+      },
+    });
+    let releaseOld: (() => void) | undefined;
+    const transport: MobileRemoteTransport = {
+      hostId: "00000000-0000-4000-8000-0000000000aa",
+      authenticatedFetch: async ({ body }) => {
+        const command = JSON.parse(String(body)) as { kind: string; url?: string };
+        if (command.kind === "open" && command.url === "https://old.example") {
+          // Held until after the sheet has closed and reopened.
+          await new Promise<void>((resolve) => {
+            releaseOld = resolve;
+          });
+          return Response.json(pageView("Old page", "https://old.example/"));
+        }
+        if (command.kind === "open") {
+          return Response.json(pageView("New page", "https://new.example/"));
+        }
+        return Response.json({
+          kind: "project-browser",
+          browser: { projectId, mode: "work", subjectId },
+        });
+      },
+    };
+    const sheet = (visible: boolean) =>
+      createElement(ThemeProvider, {
+        preference: "light",
+        surfaceStyle: "flat",
+        children: createElement(ProjectPageSheet, {
+          visible,
+          onClose: () => undefined,
+          transport,
+          projectId,
+        }),
+      });
+    const root = await render(sheet(true).props.children);
+    await type("mobile-project-page-address", "old.example");
+    await press("mobile-project-page-open");
+    await act(async () => root.render(sheet(false)));
+    await act(async () => root.render(sheet(true)));
+    await type("mobile-project-page-address", "new.example");
+    await press("mobile-project-page-open");
+    expect(byTestId("mobile-project-page-view").textContent).toContain("New page");
+
+    await act(async () => {
+      releaseOld?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const shown = byTestId("mobile-project-page-view").textContent;
+    expect(shown).toContain("New page");
+    expect(shown).not.toContain("Old page");
+  });
+});
+
 describe("importing HTML into a Canvas from a Chat thread on the phone", () => {
   it("imports pasted markup and says what was taken out", async () => {
     const authority = {

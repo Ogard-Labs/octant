@@ -304,8 +304,13 @@ export function ProjectPageSheet(props: ProjectPageSheetProps) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string>();
   const { transport, projectId, visible } = props;
+  // Only the newest request's reply is shown. The sheet stays mounted while
+  // closed, so a reply to an Open sent before it closed, or to an earlier
+  // Refresh, would otherwise land on the page opened after it.
+  const latest = useRef(0);
 
   const send = async (command: "current" | "stop" | { readonly url: string }) => {
+    const ticket = ++latest.current;
     setBusy(true);
     try {
       const project = decodeProjectId(projectId);
@@ -315,6 +320,7 @@ export function ProjectPageSheet(props: ProjectPageSheetProps) {
           ? { kind: command, projectId: project }
           : { kind: "open", projectId: project, url: command.url, profile: "private" },
       );
+      if (ticket !== latest.current) return;
       if (answer.kind === "project-browser-refused") {
         setNote(answer.message);
         return;
@@ -322,9 +328,9 @@ export function ProjectPageSheet(props: ProjectPageSheetProps) {
       setNote(undefined);
       setView(answer.browser);
     } catch {
-      setNote(MOBILE_COPY.approvalSendFailed);
+      if (ticket === latest.current) setNote(MOBILE_COPY.approvalSendFailed);
     } finally {
-      setBusy(false);
+      if (ticket === latest.current) setBusy(false);
     }
   };
 
@@ -333,6 +339,11 @@ export function ProjectPageSheet(props: ProjectPageSheetProps) {
     setView(undefined);
     setNote(undefined);
     void send("current");
+    return () => {
+      // Closing, or another host or Project, makes every reply in flight obsolete.
+      latest.current += 1;
+      setBusy(false);
+    };
     // `send` reads only what the effect names.
   }, [visible, transport, projectId]);
 
