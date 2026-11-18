@@ -6760,7 +6760,8 @@ exposed. Runtime activation and observed capability requirements still apply.
 Opt-in defaults off independently for each provider instance. A local window or
 a paired device that can open the current Code Project and thread opts in and
 submits (maintainer decision, 2026-11-12; not built yet: today a local window
-must own them and a paired client is refused); routines, subagents and headless
+must own them and a paired client is refused; designed under
+**Paired devices and cloud jobs** below); routines, subagents and headless
 callers receive no implicit authority. Submission rechecks current
 window, Project binding, checkout, effective posture, opt-in, instance version,
 key availability and spend policy after any credential unlock. The original
@@ -6799,6 +6800,64 @@ Local thread purge removes the associated journal input/output/remote identity
 and de-links retained unknown usage under the existing retention rule. It does
 not delete provider-held data or guarantee remote cancellation; a late known ID
 is used only for cleanup, without restoring purged input.
+
+**Paired devices and cloud jobs** (designed, not built; maintainer request,
+2026-11-18). A device the host's own person paired opts an instance in or
+out, submits, acknowledges unknown jobs, reads and requests cancellation as
+a local window does. Today the submission policy (`canManageProvider`,
+`decideProviderCloudSubmission`) takes a `WindowId` and the store journals
+every job event as the system, so the design changes who is judged and who
+is recorded:
+
+- **Who is judged.** The service takes the authenticated principal, not a
+  window id: a local window, or a `person-paired-device` with its device id,
+  session and credential generation. `decideProviderCloudSubmission` accepts
+  `principalKind` `local-window` or `person-paired-device` and refuses
+  `remote-device` (a device the hub's roster introduced or an agent grant's
+  session) as `unauthorized` before the job is journaled. An agent grant
+  never spends a cloud account, whatever its level; routines, subagents and
+  headless callers stay refused.
+- **Which thread.** A device may submit from a Code thread whose Project is
+  active on the host and reachable to it, as for every other device route
+  (no workspace on the host is bound for a device). Everything a window's
+  submission rechecks is rechecked for the device: Project binding,
+  checkout, effective posture, opt-in, instance version, key availability and
+  spend policy. Where a window's capability must stay current across body
+  reads and a credential unlock, the device's session and credential
+  generation must; a revoked device, an ended session or a renewed key
+  withdraws admission, with the same output withholding and cancellation
+  request as a window's loss.
+- **Which device may spend.** Every person-paired device, since it is the
+  person, and only after the same per-job review on the device: the exact
+  input, the instance and model, and the cost consent with its "unknown cost"
+  line. Thread and Project spend ceilings refuse as they do for a window. A
+  key whose use needs an interactive unlock at the Mac (a Keychain prompt)
+  is refused for a device `credential-unlock-needs-this-computer` before the
+  create permit is spent, instead of waiting on a prompt nobody at a phone
+  can answer.
+- **Who is recorded.** `provider-cloud.job-changed@2` and
+  `provider-cloud.opt-in-changed@2` add `principal`: `{ kind: "local-window" }`
+  or `{ kind: "person-paired-device", credentialGeneration }`, the device's id
+  on the envelope actor (`remote-device`), resolved once from the
+  authenticated principal and never from the request, as Safe networks
+  records it. Only the person's acts carry a principal (opt-in, the create
+  intent, an acknowledgement of unknown jobs, a cancellation request); the
+  watchdog, recovery reads and terminal observations stay the system's.
+- **Journal compatibility.** Version 1 events keep decoding and are read as a
+  local window's. A local window's act keeps writing version 1, so a journal
+  in which no device acted stays readable by an older build; the first
+  device act writes version 2, which an older build cannot decode, so it never
+  reads a device's job as a window's. Projections rebuild from either, and
+  replay never submits.
+- Rationale: the cloud account is the person's and the device is the person,
+  so no extra gate is added; the per-job review already carries the consent
+  that matters, and recording the device on the act that spends shows which
+  device did it. Writing version 2 only for a device's act keeps a downgrade
+  safe for anyone who never used the feature.
+- Rejected: one fixed "spending device" per account (it would make the
+  person choose a phone in Settings to do what the 2026-11-12 decision says
+  any paired device may do); folding the device into version 1 as an optional
+  field (an older build would read a device's act as a window's).
 
 The exact API, account limitations and verification boundary are owned by
 [Provider runtimes: provider cloud sessions](design/provider-runtimes.md#provider-cloud-sessions).
@@ -13464,9 +13523,99 @@ and removes a sign-in as a local window does; the grant is still stored only
 in the host's credential broker (maintainer decision, 2026-11-12). Not built
 yet: today a paired device can read the state and nothing more, and a status
 read from a device returns the last known state of a pending attempt without
-polling the broker, since polling can finish the sign-in and store the grant. The release-boundary hold on a connector
+polling the broker, since polling can finish the sign-in and store the grant.
+How a device finishes one is designed below. The release-boundary hold on a connector
 marketplace was lifted by the maintainer on 2026-10-20; the start gates it set
 are met by this section and the rules above.
+
+**Finishing a connector sign-in from a paired device** (designed, not built;
+maintainer request, 2026-11-18). The authorization server redirects to the
+exact loopback callback this host registered, which a phone's browser cannot
+reach: on the phone, `127.0.0.1` is the phone. A device the host's own person
+paired finishes the sign-in by one of two flows, chosen by the host when the
+device presses **Sign in**; tokens, the code verifier and any device code
+never leave the host's credential broker either way.
+
+- **Who.** Only a `person-paired-device` principal begins or finishes a
+  sign-in this way, over its signed session on the private listener. A device
+  the hub's roster introduced, an agent grant, a routine and a caller with no
+  session are refused before the broker is asked, as today. The device
+  that begins an attempt is recorded on it (its id, session and credential
+  generation), and only that device may complete it remotely; a local window
+  may still finish any attempt at the loopback callback as it does now.
+- **Device authorization first.** Where the issuer's metadata advertises a
+  `device_authorization_endpoint` and the grant type
+  `urn:ietf:params:oauth:grant-type:device_code` (RFC 8628), and the
+  connector's dialect allows it, the host asks for a device code and the
+  device is shown only the `verification_uri` (or `verification_uri_complete`)
+  and the `user_code`, with the issuer's host name. The verification address
+  must be `https` on the issuer's host or a host its metadata names; anything
+  else falls back to the relay. The broker polls the token endpoint at the
+  issuer's interval, slowing on `slow_down`, until the code's own expiry or 15
+  minutes, whichever is sooner; the `device_code` stays in the broker. The
+  closed dialects keep their profiles: the GitHub OAuth App profile and
+  Google's Desktop app profile exclude device authorization, and Slack's
+  dedicated endpoints offer none, so those three use the relay. A dialect
+  opts in only by its own reviewed change.
+- **Otherwise a one-time relay.** The host begins the ordinary PKCE attempt
+  with its loopback listener and marks it relay-completable for that device.
+  The device opens the authorization address in its own browser; when the
+  browser lands on the unreachable loopback callback, the person copies that
+  address, or shares it to the Octant app, and the device sends it to
+  `POST /api/extensions/mcp-sign-in/relay` with the attempt id. The host
+  accepts it only when:
+  - the attempt is pending, relay-completable, and was begun by this same
+    device, session and credential generation;
+  - the address is exactly the attempt's registered callback (scheme,
+    `127.0.0.1` or the `localhost` the dialect retained, port and path), with
+    no fragment and no user information;
+  - `state` equals the attempt's state (compared in constant time), and the
+    `iss` parameter matches where the dialect requires it;
+  - it arrives within ten minutes of Begin and before the attempt's own
+    consent timeout.
+
+  The broker then takes the code through the same callback acceptor its
+  loopback listener uses, which exchanges it with the verifier it alone holds,
+  stores the grant and closes the listener. The relay is single use: the first
+  accepted callback, at the loopback or by relay, settles the attempt and every
+  later one is refused `sign-in-settled`. A callback that fails a check is
+  refused without settling, at most three times per attempt; the third ends
+  the attempt as failed. An `error` callback (the person declined) is relayed
+  the same way and settles it as denied.
+
+- **What travels and what is kept.** The device sends the callback address
+  once, inside its signed TLS session; the host never logs or journals the
+  address, the code or the state, and the gateway records the route and body
+  size only. The device receives the attempt's status and, for device
+  authorization, the verification address and user code; it never receives a
+  token, a verifier, a device code or a client secret. The journal records
+  the attempt's start, completion, denial, failure and cancellation with the
+  device as the actor and the flow (`device-code` or `relay`), never a code or
+  token. Cancelling a waiting attempt from a device names the device.
+- Rationale: device authorization is preferred because the phone never
+  handles a code at all; the relay exists because most catalog issuers offer
+  no device grant and their registered callback cannot change without the
+  person re-registering the app. Handing the code to the broker's callback
+  acceptor keeps one place that validates a callback, and the PKCE verifier
+  that never leaves the broker makes a code copied from the phone's history
+  useless to anyone else; binding the relay to the device that began the
+  attempt stops another paired device from finishing a sign-in it never
+  started.
+- Rejected: registering the private listener's address as a second callback
+  (it is a LAN or tailnet address with a host-owned certificate the vendor
+  cannot verify, and would need every vendor registration changed); having
+  the host make an HTTP request to its own loopback listener with the relayed
+  code (the listener would then accept a callback whose real source is a
+  phone, blurring its loopback-only rule and the Slack dialect's exact Host
+  check); an embedded web view in the phone app that watches for the redirect
+  (issuers such as Google refuse embedded views, and it would let the app read
+  the person's vendor password); and sending the token to the device for it
+  to hand back (a token never leaves the broker).
+- Residual: the failed callback address, code included, stays in the phone
+  browser's history until the person clears it; it is single use and useless
+  without the verifier. A device-code phishing page could imitate the
+  verification step, so the device always shows the issuer's host name beside
+  the user code.
 
 **Google Workspace preview connectors.** Gmail, Drive and Calendar are three
 separate read-only MCP connections at Google's documented `/mcp/v1` endpoints.
@@ -14952,15 +15101,20 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   (the terminal as plain lines of output and a line to run), and answers
   every Work request a window can: the Plan block, a provider's tool
   approval, its questions and questionnaires, each with the version read and
-  a tool or plan approval behind the phone's own confirmation. Not built yet: the Browser's Take over and Hand back, `sign-in`,
-  profile pages and saved flows, which drive the desktop's native Browser in
-  the person's signed-in profiles and need a remote input stream and a rule
-  for what a device sees of a signed-in page, neither designed; finishing a
-  connector sign-in, whose redirect returns to this host's loopback and needs
-  a device-completable flow; provider cloud sessions, whose submission policy
-  and job records know only a local window; and server Projects beyond
-  reading, whose journaled records name only a local window. Each reason is
-  recorded in full in
+  a tool or plan approval behind the phone's own confirmation.
+  Designed, not built (maintainer request, 2026-11-18): the Browser's
+  Take over and Hand back, `sign-in`, profile pages and saved flows, through
+  a one-page lease carrying a closed input stream and person-only frames
+  ([A paired device holds the page](design/browser-agent-tool.md#a-paired-device-holds-the-page),
+  [what a device sees of a signed-in page](design/browser-profiles.md#what-a-paired-device-sees-of-a-signed-in-page));
+  finishing a connector sign-in, by device authorization where the issuer
+  offers it and otherwise a one-time relay bound to the device that began it
+  ([Finishing a connector sign-in from a paired device](#extensions-and-skills));
+  and provider cloud sessions and server Projects beyond reading, whose
+  records gain a versioned device principal
+  ([Paired devices and cloud jobs](#provider-cloud-jobs),
+  [Server Projects: Paired devices](design/server-projects.md#paired-devices)).
+  Each is listed in
   [Decisions and requirements](design/decisions.md#paired-devices-act-as-the-person).
   Each owning section keeps its own "not built yet" line until it is
   built. A device the host knows only through the hub's roster is unchanged.
