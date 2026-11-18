@@ -237,10 +237,20 @@ describe("desktop packaging boundary", () => {
     expect(stable.extendInfo).toMatchObject({ LSMinimumSystemVersion: "15.0" });
     expect(nightly.extendInfo).toMatchObject({ LSMinimumSystemVersion: "15.0" });
     expect(
-      createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0", DESKTOP_PACKAGE_TARGETS["linux-x64"]),
+      createPackagerOptions(
+        "/tmp/stage",
+        "/tmp/out",
+        "0.1.0",
+        DESKTOP_PACKAGE_TARGETS["linux-x64"],
+      ),
     ).not.toHaveProperty("extendInfo");
     expect(
-      createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0", DESKTOP_PACKAGE_TARGETS["win32-x64"]),
+      createPackagerOptions(
+        "/tmp/stage",
+        "/tmp/out",
+        "0.1.0",
+        DESKTOP_PACKAGE_TARGETS["win32-x64"],
+      ),
     ).not.toHaveProperty("extendInfo");
   });
 
