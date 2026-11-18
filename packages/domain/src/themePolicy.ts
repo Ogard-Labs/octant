@@ -1,7 +1,42 @@
-import type { AppBackgroundEffect, ThemeSettings, ThemeTypography } from "@octant/contracts/theme";
+import type {
+  AppBackgroundCharacterPattern,
+  AppBackgroundEffect,
+  AppBackgroundScene,
+  ThemeSettings,
+  ThemeTypography,
+} from "@octant/contracts/theme";
 import { getZenBuiltinBackground } from "@octant/contracts/zen";
 import { resolveTypographyProjection } from "@octant/theme/typography";
 import { asciiCell } from "./asciiPrint";
+
+/** The character field's default cells: letters and digits. */
+export const DEFAULT_CHARACTER_SET =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+export const DEFAULT_CHARACTER_LEVEL = 50;
+const MAX_CHARACTER_SET = 64;
+// The same pattern as the contract's character set, applied to one code point.
+const UNSUPPORTED_CHARACTER = /[\p{C}\p{Z}\p{M}\s\p{Extended_Pictographic}]/u;
+
+export type CharacterSetResult =
+  | { readonly status: "ok"; readonly characterSet: string }
+  | { readonly status: "refused"; readonly reason: "empty" | "too-long" | "unsupported" };
+
+/**
+ * Cleans what a person typed into the character field's cells: whitespace and
+ * repeated characters are dropped, and anything the field cannot draw as one
+ * plain glyph (controls, bidi marks, combining marks, emoji) refuses the text.
+ */
+export function cleanCharacterSet(text: string): CharacterSetResult {
+  const seen = new Set<string>();
+  for (const character of Array.from(text)) {
+    if (/^\s$/u.test(character)) continue;
+    if (UNSUPPORTED_CHARACTER.test(character)) return { status: "refused", reason: "unsupported" };
+    seen.add(character);
+  }
+  if (seen.size === 0) return { status: "refused", reason: "empty" };
+  if (seen.size > MAX_CHARACTER_SET) return { status: "refused", reason: "too-long" };
+  return { status: "ok", characterSet: Array.from(seen).join("") };
+}
 
 export type EffectiveThemeMode = "light" | "dark";
 
@@ -88,10 +123,22 @@ export interface ResolvedAppBackground {
     readonly cell: number;
     readonly levels: number;
   };
+  /** What the pixel ground draws; absent for every other ground. */
+  readonly scene?: AppBackgroundScene;
   /** 0..1, ready for the renderer. */
   readonly photoOpacity: number;
   readonly scope: "welcome" | "everywhere";
   readonly coversSidebar: boolean;
+  /** What the character field draws; present on the character ground only. */
+  readonly characters?: {
+    readonly characterSet: string;
+    /** 0..100, 50 is the default field. */
+    readonly density: number;
+    /** 0..100, 50 is the default pace, 0 holds one frame. */
+    readonly speed: number;
+    /** Which pattern the field draws; `cycle` takes each in turn. */
+    readonly pattern: AppBackgroundCharacterPattern;
+  };
 }
 
 // The ground is a picture, printed plain or through one still effect, a field
@@ -124,7 +171,7 @@ export function resolveAppBackground(
     effect,
     photoOpacity: background.photoOpacity / 100,
     scope: background.scope,
-    coversSidebar: background.scope === "everywhere" && background.coversSidebar,
+    coversSidebar: background.scope === "everywhere",
   };
   if (settings.increasedContrast || background.kind === "none" || background.kind === "theme") {
     return {
@@ -165,23 +212,40 @@ export function resolveAppBackground(
     };
   }
   if (background.kind === "characters") {
+    // Speed 0 holds one frame, as Motion Still does.
+    const characterSpeed = background.characterSpeed ?? DEFAULT_CHARACTER_LEVEL;
     return {
       ...tuning,
       effect: { ...effect, kind: "none" },
       kind: "characters",
+      characters: {
+        characterSet: background.characterSet ?? DEFAULT_CHARACTER_SET,
+        density: background.characterDensity ?? DEFAULT_CHARACTER_LEVEL,
+        speed: characterSpeed,
+        pattern: background.characterPattern ?? "cycle",
+      },
       backgroundId: null,
       backgroundUrl: null,
       backgroundStillUrl: null,
       backgroundLightUrl: null,
-      backgroundAnimated: fieldMoves,
+      backgroundAnimated: fieldMoves && characterSpeed !== 0,
     };
   }
   if (background.kind === "pixels") {
+    // A pixel ground saved before scenes existed has none and reads as Drift.
+    // The Picture scene needs a photo; without one there is nothing to print,
+    // so it draws Drift rather than an empty page.
+    const picture = background.scene === "picture" && background.backgroundId !== undefined;
+    const scene: AppBackgroundScene =
+      background.scene === undefined || (background.scene === "picture" && !picture)
+        ? "drift"
+        : background.scene;
     return {
       ...tuning,
       effect: { ...effect, kind: effect.kind === "pixelate" ? "pixelate" : "dither" },
+      scene,
       kind: "pixels",
-      backgroundId: null,
+      backgroundId: picture ? String(background.backgroundId) : null,
       backgroundUrl: null,
       backgroundStillUrl: null,
       backgroundLightUrl: null,

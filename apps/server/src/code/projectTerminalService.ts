@@ -1,4 +1,8 @@
+import { win32 } from "node:path";
 import type { ChildWorktreeSourceService } from "./childWorktreeSourceService";
+import { prepareProjectTerminalProtections } from "./projectTerminalProtections";
+import type { ProjectTerminalProtection } from "./projectTerminalProtections";
+import type { ProviderRuntimeNetworkPort } from "../network/providerRuntimeNetwork";
 import {
   ActorId,
   AggregateId,
@@ -31,7 +35,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { Schema } from "effect";
-import { statSync } from "node:fs";
+import { statSync, realpathSync } from "node:fs";
 import { projectExtraFolderRoots } from "@octant/domain";
 import type { Journal } from "../persistence/journal";
 import { LINUX_BUBBLEWRAP_MISSING_NOTICE } from "../process/linuxConfinement";
@@ -87,6 +91,7 @@ export type ProjectActionPlacementRequest = Extract<
 >;
 
 export interface ProjectTerminalServiceOptions {
+  readonly network?: ProviderRuntimeNetworkPort;
   /**
    * Whether Strict is on for the terminal: the task's, for a terminal opened
    * for a Work task, else the Project's. Outside Strict the person's own
@@ -829,10 +834,21 @@ export class ProjectTerminalService {
         : strict
           ? (workThread?.executionPolicy ?? posture)
           : "full-access";
-    // A Project action is written for a POSIX shell (`cd '…' && { … }`), which
-    // a Windows terminal never opens; refused before it is journaled.
-    if (action !== undefined && process.platform === "win32")
-      return refused("unavailable", "Project actions do not run on Windows yet.");
+    const shell = this.#options.shell?.() ?? defaultTerminalShell();
+    // On Windows an action runs in the shell Settings › Code names, written in
+    // that shell's own words; a shell Octant cannot write it for is refused
+    // before anything is journaled.
+    const actionCommand =
+      action === undefined
+        ? undefined
+        : process.platform === "win32"
+          ? windowsActionCommand(shell, folder, action)
+          : actionShellCommand(folder, action);
+    if (action !== undefined && actionCommand === undefined)
+      return refused(
+        "unavailable",
+        "This action cannot run in the terminal shell Settings › Code names. Choose Windows PowerShell, PowerShell 7 or Command Prompt.",
+      );
     if (action !== undefined) {
       try {
         this.#append(command.terminalId, 0, PROJECT_TERMINAL_EVENT_NAMES.started, {
@@ -852,7 +868,27 @@ export class ProjectTerminalService {
         );
       }
     }
+    let protections:
+      | Extract<ProjectTerminalProtection, { readonly status: "admitted" }>
+      | undefined;
     try {
+      const prepared = await prepareProjectTerminalProtections(
+        {
+          terminalId: String(command.terminalId),
+          projectId: String(command.projectId),
+          root: workThread?.workingRoot ?? workThread?.root ?? root,
+          mode: authority.project.type === "work" ? "work" : "code",
+          executionPolicy: launchPolicy,
+          ...(command.workThreadId === undefined ? {} : { workThreadId: command.workThreadId }),
+        },
+        this.#options.network,
+      );
+      if (prepared.status === "refused") {
+        if (action !== undefined)
+          this.#safeJournalEnded(command.projectId, command.terminalId, "stopped", undefined);
+        return refused("unavailable", prepared.message);
+      }
+      protections = prepared;
       await this.#options.terminals.launch({
         terminalId: String(command.terminalId),
         ...(action === undefined
@@ -860,7 +896,7 @@ export class ProjectTerminalService {
             ? {}
             : { admit: () => workThread.current() }
           : {
-              command: actionShellCommand(folder, action),
+              command: actionCommand ?? "",
               admit: () => {
                 const current = this.#authority(windowId, command.projectId);
                 return (
@@ -876,7 +912,7 @@ export class ProjectTerminalService {
                 );
               },
             }),
-        shell: this.#options.shell?.() ?? defaultTerminalShell(),
+        shell,
         cwd: folder,
         // Every folder of the Project is bound like the main one, so the
         // shell can move between them; the pick only chooses where it starts.
@@ -886,7 +922,17 @@ export class ProjectTerminalService {
             ? [root, ...(workThread === undefined ? [] : [workThread.root])]
             : [workThread?.root ?? root]),
           ...projectExtraFolderRoots(authority.project).filter(isDirectory),
-        ].filter((candidate) => candidate !== folder),
+        ].filter((candidate) => {
+          if (candidate === folder) return false;
+          const selection = prepared.launch.sandboxPolicy;
+          if (selection === undefined) return true;
+          const canonical = realpathSync(candidate);
+          return [
+            selection.context.root,
+            ...(selection.context.extraRoots ?? []),
+            ...selection.policy.filesystem.readWriteRoots,
+          ].some((allowed) => canonical === allowed || canonical.startsWith(`${allowed}/`));
+        }),
         // Its own shell history and state, apart from every thread's shells in
         // the same repository.
         stateScope: `project:${String(command.projectId)}`,
@@ -894,8 +940,33 @@ export class ProjectTerminalService {
         rows: command.rows,
         credentialReferences: [],
         executionPolicy: launchPolicy,
+        ...prepared.launch,
+        ...(prepared.managed
+          ? {
+              onClosed: prepared.end,
+              admit: () =>
+                prepared.current() &&
+                workThread?.current() !== false &&
+                (() => {
+                  const current = this.#authority(windowId, command.projectId);
+                  return (
+                    current.kind === "allowed" &&
+                    placed?.checkout?.current() !== false &&
+                    String(current.bindingRevisionId) === String(authority.bindingRevisionId) &&
+                    (action === undefined ||
+                      current.project.actions?.some(
+                        (candidate) =>
+                          candidate.id === action.id &&
+                          candidate.command === action.command &&
+                          candidate.directory === action.directory,
+                      ) === true)
+                  );
+                })(),
+            }
+          : {}),
       });
     } catch (error) {
+      await protections?.end();
       if (action !== undefined)
         this.#safeJournalEnded(command.projectId, command.terminalId, "stopped", undefined);
       console.warn(
@@ -905,9 +976,12 @@ export class ProjectTerminalService {
       // any other confinement message may carry paths and stays in the log.
       return refused(
         "unavailable",
-        error instanceof ProcessConfinementError && error.userFixable === "linux-bubblewrap-missing"
-          ? LINUX_BUBBLEWRAP_MISSING_NOTICE
-          : "The terminal could not start.",
+        error instanceof ProcessConfinementError && error.policyRefusal !== undefined
+          ? `The terminal cannot enforce these protection rules: ${error.policyRefusal.rules.join(", ")}. Review Configure protections before retrying.`
+          : error instanceof ProcessConfinementError &&
+              error.userFixable === "linux-bubblewrap-missing"
+            ? LINUX_BUBBLEWRAP_MISSING_NOTICE
+            : "The terminal could not start.",
       );
     }
     return this.#own(
@@ -1392,6 +1466,28 @@ function refused(
   message: string,
 ): Extract<ProjectTerminalResult, { kind: "project-terminal-refused" }> {
   return { kind: "project-terminal-refused", reason, message };
+}
+
+/**
+ * A Project action in a Windows shell's own words: it changes to the action's
+ * folder and stops there if that fails, then runs the action as written. A
+ * shell other than the three Settings offers gets none.
+ */
+export function windowsActionCommand(
+  shell: string,
+  folder: string,
+  action: ProjectAction,
+): string | undefined {
+  const directory = action.directory === "." ? folder : win32.join(folder, action.directory);
+  switch (win32.basename(shell).toLowerCase()) {
+    case "powershell.exe":
+    case "pwsh.exe":
+      return `Set-Location -LiteralPath '${directory.replaceAll("'", "''")}' -ErrorAction Stop\n${action.command}`;
+    case "cmd.exe":
+      return `cd /d "${directory}" && ${action.command}`;
+    default:
+      return undefined;
+  }
 }
 
 function actionShellCommand(folder: string, action: ProjectAction): string {

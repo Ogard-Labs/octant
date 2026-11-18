@@ -110,6 +110,7 @@ export interface GhAssignedWorkObservationItem {
   readonly author: string;
   readonly updatedAt: string;
   readonly url: string;
+  readonly draft?: true;
 }
 
 export interface GhProjectObservationRow {
@@ -978,7 +979,13 @@ function decodeAssignedWorkItem(
   const owner = repository?.[1];
   const name = repository?.[2];
   if (owner === undefined || name === undefined) return undefined;
-  return { category, owner, name, ...shared };
+  return {
+    category,
+    owner,
+    name,
+    ...shared,
+    ...(category !== "issue" && item.draft === true ? { draft: true as const } : {}),
+  };
 }
 
 function decodePullRequestItem(item: unknown): GhPullRequestObservationRow | "skip" | undefined {

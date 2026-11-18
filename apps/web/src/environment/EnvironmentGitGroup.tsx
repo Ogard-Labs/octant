@@ -1,10 +1,9 @@
 import type { CodeEnvironmentObservation } from "@octant/contracts";
-import { ChevronRight, FileDiff, Files, GitBranch } from "lucide-react";
+import { FileDiff, Files, GitBranch, Plus, TriangleAlert } from "../ui/icons";
 import type { Ref } from "react";
 import type { CodeEnvironmentControllerStatus } from "./useCodeEnvironmentController";
-import { OctantButton } from "../ui/base/OctantButton";
-import { EnvironmentTile } from "./EnvironmentGroup";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { EnvironmentRow } from "./EnvironmentGroup";
 
 export interface EnvironmentGitGroupProps {
   /**
@@ -31,17 +30,16 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
 
   if (props.status === "loading") {
     return (
-      <p className="environment-git-group__state" role="status">
-        Loading repository environment…
-      </p>
+      <div className="environment-git-group__state" role="status">
+        <EnvironmentRow icon={FileDiff} label="Loading repository…" muted />
+      </div>
     );
   }
   if (props.status !== "ready" || props.observation === undefined) {
+    const full = reason ?? "Repository environment is unavailable.";
     return (
       <div className="environment-git-group__state" ref={props.failureRef} tabIndex={-1}>
-        <OctantAlert className="environment-git-group__error" tone="danger">
-          {reason ?? "Repository environment is unavailable."}
-        </OctantAlert>
+        <UnavailableRow reason={full} />
         <WayOut {...(props.action === undefined ? {} : { action: props.action })} />
       </div>
     );
@@ -49,10 +47,7 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
   if (props.observation.status !== "ready") {
     return (
       <div className="environment-git-group__state">
-        <strong>{props.observation.projectName}</strong>
-        <OctantAlert className="environment-git-group__error" tone="danger">
-          {props.observation.reason}
-        </OctantAlert>
+        <UnavailableRow reason={props.observation.reason} />
         <WayOut {...(props.action === undefined ? {} : { action: props.action })} />
       </div>
     );
@@ -61,60 +56,67 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
   // A thread bound to the checkout itself worktrees nowhere; only a checkout
   // that really is somewhere else is worth a line.
   const separateWorktree = observation.worktreeRoot !== observation.repositoryRoot;
-  const changesLine = (
-    <>
-      <EnvironmentTile icon={FileDiff} />
-      <span className="environment-git-group__text">
-        <span className="environment-git-group__label">
-          {observation.changes === "clean" ? "No uncommitted changes" : "Uncommitted changes"}
-        </span>
-        <ChangeCount observation={observation} />
-      </span>
-    </>
+  const changesLabel =
+    observation.changes === "clean" ? "No uncommitted changes" : "Uncommitted changes";
+  const changesRow = (
+    <EnvironmentRow
+      {...(props.onOpenChanges === undefined || observation.changes === "clean"
+        ? {}
+        : { ariaLabel: "View changes", onClick: props.onOpenChanges })}
+      detail={<ChangeCount observation={observation} />}
+      icon={FileDiff}
+      label={changesLabel}
+    />
   );
 
-  // The name, branch and folder lead the Environment header, so this card
-  // says only what the checkout holds and what to do about it. It had been a
-  // four-row table whose Branch and Repository rows repeated that header.
   return (
     <div className="environment-git-group">
-      {props.onOpenChanges === undefined || observation.changes === "clean" ? (
-        <p className="environment-git-group__changes">{changesLine}</p>
-      ) : (
-        <OctantButton
-          aria-label="View changes"
-          className="environment-git-group__changes environment-changes-action"
-          onClick={props.onOpenChanges}
-          type="button"
-          variant="bare"
-        >
-          {changesLine}
-          <ChevronRight aria-hidden="true" className="environment-git-group__chevron" size={14} />
-        </OctantButton>
-      )}
+      {changesRow}
       {observation.branch.kind === "named" ? null : (
-        <p className="environment-git-group__fact">
-          <GitBranch aria-hidden="true" size={12} />
-          <span>Detached HEAD</span>
-          <span
-            aria-label={`Full commit ${observation.branch.oid}`}
-            className="environment-git-group__mono"
-            title={observation.branch.oid}
-          >
-            {observation.branch.oid.slice(0, 12)}
-          </span>
-        </p>
+        <EnvironmentRow
+          detail={
+            <span
+              aria-label={`Full commit ${observation.branch.oid}`}
+              className="environment-git-group__mono"
+              title={observation.branch.oid}
+            >
+              {observation.branch.oid.slice(0, 12)}
+            </span>
+          }
+          icon={GitBranch}
+          label="Detached HEAD"
+        />
       )}
       {separateWorktree ? (
-        <p className="environment-git-group__fact" title={observation.worktreeRoot}>
-          <Files aria-hidden="true" size={12} />
-          <span>Worktree</span>
-          <span className="environment-git-group__mono">
-            {pathBasename(observation.worktreeRoot)}
-          </span>
-        </p>
+        <EnvironmentRow
+          detail={
+            <span className="environment-git-group__mono">
+              {shortPath(observation.worktreeRoot)}
+            </span>
+          }
+          icon={Files}
+          label="Worktree"
+          title={observation.worktreeRoot}
+        />
       ) : null}
     </div>
+  );
+}
+
+/** One muted line with the warning glyph; the full reason is its tooltip and description. */
+function UnavailableRow(props: { readonly reason: string }) {
+  return (
+    <>
+      <EnvironmentRow
+        icon={TriangleAlert}
+        label="Repository unavailable"
+        muted
+        title={props.reason}
+      />
+      <OctantAlert className="visually-hidden" tone="danger">
+        {props.reason}
+      </OctantAlert>
+    </>
   );
 }
 
@@ -140,22 +142,15 @@ function ChangeCount(props: {
   );
 }
 
-function pathBasename(path: string): string {
-  return path.split("/").filter(Boolean).at(-1) ?? path;
+/** The last two folders of a path behind an ellipsis; the full path is the line's title. */
+function shortPath(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  return parts.length <= 2 ? path : `…/${parts.slice(-2).join("/")}`;
 }
 
 function WayOut(props: {
   readonly action?: { readonly label: string; readonly onClick: () => void };
 }) {
   if (props.action === undefined) return null;
-  return (
-    <OctantButton
-      className="environment-group__action window-no-drag"
-      onClick={props.action.onClick}
-      type="button"
-      variant="ghost"
-    >
-      {props.action.label}
-    </OctantButton>
-  );
+  return <EnvironmentRow icon={Plus} label={props.action.label} onClick={props.action.onClick} />;
 }

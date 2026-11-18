@@ -1,4 +1,4 @@
-import { ChevronDown, X } from "lucide-react";
+import { ChevronDown, X } from "../ui/icons";
 import {
   memo,
   useCallback,
@@ -196,13 +196,31 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
                 props.shown?.has(tool.id) === true && tool.id !== props.active ? "Shown" : undefined
               }
               aria-selected={tool.id === props.active}
-              className="dock-tool-strip__select content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent window-no-drag"
+              className="dock-tool-strip__select content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent active:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent window-no-drag"
               data-dock-tab={tool.id}
               data-shown={props.shown?.has(tool.id) === true ? "true" : undefined}
               draggable={props.onTabDragStart === undefined ? undefined : true}
               onClick={() => props.onSelect(tool.id)}
               onDragEnd={() => props.onTabDragEnd?.()}
+              onAuxClick={(event) => {
+                if (event.button !== 1) return;
+                event.preventDefault();
+                props.onClose(tool.id);
+              }}
+              onMouseDown={(event) => {
+                // A middle press would otherwise start the platform's autoscroll.
+                if (event.button === 1) event.preventDefault();
+              }}
               onKeyDown={(event) => {
+                const closeKey =
+                  event.key === "Delete" ||
+                  event.key === "Backspace" ||
+                  (event.key.toLowerCase() === "w" && event.metaKey && !event.shiftKey);
+                if (closeKey) {
+                  event.preventDefault();
+                  props.onClose(tool.id);
+                  return;
+                }
                 // The menu key is the only keyboard route the browser turns into
                 // a context menu, and a Mac has none: Shift+F10 asks for it too.
                 if (event.key !== "F10" || !event.shiftKey) return;

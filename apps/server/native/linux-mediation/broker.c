@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
@@ -35,6 +36,7 @@ struct parent_pin {
 _Static_assert(sizeof(struct parent_pin) == 40, "parent control layout differs");
 #define CONTROL 3
 #define MAXIMUM_SECONDS 180
+#define PRODUCTION_MAXIMUM_SECONDS (30u * 24u * 60u * 60u)
 static volatile sig_atomic_t stopped;
 static void stop(int signal) { stopped = signal; }
 static int64_t milliseconds(void)
@@ -127,16 +129,26 @@ static bool end_child(pid_t child, bool *joined, int *status)
 
 int main(int argc, char **argv)
 {
-  if (argc < 2 || argv[1][0] != '/' || fcntl(CONTROL, F_GETFD) < 0) return 64;
+  if (argc == 2 && !strcmp(argv[1], "--check")) {
+    int checked = open("/dev/octant_mediation", O_RDWR | O_CLOEXEC | O_NONBLOCK);
+    struct octant_mediation_status checked_status;
+    bool compatible = checked >= 0 && !ioctl(checked, OCTANT_MEDIATION_STATUS, &checked_status) &&
+      checked_status.abi == OCTANT_MEDIATION_ABI && checked_status.production_coverage == 1;
+    if (checked >= 0) close(checked);
+    return compatible ? 0 : 66;
+  }
+  bool production = argc >= 3 && !strcmp(argv[1], "--production");
+  int command = production ? 2 : 1;
+  if (argc <= command || argv[command][0] != '/' || fcntl(CONTROL, F_GETFD) < 0) return 64;
   signal(SIGTERM, stop); signal(SIGINT, stop); signal(SIGALRM, stop); signal(SIGPIPE, SIG_IGN);
-  alarm(MAXIMUM_SECONDS);
+  alarm(production ? PRODUCTION_MAXIMUM_SECONDS : MAXIMUM_SECONDS);
   int flags = fcntl(CONTROL, F_GETFL);
   if (flags < 0 || fcntl(CONTROL, F_SETFL, flags | O_NONBLOCK)) return 65;
   if (prctl(PR_SET_CHILD_SUBREAPER, 1)) return 65;
   int broker = open("/dev/octant_mediation", O_RDWR | O_CLOEXEC | O_NONBLOCK);
   struct octant_mediation_status status;
   if (broker < 0 || ioctl(broker, OCTANT_MEDIATION_STATUS, &status) ||
-      status.abi != OCTANT_MEDIATION_ABI || status.production_coverage != 0) return 66;
+      status.abi != OCTANT_MEDIATION_ABI || status.production_coverage != (production ? 1u : 0u)) return 66;
   /* The host must inspect the real device and structured policy before even
    * forking a command. There is no legacy launch-before-ready path. */
   if (!send('H', &status, sizeof(status)) || !wait_start('G', broker)) { close(broker); return 67; }
@@ -154,7 +166,7 @@ int main(int argc, char **argv)
         read(execution[0], &release, 1) != 1 || release != 'E' ||
         prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) || ioctl(enrollment, OCTANT_MEDIATION_ENROLL, 0) ||
         syscall(SYS_close_range, 3u, UINT_MAX, 0u)) _exit(68);
-    execv(argv[1], &argv[1]);
+    execv(argv[command], &argv[command]);
     _exit(69);
   }
   close(execution[0]);

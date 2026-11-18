@@ -308,7 +308,7 @@ describe("AutomationDefinitionEditor creation", () => {
     });
     expect(screen.getByLabelText("Automatic runs per arm")).toHaveValue(8);
     expect(screen.getByRole("region", { name: "File arrival preview" })).toHaveTextContent(
-      "first complete scan is a baseline",
+      "first scan only sets a baseline",
     );
     expect(screen.getByRole("region", { name: "File arrival preview" })).toHaveTextContent(
       "At most 8 automatic runs per arm",
@@ -617,9 +617,7 @@ describe("AutomationDefinitionEditor creation", () => {
     expect(await screen.findByRole("option", { name: "Work default" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "Full access" })).not.toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Full access profiles are not eligible for automations. Choose an approval-gated profile.",
-      ),
+      screen.getByText("Automations cannot use Full access. Pick a profile that asks first."),
     ).toBeVisible();
   });
 
@@ -647,12 +645,8 @@ describe("AutomationDefinitionEditor creation", () => {
       />,
     );
     expect(screen.getByText("No Work Projects are available on this host.")).toBeVisible();
-    expect(
-      screen.getByText("No eligible execution profiles are available for this selection."),
-    ).toBeVisible();
-    expect(
-      screen.getByText("No eligible authority profiles are available for this selection."),
-    ).toBeVisible();
+    expect(screen.getByText("No profiles fit this choice.")).toBeVisible();
+    expect(screen.getByText("No access profiles fit this choice.")).toBeVisible();
   });
 
   it("cancels from the keyboard without saving", async () => {

@@ -2,13 +2,13 @@ import type { PreparedProductFeedbackTurn } from "../browser/productFeedbackTurn
 import {
   attachedFilesMessage,
   partitionAttachedFiles,
-  SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
   type AttachedFileByPath,
 } from "../attachments/attachedFiles";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import type { ConversationInputReceipt } from "@octant/contracts/conversation-inputs";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
+import type { AccountSessionCarrier } from "../providers/accountSessionCarry";
 import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
 import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "../chat/sideChatReturn";
 import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
@@ -59,6 +59,8 @@ import {
   MAX_WORK_REWOUND_TURNS,
   decodeWorkThreadRewindResult,
   type WorkThreadRewindResult,
+  type AccountMoveSessionHandoff,
+  type AccountMoveTextHandoffCause,
   type WorkTurnHandoff,
   type ContextCompactionSettledRecord,
   type ContextInspectorSnapshot,
@@ -135,7 +137,7 @@ import {
   workProjectKeepsStatusFile,
   changedThreadToolStep,
   clampWorkAccess,
-  hostSandboxRefusal,
+  hostProviderTurnRefusal,
   threadToolStepLimit,
   workThreadAccessOf,
   workTurnCapabilityFacts,
@@ -309,7 +311,18 @@ export interface ServerWorkTurns {
     thread: WorkThread,
     turn: { readonly windowId: WindowId; readonly routineRun?: AutomationRunReference },
   ) =>
-    | { readonly status: "bound"; readonly folder: string; readonly tools: AppManagedToolSet }
+    | {
+        readonly status: "bound";
+        readonly folder: string;
+        readonly tools: AppManagedToolSet;
+        /** Copies files the turn names by path to the thread's attachments folder on the server. */
+        readonly transferAttachments: (
+          files: ReadonlyArray<ProviderAttachmentInput>,
+        ) => Promise<
+          | { readonly status: "transferred"; readonly files: ReadonlyArray<AttachedFileByPath> }
+          | { readonly status: "refused"; readonly message: string }
+        >;
+      }
     | { readonly status: "refused"; readonly message: string };
 }
 
@@ -421,6 +434,8 @@ export interface WorkTurnServiceDependencies {
    * sending the prompt with its pictures quietly removed.
    */
   readonly conversationInputTransfer?: Pick<ConversationInputTransfer, "prepare">;
+  /** Carries a thread's session to another account of the same provider after a move. */
+  readonly accountSessionCarrier?: AccountSessionCarrier;
   readonly supportsAttachments?: (input: {
     readonly providerInstanceId: WorkThread["providerInstanceId"];
     readonly modelId: WorkThread["modelId"];
@@ -698,6 +713,7 @@ export class WorkTurnService {
   readonly #resolveDriver: WorkTurnServiceDependencies["resolveDriver"];
   readonly #attachments: WorkAttachmentStore | undefined;
   readonly #conversationInputTransfer: WorkTurnServiceDependencies["conversationInputTransfer"];
+  readonly #accountSessionCarrier: WorkTurnServiceDependencies["accountSessionCarrier"];
   readonly #supportsAttachments: WorkTurnServiceDependencies["supportsAttachments"];
   readonly #takesFileNatively: WorkTurnServiceDependencies["takesFileNatively"];
   readonly #describeImages: WorkTurnServiceDependencies["describeImages"];
@@ -769,6 +785,7 @@ export class WorkTurnService {
     this.#resolveDriver = dependencies.resolveDriver;
     this.#attachments = dependencies.attachments;
     this.#conversationInputTransfer = dependencies.conversationInputTransfer;
+    this.#accountSessionCarrier = dependencies.accountSessionCarrier;
     this.#supportsAttachments = dependencies.supportsAttachments;
     this.#takesFileNatively = dependencies.takesFileNatively;
     this.#describeImages = dependencies.describeImages;
@@ -838,9 +855,11 @@ export class WorkTurnService {
     thread: WorkThread,
     previous: WorkTurnState,
     reason: "provider-switch" | "branch" | "rewind",
+    /** Why a move to another account of the same provider did not carry its session. */
+    accountMoveTextCause?: AccountMoveTextHandoffCause,
   ): {
     readonly blocks: ReadonlyArray<ProviderContextBlock>;
-    readonly record: WorkTurnHandoff;
+    readonly record: Exclude<WorkTurnHandoff, AccountMoveSessionHandoff>;
     readonly selection: Extract<AgentRunParentContextSelection, { readonly status: "available" }>;
   } {
     const refuse = (refusal: ConversationHandoffRefusal): never => {
@@ -877,23 +896,91 @@ export class WorkTurnService {
       selection,
       this.#handoverSummary("work-thread", thread.id),
     );
+    const record = providerSwitchHandoffRecord(
+      switched,
+      // A handoff that never completed is made again from the provider the
+      // conversation came from, not the one that may not have received it.
+      previous.handoff?.reason === "provider-switch" && previous.status !== "completed"
+        ? {
+            providerInstanceId: previous.handoff.previousProviderInstanceId,
+            modelId: previous.handoff.previousModelId,
+          }
+        : {
+            providerInstanceId: previous.authority.providerInstanceId,
+            modelId: previous.authority.modelId,
+          },
+    );
     return {
       blocks: switched.blocks,
       selection: switched,
-      record: providerSwitchHandoffRecord(
-        switched,
-        // A handoff that never completed is made again from the provider the
-        // conversation came from, not the one that may not have received it.
-        previous.handoff?.reason === "provider-switch" && previous.status !== "completed"
-          ? {
-              providerInstanceId: previous.handoff.previousProviderInstanceId,
-              modelId: previous.handoff.previousModelId,
-            }
-          : {
-              providerInstanceId: previous.authority.providerInstanceId,
-              modelId: previous.authority.modelId,
-            },
-      ),
+      record: accountMoveTextCause === undefined ? record : { ...record, accountMoveTextCause },
+    };
+  }
+
+  /**
+   * The previous turn's session, carried to the account the person moved the
+   * thread to, when the provider's own session can come along (maintainer
+   * decision, 2026-11-17). Only a move between accounts of the same provider
+   * on this computer is tried, on the folder and binding the session ran in.
+   * A move that cannot carry it says why, and the turn hands over as text.
+   */
+  async #carryMovedAccountSession(
+    command: StartWorkThreadTurnCommand,
+    previous: WorkTurnState | undefined,
+    projectRoot: string,
+    eligible: boolean,
+  ): Promise<{
+    readonly session?: WorkTurnState;
+    readonly record?: AccountMoveSessionHandoff;
+    readonly textCause?: AccountMoveTextHandoffCause;
+  }> {
+    if (
+      !eligible ||
+      previous?.resumeCursor === undefined ||
+      previous.providerSessionId === undefined ||
+      previous.carriedFrom !== undefined ||
+      previous.authority.bindingRevisionId !== command.authority.bindingRevisionId ||
+      previous.authority.workingDirectory !== command.authority.workingDirectory ||
+      // A turn whose own text handoff may never have reached its session holds
+      // less than the conversation, so that handoff is made again.
+      (previous.handoff !== undefined &&
+        previous.status !== "completed" &&
+        previous.handoff.reason !== "account-move") ||
+      this.#projection.rewoundSinceLatest(command.threadId) ||
+      this.#accountSessionCarrier === undefined ||
+      !this.#accountSessionCarrier.sameProvider(
+        previous.authority.providerInstanceId,
+        command.authority.providerInstanceId,
+      )
+    )
+      return {};
+    const carried = await this.#accountSessionCarrier
+      .carry({
+        fromInstanceId: previous.authority.providerInstanceId,
+        toInstanceId: command.authority.providerInstanceId,
+        resumeCursor: previous.resumeCursor,
+        sessionId: previous.providerSessionId,
+        projectRoot,
+        mode: "work",
+        modelId: command.authority.modelId,
+      })
+      .catch(() => ({ status: "text", cause: "session-not-copied" }) as const);
+    if (carried.status === "text") return { textCause: carried.cause };
+    return {
+      session: {
+        ...previous,
+        authority: {
+          ...previous.authority,
+          providerInstanceId: command.authority.providerInstanceId,
+        },
+        resumeCursor: carried.resumeCursor,
+      },
+      record: {
+        reason: "account-move",
+        previousProviderInstanceId: previous.authority.providerInstanceId,
+        previousModelId: previous.authority.modelId,
+        nativeSessionTransferred: true,
+      },
     };
   }
 
@@ -1390,14 +1477,17 @@ export class WorkTurnService {
         ? (thread?.access ?? DEFAULT_WORK_ACCESS)
         : clampWorkAccess(thread?.access ?? DEFAULT_WORK_ACCESS, options.accessCeiling);
     // Judged at that level, not only the thread's stored one, before anything
-    // is journaled or started: a host without Octant's sandbox runs only the
-    // level that uses none.
-    const sandboxRefusal = hostSandboxRefusal({
+    // is journaled or started: on a host without Octant's sandbox a turn below
+    // Full access runs with the provider's own approvals, and only Strict and
+    // a kept sandbox, which need Octant's sandbox, refuse.
+    const sandboxRefusal = hostProviderTurnRefusal({
       platform: process.platform,
       access: {
         ...workThreadAccessOf(turnAccess),
+        ...(thread?.strict === undefined ? {} : { strict: thread.strict }),
         ...(thread?.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
       },
+      strict: this.#resolveStrict?.(String(command.threadId)) ?? true,
     });
     if (sandboxRefusal !== undefined) throw this.#failure("unavailable", sandboxRefusal);
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
@@ -1584,11 +1674,18 @@ export class WorkTurnService {
       (reference) => this.#takesFileNatively?.(command.authority, reference.mediaType) === true,
     );
     const filesByPath = files.filter((reference) => !nativeFiles.includes(reference));
-    if (server !== undefined && filesByPath.length > 0) {
-      throw this.#failure("unsupported", SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL);
-    }
     const attachedFileTexts: string[] = [];
-    if (filesByPath.length > 0) {
+    if (server !== undefined && filesByPath.length > 0) {
+      // A server thread's agent opens files with the server's tools, so the
+      // files are copied to the thread's attachments folder there first.
+      const inputs = await this.#attachmentInputs(command.threadId, filesByPath);
+      if (inputs === undefined) {
+        throw this.#failure("unavailable", "A file attached to this turn is unavailable.");
+      }
+      const transferred = await server.transferAttachments(inputs);
+      if (transferred.status === "refused") throw this.#failure("unavailable", transferred.message);
+      attachedFileTexts.push(attachedFilesMessage(transferred.files));
+    } else if (filesByPath.length > 0) {
       const named = await this.#attachedFilePaths(command.threadId, filesByPath);
       if (named === undefined) {
         throw this.#failure("unavailable", "A file attached to this turn is unavailable.");
@@ -1709,7 +1806,16 @@ export class WorkTurnService {
       const acceptedAt = decodeTimestamp(this.#clock());
       const nativeConversation = driver.conversationOwnership === "provider";
       const resumableHost = driver.conversationOwnership === "host-resumable";
-      const previous = this.#projection.latestForThread(command.threadId);
+      const latest = this.#projection.latestForThread(command.threadId);
+      const accountMove = await this.#carryMovedAccountSession(
+        command,
+        latest,
+        projectRoot,
+        nativeConversation && server === undefined && command.toolCatalogHandoff !== true,
+      );
+      // The turn the session decision reads: the moved session under the new
+      // account when it came along, otherwise the latest turn as it stands.
+      const previous = accountMove.session ?? latest;
       const catalogChanged =
         previous?.resumeCursor !== undefined &&
         String(previous.authority.providerInstanceId) ===
@@ -1780,7 +1886,11 @@ export class WorkTurnService {
                 // The session cursor is recorded when the session starts, before
                 // the provider is sent anything, so a turn that carried a
                 // handoff and did not complete may never have delivered it.
-                ...(previous.handoff !== undefined && previous.status !== "completed"
+                // A carried session holds the whole conversation, so a turn
+                // that took one up and did not complete left nothing undelivered.
+                ...(previous.handoff !== undefined &&
+                previous.status !== "completed" &&
+                previous.handoff.reason !== "account-move"
                   ? {
                       undeliveredHandoff:
                         previous.handoff.reason === "fork" ? "branch" : previous.handoff.reason,
@@ -1851,7 +1961,12 @@ export class WorkTurnService {
         sessionDecision.kind === "new-session-with-handoff" &&
         previous !== undefined &&
         thread !== undefined
-          ? this.#selectConversationHandoff(thread, previous, sessionDecision.reason)
+          ? this.#selectConversationHandoff(
+              thread,
+              previous,
+              sessionDecision.reason,
+              accountMove.textCause,
+            )
           : undefined;
       const inputHandoff =
         handoff ??
@@ -2222,7 +2337,11 @@ export class WorkTurnService {
             authority: command.authority,
             providerSessionId,
             ...(resumeCursor === undefined ? {} : { resumeCursor }),
-            ...(handoff === undefined ? {} : { handoff: handoff.record }),
+            ...(handoff !== undefined
+              ? { handoff: handoff.record }
+              : accountMove.record !== undefined && continuing === accountMove.session
+                ? { handoff: accountMove.record }
+                : {}),
             ...(inputReceipt === undefined ? {} : { inputReceipt }),
             ...(externalInput === undefined ? {} : { externalInput }),
             prompt: command.prompt,
@@ -2951,14 +3070,20 @@ export class WorkTurnService {
         strict: this.#resolveStrict?.(String(input.command.threadId)) ?? true,
         ...(artifactToolName === undefined ? {} : { nativeArtifacts: true }),
         ...nativeSetupOption(
-          sessionNativeSetup(this.#persistence, {
-            providerInstanceId: input.command.authority.providerInstanceId,
-            projectId: input.command.authority.projectId,
-            threadId: String(input.command.threadId),
-            mode: "work",
-            executionPolicy:
-              input.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
-          }),
+          sessionNativeSetup(
+            {
+              ...this.#persistence,
+              readStrict: (threadId) => this.#resolveStrict?.(threadId) ?? true,
+            },
+            {
+              providerInstanceId: input.command.authority.providerInstanceId,
+              projectId: input.command.authority.projectId,
+              threadId: String(input.command.threadId),
+              mode: "work",
+              executionPolicy:
+                input.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
+            },
+          ),
         ),
         ...wakeupsOption(this.#wakeupsForThread?.(String(input.command.threadId))),
         ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),

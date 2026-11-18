@@ -261,19 +261,20 @@ export function changeWorkProjectPermissionMode(
   updatedAt: UtcTimestamp,
   /** The sandbox at Full access for new threads; absent returns it to Settings. */
   fullAccessSandbox?: boolean,
-  /** Strict for threads here that did not choose; absent returns it to Settings. */
-  strict?: boolean,
+  strict?: boolean | null,
 ): WorkProject {
   if (project.type !== "work") {
     reject("binding-not-allowed", "Only Work Projects take a Work default mode");
   }
+  const nextStrict = strict === null ? undefined : (strict ?? project.defaultStrict);
+  const compatibleSandbox = strict === null ? undefined : (nextStrict ?? fullAccessSandbox);
   if (project.lifecycle === "archived") {
     reject("invalid-lifecycle", "Archived Projects are read-only");
   }
   if (
     project.defaultPermissionMode === permissionMode &&
-    project.defaultFullAccessSandbox === fullAccessSandbox &&
-    project.defaultStrict === strict
+    project.defaultFullAccessSandbox === compatibleSandbox &&
+    project.defaultStrict === nextStrict
   ) {
     reject("invalid-lifecycle", "This Project already starts threads in that mode");
   }
@@ -286,8 +287,8 @@ export function changeWorkProjectPermissionMode(
   return {
     ...rest,
     ...(permissionMode === undefined ? {} : { defaultPermissionMode: permissionMode }),
-    ...(fullAccessSandbox === undefined ? {} : { defaultFullAccessSandbox: fullAccessSandbox }),
-    ...(strict === undefined ? {} : { defaultStrict: strict }),
+    ...(compatibleSandbox === undefined ? {} : { defaultFullAccessSandbox: compatibleSandbox }),
+    ...(nextStrict === undefined ? {} : { defaultStrict: nextStrict }),
     version: nextVersion(project),
     updatedAt,
   };
@@ -325,12 +326,13 @@ export function changeCodeProjectPermissionMode(
   updatedAt: UtcTimestamp,
   /** The sandbox at Full access for new threads; absent returns it to Settings. */
   fullAccessSandbox?: boolean,
-  /** Strict for threads here that did not choose; absent returns it to Settings. */
-  strict?: boolean,
+  strict?: boolean | null,
 ): CodeProject {
   if (project.type !== "code") {
     reject("binding-not-allowed", "Only Code Projects have a default mode");
   }
+  const nextStrict = strict === null ? undefined : (strict ?? project.defaultStrict);
+  const compatibleSandbox = strict === null ? undefined : (nextStrict ?? fullAccessSandbox);
   const codeAccessPersistence: CodeAccessPersistence =
     permissionMode === "full-access" ? "project-default" : "current-session";
   // A Project that remembered Full access before Project modes existed has no
@@ -339,8 +341,8 @@ export function changeCodeProjectPermissionMode(
   if (
     project.defaultPermissionMode === permissionMode &&
     project.codeAccessPersistence === codeAccessPersistence &&
-    project.defaultFullAccessSandbox === fullAccessSandbox &&
-    project.defaultStrict === strict
+    project.defaultFullAccessSandbox === compatibleSandbox &&
+    project.defaultStrict === nextStrict
   ) {
     reject("invalid-lifecycle", "This Project already starts threads in that mode");
   }
@@ -353,8 +355,8 @@ export function changeCodeProjectPermissionMode(
   return {
     ...rest,
     ...(permissionMode === undefined ? {} : { defaultPermissionMode: permissionMode }),
-    ...(fullAccessSandbox === undefined ? {} : { defaultFullAccessSandbox: fullAccessSandbox }),
-    ...(strict === undefined ? {} : { defaultStrict: strict }),
+    ...(compatibleSandbox === undefined ? {} : { defaultFullAccessSandbox: compatibleSandbox }),
+    ...(nextStrict === undefined ? {} : { defaultStrict: nextStrict }),
     codeAccessPersistence,
     version: nextVersion(project),
     updatedAt,
@@ -1031,11 +1033,10 @@ export interface ExtraFolderJudgement {
   readonly candidate: string;
   /** The host user's home folder, canonical. */
   readonly homeDirectory: string;
-  /**
-   * The person confirmed adding the home folder itself after the warning.
-   * Strict is to refuse the home folder whatever this says.
-   */
+  /** The person confirmed adding the home folder itself after the warning. */
   readonly homeFolderConfirmed?: boolean;
+  /** The Project is Strict: the home folder is refused whatever the person confirmed. */
+  readonly strict?: boolean;
 }
 
 /** The warning a person confirms before their home folder becomes an extra folder. */
@@ -1061,6 +1062,11 @@ export function extraFolderRefusal(input: ExtraFolderJudgement): string | undefi
     return "Choose your home folder or a folder inside it, not one above it.";
   }
   const home = extraFolderIsHome(candidate, homeDirectory);
+  // Strict restores the limit the warning lifted: the home folder itself is
+  // never an extra folder there, confirmed or not.
+  if (home && input.strict === true) {
+    return "Strict keeps your home folder out of a Project. Choose a folder inside it.";
+  }
   if (home && input.homeFolderConfirmed !== true) {
     return "Adding your home folder needs your confirmation.";
   }
@@ -1105,6 +1111,7 @@ export interface AddProjectExtraFolderInput {
   readonly addedAt: UtcTimestamp;
   readonly homeDirectory: string;
   readonly homeFolderConfirmed?: boolean;
+  readonly strict?: boolean;
 }
 
 /** Adds a folder a person picked to a bound Project beside its main folder. */
@@ -1125,6 +1132,7 @@ export function addProjectExtraFolder(
     candidate: input.canonicalRoot,
     homeDirectory: input.homeDirectory,
     ...(input.homeFolderConfirmed === true ? { homeFolderConfirmed: true } : {}),
+    ...(input.strict === true ? { strict: true } : {}),
   });
   if (refusal !== undefined) reject("extra-folder-refused", refusal);
   const folder: ProjectExtraFolder = {

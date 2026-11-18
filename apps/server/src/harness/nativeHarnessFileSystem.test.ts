@@ -91,14 +91,34 @@ describe("native harness file tools and the secret guard", () => {
       `-----END OPENSSH ${"PRIVATE"} KEY-----`,
     ].join("\n");
 
-    async function fullAccessFixture(fullAccess: boolean) {
+    async function fullAccessFixture(fullAccess: boolean, strict = false) {
       const root = await realpath(await mkdtemp(join(tmpdir(), "octant-harness-full-")));
       await mkdir(join(root, ".ssh"), { recursive: true });
       await writeFile(join(root, ".ssh", "id_test"), `${fakeKey}\n`);
       await mkdir(join(root, ".codex"), { recursive: true });
       await writeFile(join(root, ".codex", "auth.json"), '{"token":"fake"}\n');
+      const { decodeSandboxPolicySelection } = await import("@octant/contracts/sandbox-policy");
+      const selection = decodeSandboxPolicySelection({
+        policy: {
+          schemaVersion: 1,
+          revision: 1,
+          filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
+          network: "deny",
+          credentials: "existing-policy",
+          hostServices: "blocked",
+        },
+        context: {
+          root,
+          hostId: "host",
+          projectId: "20000000-0000-4000-8000-000000000001",
+          checkoutId: "checkout",
+          sessionId: "session",
+          provider: "native-harness",
+        },
+      });
       const fs = new NativeHarnessFileSystem({
         root,
+        ...(strict ? { sandboxPolicy: () => selection } : {}),
         protectedFileRefusal: (path, atFullAccess) =>
           secretGuardRefusal(path, {
             platform: "darwin",
@@ -129,6 +149,14 @@ describe("native harness file tools and the secret guard", () => {
 
     it("keeps refusing a protected file below Full access", async () => {
       const { fs } = await fullAccessFixture(false);
+      expect(await fs.read({ path: ".ssh/id_test" })).toMatchObject({
+        kind: "refused",
+        reason: "protected-file",
+      });
+    });
+
+    it("keeps the full protected-file list at Full access while Strict is active", async () => {
+      const { fs } = await fullAccessFixture(true, true);
       expect(await fs.read({ path: ".ssh/id_test" })).toMatchObject({
         kind: "refused",
         reason: "protected-file",
@@ -596,5 +624,46 @@ describe("native harness file system", () => {
     const matches = await fs.grep({ pattern: "const", maxMatches: 1 });
     expect(matches.kind === "matches" && matches.matches).toHaveLength(1);
     expect(matches.kind === "matches" && matches.bounds.truncated).toBe(true);
+  });
+});
+
+describe("selected sandbox folder grants", () => {
+  it("reads an allowed folder and refuses writes and edits through its read-only name", async () => {
+    const f = await fixture();
+    const shared = await realpath(await mkdtemp(join(tmpdir(), "octant-harness-readonly-")));
+    await writeFile(join(shared, "input.txt"), "original");
+    const { decodeSandboxPolicySelection } = await import("@octant/contracts/sandbox-policy");
+    const selection = decodeSandboxPolicySelection({
+      policy: {
+        schemaVersion: 1,
+        revision: 1,
+        filesystem: { readOnlyRoots: [shared], readWriteRoots: [], protectedPaths: [] },
+        network: "deny",
+        credentials: "existing-policy",
+        hostServices: "blocked",
+      },
+      context: {
+        root: f.root,
+        hostId: "host",
+        projectId: "20000000-0000-4000-8000-000000000001",
+        checkoutId: "checkout",
+        sessionId: "session",
+        provider: "native-harness",
+      },
+    });
+    const fs = new NativeHarnessFileSystem({ root: f.root, sandboxPolicy: () => selection });
+    expect((await fs.read({ path: join(shared, "input.txt") })).kind).toBe("file");
+    expect(
+      (await fs.edit({ path: join(shared, "input.txt"), oldText: "original", newText: "changed" }))
+        .kind,
+    ).toBe("refused");
+    expect((await fs.write({ path: join(shared, "new.txt"), content: "new" })).kind).toBe(
+      "refused",
+    );
+    await symlink(join(f.root, "README.md"), join(shared, "writable-alias"));
+    expect(
+      (await fs.write({ path: join(shared, "writable-alias"), content: "changed" })).kind,
+    ).toBe("refused");
+    expect(await readFile(join(shared, "input.txt"), "utf8")).toBe("original");
   });
 });

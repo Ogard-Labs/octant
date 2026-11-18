@@ -345,8 +345,8 @@ swatches (Red, Yellow, Green, Blue, White, Black; arrows move, Enter picks,
 Escape closes and returns focus); one width toggle ("Thick stroke", pressed when
 thick); Undo, Redo and Delete; then **Add to chat**, the bar's one labelled
 button, and **Discard drawing** as the trailing pair, which wrap together on a
-narrower dock. A pressed control is the raised tile a selected row wears
-(`--octant-float-pressed` with `--octant-shadow-selected`), not an accent ring,
+narrower dock. A pressed control is the flat fill a selected row wears
+(`--octant-float-pressed`), not an accent ring,
 and every swatch has a hairline edge (`--octant-border-strong`) so white shows
 on a light bar and black on a dark one. A notice about adding the picture is
 drawn in a column above the bar, inside the stage, so it never moves the still;

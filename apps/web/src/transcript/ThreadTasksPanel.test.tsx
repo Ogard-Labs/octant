@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ThreadTasksPanel } from "./ThreadTasksPanel";
 describe("ThreadTasksPanel", () => {
@@ -33,6 +33,31 @@ describe("ThreadTasksPanel", () => {
     expect(screen.queryByRole("list", { name: "Task list" })).not.toBeInTheDocument();
     await user.keyboard("{Enter}");
     expect(screen.getByRole("list", { name: "Task list" }).children).toHaveLength(3);
+  });
+
+  it("names the task in its running wording only while the turn is running", () => {
+    const tasks = [
+      {
+        id: "a",
+        state: "running",
+        summary: "Run the test suite",
+        runningSummary: "Running the test suite",
+      },
+      { id: "b", state: "pending", summary: "Commit", runningSummary: "Committing" },
+    ] as const;
+    const { rerender } = render(<ThreadTasksPanel tasks={{ running: true, tasks }} />);
+    const items = screen.getByRole("list", { name: "Task list" }).children;
+    expect(items[0]).toHaveTextContent("Running the test suite");
+    expect(items[1]).toHaveTextContent("Commit");
+    expect(items[1]).not.toHaveTextContent("Committing");
+    expect(screen.getByRole("button", { name: /Running the test suite/ })).toBeVisible();
+
+    rerender(<ThreadTasksPanel tasks={{ running: false, tasks }} />);
+    fireEvent.click(screen.getByRole("button", { name: /0 of 2 tasks completed/ }));
+    expect(screen.getByRole("list", { name: "Task list" }).children[0]).toHaveTextContent(
+      "Run the test suite",
+    );
+    expect(screen.queryByText("Running the test suite")).not.toBeInTheDocument();
   });
 
   it("keeps failed and waiting tasks visible in the collapsed summary after the turn settles", () => {

@@ -132,6 +132,7 @@ function fakeRuntimeProcess(onKill: "exits" | "outlives") {
 function makeHarness(
   output: readonly unknown[] = [safeRuntimeInitialization],
   runtimeProcess?: ReturnType<typeof fakeRuntimeProcess>,
+  platform?: NodeJS.Platform,
 ) {
   const query = new FakeQuery(output);
   let invocation: ClaudeAgentSdkQueryInvocation | undefined;
@@ -161,7 +162,11 @@ function makeHarness(
       return runtimeProcess;
     };
   });
-  const port = makeClaudeAgentSdkPort({ sdk, spawnClaudeCodeProcess });
+  const port = makeClaudeAgentSdkPort({
+    sdk,
+    spawnClaudeCodeProcess,
+    ...(platform === undefined ? {} : { platform }),
+  });
   return {
     get invocation() {
       return invocation;
@@ -420,6 +425,7 @@ describe("Claude Agent SDK port", () => {
               projectRoot: openInput.projectRoot,
               executionPolicy: openInput.executionPolicy,
               runsCommands: false,
+              runtimeExecutable: openInput.binaryPath,
             },
           ]);
           expect(harness.invocation?.options).not.toHaveProperty("continue");
@@ -493,6 +499,23 @@ describe("Claude Agent SDK port", () => {
     },
   );
 
+  test("starts a Windows session below Full access on Claude's permission modes with no command sandbox, and refuses one asking for it", async () => {
+    const { sandbox: _sandbox, ...withoutSandbox } = openInput;
+    const harness = makeHarness([safeRuntimeInitialization], undefined, "win32");
+    await expect(
+      Effect.runPromise(Effect.scoped(harness.port.openQuery(withoutSandbox))),
+    ).resolves.toBeDefined();
+    expect(harness.invocation?.options).not.toHaveProperty("sandbox");
+    expect(harness.invocation?.options).toMatchObject({ permissionMode: "default" });
+
+    const refused = makeHarness([safeRuntimeInitialization], undefined, "win32");
+    expect(await failureOf(Effect.scoped(refused.port.openQuery(openInput)))).toEqual({
+      category: "invalid-configuration",
+      message: "Claude sandbox configuration is invalid.",
+    });
+    expect(refused.invocation).toBeUndefined();
+  });
+
   test("sends the sandbox's network to the session's egress proxy port and nothing else", async () => {
     const harness = makeHarness();
     const proxied = {
@@ -547,6 +570,35 @@ describe("Claude Agent SDK port", () => {
     ).resolves.toBeDefined();
     expect(harness.invocation?.options).toMatchObject({
       sandbox: { network: { allowedDomains: ["*"] } },
+    });
+  });
+
+  test("leaves Claude's own sandbox configuration to its account settings outside Strict", async () => {
+    const harness = makeHarness();
+    const { sandbox: _sandbox, ...native } = openInput;
+    await Effect.runPromise(
+      Effect.scoped(
+        harness.port.openQuery({
+          ...native,
+          strict: false,
+          ownPermissions: true,
+          nativeSetup: {
+            skills: true,
+            hooks: false,
+            toolServers: false,
+            projectCode: false,
+            subagents: false,
+            webTools: false,
+          },
+          tools: [...native.tools, "Bash"],
+        }),
+      ),
+    );
+    expect(harness.invocation?.options).not.toHaveProperty("sandbox");
+    expect(harness.invocation?.options.settingSources).toContain("user");
+    expect(harness.invocation?.options.settings).toMatchObject({
+      disableAllHooks: true,
+      autoMemoryEnabled: false,
     });
   });
 
@@ -677,6 +729,79 @@ describe("Claude Agent SDK port", () => {
     expect(harness.invocation).toBeUndefined();
   });
 
+  test("refuses to leave the decision to Claude's own permissions in a launch that reads none of the person's settings", async () => {
+    const harness = makeHarness();
+    const { sandbox: _sandbox, ...withoutSandbox } = openInput;
+    const failed = await failureOf(
+      Effect.scoped(
+        harness.port.openQuery({
+          ...withoutSandbox,
+          ownPermissions: true,
+        } as unknown as typeof openInput),
+      ),
+    );
+    expect(failed).toEqual({
+      category: "invalid-configuration",
+      message: "Claude's own permissions need the person's Claude settings.",
+    });
+    expect(harness.invocation).toBeUndefined();
+  });
+
+  test("refuses native permission delegation when Strict owns the boundary", async () => {
+    const harness = makeHarness();
+    const failed = await failureOf(
+      Effect.scoped(
+        harness.port.openQuery({
+          ...openInput,
+          strict: true,
+          ownPermissions: true,
+          nativeSetup: {
+            skills: true,
+            hooks: false,
+            toolServers: false,
+            projectCode: false,
+            subagents: false,
+            webTools: false,
+          },
+        }),
+      ),
+    );
+    expect(failed).toMatchObject({ category: "invalid-configuration" });
+    expect(harness.invocation).toBeUndefined();
+  });
+
+  test.each([false, true])(
+    "keeps attached folders read-only when extra writes are requested: %s",
+    async (writesAttachments) => {
+      const harness = makeHarness();
+      const candidate = {
+        ...openInput,
+        attachmentsFolder: "/attached-files",
+        sandbox: {
+          ...openInput.sandbox,
+          filesystem: {
+            ...openInput.sandbox.filesystem,
+            allowRead: ["/repo", "/attached-files"] as const,
+            allowWrite: writesAttachments
+              ? (["/repo", "/attached-files"] as const)
+              : (["/repo"] as const),
+          },
+        },
+      };
+      if (writesAttachments) {
+        expect(await failureOf(Effect.scoped(harness.port.openQuery(candidate)))).toMatchObject({
+          category: "invalid-configuration",
+        });
+        expect(harness.invocation).toBeUndefined();
+      } else {
+        await Effect.runPromise(Effect.scoped(harness.port.openQuery(candidate)));
+        expect(harness.invocation?.options.sandbox).toMatchObject({
+          filesystem: { allowWrite: ["/repo"] },
+        });
+      }
+    },
+  );
+
   test("uses the pinned permission mapping and allows controlled mode changes", async () => {
     const fullAccess = makeHarness([
       { ...safeRuntimeInitialization, permissionMode: "bypassPermissions" },
@@ -745,7 +870,12 @@ describe("Claude Agent SDK port", () => {
       expect(harness.invocation?.options).not.toHaveProperty("sandbox");
       expect(harness.invocation?.options).not.toHaveProperty("allowDangerouslySkipPermissions");
       expect(harness.spawnConfinements).toEqual([
-        { projectRoot: "/repo", executionPolicy: "plan", runsCommands: false },
+        {
+          projectRoot: "/repo",
+          executionPolicy: "plan",
+          runsCommands: false,
+          runtimeExecutable: openInput.binaryPath,
+        },
       ]);
     },
   );

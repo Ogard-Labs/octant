@@ -1,6 +1,7 @@
-import type { LucideIcon } from "lucide-react";
+import type { PullRequestStateKind } from "../code/pullRequestState";
+import type { IconComponent } from "../ui/icons";
 import { memo, type ReactNode } from "react";
-import { ArrowUpDown } from "lucide-react";
+import { ArrowUpDown, ChevronDown } from "../ui/icons";
 import { compactRelativeTimeLabel } from "../lib/relativeTime";
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import {
@@ -26,8 +27,8 @@ import { OctantTooltip } from "../ui/base/OctantTooltip";
 
 export interface WorkListState {
   readonly label: string;
-  readonly tone: "open" | "draft" | "merged" | "closed";
-  readonly Icon: LucideIcon;
+  readonly tone: PullRequestStateKind;
+  readonly Icon: IconComponent;
 }
 
 export interface WorkListRowProps {
@@ -80,19 +81,20 @@ export const WorkListRow = memo(function WorkListRow(props: WorkListRowProps) {
       type="button"
       variant="bare"
     >
+      <span
+        aria-label={props.state.label}
+        className="work-list__state"
+        data-pr-state={props.state.tone}
+        data-state={props.state.tone}
+        role="img"
+      >
+        <Icon aria-hidden="true" size={16} />
+      </span>
       <span className="work-list__title" title={props.title}>
         {props.title}
       </span>
       <span className="work-list__status-cell">{props.trailing}</span>
       <span className="work-list__meta">
-        <span
-          aria-label={props.state.label}
-          className="work-list__state"
-          data-state={props.state.tone}
-          role="img"
-        >
-          <Icon aria-hidden="true" size={14} />
-        </span>
         {props.repository === undefined ? null : (
           <span className="work-list__meta-text">{props.repository}</span>
         )}
@@ -233,6 +235,71 @@ export function WorkListSortMenu<T extends string>(props: {
                 </OctantMenuCheckboxItem>
               </>
             )}
+          </OctantMenuPopup>
+        </OctantMenuPositioner>
+      </OctantMenuPortal>
+    </OctantMenuRoot>
+  );
+}
+
+/**
+ * The Repository control both lists share: a menu of every repository with its
+ * count, several of which may be chosen. No choice is "All repositories". The
+ * trigger has one fixed width and ellipsises its words, so choosing never
+ * resizes it or moves what sits beside it.
+ */
+export function WorkListRepositoryMenu(props: {
+  readonly options: ReadonlyArray<{ readonly key: string; readonly count: number }>;
+  readonly selected: ReadonlyArray<string>;
+  readonly onChange: (selected: ReadonlyArray<string>) => void;
+}) {
+  const { selected } = props;
+  const words =
+    selected.length === 0
+      ? "All repositories"
+      : selected.length === 1
+        ? (selected[0] ?? "")
+        : `${String(selected.length)} repositories`;
+  return (
+    <OctantMenuRoot>
+      <OctantMenuTrigger
+        aria-label={`Repository: ${words}`}
+        className={`${octantButtonClassName({ variant: "ghost", size: "sm" })} work-list__repository-trigger`}
+        data-active={selected.length > 0 ? "true" : undefined}
+      >
+        <span className="work-list__repository-words">{words}</span>
+        <ChevronDown aria-hidden="true" size={14} />
+      </OctantMenuTrigger>
+      <OctantMenuPortal>
+        <OctantMenuPositioner align="end">
+          <OctantMenuPopup aria-label="Repository" className="work-list__repository-popup">
+            <OctantMenuCheckboxItem
+              checked={selected.length === 0}
+              closeOnClick={false}
+              label="All repositories"
+              onCheckedChange={() => props.onChange([])}
+            >
+              All repositories
+            </OctantMenuCheckboxItem>
+            <OctantMenuSeparator />
+            {props.options.map((option) => (
+              <OctantMenuCheckboxItem
+                checked={selected.includes(option.key)}
+                closeOnClick={false}
+                key={option.key}
+                label={`${option.key} (${String(option.count)})`}
+                onCheckedChange={(checked) =>
+                  props.onChange(
+                    checked
+                      ? [...selected, option.key]
+                      : selected.filter((key) => key !== option.key),
+                  )
+                }
+              >
+                <span className="work-list__repository-name">{option.key}</span>
+                <span className="oct-meta work-list__repository-count">{option.count}</span>
+              </OctantMenuCheckboxItem>
+            ))}
           </OctantMenuPopup>
         </OctantMenuPositioner>
       </OctantMenuPortal>

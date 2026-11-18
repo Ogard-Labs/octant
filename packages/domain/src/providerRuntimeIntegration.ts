@@ -45,6 +45,9 @@ export function providerToolTransport(
     case "codex":
       return "app-server-dynamic-tools";
     case "opencode":
+    // An added agent runs on the same ACP stack; until the person trusts it,
+    // its launch takes none of Octant's tools.
+    case "acp-agent":
       return "session-mcp-bridge";
     case "pi":
       return "session-tool-bridge";

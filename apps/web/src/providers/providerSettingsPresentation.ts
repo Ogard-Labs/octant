@@ -2,6 +2,7 @@ import {
   acpAgentProfile,
   isAcpAgentKind,
   type AnthropicCompatibleProtocol,
+  type ClaudeAuthentication,
   type DiscoverySnapshot,
   type HostPlatform,
   type OpenAiCompatibleProtocol,
@@ -205,6 +206,7 @@ export function driverLabel(driverKind: ProviderInstance["driverKind"]): string 
   if (driverKind === "ideogram-image") return "Ideogram Image";
   // An outside driver package never borrows a bundled provider's name.
   if (driverKind === "outside-harness-endpoint") return "Outside driver";
+  if (driverKind === "acp-agent") return "Added ACP agent";
   return "OpenAI-compatible";
 }
 
@@ -334,13 +336,25 @@ export function providerConfiguredBinaryPath(instance: ProviderInstance): string
   return "binaryPath" in instance.configuration ? instance.configuration.binaryPath : undefined;
 }
 
+/** How a Claude account signs in, in the words Settings uses for it. */
+export function claudeAuthenticationLabel(authentication: ClaudeAuthentication): string {
+  switch (authentication) {
+    case "api-key":
+      return "Anthropic API key";
+    case "gateway":
+      return "Gateway";
+    default:
+      return "Claude subscription";
+  }
+}
+
 export function providerAuthenticationFact(instance: ProviderInstance): string | undefined {
   const { configuration, driverKind } = instance;
   if (!("authentication" in configuration) || configuration.authentication === undefined) {
     return undefined;
   }
   if (driverKind === "claude") {
-    return configuration.authentication === "api-key" ? "Anthropic API key" : "Claude subscription";
+    return claudeAuthenticationLabel(configuration.authentication);
   }
   return titleCase(configuration.authentication);
 }

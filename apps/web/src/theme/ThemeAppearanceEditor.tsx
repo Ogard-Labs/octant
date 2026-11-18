@@ -1,6 +1,16 @@
+import {
+  CUSTOM_THEME_PRESET_ID,
+  decodeThemeHexColor,
+  type ThemeCustomContrast,
+  type ThemeCustomSeeds,
+  type ThemeDensity,
+  type ThemeSettings,
+  type ThemeStyle,
+} from "@octant/contracts/theme";
+import { customThemeTokens } from "@octant/theme/custom-preset";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
-import type { ThemeSettings, ThemeStyle } from "@octant/contracts/theme";
 import { THEME_PRESETS } from "@octant/theme";
+import type { BackgroundImageLibrary } from "../settings/AppBackgroundSettings";
 import type { ThemeController } from "./useThemeController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -37,6 +47,8 @@ export function ThemeAppearanceEditor(props: {
    */
   readonly afterScheme?: ReactNode;
   readonly afterTypography?: ReactNode;
+  /** The host's photo library; an imported theme's photo that is not in it is left out. */
+  readonly photoLibrary?: BackgroundImageLibrary | undefined;
 }) {
   const focusedSetting = props.focusedSetting;
   const theme = props.controller;
@@ -57,10 +69,12 @@ export function ThemeAppearanceEditor(props: {
     ),
     ...pluginThemes,
   ];
-  const presetOptions = (mode: "light" | "dark") =>
-    availablePresets
+  const presetOptions = (mode: "light" | "dark") => [
+    ...availablePresets
       .filter((preset) => preset.supportedModes.includes(mode))
-      .map((preset) => ({ id: String(preset.id), label: preset.displayName }));
+      .map((preset) => ({ id: String(preset.id), label: preset.displayName })),
+    { id: CUSTOM_THEME_PRESET_ID, label: "Custom" },
+  ];
   // A stored preset that is no longer offered (its plugin was switched off or
   // removed) draws the default theme, so the picker shows the default too.
   // The stored choice is kept and returns with the plugin.
@@ -83,6 +97,8 @@ export function ThemeAppearanceEditor(props: {
     );
   }
   const shownAccent = currentAccentSwatch(draft);
+  const shownDensity: ThemeDensity = draft.density ?? "comfortable";
+  const smoothText = draft.fontSmoothing !== "off";
   const setTypography = (surface: "ui" | "editor" | "terminal", patch: Record<string, unknown>) => {
     void theme.applyPatch({
       typography: {
@@ -157,13 +173,16 @@ export function ThemeAppearanceEditor(props: {
             settingId="appearance.scheme.light-preset"
             focused={focusedSetting === "appearance.scheme.light-preset"}
           >
-            <OctantSelectField
-              aria-label="Light preset"
-              className="settings-view__select"
-              onValueChange={(value) => void theme.applyPatch({ lightPresetId: value as never })}
-              options={presetOptions("light")}
-              value={shownPreset("light", draft.lightPresetId)}
-            />
+            <span className="settings-preset-choice">
+              <PresetSwatch mode="light" presetId={shownPreset("light", draft.lightPresetId)} />
+              <OctantSelectField
+                aria-label="Light preset"
+                className="settings-view__select"
+                onValueChange={(value) => void theme.applyPatch({ lightPresetId: value as never })}
+                options={presetOptions("light")}
+                value={shownPreset("light", draft.lightPresetId)}
+              />
+            </span>
           </SettingRow>
           <SettingRow
             label="Dark preset"
@@ -171,13 +190,52 @@ export function ThemeAppearanceEditor(props: {
             settingId="appearance.scheme.dark-preset"
             focused={focusedSetting === "appearance.scheme.dark-preset"}
           >
-            <OctantSelectField
-              aria-label="Dark preset"
-              className="settings-view__select"
-              onValueChange={(value) => void theme.applyPatch({ darkPresetId: value as never })}
-              options={presetOptions("dark")}
-              value={shownPreset("dark", draft.darkPresetId)}
+            <span className="settings-preset-choice">
+              <PresetSwatch mode="dark" presetId={shownPreset("dark", draft.darkPresetId)} />
+              <OctantSelectField
+                aria-label="Dark preset"
+                className="settings-view__select"
+                onValueChange={(value) => void theme.applyPatch({ darkPresetId: value as never })}
+                options={presetOptions("dark")}
+                value={shownPreset("dark", draft.darkPresetId)}
+              />
+            </span>
+          </SettingRow>
+          {draft.lightPresetId === CUSTOM_THEME_PRESET_ID ? (
+            <CustomSeedsEditor
+              focusedSetting={focusedSetting}
+              mode="light"
+              onChange={(seeds) => void theme.applyPatch({ customThemeLight: seeds })}
+              seeds={draft.customThemeLight}
             />
+          ) : null}
+          {draft.darkPresetId === CUSTOM_THEME_PRESET_ID ? (
+            <CustomSeedsEditor
+              focusedSetting={focusedSetting}
+              mode="dark"
+              onChange={(seeds) => void theme.applyPatch({ customThemeDark: seeds })}
+              seeds={draft.customThemeDark}
+            />
+          ) : null}
+          <SettingRow
+            description="Comfortable is the default. Compact takes less room: shorter navigation and Settings rows, a narrower thread gutter, and a tighter prompt."
+            focused={focusedSetting === "appearance.density"}
+            label="Density"
+            scope="app"
+            settingId="appearance.density"
+          >
+            <OctantToggleGroup<ThemeDensity>
+              aria-label="Density"
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected === undefined || selected === shownDensity) return;
+                void theme.applyPatch({ density: selected });
+              }}
+              value={[shownDensity]}
+            >
+              <OctantToggleGroupItem value="comfortable">Comfortable</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="compact">Compact</OctantToggleGroupItem>
+            </OctantToggleGroup>
           </SettingRow>
           <SettingRow
             description="Colour gives Octant an accent, status hues, and coloured tiles, board marks, and Project accents. Mono keeps everything grey."
@@ -267,6 +325,23 @@ export function ThemeAppearanceEditor(props: {
             onChange={(patch) => setTypography("ui", patch)}
             hideLegend
           />
+          {runsOnMac() ? (
+            <SettingRow
+              description="Smooth edges at a heavier weight, so text stays strong. Off draws the system's fuller, grainier strokes."
+              focused={focusedSetting === "appearance.typography.smoothing"}
+              label="Smooth text"
+              scope="app"
+              settingId="appearance.typography.smoothing"
+            >
+              <OctantSwitch
+                checked={smoothText}
+                label="Smooth text"
+                onCheckedChange={(value) =>
+                  void theme.applyPatch({ fontSmoothing: value ? "on" : "off" })
+                }
+              />
+            </SettingRow>
+          ) : null}
           <SettingsDisclosure
             title="Code typography"
             defaultOpen={focusedSetting?.startsWith("appearance.typography.editor.") === true}
@@ -357,10 +432,116 @@ export function ThemeAppearanceEditor(props: {
           <ThemeTransfer
             controller={theme}
             focused={focusedSetting === "appearance.theme-import-export"}
+            photoLibrary={props.photoLibrary}
           />
         </div>
       </OctantCollapsible>
     </div>
+  );
+}
+
+/** Smoothing is a macOS rendering choice; the switch is hidden on any other system. */
+function runsOnMac(): boolean {
+  return typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
+}
+
+const DEFAULT_CUSTOM_SEEDS: Readonly<Record<"light" | "dark", ThemeCustomSeeds>> = {
+  light: {
+    ground: decodeThemeHexColor("#f4f4f2"),
+    ink: decodeThemeHexColor("#1c1c1e"),
+    accent: decodeThemeHexColor("#1f6f96"),
+    contrast: "standard",
+  },
+  dark: {
+    ground: decodeThemeHexColor("#161616"),
+    ink: decodeThemeHexColor("#ececec"),
+    accent: decodeThemeHexColor("#6aa9d6"),
+    contrast: "standard",
+  },
+};
+
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+/**
+ * The seeds of the Custom preset for one mode: Ground, Ink, Accent and a
+ * Contrast step. Seeds that cannot keep a text role readable are refused with
+ * the failing role named, and the saved seeds stay where they were.
+ */
+function CustomSeedsEditor(props: {
+  readonly mode: "light" | "dark";
+  readonly seeds: ThemeCustomSeeds | undefined;
+  readonly onChange: (seeds: ThemeCustomSeeds) => void;
+  readonly focusedSetting?: string | undefined;
+}) {
+  const seeds = props.seeds ?? DEFAULT_CUSTOM_SEEDS[props.mode];
+  const [refusal, setRefusal] = useState<string | undefined>(undefined);
+  const modeLabel = props.mode === "light" ? "Light" : "Dark";
+  const commit = (next: ThemeCustomSeeds) => {
+    const result = customThemeTokens(next, props.mode);
+    if (result.status === "refused") {
+      setRefusal(`${result.role} would not stay readable with those colours.`);
+      return;
+    }
+    setRefusal(undefined);
+    props.onChange(next);
+  };
+  const colour = (field: "ground" | "ink" | "accent", label: string) => (
+    <SettingRow
+      focused={props.focusedSetting === `appearance.custom.${props.mode}.${field}`}
+      label={`${modeLabel} ${label}`}
+      scope="app"
+      settingId={`appearance.custom.${props.mode}.${field}`}
+    >
+      <OctantInput
+        aria-label={`${modeLabel} ${label} colour`}
+        className="settings-view__select"
+        defaultValue={String(seeds[field])}
+        key={String(seeds[field])}
+        maxLength={7}
+        onBlur={(event) => {
+          const value = event.currentTarget.value.trim();
+          if (!HEX_COLOR.test(value)) {
+            setRefusal(`${label} needs a six-digit colour such as #1b1d23.`);
+            return;
+          }
+          commit({ ...seeds, [field]: decodeThemeHexColor(value) });
+        }}
+        spellCheck={false}
+      />
+    </SettingRow>
+  );
+  return (
+    <>
+      {colour("ground", "ground")}
+      {colour("ink", "ink")}
+      {colour("accent", "accent")}
+      <SettingRow
+        description="Soft, Standard or Firm moves every derived wash and edge one step each way."
+        focused={props.focusedSetting === `appearance.custom.${props.mode}.contrast`}
+        label={`${modeLabel} contrast`}
+        scope="app"
+        settingId={`appearance.custom.${props.mode}.contrast`}
+      >
+        <OctantToggleGroup<ThemeCustomContrast>
+          aria-label={`${modeLabel} contrast`}
+          onValueChange={(value) => {
+            const selected = value[0];
+            if (selected === undefined || selected === seeds.contrast) return;
+            commit({ ...seeds, contrast: selected });
+          }}
+          value={[seeds.contrast]}
+        >
+          <OctantToggleGroupItem value="soft">Soft</OctantToggleGroupItem>
+          <OctantToggleGroupItem value="standard">Standard</OctantToggleGroupItem>
+          <OctantToggleGroupItem value="firm">Firm</OctantToggleGroupItem>
+        </OctantToggleGroup>
+      </SettingRow>
+      {refusal === undefined ? null : (
+        <OctantAlert className="settings-view__error" tone="danger">
+          {refusal}
+        </OctantAlert>
+      )}
+    </>
   );
 }
 
@@ -415,6 +596,7 @@ function TypographyControl(props: {
         focused={props.focusedSetting === rowId("size")}
       >
         <OctantNumberStepper
+          field
           label={`${props.label} font size`}
           max={32}
           min={8}
@@ -432,6 +614,7 @@ function TypographyControl(props: {
             focused={props.focusedSetting === rowId("line-height")}
           >
             <OctantNumberStepper
+              field
               label={`${props.label} line height`}
               max={2.5}
               min={1}
@@ -458,8 +641,22 @@ function TypographyControl(props: {
   );
 }
 
-function ThemeTransfer(props: { readonly controller: ThemeController; readonly focused: boolean }) {
+const MISSING_PHOTO_NOTES = {
+  "background-photo": "The theme's photo is not on this computer, so the background is plain.",
+  "sidebar-photo":
+    "The theme's sidebar photo is not on this computer, so the sidebar keeps its own look.",
+} as const;
+
+function ThemeTransfer(props: {
+  readonly controller: ThemeController;
+  readonly focused: boolean;
+  readonly photoLibrary: BackgroundImageLibrary | undefined;
+}) {
   const [value, setValue] = useState("");
+  const [note, setNote] = useState("");
+  // Each import reads the photo library first; only the newest click may
+  // apply, or a slow first read would let an older theme overwrite a newer one.
+  const latestImport = useRef(0);
   const [dropped, setDropped] = useState<ReadonlyArray<string>>([]);
   const pluginThemes = usePluginThemes();
   return (
@@ -484,7 +681,28 @@ function ThemeTransfer(props: { readonly controller: ThemeController; readonly f
       </SettingRow>
       <div className="settings-view__actions">
         <OctantButton
-          onClick={() => props.controller.importJson(value)}
+          onClick={() => {
+            setNote("");
+            latestImport.current += 1;
+            const thisImport = latestImport.current;
+            const text = value;
+            // The library listing the Background settings already read. When it
+            // cannot be read the theme is imported as it is.
+            const listed = props.photoLibrary?.list().then(
+              (photos) => new Set(photos.map((photo) => String(photo.id))),
+              () => undefined,
+            );
+            void Promise.resolve(listed).then((photoIds) => {
+              if (thisImport !== latestImport.current) return;
+              const outcome = props.controller.importJson(
+                text,
+                photoIds === undefined ? undefined : { photoIds },
+              );
+              if (outcome.status === "imported" && outcome.missing.length > 0) {
+                setNote(outcome.missing.map((missing) => MISSING_PHOTO_NOTES[missing]).join(" "));
+              }
+            });
+          }}
           size="sm"
           type="button"
           variant="ghost"
@@ -532,11 +750,49 @@ function ThemeTransfer(props: { readonly controller: ThemeController; readonly f
           Export design tokens (JSON)
         </OctantButton>
       </div>
+      {/* The note's two lines are kept from the first paint, so filling it in
+        after an import moves nothing below it either. */}
+      <p
+        aria-live="polite"
+        className="settings-view__preview-note settings-theme-editor__import-note"
+        role="status"
+      >
+        {note}
+      </p>
     </div>
   );
 }
 
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { useMediaQueryMatches } from "./useMediaQueryMatches";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
+
+/**
+ * A small window drawn from a preset's own tokens (the band, the sidebar, the
+ * page, one card and the accent), so a theme choice can be seen before the
+ * sheet closes. System and Custom have no fixed palette of their own: they are
+ * drawn from the theme the window is wearing now.
+ */
+function PresetSwatch(props: { readonly mode: "light" | "dark"; readonly presetId: string }) {
+  const tokens = THEME_PRESETS.find((preset) => String(preset.id) === props.presetId)?.tokens[
+    props.mode
+  ];
+  const pick = (role: string, live: string) => tokens?.[role] ?? `var(${live})`;
+  const style: Record<string, string> = {
+    "--swatch-band": pick("chrome", "--octant-chrome"),
+    "--swatch-sidebar": pick("sidebar", "--octant-sidebar"),
+    "--swatch-page": pick("workspace", "--octant-workspace"),
+    "--swatch-card": pick("control", "--octant-control"),
+    "--swatch-accent": pick("accent", "--oct-accent"),
+    "--swatch-edge": pick("border", "--oct-border"),
+  };
+  return (
+    <span aria-hidden="true" className="settings-preset-swatch" style={style}>
+      <span className="settings-preset-swatch__band" />
+      <span className="settings-preset-swatch__sidebar" />
+      <span className="settings-preset-swatch__card" />
+      <span className="settings-preset-swatch__accent" />
+    </span>
+  );
+}

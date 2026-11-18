@@ -147,7 +147,7 @@ export function SkillFolderSettingsPanel(props: SkillFolderSettingsProps) {
         </SettingRow>
       ))}
       <SettingRow
-        description="Any folder of skill folders. A folder that is a link is ignored."
+        description="Any folder of skill folders. Links are ignored."
         label="Added skill folders"
         scope="host"
         settingId="skill-folders-added"

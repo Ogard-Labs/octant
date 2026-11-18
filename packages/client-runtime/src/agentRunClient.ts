@@ -5,6 +5,14 @@ import {
   type AgentObservedChildStopResponse,
   decodeAgentObservedChildStopRequest,
   decodeAgentObservedChildStopResponse,
+  type AgentObservedChildBackgroundRequest,
+  type AgentObservedChildBackgroundResponse,
+  type AgentObservedChildMessageRequest,
+  type AgentObservedChildMessageResponse,
+  decodeAgentObservedChildBackgroundRequest,
+  decodeAgentObservedChildBackgroundResponse,
+  decodeAgentObservedChildMessageRequest,
+  decodeAgentObservedChildMessageResponse,
   type AgentRunResultPacket,
   AgentRunResultsResponse,
   decodeAgentRunCanvasSnapshotRequest,
@@ -177,6 +185,14 @@ export interface AgentRunClient {
    * once the provider reports it finished.
    */
   stopObserved?(input: AgentObservedChildStopRequest): Promise<AgentObservedChildStopResponse>;
+  /** Asks the thread's running turn to send one subagent its provider started to the background. */
+  backgroundObserved?(
+    input: AgentObservedChildBackgroundRequest,
+  ): Promise<AgentObservedChildBackgroundResponse>;
+  /** Queues a person's message for one running subagent its provider started. */
+  messageObserved?(
+    input: AgentObservedChildMessageRequest,
+  ): Promise<AgentObservedChildMessageResponse>;
   retry(input: AgentRunRetryRequest): Promise<AgentRunClientCommandResult>;
   resume(input: AgentRunResumeRequest): Promise<AgentRunClientCommandResult>;
   /** Arms or withdraws the opt-in to resume a usage-limited run at reset. */
@@ -447,6 +463,26 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
       }
       throw new AgentRunClientFailure("unavailable", "The provider could not stop the subagent.");
     },
+    async backgroundObserved(input) {
+      return postObservedControl(
+        options,
+        headers,
+        "/api/agent-runs/observed/background",
+        () => decodeAgentObservedChildBackgroundRequest(input),
+        decodeAgentObservedChildBackgroundResponse,
+        "send the subagent to the background",
+      );
+    },
+    async messageObserved(input) {
+      return postObservedControl(
+        options,
+        headers,
+        "/api/agent-runs/observed/message",
+        () => decodeAgentObservedChildMessageRequest(input),
+        decodeAgentObservedChildMessageResponse,
+        "message the subagent",
+      );
+    },
     async retry(input) {
       return postRunCommand(options, headers, "/api/agent-runs/retry", () =>
         decodeAgentRunRetryRequest(input),
@@ -465,6 +501,47 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
       }));
     },
   };
+}
+
+/**
+ * Posts one control for a subagent a provider started. A refusal (403, 409)
+ * is an answer the caller reads, not a failure.
+ */
+async function postObservedControl<Response>(
+  options: AgentRunClientOptions,
+  headers: { readonly "x-octant-window-capability": string },
+  path: string,
+  decodeRequest: () => unknown,
+  decodeResponse: (body: unknown) => Response,
+  action: string,
+): Promise<Response> {
+  let validated: unknown;
+  try {
+    validated = decodeRequest();
+  } catch {
+    throw new AgentRunClientFailure("invalid", `The request to ${action} is invalid.`);
+  }
+  let response: globalThis.Response;
+  try {
+    response = await options.fetch(new URL(path, options.baseUrl).toString(), {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify(validated),
+    });
+  } catch {
+    throw new AgentRunClientFailure("unavailable", "Octant AgentRun service is unavailable.");
+  }
+  if (response.status === 401) {
+    throw new AgentRunClientFailure("unauthorized", "AgentRun request is unauthorized.");
+  }
+  if (response.ok || response.status === 403 || response.status === 409) {
+    try {
+      return decodeResponse(await response.json());
+    } catch {
+      throw new AgentRunClientFailure("unavailable", `The answer to ${action} is malformed.`);
+    }
+  }
+  throw new AgentRunClientFailure("unavailable", `The provider could not ${action}.`);
 }
 
 async function postRunCommand(

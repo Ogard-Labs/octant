@@ -44,7 +44,7 @@ describe("ProjectSpendCeilingSection", () => {
         projectId="00000000-0000-4000-8000-000000000201"
       />,
     );
-    expect(await screen.findByText(/No spend ceiling is set on this Project/i)).toBeVisible();
+    expect(await screen.findByText(/No spend ceiling on this Project/i)).toBeVisible();
     await user.type(screen.getByLabelText("Project token spend ceiling"), "50000");
     await user.click(screen.getByRole("button", { name: "Set Project ceiling" }));
     expect(execute).toHaveBeenCalledWith(
@@ -86,7 +86,7 @@ describe("ProjectSpendCeilingSection", () => {
     render(
       <ProjectSpendCeilingSection client={{ snapshot, execute } as never} projectId={projectId} />,
     );
-    await screen.findByText(/No spend ceiling is set on this Project/i);
+    await screen.findByText(/No spend ceiling on this Project/i);
     await user.type(screen.getByLabelText("Project agent run time ceiling in hours"), "2");
     await user.click(screen.getByRole("combobox", { name: "Project ceiling window" }));
     await user.click(await screen.findByRole("option", { name: "Each day" }));
@@ -129,7 +129,7 @@ describe("ProjectSpendCeilingSection", () => {
     render(
       <ProjectSpendCeilingSection client={{ snapshot, execute } as never} projectId={projectId} />,
     );
-    await screen.findByText(/No spend ceiling is set on this Project/i);
+    await screen.findByText(/No spend ceiling on this Project/i);
     await user.type(screen.getByLabelText("Project money ceiling in US dollars"), "$25.40");
     await user.click(screen.getByRole("button", { name: "Set Project ceiling" }));
     expect(execute).toHaveBeenCalledWith(
@@ -156,7 +156,7 @@ describe("ProjectSpendCeilingSection", () => {
         projectId="00000000-0000-4000-8000-000000000201"
       />,
     );
-    await screen.findByText(/No spend ceiling is set on this Project/i);
+    await screen.findByText(/No spend ceiling on this Project/i);
     await user.type(screen.getByLabelText("Project money ceiling in US dollars"), dollars);
     await user.type(screen.getByLabelText("Project turn ceiling"), "10");
     await user.click(screen.getByRole("button", { name: "Set Project ceiling" }));
@@ -173,7 +173,7 @@ describe("ProjectSpendCeilingSection", () => {
         projectId="00000000-0000-4000-8000-000000000201"
       />,
     );
-    await screen.findByText(/No spend ceiling is set on this Project/i);
+    await screen.findByText(/No spend ceiling on this Project/i);
     await user.click(screen.getByRole("button", { name: "Set Project ceiling" }));
     expect(execute).not.toHaveBeenCalled();
     expect(await screen.findByRole("alert")).toHaveTextContent("Enter at least one budget.");

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { CornerDownLeft, Search } from "lucide-react";
+import { CornerDownLeft, Search } from "../ui/icons";
 import {
   describeChord,
   matchKeybinding,

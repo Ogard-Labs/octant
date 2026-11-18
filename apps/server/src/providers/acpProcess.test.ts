@@ -33,6 +33,12 @@ import {
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import { projectCodeEntries } from "@octant/domain";
+import {
+  WINDOWS_CHAT_PROVIDER_REFUSAL,
+  WINDOWS_KEPT_SANDBOX_REFUSAL,
+  WINDOWS_SANDBOX_MISSING_REASON,
+  WINDOWS_STRICT_REFUSAL,
+} from "@octant/domain/guardrail-policy";
 import { acpProviderProfiles, type AcpProviderProfile } from "./acpProfiles";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeAcpAgent.py", import.meta.url));
@@ -79,6 +85,8 @@ const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, strin
   cline: ["3.0.61", "3.0.60", "cline release 3.0.61 private-noise"],
   qwen: ["0.23.0", "0.22.9", "qwen-code release 0.23.0 private-noise"],
   fx: ["0.0.13", "0.0.12", "fx release 0.0.13 private-noise"],
+  // An added agent has no floor, so it has no too-old release.
+  "acp-agent": ["1.2.3", "1.2.3", "no version"],
 };
 const readyVersions: Record<AcpProviderProfile["kind"], string> = {
   opencode: "0.0.0",
@@ -94,6 +102,7 @@ const readyVersions: Record<AcpProviderProfile["kind"], string> = {
   cline: "3.0.61",
   qwen: "0.23.0",
   fx: "0.0.13",
+  "acp-agent": "1.2.3",
 };
 
 function fixture(profile: AcpProviderProfile, mode = "ready") {
@@ -694,6 +703,82 @@ describe("ACP child-server profiles", () => {
         { action: "external_directory", effect: "ask", resource: "*" },
         { action: "skill", effect: "deny", resource: "*" },
       ]),
+    });
+  });
+
+  it("starts an ACP agent on Windows at Full access and below it outside Strict with no sandbox, and refuses Strict, a kept sandbox and Chat by name", async () => {
+    const target = fixture(kilo);
+    const confinement = makeAcpConfinementLive({
+      platform: "win32",
+      hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+    });
+    const prepare = (level: {
+      readonly mode?: "chat" | "work" | "code";
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly fullAccessSandbox?: boolean;
+      readonly strict?: boolean;
+    }) =>
+      Effect.runPromise(
+        Effect.either(
+          confinement.prepare({
+            profile: kilo,
+            binaryPath: target.binaryPath,
+            root: target.canonicalRoot,
+            managedHome: join(target.canonicalRoot, "managed-home"),
+            mode: "code",
+            environment: { PATH: "/usr/bin" },
+            ...level,
+          }),
+        ),
+      );
+    for (const level of [
+      { executionPolicy: "full-access" },
+      { executionPolicy: "approval-gated", strict: false },
+      { executionPolicy: "plan", strict: false },
+    ] as const) {
+      expect(await prepare(level)).toMatchObject({
+        _tag: "Right",
+        right: { command: target.binaryPath, cwd: target.canonicalRoot },
+      });
+    }
+    for (const [level, message] of [
+      [{ executionPolicy: "auto-accept-edits" }, WINDOWS_STRICT_REFUSAL],
+      [{ executionPolicy: "full-access", fullAccessSandbox: true }, WINDOWS_KEPT_SANDBOX_REFUSAL],
+      [
+        { mode: "chat", executionPolicy: "approval-gated", strict: false },
+        WINDOWS_CHAT_PROVIDER_REFUSAL,
+      ],
+    ] as const) {
+      expect(await prepare(level)).toMatchObject({
+        _tag: "Left",
+        left: { category: "incompatible", message },
+      });
+    }
+  });
+
+  it("reads an ACP agent's readiness on Windows only for a host whose new threads run with no Octant sandbox", async () => {
+    const target = fixture(kilo);
+    const start = (catalogUnconfined: boolean) =>
+      failureOf(
+        Effect.scoped(
+          makeAcpProcessLive({
+            platform: "win32",
+            confinement: passthroughConfinement,
+            windowsCatalogUnconfined: () => catalogUnconfined,
+          }).start({
+            profile: kilo,
+            binaryPath: target.binaryPath,
+            root: target.canonicalRoot,
+            managedHome: join(target.canonicalRoot, "managed-home"),
+            mode: "chat",
+            executionPolicy: "plan",
+            purpose: "probe",
+          }),
+        ),
+      );
+    expect(await start(false)).toMatchObject({
+      category: "incompatible",
+      message: WINDOWS_SANDBOX_MISSING_REASON,
     });
   });
 
@@ -2193,7 +2278,10 @@ describe("System Keychain read for fx", () => {
       // Only the server control-socket denial, which names no Keychain, follows it.
       const guard = SEATBELT_DENY_SERVER_CONTROL_SOCKETS.length;
       expect(lines.slice(-guard)).toEqual(SEATBELT_DENY_SERVER_CONTROL_SOCKETS);
-      expect(lines.at(-1 - guard)).toBe(allow);
+      expect(lines).toContain(allow);
+      expect(lines.lastIndexOf(allow)).toBeGreaterThan(
+        lines.lastIndexOf('(deny file-read* (subpath "/Library/Keychains"))'),
+      );
       expect(lines).toContain('(deny file-read* (subpath "/Library/Keychains"))');
       expect(
         lines.filter((line) => line.includes("Keychains/") && line.startsWith("(allow")),

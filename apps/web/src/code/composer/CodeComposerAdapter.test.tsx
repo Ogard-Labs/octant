@@ -1,11 +1,12 @@
 import { nativeFolderTransfer } from "../../composer/folderDrop.test-fixture";
 import { decodeProviderInstance, decodeProviderModelId } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CodeComposerAdapter } from "./CodeComposerAdapter";
+import { BookOpen } from "../../ui/icons";
 import type { ProjectId } from "@octant/contracts/projects";
 import { decodeHostId, LOCAL_HOST_ID } from "@octant/contracts/host";
 import {
@@ -13,6 +14,8 @@ import {
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
 } from "../../composer/useNewTaskPrompt";
+
+const whereChip = () => screen.getByRole("button", { name: /^Where this thread works/ });
 
 const twoHosts = [
   {
@@ -153,9 +156,12 @@ describe("CodeComposerAdapter", () => {
       />,
     );
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    const effort = screen.getByRole("slider", { name: "Effort level" });
-    fireEvent.change(effort, { target: { value: "2" } });
-    expect(effort).toHaveAttribute("aria-valuetext", "High");
+    const effort = screen.getByRole("group", { name: "Effort level" });
+    await user.click(within(effort).getByRole("button", { name: "High" }));
+    expect(within(effort).getByRole("button", { name: "High" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     await user.keyboard("{Escape}");
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix search");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
@@ -166,7 +172,7 @@ describe("CodeComposerAdapter", () => {
     );
   });
 
-  it("offers prompt suggestions as label-only chips that fill the prompt only when chosen", async () => {
+  it("offers prompt suggestions as cards that say what they do and fill the prompt only when chosen", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn();
     render(
@@ -177,6 +183,8 @@ describe("CodeComposerAdapter", () => {
           {
             id: "explain",
             label: "Explain this codebase",
+            detail: "Entry points and how to run it.",
+            icon: BookOpen,
             prompt: "Explain the entry points and data flow.",
           },
         ]}
@@ -184,6 +192,7 @@ describe("CodeComposerAdapter", () => {
     );
     expect(screen.queryByRole("button", { name: /example details/i })).toBeNull();
     const chip = screen.getByRole("button", { name: "Explain this codebase" });
+    expect(chip).toHaveTextContent("Entry points and how to run it.");
     expect(chip).toHaveAccessibleDescription("Explain the entry points and data flow.");
     expect(chip).toHaveAttribute("title", "Explain the entry points and data flow.");
     await user.click(screen.getByRole("button", { name: "Explain this codebase" }));
@@ -192,11 +201,18 @@ describe("CodeComposerAdapter", () => {
     );
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveFocus();
     expect(onCreateThread).not.toHaveBeenCalled();
+    // With words in the box the cards are out of reach but still in the
+    // page, so nothing under them moves.
+    expect(screen.queryByRole("button", { name: "Explain this codebase" })).toBeNull();
+    const group = document.querySelector<HTMLElement>(".code-home__suggestions");
+    expect(group).toHaveAttribute("data-away", "true");
+    expect(group).toHaveAttribute("aria-hidden", "true");
+    expect(group?.querySelector("button")).toBeDisabled();
   });
 
   it("renders composer with project and branch context", () => {
     const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
-    expect(html).toMatch(/What are we building today\?/);
+    expect(html).toContain("What should we work on in ");
     expect(html).not.toContain("What should we build");
     expect(html).toContain("My Repo");
     expect(html).toContain("development");
@@ -287,11 +303,13 @@ describe("CodeComposerAdapter", () => {
 
   it("shows a caller's decision heading in place of the start screen's question", () => {
     const { rerender } = render(<CodeComposerAdapter {...defaultProps} />);
-    expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "What should we work on in My Repo?" }),
+    ).toBeVisible();
     rerender(<CodeComposerAdapter {...defaultProps} heading={<h2>Review the proposal</h2>} />);
     expect(screen.getByRole("heading", { name: "Review the proposal" })).toBeVisible();
     expect(
-      screen.queryByRole("heading", { name: "What are we building today?" }),
+      screen.queryByRole("heading", { name: "What should we work on in My Repo?" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/just start typing/)).not.toBeInTheDocument();
   });
@@ -309,7 +327,9 @@ describe("CodeComposerAdapter", () => {
     const frame = container.querySelector(".composer");
     const dock = container.querySelector(".composer-tray");
     const row = container.querySelector(".composer-row");
-    expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "What should we work on in My Repo?" }),
+    ).toBeVisible();
     expect(frame).not.toBeNull();
     expect(dock).not.toBeNull();
     if (frame === null || dock === null || row === null) {
@@ -327,7 +347,6 @@ describe("CodeComposerAdapter", () => {
     expect(dock?.textContent).toContain("My Repo");
     expect(dock?.querySelector(".host-selector")).not.toBeNull();
     expect(dock?.querySelector(".host-selector--environment")).not.toBeNull();
-    expect(dock?.textContent).toContain("Current checkout");
     expect(dock?.textContent).toContain("development");
     const text = dock?.textContent ?? "";
     expect(text.indexOf("My Repo")).toBeLessThan(text.indexOf("development"));
@@ -439,9 +458,26 @@ describe("CodeComposerAdapter", () => {
     expect(screen.queryByRole("button", { name: "Base branch" })).toBeNull();
   });
 
-  it("shows the branch selector once a Project is chosen", () => {
+  it("names the branch on one quiet chip once a Project is chosen", () => {
     render(<CodeComposerAdapter {...defaultProps} />);
-    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("development");
+    expect(whereChip()).toHaveTextContent("development");
+    expect(whereChip()).not.toHaveTextContent("This checkout");
+    expect(screen.queryByRole("button", { name: "Base branch" })).toBeNull();
+  });
+
+  it("creates nothing when New worktree is chosen and sends that choice with the thread", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    render(<CodeComposerAdapter {...defaultProps} onCreateThread={onCreateThread} />);
+    await user.click(whereChip());
+    await user.click(screen.getByRole("radio", { name: /New worktree/ }));
+    expect(whereChip()).toHaveTextContent("New worktree");
+    expect(onCreateThread).not.toHaveBeenCalled();
+    await user.keyboard("{Escape}");
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the login bug");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+    expect(onCreateThread.mock.calls[0]?.[0]).toMatchObject({ workspace: "managed-worktree" });
   });
 
   it("keeps repository context on the context row above the composer", () => {
@@ -474,7 +510,7 @@ describe("CodeComposerAdapter", () => {
       <CodeComposerAdapter {...defaultProps} projectAvailable={false} />,
     );
 
-    expect(html).toContain("The selected Project is unavailable. Choose another Project.");
+    expect(html).toContain("That Project is unavailable. Pick another.");
     expect(html).toContain('aria-label="Create thread"');
     expect(html).toContain("disabled");
   });
@@ -514,8 +550,9 @@ describe("CodeComposerAdapter", () => {
     expect(html).not.toContain("Pool control slot");
   });
 
-  it("renders a default-enabled Start from origin control only when server-authoritative remote facts are provided", () => {
-    const html = renderToStaticMarkup(
+  it("renders a default-enabled Start from origin control only when server-authoritative remote facts are provided", async () => {
+    const user = userEvent.setup();
+    render(
       <CodeComposerAdapter
         {...defaultProps}
         // Start from origin only decides where a new worktree branches from,
@@ -524,9 +561,12 @@ describe("CodeComposerAdapter", () => {
         worktreeRemoteFacts={{ remotes: ["origin"], defaultRemote: "origin" }}
       />,
     );
-    expect(html).toContain("Start from origin");
-    expect(html).toContain("Fetch and start from origin/development");
-    expect(html).toContain('aria-checked="true"');
+    await user.click(whereChip());
+    // Where a worktree is fetched from is a rare setting, kept in the
+    // Worktree options dialog rather than the menu.
+    await user.click(screen.getByRole("button", { name: /Worktree options/ }));
+    expect(await screen.findByRole("switch", { name: "Start from origin" })).toBeChecked();
+    expect(screen.getByText("Fetch and start from origin/development")).toBeVisible();
   });
 
   it("F4: disables Start from origin when no server-authoritative remote facts are provided", () => {
@@ -581,7 +621,16 @@ describe("CodeComposerAdapter interactions", () => {
     await act(async () => {
       root.render(<CodeComposerAdapter {...defaultProps} newThreadWorkspace="managed-worktree" />);
     });
-    expect(container.querySelector('[role="switch"]')).toHaveAttribute("aria-checked", "false");
+    await act(async () => {
+      whereChip().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => {
+      screen
+        .getByRole("button", { name: /Worktree options/ })
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const originSwitch = () => screen.getByRole("switch", { name: "Start from origin" });
+    expect(originSwitch()).toHaveAttribute("aria-checked", "false");
 
     await act(async () => {
       root.render(
@@ -593,9 +642,14 @@ describe("CodeComposerAdapter interactions", () => {
       );
     });
 
-    expect(container.querySelector('[role="switch"]')).toHaveAttribute("aria-checked", "true");
-    root.unmount();
-    container.remove();
+    try {
+      expect(originSwitch()).toHaveAttribute("aria-checked", "true");
+    } finally {
+      // Unmounted even when the check fails, so a failure here cannot leave a
+      // second composer in the document for the tests after it.
+      root.unmount();
+      container.remove();
+    }
   });
 
   it("submits the access posture the composer chose", async () => {
@@ -831,13 +885,17 @@ describe("CodeComposerAdapter interactions", () => {
         <CodeComposerAdapter
           {...defaultProps}
           execute={execute as never}
+          newThreadWorkspace="managed-worktree"
           onCreateThread={onCreateThread}
           worktreeRemoteFacts={{ remotes: ["origin", "upstream"] }}
         />,
       );
     });
 
-    const trigger = container.querySelector('button[aria-label="Base branch"]');
+    await act(async () => {
+      whereChip().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const trigger = document.querySelector('button[aria-label^="Start from"]');
     expect(trigger).not.toBeNull();
     await act(async () => {
       trigger!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -929,9 +987,9 @@ describe("CodeComposerAdapter interactions", () => {
 
     // The tray states where a new task starts from, so it has to read the
     // checkout rather than assume a branch name that many repositories lack.
-    const trigger = container.querySelector('button[aria-label="Base branch"]');
-    expect(trigger?.textContent).toContain("main");
-    expect(trigger?.textContent).not.toContain("development");
+    const chip = container.querySelector('button[aria-label^="Where this thread works"]');
+    expect(chip?.textContent).toContain("main");
+    expect(chip?.textContent).not.toContain("development");
     root.unmount();
     container.remove();
   });
@@ -974,7 +1032,9 @@ describe("CodeComposerAdapter interactions", () => {
     );
     await waitFor(() => expect(execute).toHaveBeenCalled());
 
-    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("fix/parser");
+    await user.click(whereChip());
+    expect(screen.getByRole("button", { name: /^Start from/ })).toHaveTextContent("fix/parser");
+    await user.keyboard("{Escape}");
     await user.type(screen.getByLabelText("First message"), "Fix the failing parser check");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
     await waitFor(() =>
@@ -1009,11 +1069,15 @@ describe("CodeComposerAdapter interactions", () => {
         <CodeComposerAdapter
           {...defaultProps}
           execute={execute as never}
+          newThreadWorkspace="managed-worktree"
           projectId={firstProject as never}
         />,
       );
     });
-    const trigger = () => container.querySelector('button[aria-label="Base branch"]');
+    const trigger = () => document.querySelector('button[aria-label^="Start from"]');
+    await act(async () => {
+      whereChip().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
     await act(async () => {
       trigger()!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
@@ -1027,6 +1091,7 @@ describe("CodeComposerAdapter interactions", () => {
         <CodeComposerAdapter
           {...defaultProps}
           execute={execute as never}
+          newThreadWorkspace="managed-worktree"
           projectId={secondProject as never}
           projectName="Other Repo"
         />,
@@ -1089,9 +1154,7 @@ describe("CodeComposerAdapter interactions", () => {
     fireEvent.paste(screen.getByLabelText("First message"), {
       clipboardData: { files: [file], items: [] },
     });
-    const refusal = await screen.findByText(
-      "The selected model does not accept images. Choose an image-capable model.",
-    );
+    const refusal = await screen.findByText("This model cannot read images. Pick one that can.");
     expect(refusal.closest(".composer-notices")).not.toBeNull();
     expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
   });
@@ -1118,9 +1181,10 @@ describe("CodeComposerAdapter interactions", () => {
       </NewTaskDraftsContext.Provider>
     );
     const rendered = render(view);
-    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("fix/login");
-    expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent("Managed worktree");
-    expect(screen.getByRole("switch", { name: /Start from origin/ })).toHaveAttribute(
+    expect(whereChip()).toHaveTextContent("New worktree");
+    await user.click(whereChip());
+    await user.click(screen.getByRole("button", { name: /Worktree options/ }));
+    expect(await screen.findByRole("switch", { name: /Start from origin/ })).toHaveAttribute(
       "aria-checked",
       "true",
     );
@@ -1128,14 +1192,15 @@ describe("CodeComposerAdapter interactions", () => {
     rendered.unmount();
     render(view);
 
-    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("fix/login");
-    expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent("Managed worktree");
-    expect(screen.getByRole("switch", { name: /Start from origin/ })).toHaveAttribute(
+    expect(whereChip()).toHaveTextContent("New worktree");
+    await user.click(whereChip());
+    expect(screen.getByRole("button", { name: /^Start from/ })).toHaveTextContent("fix/login");
+    expect(await screen.findByRole("radio", { name: /New worktree/ })).toHaveAttribute(
       "aria-checked",
       "true",
     );
-    await user.click(screen.getByRole("button", { name: "Workspace" }));
-    expect(await screen.findByRole("menuitemradio", { name: /Managed worktree/ })).toHaveAttribute(
+    await user.click(screen.getByRole("button", { name: /Worktree options/ }));
+    expect(await screen.findByRole("switch", { name: /Start from origin/ })).toHaveAttribute(
       "aria-checked",
       "true",
     );
@@ -1253,12 +1318,8 @@ describe("CodeComposerAdapter interactions", () => {
 
       expect(screen.getByText("devbox:/home/build/service")).toBeVisible();
       // A habit remembered on this host does not choose a worktree on a server.
-      expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent(
-        "Current checkout",
-      );
-      await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("main"),
-      );
+      expect(whereChip()).not.toHaveTextContent("New worktree");
+      await waitFor(() => expect(whereChip()).toHaveTextContent("main"));
       expect(screen.getByRole("button", { name: /^Mode:/ })).toHaveAccessibleName(
         "Mode: Full access",
       );
@@ -1285,8 +1346,9 @@ describe("CodeComposerAdapter interactions", () => {
       const onCreateThread = vi.fn();
       render(<CodeComposerAdapter {...serverProps} onCreateThread={onCreateThread} />);
 
-      await user.click(screen.getByRole("button", { name: "Workspace" }));
-      await user.click(await screen.findByRole("menuitemradio", { name: /Managed worktree/ }));
+      await user.click(whereChip());
+      await user.click(await screen.findByRole("radio", { name: /New worktree/ }));
+      await user.keyboard("{Escape}");
       await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the build");
       await user.click(screen.getByRole("button", { name: "Create thread" }));
       await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
@@ -1322,5 +1384,5 @@ it("refuses a native folder as an attachment when the desktop extraction bridge 
   render(<CodeComposerAdapter {...defaultProps} />);
   const input = screen.getByRole("textbox", { name: "First message" });
   fireEvent.drop(input, { dataTransfer: nativeFolderTransfer() });
-  expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+  expect(await screen.findByText(/Folder drops need the desktop app/)).toBeVisible();
 });

@@ -18,21 +18,21 @@ const METRICS: ReadonlyArray<Metric> = [
     label: "Memory in use",
     value: (sample) => sample.rssBytes,
     words: megabytes,
-    note: "The host process's resident memory, the highest in each point.",
+    note: "The host's memory use. Highest value in each point.",
   },
   {
     id: "stalls",
     label: "Event-loop stalls",
     value: (sample) => sample.eventLoopLagCount,
     words: (value) => `${value.toLocaleString("en")}`,
-    note: "Times the host was too busy to answer for longer than the stall threshold.",
+    note: "Times the host was too busy to answer for too long.",
   },
   {
     id: "stall-worst",
     label: "Longest stall",
     value: (sample) => sample.eventLoopLagWorstMs,
     words: (value) => `${value.toLocaleString("en")} ms`,
-    note: "The longest the host went without answering, in each point.",
+    note: "The longest the host went without answering in each point.",
   },
   {
     id: "slow-sql",
@@ -46,7 +46,7 @@ const METRICS: ReadonlyArray<Metric> = [
     label: "Request handling, slow (p95)",
     value: (sample) => sample.latency.find((entry) => entry.key === "rpc")?.p95Ms,
     words: (value) => `${value.toLocaleString("en")} ms`,
-    note: "How long the slowest twentieth of the window's requests took.",
+    note: "How long the slowest 5% of requests took.",
   },
   {
     id: "database",

@@ -40,4 +40,4 @@ export function UsageName(props: { readonly kind: string; readonly id: string | 
 }
 
 const ERASED_THREADS_TITLE =
-  "These threads were purged. Their token counts stay in the totals; their identity does not.";
+  "These threads were deleted. Their tokens stay in the totals; their names do not.";

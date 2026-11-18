@@ -6,6 +6,7 @@ import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
 import { appendVitalsSample, formatBytes, formatRate, sparklinePoints } from "../shell/vitalsModel";
 import { useServerCodeProjects } from "../projects/serverProjectEntries";
 import { loading, unavailable } from "./moduleState";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 
 type Props = Pick<ThreadUtilityDockContentProps, "serverUrl" | "subject" | "windowCapability">;
 
@@ -95,17 +96,11 @@ export default function VitalsModule(props: Props) {
   if (serverUrl === undefined) return unavailable("Vitals", "No host is connected.");
   if (catalogUnknown) {
     return serverProjects.catalog === "failed"
-      ? unavailable(
-          "Vitals",
-          "Server Projects could not be read, so this thread's host is unknown.",
-        )
+      ? unavailable("Vitals", "Could not read server Projects, so this thread's host is unknown.")
       : loading("Vitals");
   }
   if (state.status === "unsupported") {
-    return unavailable(
-      "Vitals",
-      "This server does not report load. Vitals works on Linux servers.",
-    );
+    return unavailable("Vitals", "This server does not report load. Vitals needs a Linux server.");
   }
   if (state.status === "refused") {
     return unavailable("Vitals", "This window may not read this host's load.");
@@ -139,7 +134,7 @@ function VitalsView(props: { readonly history: ReadonlyArray<HostResourceSnapsho
   if (latest === undefined) {
     return (
       <section aria-label="Vitals" className="vitals" data-state="waiting">
-        <p className="vitals__empty">Reading this host…</p>
+        <OctantEmpty state="loading" title="Reading this host" />
       </section>
     );
   }
@@ -194,16 +189,16 @@ function VitalsView(props: { readonly history: ReadonlyArray<HostResourceSnapsho
       {latest.gpu === undefined ? null : (
         <VitalsTile label="GPU" max={100} series={[series.gpu]} value={`${latest.gpu.percent}%`} />
       )}
-      <div className="vitals__row">
-        <div className="vitals__head">
-          <span>Energy</span>
-          <span>
-            {latest.energy === undefined
-              ? "No battery"
-              : `${latest.energy.batteryPercent}%${latest.energy.charging ? " · charging" : ""}`}
-          </span>
+      {latest.energy === undefined ? null : (
+        <div className="vitals__row">
+          <div className="vitals__head">
+            <span>Energy</span>
+            <span>
+              {`${latest.energy.batteryPercent}%${latest.energy.charging ? " · charging" : ""}`}
+            </span>
+          </div>
         </div>
-      </div>
+      )}
     </section>
   );
 }

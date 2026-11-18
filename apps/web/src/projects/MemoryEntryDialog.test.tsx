@@ -21,7 +21,7 @@ describe("MemoryEntryDialog", () => {
       screen.getByRole("heading", { name: "Add Project memory" }).id,
     );
     expect(dialog).toHaveAccessibleDescription(
-      "Choose exactly what this Project may remember. Nothing is inferred from conversations.",
+      "Choose exactly what this Project may remember. Nothing is guessed from conversations.",
     );
   });
 });

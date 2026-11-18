@@ -1,5 +1,4 @@
-import { useContext, useEffect, useState, type ReactElement, type ReactNode } from "react";
-import { Native } from "./NativeContextMenu";
+import { useRef, useState, type ReactElement, type ReactNode } from "react";
 import {
   PreviewCard,
   PreviewCardPopup,
@@ -16,6 +15,26 @@ export interface OctantPreviewCardProps {
   readonly label: string;
   readonly align?: "start" | "center" | "end";
   readonly side?: "top" | "right" | "bottom" | "left";
+  /** Milliseconds of hover before the card opens; 350 when absent. */
+  readonly delay?: number;
+  /**
+   * Stands the card beside the sidebar instead of beside its trigger: at the
+   * trigger's height, 8px clear of the sidebar's right edge. A card anchored on
+   * the row itself covered the sidebar's neighbouring rows or the transcript's head.
+   */
+  readonly besideSidebar?: boolean;
+}
+
+function beside(trigger: Element | null) {
+  const sidebar = trigger?.closest("[data-octant-sidebar]") ?? null;
+  if (trigger === null || sidebar === null) return trigger;
+  return {
+    getBoundingClientRect: () => {
+      const edge = sidebar.getBoundingClientRect().right;
+      const row = trigger.getBoundingClientRect();
+      return new DOMRect(edge, row.top, 0, row.height);
+    },
+  };
 }
 
 /**
@@ -28,18 +47,20 @@ export interface OctantPreviewCardProps {
  * lets it hold actions. Content that only describes belongs in a tooltip.
  */
 export function OctantPreviewCard(props: OctantPreviewCardProps) {
-  const nativeMenu = useContext(Native);
   const [open, setOpen] = useState(false);
-  const menuOpen = nativeMenu?.open === true;
-  useEffect(() => {
-    if (menuOpen) setOpen(false);
-  }, [menuOpen]);
+  const trigger = useRef<HTMLAnchorElement>(null);
   return (
-    <PreviewCard open={open && !menuOpen} onOpenChange={(next) => setOpen(next && !menuOpen)}>
-      <PreviewCardTrigger closeDelay={150} delay={350} render={props.children} />
+    <PreviewCard open={open} onOpenChange={setOpen}>
+      <PreviewCardTrigger
+        closeDelay={150}
+        delay={props.delay ?? 350}
+        ref={trigger}
+        render={props.children}
+      />
       <PreviewCardPortal>
         <PreviewCardPositioner
           align={props.align ?? "center"}
+          {...(props.besideSidebar === true ? { anchor: () => beside(trigger.current) } : {})}
           className="octant-preview-card__positioner"
           side={props.side ?? "bottom"}
           sideOffset={8}

@@ -44,6 +44,9 @@ import type { ServerAddress, ServerCall, ServerConnection } from "./serverConnec
 const CALL_TIMEOUT_MS = 30_000;
 const MAX_LISTING_BYTES = 8 * 1024 * 1024;
 
+const ATTACHMENTS_REFUSAL =
+  "This path is in the files people attached to Octant threads on this server. A thread's file tools read only its own attached files, and write none.";
+
 const PROTECTED_ON_SERVER_MESSAGE =
   "This path is protected by the secret guard's list, here matched on the server, so Octant's file tools do not open it. Use the server's own credential setup instead. The list is in Settings › Permissions › Protected files.";
 
@@ -105,6 +108,23 @@ elif [ -f "$r" ]; then printf 'f%s' "$r"
 else printf 'o%s' "$r"
 fi`;
 
+/**
+ * Where a thread's attached files are copied on a server, under the login's
+ * home and outside every Project folder: `<home>/.octant/thread-attachments/
+ * <thread>/<attachment>/<name>`. The file tools read there and write nowhere
+ * there, as a local runtime reads the thread's attachments folder on this host.
+ */
+export const SERVER_THREAD_ATTACHMENTS = ".octant/thread-attachments";
+
+/**
+ * A read in a thread's attachments folder: the folder (`$2`) must be that
+ * thread's under the login's home, real or as named, before the ordinary read
+ * resolves the path inside it.
+ */
+const ATTACHMENT_READ_SCRIPT = `h=$(realpath -- "$HOME" 2>/dev/null) || h=$HOME
+case "$2" in "$h"/${SERVER_THREAD_ATTACHMENTS}/*|"$HOME"/${SERVER_THREAD_ATTACHMENTS}/*) ;; *) printf 'x'; exit 0;; esac
+${READ_SCRIPT}`;
+
 const PUT_SCRIPT = `exec 2>/dev/null
 mkdir -p -- "$(dirname -- "$1")" || exit 3
 cat > "$1" || exit 3`;
@@ -147,6 +167,11 @@ export interface ServerFileSystemOptions {
    * this host. Without it every protected path is refused.
    */
   readonly fullAccess?: () => boolean;
+  /**
+   * The thread whose attachments folder on the server the file tools may read
+   * (see {@link SERVER_THREAD_ATTACHMENTS}). Absent reads only the folder.
+   */
+  readonly attachmentsOf?: string;
 }
 
 type Resolved =
@@ -189,11 +214,15 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     const lexical = this.#lexical(input.path);
     const guarded = this.#guard(lexical);
     if (guarded !== undefined) return guarded;
-    const resolved = await this.#resolve(READ_SCRIPT, [
-      lexical,
-      this.#root,
-      String(this.#maxFileBytes),
-    ]);
+    // A file the person attached was copied to the thread's own folder on the
+    // server, which is read like the Project folder and written never.
+    const attachments = this.#attachmentsFolderOf(lexical);
+    const resolved = await this.#resolve(
+      attachments === undefined ? READ_SCRIPT : ATTACHMENT_READ_SCRIPT,
+      [lexical, attachments ?? this.#root, String(this.#maxFileBytes)],
+      undefined,
+      attachments,
+    );
     if (resolved.kind === "refused") return resolved;
     const guardedReal = this.#guard(resolved.path);
     if (guardedReal !== undefined) return guardedReal;
@@ -235,7 +264,7 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     readonly content: string;
   }): Promise<NativeHarnessWriteResult> {
     const lexical = this.#lexical(input.path);
-    const guarded = this.#guard(lexical);
+    const guarded = this.#guard(lexical, true);
     if (guarded !== undefined) return guarded;
     const target = await this.#call(RESOLVE_FOR_WRITE_SCRIPT, [lexical], undefined, 4_096);
     if (target.status !== "ran") return unreachable(target);
@@ -243,7 +272,7 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     const kind = answer[0];
     const path = answer.slice(1);
     if (kind === "x" || !this.#inside(path)) return refusedWith("path-escapes-root");
-    const guardedReal = this.#guard(path);
+    const guardedReal = this.#guard(path, true);
     if (guardedReal !== undefined) return guardedReal;
     if (kind === "o") return refusedWith("not-a-file");
     const put = await this.#call(PUT_SCRIPT, [path], Buffer.from(input.content, "utf8"), 1_024);
@@ -287,7 +316,7 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
 
   async #loadForEdit(path: string): Promise<NativeHarnessEditTarget | NativeHarnessFileRefused> {
     const lexical = this.#lexical(path);
-    const guarded = this.#guard(lexical);
+    const guarded = this.#guard(lexical, true);
     if (guarded !== undefined) return guarded;
     const resolved = await this.#resolve(READ_SCRIPT, [
       lexical,
@@ -295,7 +324,7 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
       String(this.#maxFileBytes),
     ]);
     if (resolved.kind === "refused") return resolved;
-    const guardedReal = this.#guard(resolved.path);
+    const guardedReal = this.#guard(resolved.path, true);
     if (guardedReal !== undefined) return guardedReal;
     const mark = this.#readMarks.get(resolved.path);
     if (mark === undefined) return refusedWith("not-read-first");
@@ -413,6 +442,8 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     script: string,
     args: ReadonlyArray<string>,
     maxOutputBytes = this.#maxFileBytes + 4_096,
+    /** The folder the real path must be inside; the Project folder unless named. */
+    within: string = this.#root,
   ): Promise<
     | (Extract<Resolved, { readonly kind: "inside" }> & {
         readonly truncated: boolean;
@@ -431,7 +462,9 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     const nul = call.output.indexOf(0);
     if (nul === -1) return refusedWith("path-not-found");
     const path = call.output.subarray(0, nul).toString("utf8");
-    if (!this.#inside(path)) return refusedWith("path-escapes-root");
+    if (classifyPathContainment(within, path) !== "contained") {
+      return refusedWith("path-escapes-root");
+    }
     return {
       kind: "inside",
       path,
@@ -464,11 +497,23 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     });
   }
 
-  #guard(path: string): NativeHarnessFileRefused | undefined {
+  /**
+   * Refuses a protected path, and any path in the attached files' folders but
+   * this thread's own (and that one too for a write). A Project folder that
+   * holds the login's home holds every thread's attachments folder, so the
+   * Project's own reads, listings and searches would otherwise reach another
+   * thread's files, and its writes this thread's.
+   */
+  #guard(path: string, writes = false): NativeHarnessFileRefused | undefined {
     const message = serverCredentialPathRefusal(path, this.#fullAccess());
-    return message === undefined
+    if (message !== undefined) return { kind: "refused", reason: "protected-file", message };
+    const marker = `/${SERVER_THREAD_ATTACHMENTS}`;
+    const at = path.indexOf(`${marker}/`);
+    if (at === -1 && !path.endsWith(marker)) return undefined;
+    const own = writes ? undefined : this.#attachmentsFolderOf(path);
+    return own !== undefined && at !== -1
       ? undefined
-      : { kind: "refused", reason: "protected-file", message };
+      : { kind: "refused", reason: "protected-file", message: ATTACHMENTS_REFUSAL };
   }
 
   #lexical(candidate: string): string {
@@ -482,8 +527,20 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
   }
 
   #display(path: string): string {
+    // An attached file outside the folder is shown by the path it was named by.
+    if (!this.#inside(path)) return path;
     const relative = posix.relative(this.#root, path);
     return relative === "" ? "." : relative;
+  }
+
+  /** The thread's attachments folder a path names, judged on the path as written. */
+  #attachmentsFolderOf(lexical: string): string | undefined {
+    if (this.#options.attachmentsOf === undefined) return undefined;
+    const marker = `/${SERVER_THREAD_ATTACHMENTS}/${this.#options.attachmentsOf}`;
+    const at = lexical.indexOf(marker);
+    if (at <= 0) return undefined;
+    const folder = lexical.slice(0, at + marker.length);
+    return lexical === folder || lexical.startsWith(`${folder}/`) ? folder : undefined;
   }
 }
 

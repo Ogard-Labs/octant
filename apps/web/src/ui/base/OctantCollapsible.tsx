@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "../icons";
 import type { ComponentProps, ReactNode } from "react";
 
 export interface OctantCollapsibleProps extends Omit<ComponentProps<"details">, "children"> {

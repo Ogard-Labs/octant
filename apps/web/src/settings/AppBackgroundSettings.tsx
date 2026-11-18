@@ -1,20 +1,29 @@
 import type {
   AppBackground,
+  AppBackgroundCharacterPattern,
   AppBackgroundEffect,
   AppBackgroundPercent,
+  AppBackgroundScene,
   SidebarBackgroundMetadata,
 } from "@octant/contracts/theme";
 import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
+import type { ContributedGround } from "@octant/plugin-host/grounds";
 import { ASCII_DEFAULT_CELL, ASCII_MIN_CELL, asciiCell } from "@octant/domain/ascii-print";
-import { Check, Image as ImageIcon, Images, Upload } from "lucide-react";
+import {
+  DEFAULT_CHARACTER_LEVEL,
+  DEFAULT_CHARACTER_SET,
+  cleanCharacterSet,
+} from "@octant/domain/theme-policy";
+import { Check, Image as ImageIcon, Images, Upload, X } from "../ui/icons";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
-import { OctantPopover } from "../ui/base/OctantPopover";
+import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { SettingRow } from "./primitives";
+import { SettingRow, SettingsDisclosure } from "./primitives";
 import { SliderField } from "./SliderField";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { usePluginGrounds } from "../theme/pluginGrounds";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 import { MARK_TICK_STROKE_WIDTH } from "../ui/IconDefaults";
 
@@ -23,6 +32,8 @@ export interface BackgroundImageLibrary {
   readonly list: () => Promise<ReadonlyArray<SidebarBackgroundMetadata>>;
   readonly upload: (file: File) => Promise<SidebarBackgroundMetadata>;
   readonly fetch: (backgroundId: string) => Promise<Blob>;
+  /** Absent when the host cannot delete a photo; the gallery then offers no Remove. */
+  readonly remove?: (backgroundId: string) => Promise<void>;
 }
 
 export interface AppBackgroundSettingsProps {
@@ -33,6 +44,12 @@ export interface AppBackgroundSettingsProps {
   readonly focused?: boolean;
   readonly library?: BackgroundImageLibrary | undefined;
   readonly onChange: (next: AppBackground) => void;
+  /**
+   * Shows a change without saving it. The character controls preview each
+   * keystroke or slider tick through it and save once with `onChange` when the
+   * person lets go. Absent, they save each change as it happens.
+   */
+  readonly onPreview?: (next: AppBackground) => void;
 }
 
 type Choice = "builtin" | "photo" | "characters" | "pixels" | "flowing" | "none";
@@ -43,6 +60,8 @@ function choiceFor(kind: AppBackground["kind"]): Choice {
 }
 
 const ACCEPTED_TYPES = "image/png,image/jpeg,image/webp";
+const PHOTO_ADDED = "Photo added.";
+const PHOTO_REMOVED = "Photo removed.";
 const LIMITS = "PNG, JPEG, or WebP up to 8 MiB and 4096×4096";
 
 const CATALOG_GROUPS = ["gradient", "landscape", "forest", "wood", "abstract"] as const;
@@ -80,8 +99,51 @@ function carry(background: AppBackground) {
     effectCell: background.effectCell,
     effectTones: background.effectTones,
     ...(background.motion === undefined ? {} : { motion: background.motion }),
+    ...(background.scene === undefined ? {} : { scene: background.scene }),
+    ...(background.characterSet === undefined ? {} : { characterSet: background.characterSet }),
+    ...(background.characterDensity === undefined
+      ? {}
+      : { characterDensity: background.characterDensity }),
+    ...(background.characterSpeed === undefined
+      ? {}
+      : { characterSpeed: background.characterSpeed }),
+    ...(background.characterPattern === undefined
+      ? {}
+      : { characterPattern: background.characterPattern }),
   };
 }
+
+/** Ready-made sets for the character field; the first is what it draws by default. */
+const STARTER_SETS = [
+  { id: "letters", label: "Letters and digits", characters: DEFAULT_CHARACTER_SET },
+  { id: "binary", label: "Binary", characters: "01" },
+  { id: "dots", label: "Dots", characters: "·•●" },
+  { id: "shades", label: "Shades", characters: "░▒▓█" },
+  { id: "lines", label: "Lines", characters: "─│┼╱╲" },
+] as const;
+
+/** What the character field draws; all in turn is what it did before the choice. */
+const CHARACTER_PATTERNS = [
+  { id: "cycle", label: "All in turn" },
+  { id: "blotches", label: "Blotches" },
+  { id: "currents", label: "Currents" },
+  { id: "rings", label: "Rings" },
+] as const satisfies ReadonlyArray<{ id: AppBackgroundCharacterPattern; label: string }>;
+
+const CHARACTERS_HINT = "Up to 64 characters. The field draws only these.";
+// Shorter than the hint, so swapping one for the other never wraps the row.
+const REFUSED_CHARACTERS = "Emoji and spaces are left out.";
+
+/** What the pixel ground can draw; a row saved before scenes existed shows Drift. */
+const SCENES = [
+  { id: "ridges", label: "Ridges" },
+  { id: "burst", label: "Burst" },
+  { id: "drift", label: "Drift" },
+  { id: "picture", label: "Your picture" },
+] as const satisfies ReadonlyArray<{ id: AppBackgroundScene; label: string }>;
+
+/** A fresh pixel ground opens on Ridges at the bolder four shades the scenes are drawn for. */
+const FIELD_TONES = 4;
 
 /** The effect a row shows: a photo saved before the choice existed reads its dither switch. */
 function currentEffect(background: AppBackground): AppBackgroundEffect {
@@ -133,23 +195,92 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   const [photos, setPhotos] = useState<ReadonlyArray<SidebarBackgroundMetadata>>([]);
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
-  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [confirmingRemoval, setConfirmingRemoval] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const library = props.library;
   const background = props.background;
-  const selectedId = background.kind === "photo" ? String(background.backgroundId) : null;
+  const pluginGrounds = usePluginGrounds();
+  const savedCharacters =
+    background.kind === "characters"
+      ? (background.characterSet ?? DEFAULT_CHARACTER_SET)
+      : DEFAULT_CHARACTER_SET;
+  // What the person is typing. A refused text stays in the box with its note
+  // while the ground keeps the last good set.
+  const [typed, setTyped] = useState(savedCharacters);
+  const [typedRefused, setTypedRefused] = useState(false);
+  const charactersBox = useRef<HTMLInputElement>(null);
+  // The ground the character controls are previewing and have not saved yet.
+  const unsaved = useRef<AppBackground | undefined>(undefined);
+  useEffect(() => {
+    // The box keeps what the person is typing; the saved value never overwrites it mid-edit.
+    if (charactersBox.current !== null && document.activeElement === charactersBox.current) return;
+    setTyped(savedCharacters);
+    setTypedRefused(false);
+  }, [savedCharacters]);
+  const previewCharacters = (next: AppBackground) => {
+    if (props.onPreview === undefined) {
+      props.onChange(next);
+      return;
+    }
+    unsaved.current = next;
+    props.onPreview(next);
+  };
+  const saveCharacters = (next?: AppBackground) => {
+    const pending = next ?? unsaved.current;
+    unsaved.current = undefined;
+    if (pending !== undefined) props.onChange(pending);
+  };
+  // A plugin's ground is copied into the person's own (never saved as a
+  // reference), so it keeps working when the plugin is switched off.
+  const pickPluginGround = (picked: ContributedGround) => {
+    const {
+      characterSet: _set,
+      characterDensity: _density,
+      characterSpeed: _speed,
+      characterPattern: _pattern,
+      ...rest
+    } = background;
+    setTyped(picked.ground.characterSet);
+    setTypedRefused(false);
+    saveCharacters({
+      ...rest,
+      characterSet: picked.ground.characterSet,
+      ...(picked.ground.characterDensity === undefined
+        ? {}
+        : { characterDensity: picked.ground.characterDensity }),
+      ...(picked.ground.characterSpeed === undefined
+        ? {}
+        : { characterSpeed: picked.ground.characterSpeed }),
+      ...(picked.ground.characterPattern === undefined
+        ? {}
+        : { characterPattern: picked.ground.characterPattern }),
+    });
+  };
+  const field = background.kind === "pixels";
+  const scene: AppBackgroundScene = (field ? background.scene : undefined) ?? "drift";
+  const selectedId =
+    background.kind === "photo"
+      ? String(background.backgroundId)
+      : field && scene === "picture" && background.backgroundId !== undefined
+        ? String(background.backgroundId)
+        : null;
   const selectedPresetId = background.kind === "builtin" ? background.presetId : null;
   const selectedPreset = ZEN_BUILTIN_BACKGROUNDS.find((preset) => preset.id === selectedPresetId);
   const [catalogOpen, setCatalogOpen] = useState(selectedPresetId === null);
-  const showPhoto = choice === "photo" || selectedId !== null;
+  const showPhoto =
+    choice === "photo" ||
+    selectedId !== null ||
+    (choice === "pixels" && field && scene === "picture");
   const showBuiltin = choice === "builtin" || selectedPresetId !== null;
   const showDials = choiceFor(background.kind) !== "none";
   const picture = background.kind === "builtin" || background.kind === "photo";
-  const field = background.kind === "pixels";
   const savedEffect = currentEffect(background);
   // The pixel field has no plain print; a field saved without one dithers.
   const effect: AppBackgroundEffect = field && savedEffect === "none" ? "dither" : savedEffect;
   const printed = (picture && effect !== "none") || field;
+  // A picture is printed, whether the ground is a photo or the pixel ground's
+  // Picture scene.
+  const printedPicture = picture || (field && scene === "picture");
   const motion = currentMotion(background);
   // Characters have no wave, so an ASCII print offers no Motion.
   const ascii = picture && effect === "ascii";
@@ -159,7 +290,8 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   // colours. Moving one slider saves an explicit effect, which retires that
   // legacy reading, so the untouched slider's value is saved with it rather
   // than jumping to the decoded default.
-  const legacyPrint = background.effect === undefined && effect === "dither";
+  const legacyPrint =
+    background.kind === "photo" && background.effect === undefined && effect === "dither";
   const printCell = legacyPrint
     ? 2
     : ascii
@@ -195,7 +327,21 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   }, [library, showPhoto]);
 
   const choose = (kind: string) => {
-    if (kind === "none" || kind === "characters" || kind === "pixels" || kind === "flowing") {
+    if (kind === "pixels") {
+      setChoice(kind);
+      setStatus(undefined);
+      // Arriving from another ground opens Ridges, drawn for four shades; a
+      // person's own shade count and scene are kept when they come back.
+      const tones = background.effectTones === 8 ? FIELD_TONES : background.effectTones;
+      props.onChange({
+        ...carry(background),
+        kind,
+        scene: background.scene ?? "ridges",
+        effectTones: tones,
+      });
+      return;
+    }
+    if (kind === "none" || kind === "characters" || kind === "flowing") {
       setChoice(kind);
       setStatus(undefined);
       props.onChange({ ...carry(background), kind });
@@ -214,10 +360,32 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
     props.onChange({ ...carry(background), kind: "builtin", presetId });
   };
 
+  // Under the pixel ground a photo is the Picture scene's, printed in two
+  // tones; anywhere else it is a photo ground.
+  const withPhoto = (backgroundId: SidebarBackgroundMetadata["id"]): AppBackground =>
+    choice === "pixels" && field
+      ? { ...carry(background), kind: "pixels", scene: "picture", backgroundId }
+      : { ...carry(background), kind: "photo", backgroundId };
+
   const pick = (photo: SidebarBackgroundMetadata) => {
     setStatus(undefined);
-    setLibraryOpen(false);
-    props.onChange({ ...carry(background), kind: "photo", backgroundId: photo.id });
+    props.onChange(withPhoto(photo.id));
+  };
+
+  const removePhoto = async (photo: SidebarBackgroundMetadata) => {
+    setConfirmingRemoval(null);
+    if (library?.remove === undefined) return;
+    setBusy(true);
+    setStatus(undefined);
+    try {
+      await library.remove(String(photo.id));
+      setPhotos((current) => current.filter((candidate) => candidate.id !== photo.id));
+      setStatus(PHOTO_REMOVED);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "The photo could not be removed.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const setPhotoOpacity = (value: number) => {
@@ -234,7 +402,8 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
     try {
       const uploaded = await library.upload(file);
       setPhotos((current) => [uploaded, ...current.filter((photo) => photo.id !== uploaded.id)]);
-      props.onChange({ ...carry(background), kind: "photo", backgroundId: uploaded.id });
+      props.onChange(withPhoto(uploaded.id));
+      setStatus(PHOTO_ADDED);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "The photo could not be uploaded.");
     } finally {
@@ -248,7 +417,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
     <>
       <div className="setgroup">
         <SettingRow
-          description="What sits behind Octant: a built-in picture, your own photo, pulsing characters, dithered pixels, flowing colour, or none."
+          description="What sits behind Octant: a built-in picture, your photo, ASCII, pixels, flowing colour, or none."
           focused={props.focused === true}
           label="Background"
           labelledBySection
@@ -262,14 +431,33 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
             options={[
               { id: "builtin", label: "Built-in picture" },
               { id: "photo", label: "Your photo" },
-              { id: "characters", label: "Pulsing characters" },
-              { id: "pixels", label: "Dithered pixels" },
+              { id: "characters", label: "ASCII field" },
+              { id: "pixels", label: "Pixel ground" },
               { id: "flowing", label: "Flowing" },
               { id: "none", label: "None" },
             ]}
             value={choice}
           />
         </SettingRow>
+        {field ? (
+          <SettingRow
+            description="Ridges with a sun, rays, drifting streaks, or your photo, in the same two tones."
+            label="Scene"
+            scope="app"
+            settingId="app-background-scene"
+          >
+            <OctantSelectField
+              aria-label="Pixel ground scene"
+              className="settings-view__select"
+              onValueChange={(next) => {
+                const chosen = SCENES.find((option) => option.id === next);
+                if (chosen !== undefined) props.onChange({ ...background, scene: chosen.id });
+              }}
+              options={SCENES.map((option) => ({ id: option.id, label: option.label }))}
+              value={scene}
+            />
+          </SettingRow>
+        ) : null}
       </div>
       {showBuiltin ? (
         <details
@@ -375,37 +563,51 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               >
                 <Upload aria-hidden="true" size={14} />
               </OctantIconButton>
-              {photos.length === 0 ? null : (
-                <OctantPopover
-                  align="end"
-                  onOpenChange={setLibraryOpen}
-                  open={libraryOpen}
-                  title="Photos on this host"
-                  trigger={<Images aria-hidden="true" size={14} />}
-                  triggerClassName="shell-icon-button"
-                  triggerLabel="Choose an uploaded photo"
-                  triggerVariant="ghost-icon"
-                >
-                  <div
-                    aria-label="Photos on this host"
-                    className="settings-app-background__grid"
-                    onKeyDown={moveWithinRadioGroup}
-                    role="radiogroup"
-                  >
-                    {photos.map((photo) => (
-                      <PhotoChoice
-                        checked={selectedId === String(photo.id)}
-                        key={String(photo.id)}
-                        library={library}
-                        onPick={() => pick(photo)}
-                        photo={photo}
-                      />
-                    ))}
-                  </div>
-                </OctantPopover>
-              )}
             </div>
           </SettingRow>
+          {library === undefined ? null : (
+            <div className="settings-app-background__gallery">
+              {/* The row and its status line hold their height from the first
+                  paint, so a list that arrives, a photo that is added or a
+                  refusal moves nothing around them. */}
+              <div className="settings-app-background__gallery-head">
+                <span className="settings-app-background__gallery-title">On this host</span>
+                <span
+                  className="settings-app-background__gallery-status"
+                  data-tone={status === PHOTO_ADDED || status === PHOTO_REMOVED ? "done" : "note"}
+                  role="status"
+                >
+                  {status ?? ""}
+                </span>
+              </div>
+              <div
+                aria-label="Photos on this host"
+                className="settings-app-background__gallery-row"
+                onKeyDown={moveWithinRadioGroup}
+                role="radiogroup"
+              >
+                {photos.map((photo) => (
+                  <PhotoTile
+                    busy={busy}
+                    checked={selectedId === String(photo.id)}
+                    confirming={confirmingRemoval === String(photo.id)}
+                    key={String(photo.id)}
+                    library={library}
+                    onAskRemove={() => setConfirmingRemoval(String(photo.id))}
+                    onCancelRemove={() => setConfirmingRemoval(null)}
+                    onPick={() => pick(photo)}
+                    onRemove={() => void removePhoto(photo)}
+                    photo={photo}
+                  />
+                ))}
+                {photos.length === 0 ? (
+                  <p className="settings-app-background__gallery-empty">
+                    Photos you add appear here.
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          )}
           {background.kind === "photo" ? (
             <>
               <SettingRow
@@ -452,22 +654,6 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               value={background.scope}
             />
           </SettingRow>
-          {background.scope === "everywhere" ? (
-            <SettingRow
-              description="Let the background run under the sidebar too."
-              label="Cover the sidebar"
-              scope="app"
-              settingId="app-background-sidebar"
-            >
-              <OctantSwitch
-                checked={background.coversSidebar}
-                label="Cover the sidebar"
-                onCheckedChange={(coversSidebar) =>
-                  props.onChange({ ...background, coversSidebar })
-                }
-              />
-            </SettingRow>
-          ) : null}
           {picture || field ? (
             <SettingRow
               description={
@@ -554,10 +740,179 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               />
             </SettingRow>
           ) : null}
+          {background.kind === "characters" ? (
+            <SettingsDisclosure
+              className="settings-app-background__customize"
+              title="Customize"
+              variant="inline"
+            >
+              <SettingRow
+                description={
+                  // The note takes the hint's place, so the row never grows as it comes and goes.
+                  <span role="status">{typedRefused ? REFUSED_CHARACTERS : CHARACTERS_HINT}</span>
+                }
+                label="Characters"
+                scope="app"
+                settingId="app-background-characters"
+              >
+                <span className="settings-app-background__characters">
+                  <OctantInput
+                    aria-label="Characters"
+                    autoComplete="off"
+                    className="settings-view__text-input"
+                    onBlur={() => saveCharacters()}
+                    onChange={(event) => {
+                      const text = event.currentTarget.value;
+                      setTyped(text);
+                      const cleaned = cleanCharacterSet(text);
+                      setTypedRefused(cleaned.status === "refused");
+                      if (cleaned.status === "ok") {
+                        previewCharacters({ ...background, characterSet: cleaned.characterSet });
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") saveCharacters();
+                    }}
+                    ref={charactersBox}
+                    spellCheck={false}
+                    type="text"
+                    value={typed}
+                  />
+                  <OctantSelectField
+                    aria-label="Starter character set"
+                    className="settings-view__select"
+                    onValueChange={(next) => {
+                      const plugin = pluginGrounds.find((option) => option.id === next);
+                      if (plugin !== undefined) {
+                        pickPluginGround(plugin);
+                        return;
+                      }
+                      const starter = STARTER_SETS.find((option) => option.id === next);
+                      if (starter !== undefined) {
+                        setTyped(starter.characters);
+                        setTypedRefused(false);
+                        saveCharacters({ ...background, characterSet: starter.characters });
+                      }
+                    }}
+                    options={[
+                      ...STARTER_SETS.map((option) => ({ id: option.id, label: option.label })),
+                      { id: "custom", label: "Custom", disabled: true },
+                      ...pluginGrounds.map((option) => ({
+                        id: option.id,
+                        label: `${option.displayName} (${option.pluginName})`,
+                        group: "From plugins",
+                      })),
+                    ]}
+                    value={
+                      STARTER_SETS.find((option) => option.characters === savedCharacters)?.id ??
+                      "custom"
+                    }
+                  />
+                </span>
+              </SettingRow>
+              <SettingRow
+                description="The shape its patches take."
+                label="Pattern"
+                scope="app"
+                settingId="app-background-character-pattern"
+              >
+                <OctantSelectField
+                  aria-label="Character pattern"
+                  className="settings-view__select"
+                  onValueChange={(next) => {
+                    const pattern = CHARACTER_PATTERNS.find((option) => option.id === next);
+                    if (pattern !== undefined) {
+                      saveCharacters({ ...background, characterPattern: pattern.id });
+                    }
+                  }}
+                  options={CHARACTER_PATTERNS.map((option) => ({
+                    id: option.id,
+                    label: option.label,
+                  }))}
+                  value={background.characterPattern ?? "cycle"}
+                />
+              </SettingRow>
+              <SettingRow
+                description="How much of the field shows."
+                label="Density"
+                scope="app"
+                settingId="app-background-character-density"
+              >
+                <SliderField
+                  aria-label="Density"
+                  className="settings-view__range"
+                  format={(value) => `${String(value)}%`}
+                  max={100}
+                  min={0}
+                  onBlur={() => saveCharacters()}
+                  onChange={(event) =>
+                    previewCharacters({
+                      ...background,
+                      characterDensity: Number(event.currentTarget.value),
+                    })
+                  }
+                  onKeyUp={() => saveCharacters()}
+                  onPointerUp={() => saveCharacters()}
+                  step={1}
+                  value={background.characterDensity ?? DEFAULT_CHARACTER_LEVEL}
+                />
+              </SettingRow>
+              <SettingRow
+                description="How fast it drifts and the characters change. Zero holds one frame."
+                label="Speed"
+                scope="app"
+                settingId="app-background-character-speed"
+              >
+                <SliderField
+                  aria-label="Speed"
+                  className="settings-view__range"
+                  format={(value) => `${String(value)}%`}
+                  max={100}
+                  min={0}
+                  onBlur={() => saveCharacters()}
+                  onChange={(event) =>
+                    previewCharacters({
+                      ...background,
+                      characterSpeed: Number(event.currentTarget.value),
+                    })
+                  }
+                  onKeyUp={() => saveCharacters()}
+                  onPointerUp={() => saveCharacters()}
+                  step={1}
+                  value={background.characterSpeed ?? DEFAULT_CHARACTER_LEVEL}
+                />
+              </SettingRow>
+              <SettingRow
+                description="Back to the default letters and digits, all patterns in turn, at the default density and speed."
+                label="Reset"
+                scope="app"
+                settingId="app-background-characters-reset"
+              >
+                <OctantButton
+                  onClick={() => {
+                    const {
+                      characterSet: _set,
+                      characterDensity: _density,
+                      characterSpeed: _speed,
+                      characterPattern: _pattern,
+                      ...rest
+                    } = background;
+                    setTyped(DEFAULT_CHARACTER_SET);
+                    setTypedRefused(false);
+                    saveCharacters(rest);
+                  }}
+                  type="button"
+                  variant="outline"
+                >
+                  Reset
+                </OctantButton>
+              </SettingRow>
+            </SettingsDisclosure>
+          ) : null}
           {moves ? (
             <SettingRow
               description={
-                picture
+                printedPicture
                   ? "Still keeps the print as it is. Wave sends a wave through its pixels when you click a start screen."
                   : background.kind === "flowing"
                     ? "Still holds one frame. Wave lets the colour field keep drifting."
@@ -585,7 +940,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
       {props.increasedContrast === true ? (
         <p className="settings-app-background__note">Hidden while Increased contrast is on.</p>
       ) : null}
-      {status === undefined ? null : (
+      {status === undefined || (showPhoto && library !== undefined) ? null : (
         <p className="settings-app-background__note" role="status">
           {status}
         </p>
@@ -645,29 +1000,66 @@ function PhotoThumbnail(props: {
   );
 }
 
-function PhotoChoice(props: {
+/**
+ * One photo in the gallery: a radio that uses it, and a small Remove that
+ * shows when the tile is pointed at or focused. Asking to remove swaps that
+ * control for Remove and Keep over the same tile, so nothing around it moves.
+ * The photo in use has no Remove: the host refuses to delete it.
+ */
+function PhotoTile(props: {
+  readonly busy: boolean;
   readonly checked: boolean;
+  readonly confirming: boolean;
   readonly library: BackgroundImageLibrary | undefined;
+  readonly onAskRemove: () => void;
+  readonly onCancelRemove: () => void;
   readonly onPick: () => void;
+  readonly onRemove: () => void;
   readonly photo: SidebarBackgroundMetadata;
 }) {
   const url = usePhotoUrl(props.library, String(props.photo.id));
+  const canRemove = props.library?.remove !== undefined && !props.checked;
   return (
-    <OctantButton
-      aria-checked={props.checked}
-      aria-label={props.photo.displayName}
-      className="settings-view__preset-swatch settings-view__preset-swatch--photo"
-      onClick={props.onPick}
-      role="radio"
-      type="button"
-      variant="bare"
-    >
-      {url === null ? null : <img alt="" src={url} />}
-      {props.checked ? (
-        <span aria-hidden="true" className="settings-view__selection-mark">
-          ✓
-        </span>
+    <div className="settings-app-background__tile" data-confirming={props.confirming}>
+      <OctantButton
+        aria-checked={props.checked}
+        aria-label={props.photo.displayName}
+        className="settings-app-background__tile-pick"
+        onClick={props.onPick}
+        role="radio"
+        title={props.photo.displayName}
+        type="button"
+        variant="bare"
+      >
+        {url === null ? null : <img alt="" src={url} />}
+      </OctantButton>
+      {canRemove && !props.confirming ? (
+        <OctantIconButton
+          className="settings-app-background__tile-remove"
+          disabled={props.busy}
+          label={`Remove ${props.photo.displayName}`}
+          onClick={props.onAskRemove}
+          type="button"
+        >
+          <span aria-hidden="true" className="settings-app-background__tile-remove-mark">
+            <X size={12} />
+          </span>
+        </OctantIconButton>
       ) : null}
-    </OctantButton>
+      {props.confirming ? (
+        <div
+          className="settings-app-background__tile-confirm"
+          role="group"
+          aria-label={`Remove ${props.photo.displayName}?`}
+        >
+          <OctantButton onClick={props.onRemove} size="xs" type="button" variant="destructive">
+            Remove
+          </OctantButton>
+          <OctantButton onClick={props.onCancelRemove} size="xs" type="button" variant="secondary">
+            Keep
+          </OctantButton>
+        </div>
+      ) : null}
+    </div>
   );
 }

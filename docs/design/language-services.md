@@ -256,7 +256,8 @@ restrictive one was taken.
   thread's posture, the host platform, who caused the start (local window or
   paired device), and whether the shell-command approval for this checkout and
   component is on record. It returns a launch shape or the first refusal in
-  this order: `unsupported-platform` (neither macOS nor Linux),
+  this order: `unsupported-platform` (neither macOS nor Linux, nor Windows
+  for a thread outside Strict),
   `plan-read-only`, `local-host-required`, `approval-required`. The last three
   apply only to `repo-tooling`. A `static` server may start when a paired
   device's authorized read asks for one, because starting it grants nothing
@@ -806,9 +807,17 @@ classes.
   that kind and takes no path a third-party package could not. A user-added
   server is installed, quarantined, reviewed, and enabled like any executable
   component. Installing it never trusts or enables it.
-- **Platforms.** macOS and Linux. Any other platform refuses with
-  `unsupported-platform`. A missing Seatbelt or Bubblewrap backend fails closed
-  and names the recovery, as confinement already does.
+- **Platforms.** macOS and Linux, and Windows for a thread outside Strict.
+  Windows has no sandbox Octant can use yet, so there a server of either
+  class starts with confinement `none`, with the person's own reach as an
+  editor there starts it: `repo-tooling` keeps Plan's refusal, the
+  person's start and the approval, and gets no egress proxy; every read is
+  decided again with its thread's Strict value, and a crash restart with the
+  watched thread's (maintainer request, 2026-11-18; [Windows below Full
+  access](../architecture.md#current-release-boundary)). Strict on Windows
+  and any other platform refuse with `unsupported-platform`. A missing
+  Seatbelt or Bubblewrap backend fails closed and names the recovery, as
+  confinement already does.
 
 ### Packaging rules
 
@@ -1172,9 +1181,11 @@ format nobody has).
   and debug panel still offers Start only on a confirmed configuration, so a
   person at Full access confirms once before starting from it.
 - **Launch decision.** A pure `decideDebugSessionStart` takes the host
-  platform, the thread's mode and posture, who caused the start, the approval,
-  and whether the configuration's paths still resolve. It returns a launch
-  shape or the first refusal in this order: `unsupported-platform`,
+  platform, the thread's mode, posture and Strict value, who caused the
+  start, the approval, and whether the configuration's paths still resolve.
+  It returns a launch shape (confinement `none` and the open network on
+  Windows outside Strict) or the first refusal in this order:
+  `unsupported-platform` (Strict on Windows among it),
   `mode-prohibited`, `plan-read-only`, `local-host-required` (a paired
   device), `approval-required` (below Full access only),
   `configuration-invalid`. The read-side checks of the companion (`no-reach`,
@@ -1360,7 +1371,10 @@ frame ends the session. Each request has a 10-second deadline and reports
   result, marked as outside content. No subagent, hook, or other tool
   reaches a session. Built
   ([Agent debug tool rules](#agent-debug-tool-rules)).
-- **Code only, macOS and Linux.** As the companion.
+- **Code only, macOS and Linux, and Windows outside Strict.** As the
+  companion: on Windows the adapter and program run with confinement `none`
+  on the open network after the level's confirmation, a child connecting on
+  loopback, and a session ends when Strict turns on.
 
 **Decision DB7: a device the host's own person paired debugs as a local
 window does; no other device session starts, controls, or observes.** A
@@ -2177,8 +2191,9 @@ Each sub-slice is its own pull request with this addendum updated in place.
 
 - Authority is checked on the server before effects, and the renderer holds
   none ([architecture](../architecture.md#security-and-authority)).
-- One confinement port. A missing backend fails closed, and Windows Code is
-  refused until its confinement design exists
+- One confinement port. A missing backend fails closed, and on Windows,
+  which has no confinement Octant can use yet, a server or session runs
+  unconfined outside Strict and is refused under it
   ([architecture](../architecture.md#current-release-boundary)).
 - Executable components are quarantined until reviewed, then supervised.
   Installing never implies trust or enablement, and disabled components

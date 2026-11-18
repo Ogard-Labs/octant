@@ -204,9 +204,7 @@ describe("ChatComposer thread mentions", () => {
     (message as HTMLTextAreaElement).setSelectionRange(8, 8);
     await user.keyboard("{ArrowLeft}{ArrowRight}");
 
-    expect(
-      screen.getByText("No matching thread you can open. Leaving this as ordinary text."),
-    ).toBeVisible();
+    expect(screen.getByText("No thread you can open matches. Kept as plain text.")).toBeVisible();
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     await user.keyboard("{Enter}");
     expect(onSend).toHaveBeenCalledWith("#nothing");
@@ -360,7 +358,7 @@ describe("ChatComposer image paste", () => {
       onImagePasteRejected,
       imageAttachment: {
         kind: "unavailable",
-        reason: "The selected model does not accept images. Choose an image-capable model.",
+        reason: "This model cannot read images. Pick one that can.",
       },
     });
 
@@ -368,7 +366,7 @@ describe("ChatComposer image paste", () => {
 
     expect(onFileSelected).not.toHaveBeenCalled();
     expect(onImagePasteRejected).toHaveBeenCalledWith(
-      "The selected model does not accept images. Choose an image-capable model.",
+      "This model cannot read images. Pick one that can.",
     );
   });
 

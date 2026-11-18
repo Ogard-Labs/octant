@@ -1,0 +1,218 @@
+import { describe, expect, it } from "vitest";
+import {
+  ENVIRONMENT_BESIDE_TOOLS_MIN_WORKSPACE,
+  environmentApart,
+  environmentGivenWay,
+  workspaceHoldsEnvironmentBesideTools,
+  splitEnvironmentStrip,
+  withEnvironmentOpen,
+  storedColumnShares,
+  storedTileShares,
+} from "./dockEnvironmentStrip";
+import type { ThreadUtilityDockState } from "./rightUtilityDockSelection";
+
+const tabs = [
+  { id: "env", surface: "environment" },
+  { id: "browser", surface: "browser" },
+  { id: "terminal", surface: "terminal" },
+] as const;
+
+describe("how the dock divides between the Environment strip and the tools", () => {
+  it("shows no tool beside the strip while only Environment is open", () => {
+    const split = splitEnvironmentStrip({ tabs: [tabs[0]], active: "env" });
+    expect(split.environmentTabId).toBe("env");
+    expect(split.toolTabIds).toEqual([]);
+    expect(split.toolLayout).toBeUndefined();
+  });
+
+  it("puts a Browser in the tool columns, never in the strip", () => {
+    const split = splitEnvironmentStrip({ tabs: [tabs[0], tabs[1]], active: "browser" });
+    expect(split.toolTabIds).toEqual(["browser"]);
+  });
+
+  it("keeps the tool on screen when Environment is brought to the front", () => {
+    const split = splitEnvironmentStrip({ tabs: [tabs[0], tabs[1]], active: "env" });
+    expect(split.toolTabIds).toEqual(["browser"]);
+  });
+
+  it("does not bring a minimised tool back as a column", () => {
+    const split = splitEnvironmentStrip({
+      tabs: [tabs[0], tabs[1]],
+      active: "env",
+      minimised: ["browser"],
+    });
+    expect(split.toolTabIds).toEqual([]);
+  });
+
+  it("takes Environment out of a stored layout and keeps the other columns", () => {
+    const state: ThreadUtilityDockState = {
+      tabs: [...tabs],
+      active: "terminal",
+      layout: {
+        columns: [
+          { share: 0.4, tiles: [{ tabId: "env", share: 1 }] },
+          {
+            share: 0.6,
+            tiles: [
+              { tabId: "terminal", share: 0.5 },
+              { tabId: "browser", share: 0.5 },
+            ],
+          },
+        ],
+      },
+    };
+    const split = splitEnvironmentStrip(state);
+    expect(split.toolTabIds).toEqual(["terminal", "browser"]);
+    expect(split.toolLayout?.columns).toHaveLength(1);
+    expect(split.toolLayout?.columns[0]?.share).toBe(1);
+    expect(split.columnOrigins).toEqual([1]);
+    expect(storedColumnShares(state, split, [1])).toEqual([0.4, 0.6]);
+  });
+
+  it("puts a tile resize back with Environment's share kept in its column", () => {
+    const state: ThreadUtilityDockState = {
+      tabs: [...tabs],
+      active: "browser",
+      layout: {
+        columns: [
+          {
+            share: 1,
+            tiles: [
+              { tabId: "env", share: 0.2 },
+              { tabId: "browser", share: 0.4 },
+              { tabId: "terminal", share: 0.4 },
+            ],
+          },
+        ],
+      },
+    };
+    const split = splitEnvironmentStrip(state);
+    const stored = storedTileShares(state, split, 0, [0.75, 0.25]);
+    expect(stored?.column).toBe(0);
+    expect(stored?.shares[0]).toBeCloseTo(0.2);
+    expect(stored?.shares[1]).toBeCloseTo(0.6);
+    expect(stored?.shares[2]).toBeCloseTo(0.2);
+  });
+});
+
+describe("Environment kept apart from the tool tiles", () => {
+  it("takes Environment out of the layout, so one tool beside it is one column", () => {
+    const apart = environmentApart({
+      tabs: [...tabs],
+      active: "browser",
+      layout: {
+        columns: [
+          { share: 0.5, tiles: [{ tabId: "env", share: 1 }] },
+          { share: 0.5, tiles: [{ tabId: "browser", share: 1 }] },
+        ],
+      },
+    });
+    expect(apart.layout?.columns).toEqual([{ share: 1, tiles: [{ tabId: "browser", share: 1 }] }]);
+    expect(apart.tabs.map((tab) => tab.id)).toEqual(["env", "browser", "terminal"]);
+  });
+
+  it("moves the front from Environment to a shown tool, and leaves Environment in front alone", () => {
+    const shared: ThreadUtilityDockState = {
+      tabs: [...tabs],
+      active: "env",
+      layout: {
+        columns: [
+          {
+            share: 1,
+            tiles: [
+              { tabId: "env", share: 0.5 },
+              { tabId: "terminal", share: 0.5 },
+            ],
+          },
+        ],
+      },
+    };
+    expect(environmentApart(shared).active).toBe("terminal");
+    const alone = environmentApart({ tabs: [tabs[0]] });
+    expect(alone.active).toBe("env");
+    expect(alone.layout).toBeUndefined();
+  });
+
+  it("returns the same state when Environment is already apart, or not open", () => {
+    const none: ThreadUtilityDockState = { tabs: [tabs[1]], active: "browser" };
+    expect(environmentApart(none)).toBe(none);
+    const apart: ThreadUtilityDockState = { tabs: [tabs[0], tabs[1]], active: "browser" };
+    expect(environmentApart(apart)).toBe(apart);
+  });
+
+  it("opens the section without changing the tools shown or the tool in front", () => {
+    const state: ThreadUtilityDockState = {
+      tabs: [tabs[1], tabs[2]],
+      active: "terminal",
+      layout: {
+        columns: [
+          {
+            share: 1,
+            tiles: [
+              { tabId: "browser", share: 0.5 },
+              { tabId: "terminal", share: 0.5 },
+            ],
+          },
+        ],
+      },
+    };
+    const opened = withEnvironmentOpen(state);
+    expect(opened.tabs.at(-1)).toEqual({ id: "environment", surface: "environment" });
+    expect(opened.layout).toBe(state.layout);
+    expect(opened.active).toBe("terminal");
+    expect(withEnvironmentOpen(opened)).toBe(opened);
+    expect(withEnvironmentOpen({ tabs: [] }).active).toBe("environment");
+  });
+});
+
+describe("Environment in a workspace too narrow for it beside a tool", () => {
+  it("fits from the thread's 360px, its own 300px and a 280px tool column up", () => {
+    expect(ENVIRONMENT_BESIDE_TOOLS_MIN_WORKSPACE).toBe(940);
+    expect(workspaceHoldsEnvironmentBesideTools(940)).toBe(true);
+    // 1212px window, 280px sidebar and the rail: the dock ran past the edge.
+    expect(workspaceHoldsEnvironmentBesideTools(876)).toBe(false);
+  });
+
+  it("gives way while a tool pane is shown, and is drawn alone", () => {
+    const alone: ThreadUtilityDockState = { tabs: [tabs[0]], active: "env" };
+    expect(environmentGivenWay(alone)).toBe(alone);
+    const beside = environmentApart({ tabs: [tabs[0], tabs[1]], active: "browser" });
+    const drawn = environmentGivenWay(beside);
+    expect(drawn.tabs.map((tab) => tab.id)).toEqual(["browser"]);
+    expect(drawn.active).toBe("browser");
+    expect(splitEnvironmentStrip(drawn).environmentTabId).toBeUndefined();
+  });
+
+  it("stays while the only other tool is a card, since no pane is shown", () => {
+    const state: ThreadUtilityDockState = {
+      tabs: [tabs[0], tabs[1]],
+      active: "env",
+      minimised: ["browser"],
+    };
+    expect(environmentGivenWay(environmentApart(state)).tabs.map((tab) => tab.id)).toEqual([
+      "env",
+      "browser",
+    ]);
+  });
+
+  it("keeps the tiles as they were, in a layout too", () => {
+    const state = environmentApart({
+      tabs: [...tabs],
+      active: "terminal",
+      layout: {
+        columns: [
+          {
+            share: 1,
+            tiles: [
+              { tabId: "browser", share: 0.5 },
+              { tabId: "terminal", share: 0.5 },
+            ],
+          },
+        ],
+      },
+    });
+    const drawn = environmentGivenWay(state);
+    expect(drawn.layout).toEqual(state.layout);
+    expect(drawn.tabs.map((tab) => tab.id)).toEqual(["browser", "terminal"]);
+  });
+});

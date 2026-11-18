@@ -6,7 +6,7 @@ import type { ComputerUseClient } from "@octant/client-runtime/computer-use-clie
 import type { BrowserThreadId } from "@octant/contracts/browser-automation";
 import type { BrowserAutomationSnapshot } from "@octant/contracts/browser-automation-rpc";
 import type { ComputerUseSessionView } from "@octant/contracts/computer-use";
-import { Eye, EyeOff, MonitorUp, Square } from "lucide-react";
+import { Eye, EyeOff, MonitorUp, Square } from "../ui/icons";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { IconButton } from "../shell/IconButton";

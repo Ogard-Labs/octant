@@ -16,15 +16,15 @@ import {
   Monitor,
   Smartphone,
   Tablet,
-  SlidersHorizontal,
+  HostTower,
   SquareTerminal,
   Truck,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "../ui/icons";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 
-const ICONS: Readonly<Record<RightUtilityDockSurfaceId, LucideIcon>> = {
-  environment: SlidersHorizontal,
+const ICONS: Readonly<Record<RightUtilityDockSurfaceId, IconComponent>> = {
+  environment: HostTower,
   browser: Globe2,
   canvas: FileStack,
   review: GitCompareArrows,
@@ -45,7 +45,7 @@ const ICONS: Readonly<Record<RightUtilityDockSurfaceId, LucideIcon>> = {
   artifacts: Layers,
 };
 
-export function dockToolIcon(surface: RightUtilityDockSurfaceId): LucideIcon {
+export function dockToolIcon(surface: RightUtilityDockSurfaceId): IconComponent {
   return ICONS[surface] ?? CircleDashed;
 }
 

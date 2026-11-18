@@ -5,6 +5,8 @@ import { decodeCodeThreadId, type CodeThread } from "@octant/contracts/code";
 import { decodeUtcTimestamp, decodeWorkThreadId, type WorkThread } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { memo, useMemo } from "react";
+import type { CodeProjectPullRequestRow } from "@octant/contracts";
+import { ProjectReviewModule } from "../dockModules/ProjectReviewModule";
 import { useMinuteTick } from "../polling/useMinuteTick";
 import { buildAutomationEditorCatalog } from "../automation/automationEditorCatalog";
 import {
@@ -49,6 +51,8 @@ export interface ReaderPagesContainerProps {
     | "openChatThread"
     | "openCodeThread"
     | "openDraftInActiveProject"
+    | "openLinkedProjectPullRequestThread"
+    | "openProjectPullRequestChat"
     | "openProject"
     | "openProjectCreate"
     | "openSelectedProject"
@@ -57,6 +61,7 @@ export interface ReaderPagesContainerProps {
     | "openThreadBoard"
     | "openWorkThread"
     | "selectChatThread"
+    | "startNewThreadDraft"
     | "selectCodeThread"
     | "selectProjectPullRequest"
     | "selectProjectPullRequestIdentity"
@@ -114,6 +119,8 @@ export interface ReaderPagesContainerProps {
   readonly environmentNames: ReadonlyMap<string, string>;
   readonly githubClient: WorkspaceRailLayersProps["githubClient"];
   readonly githubIssuesOpen: boolean;
+  /** The signed-in GitHub login; the pull-request list's Involvement choices need it. */
+  readonly githubViewerLogin?: string;
   readonly githubIssuesReadAvailable: boolean;
   readonly hostBridge?: OctantHostBridge;
   readonly imageLibraryOpen: boolean;
@@ -186,6 +193,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
     githubClient,
     githubIssuesOpen,
     githubIssuesReadAvailable,
+    githubViewerLogin,
     imageLibraryOpen,
     imageProfiles,
     inboxAttentionItems,
@@ -302,6 +310,10 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
             changeRevision: navigationRevision,
             now,
             onClose: () => actions.setReviewOpen(false),
+            onStartThread: () => {
+              actions.closeWorkspaceReaders();
+              actions.startNewThreadDraft(activeMode);
+            },
             ...(inboxDecisions === undefined ? {} : { decisions: inboxDecisions }),
             codeProjectAccess: {
               boundProjectId:
@@ -371,6 +383,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         : undefined,
     [
       actions,
+      activeMode,
       allProjects,
       boundCodeProjectId,
       inboxDecisions,
@@ -381,6 +394,27 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
       reviewSource,
     ],
   );
+
+  const activeProject = allProjects.find(
+    (project) => activeProjectId !== undefined && String(project.id) === String(activeProjectId),
+  );
+  const activeProjectRepository =
+    activeProject?.type === "code" && activeProject.connectedRepository !== undefined
+      ? {
+          owner: activeProject.connectedRepository.owner,
+          name: activeProject.connectedRepository.repository,
+        }
+      : undefined;
+
+  const projectThreadCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const thread of [...(workThreads ?? []), ...(codeThreads ?? [])]) {
+      if (thread.lifecycle === "archived" || thread.projectId === undefined) continue;
+      const key = String(thread.projectId);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [codeThreads, workThreads]);
 
   const archiveEntries = useMemo<ReadonlyArray<ArchivedThreadEntry>>(
     () => [
@@ -410,12 +444,62 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
     [allProjects],
   );
 
+  // The pull-request destination reads a pull request beside its list. It is
+  // the dock review's loader and commands on a query the page itself holds, so
+  // nothing here widens what a pull request lets the person do.
+  const renderProjectPullRequestDetail = (row: CodeProjectPullRequestRow) => {
+    const query = {
+      projectId: row.projectId,
+      repositoryOwner: row.repositoryOwner,
+      repositoryName: row.repositoryName,
+      number: row.number,
+    };
+    return (
+      <ProjectReviewModule
+        key={`${String(row.projectId)}:${row.repositoryOwner}/${row.repositoryName}#${row.number}`}
+        layout="page"
+        load={(next) => codeClient.queryProjectPullRequestDetail(next)}
+        onMerge={(method, headSha) =>
+          codeClient.mergeProjectPullRequest === undefined || headSha === ""
+            ? Promise.resolve({ status: "unavailable", reason: "unavailable" } as const)
+            : codeClient.mergeProjectPullRequest({ ...query, method, headSha, confirmed: true })
+        }
+        onOpenChat={actions.openProjectPullRequestChat}
+        onOpenLinkedThread={(thread) =>
+          actions.openLinkedProjectPullRequestThread(thread, row.projectId)
+        }
+        query={query}
+        refresh={(command) => codeClient.refreshProjectPullRequestDetail(command)}
+        updatedAt={row.updatedAt}
+        {...(codeClient.queryProjectPullRequestSwitches === undefined
+          ? {}
+          : { loadSwitches: codeClient.queryProjectPullRequestSwitches.bind(codeClient) })}
+        {...(codeClient.readProjectPullRequestActionContext === undefined ||
+        codeClient.actOnProjectPullRequest === undefined
+          ? {}
+          : {
+              loadActionContext: codeClient.readProjectPullRequestActionContext.bind(codeClient),
+              act: codeClient.actOnProjectPullRequest.bind(codeClient),
+            })}
+        {...(codeClient.setProjectPullRequestMergeWhenReady === undefined
+          ? {}
+          : {
+              setMergeWhenReady: codeClient.setProjectPullRequestMergeWhenReady.bind(codeClient),
+            })}
+        {...(codeClient.setProjectPullRequestAutoFix === undefined
+          ? {}
+          : { setAutoFix: codeClient.setProjectPullRequestAutoFix.bind(codeClient) })}
+      />
+    );
+  };
+
   return (
     <>
       {projectsListOpen ? (
         <div className="projects-page-layer">
           <ProjectsDirectory
             availabilityByProject={availabilityByProject}
+            threadCountByProject={projectThreadCounts}
             onAddProject={() => openProjectCreate()}
             onBack={() => actions.setProjectsListOpen(false)}
             onOpenProject={(project) => void openSelectedProject(project)}
@@ -460,16 +544,10 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
             signalProjectId,
           );
         }}
-        // Chat has no board: asking for one there opens a layer that
-        // hides the workspace and renders nothing in its place.
-        {...(activeMode === "chat" || !threadBoardAvailable
-          ? {}
-          : {
-              onOpenBoard: () => {
-                actions.closeWorkspaceReaders();
-                actions.openThreadBoard();
-              },
-            })}
+        onStartThread={() => {
+          actions.closeWorkspaceReaders();
+          actions.startNewThreadDraft(activeMode);
+        }}
         {...(githubIssuesReadAvailable ? { loadAssignedGithubWork } : {})}
         {...(linearIssuesRead
           ? {
@@ -480,11 +558,16 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
               },
             }
           : {})}
+        {...(activeProjectRepository === undefined
+          ? {}
+          : { projectRepository: activeProjectRepository })}
         codeBoardOpen={codeBoardOpen}
         threadBoardAvailable={threadBoardAvailable}
         codePullRequestsOpen={codePullRequestsOpen}
         githubIssuesOpen={githubIssuesOpen}
         githubClient={githubClient}
+        {...(githubViewerLogin === undefined ? {} : { githubViewerLogin })}
+        renderProjectPullRequestDetail={renderProjectPullRequestDetail}
         linearIssuesOpen={linearIssuesOpen}
         linearClient={linearClient}
         onCloseLinearIssues={() => actions.setLinearIssuesOpen(false)}

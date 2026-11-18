@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, X } from "../ui/icons";
 import { useState, type ReactNode } from "react";
 import {
   nativeHarnessSlotCandidateKey,

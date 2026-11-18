@@ -8,6 +8,14 @@
   min-width: 0;
 }
 
+/* With nothing to list, the panel is its pane's one state: it takes the pane's
+   height, so the state stands in the pane's middle like every other tool's. */
+:is(.right-utility-dock__tool, .bottom-utility-panel__content)
+  > .agent-hierarchy:has(> .surface-empty) {
+  flex: 1 1 auto;
+  align-content: center;
+}
+
 .agent-hierarchy--reconnecting {
   opacity: 0.8;
 }
@@ -30,7 +38,6 @@
   font-weight: var(--oct-weight-medium);
 }
 
-.agent-hierarchy__empty,
 .agent-hierarchy__banner {
   margin: 0;
   color: var(--oct-muted);
@@ -542,6 +549,15 @@
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
   font-weight: normal;
+}
+
+/* A message for a running subagent: one line, the field taking the room. */
+.composer-subagents__message {
+  display: flex;
+  flex: 1 1 12rem;
+  align-items: center;
+  gap: var(--oct-space-1);
+  min-width: 0;
 }
 
 /* Stop appears on the row the pointer or focus is on. Hidden rather than

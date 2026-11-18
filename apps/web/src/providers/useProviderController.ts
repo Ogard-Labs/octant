@@ -44,7 +44,11 @@ import {
   ProviderClientFailure,
   type ProviderClient,
 } from "@octant/client-runtime/provider-client";
-import { isAcpAgentInstance, providerLatestVersionNpmPackage } from "@octant/domain";
+import {
+  claudeAccountUsesStoredKey,
+  isAcpAgentInstance,
+  providerLatestVersionNpmPackage,
+} from "@octant/domain";
 import { parseClaudeAccountAccent } from "./configuration/claudeAccountValues";
 import { runProviderOAuthCommand } from "./providerOAuthClient";
 import type { ProviderOAuthCommand } from "./ProviderOAuthSignIn";
@@ -63,6 +67,26 @@ const BROWSER_CANNOT_SAVE_KEYS =
   "This window cannot save provider keys. On the host, run `octant provider key set <provider>`, or use the desktop app.";
 
 export type ProviderControllerStatus = "loading" | "ready" | "disconnected";
+
+/** A person's step for an added ACP agent, as Settings sends it. */
+export type AcpAgentStep =
+  | {
+      readonly kind: "add";
+      readonly source:
+        | { readonly kind: "registry"; readonly registryId: string }
+        | {
+            readonly kind: "local";
+            readonly displayName: string;
+            readonly command: string;
+            readonly args: ReadonlyArray<string>;
+          };
+    }
+  | {
+      readonly kind: "install" | "trust" | "untrust" | "enable" | "disable" | "remove";
+      readonly instanceId: ProviderInstanceId;
+    };
+
+export type ProviderAuthenticationOutcome = "completed" | "pending" | "failed";
 
 export interface ProviderControllerOptions {
   readonly client?: ProviderClient;
@@ -1049,13 +1073,14 @@ export function useProviderController(options: ProviderControllerOptions) {
             }
             return false;
           }
-          if (
-            configuration.authentication === "api-key" &&
-            hostBridge !== undefined &&
-            credentialValue.length === 0
-          ) {
+          const usesKey = claudeAccountUsesStoredKey(configuration.authentication);
+          if (usesKey && hostBridge !== undefined && credentialValue.length === 0) {
             if (mounted.current) {
-              setMessage("Enter an Anthropic API key before creating this provider.");
+              setMessage(
+                configuration.authentication === "gateway"
+                  ? "Enter the gateway token before creating this account."
+                  : "Enter an Anthropic API key before creating this provider.",
+              );
             }
             return false;
           }
@@ -1075,12 +1100,12 @@ export function useProviderController(options: ProviderControllerOptions) {
               install,
             );
             created = true;
-            if (configuration.authentication === "api-key" && hostBridge !== undefined) {
+            if (usesKey && hostBridge !== undefined) {
               await hostBridge.addProviderApiKey(instanceId, credentialValue);
             }
             return true;
           } catch (error) {
-            if (configuration.authentication === "api-key" && created) {
+            if (usesKey && created) {
               if (mounted.current) {
                 setMessage(
                   storeFailureMessage(
@@ -1125,31 +1150,30 @@ export function useProviderController(options: ProviderControllerOptions) {
     [client],
   );
 
+  // Asked every few seconds while the person signs in, so it leaves `busy`
+  // alone: the card's other actions do not flicker on each check.
   const completeProviderAuthentication = useCallback(
     async (
       instanceId: ProviderInstanceId,
       attemptId: ProviderAuthenticationAttempt["attemptId"],
-    ): Promise<boolean> => {
-      if (client === undefined) return false;
-      if (mounted.current) {
-        setBusy(true);
-        setMessage(undefined);
-      }
+      code?: string,
+    ): Promise<ProviderAuthenticationOutcome> => {
+      if (client === undefined) return "failed";
       try {
         const result = await client.execute({
           kind: "complete-provider-authentication",
           instanceId,
           attemptId,
+          ...(code === undefined ? {} : { code }),
         });
+        if (result.kind === "provider-authentication-pending") return "pending";
         if (result.kind !== "provider-authentication-completed") {
           throw new Error("Provider returned an invalid authentication result.");
         }
-        return true;
+        return "completed";
       } catch (error) {
         if (mounted.current) setMessage(failureMessage(error, PROVIDER_UNAVAILABLE));
-        return false;
-      } finally {
-        if (mounted.current) setBusy(false);
+        return "failed";
       }
     },
     [client],
@@ -1246,19 +1270,32 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           const previousAuthentication = instance.configuration.authentication;
           const nextAuthentication = configuration.authentication;
+          const previousUsesKey = claudeAccountUsesStoredKey(previousAuthentication);
+          const nextUsesKey = claudeAccountUsesStoredKey(nextAuthentication);
+          // The host forgets a stored key or token when the gateway it was
+          // entered for changes, including a move between a gateway and
+          // Anthropic's own API, so such a change needs a new one.
+          const credentialMoves =
+            configuration.gatewayBaseUrl !== instance.configuration.gatewayBaseUrl;
           if (
-            nextAuthentication === "api-key" &&
-            previousAuthentication === "subscription" &&
+            nextUsesKey &&
+            (!previousUsesKey || credentialMoves) &&
             credentialValue.length === 0
           ) {
             if (mounted.current) {
-              setMessage("Enter an Anthropic API key before switching authentication modes.");
+              setMessage(
+                nextAuthentication === "gateway"
+                  ? "Enter the gateway token before switching to this gateway."
+                  : "Enter an Anthropic API key before switching authentication modes.",
+              );
             }
             return false;
           }
-          const mustClear =
-            previousAuthentication === "api-key" && nextAuthentication === "subscription";
-          const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
+          const mustClear = previousUsesKey && !nextUsesKey;
+          const mustSet = nextUsesKey && credentialValue.length > 0;
+          // A key stored before a change that moves it would be the one the
+          // host deletes, so it is stored after that change instead.
+          const setAfterChange = mustSet && credentialMoves;
           if ((mustClear || mustSet) && hostBridge === undefined) {
             if (mounted.current) {
               setMessage(BROWSER_CANNOT_SAVE_KEYS);
@@ -1275,7 +1312,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           // while the instance has an active session, and clearing first left
           // the instance still configured for API-key authentication with no
           // key to connect with and nothing able to put it back.
-          if (mustSet && bridge !== undefined) {
+          if (mustSet && !setAfterChange && bridge !== undefined) {
             try {
               await bridge.addProviderApiKey(instanceId, credentialValue);
             } catch (storeError) {
@@ -1312,9 +1349,24 @@ export function useProviderController(options: ProviderControllerOptions) {
                 .clearProviderCredential(instanceId)
                 .catch(() => void credentialCleanupRequired.current.add(instanceId));
             }
+            if (setAfterChange && bridge !== undefined) {
+              try {
+                await bridge.addProviderApiKey(instanceId, credentialValue);
+              } catch (storeError) {
+                if (mounted.current) {
+                  setMessage(
+                    storeFailureMessage(
+                      "The account was saved, but its credential could not be stored. Add it, then check the connection.",
+                      storeError,
+                    ),
+                  );
+                }
+                return false;
+              }
+            }
             return true;
           } catch (error) {
-            if (mustSet && previousAuthentication === "subscription" && bridge !== undefined) {
+            if (mustSet && !setAfterChange && !previousUsesKey && bridge !== undefined) {
               try {
                 await bridge.clearProviderCredential(instanceId);
               } catch {
@@ -2169,6 +2221,41 @@ export function useProviderController(options: ProviderControllerOptions) {
       }),
     [execute],
   );
+  /**
+   * One step for any ACP agent: adding it, then installing, trusting and
+   * enabling it, each a separate command the host decides on. A registry
+   * agent is sent by its registry id alone; nothing else about it comes from
+   * here.
+   */
+  const acpAgentStep = useCallback(
+    (step: AcpAgentStep) =>
+      execute((current) => {
+        if (step.kind === "add") {
+          return {
+            kind: "add-acp-agent",
+            instanceId: decodeProviderInstanceId(crypto.randomUUID()),
+            expectedVersion: 0 as ProviderDefaults["version"],
+            source: step.source,
+          };
+        }
+        const instance = findProvider(current, step.instanceId);
+        if (instance === undefined) return undefined;
+        const target = { instanceId: step.instanceId, expectedVersion: instance.version };
+        switch (step.kind) {
+          case "install":
+            return { kind: "install-acp-agent", ...target };
+          case "trust":
+          case "untrust":
+            return { kind: "set-acp-agent-trust", ...target, trusted: step.kind === "trust" };
+          case "enable":
+          case "disable":
+            return { kind: "set-provider-enabled", ...target, enabled: step.kind === "enable" };
+          case "remove":
+            return { kind: "remove-provider", ...target };
+        }
+      }),
+    [execute],
+  );
   const setProviderOwnMemory = useCallback(
     (instanceId: ProviderInstanceId, enabled: boolean) =>
       execute((current) => {
@@ -2287,6 +2374,8 @@ export function useProviderController(options: ProviderControllerOptions) {
               instance.configuration.authentication === "bearer" ||
               credentialCleanupRequired.current.has(instanceId))) ||
           configurationAuthentication(instance) === "api-key" ||
+          (instance.driverKind === "claude" &&
+            instance.configuration.authentication === "gateway") ||
           (usesSubscriptionAuthentication(instance) &&
             credentialCleanupRequired.current.has(instanceId));
         // Only credential-bearing instances need the desktop bridge, so the
@@ -2651,6 +2740,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     setClaudeArtifactDelivery,
     setProviderNativeSetup,
     setProviderOwnMemory,
+    acpAgentStep,
     threadNativeSetup,
     setDataTags,
     setModelDataTags,

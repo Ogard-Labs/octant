@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { createEvent, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DockToolButtons } from "./DockToolButtons";
@@ -200,27 +200,96 @@ describe("the title band's tool buttons", () => {
     expect(screen.getByRole("button", { name: "More tools" })).toBeInTheDocument();
   });
 
-  it("makes an open tool's button the drag source, carrying its name", () => {
-    const transfer = { setData: vi.fn(), effectAllowed: "" };
+  it("makes an open tool's button a drag source without taking its click", () => {
+    const onPress = vi.fn();
     render(
       <DockToolButtons
         model={model({
           buttons: [button("files", "Files", { tabId: "files", tabIds: ["files"] })],
         })}
-        onPress={vi.fn()}
+        onPress={onPress}
       />,
     );
     const files = screen.getByRole("button", { name: "Files" });
-    expect(files).toHaveAttribute("draggable", "true");
-    fireEvent.dragStart(files, { dataTransfer: transfer });
-    expect(transfer.setData).toHaveBeenCalledWith("text/plain", "Files");
-    expect(transfer.effectAllowed).toBe("move");
-    fireEvent.dragEnd(files);
+    expect(files).toHaveAttribute("data-pane-drag", "true");
+    // A press that does not travel stays a click on the button.
+    fireEvent.pointerDown(files, { button: 0 });
+    fireEvent.pointerUp(document.body);
+    fireEvent.click(files);
+    expect(onPress).toHaveBeenCalledWith("files", files);
+  });
+
+  it("swallows the release of a drag given up with Escape, and nothing after it", () => {
+    const onPress = vi.fn();
+    render(
+      <DockToolButtons
+        model={model({
+          buttons: [button("files", "Files", { tabId: "files", tabIds: ["files"] })],
+        })}
+        onPress={onPress}
+      />,
+    );
+    const files = screen.getByRole("button", { name: "Files" });
+    const at = (kind: "pointerDown" | "pointerMove" | "pointerUp", target: Element, x: number) => {
+      const event = createEvent[kind](target, { button: 0 });
+      Object.defineProperties(event, {
+        clientX: { value: x },
+        clientY: { value: 10 },
+        pointerId: { value: 1 },
+      });
+      fireEvent(target, event);
+    };
+    at("pointerDown", files, 10);
+    at("pointerMove", document.body, 80);
+    expect(document.querySelector(".workspace-drag-preview")).not.toBeNull();
+    // Escape with the button still down: the drag is over, its release is not.
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(document.querySelector(".workspace-drag-preview")).toBeNull();
+    at("pointerUp", files, 12);
+    fireEvent.click(files);
+    expect(onPress).not.toHaveBeenCalled();
+    // The next press is a new gesture: its click is the button's.
+    at("pointerDown", files, 10);
+    at("pointerUp", files, 10);
+    fireEvent.click(files);
+    expect(onPress).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets the next plain click through after a drag whose release never arrived", () => {
+    const onPress = vi.fn();
+    render(
+      <DockToolButtons
+        model={model({
+          buttons: [button("files", "Files", { tabId: "files", tabIds: ["files"] })],
+        })}
+        onPress={onPress}
+      />,
+    );
+    const files = screen.getByRole("button", { name: "Files" });
+    const at = (kind: "pointerDown" | "pointerMove" | "pointerUp", target: Element, x: number) => {
+      const event = createEvent[kind](target, { button: 0 });
+      Object.defineProperties(event, {
+        clientX: { value: x },
+        clientY: { value: 10 },
+        pointerId: { value: 1 },
+      });
+      fireEvent(target, event);
+    };
+    // A drag begins and its release is lost (it landed on a native overlay).
+    at("pointerDown", files, 10);
+    at("pointerMove", document.body, 80);
+    expect(document.querySelector(".workspace-drag-preview")).not.toBeNull();
+    // The next press ends the abandoned drag; its own click is the button's.
+    at("pointerDown", files, 10);
+    expect(document.querySelector(".workspace-drag-preview")).toBeNull();
+    at("pointerUp", files, 10);
+    fireEvent.click(files);
+    expect(onPress).toHaveBeenCalledTimes(1);
   });
 
   it("does not drag a tool that has no tab, or any tool when the dock has no drop zones", () => {
     const { rerender } = render(<DockToolButtons model={model()} onPress={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "Terminal" })).not.toHaveAttribute("draggable");
+    expect(screen.getByRole("button", { name: "Terminal" })).not.toHaveAttribute("data-pane-drag");
     rerender(
       <DockToolButtons
         dragSource={false}
@@ -228,7 +297,7 @@ describe("the title band's tool buttons", () => {
         onPress={vi.fn()}
       />,
     );
-    expect(screen.getByRole("button", { name: "Files" })).not.toHaveAttribute("draggable");
+    expect(screen.getByRole("button", { name: "Files" })).not.toHaveAttribute("data-pane-drag");
   });
 
   it("renders nothing when no tool is available", () => {

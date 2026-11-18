@@ -29,6 +29,12 @@ const mentionedThreadId = "90000000-0000-4000-8000-000000000001" as never;
 const alternateProviderId = "80000000-0000-4000-8000-0000000000a2" as never;
 const alternateModelId = "model-two" as never;
 
+/** Opens the + menu and chooses one of the thread's own actions from it. */
+async function chooseFromAddMenu(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(await screen.findByRole("button", { name: /^Add attachment/ }));
+  await user.click(await screen.findByRole("menuitem", { name }));
+}
+
 describe("Code plan proposals", () => {
   it.each([0, 503])(
     "keeps plan retry reachable after an initial read fails with %s",
@@ -46,7 +52,7 @@ describe("Code plan proposals", () => {
         </ThreadPlanProvider>,
       );
 
-      await user.click(await screen.findByRole("button", { name: "Propose plan" }));
+      await chooseFromAddMenu(user, "Propose plan");
       const dialog = await screen.findByRole("dialog", { name: "New plan" });
       expect(within(dialog).queryByRole("textbox", { name: "Plan title" })).not.toBeInTheDocument();
       await user.click(within(dialog).getByRole("button", { name: "Retry" }));
@@ -80,14 +86,11 @@ describe("Code plan proposals", () => {
         </ThreadPlanProvider>,
       );
 
-      const entry = await screen.findByRole("button", { name: "Propose plan" });
-      entry.focus();
-      await user.keyboard("{Enter}");
+      await chooseFromAddMenu(user, "Propose plan");
       await screen.findByRole("dialog", { name: "New plan" });
       await user.keyboard("{Escape}");
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-      expect(entry).toHaveFocus();
-      await user.keyboard("{Enter}");
+      await chooseFromAddMenu(user, "Propose plan");
       const dialog = await screen.findByRole("dialog", { name: "New plan" });
       await user.type(
         within(dialog).getByRole("textbox", { name: "Plan title" }),
@@ -105,7 +108,9 @@ describe("Code plan proposals", () => {
         expect.objectContaining({ kind: "propose-thread-plan", title: "Review the change" }),
       );
       expect(code.sendFollowUp).not.toHaveBeenCalled();
-      expect(screen.queryByRole("button", { name: "Propose plan" })).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /^Add attachment/ }));
+      expect(await screen.findByRole("menuitem", { name: "Thread info" })).toBeVisible();
+      expect(screen.queryByRole("menuitem", { name: "Propose plan" })).not.toBeInTheDocument();
     },
   );
 });
@@ -125,7 +130,7 @@ describe("updated native session tools", () => {
     fireEvent.drop(screen.getByLabelText("Follow-up message"), {
       dataTransfer: nativeFolderTransfer(),
     });
-    expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+    expect(await screen.findByText(/Folder drops need the desktop app/)).toBeVisible();
     expect(screen.getByLabelText("Follow-up message")).toHaveValue("Use updated tools");
     expect(action).toBeVisible();
     expect(code.sendFollowUp).not.toHaveBeenCalled();
@@ -427,7 +432,11 @@ describe("CodeThreadWorkspace", () => {
       screen.getByRole("button", { name: /Continue elsewhere/, hidden: true }),
     ).not.toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "Thread info" }));
+    // The row under the box holds no button for it: the + menu offers it.
+    expect(
+      screen.queryByRole("button", { name: "Thread info", hidden: true }),
+    ).not.toBeInTheDocument();
+    await chooseFromAddMenu(user, "Thread info");
 
     expect(level).toBeVisible();
     expect(screen.getByRole("region", { name: "Thread info" })).toBe(panel);
@@ -437,7 +446,30 @@ describe("CodeThreadWorkspace", () => {
     await user.keyboard("{Escape}");
 
     expect(level).not.toBeVisible();
-    expect(screen.getByRole("button", { name: "Thread info" })).toHaveFocus();
+  });
+
+  it("counts a running Code turn's time from its own start and names no clock when it has none", async () => {
+    const startedAt = new Date(Date.now() - 65_000).toISOString();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "running",
+              role: "assistant",
+              text: "",
+              status: "incomplete",
+              startedAt,
+              at: startedAt,
+            },
+          ],
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(await screen.findByText("Working")).toBeVisible();
+    expect(screen.getByText(/^1m \d+s$/)).toBeVisible();
   });
 
   it("shows how long a completed Code turn worked and leaves unsettled turns without a duration", async () => {
@@ -547,7 +579,7 @@ describe("CodeThreadWorkspace", () => {
     );
     // Under the pill the row reads the model's name, then the approval control,
     // then the context ring: attach, the prompt, the microphone and send above.
-    const attach = screen.getByRole("button", { name: "Add attachment" });
+    const attach = screen.getByRole("button", { name: /^Add attachment/ });
     const access = screen.getByRole("button", { name: /^Mode:/ });
     const model = screen.getByRole("button", { name: "Provider and model" });
     const follows = (before: Node, after: Node) =>
@@ -595,9 +627,7 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("log")).toHaveTextContent(
-      "No messages yet. Send a prompt to start this thread.",
-    );
+    expect(screen.getByRole("log")).toHaveTextContent("Send a prompt to begin");
     expect(screen.getByRole("button", { name: "Provider and model" })).toBeVisible();
     // Opening a surface is the tab launcher's job, so no row of openers is
     // rendered above the conversation.
@@ -794,10 +824,8 @@ describe("CodeThreadWorkspace", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Loading conversation" })).toBeVisible();
-    expect(screen.getByRole("log")).not.toHaveTextContent(
-      "No messages yet. Send a prompt to start this thread.",
-    );
-    expect(screen.queryByRole("region", { name: "Start a project" })).not.toBeInTheDocument();
+    expect(screen.getByRole("log")).not.toHaveTextContent("Send a prompt to begin");
+    expect(screen.queryByRole("region", { name: "Start from a template" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Set up this workspace" })).not.toBeInTheDocument();
   });
 
@@ -817,10 +845,8 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByRole("article", { name: "Your message" })).toHaveTextContent(
       "Fix the failing test",
     );
-    expect(
-      screen.queryByText("No messages yet. Send a prompt to start this thread."),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Start a project" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Send a prompt to begin/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Start from a template" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Set up this workspace" })).not.toBeInTheDocument();
 
     // Starting the turn re-reads the transcript. The prompt stays where it is
@@ -862,10 +888,8 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("log")).not.toHaveTextContent(
-      "No messages yet. Send a prompt to start this thread.",
-    );
-    expect(screen.queryByRole("region", { name: "Start a project" })).not.toBeInTheDocument();
+    expect(screen.getByRole("log")).not.toHaveTextContent("Send a prompt to begin");
+    expect(screen.queryByRole("region", { name: "Start from a template" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Set up this workspace" })).not.toBeInTheDocument();
   });
 
@@ -978,7 +1002,7 @@ describe("CodeThreadWorkspace", () => {
     expect(alert).toHaveTextContent("This provider cannot carry Octant's Browser tool.");
     // The mark says warning without reading the colour: an icon sits with the
     // sentence, and the sentence keeps the secondary body role the recipe owns.
-    expect(alert.querySelector("svg.lucide-circle-alert")).not.toBeNull();
+    expect(alert.querySelector("svg.octant-icon-circle-alert")).not.toBeNull();
     // A tinted ground plus hairline is the system's warning language; the
     // saturated stripe on the left edge made this read as a generic AI chat
     // warning box instead of one of the thread's own notices.
@@ -2171,7 +2195,7 @@ describe("CodeThreadWorkspace", () => {
 
     const composer = screen.getByLabelText("Follow-up message");
     await user.type(composer, "match this mockup");
-    expect(screen.getByRole("button", { name: "Add attachment" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^Add attachment/ })).toBeEnabled();
     await user.upload(
       screen.getByLabelText("Choose attachment file"),
       new File(["png"], "pasted.png", { type: "image/png" }),
@@ -2408,8 +2432,8 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    const levels = screen.getByRole("slider", { name: "Effort level" });
-    fireEvent.change(levels, { target: { value: levels.getAttribute("max") } });
+    const levels = screen.getByRole("group", { name: "Effort level" });
+    await user.click(within(levels).getByRole("button", { name: "High" }));
     expect(execute).toHaveBeenCalledWith({
       kind: "change-code-thread-provider",
       threadId,
@@ -2433,7 +2457,7 @@ describe("CodeThreadWorkspace", () => {
         threadId={threadId}
       />,
     );
-    fireEvent.change(levels, { target: { value: "0" } });
+    await user.click(within(levels).getByRole("button", { name: "High" }));
     await waitFor(() =>
       expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ modelOptionValues: {} })),
     );
@@ -2573,9 +2597,7 @@ describe("CodeThreadWorkspace", () => {
     );
     const mode = screen.getByRole("button", { name: /^Mode:/ });
     expect(mode).toHaveAccessibleName("Mode: Full access");
-    expect(mode).toHaveAccessibleDescription(
-      "No sandbox and no prompts. Every action is still recorded.",
-    );
+    expect(mode).toHaveAccessibleDescription("No sandbox, no prompts. Still recorded.");
   });
 
   it("keeps sent messages free of access captions", () => {
@@ -3445,12 +3467,12 @@ describe("CodeThreadWorkspace", () => {
     );
 
     // Settled turns fold the toolchain behind one quiet line.
-    expect(screen.getByRole("button", { name: "1 tool call" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "1 tool call: 1 command" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Bash, done" })).not.toBeVisible();
     expect(screen.queryByText("bun run verify")).not.toBeVisible();
     expect(screen.queryByText("Check the failing suite first.")).not.toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "1 tool call" }));
+    await user.click(screen.getByRole("button", { name: "1 tool call: 1 command" }));
     expect(screen.getByRole("button", { name: "Bash, done" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Bash, done" }));
     expect(screen.getByText("bun run verify")).toBeVisible();
@@ -3655,9 +3677,10 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(
-      screen.queryByRole("heading", { name: "find bugs in this repo" }),
-    ).not.toBeInTheDocument();
+    // The title is the empty thread's own start heading and nowhere else.
+    const titled = screen.getAllByRole("heading", { name: "find bugs in this repo" });
+    expect(titled).toHaveLength(1);
+    expect(titled[0]).toHaveClass("empty-start__title");
     expect(screen.queryByText("Active")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Mark for follow-up" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Complete follow-up" })).not.toBeInTheDocument();
@@ -3883,7 +3906,7 @@ describe("CodeThreadWorkspace", () => {
         threadId={threadId}
       />,
     );
-    await screen.findByRole("button", { name: "Add attachment" });
+    await screen.findByRole("button", { name: /^Add attachment/ });
     expect(screen.queryByRole("button", { name: /Create image/ })).not.toBeInTheDocument();
     expect(onOpenImageSettings).not.toHaveBeenCalled();
   });
@@ -3897,7 +3920,7 @@ describe("CodeThreadWorkspace", () => {
         threadId={threadId}
       />,
     );
-    await screen.findByRole("button", { name: "Add attachment" });
+    await screen.findByRole("button", { name: /^Add attachment/ });
     expect(screen.queryByRole("button", { name: /Create image/ })).not.toBeInTheDocument();
   });
 
@@ -4275,7 +4298,7 @@ it.each(["legacy", "rebound", "source-thread"] as const)(
         kind === "legacy"
           ? /older receipt did not record its checkout/
           : kind === "rebound"
-            ? /earlier checkout binding/
+            ? /belongs to an earlier checkout/
             : /original source thread/,
       ),
     ).toBeVisible();
@@ -4292,5 +4315,5 @@ it("refuses a native folder as an attachment when the desktop extraction bridge 
   );
   const input = screen.getByRole("textbox", { name: "Follow-up message" });
   fireEvent.drop(input, { dataTransfer: nativeFolderTransfer() });
-  expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+  expect(await screen.findByText(/Folder drops need the desktop app/)).toBeVisible();
 });

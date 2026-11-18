@@ -515,6 +515,39 @@ describe("Run and debug panel", () => {
     expect(within(card).getByText("Fixture adapter, from Fixture tools 1.0.0")).toBeVisible();
   });
 
+  it("draws no launch-file section when the checkout has none, and says what the file is for beside Configurations when it has one", async () => {
+    const { client } = fakeHost();
+    const withoutFile = { ...listed(true), launchFile: { status: "absent" as const } };
+    vi.mocked(client.configurations).mockResolvedValueOnce(withoutFile as never);
+    const view = render(
+      <RunDebugPanel
+        checkoutId={checkoutId}
+        client={client}
+        store={new CodeDebugWindowState()}
+        threadId={threadId}
+      />,
+    );
+    await screen.findByRole("heading", { name: "Configurations" });
+    expect(screen.queryByRole("heading", { name: "From .vscode/launch.json" })).toBeNull();
+    expect(screen.queryByText(/has no .vscode\/launch.json/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /reads .vscode\/launch.json only/ })).toBeNull();
+    view.unmount();
+
+    render(
+      <RunDebugPanel
+        checkoutId={checkoutId}
+        client={client}
+        store={new CodeDebugWindowState()}
+        threadId={threadId}
+      />,
+    );
+    await screen.findByRole("heading", { name: "From .vscode/launch.json" });
+    expect(
+      screen.getByRole("button", { name: /reads .vscode\/launch.json only to propose/ }),
+    ).toBeVisible();
+    expect(screen.queryByText(/Nothing in it runs until you confirm it\.$/)).toBeNull();
+  });
+
   it("clears the editor's stopped line when the tool closes, and marks it again when it reopens", async () => {
     const user = userEvent.setup();
     const store = new CodeDebugWindowState();

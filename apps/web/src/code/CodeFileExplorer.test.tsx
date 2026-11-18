@@ -53,17 +53,18 @@ describe("CodeFileExplorer", () => {
     expect(tree).not.toHaveTextContent("/Users/");
   });
 
-  it("keeps Refresh beside the filter in the one row when the tool stands alone", () => {
+  it("hands Refresh to the pane's bar and keeps only the filter in its own row", () => {
     const handed: (ReadonlyArray<DockBarItem> | undefined)[] = [];
     render(
       <DockBarContext.Provider
-        value={{ placement: "alone", set: (_owner, items) => handed.push(items) }}
+        value={{ placement: "tiled", set: (_owner, items) => handed.push(items) }}
       >
         <CodeFileExplorer entries={entries()} onOpenFile={vi.fn()} onRefresh={vi.fn()} />
       </DockBarContext.Provider>,
     );
-    expect(screen.getByRole("button", { name: "Refresh files" })).toBeInTheDocument();
-    expect(handed.at(-1)).toEqual([]);
+    expect(screen.queryByRole("button", { name: "Refresh files" })).toBeNull();
+    expect(handed.at(-1)?.map((item) => item.id)).toEqual(["refresh"]);
+    expect(screen.getByRole("searchbox", { name: "Filter files" })).toBeInTheDocument();
   });
 
   it("filters the bounded projection and labels binary, oversized, and unavailable files honestly", async () => {
@@ -150,6 +151,55 @@ describe("CodeFileExplorer", () => {
       .type(screen.getByRole("searchbox", { name: "Filter files" }), "only-after-cap");
 
     expect(screen.getByRole("treeitem", { name: /src\/only-after-cap\.ts/ })).toBeVisible();
+  });
+
+  it("draws a folder as a 12px chevron and its name with no folder icon, and a file with its 16px type icon", () => {
+    render(
+      <CodeFileExplorer
+        entries={[
+          { kind: "directory", path: "src" as never },
+          file("src/app.ts"),
+          file("README.md"),
+        ]}
+        onOpenFile={vi.fn()}
+        selectedPath={"src/app.ts" as never}
+      />,
+    );
+    const folder = screen.getByRole("treeitem", { name: "src" });
+    expect(folder.querySelectorAll("svg")).toHaveLength(1);
+    expect(folder.querySelector("svg")).toHaveAttribute("width", "12");
+    const row = screen.getByRole("treeitem", { name: /app\.ts/ });
+    expect(row.querySelector("svg[data-file-kind]")).toHaveAttribute("width", "16");
+  });
+
+  it("draws dotfolders and ignored folders in the quiet ink", () => {
+    render(
+      <CodeFileExplorer
+        entries={[
+          { kind: "directory", path: ".github" as never },
+          file(".github/ci.yml"),
+          { kind: "directory", path: "node_modules" as never },
+          { kind: "directory", path: "src" as never },
+        ]}
+        onOpenFile={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("treeitem", { name: ".github" })).toHaveAttribute("data-muted", "true");
+    expect(screen.getByRole("treeitem", { name: "node_modules" })).toHaveAttribute(
+      "data-muted",
+      "true",
+    );
+    expect(screen.getByRole("treeitem", { name: "src" })).not.toHaveAttribute("data-muted");
+  });
+
+  it("keeps the list's row and column dimensions: 28px rows, 13px text, 12px indent, a 260px column", () => {
+    const code = readFileSync(resolve(import.meta.dirname, "../styles/code.css"), "utf8");
+    expect(code).toMatch(/\.code-file-explorer \{[^}]*--oct-file-row-h:\s*28px/);
+    expect(code).toMatch(/\.code-file-explorer \{[^}]*--oct-tree-indent:\s*var\(--oct-space-3\)/);
+    expect(code).toMatch(
+      /\.code-file-explorer__entry \{[^}]*font-size:\s*var\(--oct-text-detail\)/,
+    );
+    expect(code).toMatch(/\.code-files-viewer__tree \{[^}]*width:\s*260px/);
   });
 
   it("names the folder for each file when two visible basenames match", () => {
@@ -357,14 +407,14 @@ describe("CodeFileExplorer", () => {
     expect(head).toMatch(/border-bottom:\s*1px solid var\(--oct-border\)/);
   });
 
-  it("keeps the docked head at the rail height: 4px, the 30px field, then 3px and the hairline, centred", () => {
-    // The head's minimum height is the rail's; the 30px field is centred in it,
+  it("keeps the docked head at the rail height: 4px, the 28px field, then 3px and the hairline, centred", () => {
+    // The head's minimum height is the rail's; the 28px field is centred in it,
     // and the 3px below plus the hairline keep a plain 4px from overflowing it.
     expect(systemStylesheet).toMatch(/--oct-rail-pad-end:\s*calc\(var\(--oct-space-1\) - 1px\)/);
     expect(dockStylesheet).toMatch(
       /padding:\s*4px var\(--oct-space-3\) var\(--oct-rail-pad-end\);/,
     );
-    expect(codeStylesheet).toMatch(/\.code-file-explorer__search input \{[^}]*height:\s*30px/);
+    expect(codeStylesheet).toMatch(/\.code-file-explorer__search input \{[^}]*height:\s*28px/);
   });
 
   it("keeps focus on a folder when expanding or collapsing crosses the virtualization threshold", async () => {

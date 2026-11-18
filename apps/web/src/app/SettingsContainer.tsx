@@ -66,6 +66,7 @@ export interface SettingsContainerProps {
   /** `"sheet"` when Settings floats over the workspace instead of covering it. */
   readonly presentation?: "page" | "sheet";
   readonly sidebarVibrancySupported: boolean;
+  readonly glassOffNote: string;
   readonly themeController: ReturnType<typeof useThemeController>;
   readonly typography?: ThemeTypography;
   readonly workNavigation: ReturnType<typeof useWorkThreadNavigation>;
@@ -98,6 +99,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     providerController,
     settings,
     sidebarVibrancySupported,
+    glassOffNote,
     themeController,
     workNavigation,
     workSettings,
@@ -113,6 +115,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     folderBrowseClient,
     hostControlClient,
     protectedFilesClient,
+    sandboxRestrictionsClient,
     archivedWorktreesClient,
     diskCleanupClient,
     personMemoryClient,
@@ -273,6 +276,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       providerController={providerController}
       search={controller.settingsSearch}
       settings={settings}
+      glassOffNote={glassOffNote}
       sidebarVibrancySupported={sidebarVibrancySupported}
       themeController={themeController}
       diagnosticsExportClient={diagnosticsExportClient}
@@ -281,6 +285,26 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
         ? {}
         : { browserAutomationClient: props.browserAutomationClient })}
       protectedFilesClient={protectedFilesClient}
+      sandboxRestrictionsClient={sandboxRestrictionsClient}
+      sandboxScopes={[
+        ...(codeThreads ?? []).map((thread) => ({
+          id: String(thread.id),
+          label: `Session · ${thread.title}`,
+          scope: { kind: "session" as const, threadId: String(thread.id) },
+        })),
+        ...(workThreads ?? []).map((thread) => ({
+          id: String(thread.id),
+          label: `Session · ${thread.title}`,
+          scope: { kind: "session" as const, threadId: String(thread.id) },
+        })),
+        ...allProjects
+          .filter((project) => project.type !== "chat")
+          .map((project) => ({
+            id: String(project.id),
+            label: `Project · ${project.name}`,
+            scope: { kind: "project" as const, projectId: project.id },
+          })),
+      ]}
       archivedWorktreesClient={archivedWorktreesClient}
       diskCleanupClient={diskCleanupClient}
       personMemoryClient={personMemoryClient}

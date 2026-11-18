@@ -263,13 +263,18 @@ describe("outside driver activation for a provider instance", () => {
     });
   const resolve = (
     state: ExtensionPackageState | undefined,
-    options: { readonly platform?: string; readonly compatible?: boolean } = {},
+    options: {
+      readonly platform?: string;
+      readonly compatible?: boolean;
+      readonly strict?: boolean;
+    } = {},
   ) =>
     resolveOutsideDriverActivation({
       platform: options.platform ?? "darwin",
       packageState: state,
       compatible: options.compatible ?? true,
       driver,
+      ...(options.strict === undefined ? {} : { strict: options.strict }),
     });
 
   it("admits the exact package a person trusted and switched on, on a host that confines it", () => {
@@ -285,6 +290,19 @@ describe("outside driver activation for a provider instance", () => {
     expect(resolve(undefined, { platform: "win32" })).toEqual({
       kind: "blocked",
       reason: "host-prohibited",
+    });
+  });
+
+  it("keeps an outside driver host-prohibited on Linux under Strict, and admits it on macOS, where it is confined", () => {
+    expect(resolve(packageState(), { platform: "linux", strict: true })).toEqual({
+      kind: "blocked",
+      reason: "host-prohibited",
+    });
+    expect(resolve(packageState(), { platform: "linux", strict: false })).toEqual({
+      kind: "effective",
+    });
+    expect(resolve(packageState(), { platform: "darwin", strict: true })).toEqual({
+      kind: "effective",
     });
   });
 

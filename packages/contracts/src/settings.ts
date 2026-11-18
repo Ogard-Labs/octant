@@ -1,3 +1,4 @@
+import { SandboxRestrictionsScope } from "./sandboxPolicy";
 import { Schema } from "effect";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -78,6 +79,7 @@ const RetiredSettingsSectionId = Schema.transformLiterals(
 );
 
 export const SettingsDeepLink = Schema.Struct({
+  sandboxScope: Schema.optional(SandboxRestrictionsScope),
   section: Schema.Union(SettingsSectionId, RetiredSettingsSectionId),
   setting: Schema.optional(SettingsSettingId),
 }).annotations(strict);

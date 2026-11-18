@@ -19,14 +19,32 @@ export interface AttachedFileByPath {
 }
 
 /**
- * Why a server Project's turn refuses a file it would name by path. A server
- * thread's agent works with the server's own file tools, and the thread's
- * attachments folder is on this host, so a path there names nothing the agent
- * can open; no transfer to the server exists, so the turn is refused before it
- * is accepted rather than sent with a path that cannot be read.
+ * Why a server Project's turn refuses a file it would name by path on a host
+ * that composes no transfer to the server. A server thread's agent works with
+ * the server's own file tools, and the thread's attachments folder is on this
+ * host, so a path there names nothing the agent can open; the host copies the
+ * file to the server first (`transferServerAttachments`), and without that the
+ * turn is refused before it is accepted rather than sent with a path that
+ * cannot be read.
  */
 export const SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL =
   "This thread works on a server, which cannot open a file attached here. Attach images only, or copy the file to the server's folder and name it in the message.";
+
+/**
+ * A file's bytes as text when they are text: valid UTF-8 with no NUL byte,
+ * whatever its media type says, since a browser names many text files
+ * (source code, logs, configuration) `application/octet-stream` or a vendor
+ * type. Anything else is undefined, and is never decoded with replacement
+ * characters a model would read as the file's content.
+ */
+export function attachedFileText(bytes: Uint8Array): string | undefined {
+  if (bytes.includes(0)) return undefined;
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
+  } catch {
+    return undefined;
+  }
+}
 
 /** Splits a turn's attachments into the images it sends as pictures and every other file. */
 export function partitionAttachedFiles<Reference extends { readonly mediaType: string }>(

@@ -26,6 +26,7 @@ import { isAgentGrantSession, principalActsAsHostPerson } from "./clientPrincipa
 import {
   authenticateRouteWindowId,
   boundPrincipalIsRestricted,
+  boundPrincipalIsAgent,
   readPrincipalRouteContext,
 } from "./principalRouteContext";
 import { eventActorForPrincipal } from "./principalEventActor";
@@ -217,6 +218,31 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
         );
       }
       const command = decodeWorkThreadCommand(value);
+      if (
+        boundPrincipalIsRestricted(request) &&
+        ((command.kind === "change-work-thread-access" &&
+          ((command.strict !== undefined &&
+            (command.strict !== true || boundPrincipalIsAgent(request))) ||
+            command.fullAccessSandbox !== undefined)) ||
+          (command.kind === "create-work-thread" &&
+            ((command.strict !== undefined &&
+              (command.strict !== true || boundPrincipalIsAgent(request))) ||
+              command.fullAccessSandbox !== undefined)) ||
+          (command.kind === "update-work-settings" &&
+            ((command.defaultStrict !== undefined &&
+              (command.defaultStrict !== true || boundPrincipalIsAgent(request))) ||
+              command.defaultFullAccessSandbox !== undefined)))
+      )
+        return failureResponse(
+          {
+            category: "unauthorized",
+            message:
+              "Only you, from a window or a device you paired, can change Strict protections.",
+          },
+          403,
+          origin,
+        );
+
       if (command.kind === "change-work-thread-browser-profile") {
         return failureResponse(
           {

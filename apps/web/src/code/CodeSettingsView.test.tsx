@@ -207,9 +207,7 @@ describe("CodeSettingsView", () => {
       // The retired switch turned Full access's sandbox off. The only sandbox
       // switch now is the opt-in that keeps one, and it starts off.
       expect(screen.queryByRole("switch", { name: /sandbox off|no sandbox/i })).toBeNull();
-      expect(
-        screen.getByRole("switch", { name: "Keep the sandbox at Full access" }),
-      ).not.toBeChecked();
+      expect(screen.getByRole("combobox", { name: "Strict" })).toHaveTextContent("Off");
 
       await chooseSelectFieldOption(
         user,
@@ -255,7 +253,7 @@ describe("CodeSettingsView", () => {
 
     const requirement = screen.getByRole("switch", { name: "Code needs a Git repository" });
     expect(requirement).toBeChecked();
-    expect(screen.getByText(/the default folder included/)).toBeVisible();
+    expect(screen.getByText(/including the default folder/)).toBeVisible();
     expect(screen.queryByRole("switch", { name: "Threads without a Project" })).toBeNull();
 
     await userEvent.setup().click(requirement);

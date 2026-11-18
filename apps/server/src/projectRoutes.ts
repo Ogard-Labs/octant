@@ -1,4 +1,4 @@
-import { boundPrincipalIsRestricted } from "./principalRouteContext";
+import { boundPrincipalIsRestricted, boundPrincipalIsAgent } from "./principalRouteContext";
 import { principalActsAsHostPerson } from "./clientPrincipal";
 import {
   decodeMemoryCommand,
@@ -14,6 +14,8 @@ import type { CodeEnvironmentServiceApi } from "./codeEnvironmentService";
 import { authenticateProjectRequest } from "./projectBindingRoutes";
 import { readPrincipalRouteContext } from "./principalRouteContext";
 import type { ProjectIconReader } from "./projectIcon";
+import { MAX_PROJECT_ICON_BYTES } from "./projectIcon";
+import type { ProjectCustomIconStore } from "./projectIconStore";
 import { eventActorForPrincipal } from "./principalEventActor";
 import { ProjectServiceError, type ProjectServiceApi } from "./projectService";
 import type { ProjectMemoryProposalService } from "./projectMemory/projectMemoryProposalService";
@@ -21,7 +23,7 @@ import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
 const DEFAULT_BODY_LIMIT = 1_048_576;
-const METHODS = "GET, POST, OPTIONS";
+const METHODS = "GET, POST, PUT, DELETE, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
 
 export interface ProjectRouteDependencies {
@@ -30,6 +32,8 @@ export interface ProjectRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   /** Absent on a host with no icon lookup: every Project then has no icon. */
   readonly icons?: ProjectIconReader;
+  /** Absent on a host that cannot keep a chosen icon: setting one is then refused. */
+  readonly customIcons?: Pick<ProjectCustomIconStore, "write" | "remove">;
   /** Memory changes agents asked for, answered by the window whose turn raised them. */
   readonly memoryProposals?: Pick<ProjectMemoryProposalService, "list" | "decide">;
   readonly maxRequestBodySize?: number;
@@ -83,9 +87,11 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
     )
       return undefined;
     const isPost = isCommands || isMemoryCommands || isMemoryProposalDecision;
+    const changesIcon = isIcon && (request.method === "PUT" || request.method === "DELETE");
     if (
-      ((isBootstrap || isSearch || isMemory || isMemoryProposals || isEnvironment || isIcon) &&
+      ((isBootstrap || isSearch || isMemory || isMemoryProposals || isEnvironment) &&
         request.method !== "GET") ||
+      (isIcon && request.method !== "GET" && !changesIcon) ||
       (isPost && request.method !== "POST")
     ) {
       return response(
@@ -148,6 +154,15 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           200,
           origin,
         );
+      if (changesIcon) {
+        return await changeIcon({
+          request,
+          windowId,
+          iconId: iconMatch[1] ?? "",
+          origin,
+          dependencies,
+        });
+      }
       if (isIcon) {
         let projectId;
         try {
@@ -166,6 +181,9 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
         }
         const headers = corsHeaders(origin);
         headers.set("etag", icon.etag);
+        // Which icon this is, so the page can offer to go back to the folder's own.
+        headers.set("x-octant-project-icon-source", icon.source ?? "found");
+        headers.set("x-octant-project-icon-found", icon.foundAvailable === false ? "0" : "1");
         // Revalidate on every use; the body is small and the person may edit the file.
         headers.set("cache-control", "private, no-cache");
         headers.set("x-content-type-options", "nosniff");
@@ -293,6 +311,24 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
         return response(
           { category: "invalid", message: "Project command is invalid." },
           400,
+          origin,
+        );
+      }
+      if (
+        boundPrincipalIsRestricted(request) &&
+        (command.kind === "change-code-project-permission-mode" ||
+          command.kind === "change-work-project-permission-mode") &&
+        ((command.strict !== undefined &&
+          (command.strict !== true || boundPrincipalIsAgent(request))) ||
+          command.fullAccessSandbox !== undefined)
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message:
+              "Only you, from a window or a device you paired, can change Strict protections.",
+          },
+          403,
           origin,
         );
       }
@@ -528,6 +564,7 @@ function corsHeaders(origin: string | null): Headers {
   const headers = new Headers({
     "access-control-allow-methods": METHODS,
     "access-control-allow-headers": HEADERS,
+    "access-control-expose-headers": "x-octant-project-icon-source, x-octant-project-icon-found",
     vary: "Origin",
   });
   if (origin !== null && isAllowedOrigin(origin))
@@ -552,4 +589,74 @@ function isAllowedOrigin(origin: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Sets or drops the icon a person chose for a Project. Only a window on this
+ * host that can reach the Project does it: a paired device reads the icon but
+ * does not change what the host keeps. The body is the image itself, which the
+ * host copies into its own data folder; no path from the person's disk is ever
+ * read here.
+ */
+async function changeIcon(input: {
+  readonly request: Request;
+  readonly windowId: Parameters<ProjectServiceApi["bootstrap"]>[0];
+  readonly iconId: string;
+  readonly origin: string | null;
+  readonly dependencies: ProjectRouteDependencies;
+}): Promise<Response> {
+  const { request, origin, dependencies } = input;
+  let projectId;
+  try {
+    projectId = decodeProjectId(decodeURIComponent(input.iconId));
+  } catch {
+    return response({ category: "invalid", message: "Project ID is invalid." }, 400, origin);
+  }
+  const principal = readPrincipalRouteContext(request)?.principal;
+  if (principal !== undefined && !principalActsAsHostPerson(principal)) {
+    return response(
+      { category: "unauthorized", message: "A Project's icon is chosen on the host." },
+      403,
+      origin,
+    );
+  }
+  const reachable = (await dependencies.service.bootstrap(input.windowId)).active.some(
+    (candidate) => candidate.id === projectId,
+  );
+  if (!reachable || dependencies.customIcons === undefined) {
+    return response(
+      { category: "not-found", message: "This Project is not available." },
+      404,
+      origin,
+    );
+  }
+  if (request.method === "DELETE") {
+    await dependencies.customIcons.remove(projectId);
+    return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  }
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_PROJECT_ICON_BYTES) {
+    return response(
+      {
+        category: "too-large",
+        message: "That image is larger than 256 KB. Choose a smaller icon.",
+      },
+      413,
+      origin,
+    );
+  }
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  const stored = await dependencies.customIcons.write(
+    projectId,
+    bytes,
+    request.headers.get("content-type"),
+  );
+  if (stored.status === "refused") {
+    return response(
+      { category: stored.reason, message: stored.message },
+      stored.reason === "too-large" ? 413 : 400,
+      origin,
+    );
+  }
+  return new Response(null, { status: 204, headers: corsHeaders(origin) });
 }

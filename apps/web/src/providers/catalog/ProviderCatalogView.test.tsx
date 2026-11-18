@@ -21,7 +21,7 @@ const codexId = "00000000-0000-4000-8000-000000000391" as ProviderInstanceId;
 
 const codexCandidate = {
   driverKind: "codex",
-  displayName: "Codex CLI",
+  displayName: "Codex",
   binaryPath: "/usr/local/bin/codex",
   version: "codex-cli 0.1.0",
   readiness: "ready",
@@ -42,7 +42,7 @@ function snapshot(candidates: ReadonlyArray<DiscoveryCandidate>): DiscoverySnaps
 function codex(enabled: boolean): ProviderInstance {
   return createCodexProvider({
     id: codexId,
-    displayName: "Codex CLI",
+    displayName: "Codex",
     binaryPath: "/usr/local/bin/codex",
     existingInstances: [],
     expectedVersion: 0 as AggregateVersion,
@@ -158,8 +158,8 @@ describe("ProviderCatalogView", () => {
   it("starts nothing when the catalog or a driver's setup is opened", () => {
     const view = props();
     render(<ProviderCatalogView {...view} />);
-    openSetup(/^Codex CLI, /);
-    expect(screen.getByRole("heading", { level: 1, name: "Codex CLI" })).toBeDefined();
+    openSetup(/^Codex, /);
+    expect(screen.getByRole("heading", { level: 1, name: "Codex" })).toBeDefined();
     expect(view.onScan).not.toHaveBeenCalled();
     expect(view.onConnect).not.toHaveBeenCalled();
     expect(view.onProbe).not.toHaveBeenCalled();
@@ -192,7 +192,7 @@ describe("ProviderCatalogView", () => {
   it("looks on the host only when asked, then offers to add what it found", async () => {
     const view = props();
     const { rerender } = render(<ProviderCatalogView {...view} />);
-    openSetup(/^Codex CLI, /);
+    openSetup(/^Codex, /);
     fireEvent.click(screen.getByRole("button", { name: "Look on this host" }));
     expect(view.onScan).toHaveBeenCalledTimes(1);
 
@@ -202,22 +202,22 @@ describe("ProviderCatalogView", () => {
         discovery={{ ...view.discovery!, snapshot: snapshot([codexCandidate]) }}
       />,
     );
-    expect(screen.getByText(/Found Codex CLI codex-cli 0.1.0 in \/usr\/local\/bin/)).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Add Codex CLI" }));
+    expect(screen.getByText(/Found Codex codex-cli 0.1.0 in \/usr\/local\/bin/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Add Codex" }));
     await waitFor(() => expect(view.onConnect).toHaveBeenCalledWith(codexCandidate));
   });
 
   it("closes the driver's setup when it sends a person to Providers & Models", () => {
     const view = props();
     const { rerender } = render(<ProviderCatalogView {...view} />);
-    openSetup(/^Codex CLI, /);
+    openSetup(/^Codex, /);
     // A look that found nothing leaves only the unusual-path route.
     rerender(
       <ProviderCatalogView {...view} discovery={{ ...view.discovery!, snapshot: snapshot([]) }} />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Open Providers & Models" }));
     expect(view.onOpenProviders).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("heading", { level: 1, name: "Codex CLI" })).toBeNull();
+    expect(screen.queryByRole("heading", { level: 1, name: "Codex" })).toBeNull();
     expect(screen.getByRole("list", { name: "Agent runtimes" })).toBeDefined();
   });
 
@@ -233,8 +233,8 @@ describe("ProviderCatalogView", () => {
       },
     });
     render(<ProviderCatalogView {...view} />);
-    openSetup(/^Codex CLI, off/);
-    expect(screen.queryByRole("button", { name: "Add Codex CLI" })).toBeNull();
+    openSetup(/^Codex, off/);
+    expect(screen.queryByRole("button", { name: "Add Codex" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Turn on" }));
     expect(view.onSetEnabled).toHaveBeenCalledWith(codexId, true);
   });
@@ -249,7 +249,7 @@ describe("ProviderCatalogView", () => {
         })}
       />,
     );
-    openSetup(/^Codex CLI, sign in to use/);
+    openSetup(/^Codex, sign in to use/);
     const facts = screen.getByRole("heading", { name: "State" }).closest("section")!;
     expect(within(facts).getByText("Available").nextSibling?.textContent).toBe("Yes");
     expect(within(facts).getByText("Enabled").nextSibling?.textContent).toBe("On");
@@ -258,7 +258,7 @@ describe("ProviderCatalogView", () => {
     expect(
       screen.getByText(/stored in this computer's credential store, never in the catalog/),
     ).toBeDefined();
-    expect(screen.getByText("Card for Codex CLI")).toBeDefined();
+    expect(screen.getByText("Card for Codex")).toBeDefined();
   });
 
   it("keeps a refused step actionable with the host's reason and a Try again", async () => {
@@ -267,14 +267,14 @@ describe("ProviderCatalogView", () => {
       <ProviderCatalogView
         {...props({
           instances: [codex(true)],
-          message: "Codex CLI did not answer its version check.",
+          message: "Codex did not answer its version check.",
           onProbe,
         })}
       />,
     );
-    openSetup(/^Codex CLI, not checked yet/);
+    openSetup(/^Codex, not checked yet/);
     fireEvent.click(screen.getByRole("button", { name: "Check connection" }));
-    expect(await screen.findByText("Codex CLI did not answer its version check.")).toBeDefined();
+    expect(await screen.findByText("Codex did not answer its version check.")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(onProbe).toHaveBeenCalledTimes(2));
   });
@@ -292,7 +292,7 @@ describe("ProviderCatalogView", () => {
         }}
       />,
     );
-    openSetup(/^Codex CLI, /);
+    openSetup(/^Codex, /);
     fireEvent.click(screen.getByRole("button", { name: "Look on this host" }));
     expect(await screen.findByText("Discovery service is unavailable.")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -312,7 +312,7 @@ describe("ProviderCatalogView", () => {
         discovery={{ ...view.discovery!, onScan: vi.fn(async () => failed) }}
       />,
     );
-    openSetup(/^Codex CLI, /);
+    openSetup(/^Codex, /);
     fireEvent.click(screen.getByRole("button", { name: "Look on this host" }));
     expect(await screen.findByText("Octant could not look on this host.")).toBeDefined();
   });
@@ -338,7 +338,7 @@ describe("ProviderCatalogView", () => {
 
   it.each([
     [
-      /^Codex CLI, /,
+      /^Codex, /,
       "Runs its own agent loop. Octant's sandbox confines it and approvals gate it, except on Full access",
     ],
     [
@@ -360,7 +360,7 @@ describe("ProviderCatalogView", () => {
 
   it("returns to the row it opened from on Back and on Escape", () => {
     render(<ProviderCatalogView {...props()} />);
-    openSetup(/^Codex CLI, /);
+    openSetup(/^Codex, /);
     fireEvent.click(screen.getByRole("button", { name: "Back to Provider catalog" }));
     expect(document.activeElement?.getAttribute("data-catalog-key")).toBe("codex");
     openSetup(/^Claude Code, /);
@@ -395,7 +395,7 @@ describe.each(hostsSeenFromTheOtherPlatform)(
           })}
         />,
       );
-      openSetup(/^Codex CLI, sign in to use/);
+      openSetup(/^Codex, sign in to use/);
       const sentence = screen.getByText(/A key you enter there is stored in/);
       expect(sentence).toHaveTextContent(
         `A key you enter there is stored in ${platform.store}, never in the catalog.`,

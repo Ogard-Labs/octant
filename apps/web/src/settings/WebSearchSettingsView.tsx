@@ -229,44 +229,46 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
   return (
     <>
       <SettingsSection
-        description="Where Octant's own web search may send a query. Octant cannot read your contracts, so it relies on what you state about each vendor."
+        description="Where Octant's web search may send a query. Octant cannot read your contracts, so it relies on what you say about each vendor."
         title="Data policy"
       >
-        <SettingRow
-          description={POLICY_DESCRIPTIONS[draft.policy]}
-          focused={props.focusedSetting === "web-search-policy"}
-          htmlFor={`${ids}-policy`}
-          label="Data policy"
-          scope="host"
-          settingId="web-search-policy"
-        >
-          <OctantSelectField
-            aria-label="Data policy"
-            className="settings-view__select window-no-drag"
-            disabled={busy}
-            id={`${ids}-policy`}
-            onValueChange={(value) => replace({ ...draft, policy: value as WebSearchDataPolicy })}
-            options={POLICY_OPTIONS}
-            value={draft.policy}
-          />
-        </SettingRow>
-        <SettingRow
-          description={PROVIDER_SEARCH}
-          label="A provider's own search"
-          scope="host"
-          settingId="web-search-provider-search"
-        >
-          <span className="web-search-settings__links">
-            <OctantButton
-              onClick={() => props.onOpenResearchRoute?.()}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              Research route
-            </OctantButton>
-          </span>
-        </SettingRow>
+        <div className="setgroup">
+          <SettingRow
+            description={POLICY_DESCRIPTIONS[draft.policy]}
+            focused={props.focusedSetting === "web-search-policy"}
+            htmlFor={`${ids}-policy`}
+            label="Data policy"
+            scope="host"
+            settingId="web-search-policy"
+          >
+            <OctantSelectField
+              aria-label="Data policy"
+              className="settings-view__select window-no-drag"
+              disabled={busy}
+              id={`${ids}-policy`}
+              onValueChange={(value) => replace({ ...draft, policy: value as WebSearchDataPolicy })}
+              options={POLICY_OPTIONS}
+              value={draft.policy}
+            />
+          </SettingRow>
+          <SettingRow
+            description={PROVIDER_SEARCH}
+            label="A provider's own search"
+            scope="host"
+            settingId="web-search-provider-search"
+          >
+            <span className="web-search-settings__links">
+              <OctantButton
+                onClick={() => props.onOpenResearchRoute?.()}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Research route
+              </OctantButton>
+            </span>
+          </SettingRow>
+        </div>
       </SettingsSection>
       <SettingsSection
         description="A query goes to the first backend that may receive it, and moves to the next only when one does not answer."
@@ -274,191 +276,194 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
       >
         {draft.backends.length === 0 ? (
           <SettingsState kind="empty">
-            No backends. With none, Octant offers no web search of its own.
+            No search backends. Octant offers no web search of its own.
           </SettingsState>
-        ) : (
-          draft.backends.map((entry, index) => {
-            const id = String(entry.id);
-            const offer = WEB_SEARCH_BACKEND_OFFERS[entry.kind];
-            const saved = savedIds.has(id);
-            const entryDirty = dirty || !saved;
-            // Two entries can share a kind (two SearXNG instances), so each
-            // control names its entry by position as well as by vendor.
-            const entryName = `${index + 1}. ${offer.label}`;
-            return (
-              <SettingsCompactRow
-                detail={
-                  <div className="web-search-settings__detail">
-                    {entry.address === undefined ? null : <p>Address: {entry.address}</p>}
-                    {entry.kind === "searxng" ? <p>{SEARXNG_WARNING}</p> : null}
-                    <label className="web-search-settings__statement">
-                      <OctantCheckbox
-                        checked={entry.statesZdr}
-                        disabled={busy || !offer.zdr.offered}
-                        onChange={() => updateEntry(id, { statesZdr: !entry.statesZdr })}
-                      />
-                      <span>
-                        This vendor keeps no record of my queries
-                        {offer.zdr.offered
-                          ? ` (${offer.zdr.terms})`
-                          : ` — not offered: ${offer.zdr.terms}`}
-                      </span>
-                    </label>
-                    <label className="web-search-settings__statement">
-                      <OctantCheckbox
-                        checked={entry.statesEuProcessing}
-                        disabled={busy || !offer.euProcessing.offered}
-                        onChange={() =>
-                          updateEntry(id, { statesEuProcessing: !entry.statesEuProcessing })
-                        }
-                      />
-                      <span>
-                        This vendor processes my queries only in the EU or UK
-                        {offer.euProcessing.offered
-                          ? ` (${offer.euProcessing.terms})`
-                          : ` — not offered: ${offer.euProcessing.terms}`}
-                      </span>
-                    </label>
-                    <p className="web-search-settings__source">
-                      Terms checked {offer.checkedOn} at {offer.source}
-                    </p>
-                    {offer.takesKey ? (
-                      <div className="web-search-settings__key">
-                        <OctantInput
-                          aria-label={`${entryName} API key`}
-                          autoComplete="off"
-                          disabled={busy || entryDirty}
-                          onChange={(event) => {
-                            const value = event.currentTarget.value;
-                            setKeys((current) => ({ ...current, [id]: value }));
-                          }}
-                          placeholder={entryDirty ? "Save the list first" : "API key"}
-                          type="password"
-                          value={keys[id] ?? ""}
-                        />
-                        <OctantButton
-                          disabled={busy || entryDirty || (keys[id] ?? "").trim() === ""}
-                          onClick={() => void saveKey(entry, false)}
-                          size="sm"
-                          type="button"
-                          variant="secondary"
-                        >
-                          Save key
-                        </OctantButton>
-                        <OctantButton
-                          disabled={busy || entryDirty}
-                          onClick={() => void saveKey(entry, true)}
-                          size="sm"
-                          type="button"
-                          variant="ghost"
-                        >
-                          Remove key
-                        </OctantButton>
+        ) : null}
+        <div className="setgroup">
+          {draft.backends.length === 0
+            ? null
+            : draft.backends.map((entry, index) => {
+                const id = String(entry.id);
+                const offer = WEB_SEARCH_BACKEND_OFFERS[entry.kind];
+                const saved = savedIds.has(id);
+                const entryDirty = dirty || !saved;
+                // Two entries can share a kind (two SearXNG instances), so each
+                // control names its entry by position as well as by vendor.
+                const entryName = `${index + 1}. ${offer.label}`;
+                return (
+                  <SettingsCompactRow
+                    detail={
+                      <div className="web-search-settings__detail">
+                        {entry.address === undefined ? null : <p>Address: {entry.address}</p>}
+                        {entry.kind === "searxng" ? <p>{SEARXNG_WARNING}</p> : null}
+                        <label className="web-search-settings__statement">
+                          <OctantCheckbox
+                            checked={entry.statesZdr}
+                            disabled={busy || !offer.zdr.offered}
+                            onChange={() => updateEntry(id, { statesZdr: !entry.statesZdr })}
+                          />
+                          <span>
+                            This vendor keeps no record of my queries
+                            {offer.zdr.offered
+                              ? ` (${offer.zdr.terms})`
+                              : ` — not offered: ${offer.zdr.terms}`}
+                          </span>
+                        </label>
+                        <label className="web-search-settings__statement">
+                          <OctantCheckbox
+                            checked={entry.statesEuProcessing}
+                            disabled={busy || !offer.euProcessing.offered}
+                            onChange={() =>
+                              updateEntry(id, { statesEuProcessing: !entry.statesEuProcessing })
+                            }
+                          />
+                          <span>
+                            This vendor processes my queries only in the EU or UK
+                            {offer.euProcessing.offered
+                              ? ` (${offer.euProcessing.terms})`
+                              : ` — not offered: ${offer.euProcessing.terms}`}
+                          </span>
+                        </label>
+                        <p className="web-search-settings__source">
+                          Terms checked {offer.checkedOn} at {offer.source}
+                        </p>
+                        {offer.takesKey ? (
+                          <div className="web-search-settings__key">
+                            <OctantInput
+                              aria-label={`${entryName} API key`}
+                              autoComplete="off"
+                              disabled={busy || entryDirty}
+                              onChange={(event) => {
+                                const value = event.currentTarget.value;
+                                setKeys((current) => ({ ...current, [id]: value }));
+                              }}
+                              placeholder={entryDirty ? "Save the list first" : "API key"}
+                              type="password"
+                              value={keys[id] ?? ""}
+                            />
+                            <OctantButton
+                              disabled={busy || entryDirty || (keys[id] ?? "").trim() === ""}
+                              onClick={() => void saveKey(entry, false)}
+                              size="sm"
+                              type="button"
+                              variant="secondary"
+                            >
+                              Save key
+                            </OctantButton>
+                            <OctantButton
+                              disabled={busy || entryDirty}
+                              onClick={() => void saveKey(entry, true)}
+                              size="sm"
+                              type="button"
+                              variant="ghost"
+                            >
+                              Remove key
+                            </OctantButton>
+                          </div>
+                        ) : null}
+                        <div className="web-search-settings__actions">
+                          <OctantButton
+                            aria-label={`Move ${entryName} up`}
+                            disabled={busy || index === 0}
+                            onClick={() => move(index, -1)}
+                            size="sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            Move up
+                          </OctantButton>
+                          <OctantButton
+                            aria-label={`Move ${entryName} down`}
+                            disabled={busy || index === draft.backends.length - 1}
+                            onClick={() => move(index, 1)}
+                            size="sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            Move down
+                          </OctantButton>
+                          <OctantButton
+                            aria-label={`Remove ${entryName}`}
+                            disabled={busy}
+                            onClick={() =>
+                              replace({
+                                ...draft,
+                                backends: draft.backends.filter((other) => String(other.id) !== id),
+                              })
+                            }
+                            size="sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            Remove
+                          </OctantButton>
+                        </div>
                       </div>
-                    ) : null}
-                    <div className="web-search-settings__actions">
-                      <OctantButton
-                        aria-label={`Move ${entryName} up`}
-                        disabled={busy || index === 0}
-                        onClick={() => move(index, -1)}
-                        size="sm"
-                        type="button"
-                        variant="ghost"
-                      >
-                        Move up
-                      </OctantButton>
-                      <OctantButton
-                        aria-label={`Move ${entryName} down`}
-                        disabled={busy || index === draft.backends.length - 1}
-                        onClick={() => move(index, 1)}
-                        size="sm"
-                        type="button"
-                        variant="ghost"
-                      >
-                        Move down
-                      </OctantButton>
-                      <OctantButton
-                        aria-label={`Remove ${entryName}`}
-                        disabled={busy}
-                        onClick={() =>
-                          replace({
-                            ...draft,
-                            backends: draft.backends.filter((other) => String(other.id) !== id),
-                          })
-                        }
-                        size="sm"
-                        type="button"
-                        variant="ghost"
-                      >
-                        Remove
-                      </OctantButton>
-                    </div>
-                  </div>
-                }
-                key={id}
-                label={entryName}
-                meta={stateText(states.get(id), entryDirty)}
-                metaWraps
-              >
-                <OctantSwitch
-                  checked={entry.enabled}
-                  disabled={busy}
-                  label={`Use ${offer.label}`}
-                  onCheckedChange={(enabled) => updateEntry(id, { enabled })}
-                />
-              </SettingsCompactRow>
-            );
-          })
-        )}
-        <SettingRow
-          description={
-            addOffer.address === "never"
-              ? `${addOffer.index}. Its key is asked for once the list is saved.`
-              : addKind === "searxng"
-                ? `The instance's address: HTTPS, or HTTP on a loopback address. ${SEARXNG_WARNING}`
-                : `${addOffer.index}. The EU host your agreement names, if it names one.`
-          }
-          focused={props.focusedSetting === "web-search-add"}
-          htmlFor={`${ids}-kind`}
-          label="Add backend"
-          scope="host"
-          settingId="web-search-add"
-        >
-          <span className="web-search-settings__add">
-            <OctantSelectField
-              aria-label="Backend kind"
-              className="settings-view__select window-no-drag"
-              disabled={busy}
-              id={`${ids}-kind`}
-              onValueChange={(value) => setAddKind(value as WebSearchBackendKind)}
-              options={KIND_ORDER.map((kind) => ({
-                id: kind,
-                label: WEB_SEARCH_BACKEND_OFFERS[kind].label,
-              }))}
-              value={addKind}
-            />
-            {addOffer.address === "never" ? null : (
-              <OctantInput
-                aria-label="Backend address"
-                className="settings-view__text-input"
+                    }
+                    key={id}
+                    label={entryName}
+                    meta={stateText(states.get(id), entryDirty)}
+                    metaWraps
+                  >
+                    <OctantSwitch
+                      checked={entry.enabled}
+                      disabled={busy}
+                      label={`Use ${offer.label}`}
+                      onCheckedChange={(enabled) => updateEntry(id, { enabled })}
+                    />
+                  </SettingsCompactRow>
+                );
+              })}
+          <SettingRow
+            description={
+              addOffer.address === "never"
+                ? `${addOffer.index}. Its key is asked for once the list is saved.`
+                : addKind === "searxng"
+                  ? `The instance's address: HTTPS, or HTTP on a loopback address. ${SEARXNG_WARNING}`
+                  : `${addOffer.index}. The EU host your agreement names, if it names one.`
+            }
+            focused={props.focusedSetting === "web-search-add"}
+            htmlFor={`${ids}-kind`}
+            label="Add backend"
+            scope="host"
+            settingId="web-search-add"
+          >
+            <span className="web-search-settings__add">
+              <OctantSelectField
+                aria-label="Backend kind"
+                className="settings-view__select window-no-drag"
                 disabled={busy}
-                onChange={(event) => setAddAddress(event.currentTarget.value)}
-                placeholder="https://search.example"
-                type="url"
-                value={addAddress}
+                id={`${ids}-kind`}
+                onValueChange={(value) => setAddKind(value as WebSearchBackendKind)}
+                options={KIND_ORDER.map((kind) => ({
+                  id: kind,
+                  label: WEB_SEARCH_BACKEND_OFFERS[kind].label,
+                }))}
+                value={addKind}
               />
-            )}
-            <OctantButton
-              disabled={busy || draft.backends.length >= MAX_WEB_SEARCH_BACKENDS}
-              onClick={add}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Add
-            </OctantButton>
-          </span>
-        </SettingRow>
+              {addOffer.address === "never" ? null : (
+                <OctantInput
+                  aria-label="Backend address"
+                  className="settings-view__text-input"
+                  disabled={busy}
+                  onChange={(event) => setAddAddress(event.currentTarget.value)}
+                  placeholder="https://search.example"
+                  type="url"
+                  value={addAddress}
+                />
+              )}
+              <OctantButton
+                disabled={busy || draft.backends.length >= MAX_WEB_SEARCH_BACKENDS}
+                onClick={add}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Add
+              </OctantButton>
+            </span>
+          </SettingRow>
+        </div>
         <div className="web-search-settings__save">
           <OctantButton
             disabled={busy || !dirty}

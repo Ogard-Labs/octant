@@ -2,7 +2,7 @@ import {
   Blocks,
   Bot,
   CalendarClock,
-  CircleCheckBig,
+  SquareCheck,
   CircleDot,
   Folders,
   GitPullRequestArrow,
@@ -12,7 +12,7 @@ import {
   ListTodo,
   SquareKanban,
   SquarePen,
-} from "lucide-react";
+} from "../ui/icons";
 import type { ReactNode } from "react";
 import {
   buildSidebarNavigation,
@@ -28,6 +28,16 @@ export interface SidebarNavigationProps {
   /** Row counts (e.g. threads waiting in the Inbox); zero and absent render nothing. */
   readonly counts?: Partial<Readonly<Record<SidebarNavigationDescriptorId, number>>>;
   readonly input: SidebarNavigationInput;
+  /**
+   * The row that starts a thread, first in the list. The band's compose button
+   * starts the same thread; this row is the one a person reaches for from the
+   * list and says its key.
+   */
+  readonly newThread?: {
+    readonly label: string;
+    readonly shortcut?: string;
+    readonly onSelect: () => void;
+  };
   /**
    * The More row that reveals the menu-only destinations, placed as the last
    * destination row, before the Project and thread lists.
@@ -130,6 +140,23 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
   }
   return (
     <div className="sidebar-navigation">
+      {props.newThread === undefined ? null : (
+        <OctantButton
+          className="sidebar-item sidebar-item--new-thread window-no-drag justify-start"
+          data-navigation-id="new-thread-row"
+          onClick={() => props.newThread?.onSelect()}
+          type="button"
+          variant="bare"
+        >
+          <SquarePen aria-hidden="true" className="icon" size={16} />
+          <span className="sidebar-label">{props.newThread.label}</span>
+          {props.newThread.shortcut === undefined ? null : (
+            <kbd aria-hidden="true" className="sidebar-item__key">
+              {props.newThread.shortcut}
+            </kbd>
+          )}
+        </OctantButton>
+      )}
       {rows}
       {props.more}
       {projectContent}
@@ -153,7 +180,7 @@ export function navigationIcon(id: SidebarNavigationDescriptorId) {
       return Inbox;
     case "todos":
       // The tick leaves the circle, so it does not read as Done today's mark.
-      return CircleCheckBig;
+      return SquareCheck;
     case "artifact-library":
       return Layers;
     case "image-library":

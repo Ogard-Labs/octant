@@ -20,6 +20,11 @@ import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts
 import { Effect, Either, Fiber } from "effect";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  WINDOWS_CHAT_PROVIDER_REFUSAL,
+  WINDOWS_KEPT_SANDBOX_REFUSAL,
+  WINDOWS_STRICT_REFUSAL,
+} from "@octant/domain/guardrail-policy";
+import {
   captureOpenCodeRuntimeConfig,
   createPrivateOpenCodeProfile,
   makeOpenCodeProcessLive,
@@ -834,6 +839,37 @@ describe("OpenCodeProcessPort", () => {
     expect(execRules).toEqual(['(allow process-exec (literal "/usr/bin/false"))']);
   });
 
+  it("refuses a Windows launch that needs Octant's sandbox by name before OpenCode is read or served", async () => {
+    const fixture = probeWrapper("v2-ready");
+    for (const [launch, message] of [
+      [{ mode: "code", executionPolicy: "approval-gated" }, WINDOWS_STRICT_REFUSAL],
+      [
+        { mode: "code", executionPolicy: "full-access", fullAccessSandbox: true, strict: false },
+        WINDOWS_KEPT_SANDBOX_REFUSAL,
+      ],
+      [{ mode: "chat", executionPolicy: "plan", strict: false }, WINDOWS_CHAT_PROVIDER_REFUSAL],
+    ] as const) {
+      const prepare = vi.fn((input: { executable: string; args: ReadonlyArray<string> }) => ({
+        command: input.executable,
+        args: input.args,
+      }));
+      const refused = await Effect.runPromise(
+        Effect.flip(
+          Effect.scoped(
+            makeOpenCodeProcessLive({
+              confinement: { prepare },
+              platform: "win32",
+              runtimeConfigResolver: async () => undefined,
+              startupTimeoutMs: 2_000,
+            }).start({ binaryPath: fixture.binaryPath, cwd: fixture.root, ...launch }),
+          ),
+        ),
+      );
+      expect(refused).toMatchObject({ category: "incompatible", message });
+      expect(prepare).not.toHaveBeenCalled();
+    }
+  });
+
   it("refuses a 2.x Chat or Plan launch before anything starts where the jail can start no process", async () => {
     const fixture = probeWrapper("v2-ready");
     for (const launch of [
@@ -854,7 +890,7 @@ describe("OpenCodeProcessPort", () => {
           Effect.scoped(
             makeOpenCodeProcessLive({
               confinement,
-              platform: "win32",
+              platform: "freebsd",
               runtimeConfigResolver: async () => undefined,
               startupTimeoutMs: 2_000,
             }).start({ binaryPath: fixture.binaryPath, cwd: fixture.root, ...launch }),
@@ -1521,6 +1557,7 @@ describe("OpenCodeProcessPort", () => {
         readonly runsAsItself?: boolean;
         readonly mode?: string;
         readonly environment?: NodeJS.ProcessEnv;
+        readonly strict?: false;
       },
     ): Promise<{
       readonly seen: string;
@@ -1560,6 +1597,7 @@ describe("OpenCodeProcessPort", () => {
             mode: "work",
             executionPolicy: options.executionPolicy ?? "approval-gated",
             ...(options.runsAsItself === false ? {} : { runsAsItself: true as const }),
+            ...(options.strict === false ? { strict: false } : {}),
           }),
         ),
       );
@@ -1695,12 +1733,43 @@ describe("OpenCodeProcessPort", () => {
       }
     });
 
-    it("opens nothing for an OpenCode 2.x launch", async () => {
+    it("is what an OpenCode 2.x launch running as itself finds outside Strict, opened as for 1.x", async () => {
+      const { home, file, folder } = agentsHome();
+      const onLinux = await launch(home, {
+        platform: "linux",
+        mode: "v2-0-1-ready",
+        strict: false,
+      });
+      expect(onLinux.seen).toBe("Answer in British English.\n");
+      const granted = [
+        ...(onLinux.input?.privateHomeAllowPaths ?? []),
+        ...(onLinux.input?.readRoots ?? []),
+      ];
+      expect(granted.filter((path) => path.startsWith(folder))).toEqual([file]);
+      const onMac = await launch(home, { platform: "darwin", mode: "v2-0-1-ready", strict: false });
+      expect(onMac.seen).toBe("Answer in British English.\n");
+      expect(
+        new Set((onMac.input?.extraRules ?? []).filter((rule) => rule.includes(folder))),
+      ).toEqual(
+        new Set([
+          `(allow file-read-metadata (literal "${folder}"))`,
+          `(allow file-read* (literal "${file}"))`,
+        ]),
+      );
+    });
+
+    it("opens nothing for an OpenCode 2.x launch under Strict, or one not running as itself", async () => {
       const { home, folder } = agentsHome();
       for (const platform of ["darwin", "linux"] as const) {
-        const { seen, input } = await launch(home, { platform, mode: "v2-0-1-ready" });
-        expect(seen).toBe("");
-        expect((input?.extraRules ?? []).some((rule) => rule.includes(folder))).toBe(false);
+        for (const options of [{}, { strict: false, runsAsItself: false }] as const) {
+          const { seen, input } = await launch(home, {
+            platform,
+            mode: "v2-0-1-ready",
+            ...options,
+          });
+          expect(seen).toBe("");
+          expect((input?.extraRules ?? []).some((rule) => rule.includes(folder))).toBe(false);
+        }
       }
     });
   });

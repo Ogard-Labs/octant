@@ -16,6 +16,8 @@ export interface ProviderNativeSetupSources {
   readonly readThreadNativeSetup?: (threadId: string) => "on" | "off" | undefined;
   /** Whether the provider's own CLI already trusts the Project's folder; absent reads none. */
   readonly readProviderCliTrust?: ProviderCliProjectTrust;
+  /** Strict for the thread, read as the session starts; absent reads Strict. */
+  readonly readStrict?: (threadId: string) => boolean;
 }
 
 /**
@@ -23,16 +25,18 @@ export interface ProviderNativeSetupSources {
  * in Octant, or already in the provider's own CLI, whose record Octant's one
  * card would only ask again (maintainer decision, 2026-11-16).
  *
- * Strict plugs in here: under Strict only Octant's own trust counts.
+ * Under Strict only Octant's own trust counts: the CLI's record is a lift of
+ * Octant's own limit, and Strict restores that limit.
  */
 export function projectTrustsProvider(
   project: Exclude<Project, { readonly type: "chat" }>,
   driverKind: ProviderInstance["driverKind"],
   readProviderCliTrust: ProviderCliProjectTrust | undefined,
+  strict: boolean,
 ): boolean {
   return (
     (project.nativeProviders ?? []).some((kind) => kind === driverKind) ||
-    readProviderCliTrust?.(driverKind, project.binding.canonicalRoot) === true
+    (!strict && readProviderCliTrust?.(driverKind, project.binding.canonicalRoot) === true)
   );
 }
 
@@ -57,7 +61,8 @@ export function nativeSetupOption(setup: ProviderNativeSetup | undefined): {
  * What a session of this thread may load of the provider's own setup, read
  * from the journal when the session starts or resumes: the account's switch
  * and the Project's trust, both set only by a person at a window on this
- * host, or the trust the person gave the folder in the provider's own CLI.
+ * host, or, outside Strict, the trust the person gave the folder in the
+ * provider's own CLI.
  * Nothing a thread, an agent, or a remote client sends reaches any of them.
  */
 export function sessionNativeSetup(
@@ -73,7 +78,12 @@ export function sessionNativeSetup(
   const projectTrusts =
     project !== undefined &&
     project.type !== "chat" &&
-    projectTrustsProvider(project, instance.driverKind, sources.readProviderCliTrust);
+    projectTrustsProvider(
+      project,
+      instance.driverKind,
+      sources.readProviderCliTrust,
+      input.threadId === undefined || (sources.readStrict?.(input.threadId) ?? true),
+    );
   const threadChoice =
     input.threadId === undefined ? undefined : sources.readThreadNativeSetup?.(input.threadId);
   return resolveProviderNativeSetup({

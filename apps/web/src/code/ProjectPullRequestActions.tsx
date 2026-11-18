@@ -4,6 +4,7 @@ import type {
 } from "@octant/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 
 /** The person's own actions on a pull request, before the pane names its target. */
@@ -30,6 +31,11 @@ export interface ProjectPullRequestActionsProps {
   ) => Promise<CodeProjectPullRequestActionOutcome>;
   /** Called after an action the forge accepted, so the review can re-read. */
   readonly onChanged?: () => void;
+  /**
+   * "timeline" is the page's Timeline tab: the forms only. Closing and
+   * reopening sit in the page's own menu, so the tab does not repeat them.
+   */
+  readonly layout?: "dock" | "timeline";
 }
 
 type ReadContext = Extract<CodeProjectPullRequestActionContext, { status: "read" }>;
@@ -118,10 +124,16 @@ export function ProjectPullRequestActions(props: ProjectPullRequestActionsProps)
   const openThreads = (context?.reviewThreads ?? []).filter((thread) => !thread.resolved);
 
   return (
-    <section aria-label="Your actions" className="code-pr-review__section code-pr-actions">
-      <header className="code-pr-review__section-header">
-        <h2>Your actions</h2>
-      </header>
+    <section
+      aria-label="Your actions"
+      className="code-pr-review__section code-pr-actions"
+      data-layout={props.layout ?? "dock"}
+    >
+      {props.layout === "timeline" ? null : (
+        <header className="code-pr-review__section-header">
+          <h2>Your actions</h2>
+        </header>
+      )}
       {loadFailure === undefined ? null : (
         <p className="code-pr-actions__note" role="status">
           {loadFailure}
@@ -130,48 +142,75 @@ export function ProjectPullRequestActions(props: ProjectPullRequestActionsProps)
 
       <div className="code-pr-actions__group" role="group" aria-label="Labels">
         <strong>Labels</strong>
-        {context === undefined ? null : context.labels.length === 0 && available.length === 0 ? (
+        {context === undefined ? (
+          loadFailure === undefined ? (
+            // The row of chips keeps its place until the read lands, so the
+            // comment box under it does not move.
+            <div aria-busy="true" className="code-pr-actions__labels-skeleton" role="status">
+              <span className="sr-only">Loading labels</span>
+              <span aria-hidden="true" className="skeleton code-pr-actions__labels-skeleton-chip" />
+            </div>
+          ) : null
+        ) : context.labels.length === 0 && available.length === 0 ? (
           <p className="code-pr-actions__note">This repository has no labels yet.</p>
         ) : (
-          <ul className="code-pr-actions__labels">
-            {context.labels.map((label) => (
-              <li key={`on-${label}`}>
-                <OctantButton
-                  aria-label={`Remove label ${label}`}
-                  aria-pressed="true"
-                  disabled={pending || merged}
-                  onClick={() =>
-                    void run(
-                      { kind: "labels", add: [], remove: [label] },
-                      `Removed label ${label}.`,
-                    )
-                  }
-                  size="sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  {label} ×
-                </OctantButton>
-              </li>
-            ))}
-            {available.map((label) => (
-              <li key={`off-${label}`}>
-                <OctantButton
-                  aria-label={`Add label ${label}`}
-                  aria-pressed="false"
-                  disabled={pending || merged}
-                  onClick={() =>
-                    void run({ kind: "labels", add: [label], remove: [] }, `Added label ${label}.`)
-                  }
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  + {label}
-                </OctantButton>
-              </li>
-            ))}
-          </ul>
+          <>
+            {context.labels.length === 0 ? (
+              <p className="code-pr-actions__note">No labels on this pull request.</p>
+            ) : (
+              <ul className="code-pr-actions__labels">
+                {context.labels.map((label) => (
+                  <li key={`on-${label}`}>
+                    <OctantButton
+                      aria-label={`Remove label ${label}`}
+                      aria-pressed="true"
+                      disabled={pending || merged}
+                      onClick={() =>
+                        void run(
+                          { kind: "labels", add: [], remove: [label] },
+                          `Removed label ${label}.`,
+                        )
+                      }
+                      size="sm"
+                      type="button"
+                      variant="secondary"
+                    >
+                      {label} ×
+                    </OctantButton>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {available.length === 0 ? null : (
+              <OctantCollapsible
+                className="code-pr-actions__more-labels"
+                summary={`Add a label (${available.length})`}
+              >
+                <ul className="code-pr-actions__labels">
+                  {available.map((label) => (
+                    <li key={`off-${label}`}>
+                      <OctantButton
+                        aria-label={`Add label ${label}`}
+                        aria-pressed="false"
+                        disabled={pending || merged}
+                        onClick={() =>
+                          void run(
+                            { kind: "labels", add: [label], remove: [] },
+                            `Added label ${label}.`,
+                          )
+                        }
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        + {label}
+                      </OctantButton>
+                    </li>
+                  ))}
+                </ul>
+              </OctantCollapsible>
+            )}
+          </>
         )}
       </div>
 
@@ -352,7 +391,7 @@ export function ProjectPullRequestActions(props: ProjectPullRequestActionsProps)
         </form>
       )}
 
-      {merged ? null : (
+      {merged || props.layout === "timeline" ? null : (
         <div className="code-pr-actions__group code-pr-actions__row">
           <span className="code-pr-actions__note">
             {closed
@@ -391,9 +430,9 @@ export function ProjectPullRequestActions(props: ProjectPullRequestActionsProps)
   );
 }
 
-const DESKTOP_ONLY = "Only the desktop window can do this.";
+export const DESKTOP_ONLY = "Only the desktop window can do this.";
 
-function isUnauthorized(error: unknown): boolean {
+export function isUnauthorized(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
@@ -415,7 +454,7 @@ function contextFailureCopy(
       : "Labels and review threads could not be read.";
 }
 
-function actionRefusalCopy(
+export function actionRefusalCopy(
   outcome: Exclude<CodeProjectPullRequestActionOutcome, { status: "done" }>,
 ): string {
   if (outcome.status === "unavailable") {

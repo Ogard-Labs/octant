@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { useThreadStatsScope } from "./threadStatsScope";
 import "./threadStats.css";

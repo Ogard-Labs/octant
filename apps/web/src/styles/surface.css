@@ -48,18 +48,20 @@
   line-height: 1.1;
 }
 
-/* The section labels' size and tracking in primary ink: one step above them.
-   Destinations and Settings share it, so the two page heads cannot drift. A
-   thread's title in the title band is a name in navigation, not a page title. */
+/* The page title is the large one: the display size (26, the start screen's
+   question size), the strong weight and a slight negative tracking, so a page
+   opens as a place. Destinations and Settings share it, so the two page heads
+   cannot drift. A thread's title in the title band is a name in navigation,
+   not a page title. */
 .oct-page-title {
   margin: 0;
   overflow: hidden;
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-2xl);
   font-weight: var(--oct-weight-strong);
-  letter-spacing: var(--oct-tracking-snug);
-  line-height: var(--oct-leading-label);
+  letter-spacing: var(--oct-tracking-sf-26);
+  line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -72,22 +74,23 @@
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-strong);
-  letter-spacing: var(--oct-tracking-snug);
-  line-height: var(--oct-leading-snug);
+  letter-spacing: var(--oct-tracking-sf-14);
+  line-height: var(--oct-line-chrome);
   text-transform: none;
 }
 
 /* A name in navigation: a thread's title in the sidebar and the title band,
    the account's name, a Settings page. The interface size at regular weight
-   reads as a calm list; the selected row is told by its fill, not its weight. */
+   at medium weight reads as a firm list beside its quieter meta; the selected
+   row is told by its fill, not its weight. */
 .oct-nav-name {
   margin: 0;
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-regular);
-  letter-spacing: 0;
-  line-height: var(--oct-leading-label);
+  font-weight: var(--oct-weight-medium);
+  letter-spacing: var(--oct-tracking-sf-14);
+  line-height: var(--oct-line-chrome);
 }
 
 /* A group's caption in navigation: quiet text over its rows, in sentence
@@ -98,8 +101,8 @@
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-regular);
-  letter-spacing: 0;
-  line-height: var(--oct-leading-snug);
+  letter-spacing: var(--oct-tracking-sf-12);
+  line-height: var(--oct-line-chrome-sm);
   text-transform: none;
 }
 
@@ -125,14 +128,16 @@
 .oct-menu-option {
   font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-medium);
-  line-height: var(--oct-leading-label);
+  letter-spacing: var(--oct-tracking-sf-14);
+  line-height: var(--oct-line-chrome);
 }
 
 .oct-row-label {
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
-  line-height: var(--oct-leading-label);
+  letter-spacing: var(--oct-tracking-sf-14);
+  line-height: var(--oct-line-chrome);
 }
 
 .oct-row-detail {
@@ -144,6 +149,7 @@
 .oct-meta {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-sf-12);
   line-height: var(--oct-leading-meta);
 }
 
@@ -168,19 +174,25 @@
 .surface__inner {
   width: min(100% - var(--oct-surface-gutter) * 2, var(--oct-surface-measure));
   min-width: 0;
-  padding: 0 0 64px;
+  padding: var(--oct-space-6) 0 64px;
   margin: 0 auto;
 }
 
 /* A page with nothing on it centres its one line in the room under the
    header, the way an empty window does. */
-.surface__inner:has(> .surface-empty) {
+.surface__inner:has(
+  > .surface-empty,
+  > .review-page__body > .surface-empty,
+  > .agents-center__body > .agents-center__list-pane > .surface-empty
+) {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
 }
 
-.surface__inner > .surface-empty {
+.surface__inner > .surface-empty,
+.surface__inner > .review-page__body:has(> .surface-empty),
+.surface__inner > .agents-center__body:has(> .agents-center__list-pane > .surface-empty) {
   flex: 1 1 auto;
   align-content: center;
 }
@@ -250,20 +262,13 @@
   gap: 0 var(--oct-space-2);
 }
 
-/* A display header opens a page as a place: the title keeps its own size and
-   the one line of state sits on its baseline, in the meta ink. */
-.surface-header--display > .surface-header__copy > h1 {
-  flex: none;
-  /* A step under the large title and at the strong weight: at 28px and the
-     title weight the one word outweighed everything on the page under it. */
-  font-size: var(--oct-text-2xl);
-  font-weight: var(--oct-weight-strong);
-  letter-spacing: var(--oct-tracking-tight);
-  line-height: 1.15;
-}
-
+/* Every destination page opens on one header: the large page title, and the
+   one line of state on its baseline as a subtitle in the secondary ink at the
+   detail role. Inbox and Projects read alike. */
 .surface-header__detail {
   overflow: hidden;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-detail);
   min-width: 0;
   margin: 0;
   text-overflow: ellipsis;
@@ -445,6 +450,11 @@
   color: var(--oct-fg);
 }
 
+/* A page's description is two short lines, not one stretched across the pane. */
+.surface-empty > .oct-row-detail {
+  max-width: 48ch;
+}
+
 .surface-empty__icon {
   display: inline-flex;
   margin-bottom: var(--oct-space-2);
@@ -489,12 +499,11 @@
 }
 
 /* ── Welcome composer ──────────────────────────────────────────────────
-   Chat, Work, and Code start from the same geometry: one question in the
-   middle of the page and the raised `.composer` docked at its foot, where it
-   sits once the thread starts, so the first message is typed where every
-   later one is: 12px above the pane's foot, the thread composer's margin, so
-   a start screen beside a thread puts its composer on the same line. The
-   per-mode adapters only decide which controls sit in the composer's tray. */
+   Chat, Work, and Code start from the same column, top-anchored: the question,
+   the raised `.composer` directly under it, then that mode's list. One
+   definition serves all three and their drafts; the per-mode adapters only
+   decide which controls sit in the composer's tray. Once a thread exists the
+   composer is docked at the pane's foot, 12px above it, as before. */
 
 .welcome {
   display: flex;
@@ -509,8 +518,6 @@
   gap: var(--oct-space-4);
 }
 
-/* The question takes the free height and centres in it, which is what docks
-   the composer at the foot of the page. */
 .welcome__heading {
   display: grid;
   flex: 1 1 auto;
@@ -518,6 +525,37 @@
   justify-items: center;
   gap: var(--oct-space-2);
   text-align: center;
+}
+
+/* With a list under the composer the question keeps its own height instead of
+   taking the free height. Taking it put the composer at the foot while the list
+   was still empty, then rode it up about 200px as the rows and cards arrived
+   (measured: 446px, 314px, 217px over 1.7s). The composer now sits where the
+   arrived list would leave it, so late data fills the space below and moves
+   nothing. */
+.welcome:has(> .home-start) > .welcome__heading {
+  flex: 0 0 auto;
+}
+
+/* Chat says its hint in the composer's placeholder, so its heading has no quiet
+   line; the line's room stays, so the composer sits on the same row in all
+   three modes. */
+.welcome:has(> .home-start) > .welcome__heading:not(:has(.welcome__status))::after {
+  content: "";
+  height: calc(1em * var(--oct-leading-detail));
+  font-size: var(--oct-text-detail);
+}
+
+/* A draft pane that has a title row (a draft beside another pane) starts at
+   the window's top with that row over its first 44px; a pane without one, home
+   or a draft alone, starts under the title band. The home column starts one
+   band lower under a title row, so the question and the composer stand at one
+   height in every case. Measured in Code before the rule: both rose 44px when
+   a Project was chosen. Keyed on the surface kind alone, it later pushed a
+   draft that stands alone (every New task now) 44px down instead. */
+.workspace-pane[data-surface-kind="draft-thread"]:has(> .workspace-pane__header)
+  .welcome:has(> .home-start) {
+  padding-top: calc(min(8vh, 64px) + var(--oct-title-rail-h));
 }
 
 .welcome__mark {
@@ -571,6 +609,32 @@
   color: var(--oct-meta);
 }
 
+/* "Create from…" stands at the row's end, so a chip that only some modes show
+   never decides where it sits. */
+.composer-tray--start .composer-tray__trailing {
+  margin-left: auto;
+}
+
+/* The Project's cell is reserved in every mode: a mode without a Project here
+   (Chat keeps its chooser under the box) leaves it empty, not collapsed. */
+.composer-tray__slot {
+  display: inline-flex;
+  min-width: 8.5rem;
+  min-height: 24px;
+  align-items: center;
+}
+
+.composer-tray__slot[data-held="true"] {
+  visibility: hidden;
+}
+
+.composer-row__slot {
+  display: inline-flex;
+  min-width: 7rem;
+  min-height: 28px;
+  visibility: hidden;
+}
+
 .composer-tray__leading,
 .composer-tray__trailing {
   display: inline-flex;
@@ -596,8 +660,8 @@
   display: inline-flex;
   align-items: center;
   gap: var(--oct-space-1);
-  min-height: 26px;
-  height: 26px;
+  min-height: 24px;
+  height: 24px;
   padding: 0 var(--oct-space-2);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
@@ -692,18 +756,7 @@
   height: 100%;
   flex: 1 1 auto;
   flex-direction: column;
-  background: var(--octant-app-background);
-}
-
-/* Code Home is the one start screen taller than the pane: its cards and Up
-   next run past the fold and the pane scrolls. A stage held at the pane's
-   height scrolled away with its first screen, leaving a hard edge where the
-   ground stopped and the plain panel showed under Up next. It grows with its
-   content instead. New task keeps the fixed height: its composer docks to the
-   foot of the page through a percentage height, which an auto stage drops. */
-.welcome-stage:has(.code-home) {
-  height: auto;
-  min-height: 100%;
+  background: transparent;
 }
 
 /* Everything the stage holds except the ground itself takes a level above it.
@@ -729,27 +782,195 @@
   color: var(--octant-text-primary);
 }
 
-/* Under one start screen the ground softens behind the question, which sits
-   in the middle of the page, and fades out toward the foot, so the composer
-   docked there keeps a calm page to be read against.
+/* The ground for the start screens is one layer in the window frame, a level
+   under the sidebar, the title band and the panes, and it is shown only while
+   only start screens are open (a destination page hides the workspace, and the
+   ground goes with it; a thread beside one paints its own fill over it). It paints the page itself where the stage is, so the
+   stage and the panes above it stay clear, and on a wide window it runs on
+   under the sidebar as the same picture, so the sidebar's translucent fill
+   shows it softly. The drawn grounds dim themselves to a third there; the
+   others take the mask below.
 
-   The ground stays at z-index 0 and the start screen's own content is lifted
-   above it: at -1 the ground disappeared entirely behind the workspace fill,
-   and sharing a level with the content painted its dots over the greeting and
-   over the suggestion cards, which read as the cards being see-through. */
+   The ground stays under the start screen's content, which is lifted above it:
+   sharing a level with the content painted its dots over the greeting and over
+   the suggestion cards, which read as the cards being see-through. */
 .app-backdrop[data-placement="welcome"] {
+  /* The ground is at full strength down to 55% of the stage, then eases to
+     the stage's own colour over the lower 45%, so the composer and the lists
+     beneath the question always sit on a calm area. One ramp for dark and light
+     pages alike: the mask only reads alpha, so the page colour under it is what
+     the ground fades into. */
+  --oct-ground-fade: linear-gradient(
+    to bottom,
+    currentColor 55%,
+    color-mix(in srgb, currentColor 78%, transparent) 63%,
+    color-mix(in srgb, currentColor 52%, transparent) 72%,
+    color-mix(in srgb, currentColor 26%, transparent) 82%,
+    color-mix(in srgb, currentColor 8%, transparent) 92%,
+    transparent 100%
+  );
+  /* How far the ground runs under the sidebar, and how much of its strength
+     survives there. Zero and all of it where the sidebar is left whole. */
+  --oct-ground-under: 0px;
+  --oct-ground-under-share: 100%;
+  /* The page the ground paints under itself: the theme's page colour. Under
+     Glass it paints none (see "The stage under Glass" below). */
+  --oct-ground-page: var(--octant-app-background);
+  display: none;
+  z-index: -1;
+  left: calc(var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width));
+  background: linear-gradient(var(--oct-ground-page), var(--oct-ground-page)) right top /
+    calc(100% - var(--oct-ground-under)) 100% no-repeat;
+}
+
+.shell-frame:has(main.workspace[data-octant-start-only]:not([hidden]))
+  > .app-backdrop[data-placement="welcome"] {
+  display: block;
+}
+
+/* The pane fill the frame lays under every pane would hide the ground, so it
+   goes clear while only start screens are open. */
+.shell-frame:has(main.workspace[data-octant-start-only]:not([hidden])) > .workspace-layer::before {
+  background: transparent;
+}
+
+/* The stage under Glass. A start screen keeps the window's glass under its
+   ground, whichever setting put the ground there. Shown only behind start
+   screens, the ground painted the theme's opaque page under itself, so the one
+   screen with a picture was also the one black slab in a window of glass; shown
+   behind everything it lay on the bare glass, where a field of light cells
+   over a bright desktop is barely there. The same start screen looked like two
+   different apps (maintainer report, 2026-11-16). Now both lay one veil under
+   the ground, half a second coat of the window's own tint, in the pane's fill
+   layer: dark enough for the cells to read, clear enough to stay glass, and
+   the same in either setting. A person or a system that asked for less
+   transparency keeps the opaque page. */
+html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+  .shell--material-translucent.shell-frame {
+  --oct-stage-veil: color-mix(in srgb, var(--octant-veil-surface) 50%, transparent);
+}
+
+html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+  .shell--material-translucent.shell-frame
+  > .app-backdrop[data-placement="welcome"] {
+  --oct-ground-page: transparent;
+}
+
+html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+  .shell--material-translucent.shell-frame:has(> .app-backdrop):has(
+    main.workspace[data-octant-start-only]:not([hidden])
+  )
+  > .workspace-layer::before {
+  background: var(--oct-stage-veil);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .shell--material-translucent.shell-frame > .app-backdrop[data-placement="welcome"] {
+    --oct-ground-page: var(--octant-app-background);
+  }
+
+  .shell--material-translucent.shell-frame:has(> .app-backdrop):has(
+      main.workspace[data-octant-start-only]:not([hidden])
+    )
+    > .workspace-layer::before {
+    background: transparent;
+  }
+}
+
+/* Only the stage shows the ground. A pane that holds a tool (a tile or the
+   overview in the dock, the Environment section, the bottom panel) is solid
+   wherever a ground is on, beside a start screen and beside a thread alike:
+   the pane colour, opaque, in either material. Three lighter surfaces were
+   tried first (the pane colour at 94%, the sidebar's colour at 72% under a
+   veil, and a blur of the ground behind it) and each left the ground's cells
+   and streaks standing behind a pull request's title, the Environment rows
+   and a tool's bar: the desktop window draws no backdrop blur, and a few per
+   cent of a bright cell is still a pattern behind 12px text. The variables
+   are set on the pane itself because the shell resolves its own pane fill
+   where it is declared. */
+.shell--app-backdrop.shell-frame :is(.right-utility-dock, .bottom-utility-panel),
+.shell-frame:has(main.workspace[data-octant-start-only]:not([hidden]))
+  :is(.right-utility-dock, .bottom-utility-panel) {
+  --octant-panel-surface: color-mix(
+    in srgb,
+    var(--octant-workspace) 98%,
+    var(--octant-text-primary)
+  );
+  --octant-pane-fill: linear-gradient(var(--octant-panel-surface), var(--octant-panel-surface));
+}
+
+/* A lone tool beside a start screen has no pane under it (the stage's fill is
+   cleared above), so the dock lays the same solid fill under its tiles. */
+@media (min-width: 681px) {
+  .shell-frame:has(main.workspace[data-octant-start-only]:not([hidden]))
+    .right-utility-dock::before {
+    position: absolute;
+    z-index: -1;
+    inset: var(--oct-title-rail-h) 0 0;
+    background: var(--octant-pane-fill);
+    content: "";
+    pointer-events: none;
+  }
+}
+
+@media (min-width: 681px) {
+  .app-backdrop[data-placement="welcome"] {
+    top: var(--oct-title-rail-h);
+    right: var(--octant-panel-gap, 0px);
+    bottom: var(--octant-panel-gap, 0px);
+    border-radius: 0 var(--oct-radius-md) var(--oct-radius-md) 0;
+  }
+
+  /* Under the sidebar only where its fill is translucent: not with it
+     collapsed, and not under Glass, which keep the sidebar whole. */
+  .shell-frame:not(.shell--sidebar-collapsed, .shell--material-translucent)
+    > .app-backdrop[data-placement="welcome"] {
+    --oct-ground-under: var(--octant-rendered-sidebar-width);
+    --oct-ground-under-share: 33%;
+    left: var(--octant-rail-offset, 0px);
+    border-radius: var(--oct-radius-md);
+  }
+}
+
+html:is([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+  .shell-frame
+  > .app-backdrop[data-placement="welcome"] {
+  --oct-ground-under: 0px;
+  --oct-ground-under-share: 100%;
+  left: calc(var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width));
+  border-radius: 0 var(--oct-radius-md) var(--oct-radius-md) 0;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .shell-frame > .app-backdrop[data-placement="welcome"] {
+    --oct-ground-under: 0px;
+    --oct-ground-under-share: 100%;
+    left: calc(var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width));
+    border-radius: 0 var(--oct-radius-md) var(--oct-radius-md) 0;
+  }
+}
+
+/* The picture layers soften behind the question, which sits in the middle of
+   the stage, and fade out toward the foot, so the composer docked there keeps
+   a calm page to be read against: full strength down to about three fifths of
+   the window, then about a third of it across the lower third, and the window
+   ground itself at the foot (sooner on a light page). Under the sidebar they keep a third. The
+   mask is on the layers and not on the ground, so the page paint under them is
+   never cut away. */
+.app-backdrop[data-placement="welcome"] > * {
   mask-image:
     radial-gradient(
-      ellipse 560px 240px at 50% 44%,
+      ellipse 560px 240px at calc((100% + var(--oct-ground-under)) / 2) 44%,
       transparent 42%,
       color-mix(in srgb, currentColor 40%, transparent) 70%,
       currentColor 100%
     ),
+    var(--oct-ground-fade),
     linear-gradient(
-      to bottom,
-      currentColor 62%,
-      color-mix(in srgb, currentColor 35%, transparent) 80%,
-      transparent 94%
+      to right,
+      color-mix(in srgb, currentColor var(--oct-ground-under-share), transparent)
+        calc(var(--oct-ground-under) - 24px),
+      currentColor calc(var(--oct-ground-under) + 24px)
     );
   mask-size: 100% 100%;
   mask-repeat: no-repeat;
@@ -757,24 +978,32 @@
   -webkit-mask-composite: source-in;
 }
 
-/* Light ink on a light ground has far less contrast headroom than light ink on
-   a dark one, and the grey dots are busiest in the lower half, exactly where the
-   suggestions and the Continue list read. There the ground fades out sooner so
-   that text sits on calm paper; dark keeps the longer fade. */
-:root[data-octant-theme-mode="light"] .app-backdrop[data-placement="welcome"] {
-  mask-image:
-    radial-gradient(
-      ellipse 560px 240px at 50% 44%,
-      transparent 42%,
-      color-mix(in srgb, currentColor 40%, transparent) 70%,
-      currentColor 100%
-    ),
-    linear-gradient(
-      to bottom,
-      currentColor 56%,
-      color-mix(in srgb, currentColor 25%, transparent) 74%,
-      transparent 90%
-    );
+/* The character field and the pixel ground dim their own middle and their
+   sidebar (see appBackdropAscii.ts and appBackdropPrint.ts), so the question and
+   the composer read on a calm page without the ground being cut away in a fixed
+   ellipse. They take the same fade toward the foot as the pictures, and nothing
+   else. Each fades in once it has drawn its first frame. */
+.app-backdrop[data-octant-app-backdrop="characters"][data-placement="welcome"] > *,
+.app-backdrop[data-octant-app-backdrop="pixels"][data-placement="welcome"] > * {
+  mask-image: var(--oct-ground-fade);
+}
+
+.app-backdrop__characters,
+.app-backdrop__pixels {
+  opacity: 0;
+  transition: opacity var(--oct-motion-ground-in) var(--oct-ease-standard);
+}
+
+.app-backdrop__characters[data-ready="true"],
+.app-backdrop__pixels[data-ready="true"] {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-backdrop__characters,
+  .app-backdrop__pixels {
+    transition: none;
+  }
 }
 
 /* Under the whole shell there is no composer to clear; the ground only
@@ -1110,7 +1339,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
         .artifact-library-layer
       )
   ) {
-  --octant-thread-veil: var(--octant-sheet-surface);
+  --octant-thread-veil: var(--octant-veil-surface, var(--octant-sheet-surface));
   background: linear-gradient(
     to bottom,
     transparent var(--oct-title-rail-h),
@@ -1135,7 +1364,12 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
           .artifact-library-layer
         )
     ) {
-    --octant-thread-veil: color-mix(in srgb, var(--octant-sheet-surface) 80%, transparent);
+    --octant-thread-veil: color-mix(
+      in srgb,
+      var(--octant-veil-surface, var(--octant-sheet-surface))
+        var(--octant-reading-surface-keep, 94%),
+      transparent
+    );
   }
 }
 
@@ -1262,4 +1496,18 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
    every session in a different colour than the one its text sat on. */
 .shell--app-backdrop.shell-frame .code-terminal-pane {
   background: var(--octant-workspace);
+}
+
+/* The Filter menu's button: a count after the word, drawn as text so it needs
+   no extra box. Its room is always kept, so the button and the controls beside
+   it stay where they are when the first filter goes on. */
+.filter-menu__count {
+  min-width: 1ch;
+  color: var(--oct-accent);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.filter-menu__count[data-empty="true"] {
+  visibility: hidden;
 }

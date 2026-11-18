@@ -48,7 +48,7 @@ describe("WorkOverview Project icon", () => {
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     expect(container.querySelector(".work-overview__context-item img.project-icon")).toBeNull();
     expect(
-      container.querySelector(".work-overview__context-item svg.lucide-folder-open"),
+      container.querySelector(".work-overview__context-item svg.octant-icon-folder-open"),
     ).not.toBeNull();
   });
 });
@@ -340,8 +340,8 @@ describe("WorkOverview", () => {
     await user.click(await screen.findByRole("option", { name: "Model One" }));
     expect(onSelectProvider).toHaveBeenCalledWith({ providerInstanceId: instanceId, modelId });
     // The menu stays open after a model is chosen, so the level is right there.
-    const level = screen.getByRole("slider", { name: "Effort level" });
-    fireEvent.change(level, { target: { value: level.getAttribute("max") } });
+    const level = screen.getByRole("group", { name: "Effort level" });
+    await user.click(within(level).getByRole("button", { name: "High" }));
     await user.keyboard("{Escape}");
     await user.type(
       within(composer).getByRole("textbox", { name: "Start a new task" }),

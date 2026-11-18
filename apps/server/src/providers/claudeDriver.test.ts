@@ -1,3 +1,5 @@
+import { applyProtectedFilesChoice, currentProtectedFilesChoice } from "../process/secretGuard";
+import { claudeSandboxToolchainReads } from "./claudeSandboxToolchain";
 import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
@@ -12,6 +14,10 @@ import {
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { Effect, Exit, Fiber, Option, PubSub, Scope, Stream } from "effect";
+import {
+  WINDOWS_KEPT_SANDBOX_REFUSAL,
+  WINDOWS_STRICT_REFUSAL,
+} from "@octant/domain/guardrail-policy";
 import {
   renderProviderContextSections,
   renderProviderTurnPrompt,
@@ -47,6 +53,14 @@ import {
   claudeFileToolSecretRefusal,
   claudeOwnRulesDecide,
   claudeSearchesRunUnguarded,
+  claudeArtifactCall,
+  claudeArtifactCallRefusal,
+  claudeOctantConfiguresSandbox,
+  claudeOffersArtifacts,
+  claudeOwnPermissions,
+  claudeWithheldTools,
+  CLAUDE_LEVEL_CHANGE_REFUSAL,
+  CLAUDE_WAKEUP_UNAVAILABLE,
   makeClaudeDriver,
 } from "./claudeDriver";
 import type { ClaudeResumeIdentity, ClaudeResumeIdentityPort } from "./claudeDriver";
@@ -59,6 +73,7 @@ import {
 import {
   claudeLoginKeychainPath,
   claudePlanRunsCommands,
+  claudeProjectFolderName,
   type ClaudeProcessPort,
 } from "./claudeProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
@@ -165,6 +180,9 @@ class FakeQuery implements ClaudeQueryPort {
   readonly requestCompaction = () => this.compactionRequests();
   readonly interrupt = vi.fn(() => Effect.void);
   readonly stopTask = vi.fn((_taskId: string) => Effect.succeed("requested" as const));
+  readonly backgroundTask = vi.fn((_toolUseId: string) =>
+    Effect.succeed("backgrounded" as "backgrounded" | "not-found" | "unsupported"),
+  );
   readonly forceKill = vi.fn(() => Effect.void);
   readonly setPermissionMode = vi.fn(() => Effect.void);
   readonly supportedModels = vi.fn(() => Effect.succeed(this.initialization.models));
@@ -236,12 +254,14 @@ function harness(
     readonly autoCompactThreshold?: number;
     readonly compactAnnounced?: boolean;
     readonly configDirectory?: string;
+    readonly accountDirectory?: (instanceId: string) => string | undefined;
     readonly runtimeVersion?: string;
     readonly artifactDelivery?: () => boolean;
     readonly ownMemory?: () => boolean;
     readonly planMcpServers?: () => ReadonlyArray<string>;
     readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
     readonly authorityNow?: () => number;
+    readonly platform?: NodeJS.Platform;
     readonly maxTrackedToolUses?: number;
     readonly runtimeTurnsPerTurn?: () => number;
     readonly gitIdentity?: (checkoutRoot: string) => Promise<{ name?: string; email?: string }>;
@@ -390,6 +410,9 @@ function harness(
       ...(options.configDirectory === undefined
         ? {}
         : { configDirectory: options.configDirectory }),
+      ...(options.accountDirectory === undefined
+        ? {}
+        : { accountDirectory: options.accountDirectory }),
       ...(options.artifactDelivery === undefined
         ? {}
         : { artifactDelivery: options.artifactDelivery }),
@@ -398,6 +421,7 @@ function harness(
       ...(options.gitIdentity === undefined ? {} : { gitIdentity: options.gitIdentity }),
       ...(options.runtimeNetwork === undefined ? {} : { runtimeNetwork: options.runtimeNetwork }),
       ...(options.authorityNow === undefined ? {} : { authorityNow: options.authorityNow }),
+      ...(options.platform === undefined ? {} : { platform: options.platform }),
       ...(options.maxTrackedToolUses === undefined
         ? {}
         : { maxTrackedToolUses: options.maxTrackedToolUses }),
@@ -742,6 +766,23 @@ describe("Claude execution policy", () => {
     } finally {
       await acquired.close();
     }
+  });
+
+  it("starts a Chat session on Windows with no tool that reads a folder or runs a command", () => {
+    for (const policy of ["approval-gated", "auto-accept-edits", "full-access", "plan"] as const) {
+      const chat = claudeExecutionOptions(policy, false, "chat", "win32", false);
+      expect(chat.fullToolSet).toBe(false);
+      for (const tool of ["Read", "Grep", "Glob", "LS", "Edit", "Write", "Bash", "NotebookEdit"])
+        expect(chat.tools).not.toContain(tool);
+    }
+    expect(claudeExecutionOptions("approval-gated", false, "chat", "win32", false).tools).toEqual([
+      "AskUserQuestion",
+      "TodoWrite",
+    ]);
+    // Work and Code keep their tools on Windows, held by Claude's own modes.
+    expect(claudeExecutionOptions("approval-gated", false, "code", "win32", false).tools).toContain(
+      "Bash",
+    );
   });
 
   it("maps every Octant policy to the exact Claude permission options", () => {
@@ -1092,7 +1133,7 @@ describe("Claude execution policy", () => {
         toolUseId,
         signal,
       });
-    if (process.platform === "darwin") {
+    if (claudePlanRunsCommands()) {
       expect(open.tools).toContain("Bash");
       // Plan has no approvals: a prompt here could only fail the turn.
       await expect(command("log", { command: "git log --oneline -5" })).resolves.toEqual({
@@ -1595,6 +1636,56 @@ describe("Claude execution policy", () => {
     await fullAccess.close();
   });
 
+  it("starts Claude on Windows below Full access outside Strict with its own permission modes, and refuses Strict and a kept sandbox by name before it runs", async () => {
+    const started = harness("subscription", "current-session", { platform: "win32" });
+    const acquired = await acquire(started.driver);
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    expect(started.opens[0]?.executionPolicy).toBe("approval-gated");
+    // Claude Code has no command sandbox on Windows; requiring one would leave
+    // every command unable to run.
+    expect(started.opens[0]?.sandbox).toBeUndefined();
+    await acquired.close();
+
+    // Chat starts there outside Strict, holding no file or shell tool at all.
+    const chat = harness("subscription", "current-session", { platform: "win32" });
+    const chatConnection = await acquire(chat.driver, "chat");
+    await Effect.runPromise(
+      chatConnection.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    expect(chat.opens[0]?.withheldTools).toBeUndefined();
+    for (const tool of ["Read", "Grep", "Glob", "Edit", "Write", "Bash"])
+      expect(chat.opens[0]?.tools).not.toContain(tool);
+    await chatConnection.close();
+
+    for (const [level, message] of [
+      [{ executionPolicy: "approval-gated" }, WINDOWS_STRICT_REFUSAL],
+      [
+        { executionPolicy: "full-access", fullAccessSandbox: true, strict: false },
+        WINDOWS_KEPT_SANDBOX_REFUSAL,
+      ],
+    ] as const) {
+      const refused = harness("subscription", "current-session", { platform: "win32" });
+      const connection = await acquire(refused.driver);
+      await expect(
+        Effect.runPromise(connection.connection.start({ sessionId, modelId, ...level })),
+      ).rejects.toMatchObject({ message: expect.stringContaining(message) });
+      expect(refused.opens).toHaveLength(0);
+      await connection.close();
+    }
+  });
+
   it("passes the gate for calls made after a cd into a subfolder and refuses a cd out of the Project", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);
@@ -1863,6 +1954,90 @@ describe("Claude execution policy", () => {
       expect(query.interrupt).not.toHaveBeenCalled();
       await expect(
         Effect.runPromise(stopChild({ sessionId, childAgentId: "another-child" })),
+      ).resolves.toBe("not-found");
+    } finally {
+      await Effect.runPromise(Fiber.interrupt(subscription));
+      await acquired.close();
+    }
+  });
+
+  it("sends one running subagent to the background and carries a person's message to its next tool call", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    const children: ProviderRuntimeEvent[] = [];
+    const subscription = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          if (event.kind === "child-agent-activity") children.push(event);
+        }),
+      ),
+    );
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "Delegate", attachments: [], tools: [] }),
+      );
+      const query = f.queries[0]!;
+      const open = f.opens[0]!;
+      await query.emit({
+        kind: "stream-event",
+        sessionId: "sdk-session-1",
+        event: {
+          kind: "content-start",
+          index: 0,
+          content: {
+            kind: "tool-use",
+            toolUseId: "sdk-agent-use",
+            toolName: "Agent",
+            input: { description: "Read the notes" },
+          },
+        },
+      });
+      await vi.waitFor(() => expect(children.length).toBeGreaterThan(0));
+      const child = children[0];
+      if (child?.kind !== "child-agent-activity") throw new Error("Expected a subagent");
+      const background = acquired.connection.backgroundChildAgent;
+      const message = acquired.connection.messageChildAgent;
+      if (background === undefined || message === undefined) {
+        throw new Error("Expected subagent steering");
+      }
+      // Not a runtime task yet: nothing to background or message.
+      await expect(
+        Effect.runPromise(background({ sessionId, childAgentId: child.childAgentId })),
+      ).resolves.toBe("not-found");
+      await expect(
+        Effect.runPromise(
+          message({ sessionId, childAgentId: child.childAgentId, message: "Skip the tests" }),
+        ),
+      ).resolves.toBe("not-found");
+      await query.emit({
+        kind: "task",
+        sessionId: "sdk-session-1",
+        subtype: "task_started",
+        taskId: "sdk-runtime-task",
+        toolUseId: "sdk-agent-use",
+        description: "Read the notes",
+      });
+      await expect(
+        Effect.runPromise(background({ sessionId, childAgentId: child.childAgentId })),
+      ).resolves.toBe("backgrounded");
+      // The runtime backgrounds the one call that started the subagent.
+      expect(query.backgroundTask).toHaveBeenCalledWith("sdk-agent-use");
+      expect(query.interrupt).not.toHaveBeenCalled();
+
+      await expect(
+        Effect.runPromise(
+          message({ sessionId, childAgentId: child.childAgentId, message: "Skip the tests" }),
+        ),
+      ).resolves.toBe("queued");
+      // Another subagent's call takes nothing; this one's next call takes it once.
+      expect(open.subagentMessages?.("another-agent")).toBeUndefined();
+      expect(open.subagentMessages?.("sdk-runtime-task")).toContain("Skip the tests");
+      expect(open.subagentMessages?.("sdk-runtime-task")).toBeUndefined();
+      await expect(
+        Effect.runPromise(message({ sessionId, childAgentId: "another-child", message: "Hello" })),
       ).resolves.toBe("not-found");
     } finally {
       await Effect.runPromise(Fiber.interrupt(subscription));
@@ -2660,85 +2835,138 @@ describe("Claude execution policy", () => {
     }
   });
 
-  it("asks about every command that leaves Claude's sandbox below Full access and refuses one in Plan", async () => {
-    const escaped = { command: "ls ~/Documents", dangerouslyDisableSandbox: true };
-    const f = harness();
-    const acquired = await acquire(f.driver, "code");
-    try {
-      await Effect.runPromise(
-        acquired.connection.start({ sessionId, modelId, executionPolicy: "auto-accept-edits" }),
-      );
-      const open = f.opens[0]!;
-      // Ordinary commands stay in the sandbox; the runtime may let one out.
-      expect(open.sandbox).toMatchObject({
-        enabled: true,
-        allowUnsandboxedCommands: true,
-        filesystem: { denyRead: ["/"], allowRead: [projectRoot], allowWrite: [projectRoot] },
-      });
-      const signal = new AbortController().signal;
-      const approvals: Array<{ readonly requestId: string }> = [];
-      const watched = Effect.runFork(
-        Stream.runForEach(
-          Stream.unwrapScoped(acquired.connection.subscribe).pipe(
-            Stream.filter((event) => event.kind === "approval-request"),
+  it.each(["approval-gated", "auto-accept-edits", "full-access"] as const)(
+    "adds no command sandbox configuration at %s with Strict off",
+    async (executionPolicy) => {
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      try {
+        await Effect.runPromise(
+          acquired.connection.start({
+            sessionId,
+            modelId,
+            executionPolicy,
+            strict: false,
+            nativeSetup: {
+              skills: true,
+              hooks: false,
+              toolServers: false,
+              projectCode: false,
+              subagents: false,
+              webTools: false,
+            },
+          }),
+        );
+        expect(f.opens[0]).toMatchObject({ strict: false, executionPolicy });
+        expect(f.opens[0]).not.toHaveProperty("sandbox");
+      } finally {
+        await acquired.close();
+      }
+    },
+  );
+
+  it.each([
+    { executionPolicy: "auto-accept-edits" as const, strict: false },
+    { executionPolicy: "full-access" as const, strict: true },
+  ])(
+    "asks separately for each native sandbox escape at $executionPolicy, including Strict Full access",
+    async ({ executionPolicy, strict }) => {
+      const escaped = { command: "ls ~/Documents", dangerouslyDisableSandbox: true };
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      try {
+        await Effect.runPromise(
+          acquired.connection.start({
+            sessionId,
+            modelId,
+            executionPolicy,
+            ...(strict ? { strict: true } : {}),
+          }),
+        );
+        const open = f.opens[0]!;
+        // Ordinary commands stay in the sandbox; the runtime may let one out.
+        expect(open.sandbox).toMatchObject({
+          enabled: true,
+          allowUnsandboxedCommands: true,
+          filesystem: {
+            denyRead: ["/"],
+            allowRead: [projectRoot, ...(strict ? claudeSandboxToolchainReads() : [])],
+            allowWrite: [projectRoot],
+          },
+        });
+        const signal = new AbortController().signal;
+        const approvals: Array<{
+          readonly requestId: string;
+          readonly requiresUser?: boolean | undefined;
+          readonly description?: string | undefined;
+        }> = [];
+        const watched = Effect.runFork(
+          Stream.runForEach(
+            Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+              Stream.filter((event) => event.kind === "approval-request"),
+            ),
+            (event) =>
+              Effect.sync(() => {
+                if (event.kind === "approval-request") approvals.push(event);
+              }),
           ),
-          (event) =>
-            Effect.sync(() => {
-              if (event.kind === "approval-request") approvals.push(event);
+        );
+        const run = async (toolUseId: string) => {
+          await expect(
+            open.preToolUse({
+              sessionId: "sdk-session-1",
+              projectRoot,
+              toolName: "Bash",
+              input: escaped,
+              toolUseId,
+              signal,
             }),
-        ),
-      );
-      const run = async (toolUseId: string) => {
+          ).resolves.toEqual({ behavior: "ask" });
+          const callback = open.canUseTool({ toolName: "Bash", input: escaped, toolUseId, signal });
+          await vi.waitFor(() => expect(approvals.length).toBeGreaterThan(0));
+          const raised = approvals.shift();
+          if (raised === undefined) throw new Error("Expected an approval card");
+          if (strict) {
+            expect(raised.requiresUser).toBe(true);
+            expect(raised.description).toContain("Approval applies to this command only");
+          }
+          await Effect.runPromise(
+            acquired.connection.answerApproval({
+              sessionId,
+              requestId: raised.requestId,
+              approved: true,
+            }),
+          );
+          await expect(callback).resolves.toMatchObject({ behavior: "allow" });
+        };
+        await run("escape-1");
+        // A remembered answer never carries over to a command that leaves the sandbox.
+        await run("escape-2");
+        await Effect.runPromise(Fiber.interrupt(watched));
+      } finally {
+        await acquired.close();
+      }
+      const plan = harness();
+      const planConnection = await acquire(plan.driver, "code");
+      try {
+        await Effect.runPromise(
+          planConnection.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+        );
         await expect(
-          open.preToolUse({
+          plan.opens[0]!.preToolUse({
             sessionId: "sdk-session-1",
             projectRoot,
             toolName: "Bash",
             input: escaped,
-            toolUseId,
-            signal,
+            toolUseId: "plan-escape",
+            signal: new AbortController().signal,
           }),
-        ).resolves.toEqual({ behavior: "ask" });
-        const callback = open.canUseTool({ toolName: "Bash", input: escaped, toolUseId, signal });
-        await vi.waitFor(() => expect(approvals.length).toBeGreaterThan(0));
-        const raised = approvals.shift();
-        if (raised === undefined) throw new Error("Expected an approval card");
-        await Effect.runPromise(
-          acquired.connection.answerApproval({
-            sessionId,
-            requestId: raised.requestId,
-            approved: true,
-          }),
-        );
-        await expect(callback).resolves.toMatchObject({ behavior: "allow" });
-      };
-      await run("escape-1");
-      // A remembered answer never carries over to a command that leaves the sandbox.
-      await run("escape-2");
-      await Effect.runPromise(Fiber.interrupt(watched));
-    } finally {
-      await acquired.close();
-    }
-    const plan = harness();
-    const planConnection = await acquire(plan.driver, "code");
-    try {
-      await Effect.runPromise(
-        planConnection.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
-      );
-      await expect(
-        plan.opens[0]!.preToolUse({
-          sessionId: "sdk-session-1",
-          projectRoot,
-          toolName: "Bash",
-          input: escaped,
-          toolUseId: "plan-escape",
-          signal: new AbortController().signal,
-        }),
-      ).resolves.toMatchObject({ behavior: "deny" });
-    } finally {
-      await planConnection.close();
-    }
-  });
+        ).resolves.toMatchObject({ behavior: "deny" });
+      } finally {
+        await planConnection.close();
+      }
+    },
+  );
 
   it.each([
     ["approval-gated", false],
@@ -4700,6 +4928,127 @@ describe("Claude artifact delivery", () => {
     expectEveryGuard(afterChoice.environment);
   });
 
+  it.each(["hooks", "toolServers", "projectCode"] as const)(
+    "withholds unconfined native %s startup while retaining the baseline Strict runtime",
+    async (feature) => {
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      try {
+        const result = await Effect.runPromise(
+          Effect.either(
+            acquired.connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "full-access",
+              strict: true,
+              nativeSetup: {
+                subagents: false,
+                webTools: false,
+                skills: false,
+                toolServers: false,
+                hooks: false,
+                projectCode: false,
+                [feature]: true,
+              },
+            }),
+          ),
+        );
+        expect(result._tag).toBe("Right");
+        expect(f.opens).toHaveLength(1);
+        expect(f.opens[0]?.nativeSetup).toMatchObject({
+          hooks: false,
+          toolServers: false,
+          projectCode: false,
+        });
+      } finally {
+        await acquired.close();
+      }
+    },
+  );
+
+  it("refuses a required protected path under a native command-read grant even before the file exists, leaving native Strict-off execution available", async () => {
+    const previous = currentProtectedFilesChoice();
+    applyProtectedFilesChoice({
+      ...previous,
+      added: [...previous.added, `${projectRoot}/private-token`],
+    });
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    try {
+      const protectedRun = await Effect.runPromise(
+        Effect.either(
+          acquired.connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "full-access",
+            strict: true,
+          }),
+        ),
+      );
+      expect(protectedRun).toMatchObject({
+        _tag: "Left",
+        left: { category: "unsupported", message: expect.stringContaining("protected-file rule") },
+      });
+      expect(f.opens).toHaveLength(0);
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "full-access",
+          strict: false,
+        }),
+      );
+      expect(f.opens).toHaveLength(1);
+    } finally {
+      applyProtectedFilesChoice(previous);
+      await acquired.close();
+    }
+  });
+
+  it("denies parent-process code and unreviewed native effects at Strict Full access while retaining confined commands", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "full-access",
+          strict: true,
+          nativeSetup: {
+            subagents: true,
+            webTools: true,
+            skills: true,
+            hooks: true,
+            toolServers: true,
+            projectCode: true,
+          },
+        }),
+      );
+      const open = f.opens[0];
+      if (open === undefined) throw new Error("Expected a Strict query");
+      expect(open.withheldTools).toBeUndefined();
+      expect(open.tools).toEqual(
+        expect.arrayContaining(["Bash", "Edit", "Read", "Agent", "Skill", "TaskOutput"]),
+      );
+      for (const toolName of ["REPL", "Workflow", "EnterWorktree", "FutureNativeExecutor"]) {
+        expect(open.tools).not.toContain(toolName);
+        await expect(
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName,
+            input: { code: "process.exit()" },
+            toolUseId: `strict-${toolName}`,
+            signal: new AbortController().signal,
+          }),
+        ).resolves.toMatchObject({ behavior: "deny" });
+      }
+    } finally {
+      await acquired.close();
+    }
+  });
+
   it("offers Claude's own subagents, web tools, and skills only to a session that carries the person's setup, keeping every channel guard", async () => {
     const ownSetup = {
       subagents: true,
@@ -4950,9 +5299,16 @@ describe("Claude artifact delivery", () => {
       }
     }
     // Below Full access the command sandbox reads the folder and never writes it.
-    const sandbox = claudeSandboxSettings("approval-gated", projectRoot, [], undefined, false, [
-      attachmentsFolder,
-    ]);
+    const sandbox = claudeSandboxSettings(
+      "approval-gated",
+      projectRoot,
+      [],
+      undefined,
+      false,
+      false,
+      undefined,
+      [attachmentsFolder],
+    );
     expect(sandbox?.filesystem.allowRead).toContain(attachmentsFolder);
     expect(sandbox?.filesystem.allowWrite).not.toContain(attachmentsFolder);
   });
@@ -5277,6 +5633,7 @@ describe("Claude artifact delivery", () => {
       expect(linkOnly?.kind === "tool-success" ? linkOnly.published : undefined).toEqual({
         url: "https://claude.ai/artifact/publish-binary",
         title: "Report",
+        account: String(instanceId),
       });
     } finally {
       await Effect.runPromise(Fiber.interrupt(subscription));
@@ -7208,6 +7565,58 @@ describe("Claude sessions started outside Octant", () => {
     );
     expect(listed.map((session) => session.nativeSessionId)).toEqual([outside]);
   });
+
+  it("carries a session over from another account's directory and takes the copy back on discard", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "octant-claude-carry-")));
+    try {
+      const project = join(root, "project");
+      const nativeSessionId = "6f1c2e2a-3b4d-4c5e-8f90-0a1b2c3d4e5f";
+      const folder = claudeProjectFolderName(project);
+      await mkdir(project);
+      await mkdir(join(root, "a", "projects", folder), { recursive: true });
+      await mkdir(join(root, "b"));
+      await writeFile(join(root, "a", "projects", folder, `${nativeSessionId}.jsonl`), "t\n");
+      const directories = new Map([
+        [String(otherInstanceId), join(root, "a")],
+        [String(instanceId), join(root, "b")],
+      ]);
+      const f = harness("subscription", "current-session", {
+        accountDirectory: (id) => directories.get(String(id)),
+      });
+      const copy = join(root, "b", "projects", folder, `${nativeSessionId}.jsonl`);
+
+      const carried = await Effect.runPromise(
+        f.driver.nativeSessions!.carry!({
+          instanceId,
+          fromInstanceId: otherInstanceId,
+          projectRoot: project,
+          nativeSessionId,
+        }),
+      );
+      expect(carried.status).toBe("carried");
+      expect(existsSync(copy)).toBe(true);
+      if (carried.status === "carried") await Effect.runPromise(carried.discard());
+      expect(existsSync(copy)).toBe(false);
+
+      directories.delete(String(otherInstanceId));
+      await expect(
+        Effect.runPromise(
+          f.driver.nativeSessions!.carry!({
+            instanceId,
+            fromInstanceId: otherInstanceId,
+            projectRoot: project,
+            nativeSessionId,
+          }),
+        ),
+      ).resolves.toEqual({ status: "refused" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("offers no carrying without a way to find each account's directory", () => {
+    expect(harness().driver.nativeSessions?.carry).toBeUndefined();
+  });
 });
 
 describe("Claude exact resume", () => {
@@ -9065,5 +9474,432 @@ describe("Claude wake-ups", () => {
     ).resolves.toMatchObject({ behavior: "deny" });
     expect(planWakeups.requests).toEqual([]);
     await planAcquired.close();
+  });
+});
+
+describe("Claude Code's own permission modes and sandbox outside Strict", () => {
+  /** A setup that reads the person's own Claude settings, where their sandbox and rules live. */
+  const readsHome = {
+    subagents: false,
+    webTools: false,
+    skills: true,
+    toolServers: false,
+    hooks: false,
+    projectCode: false,
+  } as ProviderNativeSetup;
+
+  async function opened(
+    mode: "chat" | "work" | "code",
+    executionPolicy: ProviderExecutionPolicy,
+    strict: boolean,
+    extra: {
+      readonly autoApprove?: boolean;
+      readonly fullAccessSandbox?: boolean;
+      readonly nativeSetup?: ProviderNativeSetup;
+    } = { nativeSetup: readsHome },
+  ) {
+    const f = harness();
+    const acquired = await acquire(f.driver, mode);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy, strict, ...extra }),
+    );
+    return { f, acquired, open: f.opens[0]! };
+  }
+
+  it("maps each level onto Claude Code's own permission mode outside Strict and keeps today's under Strict", () => {
+    const mode = (
+      policy: ProviderExecutionPolicy,
+      strict: boolean,
+      octantMode: "chat" | "work" | "code" = "code",
+      autoApprove = false,
+    ) =>
+      claudeExecutionOptions(policy, autoApprove, octantMode, "darwin", strict, readsHome)
+        .permissionMode;
+    expect(mode("approval-gated", false)).toBe("default");
+    expect(mode("auto-accept-edits", false)).toBe("acceptEdits");
+    expect(mode("approval-gated", false, "work", true)).toBe("auto");
+    expect(mode("full-access", false)).toBe("bypassPermissions");
+    expect(mode("plan", false)).toBe("plan");
+    // Strict keeps Octant's own waiver of in-root edits, so Claude runs `default`.
+    expect(mode("auto-accept-edits", true)).toBe("default");
+    // Chat keeps its list and Octant's gate at every Strict setting.
+    expect(mode("auto-accept-edits", false, "chat")).toBe("default");
+    expect(
+      claudeOwnPermissions({
+        strict: false,
+        mode: "work",
+        executionPolicy: "plan",
+        setup: readsHome,
+      }),
+    ).toBe(false);
+  });
+
+  it("passes Claude no sandbox settings outside Strict and today's configured sandbox under Strict", async () => {
+    for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
+      const outside = await opened("work", executionPolicy, false);
+      expect(outside.open.sandbox).toBeUndefined();
+      expect(outside.open.ownPermissions).toBe(true);
+      await outside.acquired.close();
+
+      const inside = await opened("work", executionPolicy, true);
+      expect(inside.open.sandbox).toMatchObject({
+        autoAllowBashIfSandboxed: false,
+        filesystem: {
+          denyRead: ["/"],
+          allowRead: [projectRoot, ...claudeSandboxToolchainReads()],
+          allowWrite: [projectRoot],
+        },
+      });
+      expect(inside.open.ownPermissions).toBeUndefined();
+      await inside.acquired.close();
+    }
+    // A Full access thread that kept its sandbox keeps Octant's outside Strict too.
+    const kept = await opened("code", "full-access", false, {
+      fullAccessSandbox: true,
+      nativeSetup: readsHome,
+    });
+    expect(kept.open.sandbox).toMatchObject({ enabled: true, allowUnsandboxedCommands: false });
+    await kept.acquired.close();
+    expect(
+      claudeOctantConfiguresSandbox({
+        executionPolicy: "plan",
+        fullAccessSandbox: false,
+        ownPermissions: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps Octant's sandbox and gate outside Strict when the session reads none of the person's Claude settings", async () => {
+    // With no setup, or only subagents and web tools on, the launch reads no
+    // home settings, so the person's own sandbox and deny rules would not load.
+    for (const nativeSetup of [
+      undefined,
+      { ...readsHome, skills: false, subagents: true, webTools: true },
+    ]) {
+      const session = await opened(
+        "work",
+        "auto-accept-edits",
+        false,
+        nativeSetup === undefined ? {} : { nativeSetup },
+      );
+      expect(session.open.ownPermissions).toBeUndefined();
+      expect(session.open.sandbox).toMatchObject({
+        enabled: true,
+        autoAllowBashIfSandboxed: false,
+      });
+      await Effect.runPromise(
+        session.acquired.connection.send({ sessionId, prompt: "go", attachments: [], tools: [] }),
+      );
+      await expect(
+        session.open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Edit",
+          input: { file_path: `${projectRoot}/a.ts`, old_string: "a", new_string: "b" },
+          toolUseId: "edit",
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toEqual({ behavior: "allow" });
+      await session.acquired.close();
+    }
+    expect(
+      claudeExecutionOptions("auto-accept-edits", false, "work", "darwin", false).permissionMode,
+    ).toBe("default");
+  });
+
+  it("offers the full tool preset outside Plan and Chat with only the person's own switched-off features withheld", async () => {
+    const outside = await opened("code", "approval-gated", false);
+    // Skills are on in this setup; the switched-off subagents and web tools stay out.
+    expect(outside.open.withheldTools).toEqual(["Agent", "Workflow", "WebSearch", "WebFetch"]);
+    await outside.acquired.close();
+    const inside = await opened("code", "approval-gated", true);
+    expect(inside.open.withheldTools).toBeUndefined();
+    for (const tool of [
+      "REPL",
+      "Workflow",
+      "EnterWorktree",
+      "ExitPlanMode",
+      "ScheduleWakeup",
+      "Artifact",
+    ])
+      expect(inside.open.tools).not.toContain(tool);
+    await inside.acquired.close();
+    const plan = await opened("code", "plan", false);
+    expect(plan.open.withheldTools).toBeUndefined();
+    expect(plan.open.tools).not.toContain("Edit");
+    await plan.acquired.close();
+    expect(
+      claudeWithheldTools(
+        { subagents: true, webTools: true, skills: true } as ProviderNativeSetup,
+        false,
+        false,
+        false,
+        false,
+      ),
+    ).toEqual([]);
+  });
+
+  it("leaves reads and edits to Claude's own rules outside Strict and refuses what would break a server rule", async () => {
+    const { f, acquired, open } = await opened("work", "auto-accept-edits", false);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "go", attachments: [], tools: [] }),
+    );
+    const signal = new AbortController().signal;
+    const call = (toolName: string, input: object, toolUseId: string) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName,
+        input,
+        toolUseId,
+        signal,
+      });
+    // A person's `deny` rule can still refuse an in-Project read or edit.
+    await expect(call("Read", { file_path: `${projectRoot}/a.ts` }, "read")).resolves.toEqual({
+      behavior: "own-rules",
+    });
+    await expect(
+      call("Edit", { file_path: `${projectRoot}/a.ts`, old_string: "a", new_string: "b" }, "edit"),
+    ).resolves.toEqual({ behavior: "own-rules" });
+    // A command leaving Claude's sandbox keeps Octant's ask, never remembered.
+    await expect(
+      call("Bash", { command: "git push", dangerouslyDisableSandbox: true }, "escape"),
+    ).resolves.toEqual({ behavior: "ask" });
+    // A path outside the Project keeps asking below Full access.
+    await expect(
+      call(
+        "Edit",
+        { file_path: "/tmp/octant-elsewhere/a.ts", old_string: "a", new_string: "b" },
+        "out",
+      ),
+    ).resolves.toEqual({ behavior: "ask" });
+    // The mode is the server's and a wake-up never runs in this session.
+    await expect(call("EnterPlanMode", {}, "plan")).resolves.toMatchObject({
+      behavior: "deny",
+      message: CLAUDE_LEVEL_CHANGE_REFUSAL,
+    });
+    await expect(
+      call("ScheduleWakeup", { delaySeconds: 60, prompt: "x" }, "wake"),
+    ).resolves.toMatchObject({ behavior: "deny", message: CLAUDE_WAKEUP_UNAVAILABLE });
+    // An edit Claude's own rules ask about reaches the person, not Octant's waiver.
+    const edit = { file_path: `${projectRoot}/a.ts`, old_string: "a", new_string: "b" };
+    const approvals: ProviderRuntimeEvent[] = [];
+    const subscriber = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          if (event.kind === "approval-request") approvals.push(event);
+        }),
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const asked = open.canUseTool({ toolName: "Edit", input: edit, toolUseId: "edit", signal });
+    await vi.waitFor(() => expect(approvals).toHaveLength(1));
+    await acquired.close();
+    await expect(asked).resolves.toMatchObject({ behavior: "deny" });
+    await Effect.runPromise(Fiber.join(subscriber));
+    expect(f.opens).toHaveLength(1);
+  });
+
+  it("keeps Octant's gate under Strict: in-root reads and Accept edits' edits run unasked", async () => {
+    const { acquired, open } = await opened("work", "auto-accept-edits", true);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "go", attachments: [], tools: [] }),
+    );
+    const signal = new AbortController().signal;
+    const call = (toolName: string, input: object, toolUseId: string) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName,
+        input,
+        toolUseId,
+        signal,
+      });
+    await expect(call("Read", { file_path: `${projectRoot}/a.ts` }, "read")).resolves.toEqual({
+      behavior: "allow",
+    });
+    await expect(
+      call("Edit", { file_path: `${projectRoot}/a.ts`, old_string: "a", new_string: "b" }, "edit"),
+    ).resolves.toEqual({ behavior: "allow" });
+    await expect(
+      call("Bash", { command: "git push", dangerouslyDisableSandbox: true }, "escape"),
+    ).resolves.toEqual({ behavior: "ask" });
+    await acquired.close();
+  });
+
+  it("refuses a command leaving the sandbox in Plan at every Strict setting", async () => {
+    const { acquired, open } = await opened("code", "plan", false);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "go", attachments: [], tools: [] }),
+    );
+    await expect(
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Bash",
+        input: { command: "ls", dangerouslyDisableSandbox: true },
+        toolUseId: "plan-escape",
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({ behavior: "deny" });
+    await acquired.close();
+  });
+});
+
+describe("Claude artifacts outside Strict", () => {
+  const confined = (root: string, path: string) => path.startsWith(`${root}/`);
+  const refusal = (
+    input: Record<string, unknown>,
+    extra: { readonly strict?: boolean; readonly readOnly?: boolean } = {},
+  ) =>
+    claudeArtifactCallRefusal({
+      stillOn: true,
+      input,
+      projectRoot,
+      isProjectConfinedPath: confined,
+      strict: false,
+      ...extra,
+    });
+
+  it("offers the tool on the account's switch alone, in every mode, and never on an API key", () => {
+    const offers = (
+      mode: "chat" | "work" | "code",
+      executionPolicy: ProviderExecutionPolicy,
+      strict: boolean,
+      threadChoseArtifacts = false,
+      authentication: ClaudeAuthentication = "subscription",
+    ) =>
+      claudeOffersArtifacts({
+        authentication,
+        artifactDelivery: true,
+        threadChoseArtifacts,
+        hostTrafficDisabled: false,
+        mode,
+        executionPolicy,
+        strict,
+      });
+    expect(offers("work", "approval-gated", false)).toBe(true);
+    expect(offers("code", "plan", false)).toBe(true);
+    expect(offers("chat", "approval-gated", false)).toBe(true);
+    expect(offers("work", "approval-gated", false, true, "api-key")).toBe(false);
+    // Strict keeps the thread's choice and Plan's and Chat's refusal.
+    expect(offers("work", "approval-gated", true)).toBe(false);
+    expect(offers("work", "approval-gated", true, true)).toBe(true);
+    expect(offers("code", "plan", true, true)).toBe(false);
+  });
+
+  it("lets every action through outside Strict, refuses publishing in Chat and Plan, and keeps the publish-only rule under Strict", () => {
+    expect(refusal({ action: "quickstart" })).toBeUndefined();
+    expect(refusal({ action: "list" })).toBeUndefined();
+    expect(refusal({ action: "read", url: "https://claude.ai/artifact/a" })).toBeUndefined();
+    expect(refusal({ type_url: "https://claude.ai/types/design", title: "Hero" })).toBeUndefined();
+    expect(refusal({ file_path: "/elsewhere/page.html" })).toBeUndefined();
+    expect(refusal({ action: "list" }, { readOnly: true })).toBeUndefined();
+    expect(refusal({ file_path: `${projectRoot}/page.html` }, { readOnly: true })).toContain(
+      "only read",
+    );
+    expect(
+      refusal({ action: "delete", url: "https://claude.ai/artifact/a" }, { readOnly: true }),
+    ).toContain("only read");
+    expect(refusal({ action: "list" }, { strict: true })).toContain("only to publish");
+    expect(refusal({ file_path: "/elsewhere/page.html" }, { strict: true })).toContain(
+      "outside the Project",
+    );
+    expect(
+      claudeArtifactCallRefusal({
+        stillOn: false,
+        input: { action: "list" },
+        projectRoot,
+        isProjectConfinedPath: confined,
+        strict: false,
+      }),
+    ).toContain("turned off");
+  });
+
+  it("journals a publish from a type with its account and type, and no page for a read", async () => {
+    const f = harness("subscription", "current-session", { artifactDelivery: () => true });
+    const acquired = await acquire(f.driver, "work");
+    const published: ProviderRuntimeEvent[] = [];
+    const subscription = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          if (event.kind === "tool-success") published.push(event);
+        }),
+      ),
+    );
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "full-access",
+          strict: false,
+        }),
+      );
+      const open = f.opens[0]!;
+      expect(open.tools).toContain("Artifact");
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "Design it", attachments: [], tools: [] }),
+      );
+      const query = f.queries[0]!;
+      const run = async (toolUseId: string, input: Readonly<Record<string, string>>) => {
+        await query.emit({
+          kind: "stream-event",
+          sessionId: "sdk-session-1",
+          event: {
+            kind: "content-start",
+            index: 0,
+            content: { kind: "tool-use", toolUseId, toolName: "Artifact", input },
+          },
+        });
+        await expect(
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName: "Artifact",
+            input,
+            toolUseId,
+            signal: new AbortController().signal,
+          }),
+        ).resolves.toEqual({ behavior: "allow" });
+        await query.emit({
+          kind: "tool-results",
+          sessionId: "sdk-session-1",
+          results: [
+            {
+              toolUseId,
+              isError: false,
+              publishedPage: { url: "https://claude.ai/artifact/hero", title: "Hero" },
+            },
+          ],
+        });
+      };
+      await run("design", { type_url: "https://claude.ai/artifact-types/design", title: "Hero" });
+      await run("read", { action: "read", url: "https://claude.ai/artifact/hero" });
+      await vi.waitFor(() => expect(published).toHaveLength(2));
+      expect(published[0]).toMatchObject({
+        published: {
+          url: "https://claude.ai/artifact/hero",
+          account: String(instanceId),
+          artifactType: "Design",
+        },
+      });
+      expect(published[1]).not.toHaveProperty("published");
+    } finally {
+      await Effect.runPromise(Fiber.interrupt(subscription));
+      await acquired.close();
+    }
+  });
+
+  it("reads a publish's Claude artifact type from the type it names, and nothing for another action", () => {
+    expect(claudeArtifactCall({ type_url: "https://claude.ai/artifact-types/slides" })).toEqual({
+      publishes: true,
+      artifactType: "Slides",
+    });
+    expect(claudeArtifactCall({ file_path: "/p/page.html" })).toEqual({ publishes: true });
+    expect(claudeArtifactCall({ action: "read", url: "https://claude.ai/artifact/a" })).toEqual({
+      publishes: false,
+    });
+    expect(claudeArtifactCall({ type_url: "not a url" })).toEqual({ publishes: true });
   });
 });

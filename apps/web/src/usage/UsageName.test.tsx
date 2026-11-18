@@ -40,7 +40,7 @@ describe("usage identity labels", () => {
     rerender(<UsageName kind="thread" id={USAGE_ERASED_THREADS_KEY} />);
     expect(screen.getByText("Erased threads")).toHaveAttribute(
       "title",
-      expect.stringContaining("purged"),
+      expect.stringContaining("deleted"),
     );
   });
 });

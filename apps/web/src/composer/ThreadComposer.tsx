@@ -1,3 +1,4 @@
+import { SandboxRestrictionsNotice } from "../code/SandboxRestrictionsNotice";
 import { ComposerFollowUpSuggestions } from "../followUps/FollowUpSuggestionChips";
 import {
   ComposerNoticeSinkProvider,
@@ -9,7 +10,7 @@ import {
 import { ComposerNoticeCard, noticeCardId } from "./ComposerNoticeCard";
 import { useFrozenBar } from "./frozenBarScope";
 import { ComposerSubagents } from "./ComposerSubagents";
-import { ComposerOutsideContentChip } from "./OutsideContentNotice";
+import { useReportOutsideContentBusy } from "./OutsideContentNotice";
 import {
   Fragment,
   useCallback,
@@ -19,19 +20,20 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ArrowUp, Square } from "lucide-react";
+import { ArrowUp, Square } from "../ui/icons";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
-import { ThreadPlanWindows } from "../threadStats/ThreadStats";
-import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { ComposerPlanUsage } from "../usage/ComposerPlanUsage";
-import { ComposerUsageWarning } from "../usage/ComposerUsageWarning";
 import "./composer-plan-usage.css";
+import { ComposerMenuActionProvider } from "./ComposerMenuActions";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   focusComposerThreadDrop,
   useActiveComposerThreadDropKey,
 } from "../chat/composerThreadDrop";
+
+/** One row with its 12px above and under is a 44px box; this leaves room for rounding. */
+const COMPOSER_ONE_ROW_MAX_HEIGHT = 52;
 
 /**
  * The trailing send control. Sending is refused while `disabled` is true or a
@@ -138,7 +140,7 @@ export interface ThreadComposerProps {
   readonly presentation?: "follow-up";
   /** Existing-thread checkout context, in the strip above the message surface. */
   readonly context?: ReactNode;
-  /** The thread's info panel and its button, at the end of that strip. */
+  /** The thread's info panel; its item in the + menu opens it. */
   readonly info?: ReactNode;
   /** Naming the frame promotes it to a `<section>` landmark (Chat). */
   readonly ariaLabel?: string | undefined;
@@ -153,20 +155,10 @@ export interface ThreadComposerProps {
   /**
    * The provider a new thread will send to. Its remaining plan usage stands
    * at the right of the start context's row. A thread's own composer never
-   * takes it: its windows stand in the thread's strip above the box.
+   * takes it: the Environment panel's Usage row says it.
    */
   readonly planUsage?: {
     readonly providerInstanceId: string | undefined;
-    /**
-     * The accounts a new thread could use instead. With them, a chosen
-     * account at its limit shows a warning with a button for each account
-     * that has room; without them, the meters stand alone.
-     */
-    readonly alternatives?: {
-      readonly groups: ReadonlyArray<PickerGroup>;
-      readonly selectedModelId?: string | undefined;
-      readonly onSelect: (selection: ModelPickerSelection) => void | Promise<void>;
-    };
   };
   readonly queue?: ReactNode;
   /**
@@ -257,6 +249,7 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
   const dropActive = dropKey !== undefined && activeDropKey === dropKey;
   const baseClassName = props.className === undefined ? "composer" : `composer ${props.className}`;
   const followUp = props.presentation === "follow-up";
+  useReportOutsideContentBusy(props.threadBusy === true);
   const frameClassName = `${baseClassName} composer--carded${followUp ? " composer--follow-up" : ""}`;
   // Where a new thread runs and how much of the plan is left stand in the
   // tray above the card, so the card holds only the prompt. Inside the card
@@ -266,17 +259,11 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
   const startRow =
     props.startContext === undefined ? null : (
       <div className="composer-start">
-        {props.planUsage?.alternatives === undefined ? null : (
-          <ComposerUsageWarning
-            groups={props.planUsage.alternatives.groups}
-            onSelect={props.planUsage.alternatives.onSelect}
-            selectedModelId={props.planUsage.alternatives.selectedModelId}
-            selectedProviderInstanceId={props.planUsage.providerInstanceId}
-          />
-        )}
         {props.startContext}
         {props.planUsage === undefined ? null : (
-          <ComposerPlanUsage providerInstanceId={props.planUsage.providerInstanceId} />
+          <div className="composer-start__usage" data-slot="plan-usage">
+            <ComposerPlanUsage providerInstanceId={props.planUsage.providerInstanceId} />
+          </div>
         )}
       </div>
     );
@@ -325,8 +312,36 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
     prompt.setAttribute("aria-describedby", [...own, ...added].join(" "));
     prompt.dataset["composerDescribed"] = added.join(" ");
   });
+  // The box is a full pill while it holds one row and takes the large radius
+  // once it grows (a longer message, a queue, chips above the prompt). Then the
+  // prompt takes the full width on top and the controls stand in a row along
+  // the bottom. The prompt's own height decides, not the box's: the grown
+  // layout is wider for the text and taller for the row, so reading the box
+  // would flip the shape back and forth. A grown box returns to a pill only once
+  // the prompt is empty. The stylesheet reads data-shape.
+  useLayoutEffect(() => {
+    const surface = surfaceRef.current;
+    if (surface === null) return;
+    const apply = () => {
+      const prompt = surface.querySelector<HTMLElement>(".composer-input");
+      const field = surface.querySelector<HTMLElement>(".composer-field");
+      const empty = prompt instanceof HTMLTextAreaElement && prompt.value === "";
+      const crowded = field !== null && field.previousElementSibling !== null;
+      const grown = prompt !== null && prompt.offsetHeight > COMPOSER_ONE_ROW_MAX_HEIGHT;
+      const wasBox = surface.dataset["shape"] === "box";
+      surface.dataset["shape"] = crowded || grown || (wasBox && !empty) ? "box" : "pill";
+    };
+    apply();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(apply);
+    observer.observe(surface);
+    const prompt = surface.querySelector<HTMLElement>(".composer-input");
+    if (prompt !== null) observer.observe(prompt);
+    return () => observer.disconnect();
+  }, [props.held]);
   const noticeCard = (
     <ComposerNoticeCard idPrefix={noticeIdPrefix} notices={cards}>
+      <SandboxRestrictionsNotice />
       {notice}
     </ComposerNoticeCard>
   );
@@ -340,8 +355,12 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
       {props.queue}
       {props.chips}
       <div className="composer-field">
-        {props.row.attach === undefined ? null : (
+        {props.row.attach !== undefined ? (
           <div className="composer-field__attach">{props.row.attach}</div>
+        ) : props.startContext === undefined ? null : (
+          // A start surface that cannot attach (Chat) keeps the button's cell,
+          // so choosing a folder does not shift the prompt sideways.
+          <div aria-hidden="true" className="composer-field__attach composer-field__attach--held" />
         )}
         <div className="composer-field__prompt">
           {props.label === undefined ? (
@@ -372,15 +391,15 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
     props.row.actions.kind === "send-or-stop"
       ? `composer-actions ${props.row.actions.cellClassName}`
       : "composer-actions";
-  // One row under the box, on the box's own columns: the Project's icon
-  // stands under attach and its name starts where the prompt's text does; at
-  // the other end the model's name, the approval control and the context ring
-  // stand in cells as wide as send, the ring last, under it. The thread's info
-  // is reached from the Project when the surface hangs it there, and from a
-  // small icon after it otherwise. Only the surface's controls are inside
-  // `.composer-row`: the row restyles every control in it to one quiet
-  // treatment, which the info panel's fields and the checkout's actions must
-  // not take.
+  // One row under the box, on the box's own columns: at the trailing end the
+  // model's name, the approval control (with the outside-content mark's icon
+  // before it, while that applies) and the context ring, the last two in cells
+  // as wide as send so the ring stands under it. Where the thread runs (Project,
+  // branch, folder, pull requests) and its plan usage are in the Environment
+  // panel, and its info and plan proposal are items of the + menu. Only the
+  // surface's controls are inside `.composer-row`: the row restyles every
+  // control in it to one quiet treatment, which the info panel's fields and
+  // a server thread's Git actions must not take.
   const under = (
     <div className="composer-under">
       {held || !followUp || props.context === undefined ? null : (
@@ -398,9 +417,7 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
           {...(props.row.toolbar === true ? { role: "toolbar" } : {})}
         >
           {props.row.leading}
-          {followUp ? <ComposerOutsideContentChip busy={props.threadBusy === true} /> : null}
           <div className={trailingClassName}>
-            {followUp ? <ThreadPlanWindows /> : null}
             {props.row.trailing}
             {props.row.approval}
             <ComposerContextMeter />
@@ -486,7 +503,13 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
         {body}
       </section>
     );
-  return <ComposerNoticeSinkProvider set={publish}>{frame}</ComposerNoticeSinkProvider>;
+  return (
+    <ComposerNoticeSinkProvider set={publish}>
+      <ComposerMenuActionProvider offered={!props.held && props.row.attach !== undefined}>
+        {frame}
+      </ComposerMenuActionProvider>
+    </ComposerNoticeSinkProvider>
+  );
 }
 
 function ComposerThreadDropCue() {
@@ -498,22 +521,10 @@ function ComposerThreadDropCue() {
 }
 
 /**
- * Send is a quiet raised tile until there is something to send, then the
- * primary action: the accent as a gradient with a glow under it. Filled with
- * the accent at every moment, it was the loudest thing on the page under an
- * empty prompt.
+ * Send is the ink as a round fill with the page colour as its arrow, and it
+ * rests at 20% while there is nothing to send. The stylesheet draws both from
+ * the button's disabled state.
  */
-function sendVariant(refused: boolean): "secondary" | "default" {
-  return refused ? "secondary" : "default";
-}
-
-/**
- * A refused send keeps its quiet fill at full strength and dims only the
- * arrow: the blanket disabled opacity left the circle at 1.07:1 on the page,
- * so the box no longer showed where send is.
- */
-const SEND_REFUSED_PAINT = "disabled:opacity-100 disabled:[&_svg]:opacity-50";
-
 function sendRefused(send: ThreadComposerSend, compactingNoteId: string | undefined): boolean {
   return (
     compactingNoteId !== undefined || send.disabled === true || send.disabledReason !== undefined
@@ -539,12 +550,11 @@ function ComposerSendCell(props: {
         <OctantButton
           aria-describedby={props.compactingNoteId}
           aria-label={send.ariaLabel}
-          className={SEND_REFUSED_PAINT}
           disabled={refused}
           {...(send.onSend === undefined ? {} : { onClick: send.onSend })}
           size="icon"
           type={send.onSend === undefined ? "submit" : "button"}
-          variant={sendVariant(refused)}
+          variant="default"
         >
           <ArrowUp aria-hidden="true" size={16} />
         </OctantButton>
@@ -559,7 +569,7 @@ function ComposerSendCell(props: {
         <OctantButton
           onClick={stop.forceStop.onForceStop}
           size="sm"
-          title="Kill this response's process. Use it when Stop did not end the response."
+          title="Force-stop this response. Use it when Stop does not work."
           type="button"
           variant="secondary"
         >
@@ -581,12 +591,11 @@ function ComposerSendCell(props: {
       <OctantButton
         aria-describedby={props.compactingNoteId}
         aria-label={send.ariaLabel}
-        className={SEND_REFUSED_PAINT}
         disabled={refused}
         {...(send.onSend === undefined ? {} : { onClick: send.onSend })}
         size="icon"
         type="button"
-        variant={sendVariant(refused)}
+        variant="default"
       >
         <ArrowUp aria-hidden="true" size={16} />
       </OctantButton>

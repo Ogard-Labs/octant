@@ -1,6 +1,7 @@
 import type { HomeCardCustomization } from "@octant/contracts/shell";
-import type { LucideIcon } from "lucide-react";
+import type { IconComponent } from "../ui/icons";
 import type { ReactNode } from "react";
+import type { HomeListRow, HomeListSectionId, HomeListSeeAll } from "./homeListModel";
 
 /**
  * What a card says once it has looked. `loading` keeps the card's place with
@@ -28,15 +29,33 @@ export type HomeCardContent =
     };
 
 /**
- * One card the start screen can show. A card is a value, not a place in the
- * frame: the screen builds the list from the registry and passes it to
- * `HomeDashboard`, so a new card is a new definition and nothing else.
+ * What a contributor to the start screen's list says once it has looked. A
+ * `caveat` is something a person must know before trusting a quiet list (a
+ * source that never looked or failed); it is said only when nothing else is.
  */
-export interface HomeCardDefinition {
+export type HomeListRead =
+  | { readonly status: "loading" }
+  | {
+      readonly status: "ready";
+      readonly rows: ReadonlyArray<HomeListRow>;
+      readonly seeAll?: Readonly<Partial<Record<HomeListSectionId, HomeListSeeAll>>>;
+      readonly caveat?: {
+        readonly text: string;
+        readonly action?: { readonly label: string; readonly onSelect: () => void };
+      };
+    };
+
+/** A source of list rows that is not one of the registry's cards. */
+export interface HomeListContributor {
+  readonly id: string;
+  readonly useRows: () => HomeListRead;
+}
+
+interface HomeCardIdentity {
   /** Stable, lower-case, stored in settings; never reused for another card. */
   readonly id: string;
   readonly title: string;
-  readonly icon: LucideIcon;
+  readonly icon: IconComponent;
   /** Whether the card is on until the person turns it off. */
   readonly defaultOn: boolean;
   /**
@@ -45,6 +64,10 @@ export interface HomeCardDefinition {
    * rather than shown broken.
    */
   readonly available: boolean;
+}
+
+/** A card the grid draws: a frame around its own rows or one quiet line. */
+export interface HomeGridCardDefinition extends HomeCardIdentity {
   /** Drop the whole card while it has nothing to say, instead of one quiet line. */
   readonly hideWhenEmpty?: boolean;
   /** The one quiet line an empty card shows. */
@@ -55,7 +78,29 @@ export interface HomeCardDefinition {
    * nothing.
    */
   readonly useContent: () => HomeCardContent;
+  readonly useListRows?: undefined;
 }
+
+/**
+ * A card that gives its rows to the start screen's one list instead of drawing
+ * a frame. Customize still turns it on and off, and while it is off the hook is
+ * never called, so it reads nothing.
+ */
+export interface HomeListCardDefinition extends HomeCardIdentity {
+  readonly useListRows: () => HomeListRead;
+  readonly useContent?: undefined;
+}
+
+/**
+ * One card the start screen can offer. A card is a value, not a place in the
+ * frame: the screen builds the list from the registry and passes it to
+ * `HomeDashboard`, so a new card is a new definition and nothing else.
+ */
+export function isGridCard(definition: HomeCardDefinition): definition is HomeGridCardDefinition {
+  return definition.useContent !== undefined;
+}
+
+export type HomeCardDefinition = HomeGridCardDefinition | HomeListCardDefinition;
 
 export interface HomeCardPlacement {
   readonly definition: HomeCardDefinition;

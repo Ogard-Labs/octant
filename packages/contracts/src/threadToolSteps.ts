@@ -78,6 +78,16 @@ export const ThreadPublishedPage = Schema.Struct({
   ),
   title: Schema.optional(boundedNonEmptyText(256)),
   snapshot: Schema.optional(ThreadPublishedSnapshot),
+  /**
+   * The provider account that published the page: its provider instance id.
+   * Absent on a page journaled before the account was recorded.
+   */
+  account: Schema.optional(boundedNonEmptyText(128)),
+  /**
+   * The Claude artifact type the publishing call named (Design, Slides and the
+   * others an account offers), read from the call; absent for a plain page.
+   */
+  artifactType: Schema.optional(boundedNonEmptyText(64)),
 }).annotations(strict);
 export type ThreadPublishedPage = typeof ThreadPublishedPage.Type;
 

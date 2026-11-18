@@ -1,4 +1,4 @@
-import { CircleAlert, Hand, Info, X } from "lucide-react";
+import { CircleAlert, Hand, Info, X } from "../ui/icons";
 import { useEffect, useId, useRef, useState } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";

@@ -22,6 +22,11 @@ export const ThreadTaskProgress = Schema.Struct({
   taskId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
   state: ThreadTaskState,
   summary: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_048)),
+  /**
+   * The provider's wording for the task while it runs ("Running the tests").
+   * Journals written before it existed omit it, and replay unchanged.
+   */
+  runningSummary: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_048))),
 }).annotations(strict);
 export type ThreadTaskProgress = typeof ThreadTaskProgress.Type;
 

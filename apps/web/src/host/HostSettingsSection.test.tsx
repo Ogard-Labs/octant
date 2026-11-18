@@ -642,7 +642,7 @@ describe("HostSettingsSection", () => {
       );
       if (failCleanup) {
         expect(
-          await screen.findByText(/saved breakpoint configuration could not be removed/),
+          await screen.findByText(/saved breakpoint settings could not be removed/),
         ).toBeVisible();
         expect(
           [...records.keys()].some((key) => key.startsWith("octant.debug.breakpoints.v1:")),

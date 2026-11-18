@@ -1,3 +1,19 @@
+import { macosSandboxScopeLaunchArguments } from "./macosSandboxScope";
+import { pinLinuxLaunch } from "./linuxPinnedLaunch";
+import {
+  linuxMediationProductionAvailable,
+  prepareLinuxMediatedLaunch,
+} from "./linuxMediationProduction";
+import { prepareMacosSandboxScope } from "./macosSandboxScope";
+import {
+  recordSandboxLaunch,
+  sandboxAuthorityDirectory,
+  sandboxSelectionIsCurrent,
+  sandboxNetworkSnapshot,
+  sandboxToolPolicy,
+  sandboxToolNetwork,
+  sandboxNetworkLimitsOn,
+} from "./sandboxRuntimePolicy";
 /**
  * Shared confinement builder for Octant-spawned tool and provider subprocesses.
  *
@@ -15,6 +31,13 @@
  * Native macOS sandbox-exec probes remain packaged/native validation evidence;
  * Linux CI covers profile string generation and Bubblewrap launch construction.
  */
+import { createHash } from "node:crypto";
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
+import {
+  compileSandboxLaunchPolicy,
+  type SandboxLaunchPolicyReceipt,
+  type SandboxLaunchPolicyRefusal,
+} from "./sandboxLaunchPolicy";
 import {
   accessSync,
   closeSync,
@@ -27,9 +50,10 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, release } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { buildBubblewrapLaunch, DEFAULT_BWRAP_PATH } from "./linuxConfinement";
+import { processConfinementAccountRoots } from "./processConfinementAccountRoots";
 import {
   protectedAtLevel,
   secretGuardEntries,
@@ -55,12 +79,18 @@ export class ProcessConfinementError extends Error {
      * detail, so a caller that shows text must key on this, never on `message`.
      */
     readonly userFixable?: "linux-bubblewrap-missing",
+    readonly policyRefusal?: SandboxLaunchPolicyRefusal,
   ) {
     super(message);
   }
 }
 
 export interface SeatbeltProfileInput {
+  readonly sandboxProviderChannel?: boolean;
+  readonly policyBlockHostServices?: boolean;
+  readonly policyReadOnlyRoots?: ReadonlyArray<string>;
+  /** Folder grants never become provider sign-in exemptions. */
+  readonly policyFolderRoots?: ReadonlyArray<string>;
   /** The bound filesystem root the process starts in and may write (unless writeBoundRoot is false). */
   readonly boundRoot: string;
   /**
@@ -164,11 +194,21 @@ export interface WrapCommandInSandboxExecInput {
 }
 
 export interface ConfinedProcessLaunch {
+  readonly environment?: Readonly<Record<string, string>>;
+  readonly policyReceipt?: SandboxLaunchPolicyReceipt;
   readonly command: string;
   readonly args: ReadonlyArray<string>;
 }
 
 export interface ProcessConfinementPrepareInput {
+  /** Host-planner selection only; no repository or model-controlled policy source. */
+  readonly sandboxPolicy?: SandboxPolicySelection;
+  /** Materialized by the policy compiler; denied writes follow every grant. */
+  readonly sandboxProviderChannel?: boolean;
+  readonly policyBlockHostServices?: boolean;
+  readonly policyReadOnlyRoots?: ReadonlyArray<string>;
+  /** Folder grants never become provider sign-in exemptions. */
+  readonly policyFolderRoots?: ReadonlyArray<string>;
   readonly executable: string;
   readonly args: ReadonlyArray<string>;
   /** Fixed host code rechecks this recipient after credential-tool authentication. */
@@ -590,7 +630,10 @@ const privateDenyRulesCache = new Map<
   string,
   {
     readonly rules: ReadonlyArray<string>;
-    readonly watched: ReadonlyArray<{ readonly directory: string; readonly mtimeMs: number }>;
+    readonly watched: ReadonlyArray<{
+      readonly directory: string;
+      readonly mtimeMs: number;
+    }>;
   }
 >();
 const PRIVATE_DENY_RULES_CACHE_LIMIT = 32;
@@ -625,7 +668,10 @@ export function privateHomeDenyReadRules(
     privateDenyRulesCache.delete(key);
   }
   const rules: string[] = [];
-  const watched: Array<{ readonly directory: string; readonly mtimeMs: number }> = [];
+  const watched: Array<{
+    readonly directory: string;
+    readonly mtimeMs: number;
+  }> = [];
   const visit = (directory: string) => {
     const descendants = allowed.filter(
       (path) => path === directory || path.startsWith(`${directory}${sep}`),
@@ -951,7 +997,13 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     '(allow file-write-data (literal "/dev/null"))',
     ...(input.extraRules ?? []),
     ...secretGuardPersonRules(guardEntries),
+    `(deny network-outbound (remote unix-socket (path-regex #"^(/private)?/tmp/octant-sandbox-control-")))`,
+    `(deny file-read* file-write* (regex #"^(/private)?/tmp/octant-sandbox-control-"))`,
     ...SEATBELT_DENY_SERVER_CONTROL_SOCKETS,
+    ...(input.policyReadOnlyRoots ?? []).map((path) => seatbeltDenyRule("file-write*", path)),
+    ...(input.policyBlockHostServices === true
+      ? ["(deny network-outbound (remote unix-socket))"]
+      : []),
   ];
   return lines.join("\n");
 }
@@ -964,22 +1016,16 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
 export function ownAccountRoots(
   input: Pick<
     SeatbeltProfileInput,
-    "boundRoot" | "temporaryDirectory" | "ownAccountPaths" | "ownAccountAccess"
+    | "boundRoot"
+    | "temporaryDirectory"
+    | "ownAccountPaths"
+    | "ownAccountAccess"
+    | "policyFolderRoots"
   >,
   readRoots: ReadonlyArray<string>,
   additionalWriteRoots: ReadonlyArray<string>,
 ): ReadonlyArray<string> {
-  if (input.ownAccountAccess === "none") return [];
-  const shared = new Set([
-    ...resolvedRootForms(input.boundRoot),
-    ...resolvedRootForms(input.temporaryDirectory),
-  ]);
-  return uniqueAbsolutePaths([
-    ...(input.ownAccountPaths ?? []),
-    ...[...readRoots, ...additionalWriteRoots].filter(
-      (path) => !resolvedRootForms(path).some((form) => shared.has(form)),
-    ),
-  ]);
+  return processConfinementAccountRoots(input, readRoots, additionalWriteRoots);
 }
 
 export function wrapCommandInSandboxExec(
@@ -1035,11 +1081,168 @@ export function makeProcessConfinementLive(
     options.sandboxPath ?? (platform === "darwin" ? DEFAULT_SANDBOX_PATH : DEFAULT_BWRAP_PATH);
   return {
     prepare: (input) => {
+      const selectedPolicy = input.sandboxPolicy ?? sandboxToolPolicy();
+      if (selectedPolicy !== undefined && !sandboxSelectionIsCurrent(selectedPolicy))
+        throw new ProcessConfinementError(
+          "invalid-configuration",
+          "This sandbox policy expired or its folder binding changed before launch. Start a new turn after reviewing the restrictions.",
+        );
+      const toolNetwork = sandboxToolNetwork(selectedPolicy);
+      const policyInput =
+        selectedPolicy === undefined
+          ? input
+          : {
+              ...input,
+              sandboxPolicy: selectedPolicy,
+              networkEgress:
+                ((selectedPolicy.policy.approvedDestinations?.length ?? 0) > 0 ||
+                  (selectedPolicy.policy.localServices?.length ?? 0) > 0 ||
+                  (selectedPolicy.policy.network === "existing-policy" &&
+                    ((sandboxNetworkSnapshot(selectedPolicy)?.limitsOn ??
+                      sandboxNetworkLimitsOn()) ||
+                      selectedPolicy.policy.hostServices === "blocked")) ||
+                  (selectedPolicy.policy.network === "unrestricted" &&
+                    selectedPolicy.policy.hostServices === "blocked")) &&
+                input.networkEgress === "allow"
+                  ? (toolNetwork?.networkEgress ?? input.networkEgress)
+                  : input.networkEgress,
+            };
+      const authority = platform === "linux" ? sandboxAuthorityDirectory() : undefined;
+      const accessTimeMediation = linuxMediationProductionAvailable(authority);
+      const compilation = compileSandboxLaunchPolicy(policyInput, platform, {
+        accessTimeMediation,
+      });
+      if (compilation.status === "refused") {
+        throw new ProcessConfinementError(
+          compilation.code === "sandbox-policy-unsupported"
+            ? "incompatible"
+            : "invalid-configuration",
+          `Sandbox policy refused (${compilation.code}: ${compilation.rules.join(", ")}). Change the selected restrictions in the trusted host settings before retrying.`,
+          undefined,
+          compilation,
+        );
+      }
+      const prepared = compilation.input;
+      const withReceipt = (launch: ConfinedProcessLaunch): ConfinedProcessLaunch => {
+        if (compilation.status !== "admitted") return launch;
+        const backendPath = realpathSync(sandboxPath);
+        const backend = statSync(backendPath);
+        if (selectedPolicy !== undefined) {
+          const paths = (values: ReadonlyArray<string>) =>
+            [...new Set(values.map((path) => resolve(path)))]
+              .filter((path) => path !== "/")
+              .slice(0, 64);
+          recordSandboxLaunch(selectedPolicy, {
+            provider: selectedPolicy.context.provider,
+            backend: `${platform === "linux" ? (accessTimeMediation ? "Linux mediation + Bubblewrap" : "Bubblewrap") : "Seatbelt"} · ${release()}`,
+            reads: paths([
+              ...(platform === "linux"
+                ? ["/bin", "/sbin", "/usr", "/lib", "/lib64", "/etc", "/opt", "/sys"]
+                : []),
+              ...(prepared.readRoots ?? []),
+            ]),
+            writes: paths([prepared.temporaryDirectory, ...(prepared.additionalWriteRoots ?? [])]),
+            authentication: paths([
+              ...(prepared.ownAccountPaths ?? []),
+              ...(prepared.privateHomeAllowPaths ?? []),
+            ]),
+          });
+        }
+        return {
+          ...launch,
+          ...(toolNetwork === undefined
+            ? {}
+            : { environment: { ...launch.environment, ...toolNetwork.environment } }),
+          policyReceipt: Object.freeze({
+            ...compilation.receipt,
+            reuseKey: createHash("sha256")
+              .update(
+                JSON.stringify({
+                  authority: compilation.receipt.reuseKey,
+                  launch,
+                  backend: {
+                    path: backendPath,
+                    device: backend.dev,
+                    inode: backend.ino,
+                    size: backend.size,
+                    modifiedAt: backend.mtimeMs,
+                  },
+                  nativeScope:
+                    platform === "darwin" && launch.command !== sandboxPath
+                      ? (() => {
+                          const path = realpathSync(launch.command);
+                          const identity = statSync(path);
+                          return {
+                            path,
+                            device: identity.dev,
+                            inode: identity.ino,
+                            size: identity.size,
+                            modifiedAt: identity.mtimeMs,
+                          };
+                        })()
+                      : undefined,
+                  osVersion: release(),
+                  architecture: process.arch,
+                }),
+              )
+              .digest("hex"),
+          }),
+        };
+      };
       if (platform === "darwin") {
-        return prepareSeatbeltLaunch(input, { ...options, sandboxPath });
+        const launch = prepareSeatbeltLaunch(prepared, {
+          ...options,
+          sandboxPath,
+        });
+        const authorityDirectory = sandboxAuthorityDirectory();
+        // Pure native profile probes have no host authority. Enrolled policy
+        // launches always have private storage and receive a kernel scope.
+        if (selectedPolicy !== undefined && authorityDirectory !== undefined) {
+          const scope = prepareMacosSandboxScope(authorityDirectory, selectedPolicy);
+          return withReceipt({
+            ...launch,
+            command: scope.executable,
+            args: macosSandboxScopeLaunchArguments(
+              scope,
+              selectedPolicy,
+              launch.command,
+              launch.args,
+            ),
+          });
+        }
+        return withReceipt(launch);
       }
       if (platform === "linux") {
-        return buildBubblewrapLaunch(input, { bwrapPath: sandboxPath });
+        if (
+          selectedPolicy !== undefined &&
+          (accessTimeMediation ||
+            selectedPolicy.policy.filesystem.protectedPaths.length > 0 ||
+            selectedPolicy.policy.credentials === "isolated")
+        ) {
+          if (authority === undefined)
+            throw new ProcessConfinementError(
+              "incompatible",
+              "Linux access-time protections require private host storage.",
+            );
+          try {
+            return withReceipt(prepareLinuxMediatedLaunch(prepared, selectedPolicy, authority));
+          } catch (error) {
+            throw new ProcessConfinementError(
+              "incompatible",
+              error instanceof Error
+                ? error.message
+                : "Linux access-time mediation is unavailable.",
+            );
+          }
+        }
+        const launch = buildBubblewrapLaunch(prepared, {
+          bwrapPath: sandboxPath,
+        });
+        return withReceipt(
+          selectedPolicy !== undefined && authority !== undefined
+            ? pinLinuxLaunch(launch, authority, selectedPolicy)
+            : launch,
+        );
       }
       // Windows stays refused until its confinement has run on real Windows
       // with a real provider; only a caller that names the unverified option
@@ -1098,6 +1301,15 @@ function prepareSeatbeltLaunch(
   ]);
   const profile = buildDenyDefaultSeatbeltProfile({
     boundRoot: input.boundRoot,
+    ...(input.policyBlockHostServices === undefined
+      ? {}
+      : { policyBlockHostServices: input.policyBlockHostServices }),
+    ...(input.policyReadOnlyRoots === undefined
+      ? {}
+      : { policyReadOnlyRoots: input.policyReadOnlyRoots }),
+    ...(input.policyFolderRoots === undefined
+      ? {}
+      : { policyFolderRoots: input.policyFolderRoots }),
     ...(input.extraBoundRoots === undefined || input.extraBoundRoots.length === 0
       ? {}
       : { extraBoundRoots: input.extraBoundRoots }),

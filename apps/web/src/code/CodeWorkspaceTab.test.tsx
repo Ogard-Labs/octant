@@ -139,9 +139,7 @@ describe("CodeWorkspaceTab repository tests", () => {
     (client.listTests as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("unavailable"));
     render(<CodeWorkspaceTab controller={controller(client)} tab={testTab()} />);
 
-    expect(
-      await screen.findByRole("heading", { name: "Repository tests unavailable" }),
-    ).toBeVisible();
+    expect(await screen.findByText("Repository tests unavailable")).toBeVisible();
   });
 
   it("restores the host's newest result when the Tests tab opens", async () => {
@@ -208,9 +206,7 @@ describe("CodeWorkspaceTab code files", () => {
     (client.openFile as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("unauthorized"));
     render(<CodeWorkspaceTab controller={controller(client)} tab={fileTab()} />);
 
-    expect(
-      await screen.findByRole("heading", { name: "src/index.ts is unavailable" }),
-    ).toBeVisible();
+    expect(await screen.findByText("src/index.ts is unavailable")).toBeVisible();
   });
 
   it("renders the host's read-only answer instead of an editable surface", async () => {
@@ -422,9 +418,7 @@ describe("CodeWorkspaceTab code files", () => {
     await screen.findByRole("button", { name: "Discard draft and reload" });
     await user.click(screen.getByRole("button", { name: "Discard draft and reload" }));
 
-    expect(
-      await screen.findByRole("heading", { name: "src/index.ts is unavailable" }),
-    ).toBeVisible();
+    expect(await screen.findByText("src/index.ts is unavailable")).toBeVisible();
     expect(screen.queryByText("staged before the edit")).not.toBeInTheDocument();
   });
 });

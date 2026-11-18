@@ -47,6 +47,8 @@ export type DockToolPress =
   /** The tool is shown in the bottom panel while a reader hides it: leave the reader. */
   | { readonly kind: "reveal" }
   | { readonly kind: "open-beside" }
+  /** Environment, beside the tool columns: the section opens and no tile changes. */
+  | { readonly kind: "open-section" }
   | { readonly kind: "show-beside"; readonly tabId: string }
   /** The drawer shows one tool: a press replaces it with a tool that has no tab yet. */
   | { readonly kind: "open" }
@@ -61,6 +63,10 @@ export type DockToolPress =
   /** The tool is a card on the shelf: bring it back as a tile, and the dock with it. */
   | { readonly kind: "restore"; readonly tabId: string }
   | { readonly kind: "close-bottom" }
+  /** A new task's dock: open the Project's own terminal or browser, with no thread involved. */
+  | { readonly kind: "quick-open"; readonly tool: "terminal" | "browser" }
+  /** The Project tool the new task's dock shows is pressed again: the dock closes and stops it. */
+  | { readonly kind: "quick-close" }
   /** The bottom panel holds the tool behind its active one: show it there. */
   | { readonly kind: "select-bottom" }
   | { readonly kind: "refused" };
@@ -120,6 +126,8 @@ export interface DockToolButtonsInput {
     readonly id: RightUtilityDockSurfaceId;
     readonly label: string;
   }>;
+  /** Listed tools that cannot be pressed now, by tool, with the reason a tooltip gives. */
+  readonly unavailable?: Readonly<Partial<Record<RightUtilityDockSurfaceId, string>>>;
   /** Tools a draft task will have once its thread exists. */
   readonly awaitingThread?: ReadonlyArray<{
     readonly id: RightUtilityDockSurfaceId;
@@ -148,6 +156,17 @@ export interface DockToolButtonsInput {
   readonly layout?: DockTileLayout | undefined;
   /** The dock is on screen. */
   readonly dockPresentedOpen: boolean;
+  /**
+   * A new Code task whose Project is chosen: its Project terminal and browser
+   * stand in for the thread's, which does not exist yet. `open` is the one the
+   * dock shows now.
+   */
+  readonly quickTools?: {
+    readonly tools: ReadonlyArray<"terminal" | "browser">;
+    readonly open?: "terminal" | "browser" | undefined;
+  };
+  /** Tools the bottom panel could take, so a shown tool's menu can offer to move there. */
+  readonly bottomAccepts?: ReadonlyArray<RightUtilityDockSurfaceId>;
   /** Tools the open bottom panel holds. */
   readonly bottomHeld: ReadonlyArray<RightUtilityDockSurfaceId>;
   readonly bottomPresentedOpen: boolean;
@@ -155,7 +174,23 @@ export interface DockToolButtonsInput {
   readonly bottomActive?: RightUtilityDockSurfaceId | undefined;
   /** Both columns are at their limit, so a tool not shown has no room. */
   readonly capsFull: boolean;
+  /**
+   * Environment is a section of its own beside the tool columns (every dock
+   * but the drawer): its button opens and closes the section and arranges
+   * nothing, since it is never a tile.
+   */
+  readonly environmentSection?: boolean;
+  /**
+   * The window is too narrow for the Environment section beside the tool pane
+   * that is shown, so the section has given way. `open` says whether it is
+   * still open behind the pane, to return when the pane leaves the view.
+   */
+  readonly environmentGaveWay?: { readonly open: boolean };
 }
+
+/** Why the Environment button does nothing while the section has given way. */
+export const ENVIRONMENT_NO_ROOM_BESIDE_TOOL =
+  "No room beside a tool in this window. Close the tool, hide the sidebar or widen the window.";
 
 function describeButton(
   tool: { readonly id: RightUtilityDockSurfaceId; readonly label: string },
@@ -183,6 +218,32 @@ function describeButton(
     tabIds,
     ...(tabId === undefined ? {} : { tabId }),
   };
+  if (tool.id === "environment" && input.environmentGaveWay !== undefined && !narrow) {
+    // Open but not shown is the quiet dot; pressed would claim it is on screen.
+    return {
+      ...base,
+      pressed: false,
+      open: input.environmentGaveWay.open,
+      menu: [],
+      press: { kind: "refused" },
+      disabledReason: ENVIRONMENT_NO_ROOM_BESIDE_TOOL,
+    };
+  }
+  if (tool.id === "environment" && input.environmentSection === true && !narrow) {
+    const [section] = tabs;
+    if (section === undefined) {
+      return { ...base, pressed: false, open: false, menu: [], press: { kind: "open-section" } };
+    }
+    return {
+      ...base,
+      pressed: input.dockPresentedOpen,
+      open: false,
+      menu: [{ value: "close", label: `Close ${tool.label}` }],
+      press: input.dockPresentedOpen
+        ? { kind: "close", tabIds: [section.id] }
+        : { kind: "open-dock" },
+    };
+  }
   const minimisable =
     input.shelfDrawn === true && !narrow && MINIMISABLE_DOCK_SURFACES.has(tool.id);
   const cards = input.minimised ?? [];
@@ -316,6 +377,25 @@ function toolMenu(
       }
     }
   }
+  // The same move the drag to the thread's foot makes, for a click or a key.
+  // Only the tool's own first tab moves: the panel holds one of each tool, so
+  // from a second Terminal the move would open another shell below and close
+  // the first one beside, which is not the one the menu was opened on. The
+  // Browser is left out: closing its tab beside ends the thread's session, and
+  // a move must not end what it moves.
+  if (
+    tabId === tool.id &&
+    tool.id !== "browser" &&
+    shown &&
+    !narrow &&
+    !isCard &&
+    input.bottomAccepts?.includes(tool.id) === true
+  ) {
+    items.push({ value: "to-bottom", label: "Move to bottom panel" });
+  }
+  if (!narrow && !shown && input.bottomHeld.includes(tool.id)) {
+    items.push({ value: "to-side", label: "Move to the side" });
+  }
   if (minimisable && shown) items.push({ value: "minimise", label: "Minimise to card" });
   if (tool.id === "terminal") items.push({ value: "new", label: "New Terminal" });
   if (tool.id === "browser") items.push({ value: "new", label: "New Browser page" });
@@ -336,6 +416,24 @@ export function buildDockToolButtons(input: DockToolButtonsInput): DockToolButto
     ...awaiting.filter((tool) => !input.surfaces.some((candidate) => candidate.id === tool.id)),
   ];
   const described = tools.map((tool): DockToolButton => {
+    const quick = input.quickTools;
+    if (
+      !input.surfaces.some((candidate) => candidate.id === tool.id) &&
+      quick !== undefined &&
+      (tool.id === "terminal" || tool.id === "browser") &&
+      quick.tools.includes(tool.id)
+    ) {
+      const isOpen = quick.open === tool.id;
+      return {
+        id: tool.id,
+        label: tool.id === "terminal" ? "Project terminal" : "Project browser",
+        pressed: isOpen,
+        open: false,
+        tabIds: [],
+        menu: [],
+        press: isOpen ? { kind: "quick-close" } : { kind: "quick-open", tool: tool.id },
+      };
+    }
     if (!input.surfaces.some((candidate) => candidate.id === tool.id)) {
       return {
         id: tool.id,
@@ -345,6 +443,19 @@ export function buildDockToolButtons(input: DockToolButtonsInput): DockToolButto
         tabIds: [],
         menu: [],
         disabledReason: DOCK_TOOLS_AWAIT_TASK_START,
+        press: { kind: "refused" },
+      };
+    }
+    const unavailable = input.unavailable?.[tool.id];
+    if (unavailable !== undefined) {
+      return {
+        id: tool.id,
+        label: tool.label,
+        pressed: false,
+        open: false,
+        tabIds: [],
+        menu: [],
+        disabledReason: unavailable,
         press: { kind: "refused" },
       };
     }

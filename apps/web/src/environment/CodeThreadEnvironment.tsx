@@ -18,26 +18,42 @@ import type {
   CodeProjectPullRequestRow,
   LocalServerOpenTarget,
   ProjectSummary,
+  ThreadBoardPullRequestIdentity,
+  ThreadBoardPullRequestSummaries,
   WorkspaceTab,
 } from "@octant/contracts";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 import { deriveCodeEnvironmentProjection } from "@octant/domain/shell-policy";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  ChevronRight,
   FolderOpen,
   GitCommitHorizontal,
+  GitFork,
   GitPullRequest,
+  MoreHorizontal,
   Paperclip,
+  Plus,
   Server,
   Target,
-} from "lucide-react";
+} from "../ui/icons";
 import { CodeAttachmentGallery, type CodeAttachmentReader } from "../code/CodeAttachmentGallery";
 import type { CodeAttachmentReference } from "@octant/contracts";
 import { CodeCheckoutProvider } from "./CodeCheckoutContext";
 import { EnvironmentGitGroup } from "./EnvironmentGitGroup";
-import { EnvironmentCard, EnvironmentGroup } from "./EnvironmentGroup";
+import {
+  EnvironmentCard,
+  EnvironmentGroup,
+  EnvironmentRow,
+  EnvironmentTile,
+} from "./EnvironmentGroup";
+import { EnvironmentRunningReport } from "./environmentSections";
 import { EnvironmentExtraFolders } from "./EnvironmentExtraFolders";
 import { EnvironmentPullRequests } from "./EnvironmentPullRequests";
+import {
+  EnvironmentThreadPullRequests,
+  threadPullRequestCount,
+} from "./EnvironmentThreadPullRequests";
 import { countGroupedLocalServerListenersByScope } from "./localServerGroups";
 import { LocalServersGroup } from "./LocalServersGroup";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
@@ -54,11 +70,8 @@ import { EnvironmentGoal } from "./EnvironmentGoal";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
 import { EnvironmentRoutines } from "./EnvironmentRoutines";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
-import { OctantButton } from "../ui/base/OctantButton";
-import {
-  CODE_DELIVERY_OUTCOME_OPTIONS,
-  CodeDeliveryOutcomeSelector,
-} from "../code/composer/CodeDeliveryOutcomeSelector";
+import { OctantMenu } from "../ui/base/OctantMenu";
+import { CODE_DELIVERY_OUTCOME_OPTIONS } from "../code/composer/CodeDeliveryOutcomeSelector";
 
 type CodeThreadWorkspaceTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
 
@@ -120,6 +133,15 @@ export interface CodeThreadEnvironmentProps {
   readonly onOpenPullRequests?: () => void;
   /** Opens a pull request's Review surface; absent leaves rows inert. */
   readonly onSelectPullRequest?: (row: CodeProjectPullRequestRow) => void;
+  /**
+   * This thread's own pull requests, from the host's cached snapshot. Absent
+   * when it has none; the renderer never reads GitHub to fill it.
+   */
+  readonly threadPullRequests?: ThreadBoardPullRequestSummaries;
+  /** Opens one of this thread's pull requests in the app. Absent leaves its rows inert. */
+  readonly onOpenThreadPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
+  /** Opens one of this thread's pull requests on GitHub. Absent hides that menu entry. */
+  readonly onOpenThreadPullRequestOnGithub?: (identity: ThreadBoardPullRequestIdentity) => void;
   readonly hostBridge?: OctantHostBridge;
   readonly openInApplications?: ReadonlyArray<OpenInApplicationId>;
   readonly agentRunClient?: AgentRunClient;
@@ -137,11 +159,15 @@ export interface CodeThreadEnvironmentProps {
   readonly onOpenRoutine?: (automationId: string) => void;
   readonly environmentOpen?: boolean;
   readonly onOpenGit?: () => void;
+  /** Opens worktree setup for this thread's checkout. */
+  readonly onOpenWorktrees?: () => void;
   readonly onCreatePullRequest?: () => void;
   readonly sources?: ReadonlyArray<CodeAttachmentReference>;
   readonly sourceClient?: CodeAttachmentReader;
   readonly usageDashboardClient?: UsageDashboardClient;
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
+  /** Whether the Usage group shows its spend ceiling row when no ceiling is set. */
+  readonly spendCeilingShown?: boolean;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
 }
 
@@ -183,6 +209,48 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
       : { label: "New task in this Project", onClick: () => onNewThreadInProject(project.id) };
   const observed = controller.observation;
   const readyObservation = observed?.status === "ready" ? observed : undefined;
+  // The section holds the working tree's state and the branch, not how far the
+  // branch is ahead of its remote or whether a pull request exists, so it
+  // cannot rule out a push on a named branch. It hides the rows only where
+  // they could do nothing: an unreadable checkout (the status row says why)
+  // and a detached HEAD with a clean tree.
+  const offersCommitOrPush =
+    props.onOpenGit !== undefined &&
+    readyObservation !== undefined &&
+    (readyObservation.changes === "dirty" || readyObservation.branch.kind === "named");
+  const offersPullRequest =
+    props.onCreatePullRequest !== undefined &&
+    readyObservation !== undefined &&
+    readyObservation.branch.kind === "named";
+  // A checkout that cannot be read already shows "New task in this Project" as
+  // its way out, so the menu offers it for every other state.
+  const changesMenu: ReadonlyArray<{
+    readonly value: string;
+    readonly label: string;
+    readonly icon: ReactNode;
+    readonly run: () => void;
+  }> = [
+    ...(project === undefined || onNewThreadInProject === undefined || checkoutUnusable
+      ? []
+      : [
+          {
+            value: "new-task",
+            label: "New task in this Project",
+            icon: <Plus aria-hidden="true" size={16} />,
+            run: () => onNewThreadInProject(project.id),
+          },
+        ]),
+    ...(props.onOpenWorktrees === undefined
+      ? []
+      : [
+          {
+            value: "worktrees",
+            label: "Worktrees",
+            icon: <GitFork aria-hidden="true" size={16} />,
+            run: props.onOpenWorktrees,
+          },
+        ]),
+  ];
   const localServersAvailable = localServersSection?.available === true;
   const localServers = useLocalServersController({
     enabled: localServersAvailable,
@@ -197,6 +265,15 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
     localServers.snapshot === undefined
       ? undefined
       : countGroupedLocalServerListenersByScope(localServers.snapshot);
+  // A server elsewhere on the computer keeps the row, so it stays reachable;
+  // before the first read there is nothing to say yet. A failed read keeps it
+  // too, open, because the error and its way to try again live in the row.
+  const serversFailed = localServersAvailable && localServers.status === "error";
+  const serversShown =
+    serversFailed ||
+    (localServersAvailable &&
+      runningServerCounts !== undefined &&
+      runningServerCounts.currentCheckout + runningServerCounts.other > 0);
   // Open by default only when this checkout is serving something; a list of
   // servers elsewhere on the computer is a count until asked for.
   const [serversOpen, setServersOpen] = useState<boolean>();
@@ -246,7 +323,33 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
             })}
         open={environmentOpen}
         headerContent={
-          <section className="environment-checkout" aria-label="Checkout">
+          <EnvironmentCard
+            caption="Changes"
+            className="environment-checkout"
+            foldId="changes"
+            summary={changesSummary(
+              controller.status,
+              controller.observation,
+              threadPullRequestCount(props.threadPullRequests),
+            )}
+            {...(changesMenu.length === 0
+              ? {}
+              : {
+                  titleAction: (
+                    <OctantMenu
+                      items={changesMenu.map(({ value, label, icon }) => ({ value, label, icon }))}
+                      onValueChange={(value) =>
+                        changesMenu.find((entry) => entry.value === value)?.run()
+                      }
+                      selectionMode="action"
+                      trigger={<MoreHorizontal aria-hidden="true" size={16} />}
+                      triggerClassName="environment-menu-trigger"
+                      triggerLabel="More for changes"
+                      value=""
+                    />
+                  ),
+                })}
+          >
             <EnvironmentGitGroup
               {...(freshThreadAction === undefined ? {} : { action: freshThreadAction })}
               {...(controller.errorMessage === undefined
@@ -259,31 +362,32 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
               failureRef={failure}
               status={controller.status}
             />
-            {props.onOpenGit === undefined && props.onCreatePullRequest === undefined ? null : (
-              // The two things a checkout's facts lead to, side by side under
-              // them; as full-width rows they read as two more facts.
-              <div className="environment-checkout__actions">
-                {props.onOpenGit === undefined ? null : (
-                  <OctantButton onClick={props.onOpenGit} size="sm" type="button" variant="outline">
-                    <GitCommitHorizontal aria-hidden="true" size={14} />
-                    <span>Commit or push</span>
-                  </OctantButton>
-                )}
-                {props.onCreatePullRequest === undefined ? null : (
-                  <OctantButton
-                    onClick={props.onCreatePullRequest}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    <GitPullRequest aria-hidden="true" size={14} />
-                    <span>Create pull request</span>
-                  </OctantButton>
-                )}
-              </div>
-            )}
-          </section>
+            {offersCommitOrPush ? (
+              <EnvironmentRow
+                icon={GitCommitHorizontal}
+                label="Commit or push"
+                onClick={props.onOpenGit}
+              />
+            ) : null}
+            {offersPullRequest ? (
+              <EnvironmentRow
+                icon={GitPullRequest}
+                label="Create pull request"
+                onClick={props.onCreatePullRequest}
+              />
+            ) : null}
+            {/* Last in the card: the thread's pull requests arrive with the
+                host's snapshot, and a row that appears there pushes nothing the
+                pointer may be on. */}
+            <EnvironmentThreadPullRequests
+              onOpen={props.onOpenThreadPullRequest}
+              onOpenOnGithub={props.onOpenThreadPullRequestOnGithub}
+              summaries={props.threadPullRequests}
+            />
+          </EnvironmentCard>
         }
+        mode="code"
+        projectName={props.project?.name}
         summary={{
           identity: projection.identity,
           ...(readyObservation === undefined
@@ -297,6 +401,12 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                 // The folder the thread works in: a separate worktree's own
                 // path, not the repository it was cut from.
                 path: readyObservation.worktreeRoot,
+                checkout:
+                  readyObservation.workingFolder?.kind === "extra"
+                    ? "Shared folder"
+                    : readyObservation.worktreeRoot === readyObservation.repositoryRoot
+                      ? "Main folder"
+                      : "Worktree",
               }),
           ...(workingDirectory === undefined ? {} : { workingLocation: String(workingDirectory) }),
           ...(runningServerCounts === undefined ? {} : { runningServerCounts }),
@@ -305,35 +415,18 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
         {/* Two captioned cards, one row grammar: what is live on this checkout
             first, then what the thread delivers and what it has cost. */}
         <div className="environment-list">
-          <EnvironmentCard caption="Running">
-            <EnvironmentGroup
-              icon={Server}
-              onOpenChange={setServersOpen}
-              open={serversOpen ?? (runningServerCounts?.currentCheckout ?? 0) > 0}
-              {...(localServers.snapshot === undefined
-                ? {}
-                : {
-                    summary: serverSummary(runningServerCounts),
-                  })}
-              title="Local servers"
-            >
-              <LocalServersGroup
-                controller={localServers}
-                {...(props.onOpenLocalServer === undefined
-                  ? {}
-                  : { onOpenTarget: props.onOpenLocalServer })}
-                {...(props.onCopyLocalServerUrl === undefined
-                  ? {}
-                  : { onCopyUrl: props.onCopyLocalServerUrl })}
-                {...(localServersAvailable
-                  ? {}
-                  : {
-                      unavailableReason:
-                        localServersSection?.unavailableReason ??
-                        "Open a repository Project to view local servers.",
-                    })}
-              />
-            </EnvironmentGroup>
+          <EnvironmentCard caption="Running" foldId="running">
+            {/* Servers serving this checkout count as running; the section's
+                folded line adds the subagents and a live computer-use session. */}
+            <EnvironmentRunningReport
+              count={
+                !localServersAvailable
+                  ? 0
+                  : runningServerCounts === undefined
+                    ? undefined
+                    : runningServerCounts.currentCheckout
+              }
+            />
             {props.agentRunClient === undefined ? null : (
               <EnvironmentSubagents
                 client={props.agentRunClient}
@@ -353,8 +446,37 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
               />
             )}
             <ThreadActivityEnvironment />
+            {/* Last in its section: a server that starts while the strip is open
+                adds a row at the end, never above one the pointer may be on. It
+                is absent when nothing runs on this computer, which the
+                section's summary says. */}
+            {serversShown ? (
+              <EnvironmentGroup
+                icon={Server}
+                onOpenChange={setServersOpen}
+                open={
+                  serversOpen ?? (serversFailed || (runningServerCounts?.currentCheckout ?? 0) > 0)
+                }
+                {...(localServers.snapshot === undefined
+                  ? {}
+                  : {
+                      summary: serverSummary(runningServerCounts),
+                    })}
+                title="Local servers"
+              >
+                <LocalServersGroup
+                  controller={localServers}
+                  {...(props.onOpenLocalServer === undefined
+                    ? {}
+                    : { onOpenTarget: props.onOpenLocalServer })}
+                  {...(props.onCopyLocalServerUrl === undefined
+                    ? {}
+                    : { onCopyUrl: props.onCopyLocalServerUrl })}
+                />
+              </EnvironmentGroup>
+            ) : null}
           </EnvironmentCard>
-          <EnvironmentCard caption="Delivery">
+          <EnvironmentCard caption="Delivery" foldId="delivery">
             {pullRequestClient === undefined || props.project === undefined ? null : (
               <EnvironmentPullRequests
                 enabled={environmentOpen}
@@ -398,26 +520,48 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
             {props.deliveryOutcome === undefined ||
             threadVersion === undefined ||
             props.onExecute === undefined ? null : (
-              <EnvironmentGroup
-                icon={Target}
-                summary={deliveryOutcomeLabel(props.deliveryOutcome)}
-                title="Delivers"
-              >
-                {/* The outcome is the reader's to confirm, and the
-                host has accepted a confirmation all along — nothing ever sent
-                one, so a thread carried whatever its first prompt read as. */}
-                <CodeDeliveryOutcomeSelector
-                  onChange={(outcomeKind) => {
-                    void props.onExecute?.({
-                      kind: "confirm-code-delivery-outcome",
-                      threadId: props.tab.threadId,
-                      expectedVersion: threadVersion,
-                      outcomeKind,
-                    });
-                  }}
-                  value={props.deliveryOutcome}
-                />
-              </EnvironmentGroup>
+              /* One row, "Delivers" and the current outcome, that opens the same
+                 four choices as a menu: a whole group had stood here for one
+                 decision. The outcome is the reader's to confirm, and the host
+                 has accepted a confirmation all along; picking one sends it
+                 (maintainer request 2026-11-17: quieter Environment panel). */
+              <OctantMenu
+                items={CODE_DELIVERY_OUTCOME_OPTIONS.map((option) => ({
+                  value: option.id,
+                  label: option.label,
+                  description: option.detail,
+                  icon: <option.icon aria-hidden="true" size={14} />,
+                }))}
+                onValueChange={(value) => {
+                  const outcomeKind = CODE_DELIVERY_OUTCOME_OPTIONS.find(
+                    (option) => option.id === value,
+                  )?.id;
+                  if (outcomeKind === undefined) return;
+                  void props.onExecute?.({
+                    kind: "confirm-code-delivery-outcome",
+                    threadId: props.tab.threadId,
+                    expectedVersion: threadVersion,
+                    outcomeKind,
+                  });
+                }}
+                trigger={
+                  <>
+                    <EnvironmentTile icon={Target} />
+                    <span className="environment-row__title">Delivers</span>
+                    <span className="environment-row__detail">
+                      {deliveryOutcomeLabel(props.deliveryOutcome)}
+                    </span>
+                    <ChevronRight
+                      aria-hidden="true"
+                      className="environment-row__trailing"
+                      size={14}
+                    />
+                  </>
+                }
+                triggerClassName="environment-row environment-link"
+                triggerLabel={`Delivers, ${deliveryOutcomeLabel(props.deliveryOutcome)}`}
+                value={props.deliveryOutcome}
+              />
             )}
             {workingDirectory === undefined ||
             threadVersion === undefined ||
@@ -431,6 +575,14 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                     : `${readyObservation?.workingFolder?.label ?? workingFolderLabel(workingDirectory)}${String(workingDirectory) === "." || readyObservation?.workingFolder === undefined ? "" : ` / ${workingDirectory}`}`
                 }
                 title="Working folder"
+                {...(readyObservation?.workingFolder?.kind === "extra"
+                  ? {
+                      // The caveat that used to open the body; the body is now one
+                      // line, so the tooltip keeps what it said (maintainer
+                      // request 2026-11-17).
+                      hint: "Shared folder, outside this task's worktree. Git, changed files, Review and pull requests cover the Code checkout only.",
+                    }
+                  : {})}
               >
                 {readyObservation?.workingFolderUnavailable === true ? (
                   <p>
@@ -460,12 +612,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                     }}
                   />
                 ) : (
-                  <p>
-                    {readyObservation.workingFolder.kind === "extra"
-                      ? "Shared approved folder; it is outside this task's child worktree. Git, changed-file receipts, Review and PR operations cover the Code checkout only. "
-                      : "Main folder of this Code checkout. "}
-                    Start a new task to choose another working folder or subfolder.
-                  </p>
+                  <p>Fixed for this task. Start a new task to change it.</p>
                 )}
               </EnvironmentGroup>
             )}
@@ -482,6 +629,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                 {...(props.spendCeilingClient === undefined
                   ? {}
                   : { spendCeilingClient: props.spendCeilingClient })}
+                {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
                 {...(props.onOpenUsageDashboard === undefined
                   ? {}
                   : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
@@ -506,6 +654,35 @@ function deliveryOutcomeLabel(outcome: CodeDeliveryOutcomeKind): string {
   return (
     CODE_DELIVERY_OUTCOME_OPTIONS.find((option) => option.id === outcome)?.label ?? String(outcome)
   );
+}
+
+/**
+ * What the Changes section says when folded: the counts its head already
+ * shows, "Clean", or a word for a repository that cannot be read. Nothing
+ * while the first read is out.
+ */
+function changesSummary(
+  status: ReturnType<typeof useCodeEnvironmentController>["status"],
+  observation: ReturnType<typeof useCodeEnvironmentController>["observation"],
+  pullRequests: number,
+): string | undefined {
+  const changes = changesFigure(status, observation);
+  if (changes === undefined || pullRequests === 0) return changes;
+  return `${changes} \u00b7 ${String(pullRequests)} ${pullRequests === 1 ? "PR" : "PRs"}`;
+}
+
+function changesFigure(
+  status: ReturnType<typeof useCodeEnvironmentController>["status"],
+  observation: ReturnType<typeof useCodeEnvironmentController>["observation"],
+): string | undefined {
+  if (status === "error") return "Unavailable";
+  if (observation === undefined) return undefined;
+  if (observation.status !== "ready") return "Unavailable";
+  if (observation.changes === "clean") return "Clean";
+  if (observation.insertions === undefined || observation.deletions === undefined) {
+    return "Uncommitted";
+  }
+  return `+${observation.insertions.toLocaleString("en")} \u2212${observation.deletions.toLocaleString("en")}`;
 }
 
 function serverSummary(

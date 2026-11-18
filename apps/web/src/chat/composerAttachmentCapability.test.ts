@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { ProviderObservedState } from "@octant/contracts/providers";
 import {
   attachmentModality,
-  buildAttachmentCapability,
   buildImageAttachmentCapability,
+  chatFileRefusal,
   supportsAttachmentFile,
 } from "./composerAttachmentCapability";
 
@@ -40,18 +40,32 @@ describe("supportsAttachmentFile", () => {
   });
 });
 
-describe("buildAttachmentCapability", () => {
-  it("reports the provider's own native attachment support", () => {
+describe("chatFileRefusal", () => {
+  const text = new TextEncoder().encode("a,b\n1,2\n");
+  const binary = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0xff]);
+
+  it("takes a text file for any model, even one with no native attachments", () => {
+    const textOnly = observation({ nativeAttachments: "unsupported", modalities: ["text"] });
+    expect(chatFileRefusal(textOnly, "model-a", { type: "text/csv" }, text, "data.csv")).toBe(
+      undefined,
+    );
+  });
+
+  it("takes a file the model reads natively whatever its bytes", () => {
+    const documents = observation({
+      nativeAttachments: "supported",
+      modalities: ["text", "document"],
+    });
     expect(
-      buildAttachmentCapability(
-        observation({ nativeAttachments: "supported", modalities: ["text"] }),
-      ),
-    ).toEqual({ kind: "supported" });
+      chatFileRefusal(documents, "model-a", { type: "application/pdf" }, binary, "report.pdf"),
+    ).toBe(undefined);
+  });
+
+  it("refuses a binary file the model cannot read and says where it can go", () => {
+    const textOnly = observation({ nativeAttachments: "unsupported", modalities: ["text"] });
     expect(
-      buildAttachmentCapability(
-        observation({ nativeAttachments: "unsupported", modalities: ["text"] }),
-      ).kind,
-    ).toBe("unavailable");
+      chatFileRefusal(textOnly, "model-a", { type: "application/zip" }, binary, "bundle.zip"),
+    ).toMatch(/^bundle\.zip is not text.*Work or Code thread/);
   });
 });
 
@@ -73,7 +87,7 @@ describe("buildImageAttachmentCapability", () => {
 
     expect(capability).toEqual({
       kind: "unavailable",
-      reason: "The selected model does not accept images. Choose an image-capable model.",
+      reason: "This model cannot read images. Pick one that can.",
     });
   });
 

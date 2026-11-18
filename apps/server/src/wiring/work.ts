@@ -135,7 +135,11 @@ import {
   stalledTurnLimitMs,
 } from "../providers/turnBudget";
 import { withRoutineBrowserProfiles } from "../browser/browserRoutineSessions";
-import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
+import {
+  makeConfiguredAccountSessionCarrier,
+  makeConfiguredProviderDriver,
+  type ProvidersWiring,
+} from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
@@ -740,6 +744,8 @@ export function wireWork(deps: WorkDependencies) {
                   browserAutomationService.holdForPerson(ownerWindowId, threadId),
                 holdForAsk: (ownerWindowId, threadId) =>
                   browserAutomationService.holdForAsk(ownerWindowId, threadId),
+                takeBack: (ownerWindowId, threadId) =>
+                  browserAutomationService.takeBack(ownerWindowId, threadId),
                 snapshotRefs: (ownerWindowId, threadId) =>
                   browserAutomationService.snapshotRefs(ownerWindowId, threadId),
               },
@@ -756,8 +762,8 @@ export function wireWork(deps: WorkDependencies) {
                           : workThreadAccessOf(current.access).executionPolicy;
                       },
                       // Below Full access Work asks the one-use script
-                      // permission Code asks. Strict will answer false here.
-                      oneUsePermission: () => true,
+                      // permission Code asks, unless the thread is Strict.
+                      strict: () => resolveThreadStrict(String(input.thread.id)),
                       run: (command) => browserAutomationService.runScript(command),
                     },
                   }),
@@ -1016,6 +1022,10 @@ export function wireWork(deps: WorkDependencies) {
         );
       },
       attachments: workAttachments,
+      accountSessionCarrier: makeConfiguredAccountSessionCarrier(
+        (instanceId) => persistence.readProviderInstance(instanceId),
+        configuredDriverOptions,
+      ),
       supportsModelSwitch: (providerInstanceId) =>
         providerRuntimeRegistry.observedState(providerInstanceId)?.capabilities.modelSwitch ===
         "supported",

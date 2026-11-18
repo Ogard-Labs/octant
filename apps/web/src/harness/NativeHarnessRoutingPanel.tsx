@@ -1,4 +1,5 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
+import { ArrowDown, ArrowUp, X } from "../ui/icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DEFAULT_NATIVE_HARNESS_JOB_SLOTS,

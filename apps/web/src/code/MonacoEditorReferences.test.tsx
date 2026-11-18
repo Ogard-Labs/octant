@@ -210,6 +210,12 @@ function fixture() {
 afterEach(() => {
   vi.restoreAllMocks();
 });
+/** The editor's header menu is the one way to the language actions. */
+async function choose(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(screen.getByRole("button", { name: "File actions" }));
+  await user.click(await screen.findByRole("menuitem", { name }));
+}
+
 describe("references in the actual Code editor pane", () => {
   it("requests intelligence for acknowledged unsaved text and drops a reply after the draft changes", async () => {
     const f = fixture();
@@ -293,7 +299,8 @@ describe("references in the actual Code editor pane", () => {
       />,
     );
     await screen.findByText("No problems found");
-    await user.type(screen.getByRole("textbox", { name: "New symbol name" }), "renamed");
+    await choose(user, "Preview rename");
+    await user.type(await screen.findByRole("textbox", { name: "New symbol name" }), "renamed");
     await user.click(screen.getByRole("button", { name: "Preview rename" }));
     const changes = await screen.findByRole("region", { name: "Reviewed code changes" });
     const apply = await within(changes).findByRole("button", { name: "Apply reviewed changes" });
@@ -314,11 +321,12 @@ describe("references in the actual Code editor pane", () => {
         text: text.replaceAll("value", "renamed"),
       }),
     );
-    await user.click(screen.getByRole("button", { name: "Find quick fixes" }));
-    await within(changes).findByRole("button", { name: "Apply reviewed changes" });
+    await choose(user, "Find quick fixes");
+    const fixes = await screen.findByRole("region", { name: "Reviewed code changes" });
+    await within(fixes).findByRole("button", { name: "Apply reviewed changes" });
     act(() => f.options?.onChange("new unsaved text"));
     expect(
-      within(changes).queryByRole("button", { name: "Apply reviewed changes" }),
+      within(fixes).queryByRole("button", { name: "Apply reviewed changes" }),
     ).not.toBeInTheDocument();
   });
 
@@ -341,7 +349,7 @@ describe("references in the actual Code editor pane", () => {
       f.options?.onChange(text + "// unsaved draft\n");
       f.options?.onCursorPosition?.({ lineNumber: 2, column: 13 });
     });
-    await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+    await choose(user, "Find references in checkout");
     const list = await screen.findByRole("region", { name: "References" });
     expect(await within(list).findByText(/feature\/references/)).toBeVisible();
     await user.click(await within(list).findByRole("button", { name: "Open a.ts:1:14" }));
@@ -382,7 +390,7 @@ describe("references in the actual Code editor pane", () => {
         />,
       );
       await screen.findByText("No problems found");
-      await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+      await choose(user, "Find references in checkout");
       const region = await screen.findByRole("region", { name: "References" });
       await within(region).findByRole("alert");
       expect(f.requests.filter((request) => request.kind === "references")).toHaveLength(0);
@@ -409,10 +417,11 @@ describe("references in the actual Code editor pane", () => {
       };
       const view = render(<MonacoEditorPane {...props} />);
       await screen.findByText("No problems found");
-      await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+      await choose(user, "Find references in checkout");
       await waitFor(() => expect(f.signals).toHaveLength(1));
       if (change === "draft") act(() => f.options?.onChange(text + "// new draft"));
-      else if (change === "close") await user.keyboard("{Escape}");
+      else if (change === "close")
+        fireEvent.keyDown(screen.getByRole("region", { name: "References" }), { key: "Escape" });
       else if (change === "client") {
         const replacement = fixture();
         view.rerender(<MonacoEditorPane {...props} client={replacement.client} />);
@@ -434,7 +443,7 @@ describe("references in the actual Code editor pane", () => {
       expect(screen.queryByRole("region", { name: "References" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Open a.ts:1:14" })).not.toBeInTheDocument();
       if (change === "close")
-        expect(screen.getByRole("button", { name: "Find references in checkout" })).toHaveFocus();
+        expect(screen.getByRole("region", { name: /^Editor for / })).toHaveFocus();
     },
   );
   it("shows stale foreground preparation without an implicit retry and recovers only on explicit recheck", async () => {
@@ -450,7 +459,7 @@ describe("references in the actual Code editor pane", () => {
       />,
     );
     await screen.findByText("No problems found");
-    await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+    await choose(user, "Find references in checkout");
     const region = await screen.findByRole("region", { name: "References" });
     await within(region).findByRole("button", { name: "Reload language document" });
     expect(f.requests.filter((request) => request.kind === "references")).toHaveLength(0);
@@ -485,10 +494,14 @@ describe("references in the actual Code editor pane", () => {
       />,
     );
     await screen.findByText("No problems found");
+    await userEvent.setup().click(screen.getByRole("button", { name: "File actions" }));
+    const findReferences = await screen.findByRole("menuitem", {
+      name: "Find references in checkout",
+    });
     vi.useFakeTimers();
     try {
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Find references in checkout" }));
+        fireEvent.click(findReferences);
       });
       expect(f.signals).toHaveLength(1);
       await act(async () => {
@@ -523,11 +536,11 @@ describe("references in the actual Code editor pane", () => {
       />,
     );
     await screen.findByText("No problems found");
-    await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+    await choose(user, "Find references in checkout");
     await waitFor(() => expect(f.signals).toHaveLength(1));
-    await user.keyboard("{Escape}");
+    fireEvent.keyDown(screen.getByRole("region", { name: "References" }), { key: "Escape" });
     delete f.state.beforeReference;
-    await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+    await choose(user, "Find references in checkout");
     const region = await screen.findByRole("region", { name: "References" });
     await within(region).findByText(/snapshot/);
     f.state.wrongRevision = true;
@@ -558,7 +571,7 @@ describe("references in the actual Code editor pane", () => {
     await screen.findByText("No problems found");
     const base = performance.now();
     const clock = vi.spyOn(performance, "now").mockReturnValue(base);
-    await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+    await choose(user, "Find references in checkout");
     await waitFor(() => expect(f.signals).toHaveLength(1));
     clock.mockReturnValue(base + 15001);
     await act(async () => {
@@ -585,7 +598,7 @@ describe("references in the actual Code editor pane", () => {
       />,
     );
     await screen.findByText("No problems found");
-    await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+    await choose(user, "Find references in checkout");
     const region = await screen.findByRole("region", { name: "References" });
     await within(region).findByText(/snapshot/);
     f.state.wrongRevision = true;
@@ -614,14 +627,14 @@ it("records an unchanged document's late guarded acknowledgement after the perso
     />,
   );
   await screen.findByText("No problems found");
-  await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+  await choose(user, "Find references in checkout");
   await waitFor(() => expect(f.version()).toBe(2));
   await user.click(screen.getByRole("button", { name: "Close references" }));
   release();
   await act(() => new Promise<void>((resolve) => setTimeout(resolve, 10)));
   delete f.state.beforeSyncReply;
   expect(f.requests.filter((request) => request.kind === "references")).toHaveLength(0);
-  await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+  await choose(user, "Find references in checkout");
   expect(await screen.findByRole("button", { name: "Open a.ts:1:14" })).toBeVisible();
   expect(f.client.syncLanguageDocument).toHaveBeenLastCalledWith(
     expect.objectContaining({
@@ -646,7 +659,7 @@ it("recovers a genuinely lost text acknowledgement only through an explicit lang
     />,
   );
   await screen.findByText("No problems found");
-  await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+  await choose(user, "Find references in checkout");
   await waitFor(() => expect(f.version()).toBe(2));
   await screen.findByRole("alert");
   await user.click(screen.getByRole("button", { name: "Recheck references" }));
@@ -660,7 +673,7 @@ it("recovers a genuinely lost text acknowledgement only through an explicit lang
       recordedSync(f.client).mock.calls.filter(([request]) => request.kind === "open"),
     ).toHaveLength(2),
   );
-  await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+  await choose(user, "Find references in checkout");
   expect(await screen.findByRole("button", { name: "Open a.ts:1:14" })).toBeVisible();
   expect(f.client.save).not.toHaveBeenCalled();
 });
@@ -683,7 +696,7 @@ it("never replaces a newer acknowledged edited document with a cancelled sync's 
     />,
   );
   await screen.findByText("No problems found");
-  await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+  await choose(user, "Find references in checkout");
   await waitFor(() => expect(f.version()).toBe(2));
   await user.click(screen.getByRole("button", { name: "Close references" }));
   act(() => f.options?.onChange(text + "// new draft"));
@@ -691,7 +704,7 @@ it("never replaces a newer acknowledged edited document with a cancelled sync's 
   release();
   await act(() => new Promise<void>((resolve) => setTimeout(resolve, 10)));
   delete f.state.beforeSyncReply;
-  await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+  await choose(user, "Find references in checkout");
   expect(await screen.findByRole("button", { name: "Open a.ts:1:14" })).toBeVisible();
   expect(f.client.syncLanguageDocument).toHaveBeenLastCalledWith(
     expect.objectContaining({
@@ -721,7 +734,7 @@ it("does not adopt a late acknowledgement after the same file is rebound to anot
     />,
   );
   await screen.findByText("No problems found");
-  await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+  await choose(user, "Find references in checkout");
   await waitFor(() => expect(first.version()).toBe(2));
   view.rerender(
     <MonacoEditorPane
@@ -739,7 +752,7 @@ it("does not adopt a late acknowledgement after the same file is rebound to anot
   );
   release();
   await act(() => new Promise<void>((resolve) => setTimeout(resolve, 10)));
-  await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+  await choose(user, "Find references in checkout");
   expect(await screen.findByRole("button", { name: "Open a.ts:1:14" })).toBeVisible();
   expect(next.client.syncLanguageDocument).toHaveBeenLastCalledWith(
     expect.objectContaining({
@@ -766,7 +779,7 @@ it.each(["approval-required", "no-reach"] as const)(
       />,
     );
     await screen.findByText("No problems found");
-    await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+    await choose(user, "Find references in checkout");
     await screen.findByRole("button", { name: "Reload language document" });
     f.state.reopenRefusal = reason;
     await user.click(screen.getByRole("button", { name: "Reload language document" }));
@@ -775,7 +788,7 @@ it.each(["approval-required", "no-reach"] as const)(
         recordedSync(f.client).mock.calls.filter(([request]) => request.kind === "open"),
       ).toHaveLength(2),
     );
-    await user.click(screen.getByRole("button", { name: "Find references in checkout" }));
+    await choose(user, "Find references in checkout");
     await screen.findByRole("alert");
     expect(f.requests.filter((request) => request.kind === "references")).toHaveLength(0);
     expect(f.client.save).not.toHaveBeenCalled();

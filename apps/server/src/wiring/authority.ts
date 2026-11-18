@@ -1,3 +1,7 @@
+import { workThreadAccessOf, threadAccessOf } from "@octant/domain/guardrail-policy";
+import { decodeWorkThreadId } from "@octant/contracts";
+import { decodeCodeThreadId } from "@octant/contracts";
+import { LOCAL_HOST_ID } from "@octant/contracts";
 import { notifyWindowRevocations } from "../windowRevocations";
 import { randomUUID } from "node:crypto";
 import { defaultShellSettings } from "@octant/domain";
@@ -47,6 +51,9 @@ import { createTodoRouteHandler } from "../todos/todoRoutes";
 import { privateListenerHostId } from "../remote/privateListenerHostIdentity";
 import { TodoStore } from "../todos/todoStore";
 import { PersonMemoryStore } from "../personMemory/personMemoryStore";
+import { SandboxRestrictionsService } from "../sandboxRestrictionsService";
+import { createSandboxRestrictionsRoutes } from "../sandboxRestrictionsRoutes";
+import { configureSandboxRestrictionsAuthority } from "../process/sandboxRuntimePolicy";
 import { OctantInstructionsStore } from "../octantInstructions/octantInstructionsStore";
 import { createOctantInstructionsRouteHandler } from "../octantInstructions/octantInstructionsRoutes";
 import { ProtectedFilesService } from "../protectedFilesService";
@@ -126,6 +133,60 @@ export function wireAuthority(deps: AuthorityDependencies) {
     clock: () => decodeUtcTimestamp(new Date().toISOString()),
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
   });
+  const sandboxRestrictions = new SandboxRestrictionsService({
+    strictPreferences: (scope) => {
+      const code =
+        scope.kind === "session"
+          ? persistence.readCodeThread(decodeCodeThreadId(scope.threadId))
+          : undefined;
+      const work =
+        scope.kind === "session" && code === undefined
+          ? deps.workThreadProjection.read(decodeWorkThreadId(scope.threadId))
+          : undefined;
+      const thread = code ?? work;
+      const projectId =
+        scope.kind === "project" ? scope.projectId : (code?.projectId ?? work?.projectId);
+      const project = projectId === undefined ? undefined : persistence.readProject(projectId);
+      const mode =
+        scope.kind === "settings"
+          ? scope.mode
+          : work !== undefined || project?.type === "work"
+            ? "work"
+            : "code";
+      const codeSettings = persistence.readCodeSettings()?.settings;
+      const workSettings = deps.workThreadProjection.settings();
+      const settings = mode === "work" ? workSettings : codeSettings;
+      const defaultExecutionPolicy =
+        project?.type !== "chat" && project?.defaultPermissionMode !== undefined
+          ? threadAccessOf(project.defaultPermissionMode).executionPolicy
+          : mode === "work"
+            ? workThreadAccessOf(workSettings?.defaultAccess ?? "ask-first").executionPolicy
+            : (codeSettings?.defaultExecutionPolicy ?? "approval-gated");
+      return {
+        executionPolicy:
+          code?.executionPolicy ??
+          (work === undefined
+            ? defaultExecutionPolicy
+            : workThreadAccessOf(work.access).executionPolicy),
+        ...(thread === undefined ? {} : { thread }),
+        ...(project === undefined || project.type === "chat" ? {} : { project }),
+        ...(settings === undefined ? {} : { settings }),
+      };
+    },
+    enrollmentEnabled: process.env.OCTANT_SANDBOX_RESTRICTIONS_PREVIEW === "1",
+    journal: persistence.journal,
+    hostId: String(LOCAL_HOST_ID),
+    dataDirectory: persistence.dataDirectory,
+    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    project: (id) => persistence.readProject(decodeProjectId(id)),
+    thread: (id) => {
+      const code = persistence.readCodeThread(decodeCodeThreadId(id));
+      if (code !== undefined) return { projectId: String(code.projectId), mode: "code" };
+      const work = deps.workThreadProjection.read(decodeWorkThreadId(id));
+      return work === undefined ? undefined : { projectId: String(work.projectId), mode: "work" };
+    },
+  });
+  configureSandboxRestrictionsAuthority(sandboxRestrictions);
   // Person memory is hydrated before any turn runs, so the first turn after
   // a start already carries what the person was remembered by.
   const personMemory = new PersonMemoryStore({
@@ -265,6 +326,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
   const onThreadArchived = (withdraw: (threadId: string) => void): void => {
     threadArchivals.push(withdraw);
   };
+  onThreadArchived((threadId) => sandboxRestrictions.revokeSession(threadId));
   const unsubscribeThreadArchivals = persistence.journal.subscribeCommitted((append) => {
     for (const threadId of threadsArchivedBy(append)) {
       for (const withdraw of threadArchivals) {
@@ -374,6 +436,10 @@ export function wireAuthority(deps: AuthorityDependencies) {
     store: personMemory,
     windowAuthorityStore,
   });
+  const sandboxRestrictionsRoutes = createSandboxRestrictionsRoutes({
+    service: sandboxRestrictions,
+    windowAuthorityStore,
+  });
   const todoRoutes = createTodoRouteHandler({ store: todos, windowAuthorityStore });
   const octantInstructionsRoutes = createOctantInstructionsRouteHandler({
     store: octantInstructions,
@@ -447,6 +513,8 @@ export function wireAuthority(deps: AuthorityDependencies) {
     octantInstructions,
     octantInstructionsRoutes,
     protectedFilesRoutes,
+    sandboxRestrictions,
+    sandboxRestrictionsRoutes,
     simulatorInputGrants,
     todoRoutes,
     unsubscribeMachineChanges,

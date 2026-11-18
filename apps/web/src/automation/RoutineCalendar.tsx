@@ -1,5 +1,5 @@
 import type { AutomationSummary } from "@octant/contracts";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "../ui/icons";
 import { useMemo } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { buildRoutineCalendarMonth, stepRoutineCalendarMonth } from "./routineCalendarModel";
@@ -98,8 +98,7 @@ export function RoutineCalendar(props: {
 
       {month.truncated ? (
         <p className="routine-calendar__note" role="status">
-          Some routines run more often than this month can show. Their rows in the list say how
-          often.
+          Some routines run more often than this calendar can show. The list says how often.
         </p>
       ) : null}
     </section>

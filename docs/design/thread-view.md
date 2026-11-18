@@ -6,12 +6,37 @@ How a thread reads in Chat, Work, and Code: the turn header, the transcript, wha
 
 Every assistant reply in Chat, Work, and Code opens with the same line: who
 answered (provider and model as the picker names them), how the turn stands
-(Working…, Waiting for approval, Completed with how long it took, Failed with
+(Working, Waiting for approval, Completed with how long it took, Failed with
 the host's sanitized reason on the line below), and when it last changed at the
-right edge. It is set in the interface face at the detail size; only the status
+right edge. While a turn runs and has a start time, the line reads "Working ·
+12s · Read": the clock counts from the turn's own start (not from when the row
+mounted) once a second in tabular digits with a fixed minimum width, so a tick
+moves nothing; the step is the title of the newest running tool, left out when
+none runs (a reply that spoke before a tool ran still names it), and clips to an ellipsis. The live
+region holds the step alone, so a change of step is announced politely and the
+clock is never read; the timer stops when the turn settles and when the row
+unmounts. A finished turn's duration ("Worked for 1m 5s") is drawn once: at the
+head of the fold's summary line when the turn folds its tool calls, otherwise in
+the header. It is set in the interface face at the detail size; only the status
 word carries colour. `TurnHeader` in `apps/web/src/transcript/` is the one
 recipe; a mode maps its own lifecycle onto its vocabulary and adds nothing of
 its own.
+
+## Reply actions
+
+A finished reply (completed, failed, interrupted or cancelled) ends with one
+action row, `TurnActions` in `apps/web/src/transcript/`, the same in Chat, Work
+and Code: Copy, Fork from here (where the thread can fork), Read aloud (only
+where speech is available), Regenerate (where the host supports it), and the
+time at the right of the buttons, a clock time today and the date and time
+older, with the full date in its title. The buttons are 14px ghost icons in
+the meta ink on a 28px row. The row always holds its height, so showing it
+moves nothing: the thread's last reply keeps it visible at rest, an older reply
+shows it on hover or keyboard focus, and touch and increased contrast always
+show it. A reply still working has no row. A failed or interrupted reply shows
+its time (its last update, or its start when none is journaled yet). Fork also
+stays in a turn's "…" menu. The turn header above the reply keeps only the
+status, how long it took, and the provider and time in its hover details.
 
 ## Transcript
 
@@ -29,8 +54,8 @@ above it than the reply before it. A reply (`turn-agent`) is bare prose at the
 transcript size with 1.5 leading, its paragraphs, list items and table cells at
 the 1.6 reading leading ([DESIGN.md: Scale](../../DESIGN.md#scale)), with no card of its own: only the work a turn
 produced is boxed. Over the application ground, the conversation supplies one quiet,
-continuous reading veil below the title band: the sheet colour at 80%, so the
-ground stays faintly visible behind the transcript. Replies remain bare prose, including on translucent
+continuous reading veil below the title band: the sheet colour at 94%, so the
+ground stays a whisper behind the transcript. Replies remain bare prose, including on translucent
 workspaces; user bubbles and the composer retain glass over the application
 ground. Under Glass the thread's container stays clear, the ground steps down to an eighth of its strength while a thread is on screen, and keeps a quarter of it under the sidebar, so it never reads as letters behind text. Reduced transparency keeps the reading background opaque.
 
@@ -84,7 +109,13 @@ Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn:
 - **Low** (default): "Thinking stays folded, and a finished turn's tool calls
   fold behind one line." Thinking is shut, tool rows are listed while the turn
   runs and fold behind "N tool calls" once it settles, and each row's detail is
-  shut. This is the transcript as it was before the setting.
+  shut. A run of two or more consecutive reads, searches, and folder listings
+  (recognised by tool name; a call carrying a published page, an automation, or
+  an outside-content tag stays its own row) is one row such as "Read 4 files,
+  searched 2 times", shut at Low and listed at Medium and High, in running and
+  settled turns; any other row ends the run, and a lone look stays a plain row.
+  The settled fold's line leads with the turn's duration: "Worked for 1m 5s · 12
+  tool calls · 4 files edited". This is the transcript as it was before the setting.
 - **Medium**: "Thinking stays folded with its first line showing, and tool
   calls stay listed." A shut Thinking row carries the reasoning's first line
   after its name, as plain words in the muted ink, clipped to the row with an
@@ -96,6 +127,41 @@ Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn:
   reply streams, its thinking is open and grows as it arrives, and a running
   turn's tool rows are open; Settings › Chat › Stream replies still alone
   decides whether the partial answer shows, at every level.
+
+### Turn activity rows
+
+Every row of a turn's work leads with a 14px icon for its kind in the muted ink,
+in one column so the names line up: Thinking a brain, a tool call the mark of
+what it did (command, file read, edit, search, web, connector or subagent) and
+a generic wrench for a kind the transcript cannot read. The chevron stays at the
+start. A row ends in one 16px status slot that is reserved whether or not a mark
+shows, so a call that finishes swaps its mark and moves nothing: a spinner
+while it runs, a check when done, a cross in the danger ink when failed, a
+hollow circle when it never finished. The state word stays in the row's
+accessible name and in text only a screen reader reads.
+
+A tool's name is the tool's own display name. The host's internal kinds, which
+are kebab-case ("provider-tool"), read as words ("Provider tool"), and an
+`mcp__server__tool` name reads "tool (server)". Thinking says "Thought for 12s"
+when the turn recorded how long reasoning ran ("Thought briefly" under a
+second) and "Thinking" otherwise.
+
+The folded "tool calls" group says what ran in marks, not only a count: an icon
+and a number per kind, most frequent first ("terminal 4, file 5, pencil 2"), at
+most four kinds and then "+n" for the rest. Its accessible name carries the
+total and the words ("11 tool calls: 5 reads, 4 commands, 2 edits"). Opened,
+each call is one row of fixed height: the kind icon, the name, a one-line
+preview in the meta ink (a command's first line, a file's name, a search's
+query) clipped with an ellipsis, the call's duration when the host recorded one,
+and the status slot. The preview is drawn, not read: the detail under the row
+stays the one place the summary's words are, and clicking the row opens it as
+before. A call that finishes changes its mark only.
+
+A Code turn's checkout capture notes (the latest capture and its time, what the
+changes are measured from, a note that no paths were captured, and that a final
+comparison is missing) are one quiet, closed line below the reply: a camera
+icon and "Checkout capture · 19:04". The sentences sit inside it, so they do not
+read as part of the answer.
 
 The thread's own choice is a row of the thread's
 [info panel](workspace.md#thread-info) in Chat, Work, and Code. The
@@ -168,12 +234,22 @@ opens at High, and an open run past five rows shows its latest five behind
 
 ## Streaming and earlier messages
 
-The displayed partial answer coalesces updates on a fifty-millisecond beat, or
-one hundred milliseconds for long answers (at least sixteen thousand text
-units). The first content, a replacement and the finished answer appear
-immediately. Coalescing happens before parsing the whole answer, so Markdown
-references and code fences keep their document-wide meaning; it does not delay
-provider data, journal writes or copy/export.
+A streaming answer is revealed at an even pace, not as the bursts arrive. The
+view keeps a smoothed measure of how fast text arrives and how often, holds back
+about one arrival interval of it (between 50 and 400 milliseconds), and shows
+text from that buffer on each animation frame at the arrival rate. It speeds up
+gently when the backlog grows and never jumps, and it ends a step on a word
+boundary when the word finishes within twelve characters. When the reveal falls
+more than about 1.2 seconds behind (a reconnect or a large paste) it skips ahead
+to the buffer. Answers of at least sixteen thousand text units step at most every
+hundred milliseconds instead of every thirty-two, to bound the cost of parsing.
+The first content, a replacement or shrunk text, and text already present when a
+running thread opens appear immediately; only text that arrives afterwards is
+paced. The finished answer drains its remaining text within one hundred
+milliseconds. With reduced motion requested, text shows as it arrives. Pacing
+happens before parsing the whole answer, so Markdown references and code fences
+keep their document-wide meaning, and only the streaming message updates; it
+does not delay provider data, journal writes or copy/export.
 
 A thread opens on its newest messages. When earlier ones exist, one row above
 the oldest loaded message offers **Load earlier messages** as a ghost button;
@@ -228,6 +304,21 @@ the tag stays quiet. A call Octant refused because it named a protected secret
 file carries the same tag, naming that finding.
 Neither prompts.
 
+The thread itself says it is marked in two places, with no popover (a
+maintainer's choice, 2026-11-14). The Environment panel carries a calm row,
+"Outside content · read N times", with Review; its globe is in the warning ink
+only while the mark has effect, which is below Full access. In the composer's
+row a 16px warning globe with no words sits immediately before the mode
+control, only below Full access, named "This thread read outside content, so
+risky actions ask first. Review in Environment."; it appears and goes with the
+mode or a clear, never while the person types. Both open one dialog, "Outside
+content in this thread": the sources with their counts and times, one plain
+paragraph (the thread read text from outside Octant, risky actions ask first
+while it is marked, clearing says the person checked it and undoes nothing the
+model read, and new outside content marks it again), and the buttons Cancel
+and Clear mark. The mark stays server-owned: the renderer shows it and sends
+the existing clear.
+
 ## Subagents in a thread
 
 A thread's subagents sit in a card attached above the composer's message
@@ -253,6 +344,19 @@ in details. Rows open the child in Agents. Only managed active children offer
 Stop; Stop all asks first and names its managed scope. Headers and rows wrap at
 narrow widths, disclosures work with the keyboard and retain visible focus,
 and expanded lists have bounded height.
+
+Each subagent also shows in the transcript, under the activity of the turn
+that started it, as one quiet row like a tool row: its provider's logo, the
+task's first line, its latest line (an observed child's own progress, a
+managed run's result once it has one, else its state), the model and effort as
+the picker names them ("Sonnet 5.5 High"; nothing when the run reported no
+model), how long it has run (from its request or first sight to its last
+update, ticking while it works), and its state mark at the trailing edge, in a
+slot that keeps its width so nothing moves when a run finishes. A subagent
+belongs to the turn that was running when it started, because the host links
+a subagent to its thread and not to a turn: a turn owns the span from its start
+to the next turn's. The rows and the composer's card read one shared summary
+for the pane (maintainer request, 2026-11-17).
 
 A result the host delivers into the parent thread is a turn the person did
 not write, so it never renders as their right-aligned bubble. It is a
@@ -392,32 +496,74 @@ interface text, and model choices stay in a bounded scrollable popup.
 Sent messages do not repeat an access caption; the underlying history remains
 authoritative.
 
+## Image preview
+
+An image attached in a composer, and an image on a sent message, is a button
+named "Preview <name>". It opens a modal lightbox on the shared dialog: one
+frame 32px inside the window for every image, the image fitted inside it, its
+filename and size beneath, with "n of m" when the message has several. Arrow
+keys step between the images of that message or composer; Escape or a press
+outside closes it and returns focus to the thumbnail. Stepping never resizes
+the frame.
+
 ## Model picker
 
-The compact model picker uses explicit horizontal provider selection, sub-provider
-grouping, search, Favorites, and Recent. Source tabs are marks alone and name
-themselves in a tooltip. The picker of a thread whose model can no longer
+The compact model picker is one float with 12px corners. From the top: a row
+of icon tabs (Favorites, Recent, then one tab per provider showing its mark;
+the current tab has a quiet filled square behind its icon, and a tooltip names
+each); the shared filled 32px search field, with no edge of its own; the model rows;
+a hairline and the Reasoning row; a hairline and the service-tier row. Sub-provider
+grouping stays as catalog chips under the search where a provider fronts several
+catalogs. The picker of a thread whose model can no longer
 change (a completed Work thread, which passes `locked`) keeps the name in the
 ordinary meta ink (the blanket disabled opacity left it at 2.11:1) and looks
 unpressable by its dimmed chevron, default cursor and absent hover; a picker
 disabled for any other reason, such as a running turn or no ready provider,
-keeps the ordinary disabled look. The chosen model carries a check, not a
-filled row; a row's star shows on hover, on focus, or once it is on; and a
-provider mark leads each row only in a list mixed from several providers.
+keeps the ordinary disabled look.
+
+A row is the menu's 28px row (44px with the account under the model): the
+provider's mark, the model name, and at the end the ⌘ digit as quiet meta text
+in a fixed right-aligned column, with the current model's check just before
+it. The current row carries a check, never a fill (maintainer request,
+2026-11-16); a row's star shows on hover, on focus,
+or once it is on. A mixed list (Favorites, Recent, a search) names the account
+under the model, since two accounts of one provider share a mark. The first
+nine choosable rows show "⌘1" to "⌘9", and while the picker is open that chord
+chooses the row; nothing is bound while it is closed. Typing a letter anywhere
+in the picker goes to the search field, the arrows walk the rows (Up from the
+first returns to the search field), and Enter chooses. A provider with more
+than five models shows the first five and a quiet "Show more" line (a search
+shows every match, and the chosen model is never left behind the fold); the
+list scrolls inside the frame.
+
+The popup is one fixed frame, 360px wide
+and 376px tall (shorter only when the window is; it holds the rail, the search,
+five rows with "Show more" and the two controls with no blank band, and a
+longer list scrolls), opening 4px above its
+trigger with its edge aligned to the trigger's end: switching Favorites,
+Recent or a provider, an empty or short list, Show more, a search, and
+choosing a model or a setting never resize or move it or its trigger. The
+Reasoning and service-tier rows are always there for a picker whose caller can
+set model options, so the frame does not depend on the model. Reasoning is a
+segmented control of the levels the model declares, least to most, whose
+segments size to their words so six levels (Low to Ultra) all read in full, with the
+chosen level in accent ink on a raised segment, "Reasoning" on the left and
+the model's name on the right; pressing the chosen level again returns to the
+provider's default, and a chosen level shows at once and never snaps back
+while it saves. A model with no levels keeps the row, disabled, with one line
+saying so. The tier row is a segmented "Standard | Fast" (the provider's own
+names, with a bolt on the fast one); a model with no faster tier keeps the row
+disabled with its reason. The mode menu and
+the other composer-row menus open above their button and never over it.
 Choosing a model keeps the menu open, since the
-reasoning level beneath is often the next choice. Its reasoning control shows
-the full track, discrete stops, and filled range, with the reading ("Reasoning
-High") and reset above, and Faster and Smarter at the track's two ends. The fill
-is a dot grain that grows denser, brighter, and more purple, with a soft glow,
-the higher the level; a chosen level shows at once and never snaps back while
-it saves. Explicit model and reasoning choices are remembered
+reasoning level beneath is often the next choice. Explicit model and reasoning choices are remembered
 locally for new threads; model settings are keyed by provider/model and restored only
 while supported. Existing thread selections remain authoritative. The same picker
 shows every declared model setting in Chat, Work, and Code. Paired model families
-show Lead and Sidekick selectors drawn from available catalog entries; choosing
+show Lead and Sidekick selectors above the Reasoning row, drawn from available catalog entries; choosing
 one preserves the other choice and carries still-supported explicit effort and
-speed settings. Devin's Speed selector offers Standard and Fast where the CLI
-supports Fast Mode, plus Default to use the provider's choice. The settings area
+speed settings. Devin's Speed is the tier row, Standard and Fast where the CLI
+supports Fast Mode. Any other declared choice is a select above the Reasoning row. The settings area
 scrolls within the bounded popup at narrow or short viewport sizes.
 Model choices and settings wait for an asynchronous model change to finish before
 accepting another edit, so the next configuration choice uses the confirmed pairing.
@@ -509,7 +655,15 @@ counts visible while folded. An unfinished list after a settled turn says
 Incomplete; it does not claim that the agent is still running. The open list
 shows the recorded ordered steps in a bounded, scrollable list: the running
 step at Medium (500), finished steps struck through in secondary ink, and no
-fill on any row. Neither this list nor the journaled plan borrows progress,
+fill on any row. A provider that words a task for while it runs (Claude's
+`activeForm`: "Running the test suite" for "Run the test suite") has that
+wording shown for the running task, and in the header when nothing failed or
+waits, only while the turn is running; once the turn has stopped the task is
+named plainly, so a stopped turn never reads as still working. A provider
+without running wording (Codex) shows the plain wording throughout. The
+running wording is untrusted provider text, bounded and redacted like the
+plain one, optional in every journaled task so older journals replay
+unchanged, and task rows never count as tool calls or steps. Neither this list nor the journaled plan borrows progress,
 completion, or authority from the subagent group.
 
 ## Message queue and Stop
@@ -577,6 +731,19 @@ and scrolling inside the card past 18rem so the buttons stay in reach, then
 **Approve plan ·** that level and **Keep planning**. The rules are in
 [Provider runtimes](provider-runtimes.md#plan-mode-as-level-changes).
 
+The phone draws the same block on a Work thread's screen, above the
+thread's level: the label, the agent's sentence, the plan whole in a
+bordered monospace block that scrolls inside the card past 18rem, the line
+saying what happens to this turn, and the two answers with the desktop's
+words. The phone reads the thread's pending requests from the host and
+sends only yes or no with the version it read; the host applies the level
+change and journals it as the device. Approving a plan, which widens what
+the next turn may do, asks for the phone's own confirmation (Face ID, Touch
+ID or passcode) first; switching to Plan and keeping the level do not. A
+Code thread's level-change ask stays with the desktop, like the phone's
+other Code approvals, and the phone shows no other Work approval or
+question yet.
+
 ## Sessions started outside Octant
 
 An empty Work or Code thread whose provider keeps sessions of its own for the
@@ -638,6 +805,12 @@ notices appear once beside the active draft composer, with a separate-window
 action when available, as one of the composer's notice cards above the box. A note that stays until
 the person acts is a card too; only a state its surface marks as passing is the
 quiet line.
+A notice card is a small floating glass card in the box's width, a few pixels
+above it: the float fill and corner, a faint hairline, a 16px tone icon on a
+round tinted dot as its only colour, the message in the primary ink with a second
+part (a reset time) in the secondary ink, a small secondary action at the
+trailing edge, and a fade and a 4px rise on entry (none under reduced motion).
+Its look is [DESIGN.md: OctantAlert](../../DESIGN.md#octantalert).
 Authority confirmations appear beside the owning composer in a trusted surface
 owned by the desktop main process;
 ordinary notice content cannot issue an approval receipt.

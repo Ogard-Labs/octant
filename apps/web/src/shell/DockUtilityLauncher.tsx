@@ -1,4 +1,4 @@
-import { GitPullRequest, Plus } from "lucide-react";
+import { GitPullRequest, Plus } from "../ui/icons";
 import { DockToolIcon } from "./dockToolIcons";
 import { groupDockTools } from "./dockToolGroups";
 import {
@@ -49,7 +49,10 @@ export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
   return (
     <span className="dock-utility-launcher">
       <OctantMenuRoot>
-        <OctantMenuTrigger aria-label="Add tool" className="shell-icon-button window-no-drag">
+        <OctantMenuTrigger
+          aria-label="Add tool"
+          className="shell-icon-button dock-tile__control window-no-drag"
+        >
           <Plus aria-hidden="true" size={16} />
         </OctantMenuTrigger>
         <OctantMenuPortal>

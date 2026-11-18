@@ -1,3 +1,5 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
+import { sandboxToolPolicy, trackSandboxChild } from "../process/sandboxRuntimePolicy";
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { connect as connectSocket } from "node:net";
 import { chmod, link, lstat, mkdir, rm } from "node:fs/promises";
@@ -6,8 +8,16 @@ import type { Readable, Writable } from "node:stream";
 import {
   persistProcessReceipt,
   reconcileProcessReceipts,
+  reconcileWindowsProcessReceipts,
   type OwnedProcessReceiptHandle,
 } from "../process/nodeOwnedProcessReceipt";
+import { WINDOWS_PROCESS_ENVIRONMENT_NAMES } from "../process/windowsEnvironment";
+import {
+  stopWindowsProcessTree,
+  stopWindowsTreeConfirmed,
+  type WindowsProcessTreeStop,
+} from "../process/windowsProcessTree";
+import { resolveWindowsProviderProgram } from "../process/windowsProviderProgram";
 import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
 import {
   makeProcessConfinementLive,
@@ -49,6 +59,7 @@ export type DebugSessionNetwork =
   | { readonly kind: "allow" };
 
 export interface DebugAdapterLaunchInput {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   /** The session id: one receipt and one state folder per session. */
   readonly sessionId: string;
   /** Absolute, verified path of the adapter's binary. */
@@ -77,6 +88,12 @@ export interface DebugAdapterLaunchInput {
    * child port is relayed through a socket in the session's state folder.
    */
   readonly childPorts?: { readonly child: number; readonly childServer: number };
+  /**
+   * Runs the session with no Octant sandbox: only on Windows, outside
+   * Strict, which the start policy decided. A Windows launch without it is
+   * refused, since Windows has no sandbox Octant can use yet.
+   */
+  readonly unconfined?: true;
 }
 
 /**
@@ -119,6 +136,8 @@ export interface DebugAdapterProcessPortOptions {
     args: ReadonlyArray<string>,
     options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv },
   ) => ChildProcess;
+  /** Ends a Windows session and every process it started; Windows has no process groups. */
+  readonly stopWindowsTree?: (pid: number) => Promise<WindowsProcessTreeStop>;
 }
 
 export class DebugAdapterProcessPort {
@@ -128,9 +147,11 @@ export class DebugAdapterProcessPort {
   readonly #platform: NodeJS.Platform;
   readonly #processIdentity: ((pid: number) => Promise<string | undefined>) | undefined;
   readonly #spawn: NonNullable<DebugAdapterProcessPortOptions["spawn"]>;
+  readonly #stopWindowsTree: (pid: number) => Promise<WindowsProcessTreeStop>;
 
   constructor(options: DebugAdapterProcessPortOptions) {
     this.#confinement = options.confinement ?? makeProcessConfinementLive();
+    this.#stopWindowsTree = options.stopWindowsTree ?? ((pid) => stopWindowsProcessTree(pid));
     this.#egress = options.egress;
     this.#receiptDirectory = options.receiptDirectory;
     this.#platform = options.platform ?? process.platform;
@@ -156,6 +177,8 @@ export class DebugAdapterProcessPort {
     for (const path of [input.executable, input.installRoot, input.checkoutRoot, input.stateRoot]) {
       if (!isAbsolute(path)) return { status: "failed" };
     }
+    if (this.#platform === "win32") return this.#launchUnconfinedOnWindows(input);
+    if (input.unconfined === true) return { status: "confinement-unavailable" };
     if (input.network.kind === "proxied" && this.#egress === undefined) {
       return { status: "confinement-unavailable" };
     }
@@ -217,6 +240,7 @@ export class DebugAdapterProcessPort {
     let launch: ConfinedProcessLaunch;
     try {
       launch = this.#confinement.prepare({
+        ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
         executable: input.executable,
         args: [],
         boundRoot: input.checkoutRoot,
@@ -249,19 +273,23 @@ export class DebugAdapterProcessPort {
     try {
       child = this.#spawn(launch.command, launch.args, {
         cwd: input.checkoutRoot,
-        env: sessionEnvironment({
-          stateDirectory,
-          temporaryDirectory,
-          configured: input.environment,
-          proxy,
-          childPorts,
-        }),
+        env: {
+          ...launch.environment,
+          ...sessionEnvironment({
+            stateDirectory,
+            temporaryDirectory,
+            configured: input.environment,
+            proxy,
+            childPorts,
+          }),
+        },
       });
     } catch {
       await closeNetwork();
       await removeState();
       return { status: "failed" };
     }
+    trackSandboxChild(input.sandboxPolicy ?? sandboxToolPolicy(), child);
     const exited = new Promise<void>((resolve) => {
       if (child.exitCode !== null || child.signalCode !== null) resolve();
       else child.once("exit", () => resolve());
@@ -342,8 +370,152 @@ export class DebugAdapterProcessPort {
     };
   }
 
+  /**
+   * A session on Windows, outside Strict. Windows has no sandbox Octant can
+   * use yet, so the adapter and the program it starts run with the person's
+   * own reach on the open network, as a thread terminal there does; the
+   * level's confirmation was asked before this. The session keeps its fresh
+   * state folder as its temporary folder, its receipt, the configuration's
+   * environment over the Windows names a program needs, and the Windows tree
+   * stop in place of a process group. A child connects on loopback.
+   */
+  async #launchUnconfinedOnWindows(
+    input: DebugAdapterLaunchInput,
+  ): Promise<DebugAdapterLaunchOutcome> {
+    if (
+      input.unconfined !== true ||
+      input.network.kind !== "allow" ||
+      input.sandboxPolicy !== undefined ||
+      sandboxToolPolicy() !== undefined
+    )
+      return { status: "confinement-unavailable" };
+    const stateDirectory = join(input.stateRoot, input.sessionId);
+    const temporaryDirectory = join(stateDirectory, "tmp");
+    try {
+      await prepareStateDirectory(input.stateRoot, stateDirectory, temporaryDirectory);
+    } catch {
+      return { status: "failed" };
+    }
+    const removeState = () =>
+      rm(stateDirectory, { recursive: true, force: true }).catch(() => undefined);
+    const program = resolveWindowsProviderProgram({
+      displayName: "This debug adapter",
+      executable: input.executable,
+      args: [],
+      environment: process.env,
+    });
+    if (program.status === "refused") {
+      await removeState();
+      return { status: "failed" };
+    }
+    const environment: NodeJS.ProcessEnv = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      const name = key.toUpperCase();
+      if (value !== undefined && WINDOWS_PROCESS_ENVIRONMENT_NAMES.has(name))
+        environment[name] = value;
+    }
+    for (const entry of input.environment) environment[entry.key] = entry.value;
+    environment.TEMP = temporaryDirectory;
+    environment.TMP = temporaryDirectory;
+    if (input.childPorts !== undefined) {
+      environment.OCTANT_DEBUG_CHILD_PORT = String(input.childPorts.child);
+      environment.OCTANT_DEBUG_CHILD_SERVER_PORT = String(input.childPorts.childServer);
+    }
+    let child: ChildProcess;
+    try {
+      child = this.#spawn(program.command, program.args, {
+        cwd: input.checkoutRoot,
+        env: environment,
+      });
+    } catch {
+      await removeState();
+      return { status: "failed" };
+    }
+    const exited = new Promise<void>((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) resolve();
+      else child.once("exit", () => resolve());
+      child.once("error", () => resolve());
+    });
+    const { stdin, stdout, stderr, pid } = child;
+    const stopTree = () =>
+      pid === undefined
+        ? Promise.resolve("uncertain" as const)
+        : stopWindowsTreeConfirmed(pid, exited, this.#stopWindowsTree, STOP_GRACE_MS);
+    if (stdin === null || stdout === null || pid === undefined) {
+      await stopTree();
+      await removeState();
+      return { status: "failed" };
+    }
+    stderr?.resume();
+    let receipt: OwnedProcessReceiptHandle;
+    try {
+      receipt = await persistProcessReceipt(
+        {
+          supervisor: RECEIPT_SUPERVISOR,
+          receiptDirectory: this.#receiptDirectory,
+          ...(this.#processIdentity === undefined
+            ? {}
+            : { processIdentity: this.#processIdentity }),
+        },
+        input.sessionId,
+        pid,
+      );
+      await receipt.ready;
+    } catch {
+      await stopTree();
+      await removeState();
+      return { status: "failed" };
+    }
+    let finished: Promise<void> | undefined;
+    // The program the adapter started outlives it on Windows unless the tree
+    // is stopped, so the tree goes before the receipt does. A stop that
+    // failed, or a root not seen to exit, keeps the receipt and the state
+    // folder: a restarted host stops the tree from the receipt, and the
+    // session's end does not pretend the program is gone.
+    const finish = () => {
+      finished ??= (async () => {
+        if ((await stopTree()) === "uncertain") {
+          console.warn(
+            `Octant kept debug session ${input.sessionId}'s ownership receipt: process ${pid} could not be shown stopped.`,
+          );
+          void exited.then(async () => {
+            if ((await stopTree()) !== "stopped") return;
+            await receipt.remove().catch(() => undefined);
+            await removeState();
+          });
+          return;
+        }
+        await receipt.remove().catch(() => undefined);
+        await removeState();
+      })();
+      return finished;
+    };
+    void exited.then(finish);
+    return {
+      status: "launched",
+      process: {
+        stdin,
+        stdout,
+        ...(input.childPorts === undefined
+          ? {}
+          : { childEndpoint: { kind: "loopback" as const, port: input.childPorts.child } }),
+        exited,
+        kill: finish,
+      },
+    };
+  }
+
   /** Ends every capsule a previous run of this host left behind. */
   async reconcile(): Promise<void> {
+    if (this.#platform === "win32") {
+      await reconcileWindowsProcessReceipts({
+        supervisor: RECEIPT_SUPERVISOR,
+        receiptDirectory: this.#receiptDirectory,
+        ...(this.#processIdentity === undefined ? {} : { processIdentity: this.#processIdentity }),
+        stopTree: this.#stopWindowsTree,
+      });
+      return;
+    }
     await reconcileProcessReceipts({
       supervisor: RECEIPT_SUPERVISOR,
       receiptDirectory: this.#receiptDirectory,

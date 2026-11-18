@@ -40,3 +40,31 @@ describe("OctantNumberStepper", () => {
     expect(onChange).toHaveBeenLastCalledWith(18);
   });
 });
+
+describe("OctantNumberStepper as a field", () => {
+  it("draws no buttons, keeps its unit inside, and clamps a typed value on blur", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <OctantNumberStepper
+        field
+        label="CPU target"
+        max={90}
+        min={20}
+        onChange={onChange}
+        suffix="%"
+        value={60}
+      />,
+    );
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByText("%")).toBeVisible();
+    const input = screen.getByRole("spinbutton", { name: "CPU target" });
+    await user.clear(input);
+    await user.type(input, "75");
+    expect(onChange).toHaveBeenLastCalledWith(75);
+    await user.clear(input);
+    await user.type(input, "5");
+    await user.tab();
+    expect(onChange).toHaveBeenLastCalledWith(20);
+  });
+});

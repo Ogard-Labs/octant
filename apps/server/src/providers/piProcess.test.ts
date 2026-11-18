@@ -13,6 +13,10 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { ProviderExecutionPolicy, ProviderToolDefinition } from "@octant/contracts";
 import { Effect } from "effect";
+import {
+  WINDOWS_KEPT_SANDBOX_REFUSAL,
+  WINDOWS_STRICT_REFUSAL,
+} from "@octant/domain/guardrail-policy";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   makePiConfinementLive,
@@ -202,9 +206,10 @@ describe("Pi process boundary", () => {
         ANTHROPIC_API_KEY: "anthropic-key",
         OPENAI_API_KEY: "openai-key",
         XAI_API_KEY: "xai-key",
+        DATABASE_PASSWORD: "synthetic-unrelated-host-value",
       },
     });
-    const start = (modelProvider?: string) =>
+    const start = (modelProvider?: string, kept?: boolean) =>
       Effect.runPromise(
         Effect.scoped(
           port.start({
@@ -214,7 +219,8 @@ describe("Pi process boundary", () => {
             sessionDirectory: join(f.home, "sessions"),
             sessionId: "session-1",
             mode: "code",
-            executionPolicy: "approval-gated",
+            executionPolicy: kept === undefined ? "approval-gated" : "full-access",
+            ...(kept === undefined ? {} : { strict: false, fullAccessSandbox: kept }),
             ...(modelProvider === undefined ? {} : { modelProvider }),
           }),
         ),
@@ -222,7 +228,11 @@ describe("Pi process boundary", () => {
 
     await start("anthropic");
     await start();
+    await start("anthropic", true);
+    await start("anthropic", false);
 
+    expect(prepared[2]?.DATABASE_PASSWORD).toBeUndefined();
+    expect(prepared[3]?.DATABASE_PASSWORD).toBe("synthetic-unrelated-host-value");
     expect(prepared[0]?.ANTHROPIC_API_KEY).toBe("anthropic-key");
     expect(prepared[0]?.OPENAI_API_KEY).toBeUndefined();
     expect(prepared[0]?.XAI_API_KEY).toBeUndefined();
@@ -248,6 +258,67 @@ describe("Pi process boundary", () => {
     ).toEqual(
       expect.arrayContaining(["--tools", "bash,edit,write,read,grep,find,ls,octant_browser"]),
     );
+  });
+
+  it("starts Pi on Windows at Full access, below it and in Chat outside Strict with no sandbox, and refuses Strict and a kept sandbox by name", async () => {
+    const f = fixture();
+    const confinement = makePiConfinementLive({
+      platform: "win32",
+      credentialPath: f.auth,
+      modelsPath: f.models,
+      ownSetupPath: join(f.base, "own"),
+    });
+    const prepare = (level: {
+      readonly mode?: "chat" | "code";
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly fullAccessSandbox?: boolean;
+      readonly strict?: boolean;
+    }) =>
+      Effect.runPromise(
+        Effect.either(
+          confinement.prepare({
+            binaryPath: f.binary,
+            root: f.root,
+            piHome: f.home,
+            sessionDirectory: join(f.home, "sessions"),
+            sessionId: "session-1",
+            mode: "code",
+            environment: {},
+            ...level,
+          }),
+        ),
+      );
+    for (const level of [
+      { executionPolicy: "full-access" },
+      { executionPolicy: "approval-gated", strict: false },
+      { executionPolicy: "plan", strict: false },
+      // Chat starts Pi with no built-in tool, so it needs no Octant sandbox.
+      { mode: "chat", executionPolicy: "approval-gated", strict: false },
+    ] as const) {
+      const started = await prepare(level);
+      expect(started).toMatchObject({ _tag: "Right", right: { command: f.binary, cwd: f.root } });
+      if (started._tag === "Right" && "mode" in level)
+        expect(started.right.args).toContain("--no-tools");
+      // Pi's own approval bridge still asks Octant below Full access.
+      if (started._tag === "Right")
+        expect(started.right.environment.OCTANT_PI_APPROVALS).toBe(
+          level.executionPolicy === "full-access" ? "disabled" : "enabled",
+        );
+    }
+    expect(await prepare({ executionPolicy: "approval-gated" })).toMatchObject({
+      _tag: "Left",
+      left: { category: "incompatible", message: WINDOWS_STRICT_REFUSAL },
+    });
+    expect(await prepare({ mode: "chat", executionPolicy: "approval-gated" })).toMatchObject({
+      _tag: "Left",
+      left: { category: "incompatible", message: WINDOWS_STRICT_REFUSAL },
+    });
+    expect(
+      await prepare({ executionPolicy: "full-access", fullAccessSandbox: true, strict: false }),
+    ).toMatchObject({
+      _tag: "Left",
+      left: { category: "incompatible", message: WINDOWS_KEPT_SANDBOX_REFUSAL },
+    });
   });
 
   it("refuses resume when the exact native history is missing", async () => {

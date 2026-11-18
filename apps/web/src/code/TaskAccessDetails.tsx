@@ -1,27 +1,16 @@
 import { useThreadControlNavigation } from "../composer/threadControlNavigation";
 import { useThreadInfoPanel } from "../composer/ThreadInfo";
 import type { ContextClient } from "@octant/client-runtime/context-client";
-import type {
-  ContextSubjectRef,
-  PermissionMode,
-  TaskAccessSnapshot,
-  TaskAccessRecovery,
-} from "@octant/contracts";
-import { ChevronRight } from "lucide-react";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import type { PermissionMode, TaskAccessSnapshot, TaskAccessRecovery } from "@octant/contracts";
+import { ChevronRight } from "../ui/icons";
+import { useContext, useEffect, useRef, useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { absoluteTimeFormatter } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
 import { PERMISSION_MODE_LABEL } from "./PermissionModePicker";
 
-export interface TaskAccessContextValue {
-  readonly client: ContextClient;
-  readonly subject: ContextSubjectRef;
-  readonly onOpenProviders?: () => void;
-  readonly onOpenAccess?: () => void;
-  readonly onOpenProtectedFiles?: () => void;
-}
-export const TaskAccessContext = createContext<TaskAccessContextValue | undefined>(undefined);
+export { TaskAccessContext, type TaskAccessContextValue } from "./TaskAccessContext";
+import { TaskAccessContext } from "./TaskAccessContext";
 
 /** A report belongs to the exact client/task/version that requested it. */
 export function useTaskAccessFacts(
@@ -260,7 +249,7 @@ export function TaskAccessDetails({ read }: { readonly read: AccessRead }) {
                   {facts.outsideContent.effect === "recorded"
                     ? "Outside content is recorded at Full access; the mark does not add approval prompts."
                     : facts.outsideContent.effect === "gates"
-                      ? "This task read outside content, so some actions ask each time. Review the existing outside-content notice above the composer when the task is idle."
+                      ? "This task read outside content, so some actions ask each time. Review it from the Outside content row in Environment when the task is idle."
                       : "This task read outside content. Its current effect has not been reported."}
                 </p>
               ) : null}

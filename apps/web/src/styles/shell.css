@@ -6,7 +6,12 @@
 }
 
 .shell.shell-frame {
-  --octant-rendered-sidebar-width: var(--octant-sidebar-width, 232px);
+  --octant-sidebar-target-width: var(--octant-sidebar-width, 232px);
+  /* What the grid, the ground and the stage read. It follows the target at
+     once, and glides to it only while the shell says the sidebar is sliding
+     (data-octant-sidebar-sliding), so dragging the sidebar's edge or resizing
+     the window never trails the pointer. */
+  --octant-rendered-sidebar-width: var(--octant-sidebar-target-width);
   /* Published by WindowChrome from each cluster's measured width. The literals
      are only the pre-measurement fallback: both clusters' real widths swing
      with which controls a thread renders, so no constant is right for every
@@ -19,7 +24,9 @@
   height: 100vh;
   min-width: 0;
   min-height: 100vh;
-  grid-template-columns: var(--octant-rendered-sidebar-width) minmax(0, 1fr);
+  grid-template-columns: calc(
+      var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width)
+    ) minmax(0, 1fr);
   grid-template-rows: 34px minmax(0, 1fr);
   overflow: hidden;
   position: relative;
@@ -54,13 +61,32 @@
     var(--octant-text-primary)
   );
   --octant-panel-surface: var(--octant-panel-opaque);
+  /* A surface that holds running text (the thread's reading veil, the sidebar's
+     lists) keeps this much of its own colour over the application ground, so the
+     ground is a whisper behind words: at 82% and 80% a photo or a field of
+     characters still ran through the letters and read as noise. One variable, so
+     one edit moves every such surface; an empty area (a start screen, the gutters,
+     the title band) keeps the ground at full strength. */
+  --octant-reading-surface-keep: 94%;
+  /* The sidebar inside the framed panel is the panel's tone, a few steps toward
+     the ground at most, so the two sides of the seam read as one surface with
+     a line between them. It keeps 82% of its colour, so the application ground
+     shows through softly, and the drawn grounds dim themselves to a third
+     under it so a row of text never meets a glyph. No blur: the desktop app
+     does not draw one. Reduced transparency and increased contrast keep it
+     whole, and under Glass it keeps the glass tint instead. */
+  --octant-sidebar-keep: var(--octant-reading-surface-keep);
+  --octant-sidebar-fill: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--octant-panel-opaque) 90%, var(--octant-ground-opaque))
+      var(--octant-sidebar-keep),
+    transparent
+  );
   /* Every pane (the thread, a tool tile, the bottom panel, the dock's
-     overview) is the pane fill, so the glass reads as one material. A narrow
-     window's tile panel keeps the edge band over it. */
-  --octant-pane-fill:
-    var(--octant-panel-sheen),
-    linear-gradient(var(--octant-panel-surface), var(--octant-panel-surface));
-  --octant-panel-fill: var(--octant-panel-band), var(--octant-pane-fill);
+     overview) is the pane fill, so the glass reads as one material. It is one
+     flat colour, drawn as a layer so a recipe can stack a tint over it. */
+  --octant-pane-fill: linear-gradient(var(--octant-panel-surface), var(--octant-panel-surface));
+  --octant-panel-fill: var(--octant-pane-fill);
 }
 
 /* Under Glass a card is one step of ink over the sheet rather than the
@@ -77,37 +103,61 @@ html[data-octant-theme-mode="light"] .shell {
   --octant-panel-keep: 99.5%;
 }
 
+/* One coat. The window paints the workspace colour at the glass level's alpha;
+   the rail, band, sidebar, stage, panes and tiles are clear over it, so the
+   window reads as one tone and the panel's hairline is the only edge between
+   frame and panel. Stacking a second coat in the panes made two tones and
+   about 93% / 78% / 49% in dark. Everything that sits on the coat is an ink
+   wash with no blur: the packaged window's material is not re-blurred by a
+   backdrop filter, so a blur here lays a second copy of the coat under the
+   surface. A ground's veil is the one place a second tint is kept, so a picture
+   stays readable. */
 .shell.shell--material-translucent {
-  --octant-window-surface: var(--octant-sidebar-translucent);
-  --octant-sheet-surface: var(--octant-workspace-translucent);
-  --octant-stage-surface: var(--octant-workspace-translucent);
-  /* Panels are a tint of the theme colour over the window's native material,
-     not a blur of it: the packaged window's material is not re-blurred by a
-     backdrop filter. Every panel (the thread, a tile, the bottom panel) is
-     this one tint, over a ground that is itself a tint, so text reads on a
-     saturated desktop. */
-  --octant-panel-surface: color-mix(in srgb, var(--octant-sheet-surface) 80%, transparent);
+  --octant-window-surface: var(--octant-workspace-translucent);
+  --octant-sheet-surface: transparent;
+  --octant-stage-surface: transparent;
+  --octant-panel-surface: transparent;
+  --octant-veil-surface: var(--octant-window-surface);
   --octant-card: color-mix(in srgb, var(--octant-text-primary) 4%, transparent);
   --card: var(--octant-card);
   --octant-outline-rest: var(--octant-card);
-  /* A raised card's shadow goes with its tint. A shadow token is resolved
-     where it is declared, with the opaque border in it, and that border is
-     near black on the grey a desktop shows through. */
-  --octant-shadow-xs: var(--octant-shadow-raised-glass);
-  --octant-shadow-sm: var(--octant-shadow-raised-glass);
-  --octant-shadow-md: var(--octant-shadow-raised-glass);
 }
 
 .shell.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"] {
-  --octant-window-surface: var(--octant-sidebar-translucent-subtle);
-  --octant-sheet-surface: var(--octant-workspace-translucent-subtle);
-  --octant-stage-surface: var(--octant-workspace-translucent-subtle);
+  --octant-window-surface: var(--octant-workspace-translucent-subtle);
 }
 
 .shell.shell--material-translucent[data-octant-sidebar-vibrancy="strong"] {
-  --octant-window-surface: var(--octant-sidebar-translucent-strong);
-  --octant-sheet-surface: var(--octant-workspace-translucent-strong);
-  --octant-stage-surface: var(--octant-workspace-translucent-strong);
+  --octant-window-surface: var(--octant-workspace-translucent-strong);
+}
+
+/* Over a ground in the desktop app a card is near opaque even under Glass: a
+   4% ink wash let the field of characters read through the text on it, and the
+   packaged window has no blur to calm it. The card keeps its one step of ink,
+   mixed into the page colour at 94%. */
+html[data-octant-native-host="true"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  )
+  .shell.shell--app-backdrop.shell--material-translucent {
+  --octant-card: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--octant-text-primary) 4%, var(--octant-workspace)) 94%,
+    transparent
+  );
+  --card: var(--octant-card);
+  --octant-outline-rest: var(--octant-card);
+}
+
+/* Thin glass: below the secondary ink's floor the muted role takes the
+   secondary ink inside the shell, so meta text keeps 4.5:1 over a light desktop
+   behind a thin dark coat. The attribute lists the levels that are thin. */
+html[data-octant-host-vibrancy="active"][data-octant-glass-thin~="subtle"]
+  .shell.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"],
+html[data-octant-host-vibrancy="active"][data-octant-glass-thin~="strong"]
+  .shell.shell--material-translucent[data-octant-sidebar-vibrancy="strong"] {
+  --octant-text-muted: var(--octant-text-secondary);
+  --oct-meta: var(--octant-text-secondary);
 }
 
 /* The material class already carries the host's contrast and
@@ -116,26 +166,17 @@ html[data-octant-theme-mode="light"] .shell {
    Each names the vibrancy attribute too, so it outranks the Subtle and Strong
    levels; matching only the shell, it lost to them and left the glass on.
    The card colour inherits the theme's opaque one again. */
-html[data-octant-reduced-transparency="true"] :is(.shell, .shell[data-octant-sidebar-vibrancy]) {
+html:is([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+  :is(.shell, .shell[data-octant-sidebar-vibrancy]) {
   --octant-window-surface: var(--octant-ground-opaque);
   --octant-sheet-surface: var(--octant-workspace);
   --octant-stage-surface: var(--octant-app-background);
   --octant-panel-surface: var(--octant-panel-opaque);
+  --octant-sidebar-keep: 100%;
+  --octant-reading-surface-keep: 100%;
   --octant-card: inherit;
   --card: inherit;
   --octant-outline-rest: initial;
-  --octant-shadow-xs: inherit;
-  --octant-shadow-sm: inherit;
-  --octant-shadow-md: inherit;
-}
-
-html[data-octant-increased-contrast="true"] .shell {
-  --octant-card: inherit;
-  --card: inherit;
-  --octant-outline-rest: initial;
-  --octant-shadow-xs: inherit;
-  --octant-shadow-sm: inherit;
-  --octant-shadow-md: inherit;
 }
 
 @media (prefers-reduced-transparency: reduce) {
@@ -144,12 +185,12 @@ html[data-octant-increased-contrast="true"] .shell {
     --octant-sheet-surface: var(--octant-workspace);
     --octant-stage-surface: var(--octant-app-background);
     --octant-panel-surface: var(--octant-panel-opaque);
+    --octant-sidebar-keep: 100%;
+    --octant-reading-surface-keep: 100%;
+    --octant-reading-surface-keep: 100%;
     --octant-card: inherit;
     --card: inherit;
     --octant-outline-rest: initial;
-    --octant-shadow-xs: inherit;
-    --octant-shadow-sm: inherit;
-    --octant-shadow-md: inherit;
   }
 }
 
@@ -159,22 +200,31 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 
 /* The rail beside the sidebar spends width from the same budget, so the
    clamp subtracts it too. */
+/* The thread gives width to the dock first, down to its 360px. Only then does
+   the sidebar give, and only down to its own minimum (220px,
+   MIN_SIDEBAR_WIDTH). With no floor a 1280px window with Environment and a
+   tool open drew the sidebar 88px wide; with the sidebar giving first, opening
+   Environment beside a tool in a 1400px window moved the thread, its title and
+   its tool row 60px. */
 .shell.shell-frame.shell--wide-context-open {
-  --octant-rendered-sidebar-width: min(
-    var(--octant-sidebar-width, 232px),
-    calc(
-      100vw - var(--octant-rail-offset, 0px) - var(--octant-wide-primary-min) -
-        var(--octant-context-sidebar-min)
+  --octant-sidebar-target-width: max(
+    min(var(--octant-sidebar-width, 232px), 220px),
+    min(
+      var(--octant-sidebar-width, 232px),
+      calc(
+        100vw - var(--octant-rail-offset, 0px) - var(--octant-narrow-primary-min) -
+          var(--octant-context-sidebar-min)
+      )
     )
   );
 }
 
 .shell.shell-frame.shell--projects-sidebar-open {
-  --octant-rendered-sidebar-width: calc(var(--octant-sidebar-width, 232px) + 320px);
+  --octant-sidebar-target-width: calc(var(--octant-sidebar-width, 232px) + 320px);
 }
 
 .shell.shell-frame.shell--wide-context-open.shell--projects-sidebar-open {
-  --octant-rendered-sidebar-width: min(
+  --octant-sidebar-target-width: min(
     calc(var(--octant-sidebar-width, 232px) + 320px),
     calc(
       100vw - var(--octant-rail-offset, 0px) - var(--octant-wide-primary-min) -
@@ -188,64 +238,25 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   app-region: drag;
 }
 
-.shell-frame__native-drag-strip {
+.shell-frame__title-band-drag {
   display: none;
 }
 
 /* `hiddenInset` does not make the renderer's transparent top edge draggable.
-   Reserve one explicit top-edge target after the traffic lights and collapsed
-   sidebar control. It carries no content, so no interactive child has to carve
-   a hole through a drag overlay. */
-html[data-octant-native-host="true"] .shell-frame__native-drag-strip {
+   One drag layer covers the whole title band, edge to edge, and stands first in
+   the shell. Electron applies drag and no-drag rectangles in document order, a
+   later one overriding an earlier one, so every control in the band subtracts
+   itself with `window-no-drag` on its own box. No container that spans empty
+   band space is no-drag, and nothing after this layer is a drag region over the
+   band: either would carve a hole or cover a control. */
+html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   position: fixed;
-  z-index: 5;
   top: 0;
-  right: var(--octant-window-chrome-reserved-width, 148px);
-  left: 112px;
+  right: 0;
+  left: 0;
   display: block;
-  height: var(--octant-native-hidden-inset-titlebar-height);
-  pointer-events: auto;
-}
-
-/* The expanded-sidebar strip starts after traffic lights plus Hide sidebar.
-   Once the sidebar is gone, that 112px origin sits on Show sidebar / New thread
-   unless it moves to the measured leading cluster. */
-html[data-octant-native-host="true"] .shell--sidebar-collapsed .shell-frame__native-drag-strip {
-  left: var(--octant-window-chrome-leading-width, 148px);
-}
-
-/* Beside a rail the chrome, and so its leading cluster, starts after it. */
-html[data-octant-native-host="true"] .shell--sidebar-rail .shell-frame__native-drag-strip {
-  left: calc(
-    var(--octant-rendered-sidebar-width) + var(--octant-window-chrome-leading-width, 148px)
-  );
-}
-
-/* The right dock's tab strip lives in the same band. The strip used to run
-   over it, so the tabs and their close controls dragged the window instead
-   of responding; it now ends where the dock begins. */
-html[data-octant-native-host="true"] .shell--wide-context-open .shell-frame__native-drag-strip {
-  right: max(
-    var(--octant-window-chrome-reserved-width, 148px),
-    min(var(--octant-context-sidebar-width, 0px), 50%)
-  );
-}
-
-/* With two columns of tools the dock may be wider than half, so the strip ends
-   where the dock's own width rule does, not at half the window. */
-html[data-octant-native-host="true"]
-  .shell--wide-context-open[data-dock-tile-columns="2"]
-  .shell-frame__native-drag-strip {
-  right: max(
-    var(--octant-window-chrome-reserved-width, 148px),
-    min(
-      var(--octant-context-sidebar-width, 0px),
-      calc(
-        100% - var(--octant-rendered-sidebar-width, 0px) -
-          var(--octant-tiled-primary-min, var(--octant-wide-primary-min))
-      )
-    )
-  );
+  height: var(--oct-title-rail-h);
+  pointer-events: none;
 }
 
 .window-no-drag,
@@ -254,17 +265,7 @@ html[data-octant-native-host="true"]
   app-region: no-drag;
 }
 
-/* Pane headers already own their empty draggable space. A sibling native
-   drag overlay crossed their close controls when the workspace material
-   established a stacking context: accessibility activation worked, but
-   pointer clicks dragged the window. Keep that overlay on the sidebar. */
-html[data-octant-native-host="true"]
-  .shell-frame:has(.workspace-pane__header)
-  .shell-frame__native-drag-strip {
-  right: calc(100% - var(--octant-rail-offset, 0px) - var(--octant-rendered-sidebar-width));
-}
-
-/* The chrome shares the visual title row with the top drag strip, the pane
+/* The chrome shares the visual title row with the band drag layer, the pane
    header, and whatever the workspace column paints under it; its controls
    explicitly opt out of dragging and the unused rail stays draggable
    underneath. The chrome must outrank every one of them outright — while it
@@ -294,22 +295,25 @@ html[data-octant-native-host="true"]
 }
 
 .shell.shell-frame.shell--sidebar-collapsed {
-  --octant-rendered-sidebar-width: 0px;
-  grid-template-columns: minmax(0, 1fr);
+  --octant-sidebar-target-width: 0px;
 }
 
-.shell--sidebar-collapsed.shell-frame > .window-chrome,
-.shell--sidebar-collapsed.shell-frame > .workspace-layer {
-  grid-column: 1;
+/* The chrome spans both columns while the sidebar is shut so its leading
+   cluster stays where it is as the stage slides; the stage keeps column 2,
+   whose start is the sidebar's shrinking width. */
+.shell--sidebar-collapsed.shell-frame > .window-chrome {
+  grid-column: 1 / -1;
 }
 
 /* A collapsed sidebar can stay as an icon rail. It keeps the sidebar's
    column and material, and the chrome and workspace return to the second
-   column. The rail is one icon wide and exactly as wide as the title band is
-   tall, so the frame reads as one even L. */
+   column. The rail is one icon wide, `--oct-rail-w`. */
 .shell.shell-frame.shell--sidebar-rail {
-  --octant-rendered-sidebar-width: var(--oct-title-rail-h);
-  grid-template-columns: var(--octant-rendered-sidebar-width) minmax(0, 1fr);
+  --octant-sidebar-target-width: var(--oct-rail-w);
+}
+
+.shell--sidebar-rail.shell-frame > .sidebar-rail {
+  width: var(--oct-rail-w);
 }
 
 /* In the desktop app the traffic lights sit in the title band across the
@@ -329,16 +333,12 @@ html[data-octant-native-host="true"]
 
 /* The rail beside the open sidebar takes a column of its own in front of it.
    `--octant-rail-offset` moves everything placed at the sidebar's trailing
-   edge (the resize handle, the native drag strip, the glass/ground split)
+   edge (the resize handle, the band drag layer, the glass/ground split)
    right by the rail's width; the sidebar column keeps its own width rules,
-   including the Projects pane and the wide-context clamp. The rail is as wide
-   as the title band is tall: a rail wider or narrower than the band made the
-   frame's two arms visibly differ. */
+   including the Projects pane and the wide-context clamp. */
 .shell.shell-frame.shell--rail-beside {
-  --octant-rail-offset: var(--oct-title-rail-h);
-  grid-template-columns:
-    var(--octant-rail-offset) var(--octant-rendered-sidebar-width)
-    minmax(0, 1fr);
+  --octant-rail-offset: var(--oct-rail-w);
+  --octant-rail-bound: var(--oct-rail-w);
 }
 
 /* Beside the open sidebar the rail stays one narrow icon column in the desktop
@@ -352,13 +352,18 @@ html[data-octant-native-host="true"]
   );
 }
 
+.shell--rail-beside.shell-frame > .sidebar-rail {
+  width: var(--oct-rail-w);
+}
+
 .shell--rail-beside.shell-frame > .sidebar {
-  grid-column: 2;
+  grid-column: 1;
+  margin-left: var(--octant-rail-offset);
 }
 
 .shell--rail-beside.shell-frame > .window-chrome,
 .shell--rail-beside.shell-frame > .workspace-layer {
-  grid-column: 3;
+  grid-column: 2;
 }
 
 /* The traffic lights sit over the rail, so the sidebar beside it does not
@@ -397,7 +402,7 @@ html[data-octant-native-host="true"]
    column scrolled as a whole, so in a short window the foot was out of reach
    and the last destination was cut through its icon by the window's bottom
    edge. Now the list ends in a short fade rather than a half icon, and the
-   foot is always on screen. The rail is as wide as the title band around 32px
+   foot is always on screen. The rail is only a little wider than its 32px
    faces: a classic scrollbar took 10px of that once the list overflowed and
    clipped every face, so it scrolls without drawing one. */
 .sidebar-rail__scroll {
@@ -411,7 +416,7 @@ html[data-octant-native-host="true"]
   /* The first face centres on the title rail's centreline, as the band's
      controls do, so it starts (rail − face) / 2 down, and the edge fade ends
      there instead of dimming the face. */
-  --sidebar-rail-top: calc((var(--oct-title-rail-h) - 32px) / 2);
+  --sidebar-rail-top: calc((var(--oct-title-rail-h) - 36px) / 2);
   padding: var(--sidebar-rail-top) 0 var(--oct-space-3);
   overflow-x: hidden;
   overflow-y: auto;
@@ -457,8 +462,8 @@ html[data-octant-native-host="true"]
   --sidebar-rail-fill: transparent;
   position: relative;
   display: flex;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   align-items: center;
   justify-content: center;
   border-radius: var(--oct-radius-sm);
@@ -475,12 +480,16 @@ html[data-octant-native-host="true"]
 
 .sidebar-rail__button:hover .sidebar-rail__face,
 .sidebar-rail__button:focus-visible .sidebar-rail__face {
-  --sidebar-rail-fill: color-mix(in oklab, var(--oct-fg) 7%, transparent);
+  --sidebar-rail-fill: var(--oct-wash-hover);
   color: var(--oct-fg);
 }
 
+.sidebar-rail__button:active .sidebar-rail__face {
+  --sidebar-rail-fill: var(--oct-wash-pressed);
+}
+
 .sidebar-rail__button[aria-current="page"] .sidebar-rail__face {
-  --sidebar-rail-fill: color-mix(in oklab, var(--oct-fg) 12%, transparent);
+  --sidebar-rail-fill: var(--oct-wash-selected);
   color: var(--oct-fg);
 }
 
@@ -502,13 +511,55 @@ html[data-octant-native-host="true"]
   text-align: center;
 }
 
+/* The person's face at the foot of the icon rail, ringed with what is left of
+   their tightest plan window in the meta ink. A window near or at its limit
+   takes the danger ink so a spent week reads at a glance. */
+.rail-account__face {
+  border-radius: var(--oct-radius-pill);
+}
+
+.rail-account__face > .rail-account__ring {
+  position: absolute;
+  inset: 1px;
+  width: 34px;
+  height: 34px;
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+
+.rail-account__track,
+.rail-account__arc {
+  fill: none;
+  stroke-width: 1.5;
+}
+
+.rail-account__track {
+  stroke: color-mix(in oklab, var(--oct-fg) 12%, transparent);
+}
+
+.rail-account__arc {
+  stroke: color-mix(in oklab, var(--oct-fg) 50%, transparent);
+  stroke-linecap: round;
+}
+
+.rail-account__arc:is([data-level="near"], [data-level="spent"]),
+.rail-account__left:is([data-level="near"], [data-level="spent"]) {
+  stroke: var(--oct-danger);
+  color: var(--oct-danger);
+}
+
+.rail-account__left {
+  color: var(--oct-meta);
+  font-variant-numeric: tabular-nums;
+}
+
 /* A Project letter is drawn at icon size, as an outline in the icons' muted
    ink. Filled 28px tiles in full ink were the loudest thing in the rail, five
    bright blocks that outweighed the places above them. */
 .sidebar-rail__project {
   display: flex;
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   box-sizing: border-box;
   align-items: center;
   justify-content: center;
@@ -554,7 +605,7 @@ html[data-octant-native-host="true"]
 
 .window-chrome__leading--browser {
   position: relative;
-  z-index: 8;
+  z-index: 7;
   /* The band's end inset (8px) at both ends: the trailing controls keep 8px
      from the right edge, so the leading ones keep 8px from the left. */
   padding: 2px 4px 2px var(--oct-space-2);
@@ -621,6 +672,22 @@ html[data-octant-native-host="true"]
   pointer-events: auto;
 }
 
+/* The focused pane's tool buttons, drawn into the bar's end by the pane. The
+   row's own end margin belongs to a pane header, where nothing follows it. */
+.window-chrome__pane-tools {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.window-chrome__pane-tools:empty {
+  display: none;
+}
+
+.window-chrome__pane-tools > .workspace-pane__tools {
+  margin-right: 0;
+}
+
 .window-chrome__open-in-action {
   position: relative;
   display: inline-flex;
@@ -674,6 +741,9 @@ html[data-octant-native-host="true"]
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
 }
+.open-in-menu__trigger:active {
+  background: var(--oct-wash-pressed);
+}
 
 .window-chrome__zen-recovery {
   pointer-events: auto;
@@ -706,6 +776,58 @@ html[data-octant-native-host="true"]
   background: var(--oct-fg-soft);
 }
 
+.window-chrome__new-thread:active {
+  background: var(--oct-wash-pressed);
+}
+
+/* The checkout's diff size, always shown on a Code thread and the Code start
+   screen. It is the first control of the trailing cluster, so a longer number
+   grows leftward; the floor keeps the common "+12 −3", "+0 −0" and the dash
+   that holds the place before a first reading from nudging the title while the
+   counts arrive or tick. */
+.window-chrome__changes {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 56px;
+  height: var(--oct-rail-button-h);
+  padding: 0 var(--oct-space-2);
+  align-items: center;
+  justify-content: center;
+  gap: var(--oct-space-1);
+  border: 1px solid transparent;
+  border-radius: var(--oct-radius-sm);
+  background: transparent;
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.window-chrome__changes:hover,
+.window-chrome__changes:focus-visible {
+  background: var(--oct-fg-soft);
+}
+
+.window-chrome__changes:active {
+  background: var(--oct-wash-pressed);
+}
+
+.window-chrome__changes-added {
+  color: var(--oct-success-fg);
+}
+
+.window-chrome__changes-removed {
+  color: var(--oct-danger-fg);
+}
+
+/* A zero count, a reading that may be out of date and the dash before any
+   reading are meta ink: colour says "this changed", and only a current,
+   non-zero count may say it. */
+.window-chrome__changes :is([data-zero="true"], .window-chrome__changes-none),
+.window-chrome__changes[data-updating="true"] span {
+  color: var(--oct-meta);
+}
+
 .window-chrome__button:hover {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
@@ -724,7 +846,6 @@ html[data-octant-native-host="true"]
   color: var(--oct-fg);
   background: var(--octant-control);
   border-color: transparent;
-  box-shadow: var(--octant-shadow-control-pressed);
 }
 
 .window-chrome__button[aria-expanded="true"]:hover,
@@ -738,7 +859,6 @@ html[data-octant-native-host="true"]
 .window-chrome__button[aria-pressed="true"]:active,
 .window-chrome__button[data-dock-tools-shown="true"]:active {
   background: var(--octant-control-pressed);
-  box-shadow: var(--octant-shadow-control-pressed);
 }
 
 .window-chrome__button[aria-disabled="true"] {
@@ -780,16 +900,13 @@ html[data-octant-native-host="true"]
 
 .window-chrome__disclosure {
   position: absolute;
-  z-index: 10;
-  top: calc(100% + 7px);
+  z-index: var(--oct-z-popup);
+  top: calc(100% + var(--oct-space-1));
   right: 0;
   display: grid;
   width: 180px;
-  padding: var(--oct-space-1);
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--oct-elev-raised);
+  padding: var(--oct-menu-inset);
+  /* Fill, radius and shadow are the shared float's, from components.css. */
 }
 
 .window-chrome__disclosure-action {
@@ -806,6 +923,10 @@ html[data-octant-native-host="true"]
 .window-chrome__disclosure-action:focus-visible {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
+}
+
+.window-chrome__disclosure-action:active {
+  background: var(--oct-wash-pressed);
 }
 
 /* The container recipe (flex column, min-width, border, base surface) comes
@@ -863,13 +984,6 @@ html[data-octant-native-host="true"]
   min-height: var(--oct-rail-button-h);
   flex: 0 0 auto;
   margin-left: 2px;
-}
-
-.sidebar__native-leading .sidebar__drag-surface {
-  display: block;
-  align-self: stretch;
-  flex: 1 1 auto;
-  min-width: 12px;
 }
 
 .sidebar__primary {
@@ -1002,6 +1116,15 @@ html[data-octant-native-host="true"]
   min-width: 0;
 }
 
+/* In the desktop window the row holds the mode tray, Search and New task with
+   room to spare, so its first and last glyphs stand on the rows' icon column
+   and right edge: a 16px glyph sits 6px inside its button, and seen in the
+   real window both stood that 6px outside the grid. The browser client's row
+   is full (the tray and five buttons take all 264px), and there it stays. */
+html[data-octant-native-host="true"] .sidebar__chrome {
+  padding-inline: calc(var(--oct-nav-inset) - (var(--oct-rail-button-h) - var(--oct-icon-md)) / 2);
+}
+
 /* The header names the app on the same 12px inset every row icon keeps, so
    "Octant" heads the icon column. The system trigger keeps its compact 4px
    padding for the narrowest sidebar; this row has the room. */
@@ -1074,6 +1197,11 @@ html[data-octant-native-host="true"]
 /* Navigation rows must not shrink when the Project tree below them grows. */
 .sidebar-navigation > .sidebar-item {
   flex: 0 0 auto;
+  /* The button recipe keeps a 1px transparent border, which measured as the
+     icon at x 73 and the shortcut ending at 311 while every other row's icon
+     starts at 72 and its trailing mark ends at 312. The border takes its pixel
+     out of the inset so the glyph column and the right edge are the rows'. */
+  padding-inline: calc(var(--oct-nav-inset) - 1px);
 }
 
 /* ── Sidebar count tiles and thread filter ────────────────────────────────
@@ -1152,16 +1280,13 @@ html[data-octant-native-host="true"]
 .sidebar-rail__button[data-tile="inbox"] {
   --sidebar-tile-hue: var(--oct-colour-inbox, var(--octant-palette-blue, currentColor));
 }
-.sidebar-tile[data-tile="running"],
-.sidebar-rail__button[data-tile="running"] {
+.sidebar-tile[data-tile="running"] {
   --sidebar-tile-hue: var(--oct-colour-running, var(--octant-palette-orange, currentColor));
 }
-.sidebar-tile[data-tile="review"],
-.sidebar-rail__button[data-tile="review"] {
+.sidebar-tile[data-tile="review"] {
   --sidebar-tile-hue: var(--oct-colour-review, var(--octant-palette-purple, currentColor));
 }
-.sidebar-tile[data-tile="done"],
-.sidebar-rail__button[data-tile="done"] {
+.sidebar-tile[data-tile="done"] {
   --sidebar-tile-hue: var(--oct-colour-done, var(--octant-palette-green, currentColor));
 }
 
@@ -1177,12 +1302,7 @@ html[data-octant-native-host="true"]
 
 :root[data-octant-style="colour"][data-octant-theme-mode="light"] .sidebar-tile__face {
   border-color: color-mix(in oklab, var(--sidebar-tile-hue) 70%, transparent);
-  background: linear-gradient(
-    155deg,
-    color-mix(in oklab, var(--sidebar-tile-hue) 72%, var(--octant-primary-foreground)) 0%,
-    var(--sidebar-tile-hue) 78%
-  );
-  box-shadow: 0 6px 16px color-mix(in oklab, var(--sidebar-tile-hue) 24%, transparent);
+  background: var(--sidebar-tile-hue);
   color: var(--octant-primary-foreground);
 }
 
@@ -1244,6 +1364,7 @@ html[data-octant-native-host="true"]
   flex: 1 1 auto;
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
 }
 
 :root[data-octant-style][data-octant-theme-mode] .sidebar-tiles--rows .sidebar-tile__count {
@@ -1293,6 +1414,11 @@ html[data-octant-native-host="true"]
   align-items: center;
   gap: var(--oct-space-1);
   min-width: 0;
+  /* The last 28px button's 16px glyph ends on the navigation inset, the edge
+     every row's trailing mark ends on: the button reaches (28 - 16) / 2 past it. */
+  padding-inline-end: calc(
+    var(--oct-nav-inset) - (var(--oct-rail-button-h) - var(--oct-icon-md)) / 2
+  );
 }
 
 .project-nav__toolbar > :first-child:not(.project-nav__list-switch) {
@@ -1307,9 +1433,29 @@ html[data-octant-native-host="true"]
 
 /* Square glyph buttons. The recipe's text padding made each 32px wide, and
    at a narrow sidebar width the row no longer fit beside the views. */
-.project-nav__list-switch > button {
-  aspect-ratio: 1;
-  padding-inline: 0;
+.project-nav__list-switch {
+  display: inline-flex;
+  gap: var(--oct-space-1);
+  padding: 0;
+}
+
+/* Every control in the toolbar row is a 28px hit area on the 4px grid, with
+   4px between neighbours, so the filter and the view switches read as one set. */
+.project-nav__toolbar button {
+  min-height: 28px;
+}
+
+/* The row's glyph buttons rest in the secondary ink, never the muted meta ink
+   (a glyph is not a caption: at 4.1:1 on the sidebar they all but vanished),
+   and the chosen view takes the primary ink and its fill. The switch is a
+   standing choice, not a popover: it stays while a view is saved so the way
+   back to the others is never what went missing. */
+.project-nav__toolbar button:not([data-pressed], [aria-pressed="true"]) {
+  color: var(--oct-fg-2);
+}
+
+.project-nav__toolbar button:not([data-pressed], [aria-pressed="true"]):hover {
+  color: var(--oct-fg);
 }
 
 .sidebar-navigation__threads {
@@ -1337,11 +1483,19 @@ html[data-octant-native-host="true"]
      "Inbox" and "Board" start. Measured before this, the sidebar had seven
      left edges: titles at 42px, destinations at 45px, feed rows at 14px. */
   gap: var(--oct-space-2);
-  /* Visible properties add lines; the button recipe's fixed height would
-     let those lines overlap the next thread instead of growing this row. */
+  /* The lines of a row and its padding sit on the 4px grid: a two-line row is
+     48px (16 for the top line, 20 for the title, 6 above and below), a
+     three-line row 64. Compact takes two pixels off each of those lines, so
+     44 and 60. The text block is centred in the row. The button recipe's fixed
+     height would let a third line overlap the next thread instead of growing
+     this row. */
+  --thread-line-context: 16px;
+  --thread-line-title: 20px;
   height: auto;
   min-height: var(--oct-nav-row-h);
-  padding-block: 4px;
+  /* 6px: one grid step and half of another, so the text block of a 48px row
+     (44 compact) is centred with the same room above and below. */
+  padding-block: calc(var(--oct-space-1) * 1.5);
   padding-inline: var(--oct-nav-inset);
   color: var(--oct-muted);
   background: transparent;
@@ -1353,33 +1507,90 @@ html[data-octant-native-host="true"]
   text-align: left;
 }
 
-/* A row that carries a facts line is two lines of type, and at the one-line
-   row's 4px it sat 46px tall with the title and the facts pressed against the
-   fill's edges. It takes the room a two-line row needs. */
-.sidebar-navigation__thread:has(.sidebar-navigation__thread-facts) {
-  padding-block: var(--oct-space-2);
+/* A row's trailing end is built once and never changes on hover, focus or an
+   open menu: [title] [age or actions, 50px] [provider mark]. The slot is the
+   width of the two actions, so the age right-aligns inside it, the actions
+   fade in over it, and neither the title's truncation nor the mark moves. A
+   row whose age stands on its top line, or that carries a state, keeps the
+   same room on the title line empty. */
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
+  .sidebar-navigation__thread-when {
+  inline-size: 50px;
 }
 
-/* Hover-only actions take no width until their row is hovered or focused. The
-   room for them used to be reserved at all times, which left 56px of nothing
-   at the end of every row: the age and the status dot floated mid-row and a
-   title had about 70px of a 232px sidebar. The room is made only while the
-   actions show, and the age and status give their place to them, so nothing
-   is seen to slide. */
-.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):hover
-  > .sidebar-navigation__thread,
-.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):focus-within
-  > .sidebar-navigation__thread,
-.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has([aria-expanded="true"])
-  > .sidebar-navigation__thread,
-.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has([data-popup-open])
-  > .sidebar-navigation__thread {
-  padding-inline-end: 56px;
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
+  .sidebar-navigation__thread-main:not(
+    :has(.sidebar-navigation__thread-when, .sidebar-navigation__thread-state)
+  )::after {
+  flex: none;
+  inline-size: 50px;
+  content: "";
+}
+
+/* A two-line row's trailing column is one 50px slot on the row's right edge:
+   the age ends the top line, the provider mark ends the title line, and the
+   actions fade in over both. Measured before, the age ended 28px short of the
+   edge every other row's trailing mark ends on, and the mark stood 58px short
+   of it under the age. A forked row keeps its older room for the fork mark. */
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-lineage)
+  .sidebar-navigation__thread-context {
+  padding-inline-end: 28px;
+}
+
+/* On touch and in a narrow window the row's action is always shown, 40px in
+   from the right, so the top line still stops before it there. */
+@media (pointer: coarse), (max-width: 560px) {
+  .sidebar-navigation__thread-context {
+    padding-inline-end: 28px;
+  }
+}
+
+@media not ((pointer: coarse) or (max-width: 560px)) {
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
+      .sidebar-navigation__thread-context
+    ):not(:has(.sidebar-navigation__thread-lineage))
+    .sidebar-navigation__thread-main:has(> .sidebar-navigation__thread-provider)::after {
+    content: none;
+  }
+
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
+      .sidebar-navigation__thread-context
+    ):not(:has(.sidebar-navigation__thread-lineage))
+    .sidebar-navigation__thread-main
+    > .sidebar-navigation__thread-provider {
+    inline-size: 50px;
+    justify-content: flex-end;
+    margin-inline-start: 0;
+  }
+
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
+      .sidebar-navigation__thread-context
+    ):not(:has(.sidebar-navigation__thread-lineage))
+    .sidebar-navigation__thread-actions {
+    right: var(--oct-nav-inset);
+  }
+
+  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
+      .sidebar-navigation__thread-context
+    ):not(:has(.sidebar-navigation__thread-lineage)):is(
+      :hover,
+      :focus-within,
+      :has([aria-expanded="true"]),
+      :has([data-popup-open])
+    )
+    .sidebar-navigation__thread-main
+    > .sidebar-navigation__thread-provider {
+    opacity: 0;
+  }
 }
 
 .sidebar-navigation__thread:hover {
   color: var(--oct-fg);
-  background: var(--oct-fg-soft);
+  background: var(--oct-wash-hover);
+}
+
+.sidebar-navigation__thread:active {
+  background: var(--oct-wash-pressed);
 }
 
 /* The open thread reads louder than a hovered one: the pointer gets the soft
@@ -1393,8 +1604,14 @@ html[data-octant-native-host="true"]
    a green slab, louder than anything else in the list. */
 .sidebar-navigation__thread[aria-current="page"] {
   color: var(--oct-fg);
-  background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
-  box-shadow: var(--octant-shadow-selected);
+  background: var(--oct-wash-selected);
+}
+
+/* A press shows on the open row too. Its selected fill has the weight of the
+   plain row's pressed step and comes later, so without this the one row a
+   person is most likely to press was the only one that gave no answer. */
+.sidebar-navigation__thread[aria-current="page"]:active {
+  background: var(--oct-wash-pressed);
 }
 
 /* A window can show several threads at once, and exactly one marked row
@@ -1419,26 +1636,43 @@ html[data-octant-native-host="true"]
   background: var(--oct-fg);
 }
 
+html[data-octant-density="compact"] .sidebar-navigation__thread {
+  --thread-line-context: 14px;
+  --thread-line-title: 18px;
+}
+
+/* Compact: the mark steps down to the top line's 14px so the row stays 44px. */
+html[data-octant-density="compact"]
+  .sidebar-navigation__thread-context
+  :is(.project-mark, .project-icon) {
+  width: 14px;
+  height: 14px;
+  /* The 14px mark keeps the 16px icon column, so the name still starts at 96. */
+  margin-inline-end: 2px;
+}
+
 .sidebar-navigation__thread-copy {
   display: flex;
   min-width: 0;
   flex: 1 1 auto;
   flex-direction: column;
   align-items: stretch;
-  gap: 1px;
 }
 
-/* The facts under a title: Project, pull request, branch, then the age at the
-   end. Names give way before numbers do, so a long Project or branch
-   truncates while the pull request number and the age stay whole. */
-.sidebar-navigation__thread-facts {
+/* The top line says where the thread lives and how it stands: the Project's
+   mark and name in the secondary ink, the branch in the mono face and the muted
+   ink, and at the end the state in words or the time. It is small and quiet so
+   the title beneath is the strongest text in the row. Names give way before
+   the state does: a long Project or branch truncates, the state stays whole. */
+.sidebar-navigation__thread-context,
+.sidebar-navigation__thread-detail {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: var(--oct-space-1);
+  gap: var(--oct-space-2);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  line-height: var(--oct-line-meta);
+  line-height: var(--thread-line-context);
 }
 
 .sidebar-navigation__thread-project,
@@ -1448,23 +1682,29 @@ html[data-octant-native-host="true"]
   flex: 0 1 auto;
   align-items: center;
   gap: var(--oct-space-1);
-  color: var(--oct-meta);
+  color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
-  line-height: var(--oct-line-meta);
+  line-height: var(--thread-line-context);
+}
+
+.sidebar-navigation__thread-checkout {
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+}
+
+/* The Project's name starts on the label column every row's text starts on
+   (16px mark, 8px gap), not 4px after the mark as it measured before. */
+.sidebar-navigation__thread-project {
+  gap: var(--oct-space-2);
 }
 
 .sidebar-navigation__thread-project > svg,
 .sidebar-navigation__thread-checkout > svg {
   flex: none;
+  color: var(--oct-muted);
 }
 
-.sidebar-navigation__thread-project-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
+.sidebar-navigation__thread-project-label,
 .sidebar-navigation__thread-checkout-label {
   min-width: 0;
   overflow: hidden;
@@ -1472,35 +1712,98 @@ html[data-octant-native-host="true"]
   white-space: nowrap;
 }
 
-/* One fixed trailing slot keeps state changes from shifting the title or age. */
-.sidebar-navigation__thread-status {
+/* A Project with no icon of its own gets two letters on a small rounded square
+   whose hue comes from the Project, so it is the same colour on every row. It
+   is the one colour a row spends besides its state. */
+.project-mark {
+  --project-mark-hue: 250;
+  --project-mark-fill: oklch(0.42 0.07 var(--project-mark-hue));
+  --project-mark-ink: oklch(0.93 0.03 var(--project-mark-hue));
   display: inline-flex;
+  width: 16px;
+  height: 16px;
   flex: none;
-  width: 12px;
-  height: 12px;
   align-items: center;
   justify-content: center;
-  color: var(--octant-text-secondary);
+  border-radius: 4px;
+  background: var(--project-mark-fill);
+  color: var(--project-mark-ink);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: 0;
+  line-height: 1;
 }
 
-.sidebar-navigation__thread-status[data-activity="idle"] {
-  opacity: 0;
+/* Two capitals inside a 16px square need about 10px of type, which the scale
+   has no step for; the letters are drawn at the scale's 12px and drawn smaller. */
+.project-mark__letters {
+  display: block;
+  scale: 0.84;
 }
 
-.sidebar-navigation__thread-status[data-activity="unread"]::before {
+:root[data-octant-theme-mode="light"] .project-mark {
+  --project-mark-fill: oklch(0.92 0.045 var(--project-mark-hue));
+  --project-mark-ink: oklch(0.38 0.1 var(--project-mark-hue));
+}
+
+.project-mark[data-neutral="true"] {
+  background: var(--oct-fg-soft);
+  color: var(--oct-meta);
+}
+
+/* The title line: the thread's name, one line, the strongest text in the row.
+   With no top line the time or state stands at its end. */
+.sidebar-navigation__thread-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+/* The state in words with its icon: the only place a row spends colour besides
+   the Project's mark. The word and the icon carry the state, so the colour is
+   never the only signal. */
+.sidebar-navigation__thread-state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin-inline-start: auto;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  line-height: var(--thread-line-context);
+  white-space: nowrap;
+}
+
+.sidebar-navigation__thread-state[data-activity="working"] {
+  color: var(--octant-accent-text);
+}
+
+.sidebar-navigation__thread-state[data-activity="attention"] {
+  color: var(--oct-warn-fg);
+}
+
+.sidebar-navigation__thread-state[data-activity="working"] > svg {
+  animation: octant-thread-spin var(--oct-motion-spin) linear infinite;
+}
+
+.sidebar-navigation__thread-when {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin-inline-start: auto;
+}
+
+/* New activity is a small dot beside the time, in the ink, with its own name. */
+.sidebar-navigation__thread-unread-dot {
   width: 6px;
   height: 6px;
+  flex: none;
   border-radius: var(--oct-radius-pill);
-  background: currentColor;
-  content: "";
-}
-
-.sidebar-navigation__thread-status[data-activity="attention"] {
-  color: var(--octant-text-primary);
-}
-
-.sidebar-navigation__thread-status[data-activity="working"] > svg {
-  animation: octant-thread-spin var(--oct-motion-spin) linear infinite;
+  background: var(--oct-fg-2);
 }
 
 @keyframes octant-thread-spin {
@@ -1510,31 +1813,35 @@ html[data-octant-native-host="true"]
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-navigation__thread-status[data-activity="working"] > svg {
+  .sidebar-navigation__thread-state[data-activity="working"] > svg {
     animation: none;
   }
 }
 
-/* Provider identity sits immediately before the title, like a compact file
-   type mark. It is stable across the row and does not consume a trailing
-   action slot or change the title's indentation when the row is hovered. */
+/* Provider identity sits small at the end of the row's last line. It is stable
+   across rows and does not consume a trailing action slot. */
 .sidebar-navigation__thread-provider {
   display: inline-flex;
   flex: none;
   align-items: center;
   justify-content: center;
-  /* As wide as a destination's icon, so the title beside it starts in the
-     same text column; the 14px glyph sits centred inside. */
-  width: var(--oct-icon-md);
-  height: 14px;
+  margin-inline-start: auto;
   opacity: 0.78;
 }
 
-/* A name in navigation (`oct-nav-name`); this rule only truncates it. */
+.sidebar-navigation__thread-main > .sidebar-navigation__thread-provider {
+  margin-inline-start: var(--oct-space-1);
+}
+
+/* A name in navigation (`oct-nav-name`); this rule makes it the row's
+   strongest text and truncates it. */
 .sidebar-navigation__thread-title {
   min-width: 0;
-  /* Whole-pixel lines, so a two-line row is a whole number of pixels tall. */
-  line-height: var(--oct-line-label);
+  flex: 1 1 auto;
+  /* Whole-pixel lines, so a row is a whole number of pixels tall. */
+  line-height: var(--thread-line-title);
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1637,8 +1944,8 @@ html[data-octant-native-host="true"]
 }
 
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-lineage)
-  .sidebar-navigation__thread-status {
-  margin-inline-start: var(--oct-space-5);
+  .sidebar-navigation__thread-main {
+  padding-inline-end: var(--oct-space-5);
 }
 
 /* A view that hides the status leaves no slot to stand beside, so the room is
@@ -1659,17 +1966,12 @@ html[data-octant-native-host="true"]
    sitting under them, and the row makes that much more room. */
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
     .sidebar-navigation__thread-lineage
-  ):is(:hover, :focus-within, :has([aria-expanded="true"]), :has([data-popup-open]))
+  )
   > .sidebar-navigation__thread {
   padding-inline-end: 80px;
 }
 
-.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):is(
-    :hover,
-    :focus-within,
-    :has([aria-expanded="true"]),
-    :has([data-popup-open])
-  )
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
   .sidebar-navigation__thread-lineage {
   right: 58px;
 }
@@ -1699,7 +2001,7 @@ html[data-octant-native-host="true"]
 
 .thread-lineage__entry {
   width: 100%;
-  min-height: 26px;
+  min-height: 28px;
   padding-inline: var(--oct-space-2);
   text-align: left;
 }
@@ -1716,14 +2018,13 @@ html[data-octant-native-host="true"]
 .sidebar-navigation__thread-actions {
   position: absolute;
   top: 50%;
-  right: 4px;
+  right: 40px;
   display: inline-flex;
   align-items: center;
   gap: 2px;
   transform: translateY(-50%);
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--oct-motion-fast) ease;
 }
 
 .sidebar-navigation__thread-row:hover .sidebar-navigation__thread-actions,
@@ -1739,26 +2040,26 @@ html[data-octant-native-host="true"]
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):hover
   :is(
     .sidebar-navigation__thread-meta,
-    .sidebar-navigation__thread-age,
-    .sidebar-navigation__thread-status
+    .sidebar-navigation__thread-when,
+    .sidebar-navigation__thread-state
   ),
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):focus-within
   :is(
     .sidebar-navigation__thread-meta,
-    .sidebar-navigation__thread-age,
-    .sidebar-navigation__thread-status
+    .sidebar-navigation__thread-when,
+    .sidebar-navigation__thread-state
   ),
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has([aria-expanded="true"])
   :is(
     .sidebar-navigation__thread-meta,
-    .sidebar-navigation__thread-age,
-    .sidebar-navigation__thread-status
+    .sidebar-navigation__thread-when,
+    .sidebar-navigation__thread-state
   ),
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has([data-popup-open])
   :is(
     .sidebar-navigation__thread-meta,
-    .sidebar-navigation__thread-age,
-    .sidebar-navigation__thread-status
+    .sidebar-navigation__thread-when,
+    .sidebar-navigation__thread-state
   ) {
   opacity: 0;
 }
@@ -1777,6 +2078,10 @@ html[data-octant-native-host="true"]
 .sidebar-navigation__thread-action:focus-visible {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
+}
+
+.sidebar-navigation__thread-action:active {
+  background: var(--oct-wash-pressed);
 }
 
 /* The overflow action is reserved for coarse/narrow pointers where inline
@@ -1854,10 +2159,7 @@ html[data-octant-native-host="true"]
   }
 
   .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
-    :is(
-      .sidebar-navigation__thread-age,
-      .sidebar-navigation__thread-status:not([data-activity="idle"])
-    ) {
+    :is(.sidebar-navigation__thread-when, .sidebar-navigation__thread-state) {
     opacity: 1;
   }
 
@@ -1867,12 +2169,6 @@ html[data-octant-native-host="true"]
 
   .sidebar-navigation__thread-action--overflow {
     display: inline-flex;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sidebar-navigation__thread-actions {
-    transition: none;
   }
 }
 
@@ -2038,19 +2334,15 @@ html[data-octant-native-host="true"]
    message arr..." once checked). The positioner's available width keeps a
    submenu on screen when neither side of its parent has room. */
 .thread-row-context-menu {
-  display: grid;
   width: max-content;
   min-width: min(224px, calc(100vw - 24px));
   max-width: min(320px, var(--available-width, 100vw), calc(100vw - 24px));
-  gap: 0;
-  padding: var(--oct-space-1);
-  overflow: hidden;
-  border-radius: var(--oct-radius-md);
 }
 
-/* Its rows and separators are the shared menu recipe: 28px rows and the Menu
-   option type. The icon stands in the same 16px column every menu uses; only
-   its ink is this menu's own. */
+/* Its popup, rows and separators are the shared menu recipe: padding, radius,
+   scroll at the window's edge, 28px rows and the Menu option type. The icon
+   stands in the same 16px column every menu uses; only its ink is this menu's
+   own (a destructive row's svg takes the danger ink over it). */
 .thread-row-context-menu__icon {
   display: inline-flex;
   width: var(--oct-icon-md);
@@ -2111,17 +2403,52 @@ html[data-octant-native-host="true"]
   background: transparent;
 }
 
-/* The frame and its panes. The title band and the sidebar are the frame: the
-   window's ground, painted once, with the sidebar's rows sitting on it. The
-   thread stage, each tool tile in the dock, and the bottom panel are square
-   panes (level 1 of the material) that share their edges: no gap, no corner,
-   and one 1px line between two neighbours, drawn by whichever pane lies below
-   or to the right of the edge. The first row of panes starts under the title
-   band with that line along its top, and the panes reach the window's right
-   and bottom edges. Each pane paints below the title band from a
-   pseudo-element or its own box, so headers and dock tabs keep sitting in the
-   band. The ground lies over the stage's paint and under everything else. A
-   narrow window keeps its overlay drawer. */
+/* The frame and its panes. The rail, the title band and the sidebar's rows sit
+   on the window's ground, painted once. Under the band, the sidebar and the
+   stage sit in one framed panel (see "One framed panel" below). The thread
+   stage, each tool tile in the dock, and the bottom panel are flat panes
+   (level 1 of the material) that share their edges with no gap and one 1px
+   line between two neighbours, drawn by whichever pane lies below or to the
+   right of the edge. The panes start under the title band, and the stage
+   clips to the panel's inside, so the first row's top line and the last
+   column's right edge are the panel's outline and nothing is drawn twice. Each
+   pane paints below the title band from a pseudo-element or its own box, so
+   headers and dock tabs keep sitting in the band. The ground lies over the
+   stage's paint and under everything else. A narrow window keeps its overlay
+   drawer and has no panel. */
+/* Registered so the stage's left edge and corners interpolate as the sidebar
+   slides; an unregistered custom property flips at the first frame and opens a
+   notch at the corner. */
+@property --octant-stage-clip-left {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --octant-stage-corner-left {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --octant-stage-gap-left {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --octant-rendered-sidebar-width {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --octant-rail-offset {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
 @media (min-width: 681px) {
   /* The sheet's stage piece sits at a negative level so the ground can lie
      over it; the shell has to hold that level itself; without a ground the
@@ -2130,9 +2457,16 @@ html[data-octant-native-host="true"]
      takes. It is a tenth of the ink, not the theme's border: on a near-black
      preset the border is a shade off the page and the panes ran together,
      and under Window glass it is lost on the tint. A share of the ink shows
-     on any fill, in dark, in light and on glass. */
+     on any fill, in dark, in light and on glass (7%, a faint line). It is mixed into the pane's
+     opaque colour instead of left translucent: over the sidebar's material,
+     the stage's fill and the ground a translucent line read three different
+     strengths, and an edge drawn twice read as double. */
   .shell.shell-frame {
-    --octant-pane-line: color-mix(in srgb, var(--octant-text-primary) 10%, transparent);
+    --octant-pane-line: color-mix(
+      in oklab,
+      var(--octant-text-primary) calc(7% * var(--oct-contrast-scale, 1)),
+      var(--octant-panel-opaque)
+    );
     isolation: isolate;
   }
 
@@ -2140,16 +2474,212 @@ html[data-octant-native-host="true"]
     --octant-pane-line: var(--octant-border-strong);
   }
 
-  /* The sidebar sits on the ground with no panel of its own. */
+  /* One framed panel. The rail and the title band sit on the window's ground
+     with no fill or line of their own. The sidebar and the stage (the thread,
+     its dock and the bottom panel) sit together in one panel under the band:
+     one hairline all the way round, the container radius at every corner, and
+     the same small gap to the window's right and bottom edges. The outline is
+     this frame's pseudo-element, drawn above the content so a pane never
+     covers it; the stage clips to the outline's inside (see the stage rule
+     below), so no pane paints over the rounded corners or doubles the line. */
+  .shell.shell-frame {
+    --octant-panel-gap: var(--oct-space-1);
+    --octant-panel-left: 0px;
+    --octant-stage-clip-left: 0px;
+    --octant-stage-corner-left: 0px;
+    --octant-stage-gap-left: 0px;
+  }
+
+  .shell--rail-beside.shell-frame {
+    --octant-panel-left: var(--octant-rail-offset);
+  }
+
+  /* The sidebar slides like a Mac sidebar, but only while the shell carries
+     data-octant-sidebar-sliding, which it sets when the sidebar opens or shuts
+     and never for a drag of its edge or a window resize, so those stay glued
+     to the pointer. The width the grid, the ground and the stage read glides,
+     and they move together. The stage's corner and clip leave at once when it
+     opens and arrive once the slide has landed when it shuts, so no notch shows
+     at the stage's left edge. The title band's drag layer and traffic-light
+     reserve are placed by measured widths, not by this column. */
+  .shell.shell-frame[data-octant-sidebar-sliding] {
+    transition:
+      --octant-rendered-sidebar-width var(--oct-motion-panel) var(--oct-ease-panel),
+      --octant-rail-offset var(--oct-motion-panel) var(--oct-ease-panel),
+      --octant-stage-gap-left var(--oct-motion-panel) var(--oct-ease-panel),
+      --octant-stage-clip-left var(--oct-motion-fast) var(--oct-ease-standard),
+      --octant-stage-corner-left var(--oct-motion-fast) var(--oct-ease-standard);
+  }
+
+  .shell.shell-frame.shell--sidebar-collapsed[data-octant-sidebar-sliding] {
+    transition:
+      --octant-rendered-sidebar-width var(--oct-motion-panel) var(--oct-ease-panel),
+      --octant-rail-offset var(--oct-motion-panel) var(--oct-ease-panel),
+      --octant-stage-gap-left var(--oct-motion-panel) var(--oct-ease-panel),
+      --octant-stage-clip-left var(--oct-motion-fast) var(--oct-ease-standard)
+        var(--oct-motion-base),
+      --octant-stage-corner-left var(--oct-motion-fast) var(--oct-ease-standard)
+        var(--oct-motion-base);
+  }
+
+  /* The sidebar keeps its full width through the slide and its column clips
+     it, so its contents travel with the edge instead of reflowing squeezed.
+     Closing, the shell holds a still copy of the sidebar (the ghost) because
+     the live one is gone the moment the state flips. */
+  .shell[data-octant-sidebar-sliding] > .sidebar:not([data-octant-sidebar-ghost]) {
+    --octant-slide-shift: min(
+      0px,
+      calc(var(--octant-rendered-sidebar-width) - var(--octant-sidebar-target-width))
+    );
+    justify-self: start;
+    width: var(--octant-sidebar-target-width);
+    clip-path: inset(
+      0 0 0
+        max(
+          0px,
+          calc(
+            var(--octant-rail-bound, 0px) - var(--octant-rail-offset, 0px) -
+              var(--octant-slide-shift)
+          )
+        )
+    );
+    pointer-events: none;
+    transform: translateX(var(--octant-slide-shift));
+  }
+
+  .shell > .sidebar[data-octant-sidebar-ghost] {
+    --octant-slide-shift: min(
+      0px,
+      calc(
+        var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width) - var(--ghost-left) -
+          var(--ghost-width)
+      )
+    );
+    grid-column: 1;
+    justify-self: start;
+    width: var(--ghost-width);
+    margin-left: var(--ghost-left);
+    clip-path: inset(0 0 0 calc(-1 * var(--octant-slide-shift)));
+    pointer-events: none;
+    transform: translateX(var(--octant-slide-shift));
+  }
+
+  html[data-octant-reduced-motion="true"] .shell.shell-frame[data-octant-sidebar-sliding],
+  html[data-octant-reduced-motion="true"]
+    .shell.shell-frame.shell--sidebar-collapsed[data-octant-sidebar-sliding] {
+    transition: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .shell.shell-frame[data-octant-sidebar-sliding],
+    .shell.shell-frame.shell--sidebar-collapsed[data-octant-sidebar-sliding] {
+      transition: none;
+    }
+  }
+
+  /* Without the sidebar the stage is the panel's left side, so it takes the
+     outline's inset and its rounded corners, and keeps the gap from the
+     window's edge (beside the rail, the rail is that gap). */
+  .shell--sidebar-collapsed.shell-frame {
+    --octant-stage-clip-left: 1px;
+    --octant-stage-corner-left: calc(var(--oct-radius-md) - 1px);
+  }
+
+  .shell--sidebar-collapsed.shell-frame:not(.shell--sidebar-rail) {
+    --octant-panel-left: var(--octant-stage-gap-left);
+    --octant-stage-gap-left: var(--octant-panel-gap);
+  }
+
+  .shell--sidebar-rail.shell-frame {
+    --octant-panel-left: var(--octant-rendered-sidebar-width);
+  }
+
+  .shell-frame::after {
+    position: absolute;
+    z-index: 6;
+    top: var(--oct-title-rail-h);
+    right: var(--octant-panel-gap);
+    bottom: var(--octant-panel-gap);
+    left: var(--octant-panel-left);
+    border: 1px solid var(--octant-pane-line);
+    border-radius: var(--oct-radius-md);
+    content: "";
+    pointer-events: none;
+  }
+
+  /* The sidebar sits on the ground with no panel of its own, and ends where
+     the panel does. */
   .shell-frame > .sidebar {
     position: relative;
     isolation: isolate;
+    margin-bottom: var(--octant-panel-gap);
     padding-bottom: var(--oct-space-2);
     border-right: 0;
   }
 
+  /* Inside the panel, under the band's line, the sidebar paints its own fill,
+     rounded to the outline's inner corner on its left side. */
+  .shell-frame:not(.shell--material-translucent) > .sidebar::before {
+    position: absolute;
+    z-index: -1;
+    inset: var(--oct-title-rail-h) 0 0;
+    border-radius: calc(var(--oct-radius-md) - 1px) 0 0 calc(var(--oct-radius-md) - 1px);
+    background: var(--octant-sidebar-fill);
+    content: "";
+    pointer-events: none;
+  }
+
+  /* The stage is the panel's right part. It keeps the gap to the window's
+     edges and clips to the outline's inside: below the band's line, a pixel
+     in from the outline, and with the outline's inner radius (the corner
+     beside the sidebar stays square). Its pane lines run along its top and
+     left edges, so the top one lies under the outline and is clipped away,
+     while the left one is the full-height line between the sidebar and the
+     stage and meets the outline at both ends. */
   .shell-frame > .workspace-layer {
     position: relative;
+    margin: 0 var(--octant-panel-gap) var(--octant-panel-gap) var(--octant-stage-gap-left);
+    /* The layer starts at the window's top, because the pane header lives in the
+       title band above the panel. So the clip cannot start at the band's line:
+       it kept the band out of sight, and with it the header and its breadcrumb.
+       It clips the sides and the foot with the outline's inner radius, and the
+       panel's two top corners are cut by the mask, which keeps the band whole. */
+    --octant-stage-top: calc(var(--oct-title-rail-h) + 1px);
+    --octant-stage-radius: calc(var(--oct-radius-md) - 1px);
+    clip-path: inset(
+      0 1px 1px var(--octant-stage-clip-left) round 0 0 var(--octant-stage-radius)
+        var(--octant-stage-corner-left)
+    );
+    mask-image:
+      linear-gradient(currentColor, currentColor), linear-gradient(currentColor, currentColor),
+      linear-gradient(currentColor, currentColor),
+      radial-gradient(
+        circle at 100% 100%,
+        currentColor max(0px, calc(var(--octant-stage-corner-left) - 0.5px)),
+        transparent var(--octant-stage-corner-left)
+      ),
+      radial-gradient(
+        circle at 0 100%,
+        currentColor calc(var(--octant-stage-radius) - 0.5px),
+        transparent var(--octant-stage-radius)
+      );
+    mask-size:
+      100% var(--octant-stage-top),
+      100% calc(100% - var(--octant-stage-top) - var(--octant-stage-radius)),
+      calc(
+          100% - var(--octant-stage-clip-left) - var(--octant-stage-corner-left) -
+            var(--octant-stage-radius) - 1px
+        )
+        var(--octant-stage-radius),
+      var(--octant-stage-corner-left) var(--octant-stage-corner-left),
+      var(--octant-stage-radius) var(--octant-stage-radius);
+    mask-position:
+      0 0,
+      0 100%,
+      calc(var(--octant-stage-clip-left) + var(--octant-stage-corner-left)) var(--octant-stage-top),
+      var(--octant-stage-clip-left) var(--octant-stage-top),
+      right 1px top var(--octant-stage-top);
+    mask-repeat: no-repeat;
   }
 
   /* The thread's pane. It is a grid item rather than an absolute piece, so it
@@ -2185,7 +2715,8 @@ html[data-octant-native-host="true"]
 
   /* Tool tiles are panes of their own (see dock.css). Before any tool is
      open the dock shows its overview cards, and those sit on one pane. */
-  .shell-frame .right-utility-dock:not(:has(.dock-tiles))::before {
+  .shell-frame
+    .right-utility-dock:not(:has(.dock-tiles)):not([data-dock-environment="true"])::before {
     position: absolute;
     z-index: -1;
     inset: var(--oct-title-rail-h) 0 0;
@@ -2204,17 +2735,16 @@ html[data-octant-native-host="true"]
     grid-column: 1;
     grid-row: 1;
     margin-top: var(--oct-title-rail-h);
-    border-top: 1px solid var(--octant-pane-line);
     border-left: 1px solid var(--octant-pane-line);
     content: "";
     pointer-events: none;
   }
 
-  .shell-frame .right-utility-dock:not(:has(.dock-tiles))::after {
+  .shell-frame
+    .right-utility-dock:not(:has(.dock-tiles)):not([data-dock-environment="true"])::after {
     position: absolute;
     z-index: 4;
     inset: var(--oct-title-rail-h) 0 0;
-    border-top: 1px solid var(--octant-pane-line);
     border-left: 1px solid var(--octant-pane-line);
     content: "";
     pointer-events: none;
@@ -2238,6 +2768,7 @@ html[data-octant-native-host="true"]
      grabbed, and only along the panes. */
   .shell-frame__sidebar-resize::before {
     top: var(--oct-title-rail-h);
+    bottom: var(--octant-panel-gap);
     background: transparent;
   }
 
@@ -2294,7 +2825,7 @@ html[data-octant-native-host="true"]
      page starts below it and its header pins there. */
   .shell-frame .primary-workspace-layer :is(.surface__inner, .linear-issues) {
     --oct-surface-header-top: var(--oct-title-rail-h);
-    padding-top: var(--oct-title-rail-h);
+    padding-top: calc(var(--oct-title-rail-h) + var(--oct-space-4));
   }
 
   /* A start screen has no pane heading to hold the title band open. Without
@@ -2339,26 +2870,22 @@ html[data-octant-native-host="true"]
   }
 }
 
+/* Set whether or not the dock is open: the thread box's minimum
+   (--octant-thread-box-min) is worked out from it, and the tool row that
+   stands on that line must not move when the dock opens. */
 @media (min-width: 1100px) {
-  .shell.shell-frame.shell--wide-context-open {
+  .shell.shell-frame {
     --octant-wide-primary-min: 560px;
-  }
-}
-
-@media (min-width: 1100px) {
-  .shell.shell-frame.shell--wide-context-open[data-dock-tile-columns="2"] {
-    --octant-tiled-primary-min: 440px;
   }
 }
 
 @media (min-width: 681px) and (max-width: 960px) {
   .shell.shell-frame {
-    --octant-rendered-sidebar-width: min(var(--octant-sidebar-width, 232px), 236px);
-    grid-template-columns: var(--octant-rendered-sidebar-width) minmax(0, 1fr);
+    --octant-sidebar-target-width: min(var(--octant-sidebar-width, 232px), 236px);
   }
 
   .shell.shell-frame.shell--projects-sidebar-open {
-    --octant-rendered-sidebar-width: min(
+    --octant-sidebar-target-width: min(
       calc(var(--octant-sidebar-width, 232px) + 280px),
       calc(100vw - 320px)
     );
@@ -2535,44 +3062,6 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   background: var(--octant-workspace);
 }
 
-/* The same geometry as `.welcome`: the question takes the free height and
-   centres in it, which docks the composer at the foot of the page where the
-   thread continues, 12px above the pane's foot as a thread's composer sits,
-   so a start screen beside a thread puts its composer on the same line.
-
-   The canvas also takes a level above the ground, which paints at z-index 0 under this
-   same start screen. Without one the ground's dots landed over the greeting
-   and over the suggestion cards, which reads as the cards being
-   see-through. */
-.draft-thread__canvas {
-  position: relative;
-  z-index: 1;
-  box-sizing: border-box;
-  display: flex;
-  width: min(100% - var(--oct-thread-gutter), var(--oct-composer-width));
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  min-height: 100%;
-  padding-block: min(8vh, 64px) 12px;
-  margin: 0 auto;
-  gap: var(--oct-space-2);
-}
-
-.draft-thread__welcome {
-  display: grid;
-  flex: 1 1 auto;
-  align-content: center;
-  justify-items: start;
-  gap: 4px;
-  margin-bottom: 24px;
-}
-
-.draft-thread__welcome {
-  justify-items: center;
-  text-align: center;
-}
-
 .new-thread-welcome__mark {
   margin-bottom: 4px;
   color: var(--oct-accent-fg);
@@ -2639,6 +3128,10 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   background: var(--muted);
 }
 
+.draft-thread__recent-item:active {
+  background: var(--oct-wash-pressed);
+}
+
 .draft-thread__recent-item {
   display: flex;
   width: 100%;
@@ -2662,28 +3155,6 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
 .draft-thread__recent-detail {
   color: var(--oct-meta);
   font-size: var(--oct-text-detail);
-}
-
-/* The cards themselves share the Code home's suggestion recipe below. They
-   sit a clear step under the composer: pressed up against its band they read
-   as part of the card, and the prompt lost its edge. */
-.draft-thread__intent-cards {
-  order: 3;
-  margin-top: 56px;
-}
-
-/* The card area sits between the composer and the suggestions or Continue list.
-   Items in this flex column are ordered by number, and an unnumbered one would
-   paint above the composer. */
-.draft-thread__canvas > .home-start {
-  order: 3;
-}
-
-.draft-thread__composer {
-  order: 2;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 
 /* A New coordinator draft's settings, one quiet line under the composer:
@@ -2722,59 +3193,38 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   text-overflow: ellipsis;
 }
 
-/* The menu opens on the side of the trigger with more room (the selector
-   measures it) and is capped to that room. Hung always below, it ran past the
-   window's bottom edge where the composer docks at the page foot and showed
-   one Project and a half. Inside that cap only the saved Projects scroll: the
-   ways to add one stay pinned under them, where a long list once pushed
-   "New Project from GitHub repository…" past the menu's bottom edge. The face
-   is the shared popover recipe (fill, overlay shadow, 12px radius). */
+.composer-folder-selector__chevron {
+  flex: none;
+  opacity: 0.7;
+}
+
+/* The Project menu is the shared popover float: its face, shadow, motion and
+   4px offset come from the popover recipe, and Base UI opens it on the side of
+   the trigger with room. Only its size is written here: the popup's body is
+   capped to the room on that side (--available-height) and is as tall as its
+   content when it opens (the component freezes that height so typing in the
+   search never resizes it); only the Project list scrolls, and the ways to
+   add one stay pinned under it. */
 .composer-folder-selector__menu {
-  position: absolute;
-  z-index: 40;
-  inset-block-end: calc(100% + 6px);
-  inset-inline-start: 0;
+  width: min(28rem, calc(100vw - 2rem));
+  padding: var(--oct-menu-inset);
+}
+
+.composer-folder-selector__body {
   display: flex;
   flex-direction: column;
-  width: min(22rem, calc(100vw - 2rem));
-  max-height: min(28rem, 64vh);
   gap: var(--oct-space-1);
-  padding: calc(var(--oct-space-1) + 2px);
+  max-height: min(28rem, calc(var(--available-height, 28rem) - 2 * var(--oct-menu-inset)));
   overflow: hidden;
-  color: var(--popover-foreground);
-  background: var(--popover);
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-overlay);
-  animation: octant-popover-enter var(--oct-motion-fast) cubic-bezier(0.2, 0, 0, 1);
 }
 
-.composer-folder-selector__menu--below {
-  inset-block-start: calc(100% + 6px);
-  inset-block-end: auto;
-}
-
-@keyframes octant-popover-enter {
-  from {
-    opacity: 0;
-    transform: scale(0.98);
-  }
-
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .composer-folder-selector__menu {
-    animation: none;
-  }
-}
-
-/* The GitHub flow carries a picker and a confirmation card, so the same
-   menu opens wider for it and scrolls as one. */
-.composer-folder-selector__menu--github {
-  width: min(30rem, calc(100vw - 2rem));
+/* The GitHub flow carries a picker and a confirmation card, so it keeps a
+   floor of its own and scrolls as one. The Project list has no floor: a
+   fixed 240px left a blank band under one Project and a big empty box over
+   none (maintainer request, 2026-11-16). */
+.composer-folder-selector__body--github {
+  /* Its floor yields where the window leaves less room than that. */
+  min-height: min(240px, var(--available-height, 240px));
   overflow: auto;
 }
 
@@ -2792,27 +3242,52 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   font-weight: var(--oct-weight-medium);
 }
 
-.composer-folder-selector__menu [role="listbox"] {
+.composer-folder-selector__list {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
+  gap: var(--oct-space-1);
   min-height: 0;
+  outline: none;
 }
 
-.composer-folder-selector__saved {
+.composer-folder-selector__scroll {
   display: grid;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   align-content: start;
   gap: 1px;
   min-height: 0;
   overflow-y: auto;
 }
 
+.composer-folder-selector__group {
+  display: grid;
+  gap: 1px;
+}
+
+/* One 28px line: the quiet "No Projects yet", sitting over the actions like
+   the first row of a short menu. */
+.composer-folder-selector__empty {
+  display: flex;
+  align-items: center;
+  min-height: var(--oct-menu-row-h);
+  padding-block: 0;
+  padding-inline: var(--oct-menu-row-inset);
+}
+
+/* A hairline between the place a thread starts without a Project and the
+   ways to make one, so the two read as separate groups. */
+.composer-folder-selector__divider {
+  height: 1px;
+  margin: var(--oct-space-1) var(--oct-menu-row-inset);
+  background: var(--oct-hairline);
+}
+
 .composer-folder-selector__actions {
   display: grid;
   flex: 0 0 auto;
   gap: 1px;
-  margin-top: var(--oct-space-1);
+  margin-top: auto;
   padding-top: var(--oct-space-1);
   border-top: 1px solid var(--oct-hairline);
 }
@@ -2850,7 +3325,32 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   text-overflow: ellipsis;
 }
 
-.composer-folder-selector__option--active {
+/* A refused row is the 44px two-line row: its name, and under it the whole
+   reason, wrapping rather than cut (the reason was the only explanation and
+   was truncated to "Change it in…"). Dimmed like every disabled menu row. */
+.composer-folder-selector__option--two-line {
+  min-height: var(--oct-menu-row-two-h);
+  opacity: var(--oct-disabled-opacity);
+}
+
+.composer-folder-selector__option--two-line .composer-folder-selector__option-copy {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+
+.composer-folder-selector__option--two-line .composer-folder-selector__option-name {
+  max-width: none;
+}
+
+.composer-folder-selector__option--two-line .composer-folder-selector__option-reason {
+  overflow: visible;
+  white-space: normal;
+}
+
+/* Keyboard highlight is the float's hover fill, the same as a row under the
+   pointer; a chosen Project is only the check at its end. */
+.composer-folder-selector__option[data-active="true"] {
   background: var(--octant-control-hover);
 }
 
@@ -2922,153 +3422,143 @@ form > .work-composer-adapter__attachments {
   gap: var(--oct-space-1);
 }
 
-.create-from-issue-control__popup {
+/* "Create from…" is one frame, 420 by 400. The tabs, the search and the list
+   stand in the same boxes before, while and after the rows arrive, and the
+   rows are the same height as the skeleton that holds their place, so nothing
+   in the popup resizes or moves while it loads or while a tab is chosen. Only
+   the list scrolls. */
+.create-from-popup {
   display: flex;
   flex-direction: column;
-  width: min(32rem, calc(100vw - 2rem));
-  max-height: min(60vh, 32rem);
-  padding: calc(var(--oct-space-1) + 2px);
-  overflow: auto;
+  width: min(420px, calc(100vw - 32px));
+  height: min(400px, 70vh);
+  padding: var(--oct-menu-inset);
+  overflow: hidden;
 }
 
-.create-from-issue-control__panel,
+.create-from-popup__panel,
+.create-from-popup__body,
 .create-from-issue {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: var(--oct-space-1);
   min-width: 0;
+  min-height: 0;
 }
 
-/* The source tabs read as the popup's heading: the chosen one in the text
-   tone, the other in the meta tone, with no fill, so a lone "Issues" tab is
-   a title rather than a pressed button. */
-.create-from-issue-control__panel > [role="tablist"] {
-  display: flex;
-  gap: var(--oct-space-1);
-  padding: var(--oct-space-1) var(--oct-space-1) var(--oct-space-1);
+.create-from-popup__tabs {
+  flex: 0 0 auto;
+  align-self: stretch;
+  margin: var(--oct-space-1) var(--oct-space-1) var(--oct-space-1);
 }
 
-.create-from-issue-control__panel > [role="tablist"] > [role="tab"] {
+.create-from-popup__tabs > .segment {
+  flex: 1 1 0;
   height: 24px;
-  padding-inline: var(--oct-space-1);
-  color: var(--oct-meta);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-medium);
 }
 
-.create-from-issue-control__panel > [role="tablist"] > [role="tab"][aria-selected="true"] {
+.create-from-popup__tabs > .segment[aria-selected="true"] {
+  background: var(--oct-fill-2);
   color: var(--oct-fg);
-  background: transparent;
 }
 
-.draft-thread__error {
+.create-from-popup .octant-popover-search {
+  flex: 0 0 auto;
+}
+
+.create-from-popup .github-picker {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.create-from-popup .github-picker__results {
+  flex: 1 1 auto;
+}
+
+.create-from-popup .github-picker__listbox {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 0;
+}
+
+.create-from-popup .github-picker__option {
+  align-items: center;
+}
+
+.create-from-issue__repository {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  height: var(--oct-menu-row-h);
+}
+
+.create-from__list {
+  flex: 1 1 auto;
+  min-height: 0;
   margin: 0;
-  color: var(--octant-destructive);
-  font-size: var(--oct-text-detail);
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
 }
 
-.draft-thread__hint,
+.create-from__row {
+  height: var(--oct-menu-row-two-h);
+  padding-block: 0;
+  gap: var(--oct-space-2);
+}
+
+.create-from__state {
+  flex: 0 0 auto;
+  color: var(--oct-muted);
+}
+
+.create-from__state[data-state="open"] {
+  color: var(--oct-success-fg);
+}
+
+.create-from__copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.create-from__title,
+.create-from__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.create-from__more {
+  height: var(--oct-menu-row-h);
+  justify-content: center;
+  color: var(--oct-muted);
+}
+
+.create-from__note {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0 var(--oct-menu-row-inset);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The popup's list states (rows, skeleton, "none", an error) all stand in the
+   room under the search; a short message sits at its top, not mid-frame. */
+.create-from-popup .octant-popover-empty {
+  flex: 0 0 auto;
+}
+
 .work-composer-adapter__hint {
   margin: 0;
   padding: 0 2px;
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .draft-thread__intent-card {
-    transition: none;
-  }
-  .draft-thread__intent-cards > button:hover:not(:disabled) {
-    transform: none;
-  }
-}
-
-@media (max-width: 640px) {
-  .draft-thread__canvas {
-    width: calc(100% - 24px);
-    padding: 24px 12px;
-  }
-
-  .draft-thread.chat-welcome {
-    box-sizing: border-box;
-    height: auto;
-    overflow-y: auto;
-    padding-block: 0;
-  }
-
-  /* The start screen's composer stands the panel's 20px from each edge, as a
-     thread's composer does (its width is the viewport less 40px). A 12px margin
-     and 12px of padding on top of the panel's inset made 44px of it. */
-  .draft-thread.chat-welcome .welcome {
-    box-sizing: border-box;
-    width: 100%;
-    justify-content: flex-start;
-    padding: 12px 0;
-    gap: 16px;
-  }
-
-  .draft-thread__intent-cards {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* The Work and Code page before a thread exists: one question, one sentence
-   saying what the choice means, and the two things to do, centred on the
-   same axis as every other start screen. It had been a left-aligned eyebrow,
-   paragraph, and tip over two cards, which read as a settings form. */
-.agent-mode-welcome__panel {
-  position: relative;
-  z-index: 1;
-  box-sizing: border-box;
-  display: grid;
-  width: min(100% - 48px, 560px);
-  justify-items: center;
-  gap: var(--oct-space-3);
-  margin: 0 auto;
-  padding-block: min(20vh, 180px) var(--oct-space-12);
-  text-align: center;
-}
-
-.agent-mode-welcome__mark {
-  display: grid;
-  width: 44px;
-  height: 44px;
-  place-items: center;
-  margin-bottom: var(--oct-space-1);
-  border: 1px solid var(--oct-hairline);
-  border-radius: var(--oct-radius-sm);
-  color: var(--oct-fg);
-  background: var(--octant-card);
-}
-
-.agent-mode-welcome__lead {
-  max-width: 46ch;
-  margin: 0;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-sm);
-  line-height: 1.5;
-}
-
-.agent-mode-welcome__actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: var(--oct-space-2);
-  margin-top: var(--oct-space-3);
-}
-
-@media (max-width: 640px) {
-  .agent-mode-welcome__panel {
-    width: calc(100% - 32px);
-    padding-block: var(--oct-space-12) var(--oct-space-6);
-  }
-
-  .agent-mode-welcome__actions {
-    width: 100%;
-    flex-direction: column;
-    align-items: stretch;
-  }
 }
 
 .work-composer-adapter,
@@ -3085,19 +3575,6 @@ form > .work-composer-adapter__attachments {
 
 .work-composer-adapter {
   background: var(--octant-app-background);
-}
-
-.work-thread-workspace .draft-thread__canvas {
-  box-sizing: border-box;
-  display: flex;
-  width: min(100% - 48px, 768px);
-  flex-direction: column;
-  align-items: stretch;
-  min-height: 100%;
-  justify-content: flex-start;
-  padding-block: min(16vh, 148px) 48px;
-  margin: 0 auto;
-  gap: var(--oct-space-2);
 }
 
 .work-composer-adapter__attach-btn {
@@ -3235,10 +3712,6 @@ form > .work-composer-adapter__attachments {
     width: 100%;
     max-width: none;
   }
-
-  .composer-folder-selector__menu {
-    width: min(100%, calc(100vw - 2rem));
-  }
 }
 
 .code-composer-adapter__context-picker {
@@ -3267,20 +3740,29 @@ form > .work-composer-adapter__attachments {
   flex-direction: column;
   gap: var(--oct-space-1);
   width: min(320px, calc(100vw - 32px));
-  padding: calc(var(--oct-space-1) + 2px);
+  /* A list of rows: the menu inset, so its rows stand on the menu rows' edges.
+     Fill, edge and radius come from the popover recipe and the float rules in
+     components.css; setting a workspace fill and a strong border here made this
+     the one popup with a darker face and a 2px edge. */
+  padding: var(--oct-menu-inset);
   overflow: hidden;
-  /* Fill and edge come from the popover recipe. Setting a workspace fill and a
-     strong border here on top of the overlay's own ring made this the one
-     popup with a darker face and a 2px edge. */
-  border-radius: var(--oct-radius-md);
 }
 
+/* The list is a fixed six rows tall: the loading shape, the rows and "no refs"
+   all stand in the same box, and a longer list scrolls inside it. */
 .code-branch-selector__list {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  max-height: min(240px, 36vh);
+  height: calc(6 * var(--oct-menu-row-h) + 5px);
   overflow: auto;
+}
+
+.code-branch-selector__empty {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
 }
 
 .code-branch-selector__option {
@@ -3331,72 +3813,86 @@ form > .work-composer-adapter__attachments {
   margin-inline-start: 0;
 }
 
-/* Quiet worktree-source status line below the context strip. */
+/* The worktree's source, drawn as three fixed rows inside the Where panel:
+   the origin switch (a name and its note), the line saying what it resolved
+   to, and the remote. Each keeps its height whether it has something to say
+   or not. */
 .code-worktree-source {
-  display: grid;
-  justify-items: center;
-  gap: 4px;
-  padding: 0 12px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .code-worktree-source__row {
   display: flex;
-  align-items: center;
-  gap: var(--oct-space-2);
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  min-width: 0;
+  padding-block: var(--oct-space-1);
+}
+
+.code-worktree-source__row > [role="switch"] {
+  flex: none;
+  margin-top: 2px;
 }
 
 .code-worktree-source__labels {
-  display: grid;
-  gap: 2px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
-.code-worktree-source__title {
-  font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-medium);
-  color: var(--octant-text-primary);
-}
-
+/* The note wraps to two lines in a slot that is always two lines tall, so a
+   longer reason (no remote, a failed fetch) reads whole and moves nothing. A
+   note cut off with an ellipsis hid the part that said what would happen. */
 .code-worktree-source__copy {
-  font-size: var(--oct-text-xs);
-  color: var(--octant-text-muted);
+  display: -webkit-box;
+  height: calc(2 * var(--oct-line-meta, 16px));
+  overflow: hidden;
+  line-height: var(--oct-line-meta, 16px);
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .code-worktree-source__disclosure {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--oct-space-1);
+  align-items: center;
+  gap: var(--oct-space-2);
+  height: var(--oct-menu-row-h);
   margin: 0;
-  font-size: var(--oct-text-detail);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .code-worktree-source__disclosure-label {
-  color: var(--octant-text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--oct-fg);
   font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
 }
 
 .code-worktree-source__disclosure-detail {
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .code-worktree-source__field {
-  display: grid;
-  gap: 4px;
-  font-size: var(--oct-text-detail);
-  color: var(--octant-text-secondary);
-}
-
-.code-worktree-source__cached {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+  height: var(--oct-menu-row-h);
 }
 
-.code-worktree-source__cached-detail {
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
+.code-worktree-source__field [data-slot="select-trigger"] {
+  width: 120px;
+  height: var(--oct-menu-row-h);
 }
 
 /* The toolbar adapts to the width it is given, which in a dock tile can be as
@@ -3440,7 +3936,7 @@ form > .work-composer-adapter__attachments {
   --browser-row-inset: calc(
     var(--oct-space-3) - (var(--oct-rail-button-h) - var(--oct-icon-md)) / 2
   );
-  border-bottom: 1px solid var(--oct-border-soft);
+  border-bottom: 1px solid var(--octant-pane-line, var(--oct-border-soft));
   background: var(--oct-surface);
 }
 
@@ -3638,17 +4134,10 @@ form > .work-composer-adapter__attachments {
   animation: browser-spin var(--oct-motion-spin) linear infinite;
 }
 
-/* A confirmation keeps the callout's own tone; only the warning paints amber. */
-.browser-workspace__notice {
-  padding: var(--oct-space-2) var(--oct-space-3);
-  font-size: var(--oct-text-xs);
-}
-
+/* A Browser notice is the callout's quiet row: no fill and no rule, one line
+   at the panel's own inset that wraps its action underneath when narrow. */
 .browser-workspace__message {
-  padding: var(--oct-space-2) var(--oct-space-3);
-  color: var(--oct-warn-fg);
-  border-bottom: 1px solid var(--octant-warning-border);
-  background: var(--oct-warn-soft);
+  min-width: 0;
   font-size: var(--oct-text-xs);
 }
 
@@ -3881,32 +4370,61 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
    (Start something new), and where the latest threads stand (Continue).
    Sections are a label, a note, and a hairline panel; Continue's cards lead
    with a tile that names the thread's delivery state. */
-/* One suggestion card for the draft thread's intents and the Add-a-folder
-   page's two choices (the Code prompts are chips, below). A hairline card
-   on the card fill, a 13px title, and a 12px line saying what it fills in.
-   The button is the card, so the paint keys on the element inside the cards
-   group rather than on a class the button recipe owns. */
-.draft-thread__intent-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: var(--oct-space-2);
-}
-
-/* The prompts are one compact row of chips, the same as Work's starters (both
-   are StartSuggestionChip, so the chip itself is not styled here): the
-   label says what it is, and the prompt it fills in rides as the chip's
-   tooltip and description. Five full cards had pushed Running now below the
-   fold. */
+/* Code's prompts are suggestion cards: a hairline card on the card fill, a
+   13px title and a 12px line saying what it fills in, with a glyph on top, four on
+   one line on the composer's edges. As label-only chips they were four grey
+   words, and what each would do was only in a tooltip. Under 664px of column
+   (four 160px cards and their gaps) they stand two by two, never three and
+   one: below that width the clamp's middle term is a huge length, so a card's
+   least width becomes half the row; above it the term is negative and the
+   least width is a quarter. */
 .code-home__suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  display: grid;
+  flex: 0 0 auto;
   gap: var(--oct-space-2);
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(
+      clamp(
+        (100% - 3 * var(--oct-space-2)) / 4,
+        (664px - 100%) * 999,
+        (100% - var(--oct-space-2)) / 2
+      ),
+      1fr
+    )
+  );
   width: 100%;
   margin: var(--oct-space-4) auto 0;
 }
 
-.draft-thread__intent-cards > button {
+/* Typed into, the composer no longer takes a suggestion: the cards go out of
+   sight and keep their room, so the list under them stays where it is. */
+.code-home__suggestions[data-away="true"] {
+  visibility: hidden;
+}
+
+.code-home__suggestion-icon {
+  margin-bottom: var(--oct-space-1);
+  color: var(--oct-accent);
+}
+
+.code-home__suggestions .draft-thread__intent-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Two lines at most. The cards of one row are one height because the grid
+   stretches them, whatever their words. */
+.code-home__suggestions .draft-thread__intent-description {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.code-home__suggestions > button {
   display: grid;
   height: auto;
   min-height: 0;
@@ -3921,15 +4439,21 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   background: var(--octant-card);
   text-align: left;
   white-space: normal;
-  transition:
-    border-color var(--oct-motion-base) var(--oct-ease-standard),
-    box-shadow var(--oct-motion-base) var(--oct-ease-standard);
 }
 
-.draft-thread__intent-cards > button:hover:not(:disabled) {
+.code-home__suggestions > button:hover:not(:disabled) {
   border-color: var(--octant-border-strong);
   background: var(--octant-card);
-  box-shadow: var(--octant-shadow-xs);
+}
+.code-home__suggestions > button:active:not(:disabled) {
+  background: var(--oct-wash-pressed);
+}
+
+/* After the shared card paint, whose wider side padding it replaces: four
+   cards share 800px, and a card may shrink to its column. */
+.code-home__suggestions > button {
+  min-width: 0;
+  padding: var(--oct-space-3);
 }
 
 .draft-thread__intent-label {
@@ -3943,426 +4467,6 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-regular);
   line-height: 1.45;
-}
-
-/* Everything under the composer ends on the composer's own edges. A fixed
-   704px measure matched the default reading width only: at the widest reading
-   width the composer was 1040px over a 704px column of cards, and the page
-   read as two unrelated stacks. */
-/* What continues below the cards keeps the same clear step under them. */
-.code-home {
-  display: grid;
-  width: 100%;
-  gap: var(--oct-space-6);
-  margin: 44px auto 0;
-}
-
-.code-home .draft-thread__recent {
-  margin-top: 0;
-}
-
-.code-home__section {
-  display: grid;
-  gap: var(--oct-space-3);
-}
-
-/* Up next, Start something new, and Continue are section labels over a
-   hairline, with their one line of help under the label and the section's
-   ghost action at the trailing edge. */
-.code-home__section-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--oct-space-3);
-  padding-bottom: var(--oct-space-2);
-  border-bottom: 1px solid var(--oct-hairline);
-}
-
-.code-home__section-copy {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.code-home__section-title {
-  margin: 0;
-  color: var(--oct-muted);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-  letter-spacing: var(--oct-tracking-snug);
-  line-height: 1.3;
-}
-
-.code-home__section-note,
-.code-home__note {
-  margin: 0;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-detail);
-}
-
-.code-home__panel {
-  display: grid;
-  padding: 12px var(--oct-space-4);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--octant-card);
-}
-
-.code-home__empty {
-  justify-items: center;
-  gap: var(--oct-space-1);
-  padding: 28px var(--oct-space-4);
-  color: var(--oct-muted);
-  text-align: center;
-}
-
-.code-home__empty-title {
-  margin: 0;
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-}
-
-/* Every section is the same grid of cards: two across at the composer's
-   width, one when the pane narrows, never a centred list of rows. */
-.code-home__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.code-home__grid > li {
-  display: grid;
-  min-width: 0;
-}
-
-.code-home__card {
-  display: grid;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  /* The button recipe centres its content; on a grid that shrinks the one
-     column to its content and floats a short title mid-card. */
-  grid-template-columns: minmax(0, 1fr);
-  align-content: start;
-  justify-content: stretch;
-  justify-items: start;
-  gap: var(--oct-space-1);
-  padding: 12px var(--oct-space-4);
-  /* The edge is the glass ring (octant.css), the same one the cards above
-     and the composer wear; a border under it drew the edge twice. */
-  border: 0;
-  border-radius: var(--oct-radius-md);
-  font-weight: 400;
-  text-align: left;
-  white-space: normal;
-}
-
-/* A live agent Browser the dock would show as a card while the dock is closed:
-   one quiet dot on the dock toggle, the same mark the dock's cards use. */
-.window-chrome__button[data-activity="browser"] {
-  position: relative;
-}
-
-.window-chrome__button[data-activity="browser"]::after {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 6px;
-  height: 6px;
-  border-radius: var(--oct-radius-pill);
-  background: var(--oct-fg);
-  content: "";
-}
-
-.code-home__card:hover:not(:disabled) {
-  box-shadow: 0 0 0 1px var(--oct-glass-stroke-strong);
-}
-
-/* Keep the thread title first and the state at the trailing edge. Container
-   sizing follows the workspace pane, including when the dock is open. */
-.code-home__section:has(.code-home__grid--rows) {
-  container-type: inline-size;
-}
-
-/* Continue's rows share one card, divided by hairlines, so the list reads
-   as one object on the page rather than lines drawn over the ground. */
-.code-home__grid--rows {
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0;
-  overflow: hidden;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--octant-card);
-}
-
-.code-home__grid--rows > li + li {
-  border-top: 1px solid var(--oct-border);
-}
-
-.code-home__row {
-  display: grid;
-  width: 100%;
-  height: auto;
-  min-height: 0;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
-  align-items: center;
-  justify-content: stretch;
-  justify-items: start;
-  column-gap: 12px;
-  row-gap: var(--oct-space-1);
-  padding: var(--oct-space-2) var(--oct-space-2);
-  font-weight: 400;
-  text-align: left;
-  white-space: normal;
-}
-
-.code-home__row > .code-home__card-head {
-  display: contents;
-}
-
-/* The attribute in the selector outranks the card badges' tone fills, which
-   come later in this file; rows use colored text and dots without a chip. */
-.code-home__row .code-home__badge[data-tone] {
-  grid-column: 2;
-  grid-row: 1;
-  justify-self: end;
-  align-self: start;
-  padding: 0;
-  color: var(--oct-meta);
-  background: transparent;
-  font-weight: var(--oct-weight-regular);
-}
-
-/* The leading dot carries the state the way the sidebar's thread rows do;
-   the word beside it is there for anyone who cannot read the colour. */
-.code-home__row .code-home__badge::before {
-  content: "";
-  width: 7px;
-  height: 7px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: currentcolor;
-}
-
-/* Under Mono these inks follow the Board's column marks (active in the primary
-   ink, Waiting quiet, Done secondary); the colour style gives them the same
-   hues the Board's marks take there. */
-.code-home__row .code-home__badge[data-tone="running"],
-.code-home__row .code-home__badge[data-tone="open"] {
-  color: var(--oct-fg);
-}
-
-.code-home__row .code-home__badge[data-tone="waiting"] {
-  color: var(--oct-meta);
-}
-
-.code-home__row .code-home__badge[data-tone="done"] {
-  color: var(--oct-fg-2);
-}
-
-:root[data-octant-style="colour"] .code-home__row .code-home__badge[data-tone="running"],
-:root[data-octant-style="colour"] .code-home__row .code-home__badge[data-tone="open"] {
-  color: var(--oct-colour-running);
-}
-
-:root[data-octant-style="colour"] .code-home__row .code-home__badge[data-tone="waiting"] {
-  color: var(--oct-colour-review);
-}
-
-:root[data-octant-style="colour"] .code-home__row .code-home__badge[data-tone="done"] {
-  color: var(--oct-colour-done);
-}
-
-.code-home__row .code-home__card-title {
-  grid-column: 1;
-  grid-row: 1;
-  -webkit-line-clamp: 2;
-}
-
-.code-home__row .code-home__facts {
-  grid-column: 1;
-  grid-row: 2;
-  gap: 2px var(--oct-space-2);
-  color: var(--oct-meta);
-}
-
-.code-home__row .code-home__card-age {
-  grid-column: 2;
-  grid-row: 2;
-  justify-self: end;
-  align-self: start;
-  margin-left: 0;
-}
-
-/* Long repository and branch names must not widen a narrow workspace. */
-.code-home__row .code-home__fact {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  white-space: normal;
-}
-
-.code-home__row .code-home__fact-note {
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-@container (max-width: 440px) {
-  .code-home__row {
-    row-gap: 4px;
-    padding: var(--oct-space-2) var(--oct-space-2);
-  }
-
-  .code-home__row .code-home__badge[data-tone] {
-    grid-column: 1;
-    justify-self: start;
-  }
-
-  .code-home__row .code-home__card-age {
-    grid-row: 1;
-  }
-
-  .code-home__row .code-home__card-title {
-    grid-column: 1 / -1;
-    grid-row: 2;
-  }
-
-  .code-home__row .code-home__facts {
-    grid-column: 1 / -1;
-    grid-row: 3;
-  }
-}
-
-.code-home__card-head {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.code-home__badge {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: var(--oct-radius-sm);
-  color: var(--oct-fg-2);
-  background: var(--octant-control);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
-  line-height: 1.4;
-}
-
-.code-home__badge[data-tone="merged"],
-.code-home__badge[data-tone="done"] {
-  color: var(--octant-success-text);
-  background: var(--octant-success-surface);
-}
-
-.code-home__badge[data-tone="running"] {
-  color: var(--oct-fg);
-  background: var(--octant-selection);
-}
-
-.code-home__badge[data-tone="waiting"] {
-  color: var(--oct-fg-2);
-}
-
-.code-home__card-detail {
-  flex: 0 0 auto;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.code-home__card-source {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.code-home__card-age {
-  flex: 0 0 auto;
-  margin-left: auto;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.code-home__card-title {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-  line-height: var(--oct-leading-snug);
-}
-
-.code-home__card-meta {
-  max-width: 100%;
-  overflow: hidden;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.code-home__facts {
-  display: flex;
-  flex-wrap: wrap;
-  max-width: 100%;
-  align-items: center;
-  gap: 4px 12px;
-  color: var(--oct-fg-2);
-  font-size: var(--oct-text-xs);
-}
-
-.code-home__fact {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-}
-
-.code-home__fact > svg {
-  flex: 0 0 auto;
-  color: var(--oct-muted);
-}
-
-.code-home__fact-note,
-.code-home__fact--muted {
-  color: var(--oct-meta);
-}
-
-:root[data-octant-style="colour"] .code-home__fact--branch,
-:root[data-octant-style="colour"] .code-home__fact--branch > svg {
-  color: var(--octant-palette-blue);
-}
-
-.code-home__insertions {
-  color: var(--octant-success-text);
-  font-variant-numeric: tabular-nums;
-}
-
-.code-home__deletions {
-  color: var(--octant-danger-text);
-  font-variant-numeric: tabular-nums;
-}
-
-.code-home__facts .pull-request-chip {
-  background: color-mix(in srgb, currentcolor 10%, transparent);
 }
 
 /* ── Start-screen cards ───────────────────────────────────────────────────
@@ -4435,9 +4539,10 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 /* A pull request on the facts line: its state glyph and its number read as one
    mark. Colour is spent on the state only. */
 .sidebar-navigation__thread-pr {
+  display: inline-flex;
   flex: none;
   align-items: center;
-  gap: 2px;
+  gap: var(--oct-space-1);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
@@ -4457,32 +4562,76 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 }
 
 /* PR state carries the same meaning in navigation, boards, and pane headers. */
-.pull-request-chip[data-tone="draft"],
-.pull-request-chip[data-tone="unknown"] {
-  color: var(--oct-meta);
+:is(.pull-request-chip, .pr-state-pill, .work-list__state)[data-pr-state="open"] {
+  color: var(--oct-pr-open);
 }
 
-.pull-request-chip[data-tone="open"],
-.sidebar-navigation__thread-pr-mark[data-state="open"] {
-  color: var(--octant-success-text);
+:is(.pull-request-chip, .pr-state-pill, .work-list__state)[data-pr-state="merged"] {
+  color: var(--oct-pr-merged);
 }
 
-.pull-request-chip[data-tone="merged"],
-.sidebar-navigation__thread-pr-mark[data-state="merged"] {
-  color: var(--octant-palette-purple);
+:is(.pull-request-chip, .pr-state-pill, .work-list__state)[data-pr-state="closed"] {
+  color: var(--oct-pr-closed);
 }
 
-.pull-request-chip[data-tone="closed"],
-.sidebar-navigation__thread-pr-mark[data-state="closed"] {
-  color: var(--octant-danger-text);
+:is(.pull-request-chip, .pr-state-pill, .work-list__state)[data-pr-state="draft"],
+:is(.pull-request-chip, .pr-state-pill, .work-list__state)[data-pr-state="unknown"] {
+  color: var(--oct-pr-draft);
 }
 
+.pr-state-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  white-space: nowrap;
+}
+
+/* At the head of a request the state is a filled badge, as on the host. */
+.pr-state-pill[data-pr-solid="true"] {
+  padding: 0 var(--oct-space-2);
+  border-radius: var(--oct-radius-sm);
+  line-height: var(--oct-space-5);
+  background: var(--oct-pr-draft-fill);
+  color: var(--oct-pr-on-fill);
+  font-weight: var(--oct-weight-strong, 600);
+}
+
+.pr-state-pill[data-pr-solid="true"][data-pr-state="open"] {
+  background: var(--oct-pr-open-fill);
+}
+
+.pr-state-pill[data-pr-solid="true"][data-pr-state="merged"] {
+  background: var(--oct-pr-merged-fill);
+}
+
+.pr-state-pill[data-pr-solid="true"][data-pr-state="closed"] {
+  background: var(--oct-pr-closed-fill);
+}
+
+.pr-detail__prose a,
+.code-pr-review__prose a,
+.code-pr-review__github-link {
+  color: var(--oct-link);
+}
+
+/* The age holds a slot of one width, right-aligned, so a title never gives or
+   takes room as "now" becomes "3d" and every row's age ends at the same edge.
+   Three characters at the 12px meta size, which is the longest it reads
+   ("52w"). The unread dot beside it is reserved with it. */
 .sidebar-navigation__thread-age {
   flex: none;
-  margin-left: auto;
+  inline-size: 28px;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.sidebar-navigation__thread-when:has(.sidebar-navigation__thread-age) {
+  inline-size: 38px;
+  justify-content: flex-end;
 }
 
 .whats-new__dialog {
@@ -4547,7 +4696,8 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   overflow: hidden;
   border-radius: var(--oct-radius-md);
   background: var(--octant-card);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
 }
 
 /* The fill and shadow are the card's only edge, and forced colours drops both.
@@ -4769,4 +4919,23 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
   font-size: var(--oct-text-base);
   font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-tight);
+}
+
+/* The New thread row at the head of the list is a navigation row like the ones
+   under it, so it takes their height (32px, 28 compact), not the 28px control
+   height it measured at beside rows of 32; 8px radius, with its key at the
+   right in the meta ink. */
+.sidebar-item.sidebar-item--new-thread {
+  height: var(--oct-nav-row-h);
+  min-height: var(--oct-nav-row-h);
+  border-radius: var(--oct-radius-sm);
+}
+
+.sidebar-item__key {
+  margin-inline-start: auto;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  letter-spacing: 0;
 }

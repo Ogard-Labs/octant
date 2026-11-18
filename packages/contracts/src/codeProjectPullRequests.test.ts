@@ -194,6 +194,45 @@ describe("Code Project pull-request contracts", () => {
     ).toThrow();
   });
 
+  it("keeps line counts, check counts and merging the host recorded, and still reads a row that has none", () => {
+    const withFacts = {
+      ...connectedView,
+      rows: [
+        {
+          ...connectedView.rows[0],
+          additions: 2173,
+          deletions: 296,
+          checkCounts: { passed: 19, total: 26 },
+          merging: "queued",
+        },
+      ],
+    };
+    expect(decodeCodeProjectPullRequestView(withFacts).rows[0]).toMatchObject({
+      additions: 2173,
+      deletions: 296,
+      checkCounts: { passed: 19, total: 26 },
+      merging: "queued",
+    });
+    const older = decodeCodeProjectPullRequestView(connectedView).rows[0];
+    expect(older?.additions).toBe(undefined);
+    expect(older?.checkCounts).toBe(undefined);
+    expect(older?.merging).toBe(undefined);
+    for (const bad of [
+      { additions: -1 },
+      { deletions: 1.5 },
+      { checkCounts: { passed: 3, total: 2 } },
+      { checkCounts: { passed: 0, total: 0 } },
+      { merging: "merged" },
+    ]) {
+      expect(() =>
+        decodeCodeProjectPullRequestView({
+          ...connectedView,
+          rows: [{ ...connectedView.rows[0], ...bad }],
+        }),
+      ).toThrow();
+    }
+  });
+
   it("labels each Project's background refresh state and refuses duplicate entries", () => {
     expect(
       decodeCodeProjectPullRequestView({

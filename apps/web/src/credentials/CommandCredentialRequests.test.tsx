@@ -45,6 +45,24 @@ const view = decodeCommandCredentialResult({
   receipts: [],
 });
 describe("named command review", () => {
+  it("discloses that Strict keeps a Full access credential recipient confined", async () => {
+    const strictView = decodeCommandCredentialResult({
+      ...view,
+      requests: [{ ...pending, strict: true }],
+    });
+    render(
+      <CommandCredentialRequests
+        threadId={id(4)}
+        projectId={id(2)}
+        client={{ read: vi.fn(async () => strictView), execute: vi.fn() }}
+      />,
+    );
+    await userEvent.click(screen.getByText(/Credential commands/));
+    expect(
+      await screen.findByText(/Strict: the credential tool authenticates outside/),
+    ).toBeVisible();
+    expect(screen.queryByText(/with ordinary Full access/)).not.toBeInTheDocument();
+  });
   it("shows the fixed recipient and account, and discards an old execution response after switching task", async () => {
     let finish: ((value: CommandCredentialResult) => void) | undefined;
     const execute = vi.fn(

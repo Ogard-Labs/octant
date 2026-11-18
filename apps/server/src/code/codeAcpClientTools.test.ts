@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { CodeThread, WindowId } from "@octant/contracts";
+import { decodeSandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { makeProcessConfinementLive } from "../process/seatbeltProfile";
+import { configureSandboxRestrictionsAuthority } from "../process/sandboxRuntimePolicy";
 import { secretGuardRefusal } from "../process/secretGuard";
 import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
 import { createCodeAcpClientTools, type CodeAcpTerminalConfinement } from "./codeAcpClientTools";
@@ -189,6 +191,51 @@ describe("ACP Code client tools", () => {
       expect(signIn).toMatchObject({ result: { error: "protected-file" }, isError: true });
       expect(JSON.stringify(signIn)).toContain("Provider sign-ins");
     } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the complete protected-file guard at Full access under an active sandbox", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "octant-acp-home-")));
+    const selection = decodeSandboxPolicySelection({
+      policy: {
+        schemaVersion: 1,
+        revision: 1,
+        filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
+        network: "existing-policy",
+        credentials: "isolated",
+        hostServices: "blocked",
+      },
+      context: {
+        root,
+        hostId: "host",
+        projectId: thread("full-access").projectId,
+        threadId: thread("full-access").id,
+        checkoutId: thread("full-access").checkoutId,
+        sessionId: "sandbox-session",
+        provider: "kimi-code",
+      },
+    });
+    configureSandboxRestrictionsAuthority({
+      validateSelection: () => true,
+      active: () => selection,
+      beginTurn: () => ({ status: "refused", message: "unused" }),
+      storageDirectory: () => undefined,
+      deny: () => undefined,
+      registerCleanup: () => () => undefined,
+    });
+    try {
+      await mkdir(join(root, ".aws"), { recursive: true });
+      await writeFile(join(root, ".aws", "credentials"), "fake", "utf8");
+      const appTools = protectedTools(root, "full-access");
+      await expect(
+        appTools.execute({
+          name: "octant_acp_fs_read_text_file",
+          inputJson: JSON.stringify({ path: join(root, ".aws", "credentials") }),
+        }),
+      ).resolves.toMatchObject({ result: { error: "protected-file" }, isError: true });
+    } finally {
+      configureSandboxRestrictionsAuthority(undefined);
       await rm(root, { recursive: true, force: true });
     }
   });

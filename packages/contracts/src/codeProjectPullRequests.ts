@@ -13,6 +13,11 @@ import { UtcTimestamp } from "./events";
 import { GithubRepositoryName, GithubRepositoryOwner } from "./githubCatalogue";
 import { HubMemberId } from "./hubAndSpokes";
 import { ProjectId } from "./projects";
+import {
+  PullRequestCheckCounts,
+  PullRequestLineCount,
+  PullRequestMerging,
+} from "./threadBoardPullRequests";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
@@ -635,6 +640,25 @@ export const CodeProjectPullRequestRow = Schema.Struct({
    * taken before that fact was recorded.
    */
   crossRepository: Schema.optional(Schema.Literal(true)),
+  /**
+   * Added and removed lines of the whole pull request. Absent when the host has
+   * not read them (a snapshot from before they were recorded, or a pull request
+   * known only from a thread); absent is not zero.
+   */
+  additions: Schema.optional(PullRequestLineCount),
+  deletions: Schema.optional(PullRequestLineCount),
+  /**
+   * Checks passed out of counted, from the same rollup as `checks`. Absent when
+   * the rollup named no check the host counts, or was not read.
+   */
+  checkCounts: Schema.optional(PullRequestCheckCounts),
+  /**
+   * Set only on an open pull request that is on its way in: auto-merge is on
+   * (`auto-merge`) or it sits in the merge queue (`queued`; absent when the
+   * queue could not be read). Absent otherwise, and on a snapshot from before
+   * this was recorded.
+   */
+  merging: Schema.optional(PullRequestMerging),
   linkedThreads: Schema.Array(CodeProjectPullRequestLinkedThread).pipe(
     Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS),
   ),

@@ -133,7 +133,8 @@ export interface AgentHierarchyModel {
   readonly working: ReadonlyArray<AgentHierarchyRow>;
   /** Every settled subagent, newest first. */
   readonly finished: ReadonlyArray<AgentHierarchyRow>;
-  readonly emptyReason?: string;
+  /** What a thread with no subagents says: one line, and one muted line under it. */
+  readonly empty?: { readonly title: string; readonly detail: string };
 }
 
 const ACTIVE = new Set(["queued", "starting", "running", "waiting"]);
@@ -186,10 +187,13 @@ export function buildAgentHierarchyModel(input: {
     finished,
     ...(rows.length === 0
       ? {
-          emptyReason:
+          empty:
             creationPosture === "off"
-              ? "Subagents are turned off in Settings."
-              : "No subagents yet. They appear here when the agent hands off part of its work.",
+              ? { title: "Subagents are turned off", detail: "Turn them on in Settings." }
+              : {
+                  title: "No subagents yet",
+                  detail: "They appear here when the agent hands off part of its work.",
+                },
         }
       : {}),
   };

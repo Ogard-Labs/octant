@@ -796,8 +796,8 @@ export const ProjectCommand = Schema.Union(
     permissionMode: Schema.optional(PermissionMode),
     /** The sandbox at Full access for new threads; absent returns it to Settings. */
     fullAccessSandbox: Schema.optional(Schema.Boolean),
-    /** Strict for threads here that did not choose; absent returns it to Settings. */
-    strict: Schema.optional(Schema.Boolean),
+    /** Strict for threads here; absent keeps the choice, null returns it to Settings. */
+    strict: Schema.optional(Schema.NullOr(Schema.Boolean)),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-project-auto-reviewer"),
@@ -870,8 +870,8 @@ export const ProjectCommand = Schema.Union(
     permissionMode: Schema.optional(WorkProjectPermissionMode),
     /** The sandbox at Full access for new threads; absent returns it to Settings. */
     fullAccessSandbox: Schema.optional(Schema.Boolean),
-    /** Strict for threads here that did not choose; absent returns it to Settings. */
-    strict: Schema.optional(Schema.Boolean),
+    /** Strict for threads here; absent keeps the choice, null returns it to Settings. */
+    strict: Schema.optional(Schema.NullOr(Schema.Boolean)),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-work-project-actions"),

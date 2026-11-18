@@ -51,7 +51,7 @@ describe("ProjectMemoryProposalPrompt", () => {
     const card = await screen.findByRole("group", { name: "Project memory change" });
     expect(card).toHaveTextContent("Save a decision to Project memory?");
     expect(card).toHaveTextContent("Releases ship from main only.");
-    expect(card).toHaveTextContent("written by an agent in this thread");
+    expect(card).toHaveTextContent("marked as written by an agent");
     expect(fake.decideMemoryProposal).not.toHaveBeenCalled();
 
     await userEvent.setup().click(screen.getByRole("button", { name: "Save to memory" }));

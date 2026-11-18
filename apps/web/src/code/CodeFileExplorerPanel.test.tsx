@@ -265,7 +265,7 @@ describe("CodeFileExplorerPanel", () => {
     expect(onOpenFile.mock.calls[0]?.[0]).toMatchObject({ path: "src/main.ts" });
   });
 
-  it("says the tree is incomplete when the host truncated the walk", async () => {
+  it("shows no note when the host truncated the walk", async () => {
     render(
       <CodeFileExplorerPanel
         checkoutId={checkoutId}
@@ -288,11 +288,8 @@ describe("CodeFileExplorerPanel", () => {
       />,
     );
 
-    expect(
-      await screen.findByText(
-        "Octant listed part of this repository. The file tree is incomplete.",
-      ),
-    ).toBeVisible();
+    await screen.findByRole("tree");
+    expect(screen.queryByText(/file tree is incomplete/)).toBeNull();
   });
 
   it("states the host's failure rather than an empty repository", async () => {

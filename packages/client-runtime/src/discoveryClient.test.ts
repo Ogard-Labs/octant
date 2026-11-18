@@ -8,7 +8,7 @@ const scanResponse = {
     candidates: [
       {
         driverKind: "codex",
-        displayName: "Codex CLI",
+        displayName: "Codex",
         binaryPath: "/usr/local/bin/codex",
         version: "codex-cli 0.1.0",
         readiness: "ready",
@@ -61,7 +61,7 @@ describe("discoveryClient", () => {
       kind: "connect",
       driverKind: "codex",
       binaryPath: "/usr/local/bin/codex",
-      displayName: "Codex CLI",
+      displayName: "Codex",
     });
     expect(result.kind).toBe("candidate-connected");
   });

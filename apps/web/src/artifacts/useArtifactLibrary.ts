@@ -6,6 +6,7 @@ import type {
   ArtifactKind,
   ArtifactLibraryListing,
   ArtifactLibraryQuery,
+  ArtifactLibrarySource,
   ArtifactLibraryTab,
 } from "@octant/contracts/artifact-library";
 import type { OctantMode, ProjectId } from "@octant/contracts";
@@ -18,6 +19,12 @@ export interface ArtifactLibraryFilters {
   readonly mode?: OctantMode;
   readonly kind?: ArtifactKind;
   readonly tag?: string;
+  /** Canvas documents or Claude pages only. */
+  readonly source?: ArtifactLibrarySource;
+  /** One Claude artifact type; only Claude pages match it. */
+  readonly claudeType?: string;
+  /** One Claude account; only the pages it published match it. */
+  readonly account?: string;
 }
 
 export interface ArtifactLibraryOptions {
@@ -73,6 +80,9 @@ export function useArtifactLibrary(options: ArtifactLibraryOptions): ArtifactLib
       ...(filters.mode === undefined ? {} : { mode: filters.mode }),
       ...(filters.kind === undefined ? {} : { kind: filters.kind }),
       ...(tag === undefined || tag === "" ? {} : { tag }),
+      ...(filters.source === undefined ? {} : { source: filters.source }),
+      ...(filters.claudeType === undefined ? {} : { claudeType: filters.claudeType }),
+      ...(filters.account === undefined ? {} : { account: filters.account }),
     } as ArtifactLibraryQuery;
   }, [filters]);
 

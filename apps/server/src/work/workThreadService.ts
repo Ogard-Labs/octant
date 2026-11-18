@@ -80,6 +80,8 @@ import {
   withUsageLimitHandoff,
   withUsageLimitHandoffOutcome,
   ProjectProviderPolicyRejected,
+  resolveStrict,
+  STRICT_REFUSES_FULL_ACCESS_RUN_FLAG,
   workProjectKeepsStatusFile,
 } from "@octant/domain";
 import {
@@ -752,7 +754,13 @@ export class WorkThreadService {
           defaultAccess: command.defaultAccess,
           // Absent keeps the stored choice, so a save from a client that does
           // not show the switch never turns it off.
-          ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
+          ...((command.defaultStrict ?? current.defaultStrict) === undefined
+            ? {}
+            : { defaultStrict: command.defaultStrict ?? current.defaultStrict }),
+          ...((command.defaultStrict ??
+            current.defaultStrict ??
+            command.defaultFullAccessSandbox ??
+            current.defaultFullAccessSandbox) === true
             ? { defaultFullAccessSandbox: true }
             : {}),
           ...((command.defaultStrict ?? current.defaultStrict) === true
@@ -909,6 +917,7 @@ export class WorkThreadService {
           ...(command.modelOptionValues === undefined
             ? {}
             : { modelOptionValues: command.modelOptionValues }),
+          ...(command.strict === undefined ? {} : { strict: command.strict }),
           bindingRevisionId: command.bindingRevisionId,
           workingDirectory,
           ...(command.workingFolderId === undefined
@@ -929,7 +938,8 @@ export class WorkThreadService {
               ? undefined
               : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
             this.#currentSettings().defaultAccess) === "full-access" &&
-          (command.fullAccessSandbox ??
+          (command.strict ??
+            command.fullAccessSandbox ??
             defaultFullAccessSandboxFor({ project, settings: this.#currentSettings() }))
             ? { fullAccessSandbox: true }
             : {}),
@@ -1369,15 +1379,29 @@ export class WorkThreadService {
               "invalid",
               "The per-run Full access flag puts a thread at Full access only.",
             );
+          // The flag is a lift Octant made; Strict refuses it, read as the
+          // thread would resolve it once this change applies.
+          const chosen = command.strict === undefined ? current.strict : command.strict;
+          const project = this.#persistence.readProject(current.projectId);
+          if (
+            resolveStrict({
+              thread: { strict: chosen ?? undefined },
+              project: project?.type === "work" ? project : undefined,
+              settings: this.#projection.settings(),
+            })
+          )
+            throw this.#failure("invalid", STRICT_REFUSES_FULL_ACCESS_RUN_FLAG);
         }
         const {
           fullAccessSandbox: currentSandbox,
           fullAccessRunFlag: currentRunFlag,
+          strict: currentStrict,
           ...unsandboxed
         } = current;
         const sandboxed =
+          command.strict !== null &&
           command.access === "full-access" &&
-          (command.fullAccessSandbox ?? currentSandbox) === true;
+          (command.strict ?? currentStrict ?? command.fullAccessSandbox ?? currentSandbox) === true;
         // Kept while the thread stays at Full access; any other level ends it.
         const runFlag =
           command.access === "full-access" &&
@@ -1385,10 +1409,9 @@ export class WorkThreadService {
             (currentRunFlag === true && current.access === "full-access"));
         // Strict holds at every level: kept from the command, else from the
         // thread; null returns the thread to its Project's and Settings' default.
-        const { strict: currentStrict, ...unchosen } = unsandboxed;
         const strict = command.strict === undefined ? currentStrict : command.strict;
         const updated = decodeWorkThread({
-          ...threadAtAccess(unchosen, command.access, command.planReturnAccess),
+          ...threadAtAccess(unsandboxed, command.access, command.planReturnAccess),
           ...(sandboxed ? { fullAccessSandbox: true } : {}),
           ...(runFlag ? { fullAccessRunFlag: true } : {}),
           ...(strict === null || strict === undefined ? {} : { strict }),
@@ -1800,9 +1823,11 @@ export class WorkThreadService {
         : { modelOptionValues: command.modelOptionValues }),
       bindingRevisionId,
       workingDirectory: ".",
+      ...(command.strict === undefined ? {} : { strict: command.strict }),
       access: command.access ?? this.#currentSettings().defaultAccess,
       ...((command.access ?? this.#currentSettings().defaultAccess) === "full-access" &&
-      (command.fullAccessSandbox ??
+      (command.strict ??
+        command.fullAccessSandbox ??
         defaultFullAccessSandboxFor({ settings: this.#currentSettings() }))
         ? { fullAccessSandbox: true }
         : {}),

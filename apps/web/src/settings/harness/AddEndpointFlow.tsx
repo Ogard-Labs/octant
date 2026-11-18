@@ -13,8 +13,8 @@ import {
   NativeHarnessClientFailure,
   type NativeHarnessClient,
 } from "@octant/client-runtime/native-harness-client";
-import { Cloud, Globe, MessagesSquare, X } from "lucide-react";
 import { ollamaAddressWarning } from "@octant/domain";
+import { Cloud, Globe, MessagesSquare, X } from "../../ui/icons";
 import {
   useEffect,
   useId,

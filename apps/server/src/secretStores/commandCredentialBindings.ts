@@ -21,6 +21,8 @@ export interface CommandCredentialContext {
   readonly root: string;
   readonly authorityKey: string;
   readonly executionPolicy: string;
+  readonly strict?: boolean;
+  readonly legacySandbox?: boolean;
   readonly current: () => boolean;
   readonly revalidate: () => Promise<boolean>;
 }
@@ -254,6 +256,8 @@ export class CommandCredentialBindings {
       threadId,
       expiresAt: new Date(ends).toISOString(),
       executionPolicy: context.executionPolicy,
+      ...(context.strict === undefined ? {} : { strict: context.strict }),
+      ...(context.legacySandbox === undefined ? {} : { legacySandbox: context.legacySandbox }),
       state: "pending",
     });
     let finish: ((value: CommandCredentialReceipt) => void) | undefined;

@@ -24,9 +24,10 @@ import {
   subscriptionDescriptorIdOf,
   supportsProviderCliUpdate,
 } from "@octant/domain";
-import { CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "../ui/icons";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ProviderToolVerification } from "./ProviderToolVerification";
+import { AccountSignIn } from "./AccountSignIn";
 import { ClaudeArtifactDeliverySetting } from "./ClaudeArtifactDeliverySetting";
 import {
   ProviderNativeSetupSetting,
@@ -83,6 +84,7 @@ import {
   providerProcessFailureSummary,
   providerRowReadinessLabel,
   titleCase,
+  claudeAuthenticationLabel,
 } from "./providerSettingsPresentation";
 import type { ProviderSettingsViewProps } from "./ProviderSettingsView";
 import type { LocateBinaryOutcome } from "./useDiscoveryController";
@@ -776,6 +778,19 @@ interface ProviderRowProps {
   readonly startSignIn: boolean;
 }
 
+/**
+ * A Claude Code subscription account or a Codex account: the host signs it in
+ * with the account's own CLI command. API-key Claude accounts have no sign-in.
+ */
+function signsInWithOwnCli(instance: ProviderInstance): boolean {
+  if (instance.driverKind === "codex") return true;
+  return (
+    instance.driverKind === "claude" &&
+    "authentication" in instance.configuration &&
+    instance.configuration.authentication === "subscription"
+  );
+}
+
 function latestVersionProp(
   latestVersions: ReadonlyMap<ProviderInstanceId, string> | undefined,
   instanceId: ProviderInstanceId,
@@ -909,7 +924,7 @@ function ProviderRow(props: ProviderRowProps) {
     isAnthropicHttp ||
     isFoundry ||
     isImageProfile ||
-    (isClaude && props.instance.configuration.authentication === "api-key") ||
+    (isClaude && props.instance.configuration.authentication !== "subscription") ||
     acpInstance?.configuration.authentication === "api-key";
   const browserClaudeKeySetup = isClaude && usesCredential && !props.credentialManagementAvailable;
   const credential = useCredentialStatus(props, !usesCredential);
@@ -926,6 +941,9 @@ function ProviderRow(props: ProviderRowProps) {
     (setupGuidance !== null && setupGuidance !== undefined);
   const label = driverLabel(props.instance.driverKind);
   const providerTags = props.instance.dataTags ?? [];
+  // A command-line provider is named by its provider alone ("Codex", not
+  // "Codex CLI"), so its grey label is just that name, and it is hidden when
+  // the account already carries it.
   const runtimeLabel = isClaude
     ? "Agent SDK"
     : acpInstance !== undefined
@@ -933,7 +951,7 @@ function ProviderRow(props: ProviderRowProps) {
       : isPi || isOhMyPi
         ? "RPC"
         : isCli || isCodex
-          ? "CLI"
+          ? ""
           : isImageProfile
             ? "Image"
             : "HTTP";
@@ -1223,6 +1241,19 @@ function ProviderRow(props: ProviderRowProps) {
                 {props.probing ? "Checking…" : "Check connection"}
               </OctantButton>
             )}
+            {props.instance.enabled && signsInWithOwnCli(props.instance) ? (
+              <AccountSignIn
+                disabled={disabled}
+                displayName={name}
+                instanceId={props.instance.id}
+                onBegin={props.onBeginProviderAuthentication}
+                onComplete={props.onCompleteProviderAuthentication}
+                onSignedIn={() => void props.onProbe(props.instance.id, { quiet: true })}
+                {...(props.onOpenExternalUrl === undefined
+                  ? {}
+                  : { onOpenExternalUrl: props.onOpenExternalUrl })}
+              />
+            ) : null}
             {props.onLocateBinary !== undefined &&
             canLocateRuntimeBinary(props.instance.driverKind) ? (
               <OctantButton
@@ -1796,10 +1827,11 @@ function ProviderRow(props: ProviderRowProps) {
                   <div className="provider-card__facts provider-card__facts--claude">
                     <span>
                       Authentication:{" "}
-                      {props.instance.configuration.authentication === "api-key"
-                        ? "Anthropic API key"
-                        : "Claude subscription"}
+                      {claudeAuthenticationLabel(props.instance.configuration.authentication)}
                     </span>
+                    {props.instance.configuration.gatewayBaseUrl === undefined ? null : (
+                      <span>Gateway: {props.instance.configuration.gatewayBaseUrl}</span>
+                    )}
                     {props.usageLimitsClient === undefined ? null : (
                       <ProviderUsageLimitsPanel
                         client={props.usageLimitsClient}
@@ -2296,7 +2328,9 @@ function authenticationGuidance(
     case "claude":
       return instance.configuration.authentication === "api-key"
         ? `Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in ${hostCredentialStore(hostPlatform)}, then check the connection again.`
-        : "Authenticate with the official Claude Code app or CLI, then check the connection again.";
+        : instance.configuration.authentication === "gateway"
+          ? `Add or replace the gateway token in the Octant host. It remains write-only and is stored in ${hostCredentialStore(hostPlatform)}, then check the connection again.`
+          : "Authenticate with the official Claude Code app or CLI, then check the connection again.";
     case "anthropic-compatible":
       return `Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in ${hostCredentialStore(hostPlatform)}, then check the connection again.`;
     case "azure-foundry":

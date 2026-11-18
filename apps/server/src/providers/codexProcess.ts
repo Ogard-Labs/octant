@@ -1,3 +1,5 @@
+import { trackSandboxChild } from "../process/sandboxRuntimePolicy";
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { spawn, type ChildProcess } from "node:child_process";
 import { stopWindowsProcessTree } from "../process/windowsProcessTree";
 import { isAtLeastRelease } from "./releaseVersion";
@@ -18,9 +20,18 @@ import { delimiter, dirname, isAbsolute, join } from "node:path";
 import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
 import { Effect, type Scope } from "effect";
 
-import { WINDOWS_SANDBOX_MISSING_REASON } from "@octant/domain/guardrail-policy";
+import {
+  WINDOWS_SANDBOX_MISSING_REASON,
+  WINDOWS_STRICT_REFUSAL,
+  windowsProviderLaunch,
+  type WindowsProviderLaunch,
+} from "@octant/domain/guardrail-policy";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import { WINDOWS_PROCESS_ENVIRONMENT_NAMES } from "../process/windowsEnvironment";
+import {
+  resolveWindowsProviderProgram,
+  windowsUnconfinedLaunch,
+} from "../process/windowsProviderProgram";
 import { processGroupHasRunningMember } from "../process/processGroupRunningMember";
 import {
   makeProcessConfinementLive,
@@ -77,13 +88,13 @@ export type CodexLaunchAuthority =
   | {
       readonly kind: "catalog";
       /**
-       * Read for a Windows host whose new threads start at Full access with
-       * the sandbox off, the only level Windows runs. There the catalog read
-       * runs unconfined, as the turns it serves do; without it Windows refuses
-       * the read, since its confined form needs a sandbox Windows lacks.
-       * Other platforms ignore it.
+       * Read for a Windows host whose new threads run with no Octant sandbox
+       * (`hostReadsProviderCatalogUnconfined`). There the catalog read runs
+       * unconfined, as the turns it serves do; without it Windows refuses the
+       * read, since its confined form needs a sandbox Windows lacks. Other
+       * platforms ignore it.
        */
-      readonly forOpenFullAccess?: true;
+      readonly unconfinedOnWindows?: true;
     }
   | {
       readonly kind: "thread";
@@ -99,6 +110,7 @@ export type CodexLaunchAuthority =
        * deny-default profile and proxied egress instead of running unwrapped.
        */
       readonly fullAccessSandbox?: boolean;
+      readonly sandboxPolicy?: SandboxPolicySelection;
       /**
        * The person let Codex run its own subagents. Their requests reach the
        * parent's approval path on their own thread ids, at every level.
@@ -114,7 +126,7 @@ export type CodexLaunchAuthority =
        * Strict is off for this lease. Absent is Strict, so a caller that never
        * resolved it keeps Octant's profile and never loosens a launch.
        */
-      readonly strict?: false;
+      readonly strict?: boolean;
     };
 
 /**
@@ -171,26 +183,69 @@ export interface CodexProcessOptions {
   readonly confinement?: ProcessConfinementPort;
   readonly platform?: NodeJS.Platform;
   /**
-   * Whether a catalog read on a Windows host is made for open Full access
-   * (the host's new threads start there); read as each catalog read starts.
+   * Whether a catalog read on a Windows host runs unconfined, because the
+   * host's new threads run with no Octant sandbox; read as each catalog read
+   * starts.
    */
-  readonly windowsCatalogForOpenFullAccess?: () => boolean;
+  readonly windowsCatalogUnconfined?: () => boolean;
   /** Routes the app-server through its own egress proxy below Full access. */
   readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
   /** The Project's registered servers, for the runtime's own `ssh` below Full access. */
   readonly serverAccess?: ProviderServerAccessPort;
 }
 
-/** Leaves a launch as asked: the form Full access takes, with no sandbox. */
+/**
+ * Where the program to point Settings at sits when an npm install of Codex
+ * cannot be started on Windows: the npm launcher is a Node script that starts
+ * the native program the package carries.
+ */
+const CODEX_WINDOWS_PROGRAM_HINT =
+  "the codex.exe the @openai/codex package carries in its vendor folder";
+
 const UNCONFINED: ProcessConfinementPort = {
   prepare: ({ executable, args }) => ({ command: executable, args }),
 };
 
-/** Whether a launch runs with no sandbox on Windows, the only form it has there. */
-function runsUnconfinedOnWindows(authority: CodexLaunchAuthority): boolean {
-  return authority.kind === "catalog"
-    ? authority.forOpenFullAccess === true
-    : authority.executionPolicy === "full-access" && authority.fullAccessSandbox !== true;
+/** Native provider execution and account metadata never attest a Strict boundary. */
+function runsWithoutOctantConfinement(
+  authority: CodexLaunchAuthority,
+  platform: NodeJS.Platform,
+): boolean {
+  if (authority.kind === "catalog") return true;
+  return (
+    authority.strict !== true &&
+    authority.fullAccessSandbox !== true &&
+    authority.sandboxPolicy === undefined &&
+    (authority.strict === false ||
+      authority.executionPolicy === "full-access" ||
+      platform === "win32")
+  );
+}
+
+/**
+ * How one launch runs on Windows, from that launch's own authority. Windows
+ * has no Octant sandbox, so a launch there runs unconfined (Full access, or a
+ * level below it outside Strict, where Codex's own sandbox and approvals hold
+ * it, or a catalog read made for such a host) or is refused with the reason.
+ */
+function codexWindowsLaunch(authority: CodexLaunchAuthority): WindowsProviderLaunch {
+  if (authority.kind === "catalog") {
+    return authority.unconfinedOnWindows === true
+      ? { status: "unconfined", approvals: "none" }
+      : { status: "refused", reason: WINDOWS_SANDBOX_MISSING_REASON };
+  }
+  if (authority.sandboxPolicy !== undefined)
+    return { status: "refused", reason: WINDOWS_STRICT_REFUSAL };
+  return windowsProviderLaunch({
+    mode: authority.mode,
+    executionPolicy: authority.executionPolicy,
+    fullAccessSandbox: authority.fullAccessSandbox,
+    strict: authority.strict,
+    // A Chat thread gives Codex no execution environment and turns its shell,
+    // image, plugin and app features off on every start and resume, so it
+    // has no folder or shell without Octant's sandbox.
+    chatWithoutFolderOrShell: true,
+  });
 }
 
 const DEFAULT_OCTANT_VERSION = "0.0.0";
@@ -800,6 +855,7 @@ const CODEX_SEATBELT_SERVICE_RULES = [
 ] as const;
 
 interface CodexLaunch {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly command: string;
   readonly args: ReadonlyArray<string>;
   readonly cwd: string | undefined;
@@ -844,10 +900,13 @@ export function prepareCodexLaunch(input: {
   | { readonly status: "prepared"; readonly launch: CodexLaunch }
   | { readonly status: "refused"; readonly failure: ProviderFailure } {
   const { authority } = input;
+  if (input.platform === "win32") return prepareWindowsCodexLaunch({ ...input, authority });
   if (
     authority.kind === "thread" &&
-    authority.executionPolicy === "full-access" &&
-    authority.fullAccessSandbox !== true
+    (authority.executionPolicy === "full-access" || threadRunsNativeSandbox(authority)) &&
+    authority.strict !== true &&
+    authority.fullAccessSandbox !== true &&
+    authority.sandboxPolicy === undefined
   ) {
     return {
       status: "prepared",
@@ -855,42 +914,11 @@ export function prepareCodexLaunch(input: {
         command: input.binaryPath,
         args: input.args,
         cwd: authority.root,
-        environment: input.environment,
+        environment: { ...input.environment, ...input.network?.environment },
         release: () => undefined,
       },
     };
   }
-  if (input.platform === "win32" && authority.kind === "catalog" && authority.forOpenFullAccess) {
-    // A scratch working directory of its own, removed when the read ends.
-    let scratch: string | undefined;
-    try {
-      scratch = mkdtempSync(join(tmpdir(), "octant-codex-catalog-"));
-    } catch {
-      return {
-        status: "refused",
-        failure: failure("unavailable", "Codex catalog folder could not be created."),
-      };
-    }
-    const folder = scratch;
-    return {
-      status: "prepared",
-      launch: {
-        command: input.binaryPath,
-        args: input.args,
-        cwd: folder,
-        environment: input.environment,
-        release: () => rmSync(folder, { recursive: true, force: true }),
-      },
-    };
-  }
-  // Every other launch runs inside a sandbox, Octant's or Codex's own, which
-  // Octant does not configure on Windows yet; refused here, before a scratch
-  // directory is made for it.
-  if (input.platform === "win32")
-    return {
-      status: "refused",
-      failure: failure("incompatible", WINDOWS_SANDBOX_MISSING_REASON),
-    };
   if (authority.kind === "thread" && threadRunsNativeSandbox(authority)) {
     // Codex's own workspace-write sandbox holds each command it runs; each
     // turn names the Project's folders as its writable roots
@@ -961,6 +989,10 @@ export function prepareCodexLaunch(input: {
       executable: input.binaryPath,
       args: input.args,
       boundRoot: root,
+      sandboxProviderChannel: true,
+      ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined
+        ? { sandboxPolicy: authority.sandboxPolicy }
+        : {}),
       extraBoundRoots: extraFolders,
       temporaryDirectory,
       networkEgress,
@@ -1001,7 +1033,15 @@ export function prepareCodexLaunch(input: {
     });
     return {
       status: "prepared",
-      launch: { ...launch, cwd: root, environment, release },
+      launch: {
+        ...launch,
+        cwd: root,
+        environment: { ...environment, ...launch.environment },
+        release,
+        ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined
+          ? { sandboxPolicy: authority.sandboxPolicy }
+          : {}),
+      },
     };
   } catch (error) {
     release();
@@ -1017,6 +1057,71 @@ export function prepareCodexLaunch(input: {
       ),
     };
   }
+}
+
+/**
+ * A Codex launch on Windows, decided from that launch's own authority. Windows
+ * has no Octant sandbox, so a launch runs unconfined, with Codex's own sandbox
+ * and approvals below Full access (`codexExecutionSettings`), or is refused
+ * with the reason. An npm shim is resolved to the program it starts, never run
+ * through a shell.
+ */
+function prepareWindowsCodexLaunch(input: {
+  readonly binaryPath: string;
+  readonly args: ReadonlyArray<string>;
+  readonly authority: CodexLaunchAuthority;
+  readonly environment: NodeJS.ProcessEnv;
+}):
+  | { readonly status: "prepared"; readonly launch: CodexLaunch }
+  | { readonly status: "refused"; readonly failure: ProviderFailure } {
+  const { authority } = input;
+  const form = codexWindowsLaunch(authority);
+  if (form.status === "refused") {
+    return { status: "refused", failure: failure("incompatible", form.reason) };
+  }
+  const program = resolveWindowsProviderProgram({
+    displayName: "Codex",
+    executable: input.binaryPath,
+    args: input.args,
+    environment: input.environment,
+    programHint: CODEX_WINDOWS_PROGRAM_HINT,
+  });
+  if (program.status === "refused") {
+    return { status: "refused", failure: failure("invalid-configuration", program.message) };
+  }
+  if (authority.kind === "thread") {
+    return {
+      status: "prepared",
+      launch: {
+        command: program.command,
+        args: program.args,
+        cwd: authority.root,
+        environment: input.environment,
+        release: () => undefined,
+      },
+    };
+  }
+  // A catalog read gets a scratch working directory of its own, removed when
+  // the read ends.
+  let scratch: string;
+  try {
+    scratch = mkdtempSync(join(tmpdir(), "octant-codex-catalog-"));
+  } catch {
+    return {
+      status: "refused",
+      failure: failure("unavailable", "Codex catalog folder could not be created."),
+    };
+  }
+  return {
+    status: "prepared",
+    launch: {
+      command: program.command,
+      args: program.args,
+      cwd: scratch,
+      environment: input.environment,
+      release: () => rmSync(scratch, { recursive: true, force: true }),
+    },
+  };
 }
 
 /**
@@ -1048,6 +1153,7 @@ function acquireCodexAppServer(
       env: launch.environment,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    trackSandboxChild(launch.sandboxPolicy, child);
     const terminateGroup = makeProcessTerminator(child, options.shutdownTimeoutMs);
     const rpc = makeCodexRpcClient({
       stdin: child.stdin,
@@ -1205,18 +1311,23 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
         const authority: CodexLaunchAuthority =
           requested.kind === "catalog" &&
           platform === "win32" &&
-          options.windowsCatalogForOpenFullAccess?.() === true
-            ? { kind: "catalog", forOpenFullAccess: true }
+          options.windowsCatalogUnconfined?.() === true
+            ? { kind: "catalog", unconfinedOnWindows: true }
             : requested;
-        // On Windows a launch that runs unconfined (open Full access, or a
-        // catalog read made for it) reads its version unconfined too: the
-        // runtime it precedes has the same reach, and the confined read has
-        // no Windows form. Every other launch keeps the confined read, which
-        // refuses on Windows.
-        const versionProbeConfinement =
-          platform === "win32" && runsUnconfinedOnWindows(authority)
-            ? UNCONFINED
-            : resolved.versionProbeConfinement;
+        // A native launch probes its executable natively. Metadata and version
+        // results never authorize a restricted launch; Strict admits it afresh.
+        const versionProbeConfinement = runsWithoutOctantConfinement(authority, platform)
+          ? UNCONFINED
+          : resolved.versionProbeConfinement;
+        // On Windows a launch that runs unconfined (Full access, a level below
+        // it outside Strict, or a catalog read made for such a host) reads its
+        // version unconfined too: the runtime it precedes has the same reach,
+        // and the confined read has no Windows form. Every other launch is
+        // refused there before anything runs.
+        const windowsLaunch = platform === "win32" ? codexWindowsLaunch(authority) : undefined;
+        if (windowsLaunch?.status === "refused") {
+          return Effect.fail(failure("incompatible", windowsLaunch.reason));
+        }
         const strict = !(authority.kind === "thread" && authority.strict === false);
         const launchEnvironment =
           environment ??
@@ -1246,9 +1357,19 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
                 : { inheritedEnvironment: launchEnvironment }),
               shutdownTimeoutMs: resolved.shutdownTimeoutMs,
               ...(onProcessStarted === undefined ? {} : { onProcessStarted }),
-              ...(versionProbeConfinement === undefined
-                ? {}
-                : { confinement: versionProbeConfinement }),
+              ...(windowsLaunch === undefined
+                ? versionProbeConfinement === undefined
+                  ? {}
+                  : { confinement: versionProbeConfinement }
+                : {
+                    confinement: windowsUnconfinedLaunch({
+                      displayName: "Codex",
+                      ...(launchEnvironment === undefined
+                        ? {}
+                        : { environment: launchEnvironment }),
+                      programHint: CODEX_WINDOWS_PROGRAM_HINT,
+                    }),
+                  }),
             });
             const appServerEnvironment =
               launchEnvironment ?? codexProcessEnvironment(binaryPath, process.env, strict);
@@ -1259,11 +1380,15 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
               authority.fullAccessSandbox === true;
             // Full access that keeps the sandbox stays inside Octant's profile,
             // so its network is held as Accept edits' is, as Claude's sandbox
-            // asks for it; open Full access gets no proxy.
+            // asks for it; open Full access gets no proxy, and neither does a
+            // Windows launch, which has no Octant wall to hold a proxy to.
             const network =
-              runtimePolicy === "full-access" && !keepsSandbox
+              (runtimePolicy === "full-access" && !keepsSandbox) || windowsLaunch !== undefined
                 ? undefined
                 : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                    ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined
+                      ? { sandboxPolicy: authority.sandboxPolicy }
+                      : {}),
                     runtime: "codex",
                     root: authority.kind === "thread" ? authority.root : "",
                     executionPolicy: keepsSandbox ? "auto-accept-edits" : runtimePolicy,
@@ -1273,14 +1398,22 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
             // as in Codex on its own, so a native-sandbox launch needs no
             // server folder.
             const servers =
-              authority.kind === "thread" && !threadRunsNativeSandbox(authority)
-                ? yield* acquireProviderServerAccess(options.serverAccess, {
-                    root: authority.root,
-                    // Inside Octant's profile the person's own SSH setup is
-                    // out of reach, so a sandboxed launch gets the server
-                    // folder the guarded levels get.
-                    executionPolicy: keepsSandbox ? "auto-accept-edits" : runtimePolicy,
-                  })
+              authority.kind === "thread" &&
+              !threadRunsNativeSandbox(authority) &&
+              windowsLaunch === undefined
+                ? yield* acquireProviderServerAccess(
+                    authority.kind === "thread" &&
+                      authority.sandboxPolicy?.policy.hostServices === "blocked"
+                      ? undefined
+                      : options.serverAccess,
+                    {
+                      root: authority.root,
+                      // Inside Octant's profile the person's own SSH setup is
+                      // out of reach, so a sandboxed launch gets the server
+                      // folder the guarded levels get.
+                      executionPolicy: keepsSandbox ? "auto-accept-edits" : runtimePolicy,
+                    },
+                  )
                 : undefined;
             const prepared = prepareCodexLaunch({
               binaryPath,

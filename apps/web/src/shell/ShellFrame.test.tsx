@@ -8,6 +8,12 @@ import {
 } from "@octant/contracts/shell";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { describe, expect, it, vi } from "vitest";
+import { MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
+import {
+  ENVIRONMENT_STRIP_WIDTH,
+  threadBoxMinimum,
+  WORKBENCH_DOCK_WIDTH,
+} from "./rightUtilityDockModel";
 import { ShellFrame } from "./ShellFrame";
 
 // Comments are stripped before matching: `cssRule` reads a rule's prelude as
@@ -29,7 +35,228 @@ function cssRule(selector: string): string {
   return match?.[2] ?? "";
 }
 
+const rootStyles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8").replace(
+  /\/\*[\s\S]*?\*\//g,
+  "",
+);
+
+function rootRule(selector: string): string {
+  // Every rule with this selector: a selector may be declared more than once.
+  const bodies = [...rootStyles.matchAll(/([^{}]+)\{([^{}]*)\}/gs)]
+    .filter((candidate) => candidate[1]?.trim() === selector)
+    .map((candidate) => candidate[2] ?? "");
+  expect(bodies.length, `missing CSS rule for ${selector}`).toBeGreaterThan(0);
+  return squash(bodies.join(" "));
+}
+
+/** CSS with its whitespace taken out, so a formatter's line breaks do not matter. */
+function squash(css: string): string {
+  return css.replace(/\s+/g, "");
+}
+
+describe("the line the thread header's tool row stands on", () => {
+  it("is the thread box's minimum, worked out in the stylesheet as the dock model works it out", () => {
+    const layer = rootRule(".workspace-layer");
+    // threadBoxMinimum: the thread's minimum and the section at most, what a
+    // tool region at its asked width leaves, and the thread's own minimum.
+    expect(layer).toContain(
+      squash(
+        "--octant-thread-box-min: min( calc(var(--octant-wide-primary-min) + var(--octant-env-strip-width, 300px)), max( " +
+          `calc(var(--octant-workspace-width, 100%) - ${WORKBENCH_DOCK_WIDTH}px), max( ` +
+          "var(--octant-narrow-primary-min), min( var(--octant-wide-primary-min), " +
+          `calc(var(--octant-workspace-width, 100%) - ${MIN_CONTEXT_SIDEBAR_WIDTH}px) ) ) ) );`,
+      ),
+    );
+    expect(threadBoxMinimum(1464, 1800)).toBe(1464 - WORKBENCH_DOCK_WIDTH);
+  });
+
+  it("ends the header's lead on that line, measured from the pane's edge, with the row 8px in", () => {
+    expect(rootRule(".workspace-pane__lead")).toContain(
+      squash("flex: 0 1 calc(var(--octant-thread-box-min, 100%) - var(--pane-header-start));"),
+    );
+    expect(rootRule(".workspace-pane__tools")).toContain(
+      squash("margin-right: var(--oct-space-2);"),
+    );
+  });
+
+  it("keeps the tool region out of the thread box's minimum, with Environment open or closed", () => {
+    expect(rootRule(".workspace-layer")).toContain(
+      squash(
+        "--octant-dock-thread-keep: max( var(--octant-wide-primary-min), calc(var(--octant-thread-box-min) - var(--octant-dock-env-width, 0px)), var(--octant-split-primary-min, 0px) );",
+      ),
+    );
+    const one = rootRule(".workspace-layer--wide-context-open");
+    const two = rootRule('.workspace-layer--wide-context-open[data-dock-tile-columns="2"]');
+    expect(one).toContain(squash("calc(100% - var(--octant-dock-thread-keep))"));
+    expect(two).toContain(squash("calc(100% - var(--octant-dock-thread-keep))"));
+    expect(two).toContain(
+      squash(
+        "--octant-dock-tool-room: calc( 100% - var(--octant-dock-thread-keep) - var(--octant-dock-env-width, 0px) );",
+      ),
+    );
+  });
+
+  it("lets the thread give before the sidebar, so opening Environment beside a tool does not move the thread", () => {
+    const open = cssRule(".shell.shell-frame.shell--wide-context-open").replace(/\s+/g, " ");
+    expect(open).toContain(
+      "100vw - var(--octant-rail-offset, 0px) - var(--octant-narrow-primary-min) - var(--octant-context-sidebar-min)",
+    );
+    // The thread's 560px holds whether or not the dock is open: the line is
+    // worked out from it before anything opens.
+    expect(shellStyles.replace(/\s+/g, " ")).toContain(
+      "@media (min-width: 1100px) { .shell.shell-frame { --octant-wide-primary-min: 560px; } }",
+    );
+  });
+
+  it("tells the stylesheet what the panes of a split keep, and nothing for one pane", () => {
+    const frame = (splitPrimaryMinimum: number | undefined) =>
+      render(
+        <ShellFrame
+          chrome={<header>Chrome</header>}
+          contextSidebarWidth={420}
+          material="opaque"
+          onCommitSidebarWidth={vi.fn()}
+          onPreviewSidebarWidth={vi.fn()}
+          sidebar={<aside>Sidebar</aside>}
+          sidebarResizable={false}
+          sidebarWidth={232}
+          splitPrimaryMinimum={splitPrimaryMinimum}
+          wideContextOpen
+          workspace={<main>Workspace</main>}
+        />,
+      ).container.firstElementChild?.getAttribute("style");
+    expect(frame(887)).toContain("--octant-split-primary-min: 887px");
+    expect(frame(undefined)).not.toContain("--octant-split-primary-min");
+  });
+
+  it("publishes the Environment section's width to the stylesheet whether or not it is open", () => {
+    const { container } = render(
+      <ShellFrame
+        chrome={<header>Chrome</header>}
+        contextSidebarWidth={420}
+        material="opaque"
+        onCommitSidebarWidth={vi.fn()}
+        onPreviewSidebarWidth={vi.fn()}
+        sidebar={<aside>Sidebar</aside>}
+        sidebarResizable={false}
+        sidebarWidth={232}
+        wideContextOpen={false}
+        workspace={<main>Workspace</main>}
+      />,
+    );
+    expect(container.firstElementChild?.getAttribute("style")).toContain(
+      `--octant-env-strip-width: ${ENVIRONMENT_STRIP_WIDTH}px`,
+    );
+  });
+});
+
 describe("ShellFrame", () => {
+  function frameFor(collapsed: boolean, width: number) {
+    return (
+      <ShellFrame
+        chrome={<header>Chrome</header>}
+        contextSidebarWidth={360}
+        material="opaque"
+        onCommitSidebarWidth={vi.fn()}
+        onPreviewSidebarWidth={vi.fn()}
+        sidebar={
+          <aside className="sidebar" data-octant-sidebar>
+            Sidebar
+          </aside>
+        }
+        sidebarCollapsed={collapsed}
+        sidebarResizable
+        sidebarWidth={width}
+        wideContextOpen={false}
+        workspace={<main>Workspace</main>}
+      />
+    );
+  }
+
+  function stubWindowMedia(reducedMotion: boolean) {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query.includes("reduce") ? reducedMotion : query.includes("min-width"),
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+  }
+
+  it("slides the sidebar when it is shut and keeps a still copy through the closing slide", () => {
+    stubWindowMedia(false);
+    try {
+      const { container, rerender } = render(frameFor(false, 232));
+      const shell = container.querySelector(".shell-frame");
+      expect(shell?.hasAttribute("data-octant-sidebar-sliding")).toBe(false);
+      rerender(frameFor(true, 232));
+      expect(shell?.getAttribute("data-octant-sidebar-sliding")).toBe("true");
+      expect(shell?.querySelector("[data-octant-sidebar-ghost]")).not.toBeNull();
+      fireEvent.transitionEnd(shell as Element, {
+        propertyName: "--octant-rendered-sidebar-width",
+      });
+      expect(shell?.hasAttribute("data-octant-sidebar-sliding")).toBe(false);
+      expect(shell?.querySelector("[data-octant-sidebar-ghost]")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not slide when the sidebar's edge is dragged to a new width", () => {
+    stubWindowMedia(false);
+    try {
+      const { container, rerender } = render(frameFor(false, 232));
+      rerender(frameFor(false, 300));
+      rerender(frameFor(false, 340));
+      const shell = container.querySelector(".shell-frame");
+      expect(shell?.hasAttribute("data-octant-sidebar-sliding")).toBe(false);
+      expect(shell?.getAttribute("style")).toContain("--octant-sidebar-width: 340px");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("changes at once, without sliding, when the window has asked for reduced motion", () => {
+    stubWindowMedia(true);
+    try {
+      const { container, rerender } = render(frameFor(false, 232));
+      rerender(frameFor(true, 232));
+      expect(
+        container.querySelector(".shell-frame")?.hasAttribute("data-octant-sidebar-sliding"),
+      ).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("lays the ground in the frame before the sidebar, the chrome and the workspace", () => {
+    const { container } = render(
+      <ShellFrame
+        backdrop={<div data-testid="shell-ground" />}
+        chrome={<header>Chrome</header>}
+        contextSidebarWidth={360}
+        material="opaque"
+        onCommitSidebarWidth={vi.fn()}
+        onPreviewSidebarWidth={vi.fn()}
+        sidebar={<aside>Sidebar</aside>}
+        sidebarResizable={false}
+        sidebarWidth={232}
+        wideContextOpen={false}
+        welcomeGround={<div data-testid="welcome-ground" />}
+        workspace={<main>Workspace</main>}
+      />,
+    );
+    const order = [...(container.querySelector(".shell-frame")?.children ?? [])].map(
+      (child) => child.getAttribute("data-testid") ?? child.tagName,
+    );
+    const ground = Math.max(order.indexOf("shell-ground"), order.indexOf("welcome-ground"));
+    expect(order.indexOf("shell-ground")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("welcome-ground")).toBeGreaterThanOrEqual(0);
+    for (const later of ["ASIDE", "HEADER", "MAIN"]) {
+      const at = order.indexOf(later);
+      if (at >= 0) expect(at, later).toBeGreaterThan(ground);
+    }
+  });
+
   it("reserves a real native drag target at the top edge without covering the traffic lights", () => {
     const { container } = render(
       <ShellFrame
@@ -46,27 +273,16 @@ describe("ShellFrame", () => {
       />,
     );
 
-    const dragTarget = container.querySelector("[data-native-window-drag-strip]");
-    expect(dragTarget).toHaveClass("shell-frame__native-drag-strip", "window-drag-region");
-    expect(cssRule(".shell-frame__native-drag-strip")).toContain("display: none;");
-    const nativeDragTarget = cssRule(
-      'html[data-octant-native-host="true"] .shell-frame__native-drag-strip',
-    );
-    expect(nativeDragTarget).toContain("position: fixed;");
-    expect(nativeDragTarget).toContain("top: 0;");
-    expect(nativeDragTarget).toContain("left: 112px;");
-    // One measured reserve now serves both the drag strip and the pane header,
-    // so the strip cannot end at a different place than the controls begin.
-    expect(nativeDragTarget).toContain("right: var(--octant-window-chrome-reserved-width, 148px);");
-    expect(nativeDragTarget).toContain(
-      "height: var(--octant-native-hidden-inset-titlebar-height);",
-    );
-    expect(nativeDragTarget).toContain("pointer-events: auto;");
-    expect(
-      cssRule(
-        'html[data-octant-native-host="true"] .shell--sidebar-collapsed .shell-frame__native-drag-strip',
-      ),
-    ).toContain("left: var(--octant-window-chrome-leading-width, 148px);");
+    const dragTarget = container.querySelector("[data-window-drag-band]");
+    expect(dragTarget).toHaveClass("shell-frame__title-band-drag", "window-drag-region");
+    expect(container.firstElementChild?.firstElementChild).toBe(dragTarget);
+    expect(cssRule(".shell-frame__title-band-drag")).toContain("display: none;");
+    const band = cssRule('html[data-octant-native-host="true"] .shell-frame__title-band-drag');
+    expect(band).toContain("position: fixed;");
+    expect(band).toContain("top: 0;");
+    expect(band).toContain("left: 0;");
+    expect(band).toContain("right: 0;");
+    expect(band).toContain("height: var(--oct-title-rail-h);");
   });
 
   it("puts the navigation sidebar ahead of the window chrome in tab order", () => {
@@ -129,11 +345,11 @@ describe("ShellFrame", () => {
     });
     expect(shell).not.toHaveAttribute("data-client-frame");
     expect(shell?.children).toHaveLength(5);
-    expect(shell?.children[0]).toBe(screen.getByRole("complementary", { name: "Octant sidebar" }));
-    expect(shell?.children[1]).toHaveClass("shell-frame__sidebar-resize");
-    expect(shell?.children[2]).toBe(screen.getByRole("banner", { name: "Workspace actions" }));
-    expect(shell?.children[3]).toHaveClass("workspace-layer");
-    expect(shell?.children[4]).toHaveClass("shell-frame__native-drag-strip");
+    expect(shell?.children[0]).toHaveClass("shell-frame__title-band-drag");
+    expect(shell?.children[1]).toBe(screen.getByRole("complementary", { name: "Octant sidebar" }));
+    expect(shell?.children[2]).toHaveClass("shell-frame__sidebar-resize");
+    expect(shell?.children[3]).toBe(screen.getByRole("banner", { name: "Workspace actions" }));
+    expect(shell?.children[4]).toHaveClass("workspace-layer");
     expect(screen.getAllByRole("banner")).toHaveLength(1);
     expect(screen.getAllByRole("main")).toHaveLength(1);
   });
@@ -377,25 +593,8 @@ describe("ShellFrame", () => {
     );
   });
 
-  it("keeps the narrow Chat draft surface inside the scrollable 200% panel", () => {
-    expect(shellStyles).toMatch(
-      /@media \(max-width: 640px\)[\s\S]*\.draft-thread__canvas\s*\{[^}]*width:\s*calc\(100% - 24px\);[^}]*padding:\s*24px 12px;/,
-    );
-    expect(shellStyles).toMatch(
-      /@media \(max-width: 640px\)[\s\S]*\.draft-thread\.chat-welcome\s*\{[^}]*box-sizing:\s*border-box;[^}]*height:\s*auto;[^}]*overflow-y:\s*auto;/,
-    );
-    expect(shellStyles).toMatch(
-      /@media \(max-width: 640px\)[\s\S]*\.draft-thread\.chat-welcome\s+\.welcome\s*\{[^}]*box-sizing:\s*border-box;[^}]*justify-content:\s*flex-start;[^}]*padding:\s*12px 0;/,
-    );
-  });
-
-  it("stands the narrow Chat start screen's composer the panel's own inset from each edge", () => {
-    // 44px of gutter (a 12px margin and 12px of padding inside the panel's 20px)
-    // was the fault: the welcome fills the panel and adds none.
-    const welcome = shellStyles.match(
-      /@media \(max-width: 640px\)[\s\S]*?\.draft-thread\.chat-welcome\s+\.welcome\s*\{([^}]*)\}/,
-    );
-    expect(welcome?.[1]).toMatch(/width:\s*100%;/);
-    expect(welcome?.[1]).not.toMatch(/calc\(100% - 24px\)/);
+  it("gives Chat's start screen no phone-width layout of its own, so it matches Code's", () => {
+    expect(shellStyles).not.toMatch(/\.draft-thread\.chat-welcome/);
+    expect(shellStyles).not.toMatch(/\.draft-thread__canvas/);
   });
 });

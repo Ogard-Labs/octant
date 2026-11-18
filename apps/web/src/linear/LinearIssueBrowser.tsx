@@ -9,7 +9,7 @@ import type {
   LinearIssueRow,
 } from "@octant/contracts/linear-issues";
 import { decodeLinearIssueListInput } from "@octant/contracts/linear-issues";
-import { CircleDot, Search, X } from "lucide-react";
+import { CircleDot, Search, X } from "../ui/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { failureMessage } from "../lib/failureMessage";

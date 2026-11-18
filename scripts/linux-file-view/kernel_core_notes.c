@@ -189,6 +189,27 @@ static bool decode(struct input *input, uint32_t tid, unsigned signal, struct no
   return true;
 }
 
+/* Only a direct child of the still-retained registered controller qualifies.
+ * The kernel-supplied pidfd separately binds the crashing task itself. */
+static bool direct_child(uint64_t child, uint64_t parent)
+{
+  if (!child || child > INT_MAX || !parent || parent > INT_MAX || child == parent) return false;
+  char path[64], status[4097];
+  snprintf(path, sizeof(path), "/proc/%llu/status", (unsigned long long)child);
+  int file = open(path, O_RDONLY | O_CLOEXEC);
+  ssize_t size = file >= 0 ? read(file, status, sizeof(status) - 1) : -1;
+  if (file >= 0) close(file);
+  if (size <= 0) return false;
+  status[size] = 0;
+  for (char *line = status; line && *line;) {
+    unsigned long long actual;
+    if (sscanf(line, "PPid: %llu", &actual) == 1) return actual == parent;
+    line = strchr(line, '\n');
+    if (line) line++;
+  }
+  return false;
+}
+
 #ifndef OCTANT_CORE_NOTES_TEST
 struct module { unsigned id; const char *path; };
 #include "octant_core_modules.h"
@@ -210,11 +231,11 @@ static bool number(const char *text, uint64_t *value)
   *value = result;
   return true;
 }
-static bool identity(uint64_t pid, uint64_t role, uint64_t device, uint64_t inode)
+static bool image_identity(uint64_t pid, uint64_t role, uint64_t device, uint64_t inode)
 {
-  const char *expected = role == 1 ? "/policy-broker" : role == 2 ? "/core-probe" : NULL;
+  const char *expected = role == 1 ? "/policy-broker" : role == 2 ? "/core-probe" : role == 3 ? "/session-cases" : NULL;
   if (!expected || !pid || pid > INT_MAX) return false;
-  char path[64], info[513];
+  char path[64];
   struct stat actual = {0}, installed = {0}, target_ns = {0}, initial_ns = {0};
   snprintf(path, sizeof(path), "/proc/%llu/exe", (unsigned long long)pid);
   int file = open(path, O_PATH | O_CLOEXEC);
@@ -226,7 +247,13 @@ static bool identity(uint64_t pid, uint64_t role, uint64_t device, uint64_t inod
   snprintf(path, sizeof(path), "/proc/%llu/ns/pid", (unsigned long long)pid);
   if (stat(path, &target_ns) || stat("/proc/1/ns/pid", &initial_ns) ||
       target_ns.st_dev != initial_ns.st_dev || target_ns.st_ino != initial_ns.st_ino) return false;
-  file = open("/proc/self/fdinfo/3", O_RDONLY | O_CLOEXEC);
+  return true;
+}
+static bool identity(uint64_t pid, uint64_t role, uint64_t device, uint64_t inode)
+{
+  if (!image_identity(pid, role, device, inode)) return false;
+  char info[513];
+  int file = open("/proc/self/fdinfo/3", O_RDONLY | O_CLOEXEC);
   ssize_t size = file >= 0 ? read(file, info, sizeof(info) - 1) : -1;
   if (file >= 0) close(file);
   if (size <= 0) return false;
@@ -239,6 +266,13 @@ static bool identity(uint64_t pid, uint64_t role, uint64_t device, uint64_t inod
   }
   return false;
 }
+static bool owned_identity(const uint64_t args[8])
+{
+  if (!identity(args[0], args[5], args[6], args[7])) return false;
+  if (args[0] == args[4]) return true;
+  return args[5] == 3 && image_identity(args[4], args[5], args[6], args[7]) &&
+    direct_child(args[0], args[4]);
+}
 static bool mapping_time_available(long long until)
 {
   long long now = milliseconds();
@@ -248,7 +282,7 @@ static unsigned module_identity(const struct notes *notes, const uint64_t args[8
   struct stat *backing, long long until)
 {
   if (!notes->file_mapping || !mapping_time_available(until) ||
-      !identity(args[0], args[5], args[6], args[7]) || !mapping_time_available(until)) goto unknown;
+      !owned_identity(args) || !mapping_time_available(until)) goto unknown;
   char path[128];
   snprintf(path, sizeof(path), "/proc/%llu/map_files/%llx-%llx",
     (unsigned long long)args[0], (unsigned long long)notes->map_start,
@@ -258,7 +292,7 @@ static unsigned module_identity(const struct notes *notes, const uint64_t args[8
   bool found = file >= 0 && !fstat(file, backing) && S_ISREG(backing->st_mode);
   if (file >= 0) close(file);
   if (!found || !mapping_time_available(until) ||
-      !identity(args[0], args[5], args[6], args[7]) || !mapping_time_available(until)) goto unknown;
+      !owned_identity(args) || !mapping_time_available(until)) goto unknown;
   unsigned matched = 0;
   for (size_t index = 0; index < sizeof(modules) / sizeof(modules[0]); index++) {
     if (!mapping_time_available(until)) goto unknown;
@@ -270,7 +304,7 @@ static unsigned module_identity(const struct notes *notes, const uint64_t args[8
     if (!mapping_time_available(until)) goto unknown;
     if (same) { if (matched) return 0; matched = modules[index].id; }
   }
-  if (!mapping_time_available(until) || !identity(args[0], args[5], args[6], args[7]) ||
+  if (!mapping_time_available(until) || !owned_identity(args) ||
       !mapping_time_available(until)) goto unknown;
   return matched;
 unknown:
@@ -286,8 +320,8 @@ int main(int argc, char **argv)
   uint64_t args[8] = {0};
   bool owned = argc == 9;
   for (int index = 1; index < argc && owned; index++) owned = number(argv[index], &args[index - 1]);
-  owned = owned && args[0] == args[4] && args[1] > 0 && args[1] <= INT_MAX &&
-    args[2] > 0 && args[2] < 65 && args[3] == 3 && identity(args[0], args[5], args[6], args[7]);
+  owned = owned && args[1] > 0 && args[1] <= INT_MAX &&
+    args[2] > 0 && args[2] < 65 && args[3] == 3 && owned_identity(args);
   struct input input = {.fd = STDIN_FILENO, .deadline = until};
   struct notes notes = {0};
   int flags = fcntl(STDIN_FILENO, F_GETFL);
@@ -303,9 +337,10 @@ int main(int argc, char **argv)
     failure == ETIMEDOUT ? "timeout" : failure == ENODATA ? "truncated" : "invalid-notes";
   char result[2048];
   int length = snprintf(result, sizeof(result),
-    "OCTANT_CORE_NOTES {\"confirmed\":%s,\"stage\":\"%s\",\"owned\":%s,\"pidfdValidated\":%s,\"pid\":%llu,\"tid\":%llu,\"role\":%llu,\"helperPid\":%ld,\"device\":%llu,\"inode\":%llu,\"signal\":%llu,\"siCode\":%d,\"hardwareFault\":%s,\"terminationContext\":true,\"errno\":%d,\"bytes\":%zu,\"firstLoad\":%llu,\"beforeMemory\":%s,\"address\":\"0x%llx\",\"rip\":\"0x%llx\",\"rsp\":\"0x%llx\",\"rbp\":\"0x%llx\",\"rsi\":\"0x%llx\",\"rdx\":\"0x%llx\",\"rax\":\"0x%llx\",\"fileMapping\":%s,\"mapStart\":\"0x%llx\",\"mapEnd\":\"0x%llx\",\"fileOffset\":\"0x%llx\",\"mappingDevice\":%llu,\"mappingInode\":%llu,\"moduleId\":%u}\n",
+    "OCTANT_CORE_NOTES {\"confirmed\":%s,\"stage\":\"%s\",\"owned\":%s,\"pidfdValidated\":%s,\"pid\":%llu,\"tid\":%llu,\"role\":%llu,\"registeredPid\":%llu,\"directWorker\":%s,\"helperPid\":%ld,\"device\":%llu,\"inode\":%llu,\"signal\":%llu,\"siCode\":%d,\"hardwareFault\":%s,\"terminationContext\":true,\"errno\":%d,\"bytes\":%zu,\"firstLoad\":%llu,\"beforeMemory\":%s,\"address\":\"0x%llx\",\"rip\":\"0x%llx\",\"rsp\":\"0x%llx\",\"rbp\":\"0x%llx\",\"rsi\":\"0x%llx\",\"rdx\":\"0x%llx\",\"rax\":\"0x%llx\",\"fileMapping\":%s,\"mapStart\":\"0x%llx\",\"mapEnd\":\"0x%llx\",\"fileOffset\":\"0x%llx\",\"mappingDevice\":%llu,\"mappingInode\":%llu,\"moduleId\":%u}\n",
     confirmed ? "true" : "false", stage, owned ? "true" : "false", owned ? "true" : "false",
-    (unsigned long long)args[0], (unsigned long long)args[1], (unsigned long long)args[5], (long)getpid(),
+    (unsigned long long)args[0], (unsigned long long)args[1], (unsigned long long)args[5], (unsigned long long)args[4],
+    owned && args[0] != args[4] ? "true" : "false", (long)getpid(),
     (unsigned long long)args[6], (unsigned long long)args[7], (unsigned long long)args[2], notes.code,
     confirmed && args[2] == SIGSEGV && notes.code > 0 ? "true" : "false", failure, input.bytes,
     (unsigned long long)notes.first_load, confirmed ? "true" : "false", (unsigned long long)notes.address,
@@ -375,6 +410,10 @@ static size_t mapping_fixture(unsigned char *bytes)
 int main(void)
 {
   alarm(3);
+  if (!direct_child((uint64_t)getpid(), (uint64_t)getppid()) ||
+      direct_child((uint64_t)getpid(), getppid() == 1 ? 2 : 1) ||
+      direct_child((uint64_t)getpid(), (uint64_t)getpid()) ||
+      direct_child((uint64_t)getpid(), 0) || direct_child(UINT64_MAX, (uint64_t)getppid())) return 14;
   for (unsigned test = 0; test < 9; test++) {
     unsigned char bytes[8192]; size_t end = fixture(bytes), length = 4112;
     if (test == 1) length = 20;

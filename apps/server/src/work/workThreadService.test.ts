@@ -722,6 +722,45 @@ describe("WorkThreadService", () => {
     expect(inUnit).toEqual(["work.thread-updated@1", "guardrail.level-lowered@1"]);
   });
 
+  it.each([true, false])(
+    "keeps the older Full-access boundary when explicitly migrating Work to Strict %s",
+    async (strict) => {
+      const f = serviceFixture({
+        threads: [thread({ access: "full-access", fullAccessSandbox: true })],
+      });
+      const result = await f.service.execute(ids.window, {
+        kind: "change-work-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        access: "full-access",
+        strict,
+      });
+      if (!("kind" in result) || result.kind !== "thread-updated")
+        throw new Error("No updated thread");
+      expect(result.thread.strict).toBe(strict);
+      const { strict: _newPreference, ...olderReader } = result.thread;
+      expect(olderReader.fullAccessSandbox === true).toBe(strict);
+    },
+  );
+
+  it("clears a Work thread's Strict override and legacy flag when the person chooses inheritance", async () => {
+    const f = serviceFixture({
+      threads: [thread({ access: "full-access", strict: false, fullAccessSandbox: true })],
+    });
+    const result = await f.service.execute(ids.window, {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "full-access",
+      strict: null,
+    });
+    if (!("kind" in result) || result.kind !== "thread-updated")
+      throw new Error("No updated thread");
+    expect(result.thread).not.toHaveProperty("strict");
+    expect(result.thread).not.toHaveProperty("fullAccessSandbox");
+    expect(result.thread.access).toBe("full-access");
+  });
+
   it("journals the person's per-run Full access flag on the thread until it leaves Full access, and refuses it at another level or from a routine", async () => {
     const fixture = serviceFixture({ threads: [thread()] });
     const raised = await fixture.service.execute(ids.window, {
@@ -760,6 +799,34 @@ describe("WorkThreadService", () => {
         fullAccessRunFlag: true,
       }),
     ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+  });
+
+  it("refuses the per-run Full access flag under Strict, from Settings or the thread's own choice, and accepts it once the thread turns Strict off", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+    await fixture.service.execute(ids.window, {
+      kind: "update-work-settings",
+      expectedVersion: 0,
+      defaultAccess: "ask-first",
+      defaultStrict: true,
+    });
+    const raise = (extra: { readonly strict?: boolean }) =>
+      fixture.service.execute(ids.window, {
+        kind: "change-work-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        access: "full-access",
+        fullAccessRunFlag: true,
+        ...extra,
+      });
+    await expect(raise({})).rejects.toMatchObject({
+      failure: { category: "invalid", message: expect.stringMatching(/Strict/) },
+    });
+    await expect(raise({ strict: true })).rejects.toMatchObject({
+      failure: { category: "invalid", message: expect.stringMatching(/Strict/) },
+    });
+    await expect(raise({ strict: false })).resolves.toMatchObject({
+      thread: { access: "full-access", fullAccessRunFlag: true },
+    });
   });
 
   it("journals who lowered Work's default or a thread's level, from which level and at which scope", async () => {

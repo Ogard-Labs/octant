@@ -190,9 +190,13 @@ export function CommandCredentialRequests(props: {
             ))}
           </ul>
           <p>
-            {request.executionPolicy === "full-access"
-              ? "Full access: this executable and its descendants receive the credentials with ordinary Full access, including network access."
-              : `${request.executionPolicy === "approval-gated" ? "Ask for approvals" : "Auto-accept edits"}: the credential tool authenticates outside the sandbox; this executable and its descendants remain OS-confined under the task’s file and network rules. Network access uses the approved per-command proxy.`}{" "}
+            {request.legacySandbox === true
+              ? "Legacy sandbox: the credential tool authenticates outside the sandbox; this executable and its descendants retain the task's existing file and network boundary."
+              : request.strict === true
+                ? "Strict: the credential tool authenticates outside the sandbox; this executable and its descendants remain confined under the task's file and network rules, including at Full access."
+                : request.executionPolicy === "full-access"
+                  ? "Full access: this executable and its descendants receive the credentials with ordinary Full access, including network access."
+                  : `${request.executionPolicy === "approval-gated" ? "Ask for approvals" : "Auto-accept edits"}: the credential tool authenticates outside the sandbox; this executable and its descendants remain OS-confined under the task’s file and network rules. Network access uses the approved per-command proxy.`}{" "}
             Output masking cannot prevent deliberate disclosure to an allowed destination. Approval
             expires at {new Date(request.expiresAt).toLocaleTimeString()} if the process has not
             started. A fresh request does not mean an earlier process stopped.

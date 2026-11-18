@@ -95,6 +95,7 @@
     "./spend-ceiling-client": "./src/spendCeilingClient.ts",
     "./agent-grant-client": "./src/agentGrantClient.ts",
     "./person-memory-client": "./src/personMemoryClient.ts",
+    "./sandbox-restrictions-client": "./src/sandboxRestrictionsClient.ts",
     "./todo-client": "./src/todoClient.ts",
     "./octant-instructions-client": "./src/octantInstructionsClient.ts",
     "./protected-files-client": "./src/protectedFilesClient.ts",

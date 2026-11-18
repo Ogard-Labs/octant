@@ -3,9 +3,10 @@ import { useEffect, useState } from "react";
 import type { GoalClient } from "@octant/client-runtime/goal-client";
 import type { GoalLoopClient } from "@octant/client-runtime/goal-loop-client";
 import type { ThreadGoalBudget } from "@octant/contracts";
-import { AlertTriangle, CloudOff, Loader, ShieldAlert, Target } from "lucide-react";
+import { AlertTriangle, ChevronRight, CloudOff, Loader, ShieldAlert, Target } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantPopover } from "../ui/base/OctantPopover";
 import { GoalCard } from "./GoalCard";
 import { GoalLoopPanel } from "./GoalLoopPanel";
 import { useGoalController, type GoalStatus } from "./useGoalController";
@@ -29,9 +30,10 @@ export interface ThreadGoalPanelProps {
  *
  * Every transition is a host command; nothing is rendered as changed before the
  * host accepted it. Load and command outcomes are announced with an icon *and*
- * words so the distinction never depends on colour alone, and the retention
- * note states the durability the host actually provides: the journal-backed
- * store rebuilds every Goal by replay, so a Goal outlives a host restart.
+ * words so the distinction never depends on colour alone. The panel no longer
+ * says that a Goal survives a restart: the journal-backed store rebuilds every
+ * Goal by replay, and a promise nobody doubted only added a line (maintainer
+ * request 2026-11-17: quieter Environment panel).
  */
 export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
   const controller = useGoalController({
@@ -58,7 +60,6 @@ export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
   if (controller.status !== "ready") {
     return (
       <section aria-label="Goal" className="thread-goal">
-        <h3 className="thread-goal__title">Goal</h3>
         <StatusNote status={controller.status} />
         {controller.status === "loading" || controller.status === "idle" ? null : (
           <OctantButton onClick={controller.reload} type="button" variant="secondary">
@@ -71,7 +72,6 @@ export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
 
   return (
     <section aria-label="Goal" className="thread-goal">
-      <h3 className="thread-goal__title">Goal</h3>
       {goal !== null ? (
         <>
           <GoalCard
@@ -114,43 +114,7 @@ export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
                 onChange={(event) => setRevision(event.target.value)}
                 value={revision}
               />
-              <fieldset className="thread-goal__budget">
-                <legend>Budget</legend>
-                <p className="thread-goal__budget-note" role="note">
-                  A loop stops at the first limit it reaches. Leave a field empty for no limit of
-                  that kind; a loop needs at least one.
-                </p>
-                <label className="thread-goal__budget-field">
-                  <span>Turns</span>
-                  <OctantInput
-                    inputMode="numeric"
-                    onChange={(event) =>
-                      setBudgetDraft({ ...budgetDraft, turns: event.target.value })
-                    }
-                    value={budgetDraft.turns}
-                  />
-                </label>
-                <label className="thread-goal__budget-field">
-                  <span>Minutes</span>
-                  <OctantInput
-                    inputMode="numeric"
-                    onChange={(event) =>
-                      setBudgetDraft({ ...budgetDraft, minutes: event.target.value })
-                    }
-                    value={budgetDraft.minutes}
-                  />
-                </label>
-                <label className="thread-goal__budget-field">
-                  <span>Tokens</span>
-                  <OctantInput
-                    inputMode="numeric"
-                    onChange={(event) =>
-                      setBudgetDraft({ ...budgetDraft, tokens: event.target.value })
-                    }
-                    value={budgetDraft.tokens}
-                  />
-                </label>
-              </fieldset>
+              <GoalBudgetRow draft={budgetDraft} onChange={setBudgetDraft} />
               {budgetFromDraft(budgetDraft, budgetOpened).kind === "invalid" ? (
                 /* ui-boundary-exception: inline-field-error */
                 <p className="thread-goal__command-error" role="alert">
@@ -230,11 +194,88 @@ export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
           <span>{controller.commandMessage}</span>
         </p>
       )}
-      <p className="thread-goal__retention" role="note">
-        The host records this Goal in its journal, so it survives a restart.
-      </p>
     </section>
   );
+}
+
+/**
+ * The budget is one row, "Budget · None" or "Budget · 20 turns · 30 min", and
+ * its three limits open from it in a card, as the spend ceiling's do. A goal
+ * with no limit spends one line on it instead of a three-field fieldset. The
+ * draft stays in the revise form, so Save revision still sends it and the
+ * at-least-one rule is checked where it always was (maintainer request
+ * 2026-11-17).
+ */
+function GoalBudgetRow(props: {
+  readonly draft: BudgetDraft;
+  readonly onChange: (draft: BudgetDraft) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const value = budgetReading(props.draft);
+  return (
+    <OctantPopover
+      align="end"
+      className="thread-goal__popover"
+      onOpenChange={setOpen}
+      open={open}
+      title="Budget"
+      trigger={
+        <>
+          <span className="thread-goal__budget-label">Budget</span>
+          <span className="thread-goal__budget-value">{value}</span>
+          <ChevronRight aria-hidden="true" className="thread-goal__budget-chevron" size={14} />
+        </>
+      }
+      triggerClassName="thread-goal__budget-row"
+      triggerLabel={`Budget, ${value}`}
+    >
+      <div className="thread-goal__budget-sheet">
+        <p className="thread-goal__budget-note" role="note">
+          Leave a field empty for no limit. At least one is required.
+        </p>
+        <label className="thread-goal__budget-field">
+          <span>Turns</span>
+          <OctantInput
+            inputMode="numeric"
+            onChange={(event) => props.onChange({ ...props.draft, turns: event.target.value })}
+            value={props.draft.turns}
+          />
+        </label>
+        <label className="thread-goal__budget-field">
+          <span>Minutes</span>
+          <OctantInput
+            inputMode="numeric"
+            onChange={(event) => props.onChange({ ...props.draft, minutes: event.target.value })}
+            value={props.draft.minutes}
+          />
+        </label>
+        <label className="thread-goal__budget-field">
+          <span>Tokens</span>
+          <OctantInput
+            inputMode="numeric"
+            onChange={(event) => props.onChange({ ...props.draft, tokens: event.target.value })}
+            value={props.draft.tokens}
+          />
+        </label>
+      </div>
+    </OctantPopover>
+  );
+}
+
+/** What the budget row says: the limits that are set, or None, or that a field needs a fix. */
+function budgetReading(draft: BudgetDraft): string {
+  const turns = parseLimit(draft.turns);
+  const minutes = parseLimit(draft.minutes);
+  const tokens = parseLimit(draft.tokens);
+  if (turns.kind === "invalid" || minutes.kind === "invalid" || tokens.kind === "invalid") {
+    return "Needs a fix";
+  }
+  const parts = [
+    turns.kind === "set" ? `${turns.value.toLocaleString("en")} turns` : undefined,
+    minutes.kind === "set" ? `${minutes.value.toLocaleString("en")} min` : undefined,
+    tokens.kind === "set" ? `${tokens.value.toLocaleString("en")} tokens` : undefined,
+  ].filter((part) => part !== undefined);
+  return parts.length === 0 ? "None" : parts.join(" · ");
 }
 
 interface BudgetDraft {

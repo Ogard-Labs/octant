@@ -1,9 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import {
-  NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT,
-  NATIVE_TRAFFIC_LIGHT_LEADING_WIDTH,
-} from "@octant/contracts/shell";
+import { NATIVE_TRAFFIC_LIGHT_LEADING_WIDTH } from "@octant/contracts/shell";
 import { describe, expect, it } from "vitest";
 
 const shellStyles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8").replace(
@@ -24,58 +21,6 @@ function cssRule(source: string, selector: string): string {
   );
   expect(match, `missing CSS rule for ${selector}`).toBeDefined();
   return match?.[2] ?? "";
-}
-
-interface HitRect {
-  readonly left: number;
-  readonly top: number;
-  readonly width: number;
-  readonly height: number;
-}
-
-function overlaps(a: HitRect, b: HitRect): boolean {
-  return (
-    a.left < b.left + b.width &&
-    a.left + a.width > b.left &&
-    a.top < b.top + b.height &&
-    a.top + a.height > b.top
-  );
-}
-
-/**
- * Renderer-side native title-row regions. Electron collects `-webkit-app-region:
- * drag` boxes and subtracts `no-drag`; a drag strip that still overlaps a
- * control wins the native hit test even when CSS z-index puts the control on top.
- */
-function nativeTitlebarHitRegions(input: {
-  readonly windowWidth: number;
-  readonly sidebarCollapsed: boolean;
-  readonly leadingWidth: number;
-  readonly trailingWidth: number;
-}): {
-  readonly dragStrip: HitRect;
-  readonly trailing: HitRect;
-  readonly leading: HitRect | undefined;
-} {
-  const dragLeft = input.sidebarCollapsed ? input.leadingWidth : 112;
-  const trailingLeft = input.windowWidth - input.trailingWidth;
-  return {
-    dragStrip: {
-      left: dragLeft,
-      top: 0,
-      width: Math.max(0, trailingLeft - dragLeft),
-      height: NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT,
-    },
-    trailing: {
-      left: trailingLeft,
-      top: 0,
-      width: input.trailingWidth,
-      height: 34,
-    },
-    leading: input.sidebarCollapsed
-      ? { left: 0, top: 0, width: input.leadingWidth, height: 34 }
-      : undefined,
-  };
 }
 
 describe("native titlebar hit-test boundary", () => {
@@ -122,56 +67,47 @@ describe("native titlebar hit-test boundary", () => {
     );
   });
 
-  it("does not let the native drag strip cover collapsed-sidebar recovery or trailing controls", () => {
-    const expanded = nativeTitlebarHitRegions({
-      windowWidth: 1280,
-      sidebarCollapsed: false,
-      leadingWidth: 148,
-      trailingWidth: 148,
-    });
-    expect(overlaps(expanded.dragStrip, expanded.trailing)).toBe(false);
-    expect(expanded.leading).toBeUndefined();
-
-    const collapsed = nativeTitlebarHitRegions({
-      windowWidth: 1280,
-      sidebarCollapsed: true,
-      leadingWidth: 148,
-      trailingWidth: 148,
-    });
-    expect(collapsed.leading).toBeDefined();
-    const leading = collapsed.leading;
-    if (leading === undefined) throw new Error("collapsed leading region missing");
-    expect(overlaps(collapsed.dragStrip, leading)).toBe(false);
-    expect(overlaps(collapsed.dragStrip, collapsed.trailing)).toBe(false);
-    expect(collapsed.dragStrip.left).toBe(148);
-    expect(
-      cssRule(
-        shellStyles,
-        'html[data-octant-native-host="true"] .shell--sidebar-collapsed .shell-frame__native-drag-strip',
-      ),
-    ).toContain("left: var(--octant-window-chrome-leading-width, 148px);");
-  });
-
-  it("ends the drag strip where the open right dock begins so its tabs take clicks", () => {
-    const rule = cssRule(
+  it("covers the whole title band with one drag layer instead of partial strips", () => {
+    const layer = cssRule(
       shellStyles,
-      'html[data-octant-native-host="true"] .shell--wide-context-open .shell-frame__native-drag-strip',
+      'html[data-octant-native-host="true"] .shell-frame__title-band-drag',
     );
-    // The strip has to stop at whichever is wider, so naming either width
-    // alone would still let the dock's tabs sit under the drag region.
-    expect(rule).toContain("right: max(");
-    expect(rule).toContain("var(--octant-window-chrome-reserved-width, 148px)");
-    expect(rule).toContain("var(--octant-context-sidebar-width, 0px)");
+    expect(layer).toContain("position: fixed;");
+    expect(layer).toContain("top: 0;");
+    expect(layer).toContain("right: 0;");
+    expect(layer).toContain("left: 0;");
+    expect(layer).toContain("height: var(--oct-title-rail-h);");
+    expect(shellStyles).not.toContain("native-drag-strip");
+    expect(workspaceStyles).not.toContain("native-drag-strip");
   });
 
-  it("would cover Show sidebar if the drag strip kept the expanded 112px origin after collapse", () => {
-    const leading = { left: 0, top: 0, width: 148, height: 34 };
-    const staleDrag = {
-      left: 112,
-      top: 0,
-      width: 200,
-      height: NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT,
-    };
-    expect(overlaps(staleDrag, leading)).toBe(true);
+  it("leaves no wide container over the band marked no-drag, so every empty pixel drags", () => {
+    const files = [
+      "src/shell/ShellSidebar.tsx",
+      "src/shell/SidebarRail.tsx",
+      "src/shell/RightUtilityDock.tsx",
+      "src/shell/RightUtilityDockSurface.tsx",
+      "src/shell/WindowChrome.tsx",
+    ];
+    const wide = [
+      "sidebar__content",
+      "sidebar__projects-pane",
+      "sidebar-rail__column",
+      "sidebar__primary",
+      "sidebar__native-leading",
+      "right-utility-dock",
+    ];
+    for (const file of files) {
+      const source = readFileSync(resolve(process.cwd(), file), "utf8");
+      // Nothing after the band's drag layer may be a drag region over the band.
+      expect(source, `${file} adds a drag region`).not.toContain("window-drag-region");
+      for (const line of source.split("\n").filter((row) => row.includes("window-no-drag"))) {
+        for (const name of wide) {
+          expect(line, `${name} in ${file} is no-drag`).not.toContain(name);
+        }
+      }
+    }
+    // The chrome root is not no-drag either; only its clusters and controls are.
+    expect(shellStyles).not.toMatch(/\.window-chrome\s*\{[^}]*app-region/u);
   });
 });

@@ -106,7 +106,7 @@ export function CommandCredentialBindingsSettings(props: {
   return (
     <SettingsSection
       title="Credential commands"
-      description="Save a fixed command for a Code Project. Every run needs a fresh credential approval and the task’s ordinary command approval. Below Full access, the recipient stays OS-confined. Plan refuses runs."
+      description="Save a fixed command for a Code Project. Every run needs a new credential approval and the usual command approval. Strict keeps the recipient confined, including at Full access. Plan refuses runs."
     >
       <div className="credential-requests">
         {bindings.map((binding) => (
@@ -200,12 +200,12 @@ export function CommandCredentialBindingsSettings(props: {
             required
           />
           <p>
-            The recipient and its descendants receive these credentials. Full access permits
-            ordinary file and network access; other supported postures keep the recipient
-            OS-confined with per-command network rules while the credential tool authenticates
-            outside its sandbox. Choose an executable you trust. Output concealment cannot prevent
-            deliberate disclosure. A supported local op 2 CLI is pinned when saved; replacing either
-            executable requires a new binding.
+            The recipient and its descendants receive these credentials. Full access with Strict off
+            permits ordinary file and network access; Strict and other supported postures keep the
+            recipient OS-confined with per-command network rules while the credential tool
+            authenticates outside its sandbox. Choose an executable you trust. Output concealment
+            cannot prevent deliberate disclosure. A supported local op 2 CLI is pinned when saved;
+            replacing either executable requires a new binding.
           </p>
           <OctantButton type="submit" disabled={busy || project === ""}>
             {busy ? "Verifying…" : "Save command binding"}

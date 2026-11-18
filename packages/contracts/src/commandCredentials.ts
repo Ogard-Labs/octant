@@ -49,6 +49,8 @@ export const CommandCredentialRequest = Schema.Struct({
   threadId: CodeThreadId,
   expiresAt: UtcTimestamp,
   executionPolicy: Schema.Literal("full-access", "approval-gated", "auto-accept-edits"),
+  strict: Schema.optional(Schema.Boolean),
+  legacySandbox: Schema.optional(Schema.Boolean),
   state: Schema.Literal("pending", "running", "settled"),
 }).annotations(strict);
 export type CommandCredentialRequest = typeof CommandCredentialRequest.Type;

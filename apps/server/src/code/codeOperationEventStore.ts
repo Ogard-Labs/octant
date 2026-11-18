@@ -249,6 +249,7 @@ type HistoryFrame = typeof CodeOperationEventFrame.Type;
  *   child observation, which observation history folds whole;
  * - the last pull-request review, the last pull-request state, and per pull
  *   request number the last frame that identifies it;
+ * - every `tool-activity` frame carrying a page the call published;
  * - the last `git-observed` result;
  * - the last `repository-test-state` result, which the Tests surface reads;
  * - provider-turn evidence: once a completed provider turn is proven, only the
@@ -287,6 +288,12 @@ export function summarizeThreadHistory(
         newestChildSummary = index;
       }
       if (event.observation !== undefined) keep.add(index);
+      return;
+    }
+    // Every page a tool call published stays: the Artifacts library lists a
+    // thread's Claude pages from its summary, each publish a version.
+    if (event.kind === "tool-activity" && event.published !== undefined) {
+      keep.add(index);
       return;
     }
     if (event.kind === "operation-result") {
@@ -2054,6 +2061,9 @@ function conversationHandoff(
         externalContentIngested: event.externalContentIngested,
         ...(event.inherited === undefined ? {} : { inherited: event.inherited }),
         ...(event.handoverSummary === undefined ? {} : { handoverSummary: event.handoverSummary }),
+        ...(event.accountMoveTextCause === undefined
+          ? {}
+          : { accountMoveTextCause: event.accountMoveTextCause }),
       };
     case "fork":
       return {
@@ -2071,6 +2081,13 @@ function conversationHandoff(
         reason: event.reason,
         previousSessionId: event.previousSessionId,
         throughOperationId: event.throughOperationId,
+      };
+    case "account-move-native-session":
+      return {
+        reason: event.reason,
+        previousProviderInstanceId: event.previousProviderInstanceId,
+        previousModelId: event.previousModelId,
+        previousSessionId: event.previousSessionId,
       };
   }
 }

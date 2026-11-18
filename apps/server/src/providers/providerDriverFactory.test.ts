@@ -40,9 +40,13 @@ const timestamp = "2026-07-16T10:00:00.000Z";
 
 describe("bundled provider-driver plugins", () => {
   it("registers every discovery descriptor as a provider-driver plugin", () => {
-    expect(BUNDLED_PROVIDER_DRIVER_PLUGINS.map((plugin) => plugin.driverKind).sort()).toEqual(
-      DISCOVERY_DESCRIPTORS.map((descriptor) => descriptor.driverKind).sort(),
-    );
+    // An added ACP agent is never discovered: the person adds it from the
+    // ACP registry or as their own command.
+    expect(
+      BUNDLED_PROVIDER_DRIVER_PLUGINS.map((plugin) => plugin.driverKind)
+        .filter((kind) => kind !== "acp-agent")
+        .sort(),
+    ).toEqual(DISCOVERY_DESCRIPTORS.map((descriptor) => descriptor.driverKind).sort());
   });
 
   it("keeps ACP vendors on the host ACP stack", () => {
@@ -63,6 +67,7 @@ describe("bundled provider-driver plugins", () => {
       "cline",
       "qwen",
       "fx",
+      "acp-agent",
     ]);
   });
 });
@@ -262,6 +267,34 @@ describe("makeProviderDriver", () => {
     };
     expect(launch.environment?.OPENAI_API_KEY).toBe("broker-resolved-key");
     expect(launch.environment?.CODEX_ACCESS_TOKEN).toBeUndefined();
+  });
+
+  it("offers Settings sign-in for Codex and Claude subscription accounts and not for a Claude API key", () => {
+    const fixture = factoryFixture();
+    const apiKey = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000065",
+      displayName: "Claude API key",
+      driverKind: "claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/missing/claude",
+        authentication: "api-key",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-16T11:00:00.000Z",
+      updatedAt: "2026-07-16T11:00:00.000Z",
+    });
+
+    const codex = makeProviderDriver(provider("codex"), fixture.options);
+    const claude = makeProviderDriver(provider("claude"), fixture.options);
+    const keyed = makeProviderDriver(apiKey, { ...fixture.options, claudeInstances: [apiKey] });
+
+    expect(codex.beginAuthentication).toBeTypeOf("function");
+    expect(codex.completeAuthentication).toBeTypeOf("function");
+    expect(claude.beginAuthentication).toBeTypeOf("function");
+    expect(keyed.beginAuthentication).toBeUndefined();
   });
 
   it("selects the injected Claude ports only for a Claude instance", async () => {

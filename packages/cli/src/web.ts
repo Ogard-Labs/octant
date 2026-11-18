@@ -76,6 +76,12 @@ export async function runWebCommand(options: WebCommandOptions): Promise<WebComm
 
   const hostname = options.hostname;
   const port = options.port;
+  const developmentSandboxScopePath =
+    process.platform === "darwin"
+      ? fileURLToPath(
+          new URL("../../../apps/desktop/dist/native/octant-sandbox-scope", import.meta.url),
+        )
+      : undefined;
   const developmentCodeFileHelperPath =
     options.dev === true
       ? (options.resolveDevelopmentCodeFileHelperPath ?? resolveDevelopmentCodeFileHelperPath)()
@@ -108,6 +114,9 @@ export async function runWebCommand(options: WebCommandOptions): Promise<WebComm
           ...(developmentDataDirectory === undefined
             ? {}
             : { OCTANT_DATA_DIR: developmentDataDirectory }),
+          ...(developmentSandboxScopePath === undefined || !existsSync(developmentSandboxScopePath)
+            ? {}
+            : { OCTANT_SANDBOX_SCOPE_PATH: developmentSandboxScopePath }),
           ...(developmentCodeFileHelperPath === undefined
             ? {}
             : { OCTANT_CODE_FILE_HELPER_PATH: developmentCodeFileHelperPath }),
