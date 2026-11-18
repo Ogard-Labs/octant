@@ -71,6 +71,16 @@ describe("AddProviderWizard", () => {
     expect(credential.value).toBe("gateway-token-typed-here");
   });
 
+  it("does not keep an Anthropic API key typed before switching to Gateway as the gateway's token", async () => {
+    const user = userEvent.setup();
+    wizard();
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("radio", { name: /Anthropic API key/ }));
+    await user.type(screen.getByLabelText("Anthropic API key"), "sk-ant-meant-for-anthropic");
+    await user.click(screen.getByRole("radio", { name: /Gateway/ }));
+    expect(screen.getByLabelText("Gateway token")).toHaveValue("");
+  });
+
   it("refuses a public gateway address over plain HTTP before the account is added", async () => {
     const user = userEvent.setup();
     wizard();

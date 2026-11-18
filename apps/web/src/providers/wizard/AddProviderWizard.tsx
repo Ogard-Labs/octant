@@ -319,7 +319,10 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
                 key={candidate.id}
                 onClick={() => {
                   setChoiceByType((current) => ({ ...current, [type]: candidate.id }));
-                  if (!candidate.needsKey && credentialInput.current !== null) {
+                  // A secret typed for one sign-in is never kept for another:
+                  // an Anthropic API key must not be saved as a gateway's
+                  // token and sent to that gateway (review finding, 2026-11-18).
+                  if (candidate.id !== choice?.id && credentialInput.current !== null) {
                     credentialInput.current.value = "";
                   }
                   setProblem(undefined);

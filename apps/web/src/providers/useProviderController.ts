@@ -2321,6 +2321,8 @@ export function useProviderController(options: ProviderControllerOptions) {
               instance.configuration.authentication === "bearer" ||
               credentialCleanupRequired.current.has(instanceId))) ||
           configurationAuthentication(instance) === "api-key" ||
+          (instance.driverKind === "claude" &&
+            instance.configuration.authentication === "gateway") ||
           (usesSubscriptionAuthentication(instance) &&
             credentialCleanupRequired.current.has(instanceId));
         // Only credential-bearing instances need the desktop bridge, so the

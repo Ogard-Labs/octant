@@ -3083,6 +3083,31 @@ describe("useProviderController", () => {
     );
   });
 
+  it("deletes the stored token after removing a Claude gateway account", async () => {
+    const calls: string[] = [];
+    const gateway = claudeProvider({
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "gateway",
+        gatewayBaseUrl: "https://gateway.example.com",
+      },
+    });
+    const api = client(snapshot([gateway]));
+    vi.mocked(api.execute).mockImplementation(async () => {
+      calls.push("provider.remove");
+      return { kind: "provider-removed", instanceId: id, version: 2 as never };
+    });
+    const host = credentialHost(calls);
+    const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(result.current.remove(id)).resolves.toBe(true);
+    });
+    expect(calls).toEqual(["provider.remove", "credential.clear"]);
+  });
+
   it("deletes the credential after removing a bearer provider", async () => {
     const calls: string[] = [];
     const api = client(snapshot([httpProvider()]));
