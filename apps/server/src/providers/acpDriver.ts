@@ -1923,9 +1923,24 @@ function makeConnection(
             // same confirmation the standard selection would have acted on. A
             // session that already opened the requested model is left alone,
             // because switching it would reset the level it was opened with.
+            // An added agent follows the spelling its session reported: a
+            // `model` config option, or else `models` (answered with
+            // `session/set_model`); a session already on the model is left
+            // alone. A reviewed profile pins its spelling.
+            const followsSession = profile.modelSelection === "follow-session";
+            const sessionHasModelOption = (source.configOptions ?? []).some(
+              (option) => option.id === "model",
+            );
             const modelOpenedWithSession =
-              sessionMeta !== undefined && source.models?.currentModelId === input.modelId;
-            const setModelCall = profile.setModelCall?.(source.sessionId, input.modelId);
+              (sessionMeta !== undefined || followsSession) &&
+              source.models?.currentModelId === input.modelId;
+            const setModelCall =
+              followsSession && !sessionHasModelOption && source.models !== undefined
+                ? {
+                    method: "session/set_model",
+                    params: { sessionId: source.sessionId, modelId: input.modelId },
+                  }
+                : profile.setModelCall?.(source.sessionId, input.modelId);
             // The agent's config options can change with the model selection, so
             // the reply to each standard call carries the current set; keep the
             // newest one rather than the session's original list.
@@ -1958,13 +1973,17 @@ function makeConnection(
                 `${name} does not offer the ${modeValue} mode this thread needs.`,
               );
             const setModeCall = profile.setModeCall?.(source.sessionId, modeValue);
-            if (setModeCall === undefined) {
-              const result = await awaitStartup(() =>
-                client.setConfigOption(source.sessionId, "mode", modeValue),
-              );
-              configOptions = result.configOptions;
-            } else {
-              await awaitStartup(() => client.call(setModeCall.method, setModeCall.params));
+            // A profile that selects no mode leaves the session in the mode it
+            // opened with.
+            if (profile.selectsNoMode !== true) {
+              if (setModeCall === undefined) {
+                const result = await awaitStartup(() =>
+                  client.setConfigOption(source.sessionId, "mode", modeValue),
+                );
+                configOptions = result.configOptions;
+              } else {
+                await awaitStartup(() => client.call(setModeCall.method, setModeCall.params));
+              }
             }
             // Turns carry only the prompt. Restore model settings against the
             // selected session's fresh choices before it can send; apply effort

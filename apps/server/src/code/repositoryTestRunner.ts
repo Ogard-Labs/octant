@@ -33,6 +33,8 @@ export interface RepositoryTestRunnerOptions {
       readonly cwd: string;
       readonly environment: Readonly<Record<string, string>>;
       readonly timeoutMs: number;
+      /** The thread's resolved Strict value, passed on a host without Octant's sandbox. */
+      readonly strict?: boolean;
     },
     signal?: AbortSignal,
   ) => Promise<RepositoryTestProcessResult>;
@@ -60,6 +62,8 @@ export interface RepositoryTestRunInput {
    */
   readonly extraFolders?: ReadonlyArray<string>;
   readonly environment: Readonly<Record<string, string | undefined>>;
+  /** The thread's resolved Strict value, passed on a host without Octant's sandbox. */
+  readonly strict?: boolean;
 }
 
 export class RepositoryTestRunner {
@@ -83,7 +87,13 @@ export class RepositoryTestRunner {
         this.#options.realpath ?? nodeRealpath,
       );
       result = await this.#options.execute(
-        { argv: definition.argv, cwd, environment, timeoutMs: definition.timeoutMs },
+        {
+          argv: definition.argv,
+          cwd,
+          environment,
+          timeoutMs: definition.timeoutMs,
+          ...(input.strict === undefined ? {} : { strict: input.strict }),
+        },
         input.signal,
       );
     } catch {

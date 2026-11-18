@@ -1,4 +1,5 @@
 import {
+  decodeProviderInstance,
   decodeProviderInstanceId,
   decodeProviderSessionId,
   type ProviderFailure,
@@ -18,6 +19,7 @@ import { makeAcpDriver, type AcpClientPort, type AcpDriverOptions } from "./acpD
 import type { AcpConnection, AcpProcessPort } from "./acpProcess";
 import { sanitizeAcpEnvironment } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind, type AcpProviderProfile } from "./acpProfiles";
+import { addedAcpAgentProfile } from "./addedAcpAgent";
 import { AcpFailure, type AcpNewSessionResult, type AcpConfigOptionsResult } from "./acpProtocol";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import type { ManagedToolAnswer, ManagedToolCallContext } from "./managedMcpTools";
@@ -4362,5 +4364,94 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
       .filter((profile) => profile.refusesProject !== undefined)
       .map((profile) => profile.kind);
     expect(refusing.sort()).toEqual(["gemini", "qwen"]);
+  });
+});
+
+describe("an added ACP agent's model selection", () => {
+  const added = decodeProviderInstance({
+    id: instanceId,
+    displayName: "My agent",
+    driverKind: "acp-agent",
+    configuration: {
+      kind: "acp-agent",
+      source: { kind: "local", command: binaryPath },
+      args: ["acp"],
+      install: { executable: binaryPath, integrity: "local-command" },
+      trusted: true,
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 3,
+    createdAt: "2026-11-18T10:00:00.000Z",
+    updatedAt: "2026-11-18T10:00:00.000Z",
+  });
+  if (added.driverKind !== "acp-agent") throw new Error("not an added agent");
+  const profile = addedAcpAgentProfile(added);
+
+  async function start(session: AcpNewSessionResult) {
+    const { driver, client } = fixture(profile);
+    client.newSession.mockImplementationOnce(async () => session);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+    return client;
+  }
+
+  it("sets the model with session/set_model when the session reports models and no model option, and selects no mode", async () => {
+    const client = await start({
+      sessionId: "agent-session-models",
+      models: {
+        currentModelId: "agent-other",
+        availableModels: [
+          { modelId: "agent-other", name: "Other" },
+          { modelId, name: "Agent K2" },
+        ],
+      },
+    });
+    expect(client.call).toHaveBeenCalledWith("session/set_model", {
+      sessionId: "agent-session-models",
+      modelId,
+    });
+    expect(client.setConfigOption).not.toHaveBeenCalled();
+  });
+
+  it("sets the model through the config option when the session reports one", async () => {
+    const client = await start({
+      sessionId: "agent-session-options",
+      configOptions: [
+        {
+          type: "select",
+          id: "model",
+          name: "Model",
+          currentValue: "agent-other",
+          options: [
+            { value: "agent-other", name: "Other" },
+            { value: modelId, name: "Agent K2" },
+          ],
+        },
+      ],
+    });
+    expect(client.setConfigOption).toHaveBeenCalledWith("agent-session-options", "model", modelId);
+    expect(client.setConfigOption).not.toHaveBeenCalledWith(
+      "agent-session-options",
+      "mode",
+      expect.anything(),
+    );
+    expect(client.call).not.toHaveBeenCalledWith("session/set_model", expect.anything());
+  });
+
+  it("leaves a session that already opened on the model alone", async () => {
+    const client = await start({
+      sessionId: "agent-session-current",
+      models: { currentModelId: modelId, availableModels: [{ modelId, name: "Agent K2" }] },
+    });
+    expect(client.call).not.toHaveBeenCalledWith("session/set_model", expect.anything());
+    expect(client.setConfigOption).not.toHaveBeenCalled();
   });
 });

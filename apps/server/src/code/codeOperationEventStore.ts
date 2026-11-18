@@ -1890,6 +1890,9 @@ function foldTurnFrame(
     };
   } else if (frame.event.kind === "context-handoff-attached") {
     builder.handoff = conversationHandoff(frame.event);
+  } else if (frame.event.kind === "provider-session-ready") {
+    if (frame.event.strictKept === undefined) delete builder.strictKept;
+    else builder.strictKept = frame.event.strictKept;
   } else if (frame.event.kind === "fork-context-delivered") {
     const { kind: _kind, mergeOperationId: _merge, ...mergeBack } = frame.event;
     if (builder.forkMergeBacks.length < MAX_CODE_FORK_MERGE_BACKS_PER_TURN)
@@ -2106,6 +2109,7 @@ type CodeConversationBuilder = {
   describedImages?: CodeConversationTurn["describedImages"];
   usage?: CodeConversationTurn["usage"];
   handoff?: CodeConversationTurn["handoff"];
+  strictKept?: CodeConversationTurn["strictKept"];
   forkMergeBacks: Array<CodeForkMergeBack>;
   assistant: Array<CodeConversationTurn["assistant"][number]>;
   steps: Array<CodeConversationStep>;

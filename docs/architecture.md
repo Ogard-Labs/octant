@@ -1756,7 +1756,10 @@ starts a Code session at the same level, and a Work turn journals `shell` and
   approval policy and sandbox the level maps to in Code; `command` and
   `permissions` requests inside the root reach the person at Guarded. A Work
   thread reads the folder's `AGENTS.md` as Code does (maintainer decision,
-  2026-11-14).
+  2026-11-14). An empty Work or Code thread can continue one of the person's
+  own Codex sessions in its folder, and a Code fork continues a copy of
+  Codex's own thread
+  ([Provider runtimes: Codex](design/provider-runtimes.md#codex)).
 - **OpenCode:** the session rules no longer deny `bash` and `task` in Work;
   the posture's rules apply as in Code (`task` is to be allowed outside Plan
   at every level; designed, not built,
@@ -2643,10 +2646,13 @@ now also move back in place. Chat's differences are under **Chat** below.
   rewind still holds them, so it is never resumed as it stands. A provider
   that reports `sessionRollback` continues a copy of its own session cut back
   at the last kept turn (`rewind-native-session`): the Octant Harness, whose
-  transcript copy is the one a harness fork makes, and Claude Code, whose
+  transcript copy is the one a harness fork makes; Claude Code, whose
   Agent SDK copies a session through a message (`forkSession` with
-  `upToMessageId`) at the anchor the kept turn's completion journaled (see
-  [native session anchors](#native-session-anchors)). Every other provider
+  `upToMessageId`); OpenCode, through its own fork route; and Pi, whose
+  session file is copied through the anchor entry as its own fork copies one.
+  Each cuts at the anchor the kept turn's completion journaled (see
+  [native session anchors](#native-session-anchors)) and leaves the source
+  session and the files alone. Every other provider
   reports it unsupported in its capability report, and the next turn starts a
   fresh session with a disclosed text handoff of the kept turns (`rewind`),
   journaled before the prompt is sent, as a provider switch's is. A provider
@@ -2746,7 +2752,12 @@ rust-v0.162.1) leaves the copy loaded in the app-server that made it, and a
 thread loaded there is refused by another app-server's resume until that
 process ends, so the copy would have to be made on the lease that resumes
 it, inside the resume, after the host can still fall back to a text
-handoff. OpenCode and ACP agents report no anchor and keep the handoff. Rewinding only the
+handoff. OpenCode's copy ends at the last assistant message the kept turn
+reported, through its own fork route, and Pi's at the last entry it wrote,
+copied into a new session file; both leave the source untouched, and neither
+uses the runtime's own in-place way back (OpenCode's revert also puts files
+back from its own snapshots). ACP agents report no anchor and keep the
+handoff. Rewinding only the
 conversation changes nothing but the thread's own record, so it is gated as a
 read (it runs in Plan and asks for no approval); any rewind that puts files
 back is gated as the in-place restore it performs.
@@ -4415,9 +4426,14 @@ Draft edits and ordinary image attachments survive validation and refusal.
 Unknown `@` text stays ordinary text. `@` is the one composer
 picker in every composer: it lists the effective snapshot's available skills,
 effective plugin MCP servers, and connectors the person added (a disabled or
-untrusted item is absent), plus the thread's files in Work and Code. Choosing a
-row makes a structured selection chip that the host re-resolves at send; it
-never installs, trusts, enables, or elevates anything. `/` lists Octant's
+untrusted item is absent), then the thread's provider's own skills and plugins
+its runtime listed on the observation (`mentions`; Codex's account skills and
+installed plugins), labelled as the provider's, plus the thread's files in Work
+and Code. Choosing an Octant row makes a structured selection chip that the
+host re-resolves at send; choosing a provider's row writes the runtime's own
+reference (`$name`, `@name`), which its driver resolves against its own listing
+at send ([Provider runtimes: Codex](design/provider-runtimes.md#codex)). Neither
+installs, trusts, enables, or elevates anything. `/` lists Octant's
 commands and, beside them, the thread's provider's own slash commands,
 labelled as the provider's (maintainer principle, 2026-11-14: a workflow
 that works in the provider's own app works in Octant); `$skill` stays a
@@ -5049,7 +5065,7 @@ thread's [guardrail level](#security-and-authority). New tasks may choose an app
   rule under [Security and authority](#security-and-authority). Every Project terminal
   binds all of the Project's folders that exist like the main folder, so the
   shell can move between them; the pick only chooses where it starts. The
-  header's action buttons and the start screen's quick tools offer the pick
+  header's action buttons offer the pick
   once a Project has an extra folder. A Code thread's terminal binds every
   Project folder that exists as a Project terminal does, and its start command
   may name an extra folder to start in, compared as the exact path the Project
@@ -7504,10 +7520,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   discovery descriptor, the bundled plugin and its identity, picker and
   Settings labels, and the Settings create and configuration forms. A new
   agent adds its row, its runtime profile, its logo, and conformance evidence.
-  Decided (maintainer decision, 2026-11-16; designed, not built): a person may
-  also add an agent from the public ACP registry or their own local command
-  through the plugin model, so a reviewed row is no longer the only way an ACP
-  agent runs ([Provider runtimes: Any ACP agent](design/provider-runtimes.md#any-acp-agent)).
+  Decided (maintainer decision, 2026-11-16; built except the probe-next
+  profiles): a person may also add an agent from the public ACP registry or
+  their own local command through the plugin model, so a reviewed row is no
+  longer the only way an ACP agent runs. Every added agent shares one driver
+  kind, `acp-agent`, outside the rows, admitted by one bundled plugin; which
+  agent an instance runs, how it was installed and whether it is trusted are
+  its configuration, so the vocabulary stays closed
+  ([Provider runtimes: Any ACP agent](design/provider-runtimes.md#any-acp-agent)).
   The row never widens the vocabulary to `string`: an unlisted kind fails to
   decode, a configuration must name the same agent as its instance or command
   and a posture its row lists, and every capability is still the one the
@@ -11651,7 +11671,7 @@ launch's tool bridge through the loopback relay.
 (`skill-instructions`, `mcp-server`, `mcp-tool`, `mcp-prompt`, `mcp-resource`,
 `hook`, `app`, `agent`, `apple-development-adapter`, `board`, `integration`,
 `ui-surface`, `appearance-pack`, `preview-viewer`, `provider-driver`, `replica-store`,
-`desktop-provider`, `theme`, `language-server` and `debug-adapter` (Code only)), composer addressing
+`desktop-provider`, `theme`, `ground`, `language-server` and `debug-adapter` (Code only)), composer addressing
 (`@plugin`, `@plugin/component`, `$skill`), and the activation ladder. The
 manifest and component schemas themselves (`ExtensionPackageManifest`,
 component kinds, declared capabilities, and renderer contribution points)
@@ -11709,6 +11729,18 @@ Project, thread, and provider policy allow it. Any other state — `not-installe
 `incompatible`, `mode-prohibited`, `project-prohibited`, `thread-prohibited`,
 `host-prohibited`, `stale-catalog-epoch`, `broken`, `draining` — contributes no
 prompt, schema, tool, route, model, or capability.
+
+**Any ACP agent.** An agent a person adds from the public ACP registry or as
+their own local command takes the same three steps, with no one-step form:
+**Install**, **Trust** (which shows what trusting grants and whether the
+download was unverified) and **Turn on**, each its own journaled command that
+the host decides and refuses out of order, and that only a client acting as
+the host's own person may send. A registry agent is named by its registry id
+alone; its package, release, archive address and checksum come from the
+host's listing. The install runs nothing it fetched. Until trusted, the
+agent runs in Octant's sandbox at every level with nothing remembered and
+none of Octant's tools
+([Provider runtimes: Any ACP agent](design/provider-runtimes.md#any-acp-agent)).
 
 **npm packages.** A person may type an npm package name, with an optional
 version, range, or dist-tag, in Marketplace or as
@@ -13672,6 +13704,25 @@ selections, so turning the plugin back on restores the theme. _Rationale:_ rewri
 would lose the person's choice to a reversible switch, and the default is
 already what a missing preset draws.
 
+**Character grounds as plugin contributions** (maintainer request, 2026-11-18;
+built). A plugin may also offer character grounds as data only: a component of
+kind `ground` whose `ground` field holds `characterSet` and optionally
+`characterDensity`, `characterSpeed` and `characterPattern`, validated by the
+same schemas as the person's stored ground (`@octant/contracts/theme`). Like a
+theme, the component declares no capability, entry point, configuration or
+content reference; a `ground` field on any other kind, a missing one on this
+kind, a colour, an image, an emoji set, a speed past 100, or any other field is
+refused at decode. `@octant/plugin-host/grounds` lists the grounds of
+effective components only (installed, trusted and enabled at the plugin and
+the component), under a host-assigned id. The renderer reads them from the
+same extension snapshot as the themes and shows them in the Customize fold's
+starter menu under "From plugins". Picking one copies its values into the
+person's own ground and saves once, so the saved ground never refers to the
+plugin: switching the plugin off or removing it takes its grounds out of the
+menu and leaves a copy already picked as it is. _Rationale:_ a saved reference
+would dangle, and a theme declaration that also carried a ground would tie a
+field to a set of colours.
+
 The first-party manifests have one definition,
 `@octant/plugin-host/first-party-plugins`, which the server and the renderer
 both read; it also marks which of them are switchable. A switchable plugin's
@@ -14614,8 +14665,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   it, so no approval leaves the server's authority.
 
   **Octant adds no restrictions of its own unless Strict is on**
-  (maintainer decision, 2026-11-16; partly built: the Strict setting and
-  every item marked built below; not built yet: the opt-in extras). A
+  (maintainer decision, 2026-11-16; built: the Strict setting and every
+  item below, the opt-in extras included). A
   person who moves
   from a provider's own CLI to Octant keeps every workflow that worked
   there, and Octant restricts a provider no more than any other agent
@@ -14795,7 +14846,30 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     under Strict, and every turn below Full access, takes the stalled-turn
     limit).
   - **Opt-in extras.** A per-person list of provider tools to block, and in
-    Strict a notice saying what Strict withheld (not built yet).
+    Strict a notice saying what Strict withheld. Built: Settings ›
+    Permissions › Blocked tools holds the list, empty by default, per
+    provider (Claude Code, Codex, OpenCode, Pi: the providers with a way to
+    keep a named tool from their runtime) and per tool, by the runtime's own
+    name or `server__tool` for a tool of the provider's own MCP server. Each
+    change is journaled (`blocked-tools.tool-set@1`) and is the person's act
+    at a window or on a device the host's own person paired; an agent grant
+    or a hub-introduced device is refused. The host hands the list to every
+    session start and resume of that provider (`blockedTools` on
+    `ProviderSessionStart`), read at that launch, at every level and with or
+    without Strict. Claude Code gets it as `disallowedTools` and its gate
+    refuses a call to one, and a runtime that still lists one is refused as
+    widened; OpenCode denies each one last, after every allow, in its
+    session rules and its 2.x process configuration; Codex switches off its
+    shell, image view or web search, or names the tool in that MCP server's
+    `disabled_tools`; Pi leaves it out of its tool list and its approval
+    bridge refuses it before any other rule. Codex has no switch for its
+    other built-ins, so Settings refuses those names and a launch that
+    carries one fails rather than run it. Each Strict launch journals what
+    Strict kept for it (`strictKept` on a Code turn's
+    `provider-session-ready` and on a Work turn's update), computed from the
+    launch's Strict value, runtime family and whether it ran in Octant's
+    sandbox, and the thread shows it as a note ([Thread view: Strict
+    notice](design/thread-view.md#strict-notice)).
 
   Kept as product rules, since no provider feature depends on them: Plan is
   read-only, Chat has no folder or shell (it is an extra mode, not a limit
@@ -14872,8 +14946,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   import, whose request names its Project in its workspace scope; and Full
   access and extension install, built earlier. Each is journaled with the
   device as the actor. The paired browser offers the Project terminal and
-  Private page under **Project tools** in Work and Code, through the start
-  screen's quick tools, and **Import HTML…** alone in a Chat thread's Canvas
+  Private page under **Project tools** in Work and Code, as a list of the
+  Project's own tools, and **Import HTML…** alone in a Chat thread's Canvas
   tools. Not built yet: the Browser's Take over and Hand back, `sign-in`,
   profile pages and saved flows, which drive the desktop's native Browser in
   the person's signed-in profiles and need a remote input stream and a rule
@@ -16387,7 +16461,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   | `atFullAccess`                | `absent`                                                                                                                           | `absent`                                                                                                 | `absent`                                                                                                                                          | `absent`                                                                                          | `absent` in the static block; reported once a probe finds a release newer than the one a pin was reviewed against: `release: "unverified"` with the usage, forms and Octant's tools a Full access session keeps | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `acpClientCapabilities`       | `absent`                                                                                                                           | `absent`                                                                                                 | `absent`                                                                                                                                          | `absent`                                                                                          | `supported`                                                                                                                                                                                                     | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `modelSwitch`                 | `supported`                                                                                                                        | `supported`                                                                                              | `supported`; the resume names the thread's current model on every prompt                                                                          | `absent`; same                                                                                    | `absent`; same                                                                                                                                                                                                  | `absent`; Octant replays history, so the model may change                               | `absent`; Octant replays history, so the model may change                                                 | `absent`; Octant replays history, so the model may change                                    | `absent`                              |
-  | `sessionRollback`             | `supported`; a rewind continues a copy of its session cut at the kept turn's anchor, or a text handoff when it has none            | `absent`; a rewind starts a fresh session with a text handoff                                            | `absent`; same                                                                                                                                    | `absent`; same                                                                                    | `absent`; same                                                                                                                                                                                                  | `supported`; a rewind continues a copy of the transcript cut back at the last kept turn | `supported`; same                                                                                         | `supported`; same                                                                            | `absent`; same                        |
+  | `sessionRollback`             | `supported`; a rewind continues a copy of its session cut at the kept turn's anchor, or a text handoff when it has none            | `absent`; a rewind starts a fresh session with a text handoff                                            | `supported`; same as Claude Code, through its own fork route                                                                                      | `supported`; same, a copy of the session file                                                     | `absent`; same as Codex                                                                                                                                                                                         | `supported`; a rewind continues a copy of the transcript cut back at the last kept turn | `supported`; same                                                                                         | `supported`; same                                                                            | `absent`; same                        |
   | `forceStop`                   | `supported`                                                                                                                        | `unsupported`; one process serves every thread                                                           | `unsupported`; one process serves every thread                                                                                                    | `absent`                                                                                          | `absent`                                                                                                                                                                                                        | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `sessionCompaction.chat`      | `supported`; `unavailable` when the install lacks `/compact`                                                                       | `supported`; `unavailable` before Codex 0.162.1                                                          | `unavailable`; `supported` from 2.2.0                                                                                                             | `absent`                                                                                          | `absent`                                                                                                                                                                                                        | `unsupported`; Octant summarizes                                                        | `unsupported`; Octant summarizes                                                                          | `unsupported`; Octant summarizes                                                             | `absent`                              |
   | `sessionCompaction.work`      | as Chat                                                                                                                            | as Chat                                                                                                  | as Chat                                                                                                                                           | `absent`                                                                                          | `absent`                                                                                                                                                                                                        | `unsupported`; Octant summarizes                                                        | `unsupported`; Octant summarizes                                                                          | `unsupported`; Octant summarizes                                                             | `absent`                              |
@@ -16412,17 +16486,17 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Code tools reach the models its connection check reports with tool use;
   Harness endpoints reach them only for models a person verified.
 
-  | Column                    | Driver kinds                                                                                                     | Chat  | Work              | Code              | Agent loop       |
-  | ------------------------- | ---------------------------------------------------------------------------------------------------------------- | ----- | ----------------- | ----------------- | ---------------- |
-  | Claude Code               | `claude`                                                                                                         | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | Codex                     | `codex`                                                                                                          | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | OpenCode                  | `opencode`                                                                                                       | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | Pi                        | `pi`                                                                                                             | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | ACP agents                | `kilo`, `devin`, `mistral-vibe`, `kimi-code`, `grok`, `goose`, `glm`, `gemini`, `copilot`, `cline`, `qwen`, `fx` | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | Ollama                    | `ollama`                                                                                                         | `yes` | `verified-models` | `verified-models` | `octant-harness` |
-  | Harness endpoints         | `openai-compatible`, `anthropic-compatible`, `azure-foundry`, `amazon-bedrock`                                   | `yes` | `verified-models` | `verified-models` | `octant-harness` |
-  | Outside harness endpoints | `outside-harness-endpoint`                                                                                       | `yes` | `verified-models` | `verified-models` | `octant-harness` |
-  | Oh My Pi                  | `oh-my-pi`                                                                                                       | `no`  | `no`              | `no`              | `none`           |
+  | Column                    | Driver kinds                                                                                                                  | Chat  | Work              | Code              | Agent loop       |
+  | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----- | ----------------- | ----------------- | ---------------- |
+  | Claude Code               | `claude`                                                                                                                      | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Codex                     | `codex`                                                                                                                       | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | OpenCode                  | `opencode`                                                                                                                    | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Pi                        | `pi`                                                                                                                          | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | ACP agents                | `kilo`, `devin`, `mistral-vibe`, `kimi-code`, `grok`, `goose`, `glm`, `gemini`, `copilot`, `cline`, `qwen`, `fx`, `acp-agent` | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Ollama                    | `ollama`                                                                                                                      | `yes` | `verified-models` | `verified-models` | `octant-harness` |
+  | Harness endpoints         | `openai-compatible`, `anthropic-compatible`, `azure-foundry`, `amazon-bedrock`                                                | `yes` | `verified-models` | `verified-models` | `octant-harness` |
+  | Outside harness endpoints | `outside-harness-endpoint`                                                                                                    | `yes` | `verified-models` | `verified-models` | `octant-harness` |
+  | Oh My Pi                  | `oh-my-pi`                                                                                                                    | `no`  | `no`              | `no`              | `none`           |
 
   The image profiles (`openai-image`, `gemini-native-image`, `bfl-image`,
   `ideogram-image`) are not turn drivers and are not in the matrix.
@@ -19809,8 +19883,12 @@ workspaces there):
   (`Read`, `Grep`, `Glob`, `LS`, `Edit`, `Write`, `NotebookEdit`, `Bash`
   and its task tools are left out of the session's tool list), where
   elsewhere those tools ask and are declined inside Octant's sandbox.
-  OpenCode and the ACP agents keep their own file and shell tools whatever
-  they are told, so a Chat thread on them stays refused on Windows with the
+  OpenCode's permission rules can deny its file and shell tools, but its
+  command templates run shell substitutions and its plugins run code in its
+  own process outside those rules; an ACP agent's client capabilities decide
+  only whether it may use Octant's file and terminal methods, and no
+  reviewed agent profile can be told to drop its own built-in file and shell
+  tools. So a Chat thread on them stays refused on Windows with the
   reason ("This provider keeps Chat without a folder or shell only inside
   Octant's sandbox, which Windows doesn't have yet."). Chat under Strict is
   refused like every Strict launch there.
@@ -20034,7 +20112,8 @@ deliverable and keeps every gate above:
    - **Process-tree stop.** Windows has no process groups, and
      `ChildProcess.kill` there ends only the root. Every stop that signals a
      process group elsewhere (each provider family's runtime, owned-process
-     receipts, agent runs, terminals) ends the whole tree on Windows with
+     receipts, agent runs, terminals, repository tests and scaffolds,
+     language servers and debug sessions) ends the whole tree on Windows with
      `System32\taskkill.exe /PID <pid> /T /F`, run by absolute path through no
      shell (`process/windowsProcessTree.ts`). Rationale: the launcher's
      `--full-access` job object would end a tree that re-parented itself too,
@@ -20100,18 +20179,37 @@ deliverable and keeps every gate above:
      Command Prompt batch script), read from the same setting. Under Strict
      or with the sandbox kept a command is refused when it runs, with the
      reason, and nothing starts.
-   - **Not yet on Windows.** These run on macOS and Linux and are
-     unavailable on Windows: language servers, a Project's
-     [own toolchain copy](design/language-services.md#user-added-servers) among them, and the
-     [agent debug tool](design/language-services.md#agent-debug-tool-rules),
-     whose launch policies admit only a Seatbelt or Bubblewrap capsule
-     (`unsupported-platform`) and whose capsule ports have no unconfined
-     Windows form yet; repository tests and scaffolds, whose runner starts
-     every command through the confinement port and owned process groups,
-     neither of which has a Windows form, so a run reports unavailable; a
-     Chat thread on OpenCode or an ACP agent (above); and every launch under
-     Strict at any level or with the sandbox kept, until the confinement
-     launcher has run a real provider on a person's Windows machine.
+   - **Tests, scaffolds, language servers and debug sessions** (since
+     2026-11-18; before then each was refused on Windows, its runner or
+     launch policy admitting only a Seatbelt or Bubblewrap capsule and owned
+     process groups) run unconfined outside Strict, as a thread terminal
+     does, and are refused under Strict with the reason. A repository test
+     or scaffold starts the program it names with no shell, a bare name
+     found on `Path` with `PATHEXT`'s extensions and an npm `.cmd` shim
+     read for the program it starts (as above), with the Windows names a
+     program needs in its environment, and ends its whole tree on timeout
+     or cancellation. A scaffold's generator counts as installed when
+     `Path` holds it under one of `PATHEXT`'s extensions (`bunx.exe`), as
+     Windows finds it. A
+     [language server](design/language-services.md#launch-classes), a
+     Project's own toolchain copy among them, starts for a thread outside
+     Strict (`decideLanguageServerLaunch` answers confinement `none`);
+     `repo-tooling` still needs the person's start and approval and gets no
+     egress proxy, having no wall to hold it to, and a crash restart is
+     held to the watched thread's Strict value as it is then. A
+     [debug session](design/language-services.md#approval-and-starting),
+     the agent's `octant_debug` tool included, starts after the level's
+     confirmation on the open network, its child connecting on loopback,
+     and ends when Strict turns on. Each keeps its receipt, private cache
+     or state folder, and the tree stop. A server's or session's receipt
+     (and a session's state folder) goes only once the tree stop ran and the
+     root was seen to exit (`stopWindowsTreeConfirmed`); a failed or
+     unconfirmed stop keeps them, so a restarted host still stops the tree,
+     and the stop is tried again when the root exits.
+   - **Not yet on Windows.** A Chat thread on OpenCode or an ACP agent
+     (above), and every launch under Strict at any level or with the
+     sandbox kept, until the confinement launcher has run a real provider
+     on a person's Windows machine.
      A provider that starts no local process before its
      turn (an Octant Harness model over an endpoint) runs turns there
      outside Strict, at Full access and below it, with Octant's own file
@@ -20139,9 +20237,14 @@ deliverable and keeps every gate above:
      ACP runtimes compiled the same way start at Full access and below it
      outside Strict (Pi in Chat too) with an unconfined version read, the
      Kilo agent answering ACP's `initialize`, are stopped with their tree, and
-     are refused under Strict, a Kilo Chat thread by Chat's reason. Chat on
+     are refused under Strict, a Kilo Chat thread by Chat's reason; a
+     repository test outside Strict runs a real program and returns its output
+     and exit code, and a timed-out one is ended with the program it started;
+     and a language server and a debug adapter start unconfined, answer on
+     their pipes and are stopped. Chat on
      Codex and Claude, the harness shell's level routing and app-managed tools
-     on Windows are tested on Linux CI with the host's platform set to
+     on Windows, and the language server, debug and test launch policies under
+     Strict, are tested on Linux CI with the host's platform set to
      Windows. A whole Work, Code or Chat turn through a real provider on a
      person's Windows machine has not run.
 4. The `octant` CLI on Windows: native host paths, a browser opener that runs

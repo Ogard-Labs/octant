@@ -68,6 +68,24 @@ const BROWSER_CANNOT_SAVE_KEYS =
 
 export type ProviderControllerStatus = "loading" | "ready" | "disconnected";
 
+/** A person's step for an added ACP agent, as Settings sends it. */
+export type AcpAgentStep =
+  | {
+      readonly kind: "add";
+      readonly source:
+        | { readonly kind: "registry"; readonly registryId: string }
+        | {
+            readonly kind: "local";
+            readonly displayName: string;
+            readonly command: string;
+            readonly args: ReadonlyArray<string>;
+          };
+    }
+  | {
+      readonly kind: "install" | "trust" | "untrust" | "enable" | "disable" | "remove";
+      readonly instanceId: ProviderInstanceId;
+    };
+
 export type ProviderAuthenticationOutcome = "completed" | "pending" | "failed";
 
 export interface ProviderControllerOptions {
@@ -2203,6 +2221,41 @@ export function useProviderController(options: ProviderControllerOptions) {
       }),
     [execute],
   );
+  /**
+   * One step for any ACP agent: adding it, then installing, trusting and
+   * enabling it, each a separate command the host decides on. A registry
+   * agent is sent by its registry id alone; nothing else about it comes from
+   * here.
+   */
+  const acpAgentStep = useCallback(
+    (step: AcpAgentStep) =>
+      execute((current) => {
+        if (step.kind === "add") {
+          return {
+            kind: "add-acp-agent",
+            instanceId: decodeProviderInstanceId(crypto.randomUUID()),
+            expectedVersion: 0 as ProviderDefaults["version"],
+            source: step.source,
+          };
+        }
+        const instance = findProvider(current, step.instanceId);
+        if (instance === undefined) return undefined;
+        const target = { instanceId: step.instanceId, expectedVersion: instance.version };
+        switch (step.kind) {
+          case "install":
+            return { kind: "install-acp-agent", ...target };
+          case "trust":
+          case "untrust":
+            return { kind: "set-acp-agent-trust", ...target, trusted: step.kind === "trust" };
+          case "enable":
+          case "disable":
+            return { kind: "set-provider-enabled", ...target, enabled: step.kind === "enable" };
+          case "remove":
+            return { kind: "remove-provider", ...target };
+        }
+      }),
+    [execute],
+  );
   const setProviderOwnMemory = useCallback(
     (instanceId: ProviderInstanceId, enabled: boolean) =>
       execute((current) => {
@@ -2687,6 +2740,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     setClaudeArtifactDelivery,
     setProviderNativeSetup,
     setProviderOwnMemory,
+    acpAgentStep,
     threadNativeSetup,
     setDataTags,
     setModelDataTags,

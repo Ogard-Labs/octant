@@ -853,6 +853,9 @@ function cleanupEffect(displayName: string, cleanup: () => Promise<void>): Effec
   }).pipe(Effect.orDie);
 }
 
+/** What an added agent's version reads as until its `initialize` reply names one. */
+export const UNKNOWN_ACP_VERSION = "unknown";
+
 function parseVersion(
   profile: AcpProviderProfile,
   output: string,
@@ -1075,6 +1078,12 @@ export function probeAcpBinary(
             }),
           ),
         );
+      // An added agent's version is read where it answers; otherwise it is
+      // unknown here and its `initialize` reply names it.
+      const unknownVersion =
+        profile.process.versionProbe === "best-effort"
+          ? Effect.succeed({ binaryPath, version: UNKNOWN_ACP_VERSION })
+          : undefined;
       const onClose = (code: number | null) => {
         if (overflow) {
           finish(Effect.fail(failure("protocol", `${name} version output exceeded the limit.`)));
@@ -1082,11 +1091,12 @@ export function probeAcpBinary(
         }
         if (code !== 0) {
           finish(
-            Effect.fail(
-              failure("unavailable", `${name} version probe did not succeed.`, {
-                reason: "runtime-unavailable",
-              }),
-            ),
+            unknownVersion ??
+              Effect.fail(
+                failure("unavailable", `${name} version probe did not succeed.`, {
+                  reason: "runtime-unavailable",
+                }),
+              ),
           );
           return;
         }
@@ -1095,7 +1105,10 @@ export function probeAcpBinary(
           parseVersion(profile, diagnostics.toString("utf8").trimEnd());
         if (parsed === undefined) {
           finish(
-            Effect.fail(failure("protocol", `${name} returned an unrecognized version response.`)),
+            unknownVersion ??
+              Effect.fail(
+                failure("protocol", `${name} returned an unrecognized version response.`),
+              ),
           );
           return;
         }
@@ -1121,11 +1134,12 @@ export function probeAcpBinary(
       const timeout = setTimeout(
         () =>
           finish(
-            Effect.fail(
-              failure("unavailable", `${name} version probe timed out.`, {
-                reason: "runtime-unavailable",
-              }),
-            ),
+            unknownVersion ??
+              Effect.fail(
+                failure("unavailable", `${name} version probe timed out.`, {
+                  reason: "runtime-unavailable",
+                }),
+              ),
           ),
         timeoutMs,
       );
@@ -1338,7 +1352,10 @@ function acquireConnection(
             resume(
               Effect.succeed({
                 connection: {
-                  version,
+                  version:
+                    version === UNKNOWN_ACP_VERSION
+                      ? (initialized.agentInfo?.version ?? version)
+                      : version,
                   pid: child.pid,
                   root: launch.cwd,
                   initialized,

@@ -207,6 +207,7 @@ export function driverLabel(driverKind: ProviderInstance["driverKind"]): string 
   if (driverKind === "ideogram-image") return "Ideogram Image";
   // An outside driver package never borrows a bundled provider's name.
   if (driverKind === "outside-harness-endpoint") return "Outside driver";
+  if (driverKind === "acp-agent") return "Added ACP agent";
   return "OpenAI-compatible";
 }
 
