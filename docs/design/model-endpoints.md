@@ -257,7 +257,24 @@ broker reads the profile in place on each renewal as the AWS CLI does
 and keeps the key pair; the server stores only the pointer, the journal
 names only the reference, and a refusal names its cause (no such profile,
 no current single sign-on session, a `credential_process` that printed no
-credentials, or a profile that only assumes a role, which is not read yet). Add endpoint's Amazon Bedrock card opens its
+credentials, a role that asks for an MFA code, a role AWS refused to let
+the source assume, or a source Octant does not read). A profile with a
+`role_arn` is built (maintainer request, 2026-11-18): the broker assumes
+the role at the token service, from the credentials of its
+`source_profile` (which may itself assume a role, up to five in a row, a
+cycle refused), from the broker's environment keys for
+`credential_source = Environment`, or with `AssumeRoleWithWebIdentity` and
+the token in `web_identity_token_file`. It honours `role_session_name`,
+`external_id`, `duration_seconds` and the profile's `region` (the regional
+token service, else the global one), signs `AssumeRole` with its own
+Signature Version 4 signer, and keeps the role's credentials in the grant
+until five minutes before they expire, then assumes the role again. A role
+with `mfa_serial` is refused with a sentence saying so, since Connect
+profile has no place to type a code; `credential_source` of instance or
+container metadata stays unsupported, as those answer only on that
+machine's own network. Strict changes nothing here. Codex's own Bedrock
+providers resolve the profile in the Codex runtime and do not use this
+path. Add endpoint's Amazon Bedrock card opens its
 own Connect: Name, Region (where the models run), Access portal, Portal
 region, Account ID, Role (the permission set), and Model IDs (1 to 64, since
 Bedrock lists none a role may use), each with a one-line hint, and no key or
