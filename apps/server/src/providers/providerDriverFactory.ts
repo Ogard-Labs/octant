@@ -14,7 +14,7 @@ import {
   isAcpAgentInstance,
   isImageProfileDriverKind,
 } from "@octant/domain";
-import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import type { ProviderDriver, ProviderSessionOwnership } from "@octant/provider-sdk/driver";
 import type { McpPlanServerProvider } from "@octant/contracts/mcp-plan-read-only";
 import { lastClaudeHostEnvironmentSnapshot } from "./claudeAccountDirectory";
 import {
@@ -79,6 +79,8 @@ export interface ProviderDriverFactoryOptions {
   readonly claudeServerAccess?: ProviderServerAccessPort;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
+  /** Which runtime sessions an Octant thread holds, handed to every driver that takes up its own. */
+  readonly sessionOwnership?: ProviderSessionOwnership;
   /** The host's process authority clock, which Claude's pre-tool grants expire on. */
   readonly claudeAuthorityNow?: () => number;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
@@ -173,6 +175,9 @@ export function makeProviderDriver(
           ...(options.protectedPaths === undefined
             ? {}
             : { protectedPaths: options.protectedPaths }),
+          ...(options.sessionOwnership === undefined
+            ? {}
+            : { sessionOwnership: options.sessionOwnership }),
         }),
         // Plan windows come from the account behind the CLI's own sign-in,
         // not from the runtime, so both OpenCode lines report them alike.

@@ -11,6 +11,7 @@ import {
   type ProviderInputModality,
   type ProviderInstanceId,
   type ProviderOutputStopReason,
+  type ProviderResumeCursor,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
   type ProviderToolAnswer,
@@ -18,7 +19,11 @@ import {
   type ProviderApprovalCall,
 } from "@octant/contracts";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
-import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
+import type {
+  ProviderConnection,
+  ProviderDriver,
+  ProviderSessionForkRequest,
+} from "@octant/provider-sdk/driver";
 import {
   rejectUnsupportedChatTurn,
   renderProviderTurnPrompt,
@@ -33,7 +38,7 @@ import {
   type PiRpcConnection,
   type PiSessionMode,
 } from "./piProcess";
-import { makePiNativeSessions } from "./piNativeSessions";
+import { forkPiSession, makePiNativeSessions, piSessionLastEntryId } from "./piNativeSessions";
 import { PiRpcFailure, type PiRpcEvent, type PiRpcResponse } from "./piRpcClient";
 import { outputStopReason } from "./outputStopReason";
 import { providerApprovalCall } from "./providerApprovalCall";
@@ -332,6 +337,7 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
   return {
     kind: "pi",
     conversationOwnership: "provider",
+    forkSession: (input) => Effect.sync(() => forkPiDriverSession(options, input)),
     nativeSessions: makePiNativeSessions({
       instanceId: options.instanceId,
       octantSessionDirectory: join(options.piHome, "sessions"),
@@ -461,6 +467,54 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
           },
         },
       );
+    },
+  };
+}
+
+/**
+ * A fork's or rewind's first session as a copy of the source's Pi session cut
+ * at the turn's anchor (`forkPiSession`). Only a session this instance opened
+ * for the same folder and mode is copied; anything else is undefined, so the
+ * host hands the conversation over as text.
+ */
+function forkPiDriverSession(
+  options: PiDriverOptions,
+  input: ProviderSessionForkRequest,
+): ProviderResumeCursor | undefined {
+  const binding = input.source.binding;
+  if (
+    String(input.instanceId) !== String(options.instanceId) ||
+    input.source.driverKind !== "pi" ||
+    binding === undefined ||
+    String(binding.instanceId) !== String(options.instanceId) ||
+    binding.projectRoot !== input.projectRoot ||
+    binding.mode !== input.mode ||
+    // Pi keeps the model a session was opened with and refuses a resume onto
+    // another, so a fork onto another model reads its source as text.
+    String(binding.modelId) !== String(input.modelId)
+  )
+    return undefined;
+  try {
+    const forked = forkPiSession({
+      octantSessionDirectory: join(options.piHome, "sessions"),
+      sourceSessionId: input.source.value,
+      sessionId: String(input.sessionId),
+      anchor: input.anchor,
+      projectRoot: input.projectRoot,
+    });
+    if (forked === undefined) return undefined;
+  } catch {
+    return undefined;
+  }
+  return {
+    driverKind: "pi",
+    value: String(input.sessionId),
+    binding: {
+      instanceId: options.instanceId,
+      sessionId: input.sessionId,
+      projectRoot: input.projectRoot,
+      mode: input.mode,
+      modelId: input.modelId,
     },
   };
 }
@@ -841,6 +895,11 @@ function makeConnection(
         state.promptActive = false;
         state.terminal = true;
         state.completed = true;
+        // Where this turn ends in Pi's own session, for a later fork or rewind.
+        const nativeAnchor = piSessionLastEntryId(
+          join(options.piHome, "sessions"),
+          String(state.sessionId),
+        );
         emit(state, {
           kind: "completed",
           resumeCursor: {
@@ -855,6 +914,7 @@ function makeConnection(
             },
           },
           ...(state.outputStopReason === undefined ? {} : { stopReason: state.outputStopReason }),
+          ...(nativeAnchor === undefined ? {} : { nativeAnchor }),
         });
         return;
       }

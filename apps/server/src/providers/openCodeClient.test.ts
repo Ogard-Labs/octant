@@ -551,6 +551,125 @@ describe("official OpenCode client routing", () => {
     expect(requests[0]?.headers.get("x-opencode-directory")).toBe("%2Ftmp%2Fproject");
   });
 
+  it("lists a folder's 2.x sessions, finds the message after a fork's anchor across pages, and forks before it", async () => {
+    const requests: Request[] = [];
+    const json = (body: unknown) =>
+      new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request | string, init?: RequestInit) => {
+        const request = typeof input === "string" ? new Request(input, init) : input;
+        requests.push(request.clone());
+        const url = new URL(request.url);
+        if (url.pathname === "/api/session")
+          return json({
+            data: [
+              {
+                id: "ses_person",
+                title: "Fix the build",
+                location: { directory: "/tmp/project" },
+                time: { created: 1, updated: 1_700_000_000_000 },
+              },
+              {
+                id: "ses_child",
+                parentID: "ses_person",
+                location: { directory: "/tmp/project" },
+                time: { created: 1, updated: 2 },
+              },
+              { id: "ses_broken" },
+            ],
+            cursor: {},
+          });
+        if (url.pathname === "/api/session/ses_person/message")
+          return url.searchParams.get("cursor") === null
+            ? json({ data: [{ id: "msg_5" }, { id: "msg_4" }], cursor: { next: "page-2" } })
+            : json({ data: [{ id: "msg_3" }, { id: "msg_2" }], cursor: {} });
+        if (url.pathname === "/api/session/ses_person/fork")
+          return json({ data: { id: "ses_fork", location: { directory: "/tmp/project" } } });
+        return new Response(null, { status: 404 });
+      }),
+    );
+    const client = makeOfficialOpenCodeClient(
+      {
+        authorization: "Basic redacted",
+        pid: 1,
+        runtime: "beta",
+        version: "opencode v2.2.0",
+        url: new URL("http://127.0.0.1:41732/"),
+      },
+      "/tmp/project",
+    );
+    expect(await client.listSessions?.()).toEqual([
+      {
+        id: "ses_person",
+        directory: "/tmp/project",
+        title: "Fix the build",
+        updated: 1_700_000_000_000,
+      },
+      { id: "ses_child", directory: "/tmp/project", updated: 2, parentId: "ses_person" },
+    ]);
+    expect(await client.messageAfter?.("ses_person", "msg_3")).toEqual({
+      status: "found",
+      next: "msg_4",
+    });
+    expect(await client.messageAfter?.("ses_person", "msg_5")).toEqual({ status: "found" });
+    expect(await client.messageAfter?.("ses_person", "msg_gone")).toEqual({ status: "missing" });
+    expect(await client.forkSession?.("ses_person", "msg_4")).toEqual({
+      id: "ses_fork",
+      directory: "/tmp/project",
+    });
+    const list = new URL(requests[0]?.url ?? "");
+    expect([
+      list.pathname,
+      list.searchParams.get("directory"),
+      list.searchParams.get("order"),
+    ]).toEqual(["/api/session", "/tmp/project", "desc"]);
+    const fork = requests.at(-1);
+    expect([fork?.method, new URL(fork?.url ?? "").pathname]).toEqual([
+      "POST",
+      "/api/session/ses_person/fork",
+    ]);
+    expect(await fork?.json()).toEqual({ before: "msg_4" });
+    for (const request of requests) {
+      expect(request.headers.get("authorization")).toBe("Basic redacted");
+      expect(request.headers.get("x-opencode-directory")).toBe("%2Ftmp%2Fproject");
+    }
+  });
+
+  it("forks a 1.x session through its own fork route, before the named message", async () => {
+    const requests: Request[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (request: Request) => {
+        requests.push(request.clone());
+        return new Response(
+          JSON.stringify({
+            id: "ses_fork",
+            slug: "s",
+            projectID: "p",
+            directory: "/tmp/project",
+            title: "t (fork #1)",
+            version: "1",
+            time: { created: 1, updated: 1 },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+    const client = makeOfficialOpenCodeClient(
+      { authorization: "Basic redacted", pid: 1, url: new URL("http://127.0.0.1:41733/") },
+      "/tmp/project",
+    );
+    expect(await client.forkSession?.("ses_source", "msg_3")).toMatchObject({
+      id: "ses_fork",
+      directory: "/tmp/project",
+    });
+    expect(requests.map((request) => [request.method, new URL(request.url).pathname])).toEqual([
+      ["POST", "/session/ses_source/fork"],
+    ]);
+    expect(await requests[0]?.json()).toEqual({ messageID: "msg_3" });
+  });
+
   it("sends a flat prompt body to the 2.x session prompt route", async () => {
     const requests: Request[] = [];
     vi.stubGlobal(
