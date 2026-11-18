@@ -5,11 +5,17 @@ import {
   type CodeRelativePath,
   type CodeThreadId,
 } from "@octant/contracts";
+import { checkoutUnreadableReason } from "./checkoutUnreadableReason";
 import type { CodeFileListingClient } from "@octant/client-runtime";
-import { FolderTree, RefreshCw } from "lucide-react";
-import { CodeFileExplorer, type CodeFileExplorerEntry } from "./CodeFileExplorer";
+import { useEffect } from "react";
+import { FolderTree } from "../ui/icons";
+import {
+  CodeFileExplorer,
+  type CodeFileChange,
+  type CodeFileExplorerEntry,
+} from "./CodeFileExplorer";
 import { useCodeFileListingController } from "./useCodeFileListingController";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
 /**
@@ -26,12 +32,21 @@ export interface CodeFileExplorerPanelProps {
   readonly extraFolders?: ReadonlyArray<string> | undefined;
   readonly onOpenFile: (entry: Extract<CodeFileExplorerEntry, { readonly kind: "file" }>) => void;
   readonly selectedPath?: CodeRelativePath | undefined;
+  /** Files that differ from the last commit, marked in the checkout's tree. */
+  readonly changes?: ReadonlyMap<string, CodeFileChange>;
+  /** A double click on a file: keep it open rather than preview it. */
+  readonly onKeepFile?: CodeFileExplorerPanelProps["onOpenFile"];
   /** Injected in tests; otherwise built from the server URL and capability. */
   readonly client?: CodeFileListingClient;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   /** Called for every host-reported change, so an open editor can reload. */
   readonly onFilesChanged?: (notice: CodeFileChangeNotice) => void;
+  /**
+   * Told when the checkout's listing fails and when it reads again, so the
+   * pane around the tree can give the whole of itself to the one state.
+   */
+  readonly onUnavailableChange?: (unavailable: boolean) => void;
 }
 
 /**
@@ -56,6 +71,12 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
 
+  const unavailable = bound && controller.status === "error";
+  const onUnavailableChange = props.onUnavailableChange;
+  useEffect(() => {
+    onUnavailableChange?.(unavailable);
+  }, [onUnavailableChange, unavailable]);
+
   if (!bound) {
     return (
       <p className="code-file-explorer__status" role="status">
@@ -69,23 +90,19 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
     // The one sentence, and one way back. Rendering the tree as well put a
     // live filter field and "No files match" beneath an explanation that
     // there are no files to match.
+    // It is the pane's one state, so it is drawn as every pane's state is: a
+    // mark, one line, the host's sentence in the muted ink and the way back.
+    // A red notice with a button under it read as a toast over the pane's bar.
     return (
-      <div className="code-file-explorer-panel">
-        <OctantAlert className="code-file-explorer__error" tone="danger">
-          {controller.errorMessage ?? "Repository files are unavailable."}
-        </OctantAlert>
-        <div className="code-file-explorer-panel__recovery">
-          <OctantButton
-            onClick={() => void controller.refresh()}
-            size="sm"
-            type="button"
-            variant="secondary"
-          >
-            <RefreshCw aria-hidden="true" size={14} />
-            <span>Try again</span>
-          </OctantButton>
-        </div>
-      </div>
+      <OctantEmpty
+        action={{ label: "Try again", onClick: () => void controller.refresh() }}
+        message={checkoutUnreadableReason(
+          controller.errorMessage ?? "Repository files are unavailable.",
+        )}
+        role="alert"
+        state="warning"
+        title="This checkout can't be read"
+      />
     );
   }
 
@@ -95,6 +112,8 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
         entries={controller.entries}
         loading={controller.status === "loading"}
         onOpenFile={props.onOpenFile}
+        {...(props.onKeepFile === undefined ? {} : { onKeepFile: props.onKeepFile })}
+        {...(props.changes === undefined ? {} : { changes: props.changes })}
         onRefresh={() => void controller.refresh()}
         refreshing={controller.status === "loading"}
         truncated={controller.truncated}
@@ -106,6 +125,7 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
           folder={folder}
           live={index < MAX_LIVE_EXTRA_FOLDER_WATCHES}
           onOpenFile={props.onOpenFile}
+          {...(props.onKeepFile === undefined ? {} : { onKeepFile: props.onKeepFile })}
           {...(props.threadId === undefined ? {} : { threadId: props.threadId })}
           {...(props.checkoutId === undefined ? {} : { checkoutId: props.checkoutId })}
           {...(props.client === undefined ? {} : { client: props.client })}
@@ -130,7 +150,13 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
 function ExtraFolderExplorer(
   props: Pick<
     CodeFileExplorerPanelProps,
-    "threadId" | "checkoutId" | "client" | "serverUrl" | "windowCapability" | "onOpenFile"
+    | "threadId"
+    | "checkoutId"
+    | "client"
+    | "serverUrl"
+    | "windowCapability"
+    | "onOpenFile"
+    | "onKeepFile"
   > & { readonly folder: string; readonly live: boolean },
 ) {
   // A folder spelled in a way the file-path schema refuses (a decomposed
@@ -168,6 +194,10 @@ function ExtraFolderExplorer(
           onOpenFile={(entry) => {
             const path = projectFilePath(`${props.folder}/${entry.path}`);
             if (path !== undefined) props.onOpenFile({ ...entry, path });
+          }}
+          onKeepFile={(entry) => {
+            const path = projectFilePath(`${props.folder}/${entry.path}`);
+            if (path !== undefined) props.onKeepFile?.({ ...entry, path });
           }}
           onRefresh={() => void controller.refresh()}
           refreshing={controller.status === "loading"}

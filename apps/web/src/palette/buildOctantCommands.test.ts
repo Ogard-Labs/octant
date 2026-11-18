@@ -187,3 +187,38 @@ describe("the jump to the next waiting thread command", () => {
     expect(buildOctantCommands(sources()).some((c) => c.id === "thread:next-waiting")).toBe(false);
   });
 });
+
+describe("the destination, sidebar and dock commands", () => {
+  it("lists pages, Settings pages, the sidebar toggle and dock tools beside threads", () => {
+    const onOpen = vi.fn();
+    const onOpenDockTool = vi.fn();
+    const commands = buildOctantCommands(
+      sources({
+        destinations: [{ id: "inbox", label: "Inbox", onOpen }],
+        settingsPages: [{ sectionId: "appearance", label: "Appearance", onOpen }],
+        onToggleSidebar: vi.fn(),
+        dockTools: [{ id: "files", label: "Files" }],
+        onOpenDockTool,
+      }),
+    );
+    const titles = commands.map((command) => command.title);
+    expect(titles).toEqual(
+      expect.arrayContaining([
+        "Go to Inbox",
+        "Settings: Appearance",
+        "Show or hide the sidebar",
+        "Open Files",
+      ]),
+    );
+    const tool = commands.find((command) => command.id === "dock-tool:files");
+    if (tool?.action.kind !== "run") throw new Error("expected a run command");
+    tool.action.run();
+    expect(onOpenDockTool).toHaveBeenCalledWith({ id: "files", label: "Files" });
+    expect(keybindingActionForCommand("workspace:toggle-sidebar")).toBe("toggle-sidebar");
+  });
+
+  it("offers no dock tool when the host cannot open one", () => {
+    const commands = buildOctantCommands(sources({ dockTools: [{ id: "files", label: "Files" }] }));
+    expect(commands.some((command) => command.id.startsWith("dock-tool:"))).toBe(false);
+  });
+});

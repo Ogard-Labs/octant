@@ -647,6 +647,14 @@ describe("automation routes", () => {
     if (decoded.kind !== "automation-list") return;
     expect(decoded.items.map((item) => String(item.id))).toEqual([automationId("aa01")]);
     expect(decoded.items[0]?.nextDueAt).not.toBeNull();
+    // Totals cover only Automations the caller may see, never the hidden one.
+    expect(decoded.totals).toEqual({
+      automations: 1,
+      enabled: 1,
+      windowDays: 30,
+      runs: 0,
+      succeeded: 0,
+    });
     // Sanitized: no prompts, bindings, profiles, or delivery targets on the wire.
     const raw = JSON.stringify(body);
     expect(raw).not.toContain("taskPrompt");

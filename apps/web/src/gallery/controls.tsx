@@ -1,4 +1,4 @@
-import { Bell, Check, Plus, Settings, Trash2 } from "lucide-react";
+import { Bell, Check, Plus, Settings, Trash2 } from "../ui/icons";
 import { useState, type ReactNode } from "react";
 import { IconButton } from "../shell/IconButton";
 import { OctantBadge } from "../ui/base/OctantBadge";
@@ -150,7 +150,7 @@ function IconButtons() {
     <>
       <Specimen
         adapters={["OctantIconButton"]}
-        props={`<IconButton icon={Settings} label="Settings" /> (shell/IconButton.tsx, 16px icon, stroke 1.5)`}
+        props={`<IconButton icon={Settings} label="Settings" /> (shell/IconButton.tsx, 16px icon, stroke 2)`}
       >
         <div className="gallery-row">
           <IconButton icon={Settings} label="Settings" />

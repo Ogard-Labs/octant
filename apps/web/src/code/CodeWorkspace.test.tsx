@@ -23,9 +23,7 @@ describe("CodeWorkspace", () => {
     );
 
     expect(screen.getByRole("status")).toBeVisible();
-    expect(screen.getByText("Git workspace")).toBeVisible();
     expect(screen.getByRole("heading", { name: "Loading Git state" })).toBeVisible();
-    expect(screen.getByText("Loading exact checkout status and diff evidence.")).toBeVisible();
   });
 
   it("says a server Project's file tab is not available yet, and opens its terminal, Git, and pull request tabs", () => {
@@ -638,7 +636,12 @@ describe("CodeWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Repository checkout changed" })).toBeVisible();
+    // The short state Files draws for the same checkout: a title and one line,
+    // with none of the paragraph that a short bottom panel cut off.
+    expect(screen.getByRole("heading", { name: "This checkout can't be read" })).toBeVisible();
+    expect(screen.getByText("Code checkout is unavailable.")).toBeVisible();
+    expect(screen.queryByText("Code terminal")).not.toBeInTheDocument();
+    expect(screen.queryByText(/fail-closed/i)).not.toBeInTheDocument();
     // The old copy sent the reader off to start over. Recovery exists now, so
     // abandoning the thread is no longer the advice.
     expect(screen.queryByText(/create a fresh Code thread/i)).not.toBeInTheDocument();
@@ -674,7 +677,7 @@ describe("CodeWorkspace", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Connecting repository checkout" })).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "Repository checkout changed" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "This checkout can't be read" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Start terminal" })).not.toBeInTheDocument();
   });
 
@@ -688,7 +691,8 @@ describe("CodeWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "README.md is unavailable" })).toBeVisible();
+    // The panes' one state: a mark and two lines, found by its words.
+    expect(screen.getByText("README.md is unavailable")).toBeVisible();
     expect(screen.getByText(/authoritative file projection/i)).toBeVisible();
   });
 

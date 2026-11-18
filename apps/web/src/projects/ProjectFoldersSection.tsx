@@ -30,6 +30,9 @@ type Notice =
   | { readonly kind: "done"; readonly message: string }
   | { readonly kind: "failed"; readonly message: string };
 
+const EXTRA_FOLDERS_RULE =
+  "Extra folders get the same access as the main folder. Checkouts and Git stay in the main folder. A terminal or action can start in any of them.";
+
 const NO_NOTICE: Notice = { kind: "none" };
 const SELECTION_UNAVAILABLE: Notice = {
   kind: "failed",
@@ -159,9 +162,9 @@ export function ProjectFoldersSection(props: ProjectFoldersSectionProps) {
         ))}
       </ul>
       {canAdd || extras.length > 0 ? (
-        <p className="project-folders__note">
-          Extra folders get the same access as the main folder. Checkouts and Git stay in the main
-          folder; a terminal or a saved action can start in any of them.
+        <p className="project-folders__note" title={EXTRA_FOLDERS_RULE}>
+          Extra folders share the main folder&apos;s access.
+          <span className="sr-only"> {EXTRA_FOLDERS_RULE}</span>
         </p>
       ) : null}
       {canAdd ? (

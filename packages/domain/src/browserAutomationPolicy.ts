@@ -292,8 +292,8 @@ export function remoteBrowserActionReach(kind: BrowserActionKind): BrowserPolicy
  * `http:` origin upgraded to `https:` is where it was headed anyway. Every
  * other host, and every port, stays exact. A redirect from `vg.no` to
  * `www.vg.no` used to leave the page blank with a notice to open the address
- * the person had just typed. A Private page an agent opened at Full access
- * carries the any-site entry and admits every http and https address.
+ * the person had just typed. A Private page carries the any-site entry and
+ * admits every http and https address.
  */
 export function originAllowed(target: string, allowedOrigins: ReadonlyArray<string>): boolean {
   const page = httpOrigin(target);

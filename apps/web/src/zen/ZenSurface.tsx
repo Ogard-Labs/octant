@@ -12,7 +12,7 @@ import {
   SquareTerminal,
   Timer,
   X,
-} from "lucide-react";
+} from "../ui/icons";
 import {
   useCallback,
   useEffect,

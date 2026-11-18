@@ -2,6 +2,7 @@ import type {
   DesktopFrameAnswer,
   DesktopPaneClient,
 } from "@octant/client-runtime/desktop-pane-client";
+import { InfoTip, PaneBar } from "../shell/PaneBar";
 import type {
   DesktopInputEvent,
   DesktopLease,
@@ -15,7 +16,7 @@ import type {
   LeasableDesktopProvider,
 } from "@octant/contracts";
 import { decodeDesktopPaneRequest } from "@octant/contracts";
-import { Clock, Monitor, Power, RotateCw } from "lucide-react";
+import { Clock, Monitor, Power, RotateCw } from "../ui/icons";
 import { useDockBarControls, type DockBarItem } from "../shell/dockBarControls";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { DeviceLine } from "../device/DeviceLine";
@@ -661,7 +662,7 @@ function DesktopStage(props: {
       return state.start.status === "available" ? (
         <DesktopCard
           action={{ label: "Start desktop", run: props.onStart, busy: props.pending === "start" }}
-          lede={`A throwaway Linux desktop on ${state.start.provider.displayName}, with no network and nothing of this computer's. You and the agent can both use it; it is destroyed when it ends.`}
+          info={`A throwaway Linux desktop on ${state.start.provider.displayName}, with no network and nothing of this computer's. You and the agent can both use it; it is destroyed when it ends.`}
           title="Start a desktop"
         />
       ) : (
@@ -671,7 +672,7 @@ function DesktopStage(props: {
       return (
         <DesktopCard
           busy
-          lede="Octant is creating the desktop. This can take a few seconds."
+          info="Octant is creating the desktop. This can take a few seconds."
           title="Starting a desktop"
         />
       );
@@ -679,7 +680,7 @@ function DesktopStage(props: {
       return (
         <DesktopCard
           action={{ label: "Show desktop", run: () => props.onShow(state.lease) }}
-          lede="The desktop is running. A tab never reconnects to a desktop on its own."
+          info="The desktop is running. A tab never reconnects to a desktop on its own."
           title="Desktop not shown here"
         />
       );
@@ -687,7 +688,7 @@ function DesktopStage(props: {
       return (
         <DesktopCard
           action={{ label: "Reconnect", run: () => props.onShow(state.lease), icon: "reconnect" }}
-          lede="The live view stopped. The desktop is still running."
+          info="The live view stopped. The desktop is still running."
           title="Live view interrupted"
         />
       );
@@ -703,7 +704,7 @@ function DesktopStage(props: {
       return (
         <DesktopCard
           busy
-          lede="Octant is destroying the desktop and checking that it is gone."
+          info="Octant is destroying the desktop and checking that it is gone."
           title="Ending the desktop"
         />
       );
@@ -758,7 +759,10 @@ function DesktopStage(props: {
 
 function DesktopCard(props: {
   readonly title: string;
+  /** Status the person needs in order to act: shown as a line under the bar. */
   readonly lede?: string;
+  /** An explanation that is not status: carried by an info icon on the bar. */
+  readonly info?: string;
   readonly busy?: boolean;
   readonly action?: {
     readonly label: string;
@@ -770,12 +774,10 @@ function DesktopCard(props: {
   const headingId = useId();
   return (
     <section aria-labelledby={headingId} className="device-card desktop-pane__card">
-      <div className="device-card__head">
-        <h2 className="device-card__title" id={headingId}>
-          {props.title}
-        </h2>
+      <PaneBar title={<span id={headingId}>{props.title}</span>}>
         {props.busy === true ? <DeviceSpinner /> : null}
-      </div>
+        {props.info === undefined ? null : <InfoTip text={props.info} />}
+      </PaneBar>
       {props.lede === undefined ? null : <p className="device-card__lede">{props.lede}</p>}
       {props.action === undefined ? null : (
         <div className="device-card__actions">

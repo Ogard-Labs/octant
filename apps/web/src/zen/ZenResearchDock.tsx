@@ -3,7 +3,10 @@ import type { BrowserAutomationClient } from "@octant/client-runtime/browser-aut
 import type { BrowserAutomationSnapshot } from "@octant/contracts/browser-automation-rpc";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
 import { decodeWorkspaceTabId, type WorkspaceTab } from "@octant/contracts/shell";
-import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts/browser-automation";
+import {
+  ANY_BROWSER_ORIGIN,
+  MAX_BROWSER_TABS_PER_CONTEXT,
+} from "@octant/contracts/browser-automation";
 import type { ZenResearchDock as ZenResearchDockBinding } from "@octant/contracts/zen";
 import {
   ArrowLeft,
@@ -14,7 +17,7 @@ import {
   RotateCw,
   ShieldCheck,
   X,
-} from "lucide-react";
+} from "../ui/icons";
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -227,7 +230,8 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
         action: makeBrowserToolAction(scope, "Open a docked research browser for this thread."),
         policy: {
           profileMode: "isolated",
-          allowedOrigins: [new URL(target).origin],
+          // A Private page admits every site, as the thread's Browser does.
+          allowedOrigins: [ANY_BROWSER_ORIGIN],
           credentialFieldProtection: true,
           maxConcurrentTabs: MAX_BROWSER_TABS_PER_CONTEXT,
           sessionTimeoutMs: 600_000,

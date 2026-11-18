@@ -1,4 +1,4 @@
-import { Inbox, Play, Settings as SettingsIcon, SquareTerminal } from "lucide-react";
+import { Inbox, Play, Settings as SettingsIcon, SquareTerminal } from "../ui/icons";
 import { useState } from "react";
 import { SettingGroup, SettingRow, SettingsPageScope } from "../settings/primitives";
 import { SidebarCountTiles } from "../shell/SidebarCountTiles";

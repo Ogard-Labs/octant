@@ -267,7 +267,7 @@ describe("ChatComposer", () => {
     expect(screen.getByRole("button", { name: "Stop response" })).toBeVisible();
     expect(document.querySelector(".composer-progress__line")).toBeNull();
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Response is streaming. Submit to add a message to the host queue.",
+      "Response is streaming. Sending adds your message to the queue.",
     );
     expect(document.querySelector(".chat-composer--running")).not.toBeNull();
   });

@@ -342,8 +342,10 @@ import {
 import {
   INITIAL_SIDEBAR_MATERIAL_PREFERENCE,
   createWindowPresentationController,
+  glassSafeAtStart,
   observeThermalPerformance,
   resolveWindowPresentation,
+  type GlassRefusal,
   type ResolvedSidebarMaterial,
   type WindowPresentationController,
 } from "./windowPresentation";
@@ -1926,6 +1928,22 @@ function reportWindowFullScreen(window: BrowserWindow): void {
   window.on("leave-full-screen", () => send(false));
 }
 
+/**
+ * Tells the window's renderer whether it is the window in front. A Mac window
+ * that is not in front greys its toolbar and its accent, and a page cannot
+ * know this by itself: its own focus leaves whenever a Browser page inside
+ * the same window takes the keyboard, while the window is still in front.
+ */
+function reportWindowActive(window: BrowserWindow): void {
+  const send = () => {
+    if (!window.isDestroyed()) {
+      window.webContents.send(IPC_CHANNELS.windowActive, window.isFocused());
+    }
+  };
+  window.on("focus", send);
+  window.on("blur", send);
+}
+
 function popupWindowOf(window: BrowserWindow): ExtensionPopupShellWindow {
   return {
     isDestroyed: () => window.isDestroyed(),
@@ -2463,12 +2481,19 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
   nativeStateStore = stateStore;
   const state = await loadedState;
   stableWindowId = state.windowId;
+  // Glass once refused on a Mac driven over screen sharing with no reason said:
+  // the system's rich-animation hint reads false there, and it is not a Glass
+  // gate. Logged once so a packaged run shows what the host saw.
+  const animationSettings = systemPreferences.getAnimationSettings();
+  writeDiagnostic(
+    `[octant] system animation settings (not a Glass gate): shouldRenderRichAnimation=${animationSettings.shouldRenderRichAnimation} prefersReducedMotion=${animationSettings.prefersReducedMotion}`,
+  );
   const presentation = resolveWindowPresentation({
     platform: process.platform,
     sidebarMaterial: INITIAL_SIDEBAR_MATERIAL_PREFERENCE,
     sidebarVibrancyMode: "off",
     compositionSupported: process.platform === "darwin",
-    performanceSafe: false,
+    performanceSafe: glassSafeAtStart(process.platform, powerMonitor),
     prefersReducedTransparency: nativeTheme.prefersReducedTransparency,
     highContrast: nativeTheme.shouldUseHighContrastColors,
   });
@@ -2598,6 +2623,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
       });
       let resolvedMaterial: ResolvedSidebarMaterial = presentation.material;
       let resolvedSidebarVibrancy: "sidebar" | null = presentation.vibrancy;
+      let resolvedGlassRefusal: GlassRefusal | null = presentation.glassRefusal;
       const controller = createWindowPresentationController({
         window: {
           setVibrancy: (value) => window.setVibrancy(value),
@@ -2613,13 +2639,20 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
               window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, vibrancy);
             }
           },
+          publishGlassRefusal: (refusal) => {
+            resolvedGlassRefusal = refusal;
+            if (!window.webContents.isDestroyed()) {
+              window.webContents.send(IPC_CHANNELS.resolvedGlassRefusal, refusal);
+            }
+          },
         },
         nativeTheme,
         platform: process.platform,
         sidebarMaterial: INITIAL_SIDEBAR_MATERIAL_PREFERENCE,
         sidebarVibrancyMode: "off",
         compositionSupported: process.platform === "darwin",
-        performanceSafe: false,
+        performanceSafe: glassSafeAtStart(process.platform, powerMonitor),
+        report: writeDiagnostic,
       });
       preparedController = controller;
       preparationCleanup.trackPresentationController(controller);
@@ -2660,7 +2693,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
       const stopThermalPerformance = observeThermalPerformance({
         platform: process.platform,
         powerMonitor,
-        richEffectsAllowed: systemPreferences.getAnimationSettings().shouldRenderRichAnimation,
+        report: writeDiagnostic,
         updatePerformanceSafe: (performanceSafe) => controller.update({ performanceSafe }),
       });
       preparationCleanup.trackThermalObserver(stopThermalPerformance);
@@ -2673,7 +2706,9 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
       window.webContents.on("did-finish-load", () => {
         window.webContents.send(IPC_CHANNELS.resolvedMaterial, resolvedMaterial);
         window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, resolvedSidebarVibrancy);
+        window.webContents.send(IPC_CHANNELS.resolvedGlassRefusal, resolvedGlassRefusal);
         window.webContents.send(IPC_CHANNELS.windowFullScreen, window.isFullScreen());
+        window.webContents.send(IPC_CHANNELS.windowActive, window.isFocused());
         while (pendingCodeDeepLinks.length > 0) {
           window.webContents.send(IPC_CHANNELS.codeDeepLink, pendingCodeDeepLinks.shift());
         }
@@ -2695,6 +2730,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
         window.show();
       });
       reportWindowFullScreen(window);
+      reportWindowActive(window);
       window.on("close", (event) => {
         if (quitPrepared) return;
         event.preventDefault();
@@ -2759,7 +2795,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
     sidebarMaterial: INITIAL_SIDEBAR_MATERIAL_PREFERENCE,
     sidebarVibrancyMode: "off",
     compositionSupported: process.platform === "darwin",
-    performanceSafe: false,
+    performanceSafe: glassSafeAtStart(process.platform, powerMonitor),
     prefersReducedTransparency: nativeTheme.prefersReducedTransparency,
     highContrast: nativeTheme.shouldUseHighContrastColors,
   });
@@ -2896,6 +2932,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         });
         let resolvedMaterial: ResolvedSidebarMaterial = presentation.material;
         let resolvedSidebarVibrancy: "sidebar" | null = presentation.vibrancy;
+        let resolvedGlassRefusal: GlassRefusal | null = presentation.glassRefusal;
         const controller = createWindowPresentationController({
           window: {
             setVibrancy: (value) => window.setVibrancy(value),
@@ -2911,20 +2948,27 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
                 window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, vibrancy);
               }
             },
+            publishGlassRefusal: (refusal) => {
+              resolvedGlassRefusal = refusal;
+              if (!window.webContents.isDestroyed()) {
+                window.webContents.send(IPC_CHANNELS.resolvedGlassRefusal, refusal);
+              }
+            },
           },
           nativeTheme,
           platform: process.platform,
           sidebarMaterial: INITIAL_SIDEBAR_MATERIAL_PREFERENCE,
           sidebarVibrancyMode: "off",
           compositionSupported: process.platform === "darwin",
-          performanceSafe: false,
+          performanceSafe: glassSafeAtStart(process.platform, powerMonitor),
+          report: writeDiagnostic,
         });
         preparationCleanup.trackPresentationController(controller);
         preparationCleanup.trackThermalObserver(
           observeThermalPerformance({
             platform: process.platform,
             powerMonitor,
-            richEffectsAllowed: systemPreferences.getAnimationSettings().shouldRenderRichAnimation,
+            report: writeDiagnostic,
             updatePerformanceSafe: (performanceSafe) => controller.update({ performanceSafe }),
           }),
         );
@@ -2969,7 +3013,9 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         window.webContents.on("did-finish-load", () => {
           window.webContents.send(IPC_CHANNELS.resolvedMaterial, resolvedMaterial);
           window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, resolvedSidebarVibrancy);
+          window.webContents.send(IPC_CHANNELS.resolvedGlassRefusal, resolvedGlassRefusal);
           window.webContents.send(IPC_CHANNELS.windowFullScreen, window.isFullScreen());
+          window.webContents.send(IPC_CHANNELS.windowActive, window.isFocused());
         });
         window.webContents.on("render-process-gone", () => {
           codeOperationApprovalViews?.closeWindow(windowId);
@@ -2986,6 +3032,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           window.show();
         });
         reportWindowFullScreen(window);
+        reportWindowActive(window);
         window.once("closed", () => {
           codeOperationApprovalViews?.closeWindow(windowId);
           browserExtensionPopupHost?.close(windowId);
@@ -3854,6 +3901,20 @@ function installIpcHandlers(): void {
     const context = ownedTopLevelWindowContext(event);
     const request = validateBrowserSurfaceIdentity(value);
     browserSurfaceHost?.detach(request.contextId, {
+      windowId: context.windowId,
+      threadId: request.threadId,
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.browserSurfacePreview, async (event, value: unknown) => {
+    const context = ownedTopLevelWindowContext(event);
+    const request = validateBrowserSurfaceIdentity(value);
+    // The minimised Browser card's picture skips the credential-field check
+    // that guards observations. That is safe because the pane already shows
+    // this live page to this person on this screen: the picture goes only to
+    // this window's renderer for display, is never journaled or stored by the
+    // server, and never reaches an agent. The host checks that this window and
+    // thread own the context.
+    return await browserSurfaceHost?.previewPicture(request.contextId, {
       windowId: context.windowId,
       threadId: request.threadId,
     });

@@ -16,7 +16,7 @@ import {
   Square,
   Volume1,
   Volume2,
-} from "lucide-react";
+} from "../ui/icons";
 import type { KeyboardEvent, ReactNode } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";

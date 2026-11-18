@@ -68,7 +68,7 @@ export function HostPrivacyExport({
   return (
     <SettingsPanel
       title="Export my data"
-      description="Save everything this host holds about you, as a file you can read."
+      description="Save everything this host holds about you as a readable file."
     >
       <div className="settings-panel__stack" id="settings-host-export">
         <div className="host-settings__controls">

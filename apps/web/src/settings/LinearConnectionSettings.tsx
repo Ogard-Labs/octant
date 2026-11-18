@@ -278,7 +278,7 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
         <SettingsSection tone="danger" title="Disconnect">
           <div className="setgroup">
             <SettingRow
-              description="Removes Octant's Linear credentials from this host. Your Linear workspace is untouched."
+              description="Removes Octant's Linear sign-in from this host. Your Linear workspace is untouched."
               label="Disconnect Linear"
               scope="host"
               settingId="linear-disconnect"

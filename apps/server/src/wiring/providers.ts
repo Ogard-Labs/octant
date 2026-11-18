@@ -1987,6 +1987,12 @@ export function wireProviders(deps: ProvidersDependencies) {
       providerService.forgetOutsideDriverVerification(extensionId);
     quarantineOutsideDriver = (instanceId, digest) =>
       providerService.quarantineOutsideDriver(instanceId, digest);
+    // Names saved before the defaults dropped "CLI" are shortened here: after
+    // the provider projection is read and before any scan can register a new
+    // account, so a scan never meets an old name.
+    yield* Effect.promise(() =>
+      providerService.renameLegacyDefaultNames(LOCAL_HOST_ID as never).catch(() => undefined),
+    );
     // A host that stopped between a trust and the move it causes makes the
     // move now; with nothing to move this journals nothing and starts nothing.
     yield* Effect.promise(() => reconcileOutsideDriverState().catch(() => undefined));

@@ -7,15 +7,15 @@ import type {
   ArtifactLibraryTab,
 } from "@octant/contracts/artifact-library";
 import type { CanvasId, OctantMode, ProjectId } from "@octant/contracts";
-import { Layers, LayoutGrid, List, Plus, Search } from "lucide-react";
+import { Layers, LayoutGrid, List, Plus, Search } from "../ui/icons";
 import { SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantSelectField } from "../ui/base/OctantSelect";
+import { FilterMenu, FilterMenuGroup } from "../surface/FilterMenu";
 import { OctantTabs, OctantTabsList, OctantTabsTab } from "../ui/base/OctantTabs";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ArtifactCard } from "./ArtifactCard";
-import { ArtifactListRow } from "./ArtifactListRow";
+import { ArtifactTableHead, ArtifactTableRow } from "./ArtifactTableRow";
 import { ClaudePageCard, type ClaudePageActions } from "./ClaudePageCard";
 import { SyncedArtifactCard } from "./SyncedArtifactCard";
 import type { ArtifactLibraryFilters } from "./useArtifactLibrary";
@@ -79,6 +79,13 @@ const KINDS: ReadonlyArray<ArtifactKind> = [
   "mixed",
 ];
 const MODES: ReadonlyArray<OctantMode> = ["chat", "work", "code"];
+/**
+ * The "no filter" radio item; a menu radio needs a value, and the filter key
+ * is removed instead. Empty, because no kind, mode, Project id or tag name can
+ * be: a tag someone named "any" would otherwise share the item's value and
+ * could never be chosen.
+ */
+const ANY = "";
 
 /** A Canvas a Chat thread owns outside every Project files under this label. */
 const NO_PROJECT = "No Project";
@@ -107,6 +114,16 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
     ...(props.onTagAdd === undefined ? {} : { onTagAdd: props.onTagAdd }),
     ...(props.onTagRemove === undefined ? {} : { onTagRemove: props.onTagRemove }),
   };
+  // A Canvas kind and a Claude type are one choice (the Kind group), so they
+  // count once.
+  const filterCount = [
+    filters.source,
+    filters.kind ?? filters.claudeType,
+    filters.account,
+    filters.projectId,
+    filters.mode,
+    filters.tag,
+  ].filter((choice) => choice !== undefined).length;
   const hasActiveFilters =
     filters.query.trim() !== "" ||
     filters.kind !== undefined ||
@@ -136,6 +153,20 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
     key: "kind" | "projectId" | "mode" | "tag" | "source" | "claudeType" | "account",
   ) => {
     const { [key]: _removed, ...rest } = filters;
+    props.onFiltersChange(rest);
+  };
+
+  const resetFilters = () => {
+    const {
+      source: _source,
+      kind: _kind,
+      claudeType: _claudeType,
+      account: _account,
+      projectId: _projectId,
+      mode: _mode,
+      tag: _tag,
+      ...rest
+    } = filters;
     props.onFiltersChange(rest);
   };
 
@@ -181,136 +212,115 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
               />
             </div>
 
-            <label className="sr-only" htmlFor="artifact-library-source">
-              Filter by source
-            </label>
-            <OctantSelectField
-              className="artifact-library__select select"
-              id="artifact-library-source"
-              onValueChange={(value) =>
-                value === "" ? clear("source") : change({ source: value as ArtifactLibrarySource })
-              }
-              options={[{ id: "", label: "Any source" }, ...SOURCES]}
-              value={filters.source ?? ""}
-            />
-
-            <label className="sr-only" htmlFor="artifact-library-kind">
-              Filter by kind
-            </label>
-            <OctantSelectField
-              className="artifact-library__select select"
-              id="artifact-library-kind"
-              onValueChange={(value) => {
-                // A Claude type and a Canvas kind are one filter: choosing
-                // either clears the other.
-                const { kind: _kind, claudeType: _claudeType, ...rest } = filters;
-                if (value === "") props.onFiltersChange(rest);
-                else if (value.startsWith(CLAUDE_KIND_PREFIX)) {
-                  props.onFiltersChange({
-                    ...rest,
-                    claudeType: value.slice(CLAUDE_KIND_PREFIX.length),
-                  });
-                } else props.onFiltersChange({ ...rest, kind: value as ArtifactKind });
-              }}
-              options={[
-                { id: "", label: "Any kind" },
-                ...KINDS.map((kind) => ({
-                  id: kind,
-                  label: `${kind[0]?.toUpperCase()}${kind.slice(1)}`,
-                })),
-                ...(listing?.claudeTypes ?? []).map((type) => ({
-                  id: `${CLAUDE_KIND_PREFIX}${type}`,
-                  label: `${type} (Claude)`,
-                })),
-              ]}
-              value={
-                filters.claudeType === undefined
-                  ? (filters.kind ?? "")
-                  : `${CLAUDE_KIND_PREFIX}${filters.claudeType}`
-              }
-            />
-
-            {(listing?.claudeAccounts ?? []).length === 0 ? null : (
-              <>
-                <label className="sr-only" htmlFor="artifact-library-account">
-                  Filter by Claude account
-                </label>
-                <OctantSelectField
-                  className="artifact-library__select select"
-                  id="artifact-library-account"
-                  onValueChange={(value) =>
-                    value === "" ? clear("account") : change({ account: value })
+            <FilterMenu count={filterCount} onReset={resetFilters}>
+              <FilterMenuGroup<string>
+                label="Source"
+                onChange={(value) =>
+                  value === ANY
+                    ? clear("source")
+                    : change({ source: value as ArtifactLibrarySource })
+                }
+                options={[
+                  { value: ANY, label: "Any source" },
+                  ...SOURCES.map((source) => ({ value: source.id as string, label: source.label })),
+                ]}
+                value={filters.source ?? ANY}
+              />
+              <FilterMenuGroup<string>
+                label="Kind"
+                onChange={(value) => {
+                  // A Claude type and a Canvas kind are one filter: choosing
+                  // either clears the other.
+                  const { kind: _kind, claudeType: _claudeType, ...rest } = filters;
+                  if (value === ANY) props.onFiltersChange(rest);
+                  else if (value.startsWith(CLAUDE_KIND_PREFIX)) {
+                    props.onFiltersChange({
+                      ...rest,
+                      claudeType: value.slice(CLAUDE_KIND_PREFIX.length),
+                    });
+                  } else props.onFiltersChange({ ...rest, kind: value as ArtifactKind });
+                }}
+                options={[
+                  { value: ANY, label: "Any kind" },
+                  ...KINDS.map((kind) => ({
+                    value: kind as string,
+                    label: `${kind[0]?.toUpperCase()}${kind.slice(1)}`,
+                  })),
+                  ...(listing?.claudeTypes ?? []).map((type) => ({
+                    value: `${CLAUDE_KIND_PREFIX}${type}`,
+                    label: `${type} (Claude)`,
+                  })),
+                ]}
+                separated
+                value={
+                  filters.claudeType === undefined
+                    ? (filters.kind ?? ANY)
+                    : `${CLAUDE_KIND_PREFIX}${filters.claudeType}`
+                }
+              />
+              {(listing?.claudeAccounts ?? []).length === 0 ? null : (
+                <FilterMenuGroup<string>
+                  label="Claude account"
+                  onChange={(value) =>
+                    value === ANY ? clear("account") : change({ account: value })
                   }
                   options={[
-                    { id: "", label: "Any Claude account" },
+                    { value: ANY, label: "Any Claude account" },
                     ...(listing?.claudeAccounts ?? []).map((account) => ({
-                      id: account.account,
+                      value: account.account,
                       label: `${account.name ?? account.account} (${String(account.pageCount)})`,
                     })),
                   ]}
-                  value={filters.account ?? ""}
+                  separated
+                  value={filters.account ?? ANY}
                 />
-              </>
-            )}
-
-            <label className="sr-only" htmlFor="artifact-library-project">
-              Filter by Project
-            </label>
-            <OctantSelectField
-              className="artifact-library__select select"
-              id="artifact-library-project"
-              onValueChange={(value) =>
-                value === "" ? clear("projectId") : change({ projectId: value as ProjectId })
-              }
-              options={[
-                { id: "", label: "Any Project" },
-                ...(listing?.projects ?? []).map((project) => ({
-                  id: String(project.projectId),
-                  label: `${project.name} (${String(project.artifactCount)})`,
-                })),
-              ]}
-              value={filters.projectId === undefined ? "" : String(filters.projectId)}
-            />
-
-            <label className="sr-only" htmlFor="artifact-library-mode">
-              Filter by mode
-            </label>
-            <OctantSelectField
-              className="artifact-library__select select"
-              id="artifact-library-mode"
-              onValueChange={(value) =>
-                value === "" ? clear("mode") : change({ mode: value as OctantMode })
-              }
-              options={[
-                { id: "", label: "Any mode" },
-                ...MODES.map((mode) => ({
-                  id: mode,
-                  label: `${mode[0]?.toUpperCase()}${mode.slice(1)}`,
-                })),
-              ]}
-              value={filters.mode ?? ""}
-            />
-
-            {(listing?.tags ?? []).length === 0 ? null : (
-              <>
-                <label className="sr-only" htmlFor="artifact-library-tag">
-                  Filter by tag
-                </label>
-                <OctantSelectField
-                  className="artifact-library__select select"
-                  id="artifact-library-tag"
-                  onValueChange={(value) => (value === "" ? clear("tag") : change({ tag: value }))}
+              )}
+              <FilterMenuGroup<string>
+                label="Project"
+                onChange={(value) =>
+                  value === ANY ? clear("projectId") : change({ projectId: value as ProjectId })
+                }
+                options={[
+                  { value: ANY, label: "Any Project" },
+                  ...(listing?.projects ?? []).map((project) => ({
+                    value: String(project.projectId),
+                    label: `${project.name} (${String(project.artifactCount)})`,
+                  })),
+                ]}
+                separated
+                value={filters.projectId === undefined ? ANY : String(filters.projectId)}
+              />
+              <FilterMenuGroup<string>
+                label="Mode"
+                onChange={(value) =>
+                  value === ANY ? clear("mode") : change({ mode: value as OctantMode })
+                }
+                options={[
+                  { value: ANY, label: "Any mode" },
+                  ...MODES.map((mode) => ({
+                    value: mode as string,
+                    label: `${mode[0]?.toUpperCase()}${mode.slice(1)}`,
+                  })),
+                ]}
+                separated
+                value={filters.mode ?? ANY}
+              />
+              {(listing?.tags ?? []).length === 0 ? null : (
+                <FilterMenuGroup<string>
+                  label="Tag"
+                  onChange={(value) => (value === ANY ? clear("tag") : change({ tag: value }))}
                   options={[
-                    { id: "", label: "Any tag" },
+                    { value: ANY, label: "Any tag" },
                     ...(listing?.tags ?? []).map((tag) => ({
-                      id: tag.name,
+                      value: tag.name,
                       label: `${tag.name} (${String(tag.artifactCount)})`,
                     })),
                   ]}
-                  value={filters.tag ?? ""}
+                  separated
+                  value={filters.tag ?? ANY}
                 />
-              </>
-            )}
+              )}
+            </FilterMenu>
 
             <OctantToggleGroup<LibraryViewMode>
               aria-label="Artifact view"
@@ -445,7 +455,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
               ? "Artifacts you share will appear here."
               : hasActiveFilters
                 ? "Clear or adjust the active filters to see other artifacts."
-                : "Create an artifact from a thread to see it here."
+                : "Artifacts are the pages, documents and files threads make. Open or share them from here."
           }
           title={
             filters.tab === "shared"
@@ -488,11 +498,14 @@ function ArtifactEntries(
   const { className, entries, view, ...actions } = props;
   if (view === "list") {
     return (
-      <ul className="artifact-library__list">
-        {entries.map((entry) => (
-          <ArtifactListRow entry={entry} key={String(entry.canvasId)} {...actions} />
-        ))}
-      </ul>
+      <div className="artifact-table">
+        <ArtifactTableHead />
+        <ul className="artifact-table__rows">
+          {entries.map((entry) => (
+            <ArtifactTableRow entry={entry} key={String(entry.canvasId)} {...actions} />
+          ))}
+        </ul>
+      </div>
     );
   }
   return (

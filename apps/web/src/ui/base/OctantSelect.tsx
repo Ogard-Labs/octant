@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   Select as AuthoredSelect,
   SelectGroup,
@@ -12,7 +12,7 @@ import {
 } from "../shadcn/select";
 import { fieldPaint } from "../shadcn/field-paint";
 import { cn } from "../shadcn/utils";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from "../icons";
 import {
   OctantMenuRoot,
   OctantMenuTrigger,
@@ -105,6 +105,7 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
   const initialValue = props.defaultValue ?? props.value ?? props.options[0]?.id ?? "";
   const [uncontrolledValue, setUncontrolledValue] = useState(initialValue);
   const rootRef = useRef<HTMLSpanElement>(null);
+  const reasonIdPrefix = useId();
   const selectedId = props.value ?? uncontrolledValue;
   const selectedOption = props.options.find((option) => option.id === selectedId);
 
@@ -123,63 +124,6 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
     if (props.value === undefined) setUncontrolledValue(next);
     props.onValueChange?.(next);
   };
-  if (window.octantHost?.popupNativeMenu !== undefined)
-    return (
-      <span className="contents" ref={rootRef}>
-        <OctantMenuRoot>
-          <OctantMenuTrigger
-            aria-label={props["aria-label"]}
-            data-testid={props["data-testid"]}
-            id={props.id}
-            disabled={props.disabled}
-            className={cn(
-              fieldPaint,
-              "flex h-[round(2.154rem,2px)] w-full items-center justify-between gap-2 px-2 py-1 text-sm text-foreground whitespace-nowrap disabled:opacity-(--oct-disabled-opacity) window-no-drag",
-              props.triggerClassName,
-              props.className,
-            )}
-          >
-            {/* The same one-line ellipsis as the web trigger below. */}
-            <span className="min-w-0 truncate">{selectedOption?.label ?? props.placeholder}</span>
-            <ChevronDown aria-hidden="true" size={16} />
-          </OctantMenuTrigger>
-          <OctantMenuPortal>
-            <OctantMenuPositioner>
-              <OctantMenuPopup>
-                <OctantMenuRadioGroup
-                  value={encodeSelectValue(selectedId)}
-                  onValueChange={(value) => {
-                    if (typeof value === "string") changeValue(decodeSelectValue(value));
-                  }}
-                >
-                  {segmentOptions(props.options).map((segment, index) => (
-                    <OctantMenuGroup key={index}>
-                      {segment.group === undefined ? null : (
-                        <OctantMenuGroupLabel>{segment.group}</OctantMenuGroupLabel>
-                      )}
-                      {segment.options.map((option) => (
-                        <OctantMenuRadioItem
-                          key={encodeSelectValue(option.id)}
-                          value={encodeSelectValue(option.id)}
-                          disabled={option.disabled}
-                          title={option.disabledReason}
-                          closeOnClick
-                        >
-                          {option.label}
-                        </OctantMenuRadioItem>
-                      ))}
-                    </OctantMenuGroup>
-                  ))}
-                </OctantMenuRadioGroup>
-              </OctantMenuPopup>
-            </OctantMenuPositioner>
-          </OctantMenuPortal>
-        </OctantMenuRoot>
-        {props.name === undefined ? null : (
-          <input name={props.name} type="hidden" value={selectedId} />
-        )}
-      </span>
-    );
   return (
     <span className="contents" ref={rootRef}>
       <AuthoredSelect
@@ -221,12 +165,32 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
                   <SelectItem
                     disabled={option.disabled}
                     key={encodeSelectValue(option.id)}
+                    value={encodeSelectValue(option.id)}
+                    // The option is still named by its label alone; the reason
+                    // is its description, not part of its name.
                     {...(option.disabledReason === undefined
                       ? {}
-                      : { title: option.disabledReason })}
-                    value={encodeSelectValue(option.id)}
+                      : {
+                          "aria-label": option.label,
+                          "aria-describedby": `${reasonIdPrefix}-${encodeSelectValue(option.id)}`,
+                        })}
                   >
-                    {option.label}
+                    {/* A disabled option says why on a second line, where a
+                        pointer-less reader sees it too; a native title showed
+                        only on hover. */}
+                    {option.disabledReason !== undefined ? (
+                      <>
+                        <span className="block truncate">{option.label}</span>
+                        <span
+                          className="block whitespace-normal oct-menu-detail"
+                          id={`${reasonIdPrefix}-${encodeSelectValue(option.id)}`}
+                        >
+                          {option.disabledReason}
+                        </span>
+                      </>
+                    ) : (
+                      option.label
+                    )}
                   </SelectItem>
                 ));
                 if (segment.group === undefined) {

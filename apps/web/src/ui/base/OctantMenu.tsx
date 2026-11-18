@@ -10,7 +10,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "./NativeDropdownMenu";
+} from "../shadcn/dropdown-menu";
 import {
   DropdownMenu as OctantMenuRoot,
   DropdownMenuCheckboxItem as OctantMenuCheckboxItem,
@@ -27,7 +27,7 @@ import {
   DropdownMenuSubPopup as OctantMenuSubPopup,
   DropdownMenuSubTrigger as OctantMenuSubTrigger,
   DropdownMenuTrigger as OctantMenuTrigger,
-} from "./NativeDropdownMenu";
+} from "../shadcn/dropdown-menu";
 import { menuIconColumn } from "../shadcn/menu-row";
 import { cn } from "../shadcn/utils";
 
@@ -51,6 +51,12 @@ export {
 
 export interface OctantMenuItem {
   readonly description?: string;
+  /**
+   * Draws the label and icon in the danger ink (an action that discards or
+   * archives). It changes how the row looks, not what it does; a radio choice
+   * has no destructive form.
+   */
+  readonly destructive?: boolean;
   readonly disabled?: boolean;
   readonly icon?: ReactNode;
   readonly label: string;
@@ -58,6 +64,8 @@ export interface OctantMenuItem {
 }
 
 export interface OctantMenuAction {
+  /** The danger ink, as on an item. */
+  readonly destructive?: boolean;
   readonly disabled?: boolean;
   readonly icon?: ReactNode;
   readonly label: string;
@@ -142,6 +150,7 @@ export function OctantMenu(props: OctantMenuProps) {
                     ? {}
                     : { "aria-describedby": descriptionId(index) })}
                   key={item.value}
+                  {...(item.destructive === true ? { destructive: true } : {})}
                   {...(item.disabled === true ? { disabled: true } : {})}
                   onClick={() => props.onValueChange(item.value)}
                 >
@@ -186,6 +195,7 @@ export function OctantMenu(props: OctantMenuProps) {
                 {props.actions.map((action) => (
                   <DropdownMenuItem
                     key={action.label}
+                    {...(action.destructive === true ? { destructive: true } : {})}
                     {...(action.disabled === true ? { disabled: true } : {})}
                     onClick={action.onSelect}
                   >

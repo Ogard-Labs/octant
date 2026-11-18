@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ProviderGlyph } from "./ProviderGlyph";
@@ -16,6 +19,33 @@ describe("ProviderGlyph", () => {
     expect(container.querySelector("use")).toHaveAttribute("href", "./icons.svg#aperture");
     expect(screen.getByText("Octant Harness")).toBeInTheDocument();
   });
+  it("gives a provider's logo its own colour, and leaves a black-or-white mark in the text ink", () => {
+    const { container } = render(
+      <>
+        <ProviderGlyph displayName="Codex" driverKind="codex" />
+        <ProviderGlyph displayName="Ollama" driverKind="ollama" />
+      </>,
+    );
+    const [codex, ollama] = [...container.querySelectorAll("svg")];
+    expect(codex?.style.getPropertyValue("--provider-glyph-color")).toContain("#10a37f");
+    // No colour of its own: the fallback is the text ink, not a hue.
+    expect(ollama?.style.getPropertyValue("--provider-glyph-color")).toBe(
+      "var(--octant-glyph-ollama, var(--octant-text-secondary))",
+    );
+  });
+
+  it("draws every provider logo as an ink mark under the Mono style", () => {
+    const styles = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "..", "styles.css"),
+      "utf8",
+    );
+    const rule =
+      styles.match(
+        /:root\[data-octant-style="mono"\] \.provider-glyph:not\(\.provider-glyph--monogram\) \{[^}]*\}/,
+      )?.[0] ?? "";
+    expect(rule).toContain("color: inherit;");
+  });
+
   it("renders an Octant-owned bundled mark without a network image", () => {
     const { container } = render(
       <span title="Codex">
@@ -67,13 +97,13 @@ describe("ProviderGlyph", () => {
 
   it.each([
     ["claude", "Claude Code"],
-    ["codex", "Codex CLI"],
+    ["codex", "Codex"],
     ["devin", "Devin ACP"],
     ["grok", "Grok Build"],
     ["kilo", "Kilo ACP"],
     ["kimi-code", "Kimi Code CLI"],
     ["mistral-vibe", "Mistral Vibe ACP"],
-    ["opencode", "OpenCode CLI"],
+    ["opencode", "OpenCode"],
     ["oh-my-pi", "Oh My Pi"],
     ["pi", "Pi RPC"],
     ["copilot", "GitHub Copilot"],

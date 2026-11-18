@@ -46,7 +46,7 @@ export function RemoteSetupGuide(props: {
   return (
     <div ref={root}>
       <SettingsPanel
-        description="Choose where the work runs before connecting a device or a server."
+        description="Choose where work runs before you connect a device or server."
         title="What do you want to do remotely?"
       >
         <div
@@ -74,13 +74,13 @@ export function RemoteSetupGuide(props: {
                 <p>Files, providers and the journal stay on the Octant host.</p>
                 <ol className="remote-setup__steps">
                   <li>
-                    Keep Octant running on that computer and enable its private HTTPS listener.
+                    Keep Octant running on that computer and turn on its private HTTPS listener.
                   </li>
                   <li>Pair this device and confirm the request on the host.</li>
                   <li>Open a thread and read its latest message before sending a first task.</li>
                 </ol>
                 <p>
-                  An unavailable host cannot accept work. Check its network and that it is awake;
+                  An unavailable computer cannot take work. Check its network and that it is awake;
                   reconnecting never repeats an uncertain task. Scheduled work needs its executing
                   host awake, or separately configured wake support.
                 </p>

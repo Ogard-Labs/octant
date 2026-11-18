@@ -1,6 +1,10 @@
 import { DEFAULT_SIDEBAR_ROW_PROPERTIES } from "@octant/contracts/shell";
 import { describe, expect, it, vi } from "vitest";
-import { adoptLegacySidebarRowProperties, sidebarRowPropertiesAll } from "./sidebarRowProperties";
+import {
+  adoptLegacySidebarRowProperties,
+  adoptSidebarAgeDefault,
+  sidebarRowPropertiesAll,
+} from "./sidebarRowProperties";
 
 function memoryStorage(): Pick<Storage, "getItem" | "removeItem"> & {
   readonly entries: Map<string, string>;
@@ -120,5 +124,59 @@ describe("legacy sidebar row property adoption", () => {
     });
     expect(updateSettings).not.toHaveBeenCalled();
     expect(storage.entries.size).toBe(0);
+  });
+});
+
+describe("adoptSidebarAgeDefault", () => {
+  const oldActivity = {
+    project: true,
+    branch: false,
+    pullRequest: false,
+    lastUpdated: false,
+    status: true,
+  };
+  const store = () => {
+    const values = new Map<string, string>();
+    return {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => void values.set(key, value),
+    };
+  };
+
+  it("turns the age on for a saved record that is still the old default", async () => {
+    const updateSettings = vi.fn(() => Promise.resolve(true));
+    adoptSidebarAgeDefault({
+      current: { projects: DEFAULT_SIDEBAR_ROW_PROPERTIES.projects, activity: oldActivity },
+      storage: store(),
+      updateSettings,
+    });
+    expect(updateSettings).toHaveBeenCalledWith({
+      projects: DEFAULT_SIDEBAR_ROW_PROPERTIES.projects,
+      activity: DEFAULT_SIDEBAR_ROW_PROPERTIES.activity,
+    });
+  });
+
+  it("leaves a record the person changed alone", () => {
+    const updateSettings = vi.fn(() => Promise.resolve(true));
+    adoptSidebarAgeDefault({
+      current: {
+        projects: DEFAULT_SIDEBAR_ROW_PROPERTIES.projects,
+        activity: { ...oldActivity, branch: true },
+      },
+      storage: store(),
+      updateSettings,
+    });
+    expect(updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("does not undo the old record when the person picks it again later", async () => {
+    const storage = store();
+    const updateSettings = vi.fn(() => Promise.resolve(true));
+    const current = { projects: DEFAULT_SIDEBAR_ROW_PROPERTIES.projects, activity: oldActivity };
+    adoptSidebarAgeDefault({ current, storage, updateSettings });
+    await Promise.resolve();
+    await Promise.resolve();
+    adoptSidebarAgeDefault({ current, storage, updateSettings });
+    expect(updateSettings).toHaveBeenCalledTimes(1);
   });
 });

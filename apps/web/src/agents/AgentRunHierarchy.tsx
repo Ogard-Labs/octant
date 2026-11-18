@@ -375,9 +375,9 @@ export function AgentRunHierarchy(props: {
   const error = (
     <>
       {summaryReconnecting ? (
-        <p className="agent-hierarchy__banner" role="status">
+        <OctantAlert className="agent-hierarchy__banner" layout="row" tone="neutral">
           Reconnecting. Showing the last child activity and results reported.
-        </p>
+        </OctantAlert>
       ) : null}
       {errorMessage === undefined ? null : (
         <OctantAlert className="code-thread-workspace__error" tone="danger">
@@ -432,7 +432,7 @@ export function AgentRunHierarchy(props: {
             ? {
                 steerNotice:
                   steer.phase === "sending"
-                    ? "Sending the steering note. The subagent takes it at its next step."
+                    ? "Sending your note. The helper reads it at its next step."
                     : "Steering note delivered.",
               }
             : {})}

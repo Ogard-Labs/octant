@@ -1,5 +1,5 @@
 import type { ProjectExtraFolder } from "@octant/contracts/projects";
-import { FolderPlus } from "lucide-react";
+import { FolderPlus } from "../ui/icons";
 import { homeRelativePath } from "../lib/homeRelativePath";
 import { EnvironmentGroup } from "./EnvironmentGroup";
 

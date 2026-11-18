@@ -228,19 +228,30 @@ A to-do may be started again; each start adds a link.
   in the canonical order. Its mark is a circle with a check that runs out past
   it; the count badge on the sidebar row and on the rail icon is the number of
   open to-dos that are not started.
-- **Page.** Laid out like the [Inbox page](workspace.md#inbox-page): a
-  display title "To-dos", one sentence of state in the meta ink ("4 open, 1
-  started"), and one column at a 980px measure.
+- **Page.** Flat on the page, like Agents, Artifacts and Automations: no card.
+  A display title "To-dos", one sentence of state in the meta ink ("4 open, 1
+  started", or "Nothing is open." when every to-do is done or dropped), and one
+  column at a 980px measure with these rows: quick add, the toolbar, then the
+  list (maintainer request, 2026-11-16). A list that holds no to-do has no
+  sentence and no toolbar, only quick add and the empty state; that is true
+  while the first read is out and for an empty last list shown after a failed
+  read, whose note then does not promise a list below it.
 - **Quick add.** A single line at the top of the list. Enter adds the to-do on
   top. `#word` adds a tag and `@name` picks a Project by name: the Project
   whose name, without spaces and ignoring case, is the word, or the only one
   that starts with it. A word that names no Project or several stays in the
   title. Both show as chips before the to-do is added, and removing a chip
   removes its word.
-- **Filters.** Quiet chips for state (All, Open, Started, Done, with counts;
-  Open, the default, includes started to-dos), then a Project picker, a tag
-  picker shown once the list has a tag, and Show dropped, on one row under
-  quick add. The filter is held by the open page and starts at Open.
+- **Filters.** One toolbar under quick add: the state switch (All, Open,
+  Started, Done; Open, the default, includes started to-dos) on the left, each
+  button drawing only its word while its accessible name says the count
+  ("Open, 3"), so ticking a to-do off never changes the switch's width, and one
+  **Filter** menu on the right. The
+  menu holds a Project group (this list's Projects and No Project), a Tag group
+  once the list has a tag, and Show dropped. Filter shows how many of those
+  choices are on (the state switch is not counted), and "Reset filters" clears
+  them and leaves the state alone. The filter is held by the open page and
+  starts at Open (maintainer request, 2026-11-16).
 - **Rows.** A round check, the title, Project chips, tags, and the linked
   thread's state badge; Start and a more menu (Edit, Move up, Move down, Drop
   or Bring back, Delete) appear on hover and keyboard focus. Selecting a row
@@ -262,8 +273,12 @@ A to-do may be started again; each start adds a link.
   mode), or Chat when none is there. When the computer answers with the
   thread, the phone links it; a link the list did not take reads "Thread
   started, not linked" on the row, and the same long press offers Link.
-- **Empty.** One sentence: what goes here and that a to-do can be handed to
-  an agent.
+- **Empty.** A list that was read and holds no to-do draws no toolbar: under
+  quick add the page shows the shared empty state centred, with the To-dos
+  mark, "No to-dos yet" and one sentence on what goes here and that a to-do can
+  be handed to an agent. When to-dos exist but the filters hide them, the
+  toolbar stays and one quiet line reads "No to-do matches these filters."
+  (maintainer request, 2026-11-16).
 
 ## Constraints
 

@@ -193,7 +193,7 @@ describe("CodePullRequestPane", () => {
     expect(await screen.findAllByText("Delivers the review window.")).not.toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Go to worktree" }));
-    fireEvent.click(screen.getByRole("button", { name: "Go to thread" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open thread" }));
     expect(onNavigateWorktree).toHaveBeenCalledOnce();
     expect(onNavigateThread).toHaveBeenCalledOnce();
 

@@ -1,0 +1,32 @@
+/* Plan usage as one quiet line of text in the meta ink. Tabular figures keep
+   its width from shifting as the numbers tick, and it may shrink and clip
+   rather than push the controls beside it. A window close to its limit or
+   spent takes the warning or danger ink with a heavier weight, so the sign is
+   never colour alone (the tooltip says it in words). */
+.plan-usage-line {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-usage-line__part[data-level="near"] {
+  color: var(--oct-warn-fg);
+  font-weight: var(--oct-weight-medium);
+}
+
+.plan-usage-line__part[data-level="spent"] {
+  color: var(--oct-danger-fg);
+  font-weight: var(--oct-weight-medium);
+}
+
+/* The separator carries its own spaces, so the line reads and copies as text. */
+.plan-usage-line__sep {
+  white-space: pre;
+}

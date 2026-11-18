@@ -199,7 +199,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
   return (
     <SettingsSection
       className="chat-settings"
-      description="These defaults apply only to new threads. Existing threads keep their explicit values."
+      description="These apply to new threads. Existing threads keep theirs."
       title="Chat defaults"
     >
       <form
@@ -241,7 +241,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
         {/* The server already routes a turn to this model when the default
             provider cannot serve it, but nothing in Settings could set it. */}
         <SettingRow
-          description="Answers when the default provider cannot serve a turn. Optional."
+          description="Answers when the default provider cannot. Optional."
           label="Fallback model"
           scope="host"
           settingId="chat-fallback-model"
@@ -332,7 +332,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
           />
         </SettingRow>
         <SettingRow
-          description="The personality a new Chat thread starts with, until you say otherwise."
+          description="The personality new Chat threads start with."
           label="Instructions for new Chat threads"
           scope="host"
           settingId="chat-personality"

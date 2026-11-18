@@ -113,14 +113,12 @@ export function useDroppedFolderMentions(options: {
       options.windowCapability === undefined
     ) {
       setNotice(
-        "Folder drops require this computer’s desktop window and an existing local Project folder. For a future managed checkout, open the thread first. Remote client paths are unavailable.",
+        "Folder drops need the desktop app and a local Project folder. Remote paths do not work.",
       );
       return true;
     }
     if (dropped.paths.length === 0 || dropped.paths.length > 8) {
-      setNotice(
-        "Could not identify the local folders. Drop up to eight folders from Finder or a local file tree.",
-      );
+      setNotice("Could not read those folders. Drop up to eight from Finder or a file tree.");
       return true;
     }
     const { serverUrl, windowCapability, scope } = options;
@@ -156,9 +154,7 @@ export function useDroppedFolderMentions(options: {
         )
           return;
         if (result.kind !== "folder-mentions-inspected") {
-          setNotice(
-            "Folder references are unavailable for this Project. Check its folder binding and try again.",
-          );
+          setNotice("Folders cannot be added here. Check the Project folder and try again.");
           return;
         }
         const current = latest.current;
@@ -190,7 +186,7 @@ export function useDroppedFolderMentions(options: {
       } catch {
         if (!controller.signal.aborted)
           setNotice(
-            "Could not check folder references. Draft text and attachments are preserved; check the Project’s folder binding and try again.",
+            "Could not check the folders. Your draft is kept. Check the Project folder and try again.",
           );
       } finally {
         clearTimeout(timeout);

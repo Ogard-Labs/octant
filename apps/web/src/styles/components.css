@@ -31,10 +31,11 @@
 
 /* Raised opaque card for in-flow containers. */
 .octant-card {
-  background: var(--octant-surface-raised);
+  background: var(--octant-card);
   border: 0;
   border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-hairline);
+  outline-offset: -1px;
 }
 
 .octant-card--flat {
@@ -61,6 +62,9 @@
   background: var(--octant-control-hover);
   border-color: var(--octant-border-strong);
 }
+.octant-chip:active {
+  background: var(--octant-control-pressed);
+}
 
 .octant-chip[aria-pressed="true"],
 .octant-chip[data-active="true"] {
@@ -79,10 +83,10 @@
 [data-slot="popover-content"],
 [data-slot="select-content"],
 [data-slot="combobox-content"],
-.octant-menu__popup,
 .octant-dialog__popup,
 .octant-sheet__popup,
 .octant-preview-card,
+.guided-tour__card,
 .octant-tooltip--card,
 .window-chrome__disclosure,
 .workspace-disclosure,
@@ -93,7 +97,6 @@
 .chat-composer__command-typeahead,
 .code-board__view-popover,
 .code-board__filters-panel,
-.menu,
 .palette,
 .toast {
   /* A surface that paints the card colour paints the float here, and an
@@ -116,10 +119,10 @@
    also set a border or a ring drew two lines on one edge: the border is gone.
    The frost is for content behind the window's own page; it is not asked to
    blur the desktop. */
-.octant-menu__popup,
 .octant-dialog__popup,
 .octant-sheet__popup,
 .window-chrome__disclosure,
+.workspace-disclosure,
 .project-dialog,
 .folder-picker,
 [data-slot="dropdown-menu-content"],
@@ -128,22 +131,34 @@
 [data-slot="select-content"],
 [data-slot="combobox-content"],
 .octant-preview-card,
+.guided-tour__card,
 .thread-info__panel,
 .palette,
 .toast {
-  background: var(--octant-float-sheen), var(--octant-float-glass);
+  background: var(--octant-float-glass);
   border: 0;
+  /* A float's corner is the large token (a menu's rows sit 8px inside it, so
+     the row's 8px corner is concentric); a dialog and a sheet take one more. */
+  border-radius: var(--oct-radius-lg);
   box-shadow: var(--octant-shadow-pop);
   backdrop-filter: var(--octant-float-blur);
   -webkit-backdrop-filter: var(--octant-float-blur);
 }
 
+/* A dialog and the Settings sheet are a step above a menu. */
+.octant-dialog__popup,
+.octant-sheet__popup,
+.project-dialog,
+.folder-picker {
+  border-radius: var(--oct-radius-xl);
+}
+
 html[data-octant-reduced-transparency="true"]
   :is(
-    .octant-menu__popup,
     .octant-dialog__popup,
     .octant-sheet__popup,
     .window-chrome__disclosure,
+    .workspace-disclosure,
     .project-dialog,
     .folder-picker,
     [data-slot="dropdown-menu-content"],
@@ -152,16 +167,17 @@ html[data-octant-reduced-transparency="true"]
     [data-slot="select-content"],
     [data-slot="combobox-content"],
     .octant-preview-card,
+    .guided-tour__card,
     .thread-info__panel,
     .palette,
     .toast
   ),
 html[data-octant-increased-contrast="true"]
   :is(
-    .octant-menu__popup,
     .octant-dialog__popup,
     .octant-sheet__popup,
     .window-chrome__disclosure,
+    .workspace-disclosure,
     .project-dialog,
     .folder-picker,
     [data-slot="dropdown-menu-content"],
@@ -170,6 +186,7 @@ html[data-octant-increased-contrast="true"]
     [data-slot="select-content"],
     [data-slot="combobox-content"],
     .octant-preview-card,
+    .guided-tour__card,
     .thread-info__panel,
     .palette,
     .toast
@@ -181,10 +198,10 @@ html[data-octant-increased-contrast="true"]
 
 @media (prefers-reduced-transparency: reduce) {
   :is(
-    .octant-menu__popup,
     .octant-dialog__popup,
     .octant-sheet__popup,
     .window-chrome__disclosure,
+    .workspace-disclosure,
     .project-dialog,
     .folder-picker,
     [data-slot="dropdown-menu-content"],
@@ -193,6 +210,7 @@ html[data-octant-increased-contrast="true"]
     [data-slot="select-content"],
     [data-slot="combobox-content"],
     .octant-preview-card,
+    .guided-tour__card,
     .thread-info__panel,
     .palette,
     .toast
@@ -211,7 +229,21 @@ html[data-octant-increased-contrast="true"]
 .provider-question-card {
   border: 0;
   background: var(--octant-card);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-hairline);
+  outline-offset: -1px;
+}
+
+/* A person's message is a fill alone, as a quiet bubble; the cards around it
+   keep the hairline. Forced colours and increased contrast draw their own
+   borders below. */
+.turn-user .bubble {
+  outline: 0;
+}
+
+/* In light the card is the page's own white, so the bubble had no edge and no
+   fill and the message floated as bare text: it takes a step of ink instead. */
+html[data-octant-theme-mode="light"] .turn-user .bubble {
+  background: color-mix(in srgb, var(--octant-text-primary) 4%, var(--octant-workspace));
 }
 
 /* Level 3, a well: a place cut into the surface (a segmented switch's track,
@@ -222,11 +254,14 @@ html[data-octant-increased-contrast="true"]
 .browser-workspace__history,
 .approval-cmd {
   background: var(--octant-well);
-  box-shadow: var(--octant-shadow-well);
 }
 
+/* A tray, a chosen segment and a hover are washes of the theme's own ink over
+   whatever they sit on (4%, 8%, 4%), never the theme's tinted control
+   colour: on a tinted preset that colour carried a hue the surfaces round it
+   did not, and read as a different background. */
 .modeswitch__tray > .mode[aria-current="page"] {
-  background: var(--octant-control);
+  background: var(--oct-fill-2);
 }
 
 /* A chip is a raised control; the suggestion chip (a button variant) stays quiet
@@ -234,7 +269,6 @@ html[data-octant-increased-contrast="true"]
 .octant-chip {
   background: var(--octant-control);
   border: 0;
-  box-shadow: var(--octant-shadow-control);
 }
 
 .octant-chip:hover {
@@ -244,7 +278,6 @@ html[data-octant-increased-contrast="true"]
 .octant-chip[aria-pressed="true"],
 .octant-chip[data-active="true"] {
   background: var(--octant-control-pressed);
-  box-shadow: var(--octant-shadow-control-pressed);
 }
 
 /* Edges that do not depend on a shadow. The rim is a shadow, and forced colours
@@ -254,10 +287,10 @@ html[data-octant-increased-contrast="true"]
    that is pressed is told from one at rest by the system highlight. */
 @media (forced-colors: active) {
   :is(
-    .octant-menu__popup,
     .octant-dialog__popup,
     .octant-sheet__popup,
     .window-chrome__disclosure,
+    .workspace-disclosure,
     .project-dialog,
     .folder-picker,
     [data-slot="dropdown-menu-content"],
@@ -266,6 +299,7 @@ html[data-octant-increased-contrast="true"]
     [data-slot="select-content"],
     [data-slot="combobox-content"],
     .octant-preview-card,
+    .guided-tour__card,
     .thread-info__panel,
     .palette,
     .toast
@@ -289,10 +323,10 @@ html[data-octant-increased-contrast="true"]
 
 html[data-octant-increased-contrast="true"]
   :is(
-    .octant-menu__popup,
     .octant-dialog__popup,
     .octant-sheet__popup,
     .window-chrome__disclosure,
+    .workspace-disclosure,
     .project-dialog,
     .folder-picker,
     [data-slot="dropdown-menu-content"],
@@ -301,6 +335,7 @@ html[data-octant-increased-contrast="true"]
     [data-slot="select-content"],
     [data-slot="combobox-content"],
     .octant-preview-card,
+    .guided-tour__card,
     .thread-info__panel,
     .palette,
     .toast
@@ -310,11 +345,9 @@ html[data-octant-increased-contrast="true"]
   border: 1px solid var(--octant-border-strong);
 }
 
-/* A pending approval keeps its warning edge: the colour is its meaning. It
-   takes the card's depth, not its rim. */
+/* A pending approval keeps its warning edge: the colour is its meaning. */
 .approval {
   background: var(--octant-card);
-  box-shadow: var(--octant-card-drop);
 }
 
 /* ── Overlay motion ────────────────────────────────────────────────── */
@@ -385,6 +418,114 @@ html[data-octant-increased-contrast="true"]
 )[data-ending-style] {
   transition-duration: var(--oct-dur-fast);
   transition-timing-function: var(--oct-ease-color);
+}
+
+/* Settings is a sheet so a person can watch the window change while they change
+   its appearance, so the window behind it stays exactly as it is: no blur, no
+   dim, and only a faint shade that sets the sheet apart. Blurring it past
+   reading hid what a person came to Settings to watch. Words never show
+   THROUGH the sheet: it is frosted (rule below), so the thread behind it
+   cannot be read through it, while everything beside it stays visible.
+   A dialog is a decision, not a view of the window: while one is open the
+   layers that hold content are blurred past reading and barely dimmed, a filter
+   on the layers themselves, which the desktop renderer does draw. Only paint
+   changes: the content stays in place and inert, keeps its focus target and
+   returns exactly as it was, and a screen reader loses nothing. A menu or
+   popover is not modal and keeps the dense float; reduced transparency and
+   increased contrast keep the opaque float and need neither. */
+html[data-octant-native-host="true"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  ):has(.octant-dialog__popup[data-open])
+  .shell-frame
+  > :is(.sidebar-rail, .sidebar, .window-chrome, .workspace-layer) {
+  opacity: 0.92;
+  filter: blur(5px);
+}
+
+html[data-octant-native-host="true"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  )
+  .octant-sheet__backdrop {
+  background: color-mix(in srgb, var(--octant-scrim) 6%, transparent);
+}
+
+html[data-octant-native-host="true"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  )
+  .shell-frame
+  > :is(.sidebar-rail, .sidebar, .window-chrome, .workspace-layer) {
+  transition:
+    opacity var(--oct-motion-fast) var(--oct-ease-motion),
+    filter var(--oct-motion-fast) var(--oct-ease-motion);
+}
+
+html[data-octant-reduced-motion="true"]
+  .shell-frame
+  > :is(.sidebar-rail, .sidebar, .window-chrome, .workspace-layer) {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-octant-native-host="true"]
+    .shell-frame
+    > :is(.sidebar-rail, .sidebar, .window-chrome, .workspace-layer) {
+    transition: none;
+  }
+}
+
+html[data-octant-native-host="true"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  )
+  :is(.octant-sheet__popup, .octant-dialog__popup) {
+  background: color-mix(in srgb, var(--octant-float) 66%, transparent);
+}
+
+html[data-octant-native-host="true"][data-octant-theme-mode="light"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  )
+  :is(.octant-sheet__popup, .octant-dialog__popup) {
+  background: color-mix(in srgb, var(--octant-float) 78%, transparent);
+}
+
+/* Where a ground is drawn behind the window (a picture, pixels, characters), a
+   modal surface keeps it out of its text: at 66% the pixel ground's ridges ran
+   across Settings' rows and swatches. The glass coat alone, with no ground
+   drawn, stays at the normal alpha above. */
+html[data-octant-native-host="true"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  ):has(.shell-frame > .app-backdrop)
+  :is(.octant-sheet__popup, .octant-dialog__popup) {
+  background: color-mix(in srgb, var(--octant-float) 96%, transparent);
+}
+
+/* The Settings sheet is solid in the desktop app. Under Glass the window lets
+   the apps behind it through, and no blur in the page can reach them: at 80%
+   over a 28px backdrop blur, and again at 96%, another app's text stayed
+   readable through Settings' rows. The doubled class wins over the modal rules
+   above whatever their order, and the second form repeats the ground rule's
+   own `:has()`: that rule carries two classes more than the plain one, so
+   with a ground drawn it won and the sheet was 96% again. Seen in the desktop
+   app over the pixel ground: the thread's text read faintly through every
+   Settings row. */
+html[data-octant-native-host="true"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  )
+  .octant-sheet__popup.octant-sheet__popup,
+html[data-octant-native-host="true"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  ):has(.shell-frame > .app-backdrop)
+  .octant-sheet__popup.octant-sheet__popup {
+  background: var(--octant-float);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* A popup grows out of the point it is anchored to; a dialog has no anchor
@@ -562,6 +703,9 @@ html[data-octant-reduced-motion="true"]
   font: inherit;
   font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-medium);
+  /* The menu row's line: inherited, the line was 21px and 4px of padding made
+     the Project picker's rows 29px beside every other menu's 28. */
+  line-height: var(--oct-line-chrome);
   text-align: start;
   white-space: nowrap;
   cursor: default;
@@ -574,6 +718,9 @@ html[data-octant-reduced-motion="true"]
 
 .octant-popover-option:hover {
   background: var(--octant-control-hover);
+}
+.octant-popover-option:active {
+  background: var(--octant-control-pressed);
 }
 
 .octant-popover-option[aria-disabled="true"],
@@ -597,6 +744,33 @@ html[data-octant-reduced-motion="true"]
   padding: var(--oct-space-2);
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
+}
+
+/* A popup's list before its data arrives: rows of the real rows' height, so
+   the popup is the size it will be and nothing moves when the rows come. */
+.popup-skeleton {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.popup-skeleton__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+}
+
+.popup-skeleton__row {
+  height: calc(var(--oct-menu-row-h) - var(--oct-space-1));
+  margin-inline: var(--oct-menu-row-inset);
+}
+
+/* A reserved row a choice has not made current: it keeps its place and stays
+   quiet and out of reach instead of leaving the layout. */
+[data-reserved][data-quiet="true"] {
+  opacity: var(--oct-disabled-opacity);
+  pointer-events: none;
 }
 
 /* The native activity overlay may keep translucency because it floats above
@@ -643,7 +817,6 @@ html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-co
 
 html[data-octant-increased-contrast="true"] .octant-glass,
 html[data-octant-increased-contrast="true"] .octant-chip,
-html[data-octant-increased-contrast="true"] .octant-menu__popup,
 html[data-octant-increased-contrast="true"] .octant-dialog__popup,
 html[data-octant-increased-contrast="true"] .window-chrome__disclosure,
 html[data-octant-increased-contrast="true"] .composer-folder-selector__menu,
@@ -673,7 +846,6 @@ html[data-octant-increased-contrast="true"] .folder-picker {
   z-index: 1;
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--oct-motion-fast) ease;
 }
 
 .turn-action-menu:hover .turn-action-menu__more,
@@ -708,16 +880,6 @@ html[data-octant-increased-contrast="true"] .turn-action-menu__more {
 
 html[data-octant-increased-contrast="true"] .turn-action-menu__more .shell-icon-button {
   border-color: var(--octant-border-strong);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .turn-action-menu__more {
-    transition: none;
-  }
-}
-
-html[data-octant-reduced-motion="true"] .turn-action-menu__more {
-  transition: none;
 }
 
 /* ── Thread Search overlay ─────────────────────────────────────── */
@@ -907,27 +1069,71 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   flex-wrap: wrap;
 }
 
-/* The budget sits on its own row so its three limits read as one decision. */
-.thread-goal__budget {
+/* The budget is one row, label at the left and what is set at the right,
+   like the spend ceiling's. The row is a button a popover opens from, filled
+   only by the pointer; the chevron keeps its slot so nothing shifts. Doubled
+   onto the form so the trigger's utility classes cannot win on sheet order.
+   (Maintainer request 2026-11-17: quieter Environment panel.) */
+.thread-goal__revise .thread-goal__budget-row {
   display: flex;
   flex-basis: 100%;
-  flex-wrap: wrap;
+  width: 100%;
+  min-height: 28px;
   align-items: center;
-  gap: 8px;
-  min-width: 0;
-  margin: 0;
+  justify-content: flex-start;
+  gap: var(--oct-space-3);
   padding: 0;
   border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+  text-align: left;
 }
 
-.thread-goal__budget legend {
-  padding: 0;
-  font-size: var(--oct-text-xs);
+.thread-goal__revise .thread-goal__budget-row:hover {
+  background: var(--octant-control-hover);
+}
+
+.thread-goal__revise .thread-goal__budget-row:active {
+  background: var(--octant-control-pressed);
+}
+
+.thread-goal__budget-value {
+  min-width: 0;
+  margin: 0 0 0 auto;
+  overflow: hidden;
   color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-goal__budget-chevron {
+  flex: none;
+  color: var(--oct-muted);
+  opacity: 0;
+}
+
+.thread-goal__budget-row:hover .thread-goal__budget-chevron,
+.thread-goal__budget-row[data-popup-open] .thread-goal__budget-chevron {
+  opacity: 1;
+}
+
+.thread-goal__popover {
+  width: 280px;
+  max-width: calc(100vw - var(--oct-space-6));
+}
+
+.thread-goal__budget-sheet {
+  display: grid;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-1);
 }
 
 .thread-goal__budget-note {
-  flex-basis: 100%;
   margin: 0;
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
@@ -942,14 +1148,13 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 }
 
 .thread-goal__budget-field input {
-  inline-size: 8rem;
+  inline-size: 100%;
 }
 
 .thread-goal__status,
 .thread-goal__empty,
 .thread-goal__command-error,
-.thread-goal__history,
-.thread-goal__retention {
+.thread-goal__history {
   display: flex;
   align-items: center;
   gap: var(--oct-space-1);
@@ -1193,6 +1398,9 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 .thread-task-viewer__trigger[aria-expanded="true"] {
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
+}
+.thread-task-viewer__trigger:active {
+  background: var(--octant-control-pressed);
 }
 
 .thread-task-viewer__evidence {
@@ -1731,7 +1939,7 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
 }
 
 /* Tool rows: what a turn did, one 28px row per call, between the turn header
-   and the reply. The name reads at the body size; the state sits at the
+   and the reply. The name reads at the detail size; the state sits at the
    right edge as quiet detail text with a 12px mark (a spinner while it runs,
    a check when it is done, a cross when it failed). Rows are parted by
    hairlines and share one indent, so a tool row is the same object in every
@@ -1763,8 +1971,18 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   cursor: default;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-detail);
   list-style: none;
+  border-radius: var(--oct-radius-sm);
+}
+
+/* The pointer gets the soft wash the sidebar's rows take. */
+.turn-activity__disclosure > summary:hover {
+  background: var(--oct-wash-hover);
+}
+
+.turn-activity__disclosure > summary:active {
+  background: var(--oct-wash-pressed);
 }
 
 .turn-activity__disclosure > summary::-webkit-details-marker {
@@ -1786,9 +2004,15 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   min-width: 0;
   overflow: hidden;
   color: var(--oct-fg-2);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-detail);
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* A tool row's name makes room for its preview, which takes the rest. */
+.turn-activity__disclosure[data-kind="tool"] > summary .turn-activity__name {
+  flex: 0 1 auto;
+  max-width: 45%;
 }
 
 /* The settled fold ("2 tool calls · 1 file edited") is a summary, so it keeps
@@ -1819,9 +2043,55 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   min-width: 0;
   overflow: hidden;
   color: var(--oct-meta);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-detail);
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* The kind mark leads every row in one 14px column so the names line up. */
+.turn-activity__kind-icon {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+/* The collapsed group names what ran: a mark and a count per kind. */
+.turn-activity__kinds {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  gap: var(--oct-space-3);
+  color: var(--oct-muted);
+}
+
+.turn-activity__kind-count {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+/* A tool row's own words (its first line or file name) follow its name in the
+   meta ink on one line, so the row keeps its height whatever the call said. */
+.turn-activity__duration {
+  flex: none;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The state mark sits in a slot of its own width at the row's end, shown or
+   not, so a call that finishes swaps a glyph and moves nothing. */
+.turn-activity__status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  position: relative;
+}
+
+.turn-activity__preview--call::before {
+  content: attr(data-preview);
 }
 
 .turn-activity__outcome {
@@ -1876,6 +2146,21 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
 
 /* The journaled summary, expanded: detail-size mono on a surface set into
    the row, indented to where the name starts. */
+/* The checkout capture's sentences, under their one summary line: quiet text
+   indented to where the line's name starts, with no surface of their own. */
+.turn-activity__notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 8px 40px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+}
+
+.turn-activity__notes > p {
+  margin: 0;
+}
+
 .turn-activity__body {
   display: flex;
   flex-direction: column;
@@ -2230,14 +2515,39 @@ html[data-octant-increased-contrast="true"] .turn-message-meta {
   pointer-events: auto;
 }
 
-/* Keyboard focus may reveal actions, but the response clock follows the pointer. */
-.turn-agent .turn-time {
-  visibility: hidden;
-}
-.turn-agent:hover .turn-time {
-  visibility: visible;
+/* The action row that ends a finished agent reply. It always holds its 28px so
+   showing it moves nothing: the thread's last reply keeps it visible, older
+   replies show it on hover or focus, and touch and increased contrast always
+   show it. */
+.turn-actions {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: var(--oct-space-2);
+  color: var(--oct-meta);
+  opacity: 0;
+  pointer-events: none;
 }
 
+.turn-actions[data-latest="true"],
+.turn-agent:hover .turn-actions,
+.turn-agent:focus-within .turn-actions,
+.turn-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .turn-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+html[data-octant-increased-contrast="true"] .turn-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
 /* The number stepper is a primitive, so its rules load with the app rather
    than with the lazily loaded Settings sheet: opened from a sidebar dialog
    before Settings, its buttons fell back to block layout and stacked above and
@@ -2254,7 +2564,6 @@ html[data-octant-increased-contrast="true"] .turn-message-meta {
   background: var(--background);
   border: 1px solid var(--input);
   border-radius: var(--radius-md);
-  box-shadow: var(--octant-shadow-xs);
 }
 
 .octant-number-stepper:focus-within {
@@ -2305,4 +2614,38 @@ html[data-octant-increased-contrast="true"] .turn-message-meta {
 .thread-search__modes {
   flex-wrap: wrap;
   padding: var(--oct-space-2) var(--oct-space-3) 0;
+}
+
+/* A pane's one toolbar row (see PaneBar): 36px, the 12px inset, a hairline. */
+.pane-bar {
+  display: flex;
+  height: 36px;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+  padding: 0 var(--oct-space-3);
+  background: var(--octant-sidebar-fill);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
+}
+
+.pane-bar__title {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-bar__trail {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin-inline-start: auto;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }

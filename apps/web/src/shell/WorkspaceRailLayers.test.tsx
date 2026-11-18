@@ -126,7 +126,7 @@ describe("WorkspaceRailLayers", () => {
     expect(await screen.findByRole("region", { name: "Pull requests" })).toBeVisible();
     expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
 
-    await user.click(screen.getByRole("button", { name: "New task" }));
+    await user.click(screen.getAllByRole("button", { name: "New task" })[0] as HTMLElement);
 
     expect(await screen.findByRole("region", { name: "New Code thread" })).toBeVisible();
     expect(screen.queryByRole("region", { name: "Pull requests" })).not.toBeInTheDocument();

@@ -17,8 +17,8 @@ export default function GitHubSettingsSectionModule(props: GitHubSettingsSection
     return (
       <section aria-label="GitHub" id="settings-github">
         <p>
-          The GitHub connection is managed on the owning host. Open Settings on that host to set it
-          up or inspect the account.
+          GitHub is set up on the computer that owns it. Open Settings there to set it up or inspect
+          the account.
         </p>
       </section>
     );

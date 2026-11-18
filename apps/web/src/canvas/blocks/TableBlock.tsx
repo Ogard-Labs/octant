@@ -1,5 +1,5 @@
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, MessageSquare, Pin } from "lucide-react";
+import { ChevronRight, MessageSquare, Pin } from "../../ui/icons";
 import {
   canvasTableRowCells,
   canvasTableRowId,

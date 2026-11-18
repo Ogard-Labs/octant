@@ -1,4 +1,4 @@
-import { History } from "lucide-react";
+import { History } from "../ui/icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";

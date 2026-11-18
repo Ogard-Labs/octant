@@ -1,5 +1,12 @@
 import type { OpenInApplicationId } from "@octant/contracts/shell";
-import { ChevronDown, Code2, Folder, Hammer, SquareTerminal, type LucideIcon } from "lucide-react";
+import {
+  ChevronDown,
+  Code2,
+  Folder,
+  Hammer,
+  SquareTerminal,
+  type IconComponent,
+} from "../ui/icons";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type { OctantHostBridge, OpenInApplicationDescriptor } from "../shell/hostBridge";
@@ -12,7 +19,7 @@ export interface OpenInMenuProps {
   readonly threadId: string;
 }
 
-const APPLICATION_ICONS: Readonly<Record<OpenInApplicationId, LucideIcon>> = {
+const APPLICATION_ICONS: Readonly<Record<OpenInApplicationId, IconComponent>> = {
   vscode: Code2,
   cursor: Code2,
   zed: Code2,

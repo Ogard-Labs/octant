@@ -19,6 +19,41 @@ function isContent(surface: WorkspaceTab): boolean {
   );
 }
 
+function isConversation(surface: WorkspaceTab): boolean {
+  return ["chat-thread", "work-thread", "code-overview"].includes(surface.kind);
+}
+
+/**
+ * A pane keeps one conversation: the one it shows, or the one it showed last
+ * while a file, preview or canvas stands over it. Every thread a pane had
+ * shown used to stay as a tab, so the title row grew a second list of threads
+ * beside the sidebar's and read as a browser's tab strip. The conversation
+ * keeps the place the pane's conversation had in the row, so the tabs beside
+ * it do not move when another thread opens. A row restored from storage that
+ * still holds several is pruned the same way.
+ */
+function withOneConversation(
+  entries: ReadonlyArray<WorkspaceTab>,
+  shown: WorkspaceTab,
+  prior: WorkspaceTab | undefined,
+): WorkspaceTab[] {
+  const first = entries.findIndex(isConversation);
+  if (first < 0) return [...entries];
+  const wanted = isConversation(shown)
+    ? shown
+    : prior !== undefined && isConversation(prior)
+      ? prior
+      : undefined;
+  const kept =
+    (wanted === undefined
+      ? undefined
+      : entries.find((entry) => sameWorkspaceSurface(entry, wanted))) ??
+    entries.findLast(isConversation);
+  const rest = entries.filter((entry) => !isConversation(entry));
+  if (kept !== undefined) rest.splice(first, 0, kept);
+  return rest;
+}
+
 function threadIdOf(surface: WorkspaceTab): string | undefined {
   return "threadId" in surface && surface.threadId !== null ? String(surface.threadId) : undefined;
 }
@@ -26,58 +61,42 @@ function threadIdOf(surface: WorkspaceTab): string | undefined {
 /**
  * Navigation references only. Every activation still goes through the host.
  *
- * `preview` names threads opened with a single click from the sidebar. When
- * a pane moves on from one of those, the next surface takes its tab in place
- * instead of adding one, so browsing threads does not grow the row; a thread
- * kept with a double click, or opened any other way, keeps its tab.
+ * A pane's row holds its one conversation and the files, previews and
+ * canvases opened in it. A file opened over a thread always opens beside it:
+ * while a pane kept every thread, a file took a single-click thread's tab in
+ * place, which now would leave the row with no way back to the conversation.
  */
 export function rememberWorkspaceContent(
   current: WorkspaceContentTabs,
   previous: WindowWorkspace,
   next: WindowWorkspace,
-  preview: ReadonlySet<string> = new Set(),
 ): WorkspaceContentTabs {
   const result = new Map<PaneId, ReadonlyArray<WorkspaceTab>>();
   for (const mode of ["chat", "work", "code"] as const) {
     const sameContext =
       JSON.stringify(previous.contextByMode[mode]) === JSON.stringify(next.contextByMode[mode]);
     for (const pane of panes(next.layouts[mode])) {
-      let entries = sameContext ? [...(current.get(pane.paneId) ?? [])] : [];
+      const entries = sameContext ? [...(current.get(pane.paneId) ?? [])] : [];
       const prior = sameContext
         ? panes(previous.layouts[mode]).find((item) => item.paneId === pane.paneId)?.surface
         : undefined;
-      const priorThread = prior === undefined ? undefined : threadIdOf(prior);
-      const takesOver =
-        prior !== undefined &&
-        priorThread !== undefined &&
-        preview.has(priorThread) &&
-        isContent(pane.surface) &&
-        !sameWorkspaceSurface(prior, pane.surface) &&
-        !entries.some((entry) => sameWorkspaceSurface(entry, pane.surface));
-      if (takesOver) {
-        const index = entries.findIndex((entry) => sameWorkspaceSurface(entry, prior));
-        if (index >= 0) entries[index] = pane.surface;
-        else entries.push(pane.surface);
-        result.set(pane.paneId, entries);
-        continue;
-      }
       for (const surface of [prior, pane.surface]) {
         if (surface === undefined || !isContent(surface)) continue;
         const index = entries.findIndex((entry) => sameWorkspaceSurface(entry, surface));
         if (index < 0) entries.push(surface);
         else entries[index] = surface;
       }
-      result.set(pane.paneId, entries);
+      result.set(pane.paneId, withOneConversation(entries, pane.surface, prior));
     }
   }
   return result;
 }
 
 /**
- * The thread holding the pane's single-click tab, and one a single click is
- * about to open. Only one thread is the preview at a time: a preview another
- * open replaced is forgotten, so opening it again from a link or search keeps
- * its tab instead of treating it as a sidebar preview.
+ * The thread a single click opened, and one a single click is about to open.
+ * Only one thread is the preview at a time, and a preview another open
+ * replaced is forgotten. A previewed thread's reference is not written to
+ * storage (see workspaceContentPersistence); a double click keeps it.
  */
 export interface ThreadPreview {
   readonly current?: string;

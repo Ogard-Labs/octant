@@ -1,4 +1,5 @@
 import type { SpendCeilingRemaining } from "@octant/contracts";
+import { compactTokenCount } from "../context/contextInspectorModel";
 import {
   formatSpendCeilingRunTime,
   formatSpendCeilingUsd,
@@ -163,6 +164,40 @@ export function spendCeilingRemainingPhrases(
     );
   }
   return phrases;
+}
+
+/**
+ * "2M tokens · $5": the ceiling in force, one short figure per budget. It
+ * names the same ceiling per budget that `spendCeilingRemainingPhrases` does,
+ * the one leaving less room, so the row and the sentence behind it never
+ * describe two different ceilings.
+ */
+export function spendCeilingShortReading(remainings: ReadonlyArray<SpendCeilingRemaining>): string {
+  const parts: Array<string> = [];
+  const tokens = tighter(remainings, (remaining) => remaining.remainingTokens);
+  if (tokens?.ceilingTokens !== undefined) {
+    parts.push(`${compactTokenCount(tokens.ceilingTokens)} tokens`);
+  }
+  const turns = tighter(remainings, (remaining) => remaining.remainingTurns);
+  if (turns?.ceilingTurns !== undefined) {
+    parts.push(`${turns.ceilingTurns.toLocaleString("en")} turns`);
+  }
+  const runTime = tighter(remainings, (remaining) => remaining.remainingRunTimeSeconds);
+  if (runTime?.ceilingRunTimeSeconds !== undefined) {
+    parts.push(formatSpendCeilingRunTime(runTime.ceilingRunTimeSeconds));
+  }
+  const money = tighter(remainings, (remaining) => remaining.remainingUsdCents);
+  if (money?.ceilingUsdCents !== undefined) {
+    parts.push(formatSpendCeilingUsd(money.ceilingUsdCents));
+  } else {
+    // A money budget with no priced usage has no remaining to compare; its
+    // ceiling is still the one in force.
+    const unpriced = remainings.find((remaining) => remaining.ceilingUsdCents !== undefined);
+    if (unpriced?.ceilingUsdCents !== undefined) {
+      parts.push(formatSpendCeilingUsd(unpriced.ceilingUsdCents));
+    }
+  }
+  return parts.length === 0 ? "None" : parts.join(" · ");
 }
 
 /**

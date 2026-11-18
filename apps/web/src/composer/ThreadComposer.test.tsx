@@ -5,10 +5,20 @@ import { decodeThreadExternalContentState } from "@octant/contracts/content-prov
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { OutsideContentContext } from "./OutsideContentNotice";
+import { OutsideContentProvider } from "./OutsideContentNotice";
+import { PermissionModePicker } from "../code/PermissionModePicker";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
 import { FrozenBarScope } from "./frozenBarScope";
+import { ComposerStartTray } from "./ComposerStartTray";
+import { ComposerAttachButton } from "./ComposerAttachButton";
+import { useRegisterComposerMenuAction } from "./ComposerMenuActions";
 import { ThreadComposer } from "./ThreadComposer";
+import { ThreadInfo } from "./ThreadInfo";
+
+function ChecklistOffer() {
+  useRegisterComposerMenuAction("propose-plan", { label: "Propose plan", onSelect: vi.fn() });
+  return null;
+}
 
 describe("ThreadComposer", () => {
   it("keeps attach, the prompt and send in the card and the thread's controls in the row under it", () => {
@@ -48,11 +58,10 @@ describe("ThreadComposer", () => {
     expect(trailing).not.toContainElement(screen.getByText("Access"));
   });
 
-  it("holds one row under the box: the Project first, then the model, the approval control and the ring last", () => {
+  it("holds one row under a thread's box: the model, the approval control and the ring, and nothing else", () => {
     const { container } = render(
       <ThreadComposer
         presentation="follow-up"
-        context={<span>Project</span>}
         input={<textarea aria-label="Message" className="composer-input" />}
         row={{
           attach: <button type="button">Attach</button>,
@@ -65,21 +74,58 @@ describe("ThreadComposer", () => {
     const under = container.querySelector(".composer-under");
     expect(container.querySelectorAll(".composer-under")).toHaveLength(1);
     const order = [
-      screen.getByText("Project"),
       screen.getByRole("button", { name: "Model name" }),
       screen.getByRole("button", { name: "Mode: Ask first" }),
     ];
     for (const element of order) expect(under).toContainElement(element);
-    // Reading order is visual order: tab goes Project, model, approvals.
+    // Reading order is visual order: tab goes model, then approvals.
     order.forEach((element, index) => {
       const next = order[index + 1];
       if (next === undefined) return;
       expect(element.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     });
-    expect(container.querySelector(".composer-actions")).toContainElement(order[2] as HTMLElement);
+    expect(container.querySelector(".composer-actions")).toContainElement(order[1] as HTMLElement);
+    expect(
+      within(under as HTMLElement)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Model name", "Mode: Ask first"]);
   });
 
-  it("draws send as a quiet tile until there is something to send, then as the card's primary accent control", () => {
+  it("offers the thread's info and a plan to propose from the + menu, not from the row under the box", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <ThreadComposer
+        info={
+          <ThreadInfo>
+            <p>Saved commands</p>
+          </ThreadInfo>
+        }
+        input={<textarea aria-label="Message" className="composer-input" />}
+        presentation="follow-up"
+        row={{
+          attach: <ComposerAttachButton onFileSelected={vi.fn()} onRefused={vi.fn()} />,
+          leading: <ChecklistOffer />,
+          actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } },
+        }}
+      />,
+    );
+    expect(
+      within(container.querySelector(".composer-under") as HTMLElement).queryByRole("button", {
+        name: "Thread info",
+      }),
+    ).toBeNull();
+    expect(screen.getByText("Saved commands")).not.toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: /^Add attachment/ }));
+    expect(await screen.findByRole("menuitem", { name: "Propose plan" })).toBeVisible();
+    await user.click(screen.getByRole("menuitem", { name: "Thread info" }));
+
+    expect(screen.getByRole("region", { name: "Thread info" })).toBeVisible();
+    expect(screen.getByText("Saved commands")).toBeVisible();
+  });
+
+  it("keeps send disabled while there is nothing to send, and enabled once there is", () => {
     const { rerender } = render(
       <ThreadComposer
         input={<textarea aria-label="Message" className="composer-input" />}
@@ -88,20 +134,17 @@ describe("ThreadComposer", () => {
         }}
       />,
     );
-    expect(screen.getByRole("button", { name: "Send" })).toHaveAttribute(
-      "data-variant",
-      "secondary",
-    );
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
     rerender(
       <ThreadComposer
         input={<textarea aria-label="Message" className="composer-input" />}
         row={{ actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } } }}
       />,
     );
-    expect(screen.getByRole("button", { name: "Send" })).toHaveAttribute("data-variant", "default");
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
   });
 
-  it("puts the plan meters at the right of the start screen's context row", async () => {
+  it("puts the plan usage line at the right of the start screen's context row", async () => {
     const providerInstanceId = "10000000-0000-4000-8000-000000000001";
     const observedAt = "2026-10-20T12:00:00.000Z";
     const window = (id: string, utilization: number) => ({
@@ -153,8 +196,46 @@ describe("ThreadComposer", () => {
     const row = container.querySelector(".composer-start");
     expect(row).toContainElement(meters);
     expect(row?.firstElementChild).toHaveClass("composer-tray");
-    expect(row?.lastElementChild).toBe(meters);
-    expect(meters).toHaveTextContent("5h85%week43%");
+    expect(row?.lastElementChild).toContainElement(meters);
+    expect(meters).toHaveTextContent("85% · 43%");
+  });
+
+  it("keeps the Project's cell and the attach cell when the thread kind has neither", () => {
+    const row = {
+      actions: { kind: "send" as const, send: { ariaLabel: "Send", onSend: vi.fn() } },
+    };
+    const input = <textarea aria-label="Message" className="composer-input" />;
+    const tray = (project?: React.ReactNode) => (
+      <ComposerStartTray
+        kind={<button type="button">Chat</button>}
+        {...(project === undefined ? {} : { project })}
+        createFrom={<button type="button">Create from…</button>}
+      />
+    );
+    const { container, rerender } = render(
+      <ThreadComposer input={input} row={row} startContext={tray()} />,
+    );
+    const slot = container.querySelector('[data-slot="project"]');
+    expect(slot).toHaveAttribute("data-held", "true");
+    expect(slot).toHaveAttribute("aria-hidden", "true");
+    expect(container.querySelector(".composer-field__attach--held")).not.toBeNull();
+    const leading = container.querySelector(".composer-tray__leading");
+    expect([...(leading?.children ?? [])].map((child) => child.tagName)).toEqual(["BUTTON", "DIV"]);
+
+    rerender(
+      <ThreadComposer
+        input={input}
+        row={{ ...row, attach: <button type="button">Attach</button> }}
+        startContext={tray(<button type="button">Choose a Project</button>)}
+      />,
+    );
+    expect(container.querySelector('[data-slot="project"]')).toBe(slot);
+    expect(slot).not.toHaveAttribute("data-held");
+    expect(slot).toContainElement(screen.getByRole("button", { name: "Choose a Project" }));
+    expect(container.querySelector(".composer-field__attach--held")).toBeNull();
+    expect(container.querySelector(".composer-tray__trailing")).toContainElement(
+      screen.getByRole("button", { name: "Create from…" }),
+    );
   });
 
   it("says a notice in a card above the box and keeps the checkout context in the row under it", () => {
@@ -392,7 +473,7 @@ describe("ThreadComposer", () => {
     );
   });
 
-  it("offers the outside-content review from a chip in the row under a marked thread's box and holds the clear while the thread is busy", async () => {
+  it("shows a marked thread's mark as a globe right before the mode control, only below Full access, and holds the clear while the thread is busy", async () => {
     const threadId = "40000000-0000-4000-8000-000000000001";
     const marked = decodeThreadExternalContentState({
       threadId,
@@ -406,37 +487,44 @@ describe("ThreadComposer", () => {
       readExternalContent: vi.fn(async () => marked),
       clearExternalContent: vi.fn(),
     } as unknown as ContextClient;
-    const { container } = render(
-      <OutsideContentContext value={{ client, mode: "work", threadId }}>
+    const composerAt = (value: "ask-first" | "full-access") => (
+      <OutsideContentProvider thread={{ client, mode: "work", threadId }}>
         <ThreadComposer
           presentation="follow-up"
           threadBusy
           input={<textarea aria-label="Message" className="composer-input" />}
           row={{
-            leading: <button type="button">Ask first</button>,
+            leading: <button type="button">Attach files</button>,
+            approval: (
+              <PermissionModePicker autoSupported={false} onChange={vi.fn()} value={value} />
+            ),
             actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } },
           }}
         />
-      </OutsideContentContext>,
+      </OutsideContentProvider>
     );
+    const { container, rerender } = render(composerAt("ask-first"));
 
-    const chip = await screen.findByRole("button", { name: "Outside content" });
-    // The chip stands in the row under the box, right after the access
-    // control; no card stands above the box and nothing of it is in the box.
-    const surface = container.querySelector(".thread-composer__surface");
-    const row = container.querySelector(".composer-row");
-    expect(surface).not.toContainElement(chip);
-    expect(row).toContainElement(chip);
-    expect(row?.firstElementChild).toBe(screen.getByRole("button", { name: "Ask first" }));
-    expect(screen.getByRole("button", { name: "Ask first" }).nextElementSibling).toContainElement(
-      chip,
-    );
+    const mark = await screen.findByRole("button", {
+      name: "This thread read outside content, so risky actions ask first. See Environment.",
+    });
+    // The globe stands in the row under the box, immediately before the mode
+    // control; nothing of it is in the box or in a card above it.
+    expect(container.querySelector(".thread-composer__surface")).not.toContainElement(mark);
+    expect(container.querySelector(".composer-row")).toContainElement(mark);
+    expect(mark.nextElementSibling).toBe(screen.getByRole("button", { name: /^Mode:/ }));
     expect(container.querySelector(".composer-notices")).toBeEmptyDOMElement();
     const user = userEvent.setup();
-    await user.click(chip);
-    await user.click(await screen.findByRole("button", { name: "Review" }));
-    expect(await screen.findByRole("button", { name: "Clear the mark" })).toBeDisabled();
+    await user.click(mark);
+    expect(await screen.findByRole("button", { name: "Clear mark" })).toBeDisabled();
     await waitFor(() => expect(client.readExternalContent).toHaveBeenCalled());
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    rerender(composerAt("full-access"));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /See Environment/ })).not.toBeInTheDocument(),
+    );
   });
 
   it("renders only the capabilities the surface passes in", () => {

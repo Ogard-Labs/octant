@@ -187,4 +187,37 @@ describe("thread board pull-request policy", () => {
     });
     expect(summaries).toEqual({ items: [], hiddenCount: 0 });
   });
+
+  it("carries line counts, check counts and merging through unchanged, and leaves absent facts absent", () => {
+    const summaries = composeThreadBoardPullRequestSummaries({
+      rows: [row({})],
+      snapshotFreshness: {
+        status: "fresh",
+        lastSuccessfulRefreshAt: decodeTimestamp("2026-08-22T09:00:00.000Z"),
+      },
+      githubRevoked: false,
+      matches: [
+        {
+          row: {
+            ...row({ number: 1 }),
+            additions: 12,
+            deletions: 0,
+            checkCounts: { passed: 2, total: 5 },
+            merging: "queued" as const,
+          },
+        },
+        { row: row({ number: 2, updatedAt: "2026-08-22T07:00:00Z" }) },
+      ],
+    });
+    expect(summaries.items[0]).toMatchObject({
+      additions: 12,
+      deletions: 0,
+      checkCounts: { passed: 2, total: 5 },
+      merging: "queued",
+    });
+    const absent = summaries.items[1] ?? {};
+    for (const key of ["additions", "deletions", "checkCounts", "merging"]) {
+      expect(key in absent).toBe(false);
+    }
+  });
 });

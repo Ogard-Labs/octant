@@ -11,7 +11,7 @@ import {
   ContextMenuSubContent,
   ContextMenuSubTrigger,
   ContextMenuTrigger,
-} from "./NativeContextMenu";
+} from "../shadcn/context-menu";
 import { menuIconColumn } from "../shadcn/menu-row";
 import { cn } from "../shadcn/utils";
 import type { OctantMenuItem } from "./OctantMenu";
@@ -72,6 +72,7 @@ export function OctantContextMenu(props: OctantContextMenuProps) {
               closeOnClick
               key={item.value}
               label={item.label}
+              {...(item.destructive === true ? { destructive: true } : {})}
               {...(item.disabled === true ? { disabled: true } : {})}
               onClick={() => {
                 if (item.disabled === true) return;

@@ -4,7 +4,7 @@ import type {
   ThreadUsageLimitHandoff,
 } from "@octant/contracts";
 import { providerAccountMoveTargets, type PickerGroup } from "@octant/domain";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from "../ui/icons";
 import { useState } from "react";
 import { MoveToAccountDialog } from "../chat/MoveToAccountDialog";
 import { OctantAlert } from "../ui/base/OctantAlert";

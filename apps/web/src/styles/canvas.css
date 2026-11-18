@@ -2136,6 +2136,9 @@
 .canvas-plan__status-trigger:hover {
   background: var(--oct-fg-soft);
 }
+.canvas-plan__status-trigger:active {
+  background: var(--oct-wash-pressed);
+}
 
 .canvas-plan__status-trigger .canvas-plan__task-mark {
   margin-top: 0;
@@ -3260,6 +3263,9 @@
 .canvas-workspace-tab__overflow[aria-expanded="true"] {
   color: var(--oct-fg);
   background: var(--oct-surface);
+}
+.canvas-workspace-tab__overflow:active {
+  background: var(--oct-wash-pressed);
 }
 
 .canvas-workspace-tab__actions {

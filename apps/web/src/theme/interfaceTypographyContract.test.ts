@@ -6,6 +6,8 @@ const cssRoot = resolve(process.cwd(), "src/styles");
 const shippedCssRoot = resolve(process.cwd(), "src");
 const ordinarySurfaceFiles = ["shell.css", "settings.css", "dock.css"] as const;
 const technicalMonoSelectors = new Set([
+  // A thread row's branch is a code value, set in mono like the dock's checkout chip.
+  ".sidebar-navigation__thread-checkout",
   ".code-worktree-source__disclosure-label",
   ".settings-view__textarea",
   ".github-settings__device-code",

@@ -9,6 +9,11 @@ import type { PlannerProposalReview } from "./plannerProposalCreation";
 import { readPlannerAttempt } from "./plannerProposalAttempt";
 import { PlannerProposalReviewDialog, usePlannerState } from "./plannerProposalReview";
 
+const PLANNER_RULE =
+  "One Code thread may survey this Project and propose tasks. Each proposal waits for your decision; designation grants no right to start work.";
+
+const NO_PROPOSALS_HINT = "Open the designated planner to ask it to survey this Project.";
+
 /** The person reviews one Project's planner; every write retains its server version. */
 export function CodeProjectPlanner(
   props: Extract<CodeOverviewProps, { readonly projectId: ProjectId }>,
@@ -48,14 +53,16 @@ export function CodeProjectPlanner(
   return (
     <section aria-label="Project planner" className="code-project-planner">
       <header className="code-project-overview__section-header">
-        <h2>Project planner</h2>
+        <h2>Planner</h2>
         <OctantButton type="button" variant="ghost" size="sm" onClick={refresh}>
           Refresh planner
         </OctantButton>
       </header>
-      <p className="oct-row-detail">
-        One Code thread may survey this Project and propose tasks. Each proposal waits for your
-        decision; designation grants no right to start work.
+      {/* The one-line help sits in the card; the full rule is its tooltip and
+          its accessible description. */}
+      <p className="oct-row-detail code-project-planner__help" title={PLANNER_RULE}>
+        One thread proposes tasks; you decide each.
+        <span className="sr-only"> {PLANNER_RULE}</span>
       </p>
       {!ready || failure !== undefined ? (
         <OctantAlert tone="warning">
@@ -227,8 +234,9 @@ export function CodeProjectPlanner(
         })}
       </ul>
       {view !== undefined && proposals.length === 0 ? (
-        <p className="oct-row-detail">
-          No proposals yet. Open the designated planner to ask it to survey this Project.
+        <p className="oct-row-detail" title={NO_PROPOSALS_HINT}>
+          No proposals yet.
+          <span className="sr-only"> {NO_PROPOSALS_HINT}</span>
         </p>
       ) : null}
       {(view?.proposals.length ?? 0) > 50 ? (

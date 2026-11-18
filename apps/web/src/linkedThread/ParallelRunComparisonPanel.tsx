@@ -1,5 +1,5 @@
 import type { ParallelRunComparison, ParallelRunComparisonEntry } from "@octant/domain";
-import { GitMerge } from "lucide-react";
+import { GitMerge } from "../ui/icons";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 

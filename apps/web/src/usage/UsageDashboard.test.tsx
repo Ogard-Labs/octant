@@ -296,7 +296,7 @@ describe("UsageDashboard", () => {
     expect(await screen.findByText("Unavailable: 1")).toBeInTheDocument();
     expect(
       screen.getByText(
-        /Some usage is unavailable or estimated and shown as measurement quality, never as zero cost./,
+        /Some usage is unavailable or estimated. It is labelled as such, never shown as zero cost./,
       ),
     ).toBeInTheDocument();
   });

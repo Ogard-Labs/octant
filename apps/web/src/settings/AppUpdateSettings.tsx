@@ -81,7 +81,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   if (check === undefined || download === undefined || install === undefined) {
     return (
       <SettingRow
-        description="This copy of Octant is not the desktop app, so it does not update itself."
+        description="This is not the desktop app, so it does not update itself."
         focused={props.focused ?? false}
         label="Version"
         scope="app"
@@ -263,9 +263,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
       ) : null}
 
       {nightly ? (
-        <p className="app-update__offer-notes">
-          Octant Nightly gets a new build of what is being built every night.
-        </p>
+        <p className="app-update__offer-notes">Octant Nightly gets a new build every night.</p>
       ) : (
         <NightlyInstallRow bridge={bridge} channel={channel} ring={state?.ring} />
       )}

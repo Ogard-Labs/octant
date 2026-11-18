@@ -217,9 +217,7 @@ describe("NavigatorPanel", () => {
 
     expect(await screen.findByText("Images unavailable")).toBeVisible();
     expect(
-      screen.getByText(
-        "The Navigator model is not known to read images, and no vision reviewer is configured.",
-      ),
+      screen.getByText("The Navigator model may not read images, and no image reviewer is set."),
     ).toBeVisible();
   });
 

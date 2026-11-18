@@ -40,8 +40,8 @@ export function RoutineEventFields(props: {
         />
         {props.sources.length === 0 ? (
           <p role="status" className="automation-editor__note">
-            No event sources are available. Connect and enable an integration in Settings, then
-            reopen this editor.
+            No event sources yet. Connect and turn on an integration in Settings, then reopen this
+            editor.
           </p>
         ) : null}
       </div>

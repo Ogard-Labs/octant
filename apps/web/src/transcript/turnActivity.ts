@@ -31,6 +31,8 @@ export type TurnActivityRow =
       readonly outsideContent?: ToolOutsideContentMark;
       /** The routine the call created, shown as a receipt card under the turn. */
       readonly routine?: ThreadRoutineReceipt;
+      /** How long the call ran, when the host recorded its start and end. */
+      readonly durationMs?: number;
     }
   | {
       readonly kind: "task";
@@ -51,6 +53,8 @@ export interface TurnActivity {
   readonly rows: ReadonlyArray<TurnActivityRow>;
   /** Accumulated reasoning-channel text, in arrival order. */
   readonly reasoning: string;
+  /** How long the reasoning channel ran, when the host recorded start and end times. */
+  readonly reasoningMs?: number;
   /**
    * Whether the durable turn journaled more steps than the conversation page
    * carries back. Only replayed history can set this; a live turn is watched

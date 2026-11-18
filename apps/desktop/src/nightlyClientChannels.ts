@@ -30,6 +30,8 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   browserSurfaceBounds: "replaced",
   browserSurfaceCommand: "local",
   browserSurfaceDetach: "replaced",
+  // Nightly has no native page view to capture; its card keeps the host's picture.
+  browserSurfacePreview: "replaced",
   browserSurfaceOpenExternal: "local",
   browserSurfaceState: "replaced",
   // Nightly presents pages in its own renderer, so app shortcuts reach it directly.
@@ -121,7 +123,9 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   hostCapabilities: "local",
   resolvedMaterial: "local",
   windowFullScreen: "local",
+  windowActive: "local",
   resolvedSidebarVibrancy: "local",
+  resolvedGlassRefusal: "local",
   sidebarMaterialPreference: "local",
   sidebarVibrancyMode: "local",
   privateListenerStatus: "octant-only",
@@ -177,7 +181,9 @@ export const NIGHTLY_CLIENT_PUSH_CHANNELS: ReadonlySet<string> = new Set([
   DESKTOP_IPC_CHANNELS.codeDeepLink,
   DESKTOP_IPC_CHANNELS.resolvedMaterial,
   DESKTOP_IPC_CHANNELS.windowFullScreen,
+  DESKTOP_IPC_CHANNELS.windowActive,
   DESKTOP_IPC_CHANNELS.resolvedSidebarVibrancy,
+  DESKTOP_IPC_CHANNELS.resolvedGlassRefusal,
 ]);
 
 /**

@@ -102,6 +102,14 @@ export function shortSha(resolvedHead: string): string {
   return resolvedHead.slice(0, 7);
 }
 
+/**
+ * A branch as a person names it. The base picker hands over the full ref, and
+ * the panel read "Local refs/heads/main" where the person had picked "main".
+ */
+export function branchDisplayName(branch: string): string {
+  return branch.startsWith("refs/heads/") ? branch.slice("refs/heads/".length) : branch;
+}
+
 const MINUTE_MS = 60_000;
 const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
@@ -156,20 +164,22 @@ export function describeWorktreeSource(
     case "idle":
       return undefined;
     case "fetching":
-      return { label: `Fetching ${resolution.remoteName}/${resolution.branch}…` };
+      return {
+        label: `Fetching ${resolution.remoteName}/${branchDisplayName(resolution.branch)}…`,
+      };
     case "origin":
       return {
-        label: `${resolution.remoteName}/${resolution.branch} · ${shortSha(resolution.resolvedHead)}`,
+        label: `${resolution.remoteName}/${branchDisplayName(resolution.branch)} · ${shortSha(resolution.resolvedHead)}`,
       };
     case "local":
       return {
-        label: `Local ${resolution.branch} · ${shortSha(resolution.resolvedHead)}`,
+        label: `Local ${branchDisplayName(resolution.branch)} · ${shortSha(resolution.resolvedHead)}`,
         detail: `may differ from ${resolution.remoteName ?? "remote"}`,
       };
     case "cached-snapshot": {
       const aged = ageDetail(resolution.fetchedAt, now);
       return {
-        label: `${resolution.remoteName}/${resolution.branch} · ${shortSha(resolution.resolvedHead)}`,
+        label: `${resolution.remoteName}/${branchDisplayName(resolution.branch)} · ${shortSha(resolution.resolvedHead)}`,
         detail: aged.detail,
         ageMs: aged.ageMs,
       };

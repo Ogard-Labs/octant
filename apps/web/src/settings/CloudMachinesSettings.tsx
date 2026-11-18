@@ -341,7 +341,7 @@ export function CloudMachinesSettings(props: {
       {chosenTarget === undefined ? null : (
         <SettingsPanel
           collapse={{ summary: "Create a machine in your cloud account" }}
-          description="Your provider creates the machine from this recipe; Octant binds a server Project to the folder once it answers."
+          description="Your provider makes the machine from this recipe. Octant links a server Project to the folder once it answers."
           title="Create a cloud machine"
         >
           <form

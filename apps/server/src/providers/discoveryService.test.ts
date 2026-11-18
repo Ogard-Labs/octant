@@ -342,7 +342,7 @@ describe("discoveryService", () => {
       (candidate) => candidate.driverKind === "opencode",
     );
     expect(openCodeCandidates.map((candidate) => candidate.displayName)).toEqual([
-      "OpenCode CLI",
+      "OpenCode",
       "OpenCode 2 preview",
     ]);
   });

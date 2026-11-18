@@ -478,7 +478,7 @@ export function RemoteAccessSettingsSection({
         <div className="setgroup">
           <SettingRow
             focused={focusedSetting === "remote-listener"}
-            description="The address paired devices reach. Use a private network or Tailscale address with a certificate browsers trust; loopback and public addresses are refused."
+            description="The address paired devices connect to. Use a private network or Tailscale address with a certificate browsers trust. Loopback and public addresses are refused."
             label={status?.enabled === true ? "Move the listener" : "Enable the listener"}
             scope="host"
             settingId="remote-listener"
@@ -593,7 +593,7 @@ export function RemoteAccessSettingsSection({
               restoreFocus={listenerOpener}
               title={status?.enabled === true ? "Move remote listener?" : "Enable remote listener?"}
             >
-              Other devices on this network will be able to reach this host. Pairing still requires
+              Other devices on this network will be able to reach this host. Pairing still needs
               your approval here for every device.
             </OctantConfirmDialog>
           )}
@@ -607,7 +607,7 @@ export function RemoteAccessSettingsSection({
         {browserCannotVerify ? (
           <div className="setgroup">
             <SettingRow
-              description="Enter this code on the other device, then approve the request below. It works once, for five minutes, and lets the device confirm it is talking to this computer."
+              description="Enter this code on the other device, then approve the request below. It works once, for five minutes, and lets the device confirm it reached this computer."
               label="Pairing code"
               scope="host"
               settingId="remote-pairing-code"
@@ -808,7 +808,7 @@ export function RemoteAccessSettingsSection({
       {/* Revoking is this page's destructive group, so it sits last. */}
       <SettingsPanel
         title="Paired devices"
-        description="Revoking a device ends its sessions and streams immediately; it must pair again to return."
+        description="Revoking a device ends its sessions and streams now. It must pair again to return."
         tone="danger"
       >
         <div className="settings-panel__stack">

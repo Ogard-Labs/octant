@@ -96,7 +96,11 @@ export function buildSubagentRows(input: {
         id: entry.runId,
         entry,
         ...provider(entry.route?.executionProviderInstanceId),
-        model: entry.route?.executionModelId ?? "Model unknown",
+        model: modelName(
+          input.providers,
+          entry.route?.executionProviderInstanceId,
+          entry.route?.executionModelId,
+        ),
         lifecycleStatus: entry.lifecycleStatus,
         task: entry.task,
         ...(parentId === undefined ? {} : { parentId }),
@@ -122,7 +126,11 @@ export function buildSubagentRows(input: {
         id: observedChildSelectionId(child),
         child,
         ...provider(String(child.providerInstanceId)),
-        model: child.modelId === undefined ? "Model unknown" : String(child.modelId),
+        model: modelName(
+          input.providers,
+          String(child.providerInstanceId),
+          child.modelId === undefined ? undefined : String(child.modelId),
+        ),
         lifecycleStatus: child.lifecycleStatus,
         task: child.task ?? "Task unavailable",
         ...(parentId === undefined ? {} : { parentId }),
@@ -221,6 +229,24 @@ export function groupSubagentRows(
     out.push({ kind: "row", row });
   }
   return out;
+}
+
+/**
+ * The model's display name where the provider's catalogue describes it, its
+ * reported id where it does not, and "Model unknown" when the run reported
+ * none: never the parent thread's model.
+ */
+function modelName(
+  providers: ReadonlyMap<string, SubagentProviderIdentity> | undefined,
+  providerInstanceId: string | undefined,
+  modelId: string | undefined,
+): string {
+  if (modelId === undefined) return "Model unknown";
+  const named =
+    providerInstanceId === undefined
+      ? undefined
+      : providers?.get(providerInstanceId)?.models?.get(modelId);
+  return named ?? modelId;
 }
 
 function observedKey(child: AgentObservedChild, childAgentId: string): string {

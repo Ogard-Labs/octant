@@ -81,7 +81,7 @@ describe("WorkPromotionFlow", () => {
       />,
     );
 
-    expect(screen.getByText(/Work never turns into Code on its own/i)).toBeInTheDocument();
+    expect(screen.getByText(/Work never becomes Code by itself/i)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Propose a Code thread" }));
     expect(propose).toHaveBeenCalled();
     expect(onOpenLinkedCodeThread).not.toHaveBeenCalled();

@@ -1,7 +1,7 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useState } from "react";
 import type { WorkResearchBriefView } from "@octant/client-runtime/work-research-client";
-import { AlertTriangle, BookOpen, FileText, Quote } from "lucide-react";
+import { AlertTriangle, BookOpen, FileText, Quote } from "../ui/icons";
 import type { WorkResearchMutationOutcome, WorkResearchStatus } from "./useWorkResearchController";
 import { SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";

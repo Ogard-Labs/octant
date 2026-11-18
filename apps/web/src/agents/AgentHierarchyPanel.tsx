@@ -2,8 +2,10 @@ import type { AgentObservedChild } from "@octant/contracts";
 import { ObservedChildRow } from "./ObservedChildActivity";
 import { useMemo } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
-import { ProviderGlyph } from "../providers/ProviderGlyph";
+import { SubagentProviderMark, useSubagentProviders } from "./subagentProviders";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
+import { Bot } from "../ui/icons";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { AgentRunDependencyGraph, type SubagentProviderIdentity } from "./AgentRunDependencyGraph";
 import {
@@ -109,14 +111,15 @@ export function AgentHierarchyPanel(props: {
   );
 
   const observations = props.observations ?? NO_OBSERVATIONS;
+  const providers = useSubagentProviders(props.providers);
   const rows = useMemo(
     () =>
       buildSubagentRows({
         entries: props.entries,
         observations,
-        ...(props.providers === undefined ? {} : { providers: props.providers }),
+        ...(providers === undefined ? {} : { providers }),
       }),
-    [props.entries, observations, props.providers],
+    [props.entries, observations, providers],
   );
   const sections = useMemo(() => subagentSections(rows), [rows]);
   const managedRows = useMemo(
@@ -202,10 +205,15 @@ export function AgentHierarchyPanel(props: {
 
       {/* A coordinator with workers is not empty: saying "No subagents yet"
           above rows that count their subagents would contradict them. */}
-      {model.emptyReason === undefined || rows.length > 0 || workers.length > 0 ? null : (
-        <p className="agent-hierarchy__empty" role="status">
-          {model.emptyReason}
-        </p>
+      {model.empty === undefined || rows.length > 0 || workers.length > 0 ? null : (
+        // The shared state every pane with nothing to show uses: the mark, the
+        // line and one muted line, centred in a pane.
+        <OctantEmpty
+          detail={model.empty.detail}
+          icon={<Bot size={16} />}
+          layout="line"
+          title={model.empty.title}
+        />
       )}
 
       {props.observationsTruncated ? (
@@ -215,7 +223,7 @@ export function AgentHierarchyPanel(props: {
         <AgentRunDependencyGraph
           rows={graphRows}
           {...(props.onOpen === undefined ? {} : { onOpen: props.onOpen })}
-          {...(props.providers === undefined ? {} : { providers: props.providers })}
+          {...(providers === undefined ? {} : { providers })}
         />
       ) : (
         <>
@@ -247,7 +255,7 @@ export function AgentHierarchyPanel(props: {
                 <WorkerRow
                   graph={props.view === "graph"}
                   onOpenWorker={props.onOpenWorker}
-                  providers={props.providers}
+                  providers={providers}
                   worker={worker}
                 />
               </li>
@@ -283,10 +291,10 @@ function WorkerRow(props: {
         variant="ghost"
       >
         {worker.provider === undefined ? null : (
-          <ProviderGlyph
+          <SubagentProviderMark
             className="agent-hierarchy__worker-mark"
-            displayName={worker.provider.displayName}
             driverKind={worker.provider.driverKind}
+            providerName={worker.provider.displayName}
             size={14}
           />
         )}
@@ -432,6 +440,7 @@ function AgentHierarchySection(props: {
                   child={row.child}
                   now={Date.now()}
                   providerName={row.providerName}
+                  model={row.model}
                   {...(row.driverKind === undefined ? {} : { driverKind: row.driverKind })}
                   {...(props.onOpen === undefined ? {} : { onOpen: props.onOpen })}
                 />
@@ -467,14 +476,12 @@ function ManagedRow(props: {
       variant="ghost"
     >
       <SubagentStatusIcon lifecycleStatus={row.lifecycleStatus} />
-      {row.driverKind === undefined ? null : (
-        <ProviderGlyph
-          className="agent-hierarchy__worker-mark"
-          displayName={row.providerName}
-          driverKind={row.driverKind}
-          size={14}
-        />
-      )}
+      <SubagentProviderMark
+        className="agent-hierarchy__worker-mark"
+        driverKind={row.driverKind}
+        providerName={row.providerName}
+        size={14}
+      />
       <span className="agent-hierarchy__row-text">
         <span className="agent-hierarchy__task">{row.task}</span>
         <span className="agent-hierarchy__meta">{rowFacts(row)}</span>
@@ -515,13 +522,11 @@ function CompareGroup(props: {
                 variant="ghost"
               >
                 <span className="agent-hierarchy__compare-provider">
-                  {member.driverKind === undefined ? null : (
-                    <ProviderGlyph
-                      displayName={member.providerName}
-                      driverKind={member.driverKind}
-                      size={12}
-                    />
-                  )}
+                  <SubagentProviderMark
+                    driverKind={member.driverKind}
+                    providerName={member.providerName}
+                    size={12}
+                  />
                   <span>{member.providerName}</span>
                 </span>
                 <span className="agent-hierarchy__meta">{member.model}</span>

@@ -102,7 +102,9 @@ export function isDockToolLaunchable(
   if (surface === "delivery") return capabilities.hasDelivery === true;
   if (surface === "canvas") return capabilities.hasCanvasDocument === true;
   if (surface === "document") return capabilities.hasWrittenDocument;
-  if (surface === "ios-simulator") return capabilities.hasAppleSimulator;
+  // Always listed: a tool that comes and goes with the Project moved the
+  // menu under the pointer. `dockToolUnavailableReason` draws it disabled.
+  if (surface === "ios-simulator") return true;
   if (surface === "agents") {
     return (
       capabilities.hasExistingThread ||
@@ -132,4 +134,20 @@ export function isDockToolStillOpenable(
     );
   }
   return true;
+}
+
+/**
+ * Why a listed tool cannot be pressed now, or undefined when it can. The
+ * simulator is always in the tool lists so the menus keep one size; without an
+ * iOS app in the Project it is drawn greyed with this reason in its tooltip.
+ */
+export function dockToolUnavailableReason(
+  surface: RightUtilityDockSurfaceId,
+  capabilities: Pick<DockToolCapabilities, "hasAppleSimulator">,
+  hasProject: boolean,
+): string | undefined {
+  if (surface === "ios-simulator" && !capabilities.hasAppleSimulator) {
+    return hasProject ? "This Project has no iOS app" : "Choose a Project with an iOS app";
+  }
+  return undefined;
 }

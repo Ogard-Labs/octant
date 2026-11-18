@@ -106,7 +106,7 @@ export function AutomationNotificationSettings(props: AutomationNotificationSett
   return (
     <SettingsSection
       className="host-settings__notifications"
-      description="Get notified when an automation needs attention or finishes. Notifications include status only, without prompts, files, credentials, or access details."
+      description="Get notified when an automation needs you or finishes. Notifications show status only: no prompts, files, credentials, or access details."
       title="Automation notifications"
     >
       <div className="setgroup">
@@ -143,8 +143,8 @@ export function AutomationNotificationSettings(props: AutomationNotificationSett
       )}
       {status.providerDelivery === "unavailable" ? (
         <p className="settings-section-line">
-          Push delivery is not configured on this host. Your notification preference is saved, but
-          notifications cannot be delivered yet.
+          Push notifications are not set up on this host. Your choice is saved, but notifications
+          cannot be delivered yet.
         </p>
       ) : null}
     </SettingsSection>

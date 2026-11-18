@@ -84,9 +84,9 @@ Not everything above is equally polished; this is a technical preview. See the
 Local CLIs and SDKs (Octant discovers installed runtimes and registers them
 disabled until you enable them):
 
-- Codex CLI
+- Codex
 - Claude Code (Claude Agent SDK)
-- OpenCode CLI
+- OpenCode
 - Kimi Code CLI
 - Devin ACP
 - Kilo ACP

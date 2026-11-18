@@ -94,15 +94,19 @@ export function HostResourceSettings({
       if (mounted.current) setSaving(false);
     }
   };
-  if (loading) return <p role="status">Loading computer resource settings…</p>;
-  if (settings === undefined)
+  if (settings === undefined && !loading)
     return (
       <OctantAlert tone="danger">
         {error}
         <OctantButton onClick={() => void load()}>Retry</OctantButton>
       </OctantAlert>
     );
-  const paused = (settings.resourcePolicy ?? DEFAULT_HOST_RESOURCE_POLICY).mode === "paused";
+  // While the limits load the section is drawn whole, its rows in place with
+  // their controls out of sight and out of reach: nothing unsaved is shown as
+  // a value. As one "Loading…" line it grew by about 930px a quarter of a
+  // second after Settings opened and pushed the page's first section, and
+  // every section under it, down the page.
+  const paused = (settings?.resourcePolicy ?? DEFAULT_HOST_RESOURCE_POLICY).mode === "paused";
   const limits: ReadonlyArray<{
     readonly key:
       | "maxCommands"
@@ -158,12 +162,18 @@ export function HostResourceSettings({
   return (
     <SettingsSection
       title="Computer resources"
-      description="Limit new work on this host using its hardware and current load. Running work is allowed to finish; use its Stop control to end it."
+      description="Limit new work using this host's hardware and load. Running work finishes; use Stop to end it."
     >
-      <fieldset disabled={saving} className="setgroup" aria-label="Computer resource limits">
+      <fieldset
+        aria-busy={loading || undefined}
+        aria-label="Computer resource limits"
+        className="setgroup"
+        data-loading={loading ? "true" : undefined}
+        disabled={saving || loading}
+      >
         <SettingRow
           label="Automatic limits"
-          description="Adjust concurrency to CPU load and available RAM, including other apps. Turn off to use your ceilings without load-based adjustment."
+          description="Adjust to CPU load and free RAM, including other apps. Turn off to use your limits as set."
           scope="host"
           settingId="resource-limits"
           focused={focusedSetting === "resource-limits"}
@@ -186,9 +196,13 @@ export function HostResourceSettings({
             focused={focusedSetting === `resource-${key}`}
           >
             <OctantNumberStepper
+              field
               label={label}
               min={min}
               max={max}
+              suffix={
+                key === "cpuTargetPercent" || key === "memoryReservePercent" ? "%" : undefined
+              }
               value={draft[key]}
               onChange={(value) => setDraft({ ...draft, [key]: value })}
             />
@@ -196,7 +210,7 @@ export function HostResourceSettings({
         ))}
         <SettingRow
           label="Apply limits"
-          description="Settings are kept on this host and apply to the next managed launch."
+          description="Saved on this host. Applies to the next launch."
           scope="host"
           settingId="resource-save"
           focused={focusedSetting === "resource-save"}
@@ -207,7 +221,7 @@ export function HostResourceSettings({
         </SettingRow>
         <SettingRow
           label="New work"
-          description="Pause stops admission of new managed commands and helpers. It does not suspend running processes."
+          description="Pause blocks new commands and helpers. Running ones keep going."
           scope="host"
           settingId="resource-pause"
           focused={focusedSetting === "resource-pause"}
@@ -217,7 +231,7 @@ export function HostResourceSettings({
             disabled={saving}
             onClick={() =>
               void save({
-                ...(settings.resourcePolicy ?? DEFAULT_HOST_RESOURCE_POLICY),
+                ...(settings?.resourcePolicy ?? DEFAULT_HOST_RESOURCE_POLICY),
                 mode: paused ? "automatic" : "paused",
               })
             }
@@ -226,10 +240,16 @@ export function HostResourceSettings({
           </OctantButton>
         </SettingRow>
       </fieldset>
-      {snapshot === undefined ? (
-        <p role="status">Current load readings are unavailable.</p>
+      {loading ? (
+        <p aria-busy="true" className="host-resources__readings" role="status">
+          Reading the host's load…
+        </p>
+      ) : snapshot === undefined ? (
+        <p className="host-resources__readings" role="status">
+          Current load readings are unavailable.
+        </p>
       ) : (
-        <div role="status">
+        <div className="host-resources__readings" role="status">
           <p>
             {snapshot.cores} cores · {Math.round(snapshot.totalMemoryBytes / 2 ** 30)} GiB RAM ·{" "}
             {snapshot.cpuPercent}% CPU ·{" "}

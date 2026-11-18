@@ -30,7 +30,7 @@ import {
   type CreateHostViewScope,
   type PickerGroup,
 } from "@octant/domain";
-import { FolderOpen, AlertTriangle } from "lucide-react";
+import { FolderOpen, AlertTriangle } from "../../ui/icons";
 import {
   useCallback,
   useContext,
@@ -48,6 +48,7 @@ import { HostSelector } from "../../shell/HostSelector";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { clipboardHasImage } from "../../chat/composerImagePaste";
+import { ComposerRowSlot, ComposerStartTray } from "../../composer/ComposerStartTray";
 import { ThreadComposer } from "../../composer/ThreadComposer";
 import { WelcomeHeading } from "../../composer/WelcomeHeading";
 import { ComposerVoiceButton } from "../../voice/ComposerVoiceButton";
@@ -301,7 +302,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     if (items === null) return false;
     if (!clipboardHasImage(items)) return false;
     if (imageSupport === false) {
-      images.refuse("The selected model does not accept images. Choose an image-capable model.");
+      images.refuse("This model cannot read images. Pick one that can.");
       return true;
     }
     return images.consumePaste(items);
@@ -373,7 +374,12 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     <section aria-label="New task" className="work-composer-adapter">
       <div className="welcome">
         <div className="welcome__heading">
-          <WelcomeHeading projectChosen={props.projectId !== undefined} />
+          <WelcomeHeading
+            projectChosen={props.projectId !== undefined}
+            {...(props.projectId !== undefined && props.projectName !== undefined
+              ? { projectName: props.projectName }
+              : {})}
+          />
         </div>
         <div className="composer-stack">
           <ThreadComposer
@@ -397,7 +403,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                         key: "project-required",
                         tone: "danger" as const,
                         role: "alert" as const,
-                        text: "Choose a Project to work in before sending. Work needs a confined folder.",
+                        text: "Pick a Project before sending. Work stays inside its Project folder.",
                       },
                     ]
                   : []),
@@ -438,24 +444,14 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 props.selectedProviderInstanceId === undefined
                   ? undefined
                   : String(props.selectedProviderInstanceId),
-              alternatives: {
-                groups: props.providerGroups,
-                onSelect: props.onSelectProvider,
-                selectedModelId:
-                  props.selectedModelId === undefined ? undefined : String(props.selectedModelId),
-              },
             }}
             startContext={
-              <div className="composer-tray composer-tray--start" aria-label="Thread context">
-                <div className="composer-tray__leading">
-                  <WorkKindSwitch />
-                  {projectControl}
-                  {environmentControl}
-                </div>
-                {props.createFromControl === undefined ? null : (
-                  <div className="composer-tray__trailing">{props.createFromControl}</div>
-                )}
-              </div>
+              <ComposerStartTray
+                kind={<WorkKindSwitch />}
+                project={projectControl}
+                environment={environmentControl}
+                createFrom={props.createFromControl}
+              />
             }
             chips={
               <>
@@ -558,12 +554,12 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                       imageSupport,
                       images.attach,
                       images.refuse,
-                      "The selected model does not accept images. Choose an image-capable model.",
+                      "This model cannot read images. Pick one that can.",
                     )
                   }
                 />
               ),
-              leading: <></>,
+              leading: <ComposerRowSlot />,
               trailing: (
                 <>
                   <ComposerModelPicker

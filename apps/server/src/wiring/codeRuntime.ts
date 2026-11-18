@@ -1329,6 +1329,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             browserAutomationService.holdForPerson(windowId, threadId),
           holdForAsk: (windowId, threadId) =>
             browserAutomationService.holdForAsk(windowId, threadId),
+          takeBack: (windowId, threadId) => browserAutomationService.takeBack(windowId, threadId),
           snapshotRefs: (windowId, threadId) =>
             browserAutomationService.snapshotRefs(windowId, threadId),
         },
@@ -1342,7 +1343,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             browserModelBindings.delete(contextId);
           },
         },
-        isBrowserOriginRemembered: (origin) => browserToolApprovalService.isRemembered(origin),
         browserTransferApprovals: browserToolApprovalService,
         browserUploadFileCountLimit: () =>
           (persistence.readShellSettings()?.settings ?? defaultShellSettings())

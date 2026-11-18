@@ -424,6 +424,111 @@ describe("automation projection", () => {
     }
   });
 
+  it("lists the last seven runs oldest first so a strip reads left to right in time", () => {
+    const { store, projection } = createHarness();
+    const definition = automationDefinitionFixture({ id: automationId("1031") as never });
+    store.appendDefinitionCreated({ automation: definition });
+    for (let hour = 1; hour <= 9; hour += 1) {
+      const suffix = String(3000 + hour);
+      const at = `2026-08-09T${String(hour).padStart(2, "0")}:00:00.000Z`;
+      store.appendRunCreated({
+        run: automationRunForDefinition(definition, {
+          id: runId(suffix),
+          runNowRequestId: `ad000000-0000-4000-8000-00000000${suffix}`,
+          at,
+        }),
+      });
+    }
+    const summary = decodeSummary(
+      projection.listSummaries({ hostId: definition.hostId, mode: "all", limit: 10 }).items[0],
+    );
+    expect(summary.recentRuns?.map((run) => run.at)).toEqual(
+      [3, 4, 5, 6, 7, 8, 9].map((hour) => `2026-08-09T0${hour}:00:00.000Z`),
+    );
+  });
+
+  it("rejects a summary that carries more than seven recent runs", () => {
+    const { store, projection } = createHarness();
+    const definition = automationDefinitionFixture({ id: automationId("1032") as never });
+    store.appendDefinitionCreated({ automation: definition });
+    const [summary] = projection.listSummaries({
+      hostId: definition.hostId,
+      mode: "all",
+      limit: 10,
+    }).items;
+    const run = { lifecycle: "completed", at: now };
+    expect(() =>
+      decodeSummary({ ...summary, recentRuns: Array.from({ length: 8 }, () => run) }),
+    ).toThrow();
+  });
+
+  it("totals only visible Automations and only runs inside the window", () => {
+    const { store, projection } = createHarness();
+    const visible = automationDefinitionFixture({ id: automationId("1041") as never });
+    const hidden = automationDefinitionFixture({
+      id: automationId("1042") as never,
+      projectId: AUTOMATION_TEST_IDS.otherProject as never,
+      binding: { ...visible.binding, projectId: AUTOMATION_TEST_IDS.otherProject as never },
+      executionProfile: {
+        ...visible.executionProfile,
+        projectId: AUTOMATION_TEST_IDS.otherProject as never,
+      },
+    });
+    store.appendDefinitionCreated({ automation: visible });
+    store.appendDefinitionCreated({ automation: hidden });
+    const since = "2026-08-10T00:00:00.000Z" as UtcTimestamp;
+    const addRun = (
+      definition: AutomationDefinition,
+      suffix: string,
+      at: string,
+      lifecycle: "completed" | "failed" | "queued",
+    ) => {
+      const run = automationRunForDefinition(definition, {
+        id: runId(suffix),
+        runNowRequestId: `ad000000-0000-4000-8000-00000000${suffix}`,
+        at,
+      });
+      store.appendRunCreated({ run });
+      const updatedAt = at as UtcTimestamp;
+      const change = (
+        previousLifecycle: "queued" | "running",
+        next: "running" | "completed" | "failed",
+        version: number,
+      ) =>
+        store.appendRunStatusChanged({
+          automationId: run.automationId,
+          runId: run.id,
+          previousLifecycle,
+          lifecycle: next,
+          version,
+          expectedVersion: version - 1,
+          ...(next === "failed"
+            ? { failure: { reason: "runtime-failed" as const, message: "The run failed." } }
+            : {}),
+          updatedAt,
+        });
+      if (lifecycle === "completed") {
+        change("queued", "running", 2);
+        change("running", "completed", 3);
+      } else if (lifecycle === "failed") {
+        change("queued", "failed", 2);
+      }
+    };
+    addRun(visible, "4001", since, "completed");
+    addRun(visible, "4002", "2026-08-10T06:00:00.000Z", "failed");
+    addRun(visible, "4003", "2026-08-09T23:59:59.999Z", "completed");
+    addRun(hidden, "4004", "2026-08-10T07:00:00.000Z", "completed");
+
+    expect(
+      projection.totals({
+        hostId: visible.hostId,
+        mode: "all",
+        accessible: new Map([[String(visible.projectId), visible.mode]]),
+        since,
+      }),
+    ).toEqual({ automations: 1, enabled: 1, runs: 2, succeeded: 1 });
+  });
+
   it("filters by mode and project, searches names, and paginates with a cursor", () => {
     const { store, projection } = createHarness();
     const first = automationDefinitionFixture({

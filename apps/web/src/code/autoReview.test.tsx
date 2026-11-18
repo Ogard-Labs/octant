@@ -89,7 +89,7 @@ describe("who answers a thread's prompts at Auto, as the picker shows it", () =>
     expect(trigger).toHaveAccessibleName("Mode: Auto");
     expect(trigger).toHaveAttribute(
       "title",
-      "Mode: Auto. Octant Shield approves each action and asks you when unsure.",
+      "Mode: Auto. Octant Shield approves, and asks when unsure.",
     );
     await user.click(trigger);
     expect(

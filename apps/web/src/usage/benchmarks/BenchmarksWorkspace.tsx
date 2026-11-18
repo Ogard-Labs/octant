@@ -1,5 +1,5 @@
 import { OctantEmpty } from "../../ui/base/OctantEmpty";
-import { Download, FileSpreadsheet, Pencil, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
+import { Download, FileSpreadsheet, Pencil, Plus, RefreshCw, Trash2, Upload } from "../../ui/icons";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   decodeBenchmarkCellId,

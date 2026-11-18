@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -25,6 +25,17 @@ const projectSelection: ComposerProjectSelection = {
   displayName: "My Project",
 };
 
+function manyProjects(count: number): ComposerProjectEntry[] {
+  return Array.from({ length: count }, (_, i) => ({
+    kind: "saved-project" as const,
+    projectId: `00000000-0000-0000-0000-${String(100 + i).padStart(12, "0")}` as ProjectId,
+    displayName: `Project ${i + 1}`,
+    rootPath: `/home/user/project-${i + 1}`,
+  }));
+}
+
+const openTrigger = () => screen.getByRole("button", { name: "Project: Choose a Project" });
+
 describe("ComposerProjectSelector", () => {
   it("offers the default folder as a way to start without choosing a Project", async () => {
     const onSelect = vi.fn();
@@ -45,9 +56,10 @@ describe("ComposerProjectSelector", () => {
     });
   });
 
-  it("shows Code's opt-in default folder without allowing a refused start", async () => {
+  it("shows Code's refused default folder with its whole reason, dimmed, and refuses the start", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
+    const reason = "Code needs a Git repository. Change this in Code settings.";
     render(
       <ComposerProjectSelector
         entries={[
@@ -55,7 +67,7 @@ describe("ComposerProjectSelector", () => {
             kind: "default-folder",
             rootPath: "/Users/example/Octant/Code",
             disabled: true,
-            disabledReason: "Code needs a Git repository. Change it in Code settings",
+            disabledReason: reason,
           },
           { kind: "add-folder" },
         ]}
@@ -63,48 +75,148 @@ describe("ComposerProjectSelector", () => {
         onSelect={onSelect}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
-    const row = screen.getByRole("option", { name: /^No Project/ });
+    await user.click(openTrigger());
+    const row = screen.getByRole("option", { name: "No Project" });
     // Native `disabled` drops the option from keyboard/activedescendant
-    // discovery; aria-disabled keeps the inline reason reachable without hover.
+    // discovery; aria-disabled keeps the reason reachable without hover.
     expect(row).toHaveAttribute("aria-disabled", "true");
     expect(row).not.toBeDisabled();
-    expect(row).toHaveAccessibleName(/Code needs a Git repository. Change it in Code settings/);
-    expect(row).toHaveAttribute("title", "Code needs a Git repository. Change it in Code settings");
-    await user.keyboard("{ArrowDown}");
-    expect(row).toHaveClass("composer-folder-selector__option--active");
+    expect(row).toHaveAccessibleDescription(reason);
+    expect(row).toHaveTextContent(reason);
+    expect(row).toHaveClass("composer-folder-selector__option--two-line");
     await user.keyboard("{Enter}");
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it("opens its menu on the side of the trigger with more room, capped to that room", async () => {
-    render(<ComposerProjectSelector entries={entries} onSelect={vi.fn()} onAddFolder={() => {}} />);
-    const trigger = screen.getByRole("button", { name: "Project: Choose a Project" });
-    const at = (top: number) =>
-      vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({
-        top,
-        bottom: top + 24,
-        left: 0,
-        right: 120,
-        width: 120,
-        height: 24,
-        x: 0,
-        y: top,
-        toJSON: () => ({}),
-      });
-    const menu = () => document.querySelector(".composer-folder-selector__menu");
+  it("holds only one quiet line and the actions when there are no Projects, with no search field", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerProjectSelector
+        entries={[{ kind: "add-folder" }]}
+        onAddFolder={() => {}}
+        onSelect={() => {}}
+      />,
+    );
+    await user.click(openTrigger());
+    expect(screen.getByText("No Projects yet")).toBeVisible();
+    expect(screen.queryByRole("combobox", { name: "Search Projects" })).toBeNull();
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "New Project from folder…",
+    ]);
+  });
 
-    // Near the foot of the window, as on a start screen: above, capped to the room there.
-    at(window.innerHeight - 60);
-    await userEvent.click(trigger);
-    expect(menu()).not.toHaveClass("composer-folder-selector__menu--below");
-    expect(menu()).toHaveStyle({ maxHeight: "448px" });
-    await userEvent.click(trigger);
+  it("shows no search field and only its rows and actions with one Project", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerProjectSelector
+        entries={entries}
+        selection={projectSelection}
+        onSelect={() => {}}
+        onAddFolder={() => {}}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Project: My Project" }));
+    expect(screen.queryByRole("combobox", { name: "Search Projects" })).toBeNull();
+    expect(screen.queryByText("No Projects yet")).toBeNull();
+    // A lone group needs no label over it.
+    expect(screen.queryByText("Projects")).toBeNull();
+    expect(screen.getAllByRole("option")).toHaveLength(2);
+  });
 
-    // Near the top, as under Code Home's question: below.
-    at(80);
-    await userEvent.click(trigger);
-    expect(menu()).toHaveClass("composer-folder-selector__menu--below");
+  it("offers a search field once there are more Projects than fit without scrolling", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerProjectSelector
+        entries={[...manyProjects(8), { kind: "add-folder" }]}
+        onAddFolder={() => {}}
+        onSelect={() => {}}
+      />,
+    );
+    await user.click(openTrigger());
+    expect(screen.getByRole("combobox", { name: "Search Projects" })).toHaveFocus();
+    await user.type(screen.getByRole("combobox", { name: "Search Projects" }), "Project 3");
+    expect(screen.getAllByRole("option", { name: /^Project / })).toHaveLength(1);
+  });
+
+  it("marks the chosen Project with a check and no selected fill", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerProjectSelector
+        entries={entries}
+        selection={projectSelection}
+        onSelect={() => {}}
+        onAddFolder={() => {}}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Project: My Project" }));
+    const row = screen.getByRole("option", { name: /^My Project/ });
+    expect(row).toHaveAttribute("aria-selected", "true");
+    expect(row.querySelector(".octant-popover-option__check")).not.toBeNull();
+    expect(row.className).not.toMatch(/selected/);
+    expect(screen.getByRole("option", { name: "New Project from folder…" })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+  });
+
+  it("labels the Projects and server groups when both are listed", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerProjectSelector
+        entries={[
+          ...entries,
+          {
+            kind: "server-project",
+            projectId: "00000000-0000-0000-0000-000000000002" as ProjectId,
+            displayName: "Service",
+            location: "devbox:/home/build/service",
+          },
+        ]}
+        onAddFolder={() => {}}
+        onSelect={() => {}}
+      />,
+    );
+    await user.click(openTrigger());
+    expect(screen.getByRole("group", { name: "Projects" })).toBeVisible();
+    expect(screen.getByRole("group", { name: "On your servers" })).toBeVisible();
+  });
+
+  it("starts the keyboard on the chosen Project without drawing it pressed, and moves to the first and last row with Home and End", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const all = [...manyProjects(3), { kind: "add-folder" as const }];
+    render(
+      <ComposerProjectSelector
+        entries={all}
+        selection={{
+          projectId: (all[1] as { projectId: ProjectId }).projectId,
+          displayName: "Project 2",
+        }}
+        onSelect={onSelect}
+        onAddFolder={() => {}}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Project: Project 2" }));
+    const rows = screen.getAllByRole("option");
+    expect(screen.getByRole("listbox")).toHaveAttribute("aria-activedescendant", rows[1]?.id);
+    expect(rows[1]).not.toHaveAttribute("data-active");
+    await user.keyboard("{End}");
+    expect(rows[3]).toHaveAttribute("data-active", "true");
+    await user.keyboard("{Home}");
+    expect(rows[0]).toHaveAttribute("data-active", "true");
+    await user.keyboard("{Enter}");
+    expect(onSelect).toHaveBeenCalledWith(all[0]);
+  });
+
+  it("closes on an outside press", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerProjectSelector entries={entries} onSelect={() => {}} onAddFolder={() => {}} />,
+    );
+    await user.click(openTrigger());
+    expect(screen.getByRole("listbox", { name: "Project options" })).toBeVisible();
+    await user.click(document.body);
+    expect(screen.queryByRole("listbox", { name: "Project options" })).toBeNull();
   });
 
   it("asks for a Project until one is chosen", () => {
@@ -158,19 +270,23 @@ describe("ComposerProjectSelector", () => {
     expect(screen.getByRole("button", { name: "Project: Choose a Project" })).toBeDisabled();
   });
 
-  it("announces itself as a listbox trigger that starts closed", () => {
+  it("announces itself as a popup trigger that starts closed", () => {
     render(
       <ComposerProjectSelector entries={entries} onSelect={() => {}} onAddFolder={() => {}} />,
     );
     const trigger = screen.getByRole("button", { name: "Project: Choose a Project" });
-    expect(trigger).toHaveAttribute("aria-haspopup", "listbox");
+    expect(trigger).toHaveAttribute("aria-haspopup");
     expect(trigger).toHaveAttribute("aria-expanded", "false");
   });
 
   it("keeps the way to add a folder when the search matches no saved Project", async () => {
     const user = userEvent.setup();
     render(
-      <ComposerProjectSelector entries={entries} onSelect={() => {}} onAddFolder={() => {}} />,
+      <ComposerProjectSelector
+        entries={[...manyProjects(8), { kind: "add-folder" }]}
+        onSelect={() => {}}
+        onAddFolder={() => {}}
+      />,
     );
 
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
@@ -178,7 +294,7 @@ describe("ComposerProjectSelector", () => {
     expect(search).toHaveFocus();
     await user.type(search, "missing");
 
-    expect(screen.queryByRole("option", { name: /My Project/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /^Project 1/ })).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: "New Project from folder…" })).toBeVisible();
     // Nothing offers a thread with no Project: the list can only ever name one
     // or create one.
@@ -194,19 +310,27 @@ describe("ComposerProjectSelector", () => {
 
     const trigger = screen.getByRole("button", { name: "Project: Choose a Project" });
     await user.click(trigger);
-    await user.keyboard("{ArrowDown}{Enter}");
+    // Opening with nothing chosen starts on the first row.
+    await user.keyboard("{Enter}");
     expect(onSelect).toHaveBeenCalledWith(entries[0]);
 
     await user.click(trigger);
+    // The keyboard is inside the popup first, so Escape has somewhere to
+    // return it from.
+    await waitFor(() => expect(trigger).not.toHaveFocus());
     await user.keyboard("{Escape}");
-    expect(trigger).toHaveFocus();
+    await waitFor(() => expect(trigger).toHaveFocus());
   });
 
   it("types a space into the search field after arrowing through the list", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
     render(
-      <ComposerProjectSelector entries={entries} onSelect={onSelect} onAddFolder={() => {}} />,
+      <ComposerProjectSelector
+        entries={[...manyProjects(8), { kind: "add-folder" }]}
+        onSelect={onSelect}
+        onAddFolder={() => {}}
+      />,
     );
 
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
@@ -280,10 +404,10 @@ describe("ComposerProjectSelector", () => {
     await user.click(screen.getByRole("option", { name: "New Project from GitHub repository…" }));
 
     expect(await screen.findByText("octant/repo-1")).toBeVisible();
-    expect(screen.queryByRole("combobox", { name: "Search Projects" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("listbox", { name: "Project options" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Back to Projects" }));
-    expect(screen.getByRole("combobox", { name: "Search Projects" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "New Project from folder…" })).toBeVisible();
   });
 
   it("keeps GitHub out of the menu when the host has no GitHub clients", async () => {
@@ -314,7 +438,7 @@ describe("ComposerProjectSelector", () => {
       />,
     );
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
-    expect(screen.queryByText("No Projects yet.")).toBeNull();
+    expect(screen.queryByText("No Projects yet")).toBeNull();
     const option = screen.getByRole("option", { name: /^Service/ });
     expect(option).toHaveTextContent("devbox:/home/build/service");
     await user.click(option);

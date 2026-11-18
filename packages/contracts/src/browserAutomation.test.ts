@@ -241,6 +241,36 @@ describe("BrowserObservation", () => {
     expect(obs.extractedText).toBe("Visible page content");
     expect(obs.screenshotDataUrl).toBe("data:image/jpeg;base64,AQID");
   });
+  it("carries a page's icon only as a bounded image data URL", () => {
+    const base = {
+      contextId: "00000000-0000-4000-8000-000000000001",
+      actionId: "00000000-0000-4000-8000-000000000002",
+      correlationId: "00000000-0000-4000-8000-000000000003",
+      authority: {
+        hostId: "00000000-0000-4000-8000-000000000004",
+        mode: "work",
+        projectId: "00000000-0000-4000-8000-000000000005",
+        providerInstanceId: "00000000-0000-4000-8000-000000000006",
+        extension: { kind: "core" },
+      },
+      observedAt: "2026-07-24T12:00:00.000Z",
+      stale: false,
+    };
+    const icon = "data:image/png;base64,iVBORw0KGgo=";
+    expect(decodeBrowserObservation({ ...base, faviconDataUrl: icon }).faviconDataUrl).toBe(icon);
+    expect(() =>
+      decodeBrowserObservation({ ...base, faviconDataUrl: "data:text/html;base64,PGh0bWw+" }),
+    ).toThrow();
+    expect(() =>
+      decodeBrowserObservation({ ...base, faviconDataUrl: "https://a.test/i.png" }),
+    ).toThrow();
+    expect(() =>
+      decodeBrowserObservation({
+        ...base,
+        faviconDataUrl: `data:image/png;base64,${"A".repeat(90_000)}`,
+      }),
+    ).toThrow();
+  });
   it("decodes a stale observation", () => {
     const obs = decodeBrowserObservation({
       contextId: "00000000-0000-4000-8000-000000000001",

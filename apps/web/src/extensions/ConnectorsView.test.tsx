@@ -80,7 +80,6 @@ describe("Connectors", () => {
     const onConnected = vi.fn();
     render(
       <ConnectorsView
-        actions={null}
         client={{ addUserMcpServer, mcpServerSignIn: mcpServerSignIn as never }}
         disabled={false}
         localHost
@@ -115,7 +114,6 @@ describe("Connectors", () => {
     })) as never;
     render(
       <ConnectorsView
-        actions={null}
         client={{ addUserMcpServer, mcpServerSignIn: vi.fn() as never }}
         disabled={false}
         localHost
@@ -152,7 +150,6 @@ describe("Connectors", () => {
     })) as never;
     render(
       <ConnectorsView
-        actions={null}
         client={{ addUserMcpServer, mcpServerSignIn: vi.fn() as never }}
         disabled={false}
         localHost
@@ -184,7 +181,6 @@ describe("Connectors", () => {
   it("does not let a browser-hosted Settings connect Jottacloud", () => {
     render(
       <ConnectorsView
-        actions={null}
         client={{ addUserMcpServer: vi.fn() as never, mcpServerSignIn: vi.fn() as never }}
         disabled={false}
         localHost={false}
@@ -199,7 +195,6 @@ describe("Connectors", () => {
     const user = userEvent.setup();
     render(
       <ConnectorsView
-        actions={null}
         client={{
           addUserMcpServer: vi.fn() as never,
           mcpServerSignIn: vi.fn(async () => ({
@@ -243,7 +238,6 @@ describe("Connectors", () => {
   it("flags a connected connector whose sign-in expired, with the host's reason", () => {
     render(
       <ConnectorsView
-        actions={null}
         client={{
           addUserMcpServer: vi.fn() as never,
           mcpServerSignIn: vi.fn(async () => ({ kind: "signed-out" })) as never,
@@ -274,7 +268,6 @@ describe("Connectors", () => {
   it("does not show a server the person named like a connector as Connected", () => {
     render(
       <ConnectorsView
-        actions={null}
         client={{ addUserMcpServer: vi.fn() as never, mcpServerSignIn: vi.fn() as never }}
         disabled={false}
         localHost
@@ -289,7 +282,6 @@ describe("Connectors", () => {
   it("does not show a third-party plugin that took a connector's package name as Connected", () => {
     render(
       <ConnectorsView
-        actions={null}
         client={{ addUserMcpServer: vi.fn() as never, mcpServerSignIn: vi.fn() as never }}
         disabled={false}
         localHost
@@ -309,7 +301,6 @@ describe("Connectors", () => {
   it("names the credential store of the host's computer, not the window's", async () => {
     const user = userEvent.setup();
     const props = {
-      actions: null,
       client: { addUserMcpServer: vi.fn() as never, mcpServerSignIn: vi.fn() as never },
       disabled: false,
       localHost: true,
@@ -356,7 +347,6 @@ describe("Connectors", () => {
     const mcpServerSignIn = vi.fn(async () => ({ kind: "signed-out" }));
     render(
       <ConnectorsView
-        actions={null}
         client={{ addUserMcpServer, mcpServerSignIn: mcpServerSignIn as never }}
         disabled={false}
         localHost
@@ -396,7 +386,6 @@ describe("Connectors", () => {
   it("explains that a browser-hosted Settings cannot connect", () => {
     render(
       <ConnectorsView
-        actions={null}
         client={{ addUserMcpServer: vi.fn() as never, mcpServerSignIn: vi.fn() as never }}
         disabled={false}
         localHost={false}

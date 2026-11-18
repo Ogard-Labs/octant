@@ -28,7 +28,7 @@ describe("OctantContextMenu", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("opens nothing for an empty item list, on the web and on the desktop's native path", async () => {
+  it("opens nothing for an empty item list, in a browser and in the desktop app", async () => {
     const user = userEvent.setup();
     const { unmount } = render(
       <OctantContextMenu items={[]} onValueChange={vi.fn()} triggerClassName="recipe-trigger">
@@ -59,5 +59,28 @@ describe("OctantContextMenu", () => {
     } finally {
       Object.defineProperty(window, "octantHost", { configurable: true, value: undefined });
     }
+  });
+
+  it("marks a destructive item for the danger ink, and its popup carries the scroll cap", async () => {
+    const user = userEvent.setup();
+    render(
+      <OctantContextMenu
+        items={[
+          { label: "Rename", value: "rename" },
+          { destructive: true, label: "Archive", value: "archive" },
+        ]}
+        onValueChange={vi.fn()}
+      >
+        <span>Row</span>
+      </OctantContextMenu>,
+    );
+    await user.pointer({ target: screen.getByText("Row"), keys: "[MouseRight]" });
+    expect(await screen.findByRole("menuitem", { name: "Archive" })).toHaveAttribute(
+      "data-destructive",
+    );
+    expect(screen.getByRole("menuitem", { name: "Rename" })).not.toHaveAttribute(
+      "data-destructive",
+    );
+    expect(screen.getByRole("menu").className).toContain("overflow-y-auto");
   });
 });

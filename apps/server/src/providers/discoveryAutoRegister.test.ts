@@ -11,7 +11,7 @@ import { autoRegisterPreferredCandidates } from "./discoveryAutoRegister";
 function makeCandidate(overrides: Partial<DiscoveryCandidate> = {}): DiscoveryCandidate {
   return {
     driverKind: "codex",
-    displayName: "Codex CLI",
+    displayName: "Codex",
     binaryPath: "/opt/homebrew/bin/codex",
     readiness: "ready",
     pathSummary: "/opt/homebrew/bin/codex",
@@ -75,11 +75,11 @@ function displayNameFor(driverKind: DiscoveryCandidate["driverKind"]): string {
     case "claude":
       return "Claude Code";
     case "opencode":
-      return "OpenCode CLI";
+      return "OpenCode";
     case "grok":
       return "Grok";
     default:
-      return "Codex CLI";
+      return "Codex";
   }
 }
 
@@ -120,7 +120,7 @@ function claudeCandidate(overrides: Partial<DiscoveryCandidate> = {}): Discovery
 function opencodeCandidate(): DiscoveryCandidate {
   return makeCandidate({
     driverKind: "opencode",
-    displayName: "OpenCode CLI",
+    displayName: "OpenCode",
     binaryPath: "/opt/homebrew/bin/opencode",
     pathSummary: "/opt/homebrew/bin/opencode",
   });
@@ -186,7 +186,7 @@ describe("autoRegisterPreferredCandidates", () => {
     );
   });
 
-  it("creates a detected Codex CLI instance enabled on first run", async () => {
+  it("creates a detected Codex instance enabled on first run", async () => {
     const { createFromDiscovery } = await autoRegister({
       candidates: [makeCandidate()],
     });
@@ -198,7 +198,7 @@ describe("autoRegisterPreferredCandidates", () => {
     );
   });
 
-  it("creates both Claude Code and Codex CLI enabled when first run detects both", async () => {
+  it("creates both Claude Code and Codex enabled when first run detects both", async () => {
     const created: Array<{ driverKind: string; enabled: boolean }> = [];
     const { result, createFromDiscovery } = await autoRegister({
       candidates: [makeCandidate(), claudeCandidate()],
@@ -218,7 +218,7 @@ describe("autoRegisterPreferredCandidates", () => {
     expect(result.createdIds).toHaveLength(2);
   });
 
-  it("creates only the detected OpenCode runtime disabled when Claude Code and Codex CLI are absent", async () => {
+  it("creates only the detected OpenCode runtime disabled when Claude Code and Codex are absent", async () => {
     const { createFromDiscovery } = await autoRegister({
       candidates: [opencodeCandidate()],
     });
@@ -255,7 +255,7 @@ describe("autoRegisterPreferredCandidates", () => {
     expect(createFromDiscovery).toHaveBeenCalledWith(
       expect.objectContaining({
         driverKind: "opencode",
-        displayName: "OpenCode CLI",
+        displayName: "OpenCode",
         binaryPath: "/opt/homebrew/bin/opencode",
       }),
       { enabled: false },

@@ -45,7 +45,7 @@ import type { RightUtilityDockSurfaceId } from "../shell/rightUtilityDockModel";
 import type { ThreadUtilityDockKey } from "../shell/rightUtilityDockSelection";
 import type { useShellController } from "../shell/useShellController";
 import type { useThreadUtilityPresentation } from "../shell/useThreadUtilityPresentation";
-import type { DockTileMove } from "../shell/rightUtilityDockSelection";
+import type { DockTileEdge, DockTileMove } from "../shell/rightUtilityDockSelection";
 import type { VisibleMode } from "../shell/workKind";
 import type { WorkspaceViewProps } from "../shell/WorkspaceView";
 import type { useZenController } from "../zen/useZenController";
@@ -239,9 +239,12 @@ export type ShellActions = {
   readonly minimiseDockTool: (tabId: string) => void;
   /** Brings a minimised tool back from its card, to the place it was minimised from while that place exists. */
   readonly restoreDockTool: (tabId: string) => void;
+  /** Makes another page of the minimised Browser the one its card shows. */
+  readonly previewDockCardPage: (tabId: string) => void;
   /** Takes a minimised tool's card away; the tool stays open, its button in the row. */
   readonly hideDockCard: (tabId: string) => void;
   readonly moveDockTile: (tabId: string, direction: DockTileMove) => void;
+  readonly placeDockTile: (tabId: string, targetTabId: string, edge: DockTileEdge) => void;
   /** Opens a tool and shows it beside the focused tile in one step. */
   readonly openDockTabBeside: (surface: RightUtilityDockSurfaceId) => void;
   readonly resizeDockTileColumn: (columnIndex: number, shares: ReadonlyArray<number>) => void;
@@ -349,10 +352,18 @@ export type ShellActions = {
   readonly spendRevealTurn: () => void;
   readonly splitPane: ShellController["splitPane"];
   readonly startNewThreadDraft: (mode: OctantMode) => void;
-  readonly toggleBottomPanel: (opener: HTMLElement) => void;
   readonly toggleDock: (opener: HTMLElement) => void;
   readonly runDockToolMenu: (surface: RightUtilityDockSurfaceId, value: string) => void;
   readonly toggleDockTool: (surface: RightUtilityDockSurfaceId, opener: HTMLElement) => void;
+  /** A tool button in a pane's header; see `PaneDockTools`. */
+  readonly pressPaneDockTool: (
+    paneId: PaneId,
+    surface: RightUtilityDockSurfaceId,
+    opener: HTMLElement,
+    fromRest: boolean,
+  ) => void;
+  /** Shows a tool that is not on screen, and leaves one that is. */
+  readonly showDockToolFromRest: (surface: RightUtilityDockSurfaceId, opener: HTMLElement) => void;
   readonly touchMemoryRevision: ProjectController["touchMemoryRevision"];
   readonly tryWorkRestCommand: (
     threadId: string,

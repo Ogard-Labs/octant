@@ -215,12 +215,25 @@ describe("AppBackdrop", () => {
 });
 
 describe("which clicks send a ring", () => {
-  it("answers a click on a start screen and ignores one in a thread when limited to start screens", () => {
+  it("answers a click on a start screen's empty space and ignores one in a thread when limited to start screens", () => {
     document.body.innerHTML =
-      '<div class="draft-thread"><button id="start">Send</button></div><div class="code-thread-workspace"><p id="reply">Reply</p></div>';
+      '<div class="draft-thread"><p id="start">Greeting</p></div><div class="code-thread-workspace"><p id="reply">Reply</p></div>';
     const within = ".draft-thread, .work-composer-adapter, .code-composer-adapter";
     expect(acceptsRipple(document.getElementById("start"), within)).toBe(true);
     expect(acceptsRipple(document.getElementById("reply"), within)).toBe(false);
     expect(acceptsRipple(document.getElementById("reply"), undefined)).toBe(true);
+  });
+
+  it("sends no ring for a click on a control or anywhere in the composer's box, on any ground", () => {
+    document.body.innerHTML =
+      '<div class="draft-thread"><button id="send">Send</button>' +
+      '<div class="thread-composer__surface"><div id="padding"></div><textarea id="prompt"></textarea></div>' +
+      '<a id="link" href="#x">Open</a><p id="space">Empty</p></div>';
+    const within = ".draft-thread";
+    for (const id of ["send", "padding", "prompt", "link"]) {
+      expect(acceptsRipple(document.getElementById(id), within), id).toBe(false);
+      expect(acceptsRipple(document.getElementById(id), undefined), id).toBe(false);
+    }
+    expect(acceptsRipple(document.getElementById("space"), within)).toBe(true);
   });
 });

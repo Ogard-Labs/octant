@@ -12,12 +12,22 @@ import {
   type AgentRunClient,
 } from "@octant/client-runtime/agent-run-client";
 import type { AgentMessageClient } from "@octant/client-runtime/agent-message-client";
-import { Bot, Search } from "lucide-react";
+import { Bot, Ellipsis, Search } from "../ui/icons";
 import { useCallback, useMemo, useState } from "react";
+import { SubagentProviderMark, useSubagentProviders } from "./subagentProviders";
 import { AgentMessagingFactsRow } from "./AgentMessagingFactsRow";
 import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantBadge } from "../ui/base/OctantBadge";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
+import { FilterMenu, FilterMenuGroup } from "../surface/FilterMenu";
+import {
+  OctantMenuItem,
+  OctantMenuPopup,
+  OctantMenuPortal,
+  OctantMenuPositioner,
+  OctantMenuRoot,
+  OctantMenuTrigger,
+} from "../ui/base/OctantMenu";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
@@ -37,6 +47,7 @@ import {
   useAgentsCenterController,
   type AgentsCenterController,
 } from "./useAgentsCenterController";
+import { agentStatusTone, runTimeCell, startedCell, usageCell } from "./agentsTable";
 import { FollowUpControl } from "./FollowUpControl";
 import { AgentsCenterGraph } from "./AgentsCenterGraph";
 
@@ -52,6 +63,8 @@ export interface AgentsCenterProps {
     readonly projectId: ProjectId;
   }) => void;
   readonly onClose?: () => void;
+  /** The one action from an empty page: start a thread, where agents begin. */
+  readonly onStartThread?: () => void;
   readonly narrow?: boolean;
   readonly projectNames?: ReadonlyMap<string, string>;
   readonly providerLabels?: ReadonlyMap<string, string>;
@@ -148,14 +161,20 @@ export function AgentsCenter(props: AgentsCenterProps) {
       >
         {hideListForNarrow ? null : (
           <div className="agents-center__list-pane">
-            <AgentsCenterToolbar
-              controller={controller}
-              savingCanvas={savingCanvas}
-              {...(props.narrow === true ? {} : { onViewChange: setView, view })}
-              {...(showGraph && controller.visibleItems.length > 0
-                ? { onSaveCanvas: () => void saveGraphAsCanvas() }
-                : {})}
-            />
+            {/* Search and filters appear once there is something to filter; a
+                filter that is already on keeps its bar so it can be cleared. */}
+            {controller.list.status === "ready" &&
+            controller.list.items.length === 0 &&
+            !filtersAreActive(controller) ? null : (
+              <AgentsCenterToolbar
+                controller={controller}
+                savingCanvas={savingCanvas}
+                {...(props.narrow === true ? {} : { onViewChange: setView, view })}
+                {...(showGraph && controller.visibleItems.length > 0
+                  ? { onSaveCanvas: () => void saveGraphAsCanvas() }
+                  : {})}
+              />
+            )}
             {showGraph &&
             controller.list.status !== "loading" &&
             controller.list.status !== "unavailable" &&
@@ -175,6 +194,7 @@ export function AgentsCenter(props: AgentsCenterProps) {
                 controller={controller}
                 controls={controls}
                 onOpenThread={props.onOpenThread}
+                onStartThread={props.onStartThread}
                 projectNames={props.projectNames ?? new Map()}
                 providerLabels={props.providerLabels ?? new Map()}
                 onSelect={(runId) => controller.select(runId)}
@@ -214,6 +234,12 @@ function AgentsCenterToolbar(props: {
   readonly savingCanvas?: boolean;
 }) {
   const { controller } = props;
+  const filterCount =
+    (controller.statusFilter === "all" ? 0 : 1) + (controller.modeFilter === "all" ? 0 : 1);
+  const resetFilters = () => {
+    controller.setStatusFilter("all");
+    controller.setModeFilter("all");
+  };
   return (
     <div aria-label="Agents Center controls" className="surface-toolbar" role="group">
       <label className="surface-toolbar__search agents-center__search">
@@ -226,56 +252,42 @@ function AgentsCenterToolbar(props: {
           value={controller.search}
         />
       </label>
-      <OctantToggleGroup<(typeof STATUS_FILTERS)[number]["value"]>
-        aria-label="Filter by status"
-        className="agents-center__filters segmented"
-        onValueChange={(value) => {
-          const selected = value[0];
-          if (selected !== undefined) controller.setStatusFilter(selected);
-        }}
-        value={[controller.statusFilter]}
-      >
-        {STATUS_FILTERS.map((filter) => (
-          <OctantToggleGroupItem
-            className="agents-center__filter segment"
-            key={filter.value}
-            value={filter.value}
-          >
-            {filter.label}
-          </OctantToggleGroupItem>
-        ))}
-      </OctantToggleGroup>
-      <OctantToggleGroup<(typeof MODE_FILTERS)[number]["value"]>
-        aria-label="Filter by mode"
-        className="agents-center__filters segmented"
-        onValueChange={(value) => {
-          const selected = value[0];
-          if (selected !== undefined) controller.setModeFilter(selected);
-        }}
-        value={[controller.modeFilter]}
-      >
-        {MODE_FILTERS.map((filter) => (
-          <OctantToggleGroupItem
-            className="agents-center__filter segment"
-            key={filter.value}
-            value={filter.value}
-          >
-            {filter.label}
-          </OctantToggleGroupItem>
-        ))}
-      </OctantToggleGroup>
+      <FilterMenu count={filterCount} onReset={resetFilters}>
+        <FilterMenuGroup<(typeof STATUS_FILTERS)[number]["value"]>
+          label="Status"
+          onChange={controller.setStatusFilter}
+          options={STATUS_FILTERS}
+          value={controller.statusFilter}
+        />
+        <FilterMenuGroup<(typeof MODE_FILTERS)[number]["value"]>
+          label="Mode"
+          onChange={controller.setModeFilter}
+          options={MODE_FILTERS}
+          separated
+          value={controller.modeFilter}
+        />
+      </FilterMenu>
       {props.view === undefined || props.onViewChange === undefined ? null : (
         <AgentsCenterViewToggle onViewChange={props.onViewChange} view={props.view} />
       )}
       {props.onSaveCanvas === undefined ? null : (
-        <OctantButton
-          disabled={props.savingCanvas === true}
-          onClick={props.onSaveCanvas}
-          type="button"
-          variant="ghost"
-        >
-          Save as Canvas
-        </OctantButton>
+        <OctantMenuRoot>
+          <OctantMenuTrigger
+            aria-label="More actions"
+            className={octantButtonClassName({ variant: "ghost", size: "icon" })}
+          >
+            <Ellipsis aria-hidden="true" size={16} />
+          </OctantMenuTrigger>
+          <OctantMenuPortal>
+            <OctantMenuPositioner align="end" className="outline-none window-no-drag">
+              <OctantMenuPopup aria-label="More actions" className="min-w-[12rem]">
+                <OctantMenuItem disabled={props.savingCanvas === true} onClick={props.onSaveCanvas}>
+                  Save as Canvas
+                </OctantMenuItem>
+              </OctantMenuPopup>
+            </OctantMenuPositioner>
+          </OctantMenuPortal>
+        </OctantMenuRoot>
       )}
     </div>
   );
@@ -308,15 +320,31 @@ function AgentsCenterViewToggle(props: {
   );
 }
 
+function filtersAreActive(controller: AgentsCenterController): boolean {
+  return (
+    controller.statusFilter !== "all" ||
+    controller.modeFilter !== "all" ||
+    controller.search.trim() !== "" ||
+    controller.projectId !== undefined ||
+    controller.providerInstanceId !== undefined ||
+    controller.parentThreadId !== undefined
+  );
+}
+
 function AgentsCenterListBody(props: {
   readonly controller: AgentsCenterController;
   readonly controls: ReturnType<typeof useAgentRunControlCommands>;
   readonly onOpenThread?: AgentsCenterProps["onOpenThread"];
+  readonly onStartThread?: (() => void) | undefined;
   readonly projectNames: ReadonlyMap<string, string>;
   readonly providerLabels: ReadonlyMap<string, string>;
   readonly onSelect: (runId: string) => void;
 }) {
   const { controller } = props;
+  // One clock per answer from the host, so a table of rows does not each read
+  // its own and drift apart by a few milliseconds.
+  // oxlint-disable-next-line react-hooks/exhaustive-deps
+  const now = useMemo(() => new Date().toISOString(), [controller.visibleItems]);
   if (controller.list.status === "loading") {
     return (
       <OctantEmpty eyebrow="Agents" message="Loading agent runs." state="loading" title="Loading" />
@@ -335,13 +363,7 @@ function AgentsCenterListBody(props: {
     );
   }
   if (controller.visibleItems.length === 0) {
-    const hasActiveFilters =
-      controller.statusFilter !== "all" ||
-      controller.modeFilter !== "all" ||
-      controller.search.trim() !== "" ||
-      controller.projectId !== undefined ||
-      controller.providerInstanceId !== undefined ||
-      controller.parentThreadId !== undefined;
+    const hasActiveFilters = filtersAreActive(controller);
     return (
       <OctantEmpty
         layout="line"
@@ -365,11 +387,24 @@ function AgentsCenterListBody(props: {
                 </OctantButton>
               ),
             }
-          : {})}
+          : props.onStartThread === undefined
+            ? {}
+            : {
+                action: (
+                  <OctantButton
+                    onClick={props.onStartThread}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    Start a thread
+                  </OctantButton>
+                ),
+              })}
         detail={
           hasActiveFilters
             ? "Clear or adjust the active filters to see other runs."
-            : "Child agents appear here after a thread starts one."
+            : "Helpers a thread starts for part of its work list here."
         }
         icon={<Bot size={20} />}
         title={hasActiveFilters ? "No agent runs match these filters" : "No agent runs yet"}
@@ -377,79 +412,121 @@ function AgentsCenterListBody(props: {
     );
   }
   return (
-    <ul
-      aria-busy={controller.list.status === "refreshing"}
-      aria-label="Agent runs"
-      className="agents-center__rows"
-      data-refreshing={controller.list.status === "refreshing" ? "true" : undefined}
-    >
-      {controller.visibleItems.map((summary) => (
-        <li className="agents-center-row" key={String(summary.runId)}>
-          <OctantButton
-            className="agents-center-row__open"
-            data-agent-run-row={String(summary.runId)}
-            onClick={() => props.onSelect(String(summary.runId))}
-            type="button"
-            variant="ghost"
-          >
-            <span className="agents-center-row__task">{summary.task}</span>
-          </OctantButton>
-          <div className="agents-center-row__meta">
-            <span className="agents-center-row__parent">{summary.parentThreadTitle}</span>
-            <span className="agents-center-row__mode">{agentRunModeLabel(summary.mode)}</span>
-            <span className="agents-center-row__project">
-              {summary.projectId === undefined
-                ? "No Project"
-                : (props.projectNames.get(String(summary.projectId)) ?? "Project")}
-            </span>
-            <span className="agents-center-row__provider">
-              {props.providerLabels.get(String(summary.route.requestedProviderInstanceId)) ??
-                summary.route.requestedModelId}
-            </span>
-            <span className="agents-center-row__state" data-lifecycle={summary.lifecycleStatus}>
-              {agentRunLifecycleLabel(summary.lifecycleStatus)}
-            </span>
-            {summary.resultAcknowledgement.required &&
-            !summary.resultAcknowledgement.acknowledged ? (
-              <OctantBadge className="agents-center-row__ack" variant="secondary">
-                Needs acknowledgement
-              </OctantBadge>
-            ) : null}
-          </div>
-          <div className="agents-center-row__actions">
-            <OctantButton
-              onClick={() => {
-                const target = agentRunCenterThreadTarget(summary);
-                props.onOpenThread?.({
-                  ...target,
-                  title: summary.parentThreadTitle,
-                });
-              }}
-              type="button"
-              variant="ghost"
-            >
-              Open thread
-            </OctantButton>
-            {summary.resultAcknowledgement.required &&
-            !summary.resultAcknowledgement.acknowledged ? (
+    <div className="agents-table">
+      {/* The column names, drawn once. Each row says the same things in its
+          own accessible name and description, so this line is for the eye. */}
+      <div aria-hidden="true" className="agents-table__head">
+        <span>Agent</span>
+        <span>Status</span>
+        <span>Started</span>
+        <span>Run time</span>
+        <span>Usage</span>
+        <span />
+      </div>
+      <ul
+        aria-busy={controller.list.status === "refreshing"}
+        aria-label="Agent runs"
+        className="agents-center__rows"
+        data-refreshing={controller.list.status === "refreshing" ? "true" : undefined}
+      >
+        {controller.visibleItems.map((summary) => {
+          const rowId = `agents-row-${String(summary.runId)}`;
+          const needsAcknowledgement =
+            summary.resultAcknowledgement.required && !summary.resultAcknowledgement.acknowledged;
+          const usage = usageCell(summary);
+          return (
+            <li className="agents-center-row" key={String(summary.runId)}>
               <OctantButton
-                onClick={() =>
-                  void props.controls
-                    .acknowledge({ runId: String(summary.runId), version: summary.version })
-                    .then((message) => {
-                      if (message !== undefined) controller.setNotice(message);
-                    })
-                }
+                // Named for the task alone; where it ran, its state and its
+                // figures are the description, so a screen reader hears the
+                // name first and the rest after.
+                aria-describedby={`${rowId}-where ${rowId}-state ${rowId}-started ${rowId}-time ${rowId}-usage`}
+                aria-label={summary.task}
+                className="agents-center-row__open"
+                data-agent-run-row={String(summary.runId)}
+                onClick={() => props.onSelect(String(summary.runId))}
                 type="button"
-                variant="secondary"
+                variant="bare"
               >
-                Acknowledge
+                <span className="agents-center-row__agent">
+                  <span className="agents-center-row__task">{summary.task}</span>
+                  <span className="agents-center-row__where" id={`${rowId}-where`}>
+                    {`${summary.parentThreadTitle} · ${agentRunModeLabel(summary.mode)} · ${
+                      summary.projectId === undefined
+                        ? "No Project"
+                        : (props.projectNames.get(String(summary.projectId)) ?? "Project")
+                    }`}
+                    <span className="agents-center-row__provider">
+                      {" · "}
+                      <RanOn providerLabels={props.providerLabels} route={summary.route} />
+                    </span>
+                  </span>
+                </span>
+                <span className="agents-center-row__status" id={`${rowId}-state`}>
+                  <span
+                    className="agents-center-row__state"
+                    data-lifecycle={summary.lifecycleStatus}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="agents-center-row__dot"
+                      data-tone={agentStatusTone(summary.lifecycleStatus)}
+                    />
+                    {agentRunLifecycleLabel(summary.lifecycleStatus)}
+                  </span>
+                  <span className="agents-center-row__quiet">
+                    {needsAcknowledgement ? "Needs acknowledgement" : ""}
+                  </span>
+                </span>
+                <span className="agents-center-row__figure" id={`${rowId}-started`}>
+                  {startedCell(summary.createdAt, now)}
+                </span>
+                <span className="agents-center-row__figure" id={`${rowId}-time`}>
+                  {runTimeCell(summary, now)}
+                </span>
+                <span className="agents-center-row__figure" id={`${rowId}-usage`}>
+                  <span>{usage.primary}</span>
+                  <span className="agents-center-row__quiet">{usage.secondary}</span>
+                </span>
               </OctantButton>
-            ) : null}
-          </div>
-        </li>
-      ))}
-    </ul>
+              <span className="agents-center-row__actions">
+                <OctantButton
+                  className="agents-center-row__open-thread"
+                  onClick={() => {
+                    const target = agentRunCenterThreadTarget(summary);
+                    props.onOpenThread?.({
+                      ...target,
+                      title: summary.parentThreadTitle,
+                    });
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Open thread
+                </OctantButton>
+                {needsAcknowledgement ? (
+                  <OctantButton
+                    onClick={() =>
+                      void props.controls
+                        .acknowledge({ runId: String(summary.runId), version: summary.version })
+                        .then((message) => {
+                          if (message !== undefined) controller.setNotice(message);
+                        })
+                    }
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Acknowledge
+                  </OctantButton>
+                ) : null}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
@@ -706,4 +783,48 @@ function resolveSnapshotParentThreadId(
   const forest = buildAgentRunForest(items);
   if (forest.threads.length !== 1) return undefined;
   return forest.threads[0]?.roots[0]?.summary.parentThreadId;
+}
+
+/**
+ * What a run ran on: the provider's mark and name and the model, from the
+ * route the host executed. A run the host sent somewhere other than where it
+ * was asked says so, since the row is where a person looks to see what a run
+ * cost them and a silent change of provider reads as the request honoured.
+ * An unknown provider names no provider: only the model.
+ */
+function RanOn(props: {
+  readonly providerLabels: ReadonlyMap<string, string>;
+  readonly route: {
+    readonly executionProviderInstanceId: unknown;
+    readonly executionModelId: unknown;
+    readonly requestedProviderInstanceId: unknown;
+    readonly requestedModelId: unknown;
+  };
+}) {
+  const providers = useSubagentProviders();
+  const ranInstance = String(props.route.executionProviderInstanceId);
+  const ranModel = String(props.route.executionModelId);
+  const askedInstance = String(props.route.requestedProviderInstanceId);
+  const askedModel = String(props.route.requestedModelId);
+  const modelName = (instance: string, model: string) =>
+    providers?.get(instance)?.models?.get(model) ?? model;
+  const label = props.providerLabels.get(ranInstance);
+  const ranOn = [label, modelName(ranInstance, ranModel)].filter(
+    (part): part is string => part !== undefined,
+  );
+  const rerouted = askedInstance !== ranInstance || askedModel !== ranModel;
+  const asked = [props.providerLabels.get(askedInstance), modelName(askedInstance, askedModel)]
+    .filter((part): part is string => part !== undefined)
+    .join(" · ");
+  return (
+    <>
+      <SubagentProviderMark
+        driverKind={providers?.get(ranInstance)?.driverKind}
+        providerName={label ?? ranInstance}
+        size={12}
+      />
+      {ranOn.join(" · ")}
+      {rerouted ? ` (asked for ${asked})` : null}
+    </>
+  );
 }

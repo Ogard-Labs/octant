@@ -7,7 +7,9 @@ import type { ProjectId } from "@octant/contracts/projects";
 import { decodeWorkspaceTab, decodeWorkspaceTabId } from "@octant/contracts";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { createThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
+import { List } from "../ui/icons";
+import { PaneBar } from "./PaneBar";
 import { isAuthorizedCanvasDocument } from "./dockToolAvailability";
 
 const CanvasWorkspaceTab = lazy(() =>
@@ -147,11 +149,18 @@ export function DockCanvasTool(props: DockCanvasToolProps) {
     }
     return (
       <div className="dock-canvas-tool">
-        {cards.length === 1 ? null : (
-          <OctantButton onClick={() => setOpenCanvasId(undefined)} type="button" variant="ghost">
-            All canvases
-          </OctantButton>
-        )}
+        <PaneBar title={openCard.title}>
+          {cards.length === 1 ? null : (
+            <OctantIconButton
+              label="All canvases"
+              onClick={() => setOpenCanvasId(undefined)}
+              size="icon-sm"
+              type="button"
+            >
+              <List aria-hidden="true" size={16} />
+            </OctantIconButton>
+          )}
+        </PaneBar>
         <Suspense fallback={<OctantEmpty state="loading" title="Loading canvas" />}>
           <CanvasWorkspaceTab
             key={String(openCard.versionId)}
@@ -173,6 +182,7 @@ export function DockCanvasTool(props: DockCanvasToolProps) {
 
   return (
     <section aria-label="Canvas documents" className="dock-canvas-tool">
+      <PaneBar title="Canvas" />
       <ul className="dock-canvas-tool__list">
         {cards.map((card) => (
           <li key={String(card.canvasId)}>

@@ -106,7 +106,7 @@ export function AgentMessagingFactsRow(props: AgentMessagingFactsRowProps) {
       </p>
       {stale && props.facts === undefined ? (
         <p className="agents-center__messaging">
-          Message receipts could not refresh. Showing the last host report.
+          Could not refresh message receipts. Showing the last known state.
         </p>
       ) : null}
       {receipts.length === 0 ? null : (

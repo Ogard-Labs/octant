@@ -1,6 +1,6 @@
 import type { ChatMessagePart } from "@octant/contracts/chat";
 import { resolveChatMessageParts } from "@octant/domain/chat-message-parts";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "../ui/icons";
 import {
   createContext,
   useContext,
