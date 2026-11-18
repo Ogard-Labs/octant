@@ -1119,12 +1119,16 @@ export interface CodeOperationTurnPort {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
     readonly turnOperationId: CodeOperationId;
+    /** `"person"` only on the person's own Stop command; cleanup callers omit it. */
+    readonly stopRequestedBy?: "person";
   }) => Promise<CodeOperationTurnResult>;
   readonly cancel: (input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
     /** When set, only this turn may be stopped; a different live turn is left running. */
     readonly turnOperationId?: CodeOperationId;
+    /** `"person"` only on the person's own Stop command; cleanup callers omit it. */
+    readonly stopRequestedBy?: "person";
   }) => Promise<
     CodeOperationTurnResult & {
       /** The operation of the live turn this stopped, when there was one. */
@@ -4586,6 +4590,7 @@ export class CodeOperationService {
                 thread,
                 checkoutRoot: root.checkoutRoot,
                 turnOperationId: command.turnOperationId,
+                stopRequestedBy: "person",
               }),
         );
       case "cancel-provider-turn": {
@@ -4608,6 +4613,7 @@ export class CodeOperationService {
         const cancelled = await this.#options.turns.cancel({
           thread,
           checkoutRoot: root.checkoutRoot,
+          stopRequestedBy: "person",
           ...(command.turnOperationId === undefined
             ? {}
             : { turnOperationId: command.turnOperationId }),

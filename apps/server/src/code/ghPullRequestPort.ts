@@ -129,6 +129,11 @@ export type GhPullRequestReviewResult =
         author: string;
         mergeability?: "mergeable" | "conflicting" | "unknown";
         updatedAt?: string;
+        /** Present only on a confirmed merge: its timestamp and audited merger. */
+        mergedAt?: string;
+        mergedBy?: string;
+        /** Issue numbers the pull request's own metadata names as closing. */
+        closingIssueNumbers?: readonly number[];
         matchesDeliveryBranch: boolean;
         additions?: number;
         deletions?: number;
@@ -241,6 +246,11 @@ const ACTIVE_PR_LIST_FIELDS = [
 const MERGE_QUEUE_QUERY =
   "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){pullRequests(states:OPEN,first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number isInMergeQueue}}}}";
 
+const ISSUE_CLOSURE_QUERY =
+  "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){number title timelineItems(last:25,itemTypes:[CLOSED_EVENT]){pageInfo{hasPreviousPage} nodes{... on ClosedEvent{createdAt closer{... on PullRequest{number repository{owner{login} name}}}}}}}}}";
+
+const MAX_ISSUE_CLOSURE_EVENTS = 25;
+
 const MAX_PR_REVIEW_ITEMS = 500;
 const MAX_PR_DESCRIPTION_BYTES = 256 * 1024;
 const PR_VIEW_FIELDS = [
@@ -264,6 +274,9 @@ const PR_VIEW_FIELDS = [
   "additions",
   "deletions",
   "autoMergeRequest",
+  "mergedAt",
+  "mergedBy",
+  "closingIssuesReferences",
 ].join(",");
 
 export class GhPullRequestPort {
@@ -566,6 +579,12 @@ export class GhPullRequestPort {
         author: detail?.author ?? "",
         mergeability: detail?.mergeability ?? "unknown",
         ...(detail?.updatedAt === undefined ? {} : { updatedAt: detail.updatedAt }),
+        ...(detail?.mergedAt === undefined || detail.mergedBy === undefined
+          ? {}
+          : { mergedAt: detail.mergedAt, mergedBy: detail.mergedBy }),
+        ...(detail === undefined || detail.closingIssues.length === 0
+          ? {}
+          : { closingIssueNumbers: detail.closingIssues }),
         matchesDeliveryBranch: true,
       },
       description: detail?.description ?? "",
@@ -635,6 +654,12 @@ export class GhPullRequestPort {
         author: detail?.author ?? "",
         mergeability: detail?.mergeability ?? "unknown",
         ...(detail?.updatedAt === undefined ? {} : { updatedAt: detail.updatedAt }),
+        ...(detail?.mergedAt === undefined || detail.mergedBy === undefined
+          ? {}
+          : { mergedAt: detail.mergedAt, mergedBy: detail.mergedBy }),
+        ...(detail === undefined || detail.closingIssues.length === 0
+          ? {}
+          : { closingIssueNumbers: detail.closingIssues }),
         matchesDeliveryBranch: false,
         ...(detail?.additions === undefined ? {} : { additions: detail.additions }),
         ...(detail?.deletions === undefined ? {} : { deletions: detail.deletions }),
@@ -821,6 +846,57 @@ export class GhPullRequestPort {
       }
     }
     return queued;
+  }
+
+  /**
+   * Confirms a closure the pull request's own metadata named: the issue's
+   * `ClosedEvent` is proof only when its closer is this exact pull request in
+   * this exact repository. Anything else — a reference, a closed flag, a
+   * different closer — earns no record.
+   */
+  async observeIssueClosure(
+    request: {
+      readonly owner: string;
+      readonly name: string;
+      readonly issueNumber: number;
+      readonly closerNumber: number;
+    },
+    signal: AbortSignal,
+  ): Promise<{ readonly closedAt: string; readonly title: string } | undefined> {
+    const repository = `${request.owner}/${request.name}`;
+    if (
+      !validRepository(repository) ||
+      !Number.isSafeInteger(request.issueNumber) ||
+      !Number.isSafeInteger(request.closerNumber) ||
+      request.issueNumber <= 0 ||
+      request.closerNumber <= 0
+    )
+      return undefined;
+    const [owner, name] = repository.split("/");
+    if (owner === undefined || name === undefined) return undefined;
+    let result: GhCommandResult;
+    try {
+      result = await this.#command.run(
+        [
+          "api",
+          "graphql",
+          "-f",
+          `query=${ISSUE_CLOSURE_QUERY}`,
+          "-F",
+          `owner=${owner}`,
+          "-F",
+          `name=${name}`,
+          "-F",
+          `number=${request.issueNumber}`,
+        ],
+        { environment: this.#environment, stdin: undefined },
+        signal,
+      );
+    } catch {
+      return undefined;
+    }
+    if (result.exitCode !== 0) return undefined;
+    return decodeIssueClosure(result.stdout, request.owner, request.name, request.closerNumber);
   }
 
   async #viewReviewDetail(
@@ -1053,6 +1129,11 @@ interface GhPullRequestReviewDetail {
   readonly author: string;
   readonly mergeability: "mergeable" | "conflicting" | "unknown";
   readonly updatedAt?: string;
+  /** Set only when the forge confirms the merge, with its audited merger. */
+  readonly mergedAt?: string;
+  readonly mergedBy?: string;
+  /** Issue numbers the pull request's own metadata names as closing. */
+  readonly closingIssues: readonly number[];
   readonly baseBranch: string;
   readonly headBranch: string;
   readonly headRepository: string;
@@ -1101,6 +1182,13 @@ function decodeReviewDetail(output: string): GhPullRequestReviewDetail | undefin
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value.updatedAt)
       ? value.updatedAt
       : undefined;
+  const mergedAt =
+    typeof value.mergedAt === "string" &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value.mergedAt)
+      ? value.mergedAt
+      : undefined;
+  const mergedBy = loginOf(value.mergedBy);
+  const closingIssues = decodeClosingIssueNumbers(value.closingIssuesReferences);
   if (url === "" || baseBranch === "" || headBranch === "" || state === undefined) {
     return undefined;
   }
@@ -1111,6 +1199,8 @@ function decodeReviewDetail(output: string): GhPullRequestReviewDetail | undefin
     author: loginOf(value.author),
     mergeability: normalizeMergeability(value.mergeable),
     ...(updatedAt === undefined ? {} : { updatedAt }),
+    ...(mergedAt === undefined || mergedBy === "" ? {} : { mergedAt, mergedBy }),
+    closingIssues,
     baseBranch,
     headBranch,
     headRepository,
@@ -1381,6 +1471,65 @@ function reviewRequestLogins(value: unknown): ReadonlyArray<string> {
     if (logins.length >= MAX_REVIEW_REQUEST_LOGINS) break;
   }
   return logins;
+}
+
+function decodeIssueClosure(
+  output: string,
+  owner: string,
+  name: string,
+  closerNumber: number,
+): { readonly closedAt: string; readonly title: string } | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(output);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(value)) return undefined;
+  const data = value.data;
+  if (!isRecord(data) || !isRecord(data.repository) || !isRecord(data.repository.issue)) {
+    return undefined;
+  }
+  const issue = data.repository.issue;
+  const title = clampBytes(issue.title, 1_024);
+  const timeline = issue.timelineItems;
+  if (!isRecord(timeline)) return undefined;
+  // More than the bounded tail would leave the true closer unread; without
+  // the full window the closure is unconfirmed rather than guessed at.
+  if (isRecord(timeline.pageInfo) && timeline.pageInfo.hasPreviousPage === true) return undefined;
+  const nodes = timeline.nodes;
+  if (!Array.isArray(nodes)) return undefined;
+  for (const node of nodes.slice(0, MAX_ISSUE_CLOSURE_EVENTS)) {
+    if (!isRecord(node) || !isRecord(node.closer)) continue;
+    const closer = node.closer;
+    const closerRepository = closer.repository;
+    if (
+      closer.number === closerNumber &&
+      isRecord(closerRepository) &&
+      isRecord(closerRepository.owner) &&
+      typeof closerRepository.owner.login === "string" &&
+      closerRepository.owner.login.toLowerCase() === owner.toLowerCase() &&
+      closerRepository.name === name &&
+      typeof node.createdAt === "string" &&
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(node.createdAt)
+    ) {
+      return { closedAt: node.createdAt, title };
+    }
+  }
+  return undefined;
+}
+
+function decodeClosingIssueNumbers(value: unknown): readonly number[] {
+  if (!isRecord(value) || !Array.isArray(value.nodes)) return [];
+  const numbers: number[] = [];
+  for (const node of value.nodes) {
+    if (!isRecord(node)) continue;
+    const number = node.number;
+    if (typeof number === "number" && Number.isSafeInteger(number) && number > 0) {
+      numbers.push(number);
+    }
+  }
+  return numbers;
 }
 
 function decodeCommits(value: unknown): GhPullRequestReviewDetail["commits"] {

@@ -2788,6 +2788,51 @@ CREATE INDEX validation_evidence_authority_idx
         SELECT 1, COALESCE(MAX(global_sequence), 0) FROM event_journal;
     `,
   },
+  {
+    version: 110,
+    name: "create_code_home_activity_projection",
+    // Code Home activity history. A projection under a new name, so the first
+    // start after this migration replays the journal into it; no backfill is
+    // written here. `code_home_activity_fact` holds one durable row per
+    // delivery witness or settled run, keyed so repeated legitimate issue
+    // closure dates and distinct Project/thread witnesses keep their own
+    // rows. `code_home_activity_run` retains each run's current execution and
+    // first recorded terminal so a rerun can clear and restatements cannot
+    // move its finish time. `code_home_activity_thread` maps each mode's
+    // thread to its Project for facts whose events do not carry it.
+    sql: `
+      CREATE TABLE code_home_activity_fact (
+        kind TEXT NOT NULL CHECK(kind IN ('prs-merged', 'issues-closed', 'releases-published', 'runs')),
+        identity TEXT NOT NULL CHECK(length(trim(identity)) > 0),
+        occurred_at TEXT NOT NULL,
+        thread_id TEXT NOT NULL CHECK(length(trim(thread_id)) > 0),
+        project_id TEXT CHECK(project_id IS NULL OR length(project_id) = 36),
+        metadata_json TEXT NOT NULL CHECK(json_valid(metadata_json)),
+        PRIMARY KEY (kind, identity, occurred_at, thread_id)
+      ) STRICT;
+      CREATE INDEX code_home_activity_fact_kind_time_idx
+        ON code_home_activity_fact(kind, occurred_at);
+      CREATE TABLE code_home_activity_run (
+        source TEXT NOT NULL CHECK(source IN ('code', 'chat', 'work', 'agent-run')),
+        run_id TEXT NOT NULL CHECK(length(trim(run_id)) > 0),
+        execution TEXT NOT NULL,
+        thread_id TEXT,
+        project_id TEXT CHECK(project_id IS NULL OR length(project_id) = 36),
+        mode TEXT CHECK(mode IS NULL OR mode IN ('chat', 'work', 'code')),
+        terminal_finish TEXT CHECK(terminal_finish IS NULL OR
+          terminal_finish IN ('successful', 'failed', 'canceled')),
+        terminal_at TEXT,
+        stop_requested INTEGER NOT NULL DEFAULT 0 CHECK(stop_requested IN (0, 1)),
+        PRIMARY KEY (source, run_id)
+      ) STRICT;
+      CREATE TABLE code_home_activity_thread (
+        mode TEXT NOT NULL CHECK(mode IN ('chat', 'work', 'code')),
+        thread_id TEXT NOT NULL,
+        project_id TEXT CHECK(project_id IS NULL OR length(project_id) = 36),
+        PRIMARY KEY (mode, thread_id)
+      ) STRICT;
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

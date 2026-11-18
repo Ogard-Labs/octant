@@ -5,6 +5,7 @@ export * from "./attachmentMediaType";
 export * from "./codePlanner";
 export * from "./codeFileListing";
 export * from "./codeSearch";
+export * from "./codeHomeActivity";
 export * from "./codeOperations";
 export * from "./codeDebug";
 export * from "./codeLanguage";

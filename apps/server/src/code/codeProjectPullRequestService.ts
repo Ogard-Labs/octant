@@ -1,5 +1,10 @@
 import type { EventActor } from "@octant/contracts";
 import {
+  decodeActivityDeliveryObserved,
+  type ActivityDeliveryObserved,
+} from "@octant/contracts/code-home-activity";
+
+import {
   decideRemotePullRequestMerge,
   type RequiredChecksState,
 } from "@octant/domain/code-pull-request-action-policy";
@@ -127,6 +132,19 @@ export interface CodeProjectPullRequestDetailPort {
     },
     signal: AbortSignal,
   ): Promise<GhPullRequestReviewResult>;
+  /**
+   * Confirms an issue's `ClosedEvent` closer is this exact pull request, when
+   * the port supports the read; absent, closure candidates stay unrecorded.
+   */
+  observeIssueClosure?(
+    request: {
+      readonly owner: string;
+      readonly name: string;
+      readonly issueNumber: number;
+      readonly closerNumber: number;
+    },
+    signal: AbortSignal,
+  ): Promise<{ readonly closedAt: string; readonly title: string } | undefined>;
 }
 
 export interface CodeProjectPullRequestMergePort {
@@ -240,6 +258,7 @@ export class CodeProjectPullRequestService {
   readonly #list: CodeProjectPullRequestListPort;
   readonly #detail: CodeProjectPullRequestDetailPort;
   readonly #merge: CodeProjectPullRequestMergePort;
+  readonly #recordDelivery: ((observation: ActivityDeliveryObserved) => void) | undefined;
   readonly #recordMerge:
     | ((record: CodeProjectPullRequestMergeRecorded, actor?: EventActor) => void)
     | undefined;
@@ -311,6 +330,12 @@ export class CodeProjectPullRequestService {
       record: CodeProjectPullRequestMergeRecorded,
       actor?: EventActor,
     ) => void;
+    /**
+     * Journals a confirmed forge delivery the journal's own observers proved:
+     * a merged pull request, or an issue this pull request is confirmed to
+     * have closed. Absent, observations are shown but not recorded.
+     */
+    readonly recordDelivery?: (observation: ActivityDeliveryObserved) => void;
     readonly threads: CodeProjectLinkedThreadSource;
     readonly clock?: () => string;
     readonly cacheStats?: CacheStatsRecorder;
@@ -334,6 +359,7 @@ export class CodeProjectPullRequestService {
       } satisfies CodeProjectPullRequestMergePort);
     this.#requiredChecks = options.requiredChecks;
     this.#recordMerge = options.recordMerge;
+    this.#recordDelivery = options.recordDelivery;
     this.#threads = options.threads;
     this.#clock = options.clock ?? (() => new Date().toISOString());
     this.#cacheStats = options.cacheStats;
@@ -513,11 +539,13 @@ export class CodeProjectPullRequestService {
     this.#detailCache.set(key, { detail, lastSuccessfulRefreshAt: now });
     this.#detailFreshness.set(key, { status: "fresh", lastSuccessfulRefreshAt: now });
     const threads = await this.#threads.list();
+    const linkedThreads = this.#linkedThreads(authorized, detail, threads);
+    this.#recordObservedDelivery(authorized, observed, linkedThreads, signal);
     return this.#detailView({
       query: command,
       detail,
       freshness: { status: "fresh", lastSuccessfulRefreshAt: now },
-      linkedThreads: this.#linkedThreads(authorized, detail, threads),
+      linkedThreads,
     });
   }
 
@@ -666,6 +694,45 @@ export class CodeProjectPullRequestService {
     // route's failure; GitHub's state is still observed on the next refresh.
     record(result);
     if (result.status === "merged") {
+      // The merge answer itself names no merger or merge time, so it is
+      // re-observed once: confirmed metadata records the delivery, and a
+      // read that misses it leaves the next ordinary refresh to repair.
+      const observed = await this.#detail.observeReviewByIdentity(
+        {
+          owner: command.repositoryOwner,
+          name: command.repositoryName,
+          number: command.number,
+          maxDiffBytes: MAX_CODE_PROJECT_PULL_REQUEST_DETAIL_DIFF_BYTES,
+        },
+        signal,
+      );
+      if (
+        authorized !== undefined &&
+        observed.status === "observed" &&
+        observed.freshness === "fresh" &&
+        !observed.ambiguous
+      ) {
+        const threads = await this.#threads.list();
+        const linkedThreads = matchLinkedThreadsToPullRequest({
+          pullRequest: {
+            repository: {
+              owner: authorized.repositoryOwner,
+              name: authorized.repositoryName,
+            },
+            projectId: String(authorized.projectId),
+            number: command.number,
+            headBranch: observed.pullRequest.headBranch,
+            title: observed.pullRequest.title,
+          },
+          threads,
+        })
+          .slice(0, MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS)
+          .map((thread) => ({
+            threadId: decodeCodeThreadId(thread.threadId),
+            title: thread.title,
+          }));
+        this.#recordObservedDelivery(authorized, observed, linkedThreads, signal);
+      }
       return {
         status: "merged",
         number: command.number,
@@ -951,7 +1018,14 @@ export class CodeProjectPullRequestService {
       }
       const { repository, knownRow, observed } = entry;
       if (observed.status === "observed" && observed.freshness === "fresh" && !observed.ambiguous) {
-        collected.push(this.#rowFromObserved(repository, observed, threads, knownRow.updatedAt));
+        const observedRow = this.#rowFromObserved(
+          repository,
+          observed,
+          threads,
+          knownRow.updatedAt,
+        );
+        this.#recordObservedDelivery(repository, observed, observedRow.linkedThreads, signal);
+        collected.push(observedRow);
       } else {
         knownIdentityRefreshFailed.add(String(repository.projectId));
         collected.push(knownRow);
@@ -1517,6 +1591,95 @@ export class CodeProjectPullRequestService {
       reviews: observed.reviews.map((review) => ({ ...review })),
       comments: observed.comments.map((comment) => ({ ...comment })),
     };
+  }
+
+  /**
+   * Records a confirmed merge — and each issue closure the pull request is
+   * proved to have caused — once per matched linked thread. The observation
+   * is a fact the journal already watched; recording is best-effort so a
+   * failed append never fails the refresh that surfaced it.
+   */
+  #recordObservedDelivery(
+    repository: Extract<CodeProjectPullRequestConnection, { kind: "connected" }>,
+    observed: Extract<GhPullRequestReviewResult, { status: "observed" }>,
+    linkedThreads: ReadonlyArray<{ readonly threadId: CodeThreadId; readonly title: string }>,
+    signal: AbortSignal,
+  ): void {
+    if (this.#recordDelivery === undefined) return;
+    const pullRequest = observed.pullRequest;
+    if (
+      pullRequest.state !== "merged" ||
+      pullRequest.mergedAt === undefined ||
+      pullRequest.mergedBy === undefined
+    )
+      return;
+    for (const thread of linkedThreads) {
+      try {
+        this.#recordDelivery(
+          decodeActivityDeliveryObserved({
+            kind: "prs-merged",
+            projectId: repository.projectId,
+            threadId: thread.threadId,
+            repositoryOwner: repository.repositoryOwner,
+            repositoryName: repository.repositoryName,
+            number: pullRequest.number,
+            ...(pullRequest.title === "" ? {} : { title: pullRequest.title }),
+            occurredAt: pullRequest.mergedAt,
+            mergedBy: pullRequest.mergedBy,
+          }),
+        );
+      } catch {
+        // A malformed or rejected record must not fail the refresh.
+      }
+      for (const issueNumber of pullRequest.closingIssueNumbers ?? []) {
+        void this.#recordIssueClosure(repository, pullRequest.number, issueNumber, thread, signal);
+      }
+    }
+  }
+
+  async #recordIssueClosure(
+    repository: Extract<CodeProjectPullRequestConnection, { kind: "connected" }>,
+    closerNumber: number,
+    issueNumber: number,
+    thread: { readonly threadId: CodeThreadId },
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (this.#recordDelivery === undefined || this.#detail.observeIssueClosure === undefined) {
+      return;
+    }
+    try {
+      const closure = await this.#detail.observeIssueClosure(
+        {
+          owner: repository.repositoryOwner,
+          name: repository.repositoryName,
+          issueNumber,
+          closerNumber,
+        },
+        signal,
+      );
+      // Only a ClosedEvent naming this pull request in this repository earns
+      // the fact; a mere reference or a differently-closed issue stays out.
+      if (closure === undefined) return;
+      this.#recordDelivery(
+        decodeActivityDeliveryObserved({
+          kind: "issues-closed",
+          projectId: repository.projectId,
+          threadId: thread.threadId,
+          repositoryOwner: repository.repositoryOwner,
+          repositoryName: repository.repositoryName,
+          number: issueNumber,
+          ...(closure.title === "" ? {} : { title: closure.title }),
+          occurredAt: closure.closedAt,
+          closingPullRequest: {
+            repositoryOwner: repository.repositoryOwner,
+            repositoryName: repository.repositoryName,
+            number: closerNumber,
+          },
+        }),
+      );
+    } catch {
+      // Recording is best-effort; the next refresh re-attempts it.
+    }
   }
 
   #linkedThreads(
