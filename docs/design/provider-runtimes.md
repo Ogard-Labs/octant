@@ -1490,7 +1490,12 @@ rules as a developer message, the rest as a user message, and the images as
 `thread/inject_items` still reviews: the reply opens with a note that the
 message's context and attachments did not go with the review, and the driver
 holds them, by the session's thread, and sends them with that thread's next
-turn (held in memory, so a server restart in between loses them). When the
+turn (held in memory, so a server restart in between loses them). That
+turn's own context and attachments always go; held ones fill the room the
+block and attachment limits leave and the rest stays held for the turn after.
+A held standing block is left out once a later turn restates Octant's context
+or carries a newer version of it, so a block withdrawn meanwhile does not
+return; waiting messages always go. When the
 review reports its findings, the request and the findings are appended to
 the session's thread as the user and assistant messages Codex records after
 an inline review (`exit_review_mode` in `core/src/tasks/review.rs`) before

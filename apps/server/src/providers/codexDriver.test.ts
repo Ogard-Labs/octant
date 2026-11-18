@@ -43,6 +43,7 @@ import {
   approvalRequestIsProjectConfined,
   codexExecutionSettings,
   codexReviewRequest,
+  withHeldTurnInput,
   codexTurnExecutionSettings,
   makeCodexClient,
   makeCodexDriver,
@@ -3632,6 +3633,54 @@ describe("Codex execution authority and approvals", () => {
     expect(turn?.input).toMatchObject({ threadId: "thread-1" });
     expect(JSON.stringify(turn?.input)).toContain("From the planner: check the parser too.");
     await acquired.close();
+  });
+
+  it("leaves out a held standing block the next turn withdraws by restating, and keeps its waiting message", () => {
+    const { input } = withHeldTurnInput(
+      {
+        sessionId,
+        prompt: "fix it",
+        context: [
+          { kind: "instructions", text: PROVIDER_CONTEXT_RESTATED },
+          { kind: "instructions", text: "Octant's rules" },
+        ],
+        attachments: [],
+        tools: [],
+      },
+      {
+        context: [
+          { kind: "skill-instructions", text: "A skill since switched off" },
+          { kind: "user-message", text: "From the planner: check the parser too." },
+        ],
+        attachments: [],
+      },
+    );
+    expect(input.context).toEqual([
+      { kind: "user-message", text: "From the planner: check the parser too." },
+      { kind: "instructions", text: PROVIDER_CONTEXT_RESTATED },
+      { kind: "instructions", text: "Octant's rules" },
+    ]);
+  });
+
+  it("keeps held images past the attachment limit waiting rather than dropping them", () => {
+    const image = (id: number) => ({
+      attachmentId: `attachment-${id}`,
+      displayName: `image-${id}.png`,
+      mediaType: "image/png",
+      bytes: new Uint8Array([id]),
+    });
+    const own = Array.from({ length: 10 }, (_, index) => image(index));
+    const held = Array.from({ length: 10 }, (_, index) => image(100 + index));
+    const { input, deferred } = withHeldTurnInput(
+      { sessionId, prompt: "fix it", attachments: own, tools: [] },
+      { context: [], attachments: held },
+    );
+    // The turn's own attachments all go; held ones fill the room left.
+    expect(input.attachments).toHaveLength(16);
+    expect(input.attachments.slice(6)).toEqual(own);
+    expect(deferred?.attachments.map(({ attachmentId }) => attachmentId)).toEqual(
+      held.slice(6).map(({ attachmentId }) => attachmentId),
+    );
   });
 
   it("passes the text after /review to Codex as the review's instructions", () => {

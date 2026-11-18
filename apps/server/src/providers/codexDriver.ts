@@ -43,7 +43,9 @@ import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-fa
 import {
   attachmentMediaTypeToModality,
   isOctantInstructionContext,
+  isStandingProviderContext,
   PROVIDER_CONTEXT_RESTATED,
+  providerContextIdentity,
   renderOctantInstructions,
   renderProviderContextSections,
   renderProviderTurnPrompt,
@@ -1947,24 +1949,46 @@ const MAX_CODEX_HELD_THREADS = 64;
 
 /**
  * The turn with what an earlier review held for its thread ahead of what it
- * carries itself, each block once and within the attachment limit.
+ * carries itself, and what still waits after it. The turn's own context and
+ * attachments always go; held ones fill what room the limits leave, oldest
+ * first, and the rest stays held rather than being dropped. A held standing
+ * block goes only while the turn neither restates Octant's context (a
+ * restatement replaces every earlier block, so a withdrawn one must not come
+ * back) nor carries a newer version of the same block; waiting messages and
+ * other one-time blocks always go.
  */
 export function withHeldTurnInput(
   input: ProviderTurnInput,
   held: CodexHeldTurnInput | undefined,
-): ProviderTurnInput {
-  if (held === undefined) return input;
+): { readonly input: ProviderTurnInput; readonly deferred: CodexHeldTurnInput | undefined } {
+  if (held === undefined) return { input, deferred: undefined };
   const own = input.context ?? [];
-  const same = (left: ProviderContextBlock, right: ProviderContextBlock) =>
-    left.kind === right.kind && left.text === right.text && left.key === right.key;
-  const context = [
-    ...held.context.filter((block) => !own.some((mine) => same(block, mine))),
-    ...own,
-  ];
+  const restates = own.some(
+    (block) => block.kind === "instructions" && block.text === PROVIDER_CONTEXT_RESTATED,
+  );
+  const ownIdentities = new Set(own.map(providerContextIdentity));
+  const stillHeld = held.context.filter((block) =>
+    block.kind === "instructions" && block.text === PROVIDER_CONTEXT_RESTATED
+      ? !restates
+      : isStandingProviderContext(block)
+        ? !restates && !ownIdentities.has(providerContextIdentity(block))
+        : true,
+  );
+  const contextRoom = Math.max(0, MAX_PROVIDER_CONTEXT_BLOCKS - own.length);
+  const attachmentRoom = Math.max(0, MAX_PROVIDER_ATTACHMENTS - input.attachments.length);
+  const context = [...stillHeld.slice(0, contextRoom), ...own];
+  const deferredContext = stillHeld.slice(contextRoom);
+  const deferredAttachments = held.attachments.slice(attachmentRoom);
   return {
-    ...input,
-    ...(context.length === 0 ? {} : { context: context.slice(-MAX_PROVIDER_CONTEXT_BLOCKS) }),
-    attachments: [...held.attachments, ...input.attachments].slice(-MAX_PROVIDER_ATTACHMENTS),
+    input: {
+      ...input,
+      ...(context.length === 0 ? {} : { context }),
+      attachments: [...held.attachments.slice(0, attachmentRoom), ...input.attachments],
+    },
+    deferred:
+      deferredContext.length === 0 && deferredAttachments.length === 0
+        ? undefined
+        : { context: deferredContext, attachments: deferredAttachments },
   };
 }
 
@@ -2150,6 +2174,7 @@ function makeConnection(
       state: SessionState,
       target: CodexReviewTarget,
       input: ProviderTurnInput,
+      deferred: CodexHeldTurnInput | undefined,
     ): Effect.Effect<void, ProviderFailure> =>
       Effect.gen(function* () {
         if (mode === "chat") {
@@ -2213,23 +2238,19 @@ function makeConnection(
         }
         state.activeTurnId = started.turn.id;
         state.context ??= makeEventContext(state, factories);
-        const held = factories.heldForNextTurn;
-        if (injects === "added") {
-          held.delete(state.threadId);
+        if (injects === "added" || carried.length === 0) {
+          holdForNextTurn(state.threadId, deferred);
           return;
         }
-        if (carried.length === 0) return;
-        held.delete(state.threadId);
-        held.set(state.threadId, {
-          context: input.context ?? [],
-          attachments: input.attachments.filter(
-            (attachment) => attachmentMediaTypeToModality(attachment.mediaType) === "image",
-          ),
+        holdForNextTurn(state.threadId, {
+          context: [...(deferred?.context ?? []), ...(input.context ?? [])],
+          attachments: [
+            ...(deferred?.attachments ?? []),
+            ...input.attachments.filter(
+              (attachment) => attachmentMediaTypeToModality(attachment.mediaType) === "image",
+            ),
+          ],
         });
-        if (held.size > MAX_CODEX_HELD_THREADS) {
-          const oldest = held.keys().next().value;
-          if (oldest !== undefined) held.delete(oldest);
-        }
         for (const noted of mapCodexReviewNote(
           state.context,
           "review-carried",
@@ -2237,6 +2258,17 @@ function makeConnection(
         ))
           offer(noted);
       });
+    /** Keeps what still waits for the thread's next turn, or forgets the thread when nothing does. */
+    const holdForNextTurn = (threadId: string, waiting: CodexHeldTurnInput | undefined) => {
+      const held = factories.heldForNextTurn;
+      held.delete(threadId);
+      if (waiting === undefined) return;
+      held.set(threadId, waiting);
+      if (held.size > MAX_CODEX_HELD_THREADS) {
+        const oldest = held.keys().next().value;
+        if (oldest !== undefined) held.delete(oldest);
+      }
+    };
     /**
      * Appends messages to a thread without a turn; `unsupported` on a release
      * without `thread/inject_items`, which leaves the thread as it was.
@@ -3116,12 +3148,10 @@ function makeConnection(
               return Effect.fail(failure("unavailable", "Codex is compacting this session."));
             }
             const held = factories.heldForNextTurn.get(state.threadId);
+            const { input: turnInput, deferred } = withHeldTurnInput(input, held);
             const review = codexReviewRequest(input.prompt);
-            if (review !== undefined) {
-              return startReview(state, review, withHeldTurnInput(input, held));
-            }
+            if (review !== undefined) return startReview(state, review, turnInput, deferred);
             ensureSubscribed();
-            const turnInput = withHeldTurnInput(input, held);
             return Effect.tryPromise({
               try: async () => {
                 let lastError: unknown;
@@ -3155,7 +3185,7 @@ function makeConnection(
                     state.activeTurnId = turn.turn.id;
                     state.context ??= makeEventContext(state, factories);
                     if (factories.heldForNextTurn.get(state.threadId) === held) {
-                      factories.heldForNextTurn.delete(state.threadId);
+                      holdForNextTurn(state.threadId, deferred);
                     }
                     return;
                   } catch (error) {
