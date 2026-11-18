@@ -374,9 +374,12 @@ export class TerminalProcessPort {
       );
     }
     this.#dependencies.ensurePtyHelperExecutable();
+    // Windows has no Octant sandbox: a terminal there opens unconfined outside
+    // Strict and is refused under Strict or a protection policy, which only
+    // the sandbox could hold it to. A launch that does not say is Strict.
     if (
       this.#dependencies.platform === "win32" &&
-      (selection !== undefined || input.strict === true)
+      (selection !== undefined || input.strict !== false)
     )
       throw new ProcessConfinementError("incompatible", WINDOWS_SANDBOX_MISSING_REASON);
     const pty =
@@ -484,14 +487,13 @@ export class TerminalProcessPort {
   }
 
   /**
-   * A Windows terminal runs only at Full access, the one level that uses no
-   * sandbox, because Windows has none Octant can use yet. It opens the shell
-   * Settings › Code names with its own arguments (never POSIX `-l`), in the
-   * folder, with the inherited environment the terminal service allowed.
+   * A Windows terminal runs unconfined, outside Strict, at every level but
+   * Plan: Windows has no sandbox Octant can use yet, and a person's own
+   * terminal runs unconfined in other agent workspaces there. It opens the
+   * shell Settings › Code names with its own arguments (never POSIX `-l`), in
+   * the folder, with the inherited environment the terminal service allowed.
    */
   #spawnWindowsShell(input: TerminalLaunchInput): PtyProcess {
-    if (input.executionPolicy !== "full-access")
-      throw new ProcessConfinementError("incompatible", WINDOWS_SANDBOX_MISSING_REASON);
     const args = windowsShellArguments(input.shell, input.command);
     if (args === undefined)
       throw new ProcessConfinementError(

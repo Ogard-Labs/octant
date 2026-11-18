@@ -429,6 +429,19 @@ export interface ProviderNativeSessions {
   }) => Effect.Effect<ProviderNativeSessionCarry, ProviderFailure>;
 }
 
+/**
+ * Which of a runtime's own sessions an Octant thread holds, as the host
+ * records them: any session a journaled resume cursor of this driver kind
+ * names, for every instance of the kind, since instances of one runtime may
+ * share its session store. A driver that offers `nativeSessions` leaves a
+ * held session out of its list and refuses to adopt it, so two threads never
+ * drive one session. The host hands the same port to every driver, first-party
+ * or not.
+ */
+export interface ProviderSessionOwnership {
+  readonly held: (driverKind: ProviderDriverKind) => ReadonlySet<string>;
+}
+
 export type ProviderNativeSessionCarry =
   | { readonly status: "carried"; readonly discard: () => Effect.Effect<void> }
   | { readonly status: "refused" };

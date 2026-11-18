@@ -6,6 +6,16 @@ import {
   type ProviderRuntimeEvent,
   type ProviderToolDefinition,
 } from "@octant/contracts";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Effect, Exit, Scope, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { makePiDriver, type PiClientPort } from "./piDriver";
@@ -16,6 +26,7 @@ import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000701");
 const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000702");
+const forkedSessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000799");
 const modelId = "anthropic/claude-sonnet" as ProviderModelId;
 const root = "/tmp/octant-pi-driver";
 
@@ -111,7 +122,11 @@ class FakeClient implements PiClientPort {
 /** The Pi releases Octant verified for app-managed tools. */
 const VERIFIED_PI_VERSIONS = ["0.85.1", "1.1.0"] as const;
 
-function fixture(version = "0.80.10", registry = new ProviderRuntimeRegistry()) {
+function fixture(
+  version = "0.80.10",
+  registry = new ProviderRuntimeRegistry(),
+  piHome = "/managed/pi",
+) {
   const client = new FakeClient();
   const starts: Array<Record<string, unknown>> = [];
   const lifecycle: string[] = [];
@@ -145,7 +160,7 @@ function fixture(version = "0.80.10", registry = new ProviderRuntimeRegistry()) 
   const driver = makePiDriver({
     instanceId,
     binaryPath: "/opt/homebrew/bin/pi",
-    piHome: "/managed/pi",
+    piHome,
     process: processPort,
     runtimeRegistry: registry,
     clientFactory: () => client,
@@ -419,6 +434,82 @@ describe("Pi provider driver", () => {
     expect(completed).toMatchObject({ kind: "completed", stopReason: "max-tokens" });
     await Effect.runPromise(connection.stop(sessionId));
     await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+
+  it("names where a turn ends in Pi's session and forks a copy cut there, refusing another folder, mode or model", async () => {
+    const piHome = mkdtempSync(join(tmpdir(), "octant-pi-fork-"));
+    mkdirSync(join(piHome, "sessions"));
+    const sourcePath = join(piHome, "sessions", `2026-07-18T06-00-00-000Z_${sessionId}.jsonl`);
+    writeFileSync(
+      sourcePath,
+      `${[
+        { type: "session", version: 3, id: String(sessionId), cwd: root },
+        { type: "message", id: "e1", parentId: null, message: { role: "user" } },
+        { type: "message", id: "e2", parentId: "e1", message: { role: "assistant" } },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join("\n")}\n`,
+    );
+    const { driver, client } = fixture(undefined, undefined, piHome);
+    const scope = Effect.runSync(Scope.make());
+    const connection = await Effect.runPromise(
+      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+    );
+    await Effect.runPromise(
+      connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+    await Effect.runPromise(
+      connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
+    );
+    client.emit({ type: "agent_settled" });
+    const completed = (await collected).find((event) => event.kind === "completed");
+    expect(completed).toMatchObject({ kind: "completed", nativeAnchor: "e2" });
+    await Effect.runPromise(connection.stop(sessionId));
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    if (completed?.kind !== "completed" || completed.resumeCursor === undefined)
+      throw new Error("the turn did not complete with a cursor");
+    appendFileSync(
+      sourcePath,
+      `${JSON.stringify({ type: "message", id: "e3", parentId: "e2", message: { role: "user" } })}\n`,
+    );
+    const forkSession = driver.forkSession;
+    if (forkSession === undefined) throw new Error("Pi offers no fork");
+    const request = {
+      instanceId,
+      sessionId: forkedSessionId,
+      source: completed.resumeCursor,
+      anchor: "e1",
+      projectRoot: root,
+      mode: "code" as const,
+      modelId,
+    };
+    for (const refused of [
+      { ...request, projectRoot: "/tmp/elsewhere" },
+      { ...request, mode: "work" as const },
+      { ...request, modelId: "openai/gpt" as ProviderModelId },
+      { ...request, anchor: "missing" },
+    ])
+      expect(await Effect.runPromise(forkSession(refused))).toBeUndefined();
+    const cursor = await Effect.runPromise(forkSession(request));
+    expect(cursor).toMatchObject({
+      driverKind: "pi",
+      value: String(forkedSessionId),
+      binding: { sessionId: forkedSessionId, projectRoot: root, mode: "code", modelId },
+    });
+    const copy = readdirSync(join(piHome, "sessions")).find((name) =>
+      name.endsWith(`_${forkedSessionId}.jsonl`),
+    );
+    if (copy === undefined) throw new Error("no copy was written");
+    const lines = readFileSync(join(piHome, "sessions", copy), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines.map((line) => line.id)).toEqual([String(forkedSessionId), "e1"]);
+    expect(lines[0]).toMatchObject({ cwd: root, parentSession: sourcePath });
+    expect(readFileSync(sourcePath, "utf8").trim().split("\n")).toHaveLength(4);
+    // A session that already has a history keeps it.
+    expect(await Effect.runPromise(forkSession({ ...request, anchor: "e2" }))).toBeUndefined();
   });
 
   it("refuses concurrent owners of one native history and releases ownership after stop", async () => {
@@ -1436,6 +1527,26 @@ describe("Pi provider driver", () => {
       images: [{ type: "image", mimeType: "image/png", data: "AQID" }],
     });
     await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+
+  it("lets a Work or Code launch read the thread's attachments folder, and a Chat launch none", async () => {
+    const attachmentsFolder = "/data/work-threads/thread-1";
+    const launched = async (mode: "code" | "chat") => {
+      const { driver, starts } = fixture();
+      const scope = Effect.runSync(Scope.make());
+      const connection = await Effect.runPromise(
+        driver
+          .acquire({ instanceId, projectRoot: root, mode, attachmentsFolder })
+          .pipe(Scope.extend(scope)),
+      );
+      await Effect.runPromise(
+        connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      return starts.at(-1);
+    };
+    expect((await launched("code"))?.readOnlyFolders).toEqual([attachmentsFolder]);
+    expect((await launched("chat"))?.readOnlyFolders).toBeUndefined();
   });
 
   it("fails an active turn exactly once when the owned Pi process disconnects", async () => {

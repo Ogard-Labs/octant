@@ -731,6 +731,19 @@ and scrolling inside the card past 18rem so the buttons stay in reach, then
 **Approve plan ·** that level and **Keep planning**. The rules are in
 [Provider runtimes](provider-runtimes.md#plan-mode-as-level-changes).
 
+The phone draws the same block on a Work thread's screen, above the
+thread's level: the label, the agent's sentence, the plan whole in a
+bordered monospace block that scrolls inside the card past 18rem, the line
+saying what happens to this turn, and the two answers with the desktop's
+words. The phone reads the thread's pending requests from the host and
+sends only yes or no with the version it read; the host applies the level
+change and journals it as the device. Approving a plan, which widens what
+the next turn may do, asks for the phone's own confirmation (Face ID, Touch
+ID or passcode) first; switching to Plan and keeping the level do not. A
+Code thread's level-change ask stays with the desktop, like the phone's
+other Code approvals, and the phone shows no other Work approval or
+question yet.
+
 ## Sessions started outside Octant
 
 An empty Work or Code thread whose provider keeps sessions of its own for the

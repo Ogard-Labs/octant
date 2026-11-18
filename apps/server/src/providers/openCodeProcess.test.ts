@@ -1557,6 +1557,7 @@ describe("OpenCodeProcessPort", () => {
         readonly runsAsItself?: boolean;
         readonly mode?: string;
         readonly environment?: NodeJS.ProcessEnv;
+        readonly strict?: false;
       },
     ): Promise<{
       readonly seen: string;
@@ -1596,6 +1597,7 @@ describe("OpenCodeProcessPort", () => {
             mode: "work",
             executionPolicy: options.executionPolicy ?? "approval-gated",
             ...(options.runsAsItself === false ? {} : { runsAsItself: true as const }),
+            ...(options.strict === false ? { strict: false } : {}),
           }),
         ),
       );
@@ -1731,12 +1733,43 @@ describe("OpenCodeProcessPort", () => {
       }
     });
 
-    it("opens nothing for an OpenCode 2.x launch", async () => {
+    it("is what an OpenCode 2.x launch running as itself finds outside Strict, opened as for 1.x", async () => {
+      const { home, file, folder } = agentsHome();
+      const onLinux = await launch(home, {
+        platform: "linux",
+        mode: "v2-0-1-ready",
+        strict: false,
+      });
+      expect(onLinux.seen).toBe("Answer in British English.\n");
+      const granted = [
+        ...(onLinux.input?.privateHomeAllowPaths ?? []),
+        ...(onLinux.input?.readRoots ?? []),
+      ];
+      expect(granted.filter((path) => path.startsWith(folder))).toEqual([file]);
+      const onMac = await launch(home, { platform: "darwin", mode: "v2-0-1-ready", strict: false });
+      expect(onMac.seen).toBe("Answer in British English.\n");
+      expect(
+        new Set((onMac.input?.extraRules ?? []).filter((rule) => rule.includes(folder))),
+      ).toEqual(
+        new Set([
+          `(allow file-read-metadata (literal "${folder}"))`,
+          `(allow file-read* (literal "${file}"))`,
+        ]),
+      );
+    });
+
+    it("opens nothing for an OpenCode 2.x launch under Strict, or one not running as itself", async () => {
       const { home, folder } = agentsHome();
       for (const platform of ["darwin", "linux"] as const) {
-        const { seen, input } = await launch(home, { platform, mode: "v2-0-1-ready" });
-        expect(seen).toBe("");
-        expect((input?.extraRules ?? []).some((rule) => rule.includes(folder))).toBe(false);
+        for (const options of [{}, { strict: false, runsAsItself: false }] as const) {
+          const { seen, input } = await launch(home, {
+            platform,
+            mode: "v2-0-1-ready",
+            ...options,
+          });
+          expect(seen).toBe("");
+          expect((input?.extraRules ?? []).some((rule) => rule.includes(folder))).toBe(false);
+        }
       }
     });
   });

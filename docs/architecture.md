@@ -7060,7 +7060,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   snapshot stays. Claude Code 2.1.301 can also report
   `rate_limits_available: false` in that cold process. For a subscription
   account this means unavailable usage, not that a plan does not apply.
-  Only explicit API-key authentication establishes the no-plan state.
+  Only explicit API-key or gateway authentication establishes the no-plan state.
   For Claude and Codex, Octant never reads a token or credential file
   to fetch those numbers, and never calls a vendor usage endpoint
   itself. Each account keeps its own snapshot, keyed by
@@ -7116,7 +7116,12 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   two logins cannot share one profile without sharing credentials and
   session history. The implicit first subscription account keeps the
   host profile (`~/.claude`, or the inherited host overlay). Every
-  extra account, and every API-key account, uses its assigned leaf.
+  extra account, and every API-key or gateway account, uses its assigned leaf.
+  A gateway account (maintainer decision, 2026-11-18; built) launches with
+  `ANTHROPIC_BASE_URL` set to its own gateway address and
+  `ANTHROPIC_AUTH_TOKEN` set to its broker-resolved token, under Strict and
+  outside it, and no other account receives either
+  ([Claude gateway accounts](design/model-endpoints.md#claude-gateway-accounts)).
   A leftover custom directory keeps working until the person
   explicitly re-assigns it; Octant never silently points that login
   at another path. Removing an account leaves its assigned directory
@@ -9416,7 +9421,8 @@ fork yet) carries the source's conversation through the fork point, never
 past it. When the fork's provider instance and model can take up the
 source's own session there (the Octant Harness, `seedCodeForkHarnessSession`,
 below; Claude Code when the fork works in the source's own folder, since its
-sessions are kept per folder, see [native session anchors](#native-session-anchors)),
+sessions are kept per folder, see [native session anchors](#native-session-anchors);
+OpenCode and Pi in the source's own folder and mode, through their own fork),
 the fork resumes that copy and is sent no text. Otherwise, including
 every fork onto a provider instance other than the one that wrote the fork
 point, it reads the source through the same selector (purpose `fork`,
@@ -9440,14 +9446,18 @@ fixed `false` native-session and hidden-reasoning values; or reason
 <a id="native-session-anchors"></a>**Native session anchors.** A runtime's
 `completed` event may name where the turn ends in its own session
 (`nativeAnchor`): Claude Code reports the transcript id of the turn's last
-assistant message, Codex its turn id. The host journals it on the turn's
+assistant message, Codex its turn id, OpenCode its last assistant message's
+id, and Pi the id of the last entry it wrote to the session file. The host journals it on the turn's
 completed `operation-state` (an additive field, absent from older turns).
 A driver that copies its own session offers `forkSession` in the provider
 SDK; the host asks it, for a fork's first session or a rewound thread's next
 one, with the kept turn's recorded session and anchor, and resumes the copy
 it returns. The driver returns nothing when the copy cannot be exact: Claude
 Code copies only for the source's own folder, mode and sign-in, because
-resume looks for a session under its folder in the account's directory. The
+resume looks for a session under its folder in the account's directory;
+OpenCode forks through its own fork route, and Pi copies the session file as
+its own fork does, each only for the source's own folder and mode (Pi also
+its model) ([detail](design/provider-runtimes.md#opencode-subagents-strict-and-sessions)). The
 copy is made before the prompt is sent, so any refusal or failure falls back
 to the text handoff, and the journal, file checkpoints and transcript are
 the same either way: the rewind's own record still removes the turns, and
@@ -12002,8 +12012,9 @@ that is not yet effective for the thread is refused and never reaches the model.
   confined launch reaches only the Project's skills. No launch sets
   `OPENCODE_DISABLE_CLAUDE_CODE` or `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT`, so
   OpenCode reads `CLAUDE.md` where it finds no `AGENTS.md`, as it does on its
-  own, and running as itself OpenCode 1.x also finds the person's global
-  `AGENTS.md`, linked into its private config folder: instruction files are
+  own, and running as itself OpenCode 1.x, and 2.x outside Strict, also
+  finds the person's global `AGENTS.md`, linked into its private config
+  folder: instruction files are
   text with no authority (built;
   [detail](design/provider-runtimes.md#key-providers)). Built for
   Mistral Vibe: the launch leaves `VIBE_SKILL_PATHS` and
@@ -14862,13 +14873,20 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   paired browser and phone, as the coordinator asked for it; Canvas HTML
   import, whose request names its Project in its workspace scope; and Full
   access and extension install, built earlier. Each is journaled with the
-  device as the actor. Not built yet: the Browser's Take over and Hand back,
-  `sign-in`, profile pages and saved flows, which drive the desktop's native
-  Browser and have no remote input path; finishing a connector sign-in,
-  whose redirect returns to this host's loopback; provider cloud sessions,
-  whose submission policy and job records know only a local window; and
-  server Projects beyond reading, whose journaled records name only a local
-  window. Each owning section keeps its own "not built yet" line until it is
+  device as the actor. The paired browser offers the Project terminal and
+  Private page under **Project tools** in Work and Code, through the start
+  screen's quick tools, and **Import HTML…** alone in a Chat thread's Canvas
+  tools. Not built yet: the Browser's Take over and Hand back, `sign-in`,
+  profile pages and saved flows, which drive the desktop's native Browser in
+  the person's signed-in profiles and need a remote input stream and a rule
+  for what a device sees of a signed-in page, neither designed; finishing a
+  connector sign-in, whose redirect returns to this host's loopback and needs
+  a device-completable flow; provider cloud sessions, whose submission policy
+  and job records know only a local window; and server Projects beyond
+  reading, whose journaled records name only a local window. Each reason is
+  recorded in full in
+  [Decisions and requirements](design/decisions.md#paired-devices-act-as-the-person).
+  Each owning section keeps its own "not built yet" line until it is
   built. A device the host knows only through the hub's roster is unchanged.
 
   **Provider reach Octant no longer narrows** (maintainer decision,
@@ -14953,17 +14971,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     runtime, so on Linux a Plan command could read the account's sign-in and
     send it anywhere the runtime may reach. Building it needs a nested capsule
     for the shell alone, or the maintainer's acceptance of that reach.
-  - **Files of any kind as attachments** (designed, not built). A person may
-    attach any file in every mode. Octant keeps it in an Octant-owned
-    attachments folder per thread under the host's data directory, never
-    inside the Project, journaled like an image attachment and under the same
-    size and count limits, and grants the session read access to that one
-    folder at every level, Plan and Chat included, read-only. A provider that
-    takes the file natively (a PDF where its API takes one, OpenCode's PDF
-    capability) gets it natively; any other gets the file's path in the
-    message and reads it with its own tools. The composer accepts any file
-    by choosing or dropping it and shows it as an attachment chip. Until
-    built, attachments are images only.
+  - **Files of any kind as attachments** (built in every mode; the rules
+    are in the Plan and Chat tool parity entry that follows).
 
   Rationale: Plan's and Chat's limits are what the person relies on, not
   the absence of a tool; each of these keeps the limit at the boundary that
@@ -15038,34 +15047,70 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     nested user namespaces off) offers Plan no Bash tool, and a capsule that
     fails to build fails its command; nothing runs in the runtime's capsule
     instead.
-  - **Files of any kind as attachments** (built for Work and Code; Chat
-    designed, not built). A person may attach any file in every mode. Octant
-    keeps it in an Octant-owned attachments folder per thread under the
-    host's data directory (`code-threads/<thread>`, `work-threads/<thread>`),
-    never inside the Project, journaled like an image attachment and under
-    the same size and count limits, and grants the session read access to
-    that one folder at every level, Plan included, read-only: Claude Code's
-    command sandbox, its Plan confinement and the Linux Plan shell capsule
-    bind it read-only and its gate reads it unasked and refuses every file
-    write into it; Codex's and OpenCode's launch confinement bind it
-    read-only and OpenCode's rules allow reading it and deny edits there. At
-    Full access nothing is sandboxed, so only the gate's refusal of file
-    tools holds there. An image goes to a model that reads images as before;
-    a provider that takes the file natively gets it natively (a PDF to
-    OpenCode where its model reads documents); any other file is named in
-    the message by a path in that folder, a second name for the verified
-    file under its own name, and the agent reads it with its own tools. The
-    Work and Code composers and a paired phone accept any file by choosing or
-    dropping it and show it as an attachment chip; a paired device's upload
-    of any `type/subtype` is admitted on those routes. The folder is made
-    before the runtime launches, so a runtime started for a turn with no
-    file, which a later turn may reuse, already binds it. A thread in a
-    server Project works with the server's own file tools and this host's
-    folder is not there, and no transfer to the server exists, so a turn
-    carrying a file it would name by path is refused before it is accepted,
-    with a sentence saying to attach images or copy the file to the server;
-    images and natively taken files still go. Not built: Chat keeps its
-    image, text and PDF types.
+  - **Files of any kind as attachments** (built in every mode). A person may
+    attach any file in every mode, from the web composers and a paired
+    phone, under the existing size and count limits.
+    - **Work and Code.** Octant keeps the file in an Octant-owned
+      attachments folder per thread under the host's data directory
+      (`code-threads/<thread>`, `work-threads/<thread>`), never inside the
+      Project, journaled like an image attachment, and grants the session
+      read access to that one folder at every level, Plan included,
+      read-only: Claude Code's command sandbox, its Plan confinement and the
+      Linux Plan shell capsule bind it read-only and its gate reads it
+      unasked and refuses every file write into it; Codex's, OpenCode's,
+      Pi's and every ACP agent's launch confinement bind it read-only and
+      OpenCode's rules allow reading it and deny edits there. At Full access
+      nothing is sandboxed, so only the gate's refusal of file tools holds
+      there. An image goes to a model that reads images as before; a provider
+      that takes the file natively gets it natively (a PDF to OpenCode where
+      its model reads documents; a document to an ACP agent that advertised
+      embedded context, as an embedded `resource` block); any other file is
+      named in the message by a path in that folder, a second name for the
+      verified file under its own name, and the agent reads it with its own
+      tools. The folder is made before the runtime launches, so a runtime
+      started for a turn with no file, which a later turn may reuse, already
+      binds it.
+    - **Server Projects.** A Work or Code thread in a server Project works
+      with the server's own file tools, so a file it would name by path is
+      first copied over the Project's own SSH connection into the thread's
+      attachments folder on the server,
+      `<home>/.octant/thread-attachments/<thread>/<attachment>/<name>`,
+      outside every Project folder, made read-only there, and checked by its
+      SHA-256 against the journaled digest; the turn names that path. The
+      thread's server file tools read that one folder and write nowhere in
+      it, and another thread's tools do not read it, even through a Project
+      folder that holds the login's home. The copy is made before the turn's
+      start is journaled, and a copy that fails refuses the turn before it is
+      accepted, with a sentence saying so;
+      images and natively taken files go as before. Not built: removing the
+      server copies when the thread is deleted or purged.
+    - **Chat.** Chat has no folder, so no file is named by a path. A file the
+      provider and model take natively goes natively; an image goes to a
+      model that reads images or to Sees images as before; any other file
+      Octant recognizes as a Word, PowerPoint or Excel file or a PDF goes in
+      as the text Octant's own read takes out of it, under the read's limits
+      (a PDF whose bytes happen to be UTF-8 is still read out, never sent as
+      its raw syntax); any other file whose bytes are UTF-8 text, whatever its
+      type, goes in the turn as its text, fenced and marked as the file's
+      content rather than the person's words. The
+      attached text a turn carries is bounded (400,000 characters), and a turn
+      over it is refused rather than cut short. Any other file (an archive,
+      a binary) is refused before the turn is accepted, naming a Work or Code
+      thread as where it can go, and the composer refuses it when it is
+      chosen. The file stays on the turn for the record; as with an image sent
+      natively, its text reaches later turns where the provider keeps its own
+      session, and a host-built history carries only the person's message.
+      Rationale: a read-only tool scoped to the one attachment was the other
+      design. It changes the session's tool catalog on the turn a file
+      arrives, which a resumed native session refuses, it needs app-managed
+      tools that many Chat providers lack, and for a binary it would hand the
+      model bytes it cannot use without the shell Chat withholds; text and
+      document extraction cover what a model can read, and the rest belongs
+      where the agent has a folder.
+      The composers accept any file by choosing or dropping it and show it as
+      an attachment chip; a paired device's upload of any `type/subtype` is
+      admitted on every mode's route. Chat serves an attachment back as its own
+      type only for the types a model takes natively, and as bytes otherwise.
 
   Rationale: Plan's and Chat's limits are what the person relies on, not
   the absence of a tool; each of these keeps the limit at the boundary that
@@ -15934,8 +15979,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   (`OCTANT_*`) and every other model provider's credential
   (`providerHostEnvironment`); the account's own sign-in still decides
   which account a turn runs as, so no host Anthropic key or token crosses,
-  Octant's account directory is applied, and an API-key account gets its
-  broker key. It sets only the self-update, auto-memory and built-in-agents
+  Octant's account directory is applied, an API-key account gets its
+  broker key, and a gateway account gets its own address and broker token
+  in place of any host `ANTHROPIC_BASE_URL`. It sets only the self-update, auto-memory and built-in-agents
   switches (`OPEN_CLAUDE_LAUNCH_GUARDS`); telemetry, error reports, `/bug`,
   `/feedback`, the survey and marketplace auto-install follow the person's
   own Claude Code settings, and the Claude artifacts switch below lifts
@@ -17724,9 +17770,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     `octant provider key remove <instance>`. `<instance>` is an instance id or
     an exact, unique display name; an ambiguous name is refused with the
     candidates. `set` and `status` need an existing instance that uses
-    API-key or bearer authentication, so no secret is written for an
-    instance that cannot use it. A browser may create a Claude API-key
-    instance without a key through the existing configuration command. The
+    API-key or bearer authentication (or a Claude gateway account, whose
+    token is kept the same way), so no secret is written for an
+    instance that cannot use it. A browser may create a Claude API-key or
+    gateway instance without a key through the existing configuration command. The
     host allocates its separate managed account directory; the host-local
     CLI fills the missing credential afterward. Browser secret entry stays
     unavailable.
@@ -19751,12 +19798,45 @@ launch that does not carry its Strict value is Strict. Codex below Full access
 is told to keep its own sandbox (`workspace-write`, `read-only` in Plan) with
 its own approvals rather than an external one; a Codex or OpenCode process
 started outside Strict is never reused by a Strict session at the same level.
-A Chat provider launch stays refused on Windows: Chat's no-folder, no-shell
-rule is held by Octant's sandbox, which a provider's own approvals do not
-replace. Project actions run there in the terminal shell Settings › Code
-names. Octant's own terminals, tests and harness shell commands on a thread
-below Full access still refuse on Windows, since they run in Octant's sandbox
-elsewhere and no provider's approvals hold them.
+Project actions run there in the terminal shell Settings › Code names.
+
+Built (2026-11-18, maintainer request: providers and Octant's tools on
+Windows work as on macOS and Linux, restricted no more than in other agent
+workspaces there):
+
+- **Chat.** A Chat thread keeps no folder and no shell. On Windows it starts
+  outside Strict on a provider that is told so natively
+  (`windowsProviderLaunch` with `chatWithoutFolderOrShell`): Codex, whose
+  Chat threads get no execution environment and start with the shell, image,
+  plugin and app features off on every platform; Pi, which starts in Chat
+  with no built-in tool, no extension and none of the person's resources; and
+  Claude, whose Chat session on Windows holds no file or shell tool at all
+  (`Read`, `Grep`, `Glob`, `LS`, `Edit`, `Write`, `NotebookEdit`, `Bash`
+  and its task tools are left out of the session's tool list), where
+  elsewhere those tools ask and are declined inside Octant's sandbox.
+  OpenCode and the ACP agents keep their own file and shell tools whatever
+  they are told, so a Chat thread on them stays refused on Windows with the
+  reason ("This provider keeps Chat without a folder or shell only inside
+  Octant's sandbox, which Windows doesn't have yet."). Chat under Strict is
+  refused like every Strict launch there.
+- **Octant's own terminals and harness shell.** Outside Strict they run on
+  Windows unconfined at every level: a thread or Project terminal, which the
+  person types into, opens the configured shell at every level but Plan, and
+  the harness shell runs each command in that shell, still asking the person
+  below Full access as it does elsewhere (`resolveThreadElevation`). Under Strict, or with the sandbox kept at Full
+  access, they refuse before anything is journaled or started
+  (`hostSandboxRefusal`, read with the thread's resolved Strict value; work
+  that names no thread counts as Strict), and a harness command is refused
+  at the moment it runs, so Strict turned on mid-turn holds the next one. A
+  Windows command has no Octant egress rules or registered-server relays,
+  having no sandbox to hold them to, and a child run without network
+  authority runs no command there. The Code thread terminal elsewhere keeps
+  the confinement it has at every setting.
+- **App-managed tools for OpenCode and the ACP agents.** A Windows launch
+  has no Octant sandbox, so it reaches the host's loopback tool bridge (an
+  HTTP endpoint opened only with its per-bridge bearer token) directly, and
+  the tools are reported and offered there as on macOS and Linux
+  (`appToolBridgeReachesLaunchOn`); no named pipe or relay is needed.
 
 Also in scope, each design-first (build it only once its owning specification
 documents its authority, privacy, and release boundaries):
@@ -19876,8 +19956,8 @@ no Octant sandbox claimed
 ([Windows below Full access](#current-release-boundary), partly built); the
 confinement port still refuses Windows unless its caller opts into the dormant
 launcher, which no production caller does, so every launch that would need
-Octant's sandbox (Strict at every level, a kept sandbox, Octant's own
-terminals and commands below Full access) fails closed there. Simulator, the Apple workbench, and vibrancy stay
+Octant's sandbox (Strict at every level, including Octant's own terminals and
+commands, and a kept sandbox) fails closed there. Simulator, the Apple workbench, and vibrancy stay
 macOS-only.
 
 **Windows sequence** (maintainer decision, 2026-11-14). Each step is its own
@@ -19900,15 +19980,17 @@ deliverable and keeps every gate above:
 3. Work and Code at Full access on Windows. Partly built (maintainer request,
    2026-11-15: build it now, without waiting for the launcher):
    - **The level gate.** A Work turn, a Code turn and every Code operation on
-     a thread (terminal, tests, and the rest) on a Windows host run only at
-     Full access with the sandbox off. A provider turn below Full access runs
+     a thread (terminal, tests, and the rest) on a Windows host run outside
+     Strict, at Full access with the sandbox off and, since 2026-11-18, at
+     every level below it. A provider turn below Full access runs
      outside Strict with the provider's own approvals
      (`hostProviderTurnRefusal`, under
      [Windows below Full access](#current-release-boundary)); Octant's own
-     operations below Full access are refused on the server before they are
-     journaled or start a process, with the reason that Windows
-     has no Octant process sandbox yet (`hostSandboxRefusal` in the domain's
-     `guardrailPolicy.ts`). The gate reads the level the work runs at: a Work
+     operations under Strict or with the sandbox kept are refused on the
+     server before they are journaled or start a process, with the reason
+     that Windows has no Octant sandbox yet (`hostSandboxRefusal` in the
+     domain's `guardrailPolicy.ts`, read with the thread's resolved Strict
+     value). The gate reads the level the work runs at: a Work
      turn's level clamped to its caller's ceiling, a Code turn's composer
      level, recorded start or coordinator Plan clamped to the thread, and a
      live turn's narrower posture, never only the thread's stored level. A
@@ -19925,7 +20007,9 @@ deliverable and keeps every gate above:
      PowerShell 7 (`%ProgramFiles%\PowerShell\7\pwsh.exe`) or Command Prompt,
      each by absolute path with its own arguments (`-NoLogo`, `-Command`;
      `/D /S /C`), never a guessed POSIX shell and never POSIX `-l`. It runs
-     unconfined, only at Full access, through node-pty's ConPTY, with the
+     unconfined outside Strict at every level but Plan, and is refused under
+     Strict or a protection policy (a launch that does not carry its Strict
+     value counts as Strict), through node-pty's ConPTY, with the
      inherited environment names a Windows shell needs (`SYSTEMROOT`,
      `USERPROFILE`, `PSMODULEPATH` and their kin) added to the terminal's
      allowlist. A Project action runs in that shell, written in its own words
@@ -19996,8 +20080,11 @@ deliverable and keeps every gate above:
      Octant cannot read a program from, or a script with no `node.exe`, is
      refused with the reason, naming the `.exe` to point Settings at (for
      Codex, the `codex.exe` its package carries).
-   - **Harness shell.** The Octant Harness's shell tool at Full access on
-     Windows runs each command in the terminal shell Settings › Code names
+   - **Harness shell.** The Octant Harness's shell tool on Windows runs each
+     command, at Full access and, outside Strict, below it (since 2026-11-18;
+     before then the composition still routed a Windows lead's commands to
+     the POSIX sandboxed shell, which refused every one), in the terminal
+     shell Settings › Code names
      (Windows PowerShell by default) from a `.ps1` (`-NoProfile
 -NonInteractive -ExecutionPolicy Bypass -File`) or `.cmd` script in its
      own script folder, with the Windows names a shell needs in its
@@ -20015,20 +20102,25 @@ deliverable and keeps every gate above:
      receipt cannot be kept is stopped and reported unavailable. The tool
      keeps its name, and a Work or Code lead on a Windows host is told
      which shell runs its commands (Windows PowerShell 5.1, PowerShell 7 or a
-     Command Prompt batch script), read from the same setting. The levels below Full access refuse on Windows
-     before a command is planned.
+     Command Prompt batch script), read from the same setting. Under Strict
+     or with the sandbox kept a command is refused when it runs, with the
+     reason, and nothing starts.
    - **Not yet on Windows.** These run on macOS and Linux and are
-     unavailable on Windows: the
-     [agent debug tool](design/language-services.md#agent-debug-tool-rules);
-     a Project's [own toolchain copy](design/language-services.md#user-added-servers);
-     Octant's own terminals, tests and harness shell commands on a thread
-     below Full access; a Chat thread on a provider runtime; app-managed
-     tools for the ACP agents, which reach their bridge only through a
-     loopback rule in Octant's sandbox; and every launch under Strict at
-     any level or with the sandbox kept.
+     unavailable on Windows: language servers, a Project's
+     [own toolchain copy](design/language-services.md#user-added-servers) among them, and the
+     [agent debug tool](design/language-services.md#agent-debug-tool-rules),
+     whose launch policies admit only a Seatbelt or Bubblewrap capsule
+     (`unsupported-platform`) and whose capsule ports have no unconfined
+     Windows form yet; repository tests and scaffolds, whose runner starts
+     every command through the confinement port and owned process groups,
+     neither of which has a Windows form, so a run reports unavailable; a
+     Chat thread on OpenCode or an ACP agent (above); and every launch under
+     Strict at any level or with the sandbox kept, until the confinement
+     launcher has run a real provider on a person's Windows machine.
      A provider that starts no local process before its
-     turn (an Octant Harness model over an endpoint) runs Full access turns
-     there with Octant's own file tools and the harness shell.
+     turn (an Octant Harness model over an endpoint) runs turns there
+     outside Strict, at Full access and below it, with Octant's own file
+     tools and the harness shell.
    - **Evidence.** The level gate, the picker, the settings and the launch
      rules are tested on Linux CI with the host's platform set to Windows.
      The `server-windows` CI job runs against real processes on
@@ -20038,7 +20130,7 @@ deliverable and keeps every gate above:
      the terminal port starts again, a long harness command a "crashed" port
      left running stopped from its receipt by a fresh port, the production Codex driver reading its
      catalog through a runtime registry that keeps receipts, a failed native
-     program, cmdlet and Command Prompt command each reported as a failure, a Full access PowerShell terminal that writes a file
+     program, cmdlet and Command Prompt command each reported as a failure, a PowerShell terminal below Full access outside Strict that writes a file
      and a live one that close ends, the harness shell running a turn's
      PowerShell command that writes a file in the checkout and returns its
      output and ending a timed-out command's tree, and a fake Codex app-server
@@ -20048,10 +20140,15 @@ deliverable and keeps every gate above:
      under Strict and with a kept sandbox, and its catalog read only for a host
      whose new threads run unconfined; fake Claude and OpenCode runtimes
      compiled the same way read their version, and OpenCode starts at Full
-     access and outside Strict and is stopped with its tree. Pi and the ACP
-     agents have no compiled fake runtime and are tested on Linux CI with the
-     host's platform set to Windows. A whole Work or Code turn through a real
-     provider on a person's Windows machine has not run.
+     access and outside Strict and is stopped with its tree; fake Pi and Kilo
+     ACP runtimes compiled the same way start at Full access and below it
+     outside Strict (Pi in Chat too) with an unconfined version read, the
+     Kilo agent answering ACP's `initialize`, are stopped with their tree, and
+     are refused under Strict, a Kilo Chat thread by Chat's reason. Chat on
+     Codex and Claude, the harness shell's level routing and app-managed tools
+     on Windows are tested on Linux CI with the host's platform set to
+     Windows. A whole Work, Code or Chat turn through a real provider on a
+     person's Windows machine has not run.
 4. The `octant` CLI on Windows: native host paths, a browser opener that runs
    no shell, and a service manager equivalent. Partly built (maintainer
    request, 2026-11-15); detail in the next paragraph. It has run only on a
