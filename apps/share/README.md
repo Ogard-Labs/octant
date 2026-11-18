@@ -9,21 +9,27 @@ service against the published wire contract (see below).
 
 On a server with Docker Compose and this repository, point two distinct DNS
 names at the server and make TCP ports 80 and 443 available to Caddy. From the
-repository root, replace the example names and run:
+repository root, run the commands below after replacing every example value:
+the two domains are bare host names (no `https://`), and the abuse contact is
+shown on every link page for reports.
 
 ```sh
-export SHARE_DOMAIN=share.example.com
-export CONTENT_DOMAIN=content.example.com
-export OCTANT_SHARE_ABUSE_CONTACT=abuse@example.com
-export OCTANT_SHARE_OPERATOR_TOKEN="$(openssl rand -hex 32)"
+cat > apps/share/.env <<EOF
+SHARE_DOMAIN=share.example.com
+CONTENT_DOMAIN=content.example.com
+OCTANT_SHARE_ABUSE_CONTACT=abuse@example.com
+OCTANT_SHARE_OPERATOR_TOKEN=$(openssl rand -hex 32)
+EOF
+chmod 600 apps/share/.env
 docker compose -f apps/share/compose.yaml up -d --build
-curl --fail "https://$SHARE_DOMAIN/healthz"
+curl --fail https://share.example.com/healthz
 ```
 
 Once HTTPS is ready the health check returns `ok`. Only the proxy publishes
-ports. Named volumes persist pages and TLS certificates across restarts. Keep
-the operator token: Compose reads it again on every `up`, and a link is taken
-down from inside the running container with
+ports. Named volumes persist pages and TLS certificates across restarts.
+Compose reads `apps/share/.env` on every `up`, so later restarts keep the same
+domains and operator token; git and Docker builds both ignore the file. Take a
+link down from inside the running container with
 `docker compose -f apps/share/compose.yaml exec share bun apps/share/src/takedown.ts <share-id>`.
 Without a token the operator listener does not start and takedown is
 unavailable; without an abuse contact link pages name no one to report to.

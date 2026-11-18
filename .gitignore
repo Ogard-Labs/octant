@@ -33,3 +33,6 @@ core
 
 # Stray tsc declaration emit in package sources
 packages/*/src/**/*.d.ts
+
+# The share service Compose settings hold its operator token
+apps/share/.env

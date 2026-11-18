@@ -1,12 +1,18 @@
 import { OctantButton } from "../ui/base/OctantButton";
 import { openExternalUrl, type ExternalUrlHost } from "../shell/openExternalUrl";
 
-/** Setup links are fixed product URLs opened in the person's browser. */
-export function SettingsSetupLink(props: {
+interface SettingsSetupLinkProps {
   readonly host: ExternalUrlHost | undefined;
   readonly href: string;
   readonly children: string;
-}) {
+}
+
+/**
+ * Setup links are fixed product URLs opened in the person's browser. The
+ * desktop shell refuses `target="_blank"` popups, so a middle click goes
+ * through the same open-external route as a click instead of doing nothing.
+ */
+export function SettingsSetupLink(props: SettingsSetupLinkProps) {
   return (
     <a
       className="settings-setup-link"
@@ -14,6 +20,11 @@ export function SettingsSetupLink(props: {
       rel="noreferrer"
       target="_blank"
       onClick={(event) => {
+        event.preventDefault();
+        openExternalUrl(props.host, props.href);
+      }}
+      onAuxClick={(event) => {
+        if (event.button !== 1) return;
         event.preventDefault();
         openExternalUrl(props.host, props.href);
       }}
@@ -28,11 +39,7 @@ export function SettingsSetupLink(props: {
  * stands after the step's sentences rather than inside one, so the design
  * system makes it a button, not bare link text.
  */
-export function SettingsSetupAction(props: {
-  readonly host: ExternalUrlHost | undefined;
-  readonly href: string;
-  readonly children: string;
-}) {
+export function SettingsSetupAction(props: SettingsSetupLinkProps) {
   return (
     <OctantButton
       className="settings-setup-action"
