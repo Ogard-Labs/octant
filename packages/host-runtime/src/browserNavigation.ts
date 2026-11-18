@@ -68,7 +68,10 @@ export function refusesPageNavigation(
 }
 
 /** The same origin judgment the surfaces' own allowlist check makes, on normalized URLs. */
-function navigationOriginAllowed(target: string, allowedOrigins: ReadonlyArray<string>): boolean {
+export function navigationOriginAllowed(
+  target: string,
+  allowedOrigins: ReadonlyArray<string>,
+): boolean {
   try {
     return sameSiteOriginAllowed(
       normalizeNavigationUrl(target),
@@ -83,7 +86,7 @@ function navigationOriginAllowed(target: string, allowedOrigins: ReadonlyArray<s
 }
 
 /** The surfaces' shared reading of a navigation target: schemeless is https, http/https only. */
-function normalizeNavigationUrl(value: string): string {
+export function normalizeNavigationUrl(value: string): string {
   const url = new URL(value.includes("://") ? value : `https://${value}`);
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("Unsupported URL.");
   return url.toString();

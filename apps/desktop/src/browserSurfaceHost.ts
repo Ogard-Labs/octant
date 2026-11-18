@@ -1,5 +1,7 @@
 import {
   captureBrowserFeedbackPoint,
+  navigationOriginAllowed,
+  normalizeNavigationUrl as normalizeUrl,
   refusesPageNavigation,
   type BrowserFeedbackPointObservation,
 } from "@octant/host-runtime";
@@ -72,7 +74,6 @@ import {
   formatBrowserPageSnapshot,
   MAX_BROWSER_SNAPSHOT_NODES,
   MAX_BROWSER_SNAPSHOT_REFS,
-  originAllowed as sameSiteOriginAllowed,
   readBrowserPage,
   readBrowserPageTools,
   BROWSER_PAGE_TOOLS_LIST_REQUEST,
@@ -112,7 +113,6 @@ import {
   type SurfaceProtocolSend,
 } from "./browserSurfaceFrames";
 import {
-  ANY_BROWSER_ORIGIN,
   DEFAULT_BROWSER_WAIT_MS,
   MAX_BROWSER_AUDIT_FINDINGS_PER_RULE,
   MAX_BROWSER_DIAGNOSTIC_ENTRIES,
@@ -2028,11 +2028,13 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         event.isSameDocument === true
       )
         return;
+      const target = navigationUrl(event, details);
       // A pending redirect from the previous document must not spend the
       // next load's admission before Chromium reports the named start.
       if (
         !named.started &&
-        navigationUrl(event, details) === named.url &&
+        typeof target === "string" &&
+        sameNamedNavigationUrl(target, named.url) &&
         !navigationHasInitiator(event)
       ) {
         named.started = true;
@@ -4298,20 +4300,14 @@ function normalizeBounds(bounds: BrowserSurfaceBounds): BrowserSurfaceBounds {
   };
 }
 
-function normalizeUrl(value: string): string {
-  const url = new URL(value.includes("://") ? value : `https://${value}`);
-  if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("Unsupported URL.");
-  return url.toString();
+function originAllowed(target: string, allowedOrigins: ReadonlyArray<string>): boolean {
+  return target === "about:blank" || navigationOriginAllowed(target, allowedOrigins);
 }
 
-function originAllowed(target: string, allowedOrigins: ReadonlyArray<string>): boolean {
-  if (target === "about:blank") return true;
+/** The load this tab is expecting is the one Chromium reports, spelling aside. */
+function sameNamedNavigationUrl(observed: string, named: string): boolean {
   try {
-    return sameSiteOriginAllowed(
-      normalizeUrl(target),
-      // The any-site entry is not an address; it passes through as it is.
-      allowedOrigins.map((entry) => (entry === ANY_BROWSER_ORIGIN ? entry : normalizeUrl(entry))),
-    );
+    return normalizeUrl(observed) === named;
   } catch {
     return false;
   }

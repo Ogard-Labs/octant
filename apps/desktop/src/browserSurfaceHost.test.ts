@@ -2404,7 +2404,9 @@ describe("BrowserSurfaceHost", () => {
       const { created, host, hop } = await opened();
       vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
         expect(hop("http://192.168.1.1/")).toBe(false);
-        namedStart(created, url);
+        // Chromium may spell the named address with a capitalized host and no
+        // root slash; it still reports the start of the load the host drove.
+        namedStart(created, url.replace("short.example/", "SHORT.EXAMPLE"));
         expect(hop("http://192.168.1.1/", true, {})).toBe(false);
         expect(hop("http://192.168.1.1/")).toBe(true);
         // A subframe hop in the same load is still a page-started move.

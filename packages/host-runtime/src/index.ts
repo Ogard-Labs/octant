@@ -310,6 +310,8 @@ export {
 export * from "./browserPointCapture";
 export {
   isPrivateAddress,
+  navigationOriginAllowed,
+  normalizeNavigationUrl,
   onThisComputerOrNetwork,
   refusesPageNavigation,
 } from "./browserNavigation";
