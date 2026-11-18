@@ -1,4 +1,9 @@
 import type { Readable, Writable } from "node:stream";
+import {
+  ContentLengthFrames,
+  frameHeader,
+  type ContentLengthFrameViolation,
+} from "./contentLengthFrames";
 
 /**
  * Octant's end of one language server's Language Server Protocol connection:
@@ -15,8 +20,6 @@ import type { Readable, Writable } from "node:stream";
 
 /** The largest frame either side may send, body bytes. */
 export const LANGUAGE_SERVER_FRAME_CAP_BYTES = 4 * 1024 * 1024;
-/** Headers are a line or two; anything longer is not a frame. */
-const MAX_HEADER_BYTES = 8 * 1024;
 const MAX_CONFIGURATION_ITEMS = 256;
 const MAX_DYNAMIC_REGISTRATIONS = 256;
 
@@ -94,7 +97,7 @@ export type LanguageServerResponse =
 
 export type LanguageServerSend = "sent" | "too-large" | "closed";
 
-export type LanguageServerViolation = "oversize-frame" | "malformed-frame";
+export type LanguageServerViolation = ContentLengthFrameViolation;
 
 export interface LanguageServerConnectionOptions {
   /** The child's stdout. */
@@ -124,7 +127,7 @@ export class LanguageServerConnection {
     string,
     { readonly method: string; readonly options: unknown }
   >();
-  #buffered: Buffer = Buffer.alloc(0);
+  readonly #frames: ContentLengthFrames;
   #nextId = 1;
   #closed = false;
 
@@ -133,7 +136,12 @@ export class LanguageServerConnection {
     this.#requestDeadlineMs = options.requestDeadlineMs;
     this.#onViolation = options.onViolation;
     this.#onPublishedDiagnostics = options.onPublishedDiagnostics;
-    options.input.on("data", (chunk: Buffer) => this.#receive(chunk));
+    this.#frames = new ContentLengthFrames(
+      LANGUAGE_SERVER_FRAME_CAP_BYTES,
+      (body) => this.#body(body),
+      (violation) => this.#violate(violation),
+    );
+    options.input.on("data", (chunk: Buffer) => this.#frames.push(chunk));
     options.input.on("end", () => this.close());
     options.input.on("error", () => this.close());
     // A child that exits mid-write must not take the host down with EPIPE.
@@ -199,7 +207,7 @@ export class LanguageServerConnection {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
-    this.#buffered = Buffer.alloc(0);
+    this.#frames.close();
     for (const id of this.#pending.keys()) this.#settle(id, { status: "closed" });
   }
 
@@ -230,48 +238,20 @@ export class LanguageServerConnection {
     this.#onViolation(violation);
   }
 
-  #receive(chunk: Buffer): void {
-    if (this.#closed) return;
-    this.#buffered =
-      this.#buffered.byteLength === 0 ? chunk : Buffer.concat([this.#buffered, chunk]);
-    while (!this.#closed) {
-      const headerEnd = this.#buffered.indexOf("\r\n\r\n");
-      if (headerEnd < 0) {
-        if (this.#buffered.byteLength > MAX_HEADER_BYTES) this.#violate("malformed-frame");
-        return;
-      }
-      if (headerEnd > MAX_HEADER_BYTES) {
-        this.#violate("malformed-frame");
-        return;
-      }
-      const length = contentLength(this.#buffered.subarray(0, headerEnd).toString("ascii"));
-      if (length === undefined) {
-        this.#violate("malformed-frame");
-        return;
-      }
-      // Judged on the declared length, before the body arrives, so a server
-      // cannot make the host buffer past the cap by sending slowly.
-      if (length > LANGUAGE_SERVER_FRAME_CAP_BYTES) {
-        this.#violate("oversize-frame");
-        return;
-      }
-      const bodyStart = headerEnd + 4;
-      if (this.#buffered.byteLength < bodyStart + length) return;
-      const body = this.#buffered.subarray(bodyStart, bodyStart + length);
-      this.#buffered = this.#buffered.subarray(bodyStart + length);
-      let message: unknown;
-      try {
-        message = JSON.parse(body.toString("utf8"));
-      } catch {
-        this.#violate("malformed-frame");
-        return;
-      }
-      if (!isRecord(message)) {
-        this.#violate("malformed-frame");
-        return;
-      }
-      this.#dispatch(message);
+  /** One complete frame body: JSON-RPC or a violation. */
+  #body(body: Buffer): void {
+    let message: unknown;
+    try {
+      message = JSON.parse(body.toString("utf8"));
+    } catch {
+      this.#violate("malformed-frame");
+      return;
     }
+    if (!isRecord(message)) {
+      this.#violate("malformed-frame");
+      return;
+    }
+    this.#dispatch(message);
   }
 
   #dispatch(message: Readonly<Record<string, unknown>>): void {
@@ -386,26 +366,6 @@ export class LanguageServerConnection {
         });
     }
   }
-}
-
-/** A `Content-Length` frame header, which LSP and DAP share. */
-export function frameHeader(length: number): Buffer {
-  return Buffer.from(`Content-Length: ${length}\r\n\r\n`, "ascii");
-}
-
-/** The one `Content-Length` a frame header declares; undefined when it is not a frame header. */
-export function contentLength(header: string): number | undefined {
-  let length: number | undefined;
-  for (const line of header.split("\r\n")) {
-    const separator = line.indexOf(":");
-    if (separator < 0) return undefined;
-    const name = line.slice(0, separator).trim().toLowerCase();
-    const value = line.slice(separator + 1).trim();
-    if (name !== "content-length") continue;
-    if (!/^\d{1,10}$/.test(value) || length !== undefined) return undefined;
-    length = Number(value);
-  }
-  return length;
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {

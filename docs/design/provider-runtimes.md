@@ -1181,9 +1181,10 @@ Code journals the ask as an `approval-requested` with action `level-change`,
 the level it would move to, and the plan as evidence. On approval the host
 changes the level through the thread's ordinary access command, for the
 window that approved and journaled as the person's like any level change,
-then ends the turn that asked: Plan's read-only rule rests on the tool set
-and sandbox profile a session launches with, so the new level applies from
-the next turn's session and never inside the one that asked. A kept session
+then ends the turn that asked, unless it entered Plan in place (see
+**Changing the level inside the running turn** below): Plan's read-only
+rule otherwise rests on the tool set and sandbox profile a session launches
+with, so the new level applies from the next turn's session. A kept session
 started at the old level is stopped before that turn too. The level an
 approval applies is worked out when the person answers, from the thread as
 it is then, so a level lowered while the ask was open is the one a plan
@@ -1207,32 +1208,56 @@ host moves the thread through the same rule as the Code access command,
 journaled as the person or paired device that answered, before the
 provider hears the answer; a change the host cannot make leaves the request
 pending. The turn that asked then ends, and the next one launches at the
-new level. Entering Plan records the level the thread left as its
+new level, unless it entered Plan in place, as below. Entering Plan records the level the thread left as its
 `planReturnAccess` (Full access is recorded as Ask first), whether the
 agent asked or the person chose Plan from the mode picker, and an approved
 plan returns the thread there, never to Full access.
 
 **Changing the level inside the running turn** (maintainer decision,
-2026-11-14; resolved 2026-11-18; designed, not built). An approved change
-is applied without ending the turn only when two things hold: the provider
-can change the level inside its session, and Octant can hold that session
-to the new level's rules without launching it again. Otherwise the turn
-ends, as it does today.
+2026-11-14; resolved 2026-11-18; built). An approved change is applied
+without ending the turn only when two things hold: the provider can change
+the level inside its session, and Octant can hold that session to the new
+level's rules without launching it again. A driver says it can through the
+driver port's optional `changeLevelInPlace`, which answers `applied`,
+`refused` or `failed`; anything but `applied`, or no such call, and the turn
+ends as before.
 
 - _Entering Plan in place_ (Claude Code, in Work and Code). The host first
-  moves the thread's level. It then calls the runtime's
-  `setPermissionMode("plan")`, and only after that does the agent hear the
-  answer. From then on the session's gate applies Plan's refusals itself:
+  moves the thread's level. It then asks the driver to change in place: the
+  Claude driver turns its gate to Plan for the session and calls the
+  runtime's `setPermissionMode("plan")`, and only after that does the agent
+  hear the answer, which tells it the thread is in Plan for the rest of the
+  turn. From then on the gate judges every call at Plan rather than the
+  session's launch level (a read runs unasked, a marked server asks, a path
+  outside the Project is refused, the person's own rules decide nothing),
+  and refuses what a Plan session would not hold:
   - every file write and edit tool;
-  - every `Bash` call, because the session's sandbox is the old level's and
-    can write, so a command cannot be judged by it;
+  - every `Bash` call and every tool that manages commands, because the
+    session's sandbox is the old level's and can write, so a command cannot
+    be judged by it;
   - every command that would leave the sandbox;
   - every MCP server the person did not mark read-only;
-  - every subagent or `Workflow` start.
+  - every subagent or `Workflow` start;
+  - every other tool outside Plan's list (reads, the session's task tools,
+    a question, a skill's text, web reads, artifact reads and Octant's own
+    tools, which the host judges at the thread's current level), so a tool
+    the gate does not know fails closed.
 
-  Each refusal carries Plan's sentence. If `setPermissionMode` fails, the
-  turn ends as today, so the level never moves without its rules. The next
-  turn launches with Plan's read-only profile and tool set as usual.
+  Each refusal carries Plan's sentence, and an approval the person answers
+  afterwards for a call asked about before the change is refused too. If
+  `setPermissionMode` fails, the gate stays at Plan and the turn ends as
+  before, so the level never moves without its rules. A session whose
+  account directory overlaps the checkout, which a Plan launch refuses
+  because the task tools write there, is refused the change and its turn
+  ends. The running turn's own ceiling, a Code turn's and a Work turn's,
+  reads Plan from then on, before the agent hears the answer, so a level
+  the person raises again meanwhile applies only from the next turn and
+  Octant's own tools judge the rest of the turn at Plan. The next turn launches with Plan's
+  read-only profile and tool set as usual.
+
+- _A journaled record._ The approval's answer records which way the change
+  applied: Code's `approval-answered` and Work's resolved request carry
+  `levelChangeApplied`, `in-place` or `next-turn`.
 
 - _Leaving Plan always ends the turn._ A Plan session holds Plan's tool set
   and a read-only sandbox. No runtime control adds a tool or widens a
@@ -1251,16 +1276,6 @@ directions. Octant matches it in the narrowing direction. There, the gate
 can refuse what the old launch profile would still allow. In the widening
 direction the session has neither the tools nor the sandbox, and handing
 the agent a level its session cannot honour would be a silent mismatch.
-
-Building it needs four changes:
-
-- an in-place level change on the driver port;
-- the Claude gate reading the session's current level, not its launch
-  level, at each check (paths, `Bash`, sandbox escape, MCP servers,
-  subagents);
-- the Work and Code request runtimes choosing between applying in place
-  and ending the turn;
-- a journaled record of which of the two happened.
 
 #### Sessions started outside Octant
 
@@ -2623,11 +2638,29 @@ pinned is offered as "unverified" instead of refused, under
 Full access the pin holds. Built for Kimi Code's reviewed command inventory:
 a release that lists another inventory passes the probe, the runtime card
 says it is unverified and names the commands it added, a session below Full
-access is refused, and at Full access its listed commands run with it. Not
-built yet for the exact-release claims a profile pins (usage, compaction,
-file review, forms, warm reuse, unadvertised HTTP tools): the probe reports
-each one for every level, so offering it at Full access alone needs a Full
-access value of its own, as `appManagedToolsAtFullAccess` is.
+access is refused, and at Full access its listed commands run with it.
+
+Built for the exact-release claims a profile pins (`acpExactReleaseClaim` in
+`apps/server/src/providers/acpProfiles.ts`): a release newer than every
+release a claim was reviewed on keeps that claim at Full access, offered as
+unverified, and below Full access the pin holds; an older or unparseable
+release never inherits newer evidence. The probe gives Full access its own
+value, `capabilities.atFullAccess` (`release: "unverified"` with usage,
+forms as `userQuestions`, and Octant's tools as `appManagedTools`), present
+only where it differs from the other levels, and the runtime card says which
+features the release keeps at Full access. A Full access session then
+counts usage, asks the agent's session forms, takes Octant's tools over the
+unadvertised HTTP transport (the tool gate reads `atFullAccess` through
+`threadAppToolSupport`), and is retained warm on the newer release.
+Compaction and file review keep the pin at Full access too: the host runs
+both on a session it resumes for them tool-free or under Plan, not on the
+thread's Full access session, so the release is judged below Full access
+there. A spend ceiling still counts a provider whose usage reads
+unsupported below Full access as not measured. Rationale: the probe used to
+report one value for every level, so an unreviewed release lost these
+features at Full access as well, where the person already runs the agent
+open; Mistral Vibe 3.0.3, newer than the 2.25.0 its HTTP tool evidence
+pinned, is now offered Octant's tools at Full access as unverified.
 
 A profile ships only after a live probe against a signed-in install on Apple
 Silicon shows each of the following, recorded as a smoke test beside
