@@ -38,6 +38,8 @@ import {
   permissionModeOf,
   startedCodeThreadPickerGroups,
   threadAccessOf,
+  showsStrictNotice,
+  strictKeptSentence,
   type PickerGroup,
 } from "@octant/domain";
 import { ChevronDown, CirclePause, FileText, X } from "../ui/icons";
@@ -203,7 +205,11 @@ import {
   useComposerSlashCommands,
   composerProviderCommands,
 } from "../composer/useComposerSlashCommands";
-import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
+import {
+  ComposerAtTypeahead,
+  composerProviderMentions,
+  useComposerAtMenu,
+} from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
 
 export type CodeAttachmentClient = Pick<
@@ -718,6 +724,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const pathMentionListId = `code-path-mentions-${String(props.threadId)}`;
   const pathMentionOpen = pathMentions.open && !mention.open;
   const atMenu = useComposerAtMenu({
+    provider: composerProviderMentions(props.providerGroups, view?.thread.providerInstanceId),
     textarea: () => textareaRef.current,
     draft,
     onDraftChange: (next) => {
@@ -2053,6 +2060,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         serverUrl={props.serverUrl}
                         windowCapability={props.windowCapability}
                       />
+                    ) : null}
+                    {message.role === "assistant" &&
+                    message.strictKept !== undefined &&
+                    showsStrictNotice(message.strictKept, previousAssistant?.strictKept) ? (
+                      <p className="code-thread-workspace__handoff" role="note">
+                        {strictKeptSentence(message.strictKept)}
+                      </p>
                     ) : null}
                     {message.role === "assistant" && message.handoff !== undefined ? (
                       <p className="code-thread-workspace__handoff" role="note">

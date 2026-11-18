@@ -37,6 +37,7 @@ import { ThreadToolStep, ThreadToolStepList } from "./threadToolStepList";
 import { ThreadWindowBoundsFields } from "./threadWindow";
 import { DescribedTurnImages } from "./imageDescription";
 import { WorkThreadId } from "./workThreads";
+import { StrictKeptProtections } from "./strictNotice";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -284,6 +285,11 @@ export const WorkTurnState = Schema.Struct({
    * Journaled with the turn's acceptance, before the provider is sent anything.
    */
   handoff: Schema.optional(WorkTurnHandoff),
+  /**
+   * What Strict kept for the provider launch this turn ran on, as the host
+   * decided it at launch. Absent when the launch was not Strict.
+   */
+  strictKept: Schema.optional(StrictKeptProtections),
   /** Present on a fork's copy of one of its source's turns. */
   carriedFrom: Schema.optional(WorkTurnCarriedFrom),
   status: WorkTurnLifecycleStatus,
@@ -595,6 +601,8 @@ export const WorkTurnUpdated = Schema.Struct({
   toolSteps: Schema.optional(ThreadToolStepList),
   toolStepsTruncated: Schema.optional(Schema.Boolean),
   childObservations: Schema.optional(ProviderChildObservationState),
+  /** What Strict kept for this turn's launch; journaled once, as the launch starts. */
+  strictKept: Schema.optional(StrictKeptProtections),
   updatedAt: UtcTimestamp,
 }).annotations(strict);
 export type WorkTurnUpdated = typeof WorkTurnUpdated.Type;

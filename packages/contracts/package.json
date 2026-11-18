@@ -86,6 +86,8 @@
     "./provider-tooling": "./src/providerTooling.ts",
     "./sandbox-policy": "./src/sandboxPolicy.ts",
     "./protected-files": "./src/protectedFiles.ts",
+    "./blocked-tools": "./src/blockedTools.ts",
+    "./strict-notice": "./src/strictNotice.ts",
     "./mcp-plan-read-only": "./src/mcpPlanReadOnly.ts",
     "./archived-worktrees": "./src/archivedWorktrees.ts",
     "./disk-cleanup": "./src/diskCleanup.ts",

@@ -1,6 +1,6 @@
 import type { AgentResultSteeredIntoTurn } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
-import { useId, useState } from "react";
+import { useContext, useId, useState, type ReactNode } from "react";
 import { ChatRichText } from "../chat/ChatRichText";
 import { modelDisplayName } from "../providers/providerModelLabel";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -8,6 +8,9 @@ import { ResultDisclosure } from "./AgentRunResults";
 import "./agent-hierarchy.css";
 import { parseChildResultDelivery, type ChildResultBlock } from "./childResultDelivery";
 import { SubagentStatusIcon, subagentRoleWord, subagentStatusWord } from "./subagentStatus";
+import { buildSubagentRows, subagentRunTime } from "./subagentRows";
+import { isActiveAgentHierarchyStatus } from "./buildAgentHierarchyModel";
+import { ThreadSubagentsContext } from "./threadSubagents";
 
 /** Past this, a result starts folded so one child cannot push the thread away. */
 const FOLD_AFTER_CHARACTERS = 600;
@@ -73,7 +76,7 @@ function ChildResultCard(props: {
           modelId: block.modelId,
         });
   const attribution = [providerName, model].filter((part) => part !== undefined).join(" · ");
-  return (
+  const card = (
     <article
       aria-label={`${role} subagent ${state}`}
       className="child-result"
@@ -106,6 +109,66 @@ function ChildResultCard(props: {
         </p>
       </ResultDisclosure>
     </article>
+  );
+  return finished ? (
+    <FinishedResult generation={block.generation} role={role} runId={block.runId}>
+      {card}
+    </FinishedResult>
+  ) : (
+    card
+  );
+}
+
+/**
+ * A finished child's delivered result as one quiet line with its run time; the
+ * card with the reply opens in place behind Show result. A child that stopped
+ * or failed keeps the card, because that is news the person should see.
+ */
+function FinishedResult(props: {
+  readonly role: string;
+  readonly runId: string;
+  readonly generation: string;
+  readonly children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const subagents = useContext(ThreadSubagentsContext);
+  const entry =
+    subagents?.status === "ready"
+      ? subagents.entries.find((candidate) => candidate.runId === props.runId)
+      : undefined;
+  // Only a child that has stopped has a settled time; a later generation that
+  // is working again would tick a time this line cannot stand behind.
+  // The run's times span every generation, so a later generation's delivery
+  // cannot say how long that generation alone worked.
+  const row =
+    entry === undefined ||
+    isActiveAgentHierarchyStatus(entry.lifecycleStatus) ||
+    props.generation !== "1"
+      ? undefined
+      : buildSubagentRows({ entries: [entry] })[0];
+  const ran = row === undefined ? "" : subagentRunTime(row, 0);
+  return (
+    <div className="child-result-quiet">
+      <p className="child-result-quiet__line">
+        <span>
+          {props.role} subagent finished{ran === "" ? "" : ` · worked ${ran}`}
+        </span>
+        <OctantButton
+          aria-controls={id}
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+          size="xs"
+          type="button"
+          variant="ghost"
+        >
+          {open ? "Hide result" : "Show result"}
+        </OctantButton>
+      </p>
+      <div hidden={!open} id={id}>
+        {open ? props.children : null}
+      </div>
+    </div>
   );
 }
 

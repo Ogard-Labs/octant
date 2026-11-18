@@ -944,11 +944,16 @@ export function permissionMode(
 // and the Project set up, which Octant cannot name in advance; each call to
 // one still passes Octant's gate. A session with the full built-in set holds
 // every built-in tool but the withheld ones, also not named in advance, and
-// each call to one passes the gate too.
+// each call to one passes the gate too. A tool the person blocked is never
+// offered, so a runtime that still holds one is refused as widened.
 export function claudeOffersTool(
-  input: Pick<ClaudeOpenQueryInput, "tools" | "nativeSetup" | "withheldTools" | "planMcpServers">,
+  input: Pick<
+    ClaudeOpenQueryInput,
+    "tools" | "nativeSetup" | "withheldTools" | "planMcpServers" | "blockedTools"
+  >,
   toolName: string,
 ): boolean {
+  if (input.blockedTools?.includes(toolName) === true) return false;
   if (input.tools.includes(toolName)) return true;
   if (toolName.startsWith("mcp__")) {
     if (toolName.startsWith("mcp__octant__")) return false;
