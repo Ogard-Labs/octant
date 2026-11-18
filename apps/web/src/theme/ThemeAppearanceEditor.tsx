@@ -654,6 +654,9 @@ function ThemeTransfer(props: {
 }) {
   const [value, setValue] = useState("");
   const [note, setNote] = useState("");
+  // Each import reads the photo library first; only the newest click may
+  // apply, or a slow first read would let an older theme overwrite a newer one.
+  const latestImport = useRef(0);
   const [dropped, setDropped] = useState<ReadonlyArray<string>>([]);
   const pluginThemes = usePluginThemes();
   return (
@@ -680,6 +683,9 @@ function ThemeTransfer(props: {
         <OctantButton
           onClick={() => {
             setNote("");
+            latestImport.current += 1;
+            const thisImport = latestImport.current;
+            const text = value;
             // The library listing the Background settings already read. When it
             // cannot be read the theme is imported as it is.
             const listed = props.photoLibrary?.list().then(
@@ -687,8 +693,9 @@ function ThemeTransfer(props: {
               () => undefined,
             );
             void Promise.resolve(listed).then((photoIds) => {
+              if (thisImport !== latestImport.current) return;
               const outcome = props.controller.importJson(
-                value,
+                text,
                 photoIds === undefined ? undefined : { photoIds },
               );
               if (outcome.status === "imported" && outcome.missing.length > 0) {
@@ -756,7 +763,7 @@ function ThemeTransfer(props: {
   );
 }
 
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { useMediaQueryMatches } from "./useMediaQueryMatches";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";

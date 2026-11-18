@@ -317,6 +317,41 @@ describe("importing a theme file whose photo is not on this computer", () => {
     expect(importJson).toHaveBeenCalledWith("{}", { photoIds: new Set<string>() });
   });
 
+  it("applies only the newest import when an older library read finishes last", async () => {
+    const { act, fireEvent, render, screen } = await import("@testing-library/react");
+    const importJson = vi.fn(() => ({ status: "imported" as const, missing: [] }));
+    const reads: Array<(photos: ReadonlyArray<never>) => void> = [];
+    const slow = {
+      list: vi.fn(
+        () =>
+          new Promise<ReadonlyArray<never>>((resolve) => {
+            reads.push(resolve);
+          }),
+      ),
+      upload: vi.fn(),
+      fetch: vi.fn(),
+    } as never;
+    render(
+      <ThemeAppearanceEditor controller={{ ...controller(), importJson }} photoLibrary={slow} />,
+    );
+    const box = screen.getByRole("textbox", { name: "Theme JSON" });
+    const button = screen.getByRole("button", { name: "Import theme JSON" });
+    fireEvent.change(box, { target: { value: '{"older":true}' } });
+    fireEvent.click(button);
+    fireEvent.change(box, { target: { value: '{"newer":true}' } });
+    fireEvent.click(button);
+    await act(async () => {
+      reads[1]?.([]);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      reads[0]?.([]);
+      await Promise.resolve();
+    });
+    expect(importJson).toHaveBeenCalledTimes(1);
+    expect(importJson).toHaveBeenCalledWith('{"newer":true}', { photoIds: new Set<string>() });
+  });
+
   it("says nothing when every photo is there, and imports as it is when the library cannot be read", async () => {
     const { fireEvent, render, screen, waitFor } = await import("@testing-library/react");
     const importJson = vi.fn(() => ({ status: "imported" as const, missing: [] }));
