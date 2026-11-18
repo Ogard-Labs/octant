@@ -85,6 +85,8 @@ export interface PiConfinementPort {
     readonly root: string;
     /** The Project's extra folders, granted what `root` is granted. */
     readonly extraFolders?: ReadonlyArray<string>;
+    /** Folders Pi reads at every level and never writes: the thread's attachments folder. */
+    readonly readOnlyFolders?: ReadonlyArray<string>;
     readonly piHome: string;
     readonly sessionDirectory: string;
     readonly sessionId: string;
@@ -122,6 +124,8 @@ export interface PiProcessPort {
     readonly root: string;
     /** The Project's extra folders, granted what `root` is granted. */
     readonly extraFolders?: ReadonlyArray<string>;
+    /** Folders Pi reads at every level and never writes: the thread's attachments folder. */
+    readonly readOnlyFolders?: ReadonlyArray<string>;
     readonly piHome: string;
     readonly sessionDirectory: string;
     readonly sessionId: string;
@@ -983,6 +987,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 ...credentialPaths,
                 ...ownSetupPaths,
                 ...(input.servers === undefined ? [] : [input.servers.folder]),
+                ...(input.readOnlyFolders ?? []),
               ],
               privateHomeAllowPaths: [
                 root,
@@ -993,6 +998,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 ...credentialPaths,
                 ...ownSetupPaths,
                 ...(input.servers === undefined ? [] : [input.servers.folder]),
+                ...(input.readOnlyFolders ?? []),
               ],
               ...(platform === "darwin" && (bridgeRule !== undefined || input.servers !== undefined)
                 ? {

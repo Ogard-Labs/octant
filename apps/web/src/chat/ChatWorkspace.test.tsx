@@ -1951,24 +1951,24 @@ describe("ChatWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
     expect(controller.sendTurn).toHaveBeenLastCalledWith("Ship this plan", [], [], [], [], []);
 
-    const document = new File(["notes"], "notes.txt", { type: "text/plain" });
-    await user.upload(screen.getByLabelText("Choose attachment file"), document);
-    expect(
-      screen.getByText("notes.txt is unavailable to the selected provider and model."),
-    ).toBeVisible();
+    // A file the model does not take natively, and whose bytes are not text,
+    // has nothing Chat can give the model and is refused before upload.
+    const bundle = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00])], "bundle.zip", {
+      type: "application/zip",
+    });
+    await user.upload(screen.getByLabelText("Choose attachment file"), bundle);
+    expect(await screen.findByText(/^bundle\.zip is not text/)).toBeVisible();
     expect(upload).toHaveBeenCalledTimes(2);
     expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
-    await user.click(screen.getByRole("button", { name: "Send message" }));
-    expect(controller.sendTurn).toHaveBeenLastCalledWith("Ship this plan", [], [], [], [], []);
 
-    const docx = new File(["document"], "proposal.docx", {
-      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    });
-    await user.upload(screen.getByLabelText("Choose attachment file"), docx);
-    expect(
-      screen.getByText("proposal.docx is unavailable to the selected provider and model."),
-    ).toBeVisible();
-    expect(upload).toHaveBeenCalledTimes(2);
+    // A text file uploads for any model: the host gives the model its text.
+    const notes = new File(["notes"], "notes.txt", { type: "text/plain" });
+    await user.upload(screen.getByLabelText("Choose attachment file"), notes);
+    finishUpload();
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(3));
+    expect(upload).toHaveBeenLastCalledWith(
+      expect.objectContaining({ displayName: "notes.txt", mediaType: "text/plain" }),
+    );
   });
 
   it("keeps send blocked until every image from one paste has uploaded", async () => {

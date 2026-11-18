@@ -760,6 +760,8 @@ export interface CodeOperationRuntimeOptions {
    */
   /** Whether a thread runs in a server Project, on the checkout that Project derives. */
   readonly holdsServerThread?: (thread: CodeThread) => boolean;
+  /** Copies files a server thread's turn names by path to its attachments folder there. */
+  readonly transferServerAttachments?: CodeOperationServiceOptions["transferServerAttachments"];
   /** The login a server thread's terminal opens on its server. */
   readonly serverTerminalLogin?: CodeOperationServiceOptions["serverTerminalLogin"];
   /** Git on a server thread's server, for its Git panel. */
@@ -1534,6 +1536,9 @@ export function createCodeOperationRuntime(
     ...(options.holdsServerThread === undefined
       ? {}
       : { holdsServerThread: options.holdsServerThread }),
+    ...(options.transferServerAttachments === undefined
+      ? {}
+      : { transferServerAttachments: options.transferServerAttachments }),
     ...(options.serverTerminalLogin === undefined
       ? {}
       : { serverTerminalLogin: options.serverTerminalLogin }),

@@ -31,6 +31,12 @@ function signInFor(instance: ProviderInstance): {
     if (claude && "authentication" in configuration && configuration.authentication === "api-key") {
       return { guidance: "This account signs in with the API key you gave. Check the connection." };
     }
+    if (claude && "authentication" in configuration && configuration.authentication === "gateway") {
+      return {
+        guidance:
+          "This account signs in to your gateway with the token you gave. Check the connection.",
+      };
+    }
     const binaryPath = "binaryPath" in configuration ? configuration.binaryPath : "";
     const stateDirectory =
       "configDirectory" in configuration && configuration.configDirectory !== undefined

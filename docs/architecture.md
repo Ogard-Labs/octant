@@ -7058,7 +7058,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   snapshot stays. Claude Code 2.1.301 can also report
   `rate_limits_available: false` in that cold process. For a subscription
   account this means unavailable usage, not that a plan does not apply.
-  Only explicit API-key authentication establishes the no-plan state.
+  Only explicit API-key or gateway authentication establishes the no-plan state.
   For Claude and Codex, Octant never reads a token or credential file
   to fetch those numbers, and never calls a vendor usage endpoint
   itself. Each account keeps its own snapshot, keyed by
@@ -7114,7 +7114,12 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   two logins cannot share one profile without sharing credentials and
   session history. The implicit first subscription account keeps the
   host profile (`~/.claude`, or the inherited host overlay). Every
-  extra account, and every API-key account, uses its assigned leaf.
+  extra account, and every API-key or gateway account, uses its assigned leaf.
+  A gateway account (maintainer decision, 2026-11-18; built) launches with
+  `ANTHROPIC_BASE_URL` set to its own gateway address and
+  `ANTHROPIC_AUTH_TOKEN` set to its broker-resolved token, under Strict and
+  outside it, and no other account receives either
+  ([Claude gateway accounts](design/model-endpoints.md#claude-gateway-accounts)).
   A leftover custom directory keeps working until the person
   explicitly re-assigns it; Octant never silently points that login
   at another path. Removing an account leaves its assigned directory
@@ -9414,7 +9419,8 @@ fork yet) carries the source's conversation through the fork point, never
 past it. When the fork's provider instance and model can take up the
 source's own session there (the Octant Harness, `seedCodeForkHarnessSession`,
 below; Claude Code when the fork works in the source's own folder, since its
-sessions are kept per folder, see [native session anchors](#native-session-anchors)),
+sessions are kept per folder, see [native session anchors](#native-session-anchors);
+OpenCode and Pi in the source's own folder and mode, through their own fork),
 the fork resumes that copy and is sent no text. Otherwise, including
 every fork onto a provider instance other than the one that wrote the fork
 point, it reads the source through the same selector (purpose `fork`,
@@ -9438,14 +9444,18 @@ fixed `false` native-session and hidden-reasoning values; or reason
 <a id="native-session-anchors"></a>**Native session anchors.** A runtime's
 `completed` event may name where the turn ends in its own session
 (`nativeAnchor`): Claude Code reports the transcript id of the turn's last
-assistant message, Codex its turn id. The host journals it on the turn's
+assistant message, Codex its turn id, OpenCode its last assistant message's
+id, and Pi the id of the last entry it wrote to the session file. The host journals it on the turn's
 completed `operation-state` (an additive field, absent from older turns).
 A driver that copies its own session offers `forkSession` in the provider
 SDK; the host asks it, for a fork's first session or a rewound thread's next
 one, with the kept turn's recorded session and anchor, and resumes the copy
 it returns. The driver returns nothing when the copy cannot be exact: Claude
 Code copies only for the source's own folder, mode and sign-in, because
-resume looks for a session under its folder in the account's directory. The
+resume looks for a session under its folder in the account's directory;
+OpenCode forks through its own fork route, and Pi copies the session file as
+its own fork does, each only for the source's own folder and mode (Pi also
+its model) ([detail](design/provider-runtimes.md#opencode-subagents-strict-and-sessions)). The
 copy is made before the prompt is sent, so any refusal or failure falls back
 to the text handoff, and the journal, file checkpoints and transcript are
 the same either way: the rewind's own record still removes the turns, and
@@ -12000,8 +12010,9 @@ that is not yet effective for the thread is refused and never reaches the model.
   confined launch reaches only the Project's skills. No launch sets
   `OPENCODE_DISABLE_CLAUDE_CODE` or `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT`, so
   OpenCode reads `CLAUDE.md` where it finds no `AGENTS.md`, as it does on its
-  own, and running as itself OpenCode 1.x also finds the person's global
-  `AGENTS.md`, linked into its private config folder: instruction files are
+  own, and running as itself OpenCode 1.x, and 2.x outside Strict, also
+  finds the person's global `AGENTS.md`, linked into its private config
+  folder: instruction files are
   text with no authority (built;
   [detail](design/provider-runtimes.md#key-providers)). Built for
   Mistral Vibe: the launch leaves `VIBE_SKILL_PATHS` and
@@ -14948,17 +14959,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     runtime, so on Linux a Plan command could read the account's sign-in and
     send it anywhere the runtime may reach. Building it needs a nested capsule
     for the shell alone, or the maintainer's acceptance of that reach.
-  - **Files of any kind as attachments** (designed, not built). A person may
-    attach any file in every mode. Octant keeps it in an Octant-owned
-    attachments folder per thread under the host's data directory, never
-    inside the Project, journaled like an image attachment and under the same
-    size and count limits, and grants the session read access to that one
-    folder at every level, Plan and Chat included, read-only. A provider that
-    takes the file natively (a PDF where its API takes one, OpenCode's PDF
-    capability) gets it natively; any other gets the file's path in the
-    message and reads it with its own tools. The composer accepts any file
-    by choosing or dropping it and shows it as an attachment chip. Until
-    built, attachments are images only.
+  - **Files of any kind as attachments** (built in every mode; the rules
+    are in the Plan and Chat tool parity entry that follows).
 
   Rationale: Plan's and Chat's limits are what the person relies on, not
   the absence of a tool; each of these keeps the limit at the boundary that
@@ -15033,34 +15035,70 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     nested user namespaces off) offers Plan no Bash tool, and a capsule that
     fails to build fails its command; nothing runs in the runtime's capsule
     instead.
-  - **Files of any kind as attachments** (built for Work and Code; Chat
-    designed, not built). A person may attach any file in every mode. Octant
-    keeps it in an Octant-owned attachments folder per thread under the
-    host's data directory (`code-threads/<thread>`, `work-threads/<thread>`),
-    never inside the Project, journaled like an image attachment and under
-    the same size and count limits, and grants the session read access to
-    that one folder at every level, Plan included, read-only: Claude Code's
-    command sandbox, its Plan confinement and the Linux Plan shell capsule
-    bind it read-only and its gate reads it unasked and refuses every file
-    write into it; Codex's and OpenCode's launch confinement bind it
-    read-only and OpenCode's rules allow reading it and deny edits there. At
-    Full access nothing is sandboxed, so only the gate's refusal of file
-    tools holds there. An image goes to a model that reads images as before;
-    a provider that takes the file natively gets it natively (a PDF to
-    OpenCode where its model reads documents); any other file is named in
-    the message by a path in that folder, a second name for the verified
-    file under its own name, and the agent reads it with its own tools. The
-    Work and Code composers and a paired phone accept any file by choosing or
-    dropping it and show it as an attachment chip; a paired device's upload
-    of any `type/subtype` is admitted on those routes. The folder is made
-    before the runtime launches, so a runtime started for a turn with no
-    file, which a later turn may reuse, already binds it. A thread in a
-    server Project works with the server's own file tools and this host's
-    folder is not there, and no transfer to the server exists, so a turn
-    carrying a file it would name by path is refused before it is accepted,
-    with a sentence saying to attach images or copy the file to the server;
-    images and natively taken files still go. Not built: Chat keeps its
-    image, text and PDF types.
+  - **Files of any kind as attachments** (built in every mode). A person may
+    attach any file in every mode, from the web composers and a paired
+    phone, under the existing size and count limits.
+    - **Work and Code.** Octant keeps the file in an Octant-owned
+      attachments folder per thread under the host's data directory
+      (`code-threads/<thread>`, `work-threads/<thread>`), never inside the
+      Project, journaled like an image attachment, and grants the session
+      read access to that one folder at every level, Plan included,
+      read-only: Claude Code's command sandbox, its Plan confinement and the
+      Linux Plan shell capsule bind it read-only and its gate reads it
+      unasked and refuses every file write into it; Codex's, OpenCode's,
+      Pi's and every ACP agent's launch confinement bind it read-only and
+      OpenCode's rules allow reading it and deny edits there. At Full access
+      nothing is sandboxed, so only the gate's refusal of file tools holds
+      there. An image goes to a model that reads images as before; a provider
+      that takes the file natively gets it natively (a PDF to OpenCode where
+      its model reads documents; a document to an ACP agent that advertised
+      embedded context, as an embedded `resource` block); any other file is
+      named in the message by a path in that folder, a second name for the
+      verified file under its own name, and the agent reads it with its own
+      tools. The folder is made before the runtime launches, so a runtime
+      started for a turn with no file, which a later turn may reuse, already
+      binds it.
+    - **Server Projects.** A Work or Code thread in a server Project works
+      with the server's own file tools, so a file it would name by path is
+      first copied over the Project's own SSH connection into the thread's
+      attachments folder on the server,
+      `<home>/.octant/thread-attachments/<thread>/<attachment>/<name>`,
+      outside every Project folder, made read-only there, and checked by its
+      SHA-256 against the journaled digest; the turn names that path. The
+      thread's server file tools read that one folder and write nowhere in
+      it, and another thread's tools do not read it, even through a Project
+      folder that holds the login's home. The copy is made before the turn's
+      start is journaled, and a copy that fails refuses the turn before it is
+      accepted, with a sentence saying so;
+      images and natively taken files go as before. Not built: removing the
+      server copies when the thread is deleted or purged.
+    - **Chat.** Chat has no folder, so no file is named by a path. A file the
+      provider and model take natively goes natively; an image goes to a
+      model that reads images or to Sees images as before; any other file
+      Octant recognizes as a Word, PowerPoint or Excel file or a PDF goes in
+      as the text Octant's own read takes out of it, under the read's limits
+      (a PDF whose bytes happen to be UTF-8 is still read out, never sent as
+      its raw syntax); any other file whose bytes are UTF-8 text, whatever its
+      type, goes in the turn as its text, fenced and marked as the file's
+      content rather than the person's words. The
+      attached text a turn carries is bounded (400,000 characters), and a turn
+      over it is refused rather than cut short. Any other file (an archive,
+      a binary) is refused before the turn is accepted, naming a Work or Code
+      thread as where it can go, and the composer refuses it when it is
+      chosen. The file stays on the turn for the record; as with an image sent
+      natively, its text reaches later turns where the provider keeps its own
+      session, and a host-built history carries only the person's message.
+      Rationale: a read-only tool scoped to the one attachment was the other
+      design. It changes the session's tool catalog on the turn a file
+      arrives, which a resumed native session refuses, it needs app-managed
+      tools that many Chat providers lack, and for a binary it would hand the
+      model bytes it cannot use without the shell Chat withholds; text and
+      document extraction cover what a model can read, and the rest belongs
+      where the agent has a folder.
+      The composers accept any file by choosing or dropping it and show it as
+      an attachment chip; a paired device's upload of any `type/subtype` is
+      admitted on every mode's route. Chat serves an attachment back as its own
+      type only for the types a model takes natively, and as bytes otherwise.
 
   Rationale: Plan's and Chat's limits are what the person relies on, not
   the absence of a tool; each of these keeps the limit at the boundary that
@@ -15930,8 +15968,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   (`OCTANT_*`) and every other model provider's credential
   (`providerHostEnvironment`); the account's own sign-in still decides
   which account a turn runs as, so no host Anthropic key or token crosses,
-  Octant's account directory is applied, and an API-key account gets its
-  broker key. It sets only the self-update, auto-memory and built-in-agents
+  Octant's account directory is applied, an API-key account gets its
+  broker key, and a gateway account gets its own address and broker token
+  in place of any host `ANTHROPIC_BASE_URL`. It sets only the self-update, auto-memory and built-in-agents
   switches (`OPEN_CLAUDE_LAUNCH_GUARDS`); telemetry, error reports, `/bug`,
   `/feedback`, the survey and marketplace auto-install follow the person's
   own Claude Code settings, and the Claude artifacts switch below lifts
@@ -17719,9 +17758,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     `octant provider key remove <instance>`. `<instance>` is an instance id or
     an exact, unique display name; an ambiguous name is refused with the
     candidates. `set` and `status` need an existing instance that uses
-    API-key or bearer authentication, so no secret is written for an
-    instance that cannot use it. A browser may create a Claude API-key
-    instance without a key through the existing configuration command. The
+    API-key or bearer authentication (or a Claude gateway account, whose
+    token is kept the same way), so no secret is written for an
+    instance that cannot use it. A browser may create a Claude API-key or
+    gateway instance without a key through the existing configuration command. The
     host allocates its separate managed account directory; the host-local
     CLI fills the missing credential afterward. Browser secret entry stays
     unavailable.

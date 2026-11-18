@@ -2,6 +2,7 @@ import {
   acpAgentProfile,
   isAcpAgentKind,
   type AnthropicCompatibleProtocol,
+  type ClaudeAuthentication,
   type DiscoverySnapshot,
   type HostPlatform,
   type OpenAiCompatibleProtocol,
@@ -334,13 +335,25 @@ export function providerConfiguredBinaryPath(instance: ProviderInstance): string
   return "binaryPath" in instance.configuration ? instance.configuration.binaryPath : undefined;
 }
 
+/** How a Claude account signs in, in the words Settings uses for it. */
+export function claudeAuthenticationLabel(authentication: ClaudeAuthentication): string {
+  switch (authentication) {
+    case "api-key":
+      return "Anthropic API key";
+    case "gateway":
+      return "Gateway";
+    default:
+      return "Claude subscription";
+  }
+}
+
 export function providerAuthenticationFact(instance: ProviderInstance): string | undefined {
   const { configuration, driverKind } = instance;
   if (!("authentication" in configuration) || configuration.authentication === undefined) {
     return undefined;
   }
   if (driverKind === "claude") {
-    return configuration.authentication === "api-key" ? "Anthropic API key" : "Claude subscription";
+    return claudeAuthenticationLabel(configuration.authentication);
   }
   return titleCase(configuration.authentication);
 }

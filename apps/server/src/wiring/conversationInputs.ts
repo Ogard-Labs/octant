@@ -1,6 +1,6 @@
 import { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import type { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
-import { decodeProviderInstanceId } from "@octant/contracts";
+import { decodeProviderInstanceId, isAcpAgentKind } from "@octant/contracts";
 import {
   decodeChatAttachmentId,
   decodeChatThreadId,
@@ -38,8 +38,12 @@ export function supportsConversationInput(
  * Whether a Work or Code turn sends an attached file that is not an image as
  * it is, rather than naming its path in the thread's attachments folder.
  * OpenCode hands a file part to its model, so a PDF goes natively where the
- * thread's model reads documents; the Claude Code and Codex adapters send
- * images alone, so every other file of theirs is named by path.
+ * thread's model reads documents. An ACP agent that advertised embedded
+ * context takes a document (text, PDF, office file) as an embedded `resource`
+ * block, which its models list as reading documents. The Claude Code, Codex
+ * and Pi adapters send images alone, so every other file of theirs is named
+ * by path, as is any file a document reader is not handed (an archive, a
+ * binary).
  */
 export function providerTakesFileNatively(
   driverKind: string | undefined,
@@ -47,9 +51,13 @@ export function providerTakesFileNatively(
   modelId: string,
   mediaType: string,
 ): boolean {
+  if (driverKind === "opencode")
+    return (
+      mediaType === "application/pdf" && supportsConversationInput(observed, modelId, mediaType)
+    );
   return (
-    driverKind === "opencode" &&
-    mediaType === "application/pdf" &&
+    driverKind !== undefined &&
+    isAcpAgentKind(driverKind) &&
     supportsConversationInput(observed, modelId, mediaType)
   );
 }
