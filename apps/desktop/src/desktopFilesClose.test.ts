@@ -273,6 +273,18 @@ describe("desktopFilesClose", () => {
     expect(first.focus).not.toHaveBeenCalled();
     expect(sentChecks(first)).toHaveLength(0);
     expect(sentChecks(second)).toHaveLength(1);
+    // The refused preflight owns nothing, so the standing question is not
+    // released either: it stays pending to be answered.
+    expect(
+      vi
+        .mocked(second.webContents.send)
+        .mock.calls.filter(
+          ([channel, payload]) =>
+            channel === DESKTOP_IPC_CHANNELS.filesCloseRequest &&
+            (payload as { kind?: string }).kind === "release",
+        ),
+    ).toHaveLength(0);
+    expect(filesClose.pending(second)).toBe(true);
     // The original question still stands to be answered.
     const id = sentChecks(second)[0]?.requestId;
     filesClose.reply(second, { requestId: id, answer: "checking" });

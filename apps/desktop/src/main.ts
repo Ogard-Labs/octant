@@ -5473,8 +5473,11 @@ function requestInteractiveQuit(): void {
         expected.every((window) => live.includes(window) && filesClose.holds(window));
       if (!committed) {
         // The quit is off: the holds this preflight left go back, and the
-        // relaunch intent returns to whoever asked for it next.
-        for (const window of expected) filesClose.release(window);
+        // relaunch intent returns to whoever asked for it next. Only an
+        // allowed preflight left holds; a refused one already gave its own
+        // back, and a request it did not open (a window already asking) is
+        // not this quit's to release.
+        if (allowed) for (const window of expected) filesClose.release(window);
         nightlyRelaunch.quitCancelled();
         return;
       }
