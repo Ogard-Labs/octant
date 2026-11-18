@@ -625,6 +625,73 @@ describe("ActivityHistoryProjection", () => {
     }
   });
 
+  it("records an interrupted result as canceled only when the person's marker precedes it", () => {
+    const { connection, journal } = openStore();
+    try {
+      append(journal, "code-thread", ids.codeThread, "code.thread-created@1", codeThreadPayload());
+      append(
+        journal,
+        "code-operation",
+        ids.operation,
+        "code.operation-event-recorded@1",
+        turnStarted(ids.codeThread, ids.operation, 1),
+      );
+      append(
+        journal,
+        "code-operation",
+        ids.operation,
+        "code.operation-event-recorded@1",
+        opFrame(ids.codeThread, ids.operation, 2, {
+          kind: "conversation-turn-stop-requested",
+        }),
+      );
+      append(
+        journal,
+        "code-operation",
+        ids.operation,
+        "code.operation-event-recorded@1",
+        opFrame(ids.codeThread, ids.operation, 3, {
+          kind: "operation-result",
+          result: {
+            kind: "provider-turn-state",
+            operationId: ids.operation,
+            state: "interrupted",
+          },
+        }),
+      );
+      append(
+        journal,
+        "code-operation",
+        ids.operationTwo,
+        "code.operation-event-recorded@1",
+        turnStarted(ids.codeThread, ids.operationTwo, 4),
+      );
+      append(
+        journal,
+        "code-operation",
+        ids.operationTwo,
+        "code.operation-event-recorded@1",
+        opFrame(ids.codeThread, ids.operationTwo, 5, {
+          kind: "operation-result",
+          result: {
+            kind: "provider-turn-state",
+            operationId: ids.operationTwo,
+            state: "interrupted",
+          },
+        }),
+      );
+      const facts = runFacts(connection);
+      expect(facts).toHaveLength(2);
+      const byIdentity = new Map(
+        facts.map((fact) => [fact.identity, JSON.parse(fact.metadataJson).finish]),
+      );
+      expect(byIdentity.get(`code:${ids.operation}`)).toBe("canceled");
+      expect(byIdentity.get(`code:${ids.operationTwo}`)).toBe("failed");
+    } finally {
+      connection.close();
+    }
+  });
+
   it("lowercases the delivery identity across differently-cased witnesses", () => {
     const { connection, journal } = openStore();
     try {
