@@ -553,7 +553,7 @@ choice applies to the three delivery cards.
 
 Recording is journaled: a confirmed pull-request merge, each issue closure
 it caused, and every finished run become one activity fact per linked
-thread. Facts dedupe by identity, so a delivery witnessed by several
+thread; an issue outside the pull request's own repository is not counted. Facts dedupe by identity, so a delivery witnessed by several
 threads counts once, and a run's first terminal state wins. A delivery
 title longer than 256 UTF-8 bytes is cut on a code-point boundary rather
 than dropping the record. A run counts as canceled when the person stopped
