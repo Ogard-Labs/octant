@@ -88,6 +88,12 @@ interface ObserveInput {
    * release walk uses it to bound how far back it pages.
    */
   readonly since: string | undefined;
+  /**
+   * UTC ISO upper bound (whole seconds), or undefined when the read is
+   * open-ended. Delivered reads close the search qualifier with it; without
+   * one, newer matches would eat the bounded page budget a past range needs.
+   */
+  readonly until: string | undefined;
   readonly signal: AbortSignal;
 }
 
@@ -122,6 +128,7 @@ export class GhHomeActivityPort {
     readonly name: string;
     readonly card: "prs-merged" | "issues-closed" | "releases-published";
     readonly since: string | undefined;
+    readonly until: string | undefined;
     readonly signal: AbortSignal;
   }): Promise<GhHomeActivityResult> {
     if (!validRepository(`${input.owner}/${input.name}`)) {
@@ -146,7 +153,15 @@ export class GhHomeActivityPort {
         ? `repo:${input.owner}/${input.name} is:pr is:merged`
         : `repo:${input.owner}/${input.name} is:issue is:closed`;
     const boundary = input.card === "prs-merged" ? "merged" : "closed";
-    const q = input.since === undefined ? qualifier : `${qualifier} ${boundary}:>=${input.since}`;
+    const bound =
+      input.since !== undefined && input.until !== undefined
+        ? `${boundary}:${input.since}..${input.until}`
+        : input.until !== undefined
+          ? `${boundary}:<=${input.until}`
+          : input.since !== undefined
+            ? `${boundary}:>=${input.since}`
+            : undefined;
+    const q = bound === undefined ? qualifier : `${qualifier} ${bound}`;
     const query = input.card === "prs-merged" ? MERGED_PULL_REQUESTS_QUERY : CLOSED_ISSUES_QUERY;
     const decode =
       input.card === "prs-merged" ? decodeMergedPullRequestPage : decodeClosedIssuePage;

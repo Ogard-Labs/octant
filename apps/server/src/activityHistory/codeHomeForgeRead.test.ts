@@ -73,6 +73,8 @@ function fixture(options: {
       readonly owner: string;
       readonly name: string;
       readonly card: "prs-merged" | "issues-closed" | "releases-published";
+      readonly since: string | undefined;
+      readonly until: string | undefined;
       readonly signal: AbortSignal;
     }): Promise<GhHomeActivityResult> =>
       queue.length > 1 ? queue.shift()! : (queue[0] ?? { status: "ready", rows: [] }),
@@ -398,6 +400,72 @@ describe("createCodeHomeForgeRead", () => {
     // A 404 repo is no coverage at all: with nothing else read the whole
     // answer stays unavailable rather than reusing the earlier rows.
     expect(after).toMatchObject({ status: "unavailable", reason: "read-failed" });
+  });
+
+  it("closes a past window's search at its end, ceiled to the second", async () => {
+    const lastMonth: ActivityWindow = {
+      from: decodeUtcTimestamp("2023-10-01T00:00:00.000Z"),
+      until: decodeUtcTimestamp("2023-11-01T00:00:00.500Z"),
+    };
+    const { forgeRead, observe } = fixture({});
+    await forgeRead({ windowId, card: "prs-merged", current: lastMonth, refresh: false });
+    expect(vi.mocked(observe).mock.calls[0]?.[0]).toMatchObject({
+      since: "2023-10-01T00:00:00.000Z",
+      until: "2023-11-01T00:00:01.000Z",
+    });
+  });
+
+  it("reads a window ending near now as open-ended so its cache stays shared", async () => {
+    const thisWeek: ActivityWindow = {
+      from: decodeUtcTimestamp("2023-11-13T00:00:00.000Z"),
+      until: decodeUtcTimestamp("2023-11-14T22:12:20.000Z"),
+    };
+    const { forgeRead, observe } = fixture({});
+    await forgeRead({ windowId, card: "prs-merged", current: thisWeek, refresh: false });
+    expect(vi.mocked(observe).mock.calls[0]?.[0]).toMatchObject({
+      since: "2023-11-13T00:00:00.000Z",
+      until: undefined,
+    });
+  });
+
+  it("closes the search at the later comparison end when it is the bound that matters", async () => {
+    const lastMonth: ActivityWindow = {
+      from: decodeUtcTimestamp("2023-10-01T00:00:00.000Z"),
+      until: decodeUtcTimestamp("2023-11-01T00:00:00.000Z"),
+    };
+    const monthBefore: ActivityWindow = {
+      from: decodeUtcTimestamp("2023-09-01T00:00:00.000Z"),
+      until: decodeUtcTimestamp("2023-10-01T00:00:00.000Z"),
+    };
+    const { forgeRead, observe } = fixture({});
+    await forgeRead({
+      windowId,
+      card: "issues-closed",
+      current: lastMonth,
+      comparison: monthBefore,
+      refresh: false,
+    });
+    expect(vi.mocked(observe).mock.calls[0]?.[0]).toMatchObject({
+      since: "2023-09-01T00:00:00.000Z",
+      until: "2023-11-01T00:00:00.000Z",
+    });
+  });
+
+  it("does not share cache entries between reads with different upper bounds", async () => {
+    const weekA: ActivityWindow = {
+      from: decodeUtcTimestamp("2023-10-25T00:00:00.000Z"),
+      until: decodeUtcTimestamp("2023-11-01T00:00:00.000Z"),
+    };
+    const weekB: ActivityWindow = {
+      from: decodeUtcTimestamp("2023-10-25T00:00:00.000Z"),
+      until: decodeUtcTimestamp("2023-11-05T00:00:00.000Z"),
+    };
+    const { forgeRead, observe } = fixture({});
+    await forgeRead({ windowId, card: "prs-merged", current: weekA, refresh: false });
+    await forgeRead({ windowId, card: "prs-merged", current: weekB, refresh: false });
+    expect(observe).toHaveBeenCalledTimes(2);
+    await forgeRead({ windowId, card: "prs-merged", current: weekA, refresh: false });
+    expect(observe).toHaveBeenCalledTimes(2);
   });
 
   it("purges a missing repository's rows under every timeframe, not just the refreshed one", async () => {

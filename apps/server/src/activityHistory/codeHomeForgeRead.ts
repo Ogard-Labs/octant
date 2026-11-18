@@ -187,6 +187,20 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
             ) * 1000,
           ).toISOString();
 
+    // The read's upper bound is the later window end, ceiled to the second.
+    // An end still close to now (a live range such as This week) reads
+    // open-ended instead, so its cache key stays stable while the range slides.
+    const OPEN_ENDED_EDGE_MS = 5 * 60 * 1000;
+    const latestUntilMs = Math.max(
+      ...[input.current.until, input.comparison?.until]
+        .filter((end): end is UtcTimestamp => end !== undefined)
+        .map((end) => Date.parse(end)),
+    );
+    const until =
+      ports.now() - latestUntilMs <= OPEN_ENDED_EDGE_MS
+        ? undefined
+        : new Date(Math.ceil(latestUntilMs / 1000) * 1000).toISOString();
+
     const records: CodeHomeActivityForgeRecord[] = [];
     let partial = false;
     let rateLimited = false;
@@ -194,7 +208,7 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
     for (const repository of repositories) {
       if (!admitted()) return { status: "unavailable", reason: "read-failed" };
       const repositoryKey = `${repository.repositoryOwner.toLowerCase()}/${repository.repositoryName.toLowerCase()}`;
-      const cacheKey = `${account}|${repositoryKey}|${input.card}|${since ?? "all"}`;
+      const cacheKey = `${account}|${repositoryKey}|${input.card}|${since ?? "all"}|${until ?? "open"}`;
       const cached = cache.get(cacheKey);
       const fresh =
         cached !== undefined && !input.refresh && ports.now() - cached.storedAtMs < CACHE_TTL_MS
@@ -207,6 +221,7 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
           name: repository.repositoryName,
           card: input.card,
           since,
+          until,
           signal,
         });
         if (result.status === "ready" || result.status === "partial") {

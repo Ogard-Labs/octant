@@ -73,7 +73,8 @@ const observe = (
   port: GhHomeActivityPort,
   card: "prs-merged" | "issues-closed" | "releases-published",
   since?: string,
-) => port.observe({ owner: "octant-dev", name: "octant", card, since, signal });
+  until?: string,
+) => port.observe({ owner: "octant-dev", name: "octant", card, since, until, signal });
 
 describe("GhHomeActivityPort", () => {
   it("asks the search for merged pull requests inside the window", async () => {
@@ -92,6 +93,42 @@ describe("GhHomeActivityPort", () => {
     );
     expect(command.run).not.toHaveBeenCalledWith(
       expect.arrayContaining(["-f", expect.stringContaining("after=")]),
+      expect.anything(),
+      signal,
+    );
+  });
+
+  it("closes the search with an upper bound when the window has one", async () => {
+    const { command, port } = fixture([searchPage([mergedNode()])]);
+    await observe(port, "prs-merged", "2026-08-18T00:00:00Z", "2026-08-22T00:00:00Z");
+    expect(command.run).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        "-f",
+        "q=repo:octant-dev/octant is:pr is:merged merged:2026-08-18T00:00:00Z..2026-08-22T00:00:00Z",
+      ]),
+      expect.anything(),
+      signal,
+    );
+  });
+
+  it("caps an unbounded-from search at the window's end", async () => {
+    const { command, port } = fixture([searchPage([closedIssueNode()])]);
+    await observe(port, "issues-closed", undefined, "2026-08-22T00:00:00Z");
+    expect(command.run).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        "-f",
+        "q=repo:octant-dev/octant is:issue is:closed closed:<=2026-08-22T00:00:00Z",
+      ]),
+      expect.anything(),
+      signal,
+    );
+  });
+
+  it("leaves an open-ended search without a date qualifier", async () => {
+    const { command, port } = fixture([searchPage([mergedNode()])]);
+    await observe(port, "prs-merged");
+    expect(command.run).toHaveBeenCalledWith(
+      expect.arrayContaining(["-f", "q=repo:octant-dev/octant is:pr is:merged"]),
       expect.anything(),
       signal,
     );
@@ -347,6 +384,7 @@ describe("GhHomeActivityPort", () => {
       name: "octant",
       card: "prs-merged",
       since: undefined,
+      until: undefined,
       signal,
     });
     expect(result).toEqual({ status: "unavailable", reason: "read-failed" });
