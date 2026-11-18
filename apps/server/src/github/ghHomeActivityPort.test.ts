@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import type { GhCommandPort, GhCommandResult } from "../code/ghPullRequestPort";
 import { GhHomeActivityPort } from "./ghHomeActivityPort";
 
@@ -311,5 +312,16 @@ describe("GhHomeActivityPort", () => {
     });
     expect(result).toEqual({ status: "unavailable", reason: "read-failed" });
     expect(command.run).not.toHaveBeenCalled();
+  });
+
+  it("keeps every query constant's braces balanced", () => {
+    const source = readFileSync(new URL("./ghHomeActivityPort.ts", import.meta.url), "utf8");
+    const queries = [...source.matchAll(/const \w+_QUERY\s*=\s*\n?\s*"([^"]+)";/g)].map(
+      (match) => match[1],
+    );
+    expect(queries.length).toBeGreaterThan(0);
+    for (const query of queries) {
+      expect(query.split("{").length).toBe(query.split("}").length);
+    }
   });
 });

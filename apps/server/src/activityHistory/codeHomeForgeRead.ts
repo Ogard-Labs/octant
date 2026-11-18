@@ -201,9 +201,13 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
         });
         if (result.status === "ready" || result.status === "partial") {
           if (result.status === "partial" && result.reason === "repository-missing") {
-            // A missing or forbidden repository is not temporary: its cache is
-            // purged and none of its formerly read rows are served again.
-            cache.delete(cacheKey);
+            // A missing or forbidden repository is not temporary: every card
+            // and window it ever answered is purged, so no formerly read rows
+            // are served again under another timeframe.
+            const prefix = `${account}|${repositoryKey}|`;
+            for (const key of cache.keys()) {
+              if (key.startsWith(prefix)) cache.delete(key);
+            }
             partial = true;
             continue;
           }

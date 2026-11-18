@@ -69,7 +69,7 @@ const MERGED_PULL_REQUESTS_QUERY =
 const CLOSED_ISSUES_QUERY =
   "query($q:String!,$after:String){search(type:ISSUE,first:50,after:$after,query:$q){issueCount pageInfo{hasNextPage endCursor} nodes{... on Issue{number title closedAt timelineItems(itemTypes:[CLOSED_EVENT],last:1){nodes{... on ClosedEvent{createdAt actor{login}}}}}}}}";
 const RELEASES_QUERY =
-  "query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){releases(first:50,after:$after,orderBy:{field:CREATED_AT,direction:DESC}){pageInfo{hasNextPage endCursor} nodes{databaseId tagName name url publishedAt createdAt isDraft author{login}}}}}}";
+  "query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){releases(first:50,after:$after,orderBy:{field:CREATED_AT,direction:DESC}){pageInfo{hasNextPage endCursor} nodes{databaseId tagName name url publishedAt createdAt isDraft author{login}}}}}";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

@@ -396,6 +396,47 @@ describe("createCodeHomeForgeRead", () => {
     expect(after).toMatchObject({ status: "unavailable", reason: "read-failed" });
   });
 
+  it("purges a missing repository's rows under every timeframe, not just the refreshed one", async () => {
+    const weekA: ActivityWindow = {
+      from: decodeUtcTimestamp("2026-08-04T00:00:00.000Z"),
+      until: decodeUtcTimestamp("2026-08-11T00:00:00.000Z"),
+    };
+    const weekB: ActivityWindow = {
+      from: decodeUtcTimestamp("2026-08-11T00:00:00.000Z"),
+      until: decodeUtcTimestamp("2026-08-18T00:00:00.000Z"),
+    };
+    const newerRow: GhHomeActivityRow = { ...mergedRow, number: 55 };
+    const { forgeRead, observe } = fixture({
+      results: [
+        { status: "ready", rows: [mergedRow] },
+        { status: "ready", rows: [mergedRow] },
+        { status: "partial", rows: [], reason: "repository-missing" },
+        { status: "ready", rows: [newerRow] },
+      ],
+    });
+    // Two windows cache under two different `since` keys.
+    await forgeRead({ windowId, card: "prs-merged", current: weekA, refresh: false });
+    await forgeRead({ windowId, card: "prs-merged", current: weekB, refresh: false });
+    expect(observe).toHaveBeenCalledTimes(2);
+    // Losing access on week B's refresh must not let week A serve its old rows.
+    const lost = await forgeRead({
+      windowId,
+      card: "prs-merged",
+      current: weekB,
+      refresh: true,
+    });
+    expect(lost).toMatchObject({ status: "unavailable" });
+    const again = await forgeRead({
+      windowId,
+      card: "prs-merged",
+      current: weekA,
+      refresh: true,
+    });
+    expect(observe).toHaveBeenCalledTimes(4);
+    expect(again.status).toBe("ready");
+    expect(again.records[0]?.record).toMatchObject({ number: 55 });
+  });
+
   it("marks the read partial when a repository answer was truncated", async () => {
     const { forgeRead } = fixture({
       results: [{ status: "partial", rows: [mergedRow], reason: "incomplete" }],
