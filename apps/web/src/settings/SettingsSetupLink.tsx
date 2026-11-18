@@ -9,6 +9,7 @@ export function SettingsSetupLink(props: {
 }) {
   return (
     <a
+      className="settings-setup-link"
       href={props.href}
       rel="noreferrer"
       target="_blank"
