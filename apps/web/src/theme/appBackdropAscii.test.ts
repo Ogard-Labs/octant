@@ -483,9 +483,12 @@ describe("character ground click rings", () => {
     const surfaces = writes.surfaces;
     const paints = writes.glyphPaints;
     const frames = writes.frames;
-    options = { ...options, density: 80 };
+    const litBefore = writes.masks.at(-1)?.alphas.filter((alpha) => alpha > 0).length ?? 0;
+    options = { ...options, density: 100 };
     stop.redraw();
     expect(writes.frames).toBe(frames + 1);
+    const litAfter = writes.masks.at(-1)?.alphas.filter((alpha) => alpha > 0).length ?? 0;
+    expect(litAfter).toBeGreaterThan(litBefore);
     expect(writes.surfaces).toBe(surfaces);
     expect(writes.glyphPaints).toBe(paints);
     stop();

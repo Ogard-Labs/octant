@@ -685,6 +685,9 @@ export function runAsciiField(
 
   const redraw = () => {
     if (stopped || animated || surface === undefined) return;
+    // A still field always draws at time zero, so the patch cache would keep
+    // the old density's strengths; forget it so the new density shows.
+    fieldAt = Number.NEGATIVE_INFINITY;
     draw(0);
   };
 
