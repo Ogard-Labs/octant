@@ -732,4 +732,60 @@ describe("CodeHomeActivityService", () => {
     expect(view.status).toBe("ready");
     expect(view.count).toBe(1);
   });
+
+  it("expires a snapshot when the reach witness proving coverage loses access", async () => {
+    const denied = new Set<string>();
+    // Coverage reaches the comparison window only through an older fact
+    // witnessed by T2 — outside the bounded current window, so its witness
+    // is the sole proof the zero rests on and losing T2 must expire the
+    // snapshot.
+    const facts = [
+      mergeFact({
+        identity: "octant-dev/octant#7",
+        threadId: otherThread,
+        occurredAt: "2025-11-01T00:00:00.000Z",
+      }),
+      mergeFact({ occurredAt: "2026-08-19T10:00:00.000Z" }),
+    ];
+    const service = new CodeHomeActivityService({
+      listProjects: async () => [project],
+      canReadThread: async ({ threadId }) => !denied.has(threadId),
+      readFacts: (input) =>
+        facts.filter(
+          (fact) =>
+            (input.from === null || fact.occurredAt >= input.from) && fact.occurredAt < input.until,
+        ),
+      projectionHeld: () => false,
+      uuid: () => `83000000-0000-4000-8000-${String(++uuidCounter).padStart(12, "0")}`,
+      now: () => Date.now(),
+      clock: () => now,
+    });
+    const view = await service.read(
+      windowId,
+      {
+        kind: "read",
+        card: "prs-merged",
+        source: "octant",
+        current: {
+          from: decodeUtcTimestamp("2026-08-18T00:00:00.000Z"),
+          until: decodeUtcTimestamp("2026-08-25T00:00:00.000Z"),
+        },
+        comparison: {
+          from: decodeUtcTimestamp("2025-12-01T00:00:00.000Z"),
+          until: decodeUtcTimestamp("2026-01-01T00:00:00.000Z"),
+        },
+      },
+      () => true,
+    );
+    expect(view.comparisonCount).toBe(0);
+
+    denied.add(otherThread);
+    const page = await service.read(
+      windowId,
+      { kind: "page", snapshotId: view.snapshotId!, offset: 0 },
+      () => true,
+    );
+    expect(page).toMatchObject({ status: "unavailable", reason: "authorization-changed" });
+    expect(page.records).toHaveLength(0);
+  });
 });
