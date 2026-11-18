@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
 import {
   WINDOWS_CHAT_PROVIDER_REFUSAL,
@@ -8,7 +8,7 @@ import {
 } from "@octant/domain/guardrail-policy";
 import { Effect, Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { makeAcpProcessLive } from "./acpProcess";
+import { makeAcpConfinementLive, makeAcpProcessLive } from "./acpProcess";
 import { acpProviderProfiles } from "./acpProfiles";
 import { makeClaudeProcessLive } from "./claudeProcess";
 import { makeOpenCodeProcessLive } from "./openCodeProcess";
@@ -129,7 +129,9 @@ describe.runIf(process.platform === "win32" && fakePi !== undefined)("Pi on a Wi
             versionTimeoutMs: 30_000,
           })
             .start({
-              binaryPath: fakePi ?? "",
+              // The CI job names it with forward slashes; Pi takes only a
+              // normalized absolute path.
+              binaryPath: resolve(fakePi ?? ""),
               root,
               piHome: join(base, "home"),
               sessionDirectory: join(base, "home", "sessions"),
@@ -174,10 +176,18 @@ describe.runIf(process.platform === "win32" && fakeAcpAgent !== undefined)(
       return await Effect.runPromise(
         Effect.either(
           Effect.scoped(
-            makeAcpProcessLive({ platform: "win32", startupTimeoutMs: 30_000 })
+            makeAcpProcessLive({
+              platform: "win32",
+              startupTimeoutMs: 30_000,
+              // The runner has no Kilo sign-in; a private data folder stands in.
+              confinement: makeAcpConfinementLive({
+                platform: "win32",
+                hostAuthenticationPath: join(base, "kilo-data"),
+              }),
+            })
               .start({
                 profile: acpProviderProfiles.kilo,
-                binaryPath: fakeAcpAgent ?? "",
+                binaryPath: resolve(fakeAcpAgent ?? ""),
                 root: base,
                 managedHome: join(base, "managed-home"),
                 ...level,
