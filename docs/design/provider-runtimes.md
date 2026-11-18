@@ -2438,7 +2438,10 @@ have to show. Its identity is the configured command, so any
 Its version is read from `--version` where the agent answers and is
 otherwise taken from the `initialize` reply's `agentInfo.version`
 (`versionProbe: "best-effort"`). Every capability is what `initialize`
-advertises. No mode is selected (`selectsNoMode`), since no mapping of
+advertises. The model is set in the spelling the session reported
+(`modelSelection: "follow-session"`): its `model` config option, or else
+`session/set_model` when it reports `models`, and not at all when the
+session already opened on that model. No mode is selected (`selectsNoMode`), since no mapping of
 Chat, Work, Code and Plan onto the agent's own modes was read; Plan's
 read-only wall and the level's approvals are Octant's sandbox and approval
 bridge. It pins no exact-release feature (usage, compaction, file review,
@@ -2459,7 +2462,8 @@ Connection Check instead. A binary distribution downloads only over HTTPS
 registry schema's `sha256` is optional: an archive that carries one is
 checked and refused on a mismatch, leaving nothing on disk; one without is
 installed as an unverified download, which the Trust step says plainly.
-Archives are unpacked with the system's `tar` or `unzip` after every entry
+A download that cannot be written (a full or unwritable disk) is refused and
+its partial file removed. Archives are unpacked with the system's `tar` or `unzip` after every entry
 is listed and the archive refused when one is absolute or climbs out with
 `..`; the executable must resolve inside the install folder. Downloads
 follow the Marketplace fetches switch. Each install goes into a fresh

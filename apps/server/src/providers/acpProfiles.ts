@@ -259,6 +259,12 @@ export interface AcpProviderProfile {
    * agent loads them on its own.
    */
   readonly refusesProject?: (root: string) => string | undefined;
+  /**
+   * `follow-session`: the model is set the way the session reported its
+   * models, a `model` config option or else `session/set_model`, for an added
+   * agent whose spelling no probe pinned.
+   */
+  readonly modelSelection?: "follow-session";
   /** Overrides the default `session/set_config_option` call for setting the model. */
   readonly setModelCall?: (
     sessionId: string,

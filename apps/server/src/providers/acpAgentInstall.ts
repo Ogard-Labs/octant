@@ -36,6 +36,7 @@ export type AcpAgentInstallRefusalReason =
   | "checksum-mismatch"
   | "unsafe-archive"
   | "unpack-failed"
+  | "write-failed"
   | "package-manager-missing"
   | "package-manager-failed"
   | "executable-missing";
@@ -118,9 +119,13 @@ export async function installAcpAgent(
       "Marketplace fetches are off in Settings, so Octant downloads nothing.",
     );
   }
-  await mkdir(input.root, { recursive: true, mode: 0o700 });
   const destination = join(input.root, `${listing.version}-${randomUUID().slice(0, 8)}`);
-  await mkdir(destination, { mode: 0o700 });
+  try {
+    await mkdir(input.root, { recursive: true, mode: 0o700 });
+    await mkdir(destination, { mode: 0o700 });
+  } catch {
+    return refused("write-failed", "Octant could not create the agent's install folder.");
+  }
   let result: AcpAgentInstallResult;
   try {
     const distribution = listing.distribution;
@@ -169,24 +174,44 @@ async function installArchive(
   const hash = createHash("sha256");
   let bytes = 0;
   const file = createWriteStream(archivePath, { mode: 0o600 });
+  // A full or unwritable disk fails the stream asynchronously, outside the
+  // loop's try; without this listener the error would go unhandled and a
+  // `drain` wait would never settle. The caller removes the partial file.
+  let writeFailed = false;
+  const failure = new Promise<void>((resolve) =>
+    file.once("error", () => {
+      writeFailed = true;
+      resolve();
+    }),
+  );
   const reader = response.body.getReader();
+  const notWritten = refused("write-failed", "The agent's download could not be written to disk.");
   try {
-    while (true) {
-      const chunk = await reader.read();
+    while (!writeFailed) {
+      const chunk = await Promise.race([reader.read(), failure.then(() => undefined)]);
+      if (chunk === undefined || writeFailed) break;
       if (chunk.done) break;
       bytes += chunk.value.byteLength;
       if (bytes > MAX_ACP_AGENT_ARCHIVE_BYTES) {
-        await reader.cancel();
+        await reader.cancel().catch(() => undefined);
         return refused("too-large", "The agent's download is larger than Octant accepts.");
       }
       hash.update(chunk.value);
-      if (!file.write(chunk.value)) await new Promise((resolve) => file.once("drain", resolve));
+      if (!file.write(chunk.value))
+        await Promise.race([new Promise((resolve) => file.once("drain", resolve)), failure]);
+    }
+    if (writeFailed) {
+      await reader.cancel().catch(() => undefined);
+      return notWritten;
     }
   } catch {
+    await reader.cancel().catch(() => undefined);
     return refused("download-failed", "The agent could not be downloaded.");
   } finally {
-    await new Promise<void>((resolve) => file.end(resolve));
+    if (writeFailed) file.destroy();
+    else await Promise.race([new Promise<void>((resolve) => file.end(resolve)), failure]);
   }
+  if (writeFailed) return notWritten;
   const digest = hash.digest("hex");
   if (distribution.sha256 !== undefined && digest !== distribution.sha256.toLowerCase())
     return refused(

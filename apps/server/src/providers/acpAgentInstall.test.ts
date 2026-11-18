@@ -100,6 +100,25 @@ describe("installing an added ACP agent", () => {
     expect(readdirSync(root)).toEqual([]);
   });
 
+  it("refuses a download it cannot write to disk and leaves nothing behind", async () => {
+    const root = scratch();
+    const result = await installAcpAgent(
+      { configuration: registryConfiguration, listing: listing(), root },
+      ports(agentBytes, {
+        // A folder where the download goes makes the write fail asynchronously,
+        // as a full disk does.
+        fetch: async (url: string) => {
+          for (const entry of readdirSync(root)) mkdirSync(join(root, entry, ".download"));
+          const response = new Response(new Uint8Array(agentBytes), { status: 200 });
+          Object.defineProperty(response, "url", { value: url });
+          return response;
+        },
+      }),
+    );
+    expect(result).toMatchObject({ status: "refused", reason: "write-failed" });
+    expect(readdirSync(root)).toEqual([]);
+  });
+
   it("marks a download the registry lists no checksum for as unverified", async () => {
     const result = await installAcpAgent(
       { configuration: registryConfiguration, listing: listing(), root: scratch() },

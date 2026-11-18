@@ -33,6 +33,7 @@ export function addedAcpAgentProfile(instance: AddedAcpAgentProviderInstance): A
     reasoningOptionId: "effort",
     sessionMode: () => "",
     selectsNoMode: true,
+    modelSelection: "follow-session",
     chatSessionRoot: "managed-home",
     userQuestions: "unsupported",
     resumeMethod: "session/load",
