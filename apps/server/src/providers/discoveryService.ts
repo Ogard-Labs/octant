@@ -8,7 +8,30 @@ import { discoverableDescriptorsForAdmittedDrivers } from "@octant/provider-sdk/
 import { execVersionRead, prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import { prepareConfinedReadinessProbe } from "../process/confinedReadinessProbe";
 import type { ProcessConfinementPort } from "../process/seatbeltProfile";
+import { normalizeClaudeGatewayBaseUrl } from "@octant/domain";
 import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
+
+/**
+ * The Claude gateway this host's own environment names, offered to prefill a
+ * new gateway account's address. Only an address Octant would accept for a
+ * gateway account crosses; one with credentials in it, or plain HTTP to a
+ * public host, is withheld. The token's value never leaves the host: only
+ * whether `ANTHROPIC_AUTH_TOKEN` is set.
+ */
+export function claudeHostGateway(
+  environment: NodeJS.ProcessEnv,
+): DiscoverySnapshot["claudeHostGateway"] {
+  const candidate = environment.ANTHROPIC_BASE_URL?.trim();
+  if (candidate === undefined || candidate === "" || candidate.length > 2048) return undefined;
+  let baseUrl: string;
+  try {
+    baseUrl = normalizeClaudeGatewayBaseUrl(candidate);
+  } catch {
+    return undefined;
+  }
+  const token = environment.ANTHROPIC_AUTH_TOKEN;
+  return { baseUrl, tokenVariable: token !== undefined && token.trim() !== "" };
+}
 
 // ── Budgets ─────────────────────────────────────────────────────────────────
 
@@ -218,6 +241,7 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
       MAX_TOTAL_CANDIDATES,
     ) as DiscoverySnapshot["candidates"];
     lastScanCandidates = [...finalCandidates];
+    const hostGateway = claudeHostGateway(environment);
     const snapshot: DiscoverySnapshot = {
       hostId: hostId as DiscoverySnapshot["hostId"],
       candidates: finalCandidates,
@@ -226,6 +250,7 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
       status,
       ...(searchedDirectories.length > 0 ? { searchedDirectories } : {}),
       ...(message !== undefined ? { message: message as DiscoverySnapshot["message"] } : {}),
+      ...(hostGateway === undefined ? {} : { claudeHostGateway: hostGateway }),
     };
     return snapshot;
   };

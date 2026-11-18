@@ -198,13 +198,39 @@ export interface IsolatedClaudeAccountEnvironmentInput {
   readonly hostEnvironment: NodeJS.ProcessEnv;
   readonly configDirectory: string;
   readonly authentication: ClaudeAuthentication;
+  /**
+   * The account's broker-resolved credential: an API-key account's key, or a
+   * gateway account's token.
+   */
   readonly apiKey?: string;
+  /** A gateway account's address, sent as `ANTHROPIC_BASE_URL`. */
+  readonly gatewayBaseUrl?: string;
   /**
    * Whether the launch is Strict. Absent is Strict: the fixed passthrough list
    * and every channel guard. Off, the launch gets the host's environment less
    * Octant's own variables and other providers' keys.
    */
   readonly strict?: boolean;
+}
+
+/**
+ * The account's own sign-in, applied over an environment that already lost
+ * every ambient Anthropic credential: an API-key account's key, or a gateway
+ * account's address and token. A gateway account gets no `ANTHROPIC_API_KEY`
+ * and no other account ever gets its address or token, so two accounts never
+ * share a credential or a route.
+ */
+function applyAccountCredential(
+  environment: NodeJS.ProcessEnv,
+  input: IsolatedClaudeAccountEnvironmentInput,
+): void {
+  if (input.apiKey === undefined) return;
+  if (input.authentication === "api-key") {
+    environment.ANTHROPIC_API_KEY = input.apiKey;
+  } else if (input.authentication === "gateway" && input.gatewayBaseUrl !== undefined) {
+    environment.ANTHROPIC_BASE_URL = input.gatewayBaseUrl;
+    environment.ANTHROPIC_AUTH_TOKEN = input.apiKey;
+  }
 }
 
 function passthroughHostEnvironment(hostEnvironment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -223,7 +249,8 @@ function passthroughHostEnvironment(hostEnvironment: NodeJS.ProcessEnv): NodeJS.
  * by the passthrough list. The account directory is applied as both
  * `CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR` so the Claude
  * binary keys macOS Keychain the way it expects. An explicit API-key account
- * still receives only the broker-resolved key.
+ * still receives only the broker-resolved key, and a gateway account only its
+ * own address and broker-resolved token.
  */
 export function isolatedClaudeAccountEnvironment(
   input: IsolatedClaudeAccountEnvironmentInput,
@@ -232,9 +259,7 @@ export function isolatedClaudeAccountEnvironment(
   const environment = passthroughHostEnvironment(input.hostEnvironment);
   environment.CLAUDE_CONFIG_DIR = input.configDirectory;
   environment.CLAUDE_SECURESTORAGE_CONFIG_DIR = input.configDirectory;
-  if (input.authentication === "api-key" && input.apiKey !== undefined) {
-    environment.ANTHROPIC_API_KEY = input.apiKey;
-  }
+  applyAccountCredential(environment, input);
   return {
     ...environment,
     ...hostDisableOnlySwitches(input.hostEnvironment),
@@ -245,7 +270,7 @@ export function isolatedClaudeAccountEnvironment(
 /**
  * The launch environment for one Claude account outside Strict: the host's
  * environment as `providerHostEnvironment` leaves it, with Octant's account
- * directory and an API-key account's broker key applied and only
+ * directory and an API-key or gateway account's own credential applied and only
  * {@link OPEN_CLAUDE_LAUNCH_GUARDS} set. An Octant account's own sign-in
  * decides which account a turn runs as, so no host Anthropic key or token
  * crosses (`providerHostEnvironment` names none of them as Claude's own) and
@@ -257,9 +282,13 @@ function openClaudeAccountEnvironment(
   const environment = providerHostEnvironment(input.hostEnvironment);
   environment.CLAUDE_CONFIG_DIR = input.configDirectory;
   environment.CLAUDE_SECURESTORAGE_CONFIG_DIR = input.configDirectory;
-  if (input.authentication === "api-key" && input.apiKey !== undefined) {
-    environment.ANTHROPIC_API_KEY = input.apiKey;
+  if (input.authentication === "gateway") {
+    // The host's own routing is the person's shell setup; a gateway account
+    // names its own, and never inherits a host address its token was not
+    // entered for.
+    delete environment.ANTHROPIC_BASE_URL;
   }
+  applyAccountCredential(environment, input);
   return { ...environment, ...OPEN_CLAUDE_LAUNCH_GUARDS };
 }
 

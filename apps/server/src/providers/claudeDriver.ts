@@ -96,6 +96,7 @@ import {
 } from "./claudeEventMapper";
 import { CLAUDE_TASK_TOOLS, ClaudeTaskList, readClaudeStoredTaskList } from "./claudeTaskList";
 import {
+  claudeAccountUsesStoredKey,
   planReadOnlyToolServers,
   providerOwnMemoryLaunches,
   windowsProviderLaunch,
@@ -270,6 +271,18 @@ const CLAUDE_ARTIFACT_READ_ACTIONS = new Set<string>(["read", "list", "quickstar
 /** Claude's claude.ai Projects tool, whose upload names a local file in `local_path`. */
 const CLAUDE_PROJECTS_TOOL = "Projects";
 const CLAUDE_READ_TOOLS = new Set<string>(CLAUDE_PLAN_TOOLS);
+/** Claude's built-in tools that read or change a folder or run a command. */
+const CLAUDE_FOLDER_AND_SHELL_TOOLS = new Set<string>([
+  ...CLAUDE_PLAN_TOOLS,
+  "LS",
+  "Edit",
+  "Write",
+  "NotebookEdit",
+  "Bash",
+  "Monitor",
+  "TaskOutput",
+  "TaskStop",
+]);
 /**
  * Tools that change only Claude's own session state: no file, shell, network,
  * or person is involved, so every posture runs them unasked, as Claude Code
@@ -457,6 +470,16 @@ export function claudeExecutionOptions(
     ...policyOptions,
     fullToolSet: policyOptions.fullToolSet && (mode === "work" || mode === "code"),
   };
+  // Elsewhere Chat's file and shell tools ask and are declined inside
+  // Octant's sandbox. Windows has no such sandbox, so a Chat session there is
+  // started without them: Claude Code then has no tool that reads a folder or
+  // runs a command, whatever a hook or the gate would have answered.
+  if (mode === "chat" && platform === "win32") {
+    return {
+      ...options,
+      tools: options.tools.filter((tool) => !CLAUDE_FOLDER_AND_SHELL_TOOLS.has(tool)),
+    };
+  }
   // A Work or Code Plan turn may run read-only commands where its sandbox can
   // hold the shell to them (see `claudePlanRunsCommands`). Plan has no
   // approvals, so the sandbox, not a person, is what keeps them read-only.
@@ -1352,6 +1375,8 @@ export interface ClaudeDriverOptions {
   readonly gitIdentity?: (checkoutRoot: string) => Promise<ClaudeGitIdentity>;
   readonly binaryPath: string;
   readonly authentication: ClaudeAuthentication;
+  /** A gateway account's address; its token comes from the credential broker. */
+  readonly gatewayBaseUrl?: string;
   /** Claude-owned directory for this account. */
   readonly configDirectory?: string;
   /**
@@ -2362,6 +2387,12 @@ function probeSdk(
   });
 }
 
+function storedKeyMissingMessage(options: ClaudeDriverOptions): string {
+  return options.authentication === "gateway"
+    ? "Store the gateway token for this Claude account."
+    : "Store an Anthropic API key for this Claude provider.";
+}
+
 function makeProbe(
   options: ClaudeDriverOptions,
   environmentFactory: ClaudeEnvironmentFactory,
@@ -2419,7 +2450,7 @@ function makeProbe(
               readiness: "unauthenticated",
               version,
               credentialStatus: "missing",
-              message: "Store an Anthropic API key for this Claude provider.",
+              message: storedKeyMissingMessage(options),
             },
             clock,
           );
@@ -2433,7 +2464,7 @@ function makeProbe(
                   readiness: "unauthenticated",
                   version,
                   credentialStatus: "missing",
-                  message: "Store an Anthropic API key for this Claude provider.",
+                  message: storedKeyMissingMessage(options),
                 }
               : {
                   readiness: "unavailable",
@@ -2448,6 +2479,7 @@ function makeProbe(
       }
       const sdkResult = yield* probeSdk(options, environmentFactory, {
         ...(apiKey === undefined ? {} : { apiKey }),
+        ...(options.gatewayBaseUrl === undefined ? {} : { gatewayBaseUrl: options.gatewayBaseUrl }),
         ...(options.configDirectory === undefined
           ? {}
           : { configDirectory: options.configDirectory }),
@@ -2469,7 +2501,7 @@ function makeProbe(
           {
             readiness: "incompatible",
             version,
-            ...(options.authentication === "api-key"
+            ...(claudeAccountUsesStoredKey(options.authentication)
               ? { credentialStatus: "stored" as const }
               : {}),
             message: sdkResult.message,
@@ -2486,7 +2518,9 @@ function makeProbe(
           compactAnnounced: sdkResult.compactAnnounced,
           commands: sdkResult.commands,
           hostTrafficDisabled,
-          ...(options.authentication === "api-key" ? { credentialStatus: "stored" as const } : {}),
+          ...(claudeAccountUsesStoredKey(options.authentication)
+            ? { credentialStatus: "stored" as const }
+            : {}),
         },
         clock,
       );
@@ -2508,7 +2542,7 @@ function makeClaudeContextFacts(
             failure("invalid-configuration", "Provider instance does not match driver."),
           );
         }
-        if (options.authentication === "api-key") {
+        if (claudeAccountUsesStoredKey(options.authentication)) {
           return yield* Effect.fail(failure("unsupported", "Plan limits do not apply."));
         }
         // This reading starts a `claude` process. That is worth it when a
@@ -3653,13 +3687,15 @@ function makeConnection(
       // Windows has no Octant sandbox, so each launch there is decided from
       // its own mode, level and Strict value before anything runs: below Full
       // access Claude's own permission modes hold it outside Strict, and
-      // Strict and a kept sandbox are refused by name.
+      // Strict and a kept sandbox are refused by name. A Chat session there
+      // starts with no file or shell tool (`claudeExecutionOptions`).
       if ((options.platform ?? process.platform) === "win32") {
         const windows = windowsProviderLaunch({
           mode: mode ?? "code",
           executionPolicy: input.executionPolicy,
           fullAccessSandbox: input.fullAccessSandbox,
           strict: input.strict,
+          chatWithoutFolderOrShell: true,
         });
         if (windows.status === "refused") throw failure("incompatible", windows.reason);
       }
@@ -3706,9 +3742,14 @@ function makeConnection(
       let scope: Scope.CloseableScope | undefined;
       let state: SessionState | undefined;
       try {
-        if (options.authentication === "api-key") {
+        if (claudeAccountUsesStoredKey(options.authentication)) {
           if (!(await runSetupEffect(brokerHas(options), signal))) {
-            throw failure("unauthenticated", "Claude API-key credential is missing.");
+            throw failure(
+              "unauthenticated",
+              options.authentication === "gateway"
+                ? "Claude gateway token is missing."
+                : "Claude API-key credential is missing.",
+            );
           }
           apiKey = await runSetupEffect(brokerResolve(options), signal);
         }
@@ -3738,6 +3779,9 @@ function makeConnection(
         const environment = await runSetupEffect(
           environmentFactory(options.authentication, {
             ...(apiKey !== undefined ? { apiKey } : {}),
+            ...(options.gatewayBaseUrl === undefined
+              ? {}
+              : { gatewayBaseUrl: options.gatewayBaseUrl }),
             ...(options.configDirectory === undefined
               ? {}
               : { configDirectory: options.configDirectory }),
@@ -3877,7 +3921,7 @@ function makeConnection(
           input.executionPolicy,
           input.autoApprove,
           mode,
-          process.platform,
+          options.platform ?? process.platform,
           strict,
           nativeSetup,
         );

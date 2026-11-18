@@ -1,5 +1,5 @@
 import type { ArtifactLibraryListing } from "@octant/contracts/artifact-library";
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -540,6 +540,54 @@ describe("Claude pages in the artifact library", () => {
     await user.click(within(page).getByRole("button", { name: "Show snapshot" }));
     expect(onLoadSnapshot).toHaveBeenCalledWith(expect.objectContaining({ toolCallId: "call-2" }));
     expect(await within(page).findByText("Hero copy")).toBeInTheDocument();
+  });
+
+  it("copies an HTML snapshot into a Canvas under the title the person confirms, and reports what was taken out", async () => {
+    const user = userEvent.setup();
+    const onCopyToCanvas = vi.fn(async () => ({
+      kind: "imported" as const,
+      card: { title: "Hero landing" },
+      frame: "static" as const,
+      dropped: [{ kind: "script-file" as const, count: 1, examples: ["https://cdn.example/x.js"] }],
+    }));
+    view({
+      listing: withClaude,
+      claudePageActions: { onCopyToCanvas: onCopyToCanvas as never },
+    });
+
+    const page = screen.getByRole("listitem", { name: "Claude page: Hero" });
+    await user.click(within(page).getByRole("button", { name: "Copy into Canvas" }));
+    const form = within(page).getByRole("form", { name: "Copy into Canvas" });
+    expect(form).toHaveTextContent("A new Canvas in Storefront");
+    const title = within(form).getByLabelText("Canvas title");
+    expect(title).toHaveValue("Hero");
+    await user.clear(title);
+    await user.type(title, "Hero landing");
+    await user.click(within(form).getByRole("button", { name: "Copy" }));
+
+    expect(onCopyToCanvas).toHaveBeenCalledWith(
+      expect.objectContaining({ toolCallId: "call-2" }),
+      "Hero landing",
+    );
+    expect(
+      await within(page).findByText("“Hero landing” is now a Canvas in Storefront"),
+    ).toBeInTheDocument();
+    expect(within(page).getByText("1 script file")).toBeInTheDocument();
+  });
+
+  it("offers no Copy into Canvas for a Markdown snapshot or where the snapshot cannot be read", () => {
+    const markdown = {
+      ...withClaude,
+      claude: withClaude.claude?.map((entry) => ({ ...entry, snapshot: "markdown" as const })),
+    } as ArtifactLibraryListing;
+    view({
+      listing: markdown,
+      claudePageActions: { onCopyToCanvas: vi.fn() },
+    });
+    expect(screen.queryByRole("button", { name: "Copy into Canvas" })).toBeNull();
+    cleanup();
+    view({ listing: withClaude, claudePageActions: {} });
+    expect(screen.queryByRole("button", { name: "Copy into Canvas" })).toBeNull();
   });
 
   it("filters by source, Claude type and account, a Claude type replacing a Canvas kind", async () => {

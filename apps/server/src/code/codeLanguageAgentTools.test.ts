@@ -157,6 +157,7 @@ describe("Code language agent tools", () => {
     expect(covered.servesAgentsIn).toHaveBeenCalledWith(["/checkout"], {
       projectId: codeThread().projectId,
       posture: "plan",
+      threadId: codeThread().id,
     });
   });
 

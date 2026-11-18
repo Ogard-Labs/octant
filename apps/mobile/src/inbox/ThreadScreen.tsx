@@ -26,6 +26,7 @@ import { ApprovalDeferralSheet } from "../approvals/ApprovalDeferralSheet";
 import { BrowserSurfacePanel } from "../surfaces/BrowserSurfacePanel";
 import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel";
 import { ExtensionToolApprovalCard } from "../surfaces/ExtensionToolApprovalCard";
+import { WorkPlanRequestCard } from "../surfaces/WorkPlanRequestCard";
 import { listMobileThreadSurfaces } from "../surfaces/threadSurfacePresentation";
 import {
   MOBILE_COPY,
@@ -583,6 +584,16 @@ export function ThreadScreen(props: ThreadScreenProps) {
               )}
               {offlineDemo || transport === undefined ? null : (
                 <NativeHarnessSessionPanel threadId={selected.threadId} transport={transport} />
+              )}
+              {offlineDemo ||
+              transport === undefined ||
+              selected.mode !== "work" ||
+              work.thread === undefined ? null : (
+                <WorkPlanRequestCard
+                  projectId={String(work.thread.projectId)}
+                  threadId={String(work.thread.id)}
+                  transport={transport}
+                />
               )}
               {busy && chat.activeAttempt === undefined ? (
                 <ActivityIndicator color={colors.accent} />

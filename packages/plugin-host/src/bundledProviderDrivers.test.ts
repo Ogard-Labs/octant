@@ -37,6 +37,7 @@ const everyDriverKind = [
   "anthropic-compatible",
   "azure-foundry",
   "amazon-bedrock",
+  "acp-agent",
 ] as const satisfies ReadonlyArray<typeof ProviderDriverKind.Type>;
 
 describe("bundled provider-driver plugins", () => {
@@ -99,6 +100,7 @@ describe("bundled provider-driver plugins", () => {
       qwen: ["13", "14"],
       fx: ["14", "15"],
       "amazon-bedrock": ["19", "1a"],
+      "acp-agent": ["1a", "1b"],
     };
     for (const plugin of BUNDLED_PROVIDER_DRIVER_PLUGINS) {
       const [digestSeed, idSuffix] = seeds[plugin.driverKind as (typeof everyDriverKind)[number]];
@@ -167,7 +169,7 @@ describe("bundled provider-driver plugins", () => {
     expect(catalog.map((listing) => listing.entry.driverKind)).toEqual(
       BUNDLED_PROVIDER_DRIVER_PLUGINS.map((plugin) => plugin.driverKind),
     );
-    expect(catalog).toHaveLength(22);
+    expect(catalog).toHaveLength(23);
     for (const listing of catalog) {
       expect(listing.installed).toBe(true);
       expect(listing.trusted).toBe(true);

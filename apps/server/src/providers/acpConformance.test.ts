@@ -181,7 +181,8 @@ function createFixture(
     protocolVersion: 1,
     agentCapabilities: {
       loadSession: true,
-      promptCapabilities: { image: false, audio: false, embeddedContext: true },
+      // No image or embedded-context blocks, so native attachments stay unsupported.
+      promptCapabilities: { image: false, audio: false, embeddedContext: false },
       sessionCapabilities: { list: {}, resume: {} },
     },
     authMethods: [{ id: "provider-auth" }],

@@ -1727,6 +1727,69 @@ describe("provider registry contracts", () => {
     }
   });
 
+  it("refuses an added ACP agent that is on before it is installed, or a local one that carries an environment", () => {
+    const added = {
+      id: ids.instance,
+      displayName: "Cursor",
+      driverKind: "acp-agent",
+      configuration: {
+        kind: "acp-agent",
+        source: {
+          kind: "registry",
+          registryId: "cursor",
+          version: "2026.11.13",
+          distribution: "binary",
+        },
+        args: ["acp"],
+        install: {
+          executable: "/data/acp-agent-installs/cursor/dist-package/cursor-agent",
+          integrity: "unverified-download",
+        },
+        trusted: false,
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 3,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    } as const;
+    // On and untrusted is a state the host keeps after trust is taken back.
+    expect(decodeProviderInstance(added)).toEqual(added);
+    expect(decodeProviderInstanceConfigurationChanged({ instance: added })).toEqual({
+      instance: added,
+    });
+    const { install: _install, ...notInstalled } = added.configuration;
+    expect(() => decodeProviderInstance({ ...added, configuration: notInstalled })).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...added,
+        enabled: false,
+        configuration: { ...notInstalled, trusted: true },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...added,
+        configuration: {
+          kind: "acp-agent",
+          source: { kind: "local", command: "/opt/agent" },
+          args: [],
+          environment: { OPENAI_API_KEY: "sk-secret" },
+          install: { executable: "/opt/agent", integrity: "local-command" },
+          trusted: false,
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "add-acp-agent",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        source: { kind: "registry", registryId: "cursor", archive: "https://elsewhere.example/a" },
+      }),
+    ).toThrow();
+  });
+
   it("decodes an outside driver instance only with the exact package it binds", () => {
     const outside = {
       id: ids.instance,
