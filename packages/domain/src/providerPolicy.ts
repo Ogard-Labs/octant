@@ -698,8 +698,18 @@ export interface ClaudeConfigurationInput {
   readonly kind: ClaudeProviderConfiguration["kind"];
   readonly binaryPath: string;
   readonly authentication: ClaudeAuthentication;
+  readonly gatewayBaseUrl?: string | undefined;
   readonly configDirectory?: string | undefined;
   readonly accent?: ClaudeAccountAccent | undefined;
+}
+
+/**
+ * Whether a Claude account signs in with a credential the host keeps for it:
+ * an API key or a gateway token. Both live in the host credential store and
+ * reach the runtime only through the account's own launch environment.
+ */
+export function claudeAccountUsesStoredKey(authentication: ClaudeAuthentication): boolean {
+  return authentication !== "subscription";
 }
 
 /** Closed accent set mirrored from the contract so Settings can list it. */
@@ -731,7 +741,7 @@ export function assignedCodexHome(homeDirectory: string, instanceId: ProviderIns
 
 /**
  * The directory a Claude account launches with, or `undefined` for the host
- * profile. An API-key account always has its assigned leaf, including one
+ * profile. An API-key or gateway account always has its assigned leaf, including one
  * stored before accounts carried a directory: the probe, the launch, resume
  * lookup and usage history must all name the same folder for it.
  */
@@ -742,7 +752,7 @@ export function effectiveClaudeAccountConfigDirectory(
   if (instance.configuration.configDirectory !== undefined) {
     return instance.configuration.configDirectory;
   }
-  return instance.configuration.authentication === "api-key"
+  return claudeAccountUsesStoredKey(instance.configuration.authentication)
     ? assignedClaudeAccountConfigDirectory(homeDirectory, instance.id)
     : undefined;
 }
@@ -883,6 +893,52 @@ export function ollamaAddressWarning(baseUrl: string): string | undefined {
     : undefined;
 }
 
+/**
+ * A Claude gateway address: HTTPS anywhere, or plain HTTP on this computer or
+ * a private network, judged by the rule Ollama addresses follow so a token
+ * never crosses the internet in the clear. A gateway may serve the Anthropic
+ * API under a path, so a path is kept (less a trailing slash); credentials,
+ * a query, or a fragment are refused, since the address is not a secret.
+ */
+export function normalizeClaudeGatewayBaseUrl(baseUrl: string): string {
+  const normalized = baseUrl.trim();
+  if (normalized.includes("?") || normalized.includes("#")) {
+    reject("invalid-base-url", "Gateway address cannot include a query or fragment.");
+  }
+  let url: URL;
+  try {
+    url = new URL(normalized);
+  } catch {
+    return reject("invalid-base-url", "Gateway address is not a valid URL.");
+  }
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
+    url.username !== "" ||
+    url.password !== ""
+  ) {
+    reject(
+      "invalid-base-url",
+      "Gateway address must be an HTTP or HTTPS URL with no credentials in it.",
+    );
+  }
+  if (url.protocol === "http:" && ollamaAddressReach(url.hostname) === "public") {
+    reject(
+      "invalid-base-url",
+      "A gateway on a public address must use HTTPS; plain HTTP is allowed on this computer or a private network.",
+    );
+  }
+  return `${url.origin}${stripTrailingSlashes(url.pathname)}`;
+}
+
+/**
+ * The warning a Claude gateway address carries, or undefined: the same
+ * plain-HTTP-off-this-computer warning an Ollama address carries, since the
+ * token travels with every request.
+ */
+export function claudeGatewayAddressWarning(baseUrl: string): string | undefined {
+  return ollamaAddressWarning(baseUrl);
+}
+
 function normalizeOllamaConfiguration(
   configuration: OllamaConfigurationInput,
 ): OllamaProviderConfiguration {
@@ -912,9 +968,22 @@ function normalizeClaudeConfiguration(
 ): ClaudeProviderConfiguration {
   if (
     configuration.authentication !== "subscription" &&
-    configuration.authentication !== "api-key"
+    configuration.authentication !== "api-key" &&
+    configuration.authentication !== "gateway"
   ) {
-    reject("invalid-authentication", "Claude authentication must be subscription or api-key.");
+    reject(
+      "invalid-authentication",
+      "Claude authentication must be subscription, api-key, or gateway.",
+    );
+  }
+  let gatewayBaseUrl: string | undefined;
+  if (configuration.authentication === "gateway") {
+    if (configuration.gatewayBaseUrl === undefined || configuration.gatewayBaseUrl.trim() === "") {
+      return reject("invalid-base-url", "A gateway account needs the gateway's address.");
+    }
+    gatewayBaseUrl = normalizeClaudeGatewayBaseUrl(configuration.gatewayBaseUrl);
+  } else if (configuration.gatewayBaseUrl !== undefined) {
+    reject("invalid-base-url", "Only a gateway account has a gateway address.");
   }
   if (
     configuration.accent !== undefined &&
@@ -927,6 +996,7 @@ function normalizeClaudeConfiguration(
     kind: "claude-agent-sdk",
     binaryPath: normalizeBinaryPath(configuration.binaryPath),
     authentication: configuration.authentication,
+    ...(gatewayBaseUrl === undefined ? {} : { gatewayBaseUrl }),
     ...(configDirectory === undefined ? {} : { configDirectory }),
     ...(configuration.accent === undefined ? {} : { accent: configuration.accent }),
   };
@@ -1915,12 +1985,12 @@ export function changeCodexConfiguration(
 
 type ClaudeRuntimeInputs = Pick<
   ClaudeConfigurationInput,
-  "binaryPath" | "authentication" | "configDirectory"
+  "binaryPath" | "authentication" | "gatewayBaseUrl" | "configDirectory"
 >;
 
 /**
  * Whether a change leaves alone everything a Claude process reads: its binary,
- * its authentication, and its account directory. Only the accent is left, and
+ * its authentication and gateway, and its account directory. Only the accent is left, and
  * that is how Octant draws the account, so a running session is unaffected.
  */
 export function claudeChangeKeepsRuntime(
@@ -1930,6 +2000,7 @@ export function claudeChangeKeepsRuntime(
   return (
     current.binaryPath === next.binaryPath &&
     current.authentication === next.authentication &&
+    current.gatewayBaseUrl === next.gatewayBaseUrl &&
     current.configDirectory === next.configDirectory
   );
 }
@@ -1979,7 +2050,7 @@ export function setClaudeArtifactDelivery(
   if (input.enabled && current.configuration.authentication !== "subscription") {
     reject(
       "invalid-authentication",
-      "Claude artifacts need a claude.ai sign-in; an API-key account cannot publish them.",
+      "Claude artifacts need a claude.ai sign-in; an API-key or gateway account cannot publish them.",
     );
   }
   const { artifactDelivery: _previous, ...rest } = current.configuration;

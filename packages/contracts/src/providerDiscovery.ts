@@ -78,6 +78,21 @@ export const DiscoverySnapshot = Schema.Struct({
    * not current presence — `candidates` is the evidence a runtime is installed.
    */
   autoRegisteredInstanceIds: Schema.optional(Schema.Array(ProviderInstanceId)),
+  /**
+   * The Claude gateway this host's own environment names in
+   * `ANTHROPIC_BASE_URL`, offered to prefill a new gateway account's address.
+   * Only the address crosses, and only one the host would accept for a
+   * gateway account; a token never does. `tokenVariable` says whether
+   * `ANTHROPIC_AUTH_TOKEN` is set, so Settings can say a token is still to
+   * be entered. Absent when the variable is unset or not an address Octant
+   * accepts.
+   */
+  claudeHostGateway: Schema.optional(
+    Schema.Struct({
+      baseUrl: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
+      tokenVariable: Schema.Boolean,
+    }).annotations(strict),
+  ),
 }).annotations(strict);
 export type DiscoverySnapshot = typeof DiscoverySnapshot.Type;
 

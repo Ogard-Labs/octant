@@ -96,6 +96,7 @@ import {
 } from "./claudeEventMapper";
 import { CLAUDE_TASK_TOOLS, ClaudeTaskList, readClaudeStoredTaskList } from "./claudeTaskList";
 import {
+  claudeAccountUsesStoredKey,
   planReadOnlyToolServers,
   providerOwnMemoryLaunches,
   windowsProviderLaunch,
@@ -1352,6 +1353,8 @@ export interface ClaudeDriverOptions {
   readonly gitIdentity?: (checkoutRoot: string) => Promise<ClaudeGitIdentity>;
   readonly binaryPath: string;
   readonly authentication: ClaudeAuthentication;
+  /** A gateway account's address; its token comes from the credential broker. */
+  readonly gatewayBaseUrl?: string;
   /** Claude-owned directory for this account. */
   readonly configDirectory?: string;
   /**
@@ -2362,6 +2365,12 @@ function probeSdk(
   });
 }
 
+function storedKeyMissingMessage(options: ClaudeDriverOptions): string {
+  return options.authentication === "gateway"
+    ? "Store the gateway token for this Claude account."
+    : "Store an Anthropic API key for this Claude provider.";
+}
+
 function makeProbe(
   options: ClaudeDriverOptions,
   environmentFactory: ClaudeEnvironmentFactory,
@@ -2419,7 +2428,7 @@ function makeProbe(
               readiness: "unauthenticated",
               version,
               credentialStatus: "missing",
-              message: "Store an Anthropic API key for this Claude provider.",
+              message: storedKeyMissingMessage(options),
             },
             clock,
           );
@@ -2433,7 +2442,7 @@ function makeProbe(
                   readiness: "unauthenticated",
                   version,
                   credentialStatus: "missing",
-                  message: "Store an Anthropic API key for this Claude provider.",
+                  message: storedKeyMissingMessage(options),
                 }
               : {
                   readiness: "unavailable",
@@ -2448,6 +2457,7 @@ function makeProbe(
       }
       const sdkResult = yield* probeSdk(options, environmentFactory, {
         ...(apiKey === undefined ? {} : { apiKey }),
+        ...(options.gatewayBaseUrl === undefined ? {} : { gatewayBaseUrl: options.gatewayBaseUrl }),
         ...(options.configDirectory === undefined
           ? {}
           : { configDirectory: options.configDirectory }),
@@ -2469,7 +2479,7 @@ function makeProbe(
           {
             readiness: "incompatible",
             version,
-            ...(options.authentication === "api-key"
+            ...(claudeAccountUsesStoredKey(options.authentication)
               ? { credentialStatus: "stored" as const }
               : {}),
             message: sdkResult.message,
@@ -2486,7 +2496,9 @@ function makeProbe(
           compactAnnounced: sdkResult.compactAnnounced,
           commands: sdkResult.commands,
           hostTrafficDisabled,
-          ...(options.authentication === "api-key" ? { credentialStatus: "stored" as const } : {}),
+          ...(claudeAccountUsesStoredKey(options.authentication)
+            ? { credentialStatus: "stored" as const }
+            : {}),
         },
         clock,
       );
@@ -2508,7 +2520,7 @@ function makeClaudeContextFacts(
             failure("invalid-configuration", "Provider instance does not match driver."),
           );
         }
-        if (options.authentication === "api-key") {
+        if (claudeAccountUsesStoredKey(options.authentication)) {
           return yield* Effect.fail(failure("unsupported", "Plan limits do not apply."));
         }
         // This reading starts a `claude` process. That is worth it when a
@@ -3706,9 +3718,14 @@ function makeConnection(
       let scope: Scope.CloseableScope | undefined;
       let state: SessionState | undefined;
       try {
-        if (options.authentication === "api-key") {
+        if (claudeAccountUsesStoredKey(options.authentication)) {
           if (!(await runSetupEffect(brokerHas(options), signal))) {
-            throw failure("unauthenticated", "Claude API-key credential is missing.");
+            throw failure(
+              "unauthenticated",
+              options.authentication === "gateway"
+                ? "Claude gateway token is missing."
+                : "Claude API-key credential is missing.",
+            );
           }
           apiKey = await runSetupEffect(brokerResolve(options), signal);
         }
@@ -3738,6 +3755,9 @@ function makeConnection(
         const environment = await runSetupEffect(
           environmentFactory(options.authentication, {
             ...(apiKey !== undefined ? { apiKey } : {}),
+            ...(options.gatewayBaseUrl === undefined
+              ? {}
+              : { gatewayBaseUrl: options.gatewayBaseUrl }),
             ...(options.configDirectory === undefined
               ? {}
               : { configDirectory: options.configDirectory }),

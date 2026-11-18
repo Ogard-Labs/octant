@@ -315,6 +315,9 @@ export function makeProviderDriver(
         instanceId: instance.id,
         binaryPath: instance.configuration.binaryPath,
         authentication: instance.configuration.authentication,
+        ...(instance.configuration.gatewayBaseUrl === undefined
+          ? {}
+          : { gatewayBaseUrl: instance.configuration.gatewayBaseUrl }),
         ...(configDirectory === undefined ? {} : { configDirectory }),
         // Every Claude account's directory by the rule its launch uses, so a
         // thread moved between two of them can carry its session across.
@@ -350,7 +353,7 @@ export function makeProviderDriver(
           ? {}
           : { credentialResolver: options.credentialResolver }),
       });
-      // An API-key account has nothing to sign in. A subscription account signs
+      // An API-key or gateway account has nothing to sign in. A subscription account signs
       // in with its own `claude auth login`: an extra account under its
       // directory with inherited Claude credentials dropped, the implicit
       // first account as the person's own terminal would run it.

@@ -185,7 +185,9 @@ describe("installed Claude smoke bounds", () => {
   });
 });
 
-async function runInstalledClaudeSmoke(authentication: ClaudeAuthentication): Promise<void> {
+async function runInstalledClaudeSmoke(
+  authentication: Exclude<ClaudeAuthentication, "gateway">,
+): Promise<void> {
   const ids = identifiers[authentication];
   const harness = await createClaudeSmokeHarness(authentication, ids.instanceId);
   const { driver, projectRoot, stage } = harness;

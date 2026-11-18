@@ -63,6 +63,7 @@ import {
   createBflImageProvider,
   createIdeogramImageProvider,
   assignedClaudeAccountConfigDirectory,
+  claudeAccountUsesStoredKey,
   assignedCodexHome,
   changeCodexConfiguration,
   codexChangeKeepsRuntime,
@@ -966,13 +967,13 @@ export class ProviderService implements ProviderServiceApi {
               }
               case "create-claude-provider": {
                 // The host profile belongs to one subscription account. An
-                // API-key account never takes it, so one created first does
+                // API-key or gateway account never takes it, so one created first does
                 // not push the first subscription account onto a new leaf
                 // and a second sign-in.
                 const assignedDirectory =
                   command.configuration.configDirectory !== undefined
                     ? command.configuration.configDirectory
-                    : command.configuration.authentication === "api-key" ||
+                    : claudeAccountUsesStoredKey(command.configuration.authentication) ||
                         implicitClaudeAccountOwnerId(instances) !== undefined
                       ? assignedClaudeAccountConfigDirectory(homedir(), command.instanceId)
                       : undefined;
@@ -2364,7 +2365,7 @@ export class ProviderService implements ProviderServiceApi {
   ): ClaudeProviderConfiguration {
     if (configuration.configDirectory !== undefined) return configuration;
     if (current.configuration.configDirectory !== undefined) return configuration;
-    if (configuration.authentication === "api-key") {
+    if (claudeAccountUsesStoredKey(configuration.authentication)) {
       return {
         ...configuration,
         configDirectory: assignedClaudeAccountConfigDirectory(homedir(), current.id),
@@ -2583,7 +2584,9 @@ export class ProviderService implements ProviderServiceApi {
         instanceId: instance.id,
         readiness: "checking",
         processState: "stopped",
-        ...(authentication === "api-key" ? { credentialStatus: "missing" } : {}),
+        ...(authentication === "api-key" || authentication === "gateway"
+          ? { credentialStatus: "missing" }
+          : {}),
         models: [],
         capabilities: unavailableCapabilities,
         observedAt: decodeTimestamp(this.#clock()),
@@ -2779,6 +2782,11 @@ function credentialBinding(instance: ProviderInstance): string | undefined {
       const { baseUrl, key } = instance.configuration;
       return [baseUrl, key === undefined ? "no-key" : "key"].join("\n");
     }
+    case "claude":
+      // A gateway token is entered for one gateway: moving the address, or
+      // moving between a gateway and Anthropic's own API, must not send the
+      // stored token or key somewhere it was not entered for.
+      return instance.configuration.gatewayBaseUrl;
     case "bfl-image":
     case "ideogram-image":
       // Absent means the provider's own endpoint, so setting or clearing a
@@ -3086,7 +3094,7 @@ function effectiveClaudeAccountDirectories(
   if (instance.configuration.configDirectory !== undefined) {
     return [instance.configuration.configDirectory];
   }
-  if (instance.configuration.authentication === "api-key") {
+  if (claudeAccountUsesStoredKey(instance.configuration.authentication)) {
     return [assignedClaudeAccountConfigDirectory(homeDirectory, instance.id)];
   }
   if (claudeAccountNeedsOwnConfigDirectory(instances, instance)) {

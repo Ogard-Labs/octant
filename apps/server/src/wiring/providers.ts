@@ -237,6 +237,7 @@ import {
   appToolThreadLevel,
   accountKeepsOwnMemory,
   browserToolTransport,
+  claudeAccountUsesStoredKey,
   claudePlanUsageStateDirectory,
   defaultShellSettings,
   effectiveClaudeAccountConfigDirectory,
@@ -2330,7 +2331,8 @@ export function wireProviders(deps: ProvidersDependencies) {
           .filter((instance) => !isImageProfileDriverKind(instance.driverKind)),
       now: () => new Date().toISOString() as UtcTimestamp,
       unavailableReason: (instance) =>
-        instance.driverKind === "claude" && instance.configuration.authentication === "api-key"
+        instance.driverKind === "claude" &&
+        claudeAccountUsesStoredKey(instance.configuration.authentication)
           ? "plan-limits-do-not-apply"
           : unavailableLimitsReason(
               instance.driverKind,
@@ -2339,7 +2341,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       observe: async (instance, signal, { onDemand }) => {
         if (
           instance.driverKind === "claude" &&
-          instance.configuration.authentication === "api-key"
+          claudeAccountUsesStoredKey(instance.configuration.authentication)
         ) {
           return { source: "provider-runtime", unavailableReason: "plan-limits-do-not-apply" };
         }

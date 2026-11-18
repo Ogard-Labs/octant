@@ -44,7 +44,11 @@ import {
   ProviderClientFailure,
   type ProviderClient,
 } from "@octant/client-runtime/provider-client";
-import { isAcpAgentInstance, providerLatestVersionNpmPackage } from "@octant/domain";
+import {
+  claudeAccountUsesStoredKey,
+  isAcpAgentInstance,
+  providerLatestVersionNpmPackage,
+} from "@octant/domain";
 import { parseClaudeAccountAccent } from "./configuration/claudeAccountValues";
 import { runProviderOAuthCommand } from "./providerOAuthClient";
 import type { ProviderOAuthCommand } from "./ProviderOAuthSignIn";
@@ -1051,13 +1055,14 @@ export function useProviderController(options: ProviderControllerOptions) {
             }
             return false;
           }
-          if (
-            configuration.authentication === "api-key" &&
-            hostBridge !== undefined &&
-            credentialValue.length === 0
-          ) {
+          const usesKey = claudeAccountUsesStoredKey(configuration.authentication);
+          if (usesKey && hostBridge !== undefined && credentialValue.length === 0) {
             if (mounted.current) {
-              setMessage("Enter an Anthropic API key before creating this provider.");
+              setMessage(
+                configuration.authentication === "gateway"
+                  ? "Enter the gateway token before creating this account."
+                  : "Enter an Anthropic API key before creating this provider.",
+              );
             }
             return false;
           }
@@ -1077,12 +1082,12 @@ export function useProviderController(options: ProviderControllerOptions) {
               install,
             );
             created = true;
-            if (configuration.authentication === "api-key" && hostBridge !== undefined) {
+            if (usesKey && hostBridge !== undefined) {
               await hostBridge.addProviderApiKey(instanceId, credentialValue);
             }
             return true;
           } catch (error) {
-            if (configuration.authentication === "api-key" && created) {
+            if (usesKey && created) {
               if (mounted.current) {
                 setMessage(
                   storeFailureMessage(
@@ -1247,19 +1252,32 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           const previousAuthentication = instance.configuration.authentication;
           const nextAuthentication = configuration.authentication;
+          const previousUsesKey = claudeAccountUsesStoredKey(previousAuthentication);
+          const nextUsesKey = claudeAccountUsesStoredKey(nextAuthentication);
+          // The host forgets a stored key or token when the gateway it was
+          // entered for changes, including a move between a gateway and
+          // Anthropic's own API, so such a change needs a new one.
+          const credentialMoves =
+            configuration.gatewayBaseUrl !== instance.configuration.gatewayBaseUrl;
           if (
-            nextAuthentication === "api-key" &&
-            previousAuthentication === "subscription" &&
+            nextUsesKey &&
+            (!previousUsesKey || credentialMoves) &&
             credentialValue.length === 0
           ) {
             if (mounted.current) {
-              setMessage("Enter an Anthropic API key before switching authentication modes.");
+              setMessage(
+                nextAuthentication === "gateway"
+                  ? "Enter the gateway token before switching to this gateway."
+                  : "Enter an Anthropic API key before switching authentication modes.",
+              );
             }
             return false;
           }
-          const mustClear =
-            previousAuthentication === "api-key" && nextAuthentication === "subscription";
-          const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
+          const mustClear = previousUsesKey && !nextUsesKey;
+          const mustSet = nextUsesKey && credentialValue.length > 0;
+          // A key stored before a change that moves it would be the one the
+          // host deletes, so it is stored after that change instead.
+          const setAfterChange = mustSet && credentialMoves;
           if ((mustClear || mustSet) && hostBridge === undefined) {
             if (mounted.current) {
               setMessage(BROWSER_CANNOT_SAVE_KEYS);
@@ -1276,7 +1294,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           // while the instance has an active session, and clearing first left
           // the instance still configured for API-key authentication with no
           // key to connect with and nothing able to put it back.
-          if (mustSet && bridge !== undefined) {
+          if (mustSet && !setAfterChange && bridge !== undefined) {
             try {
               await bridge.addProviderApiKey(instanceId, credentialValue);
             } catch (storeError) {
@@ -1313,9 +1331,24 @@ export function useProviderController(options: ProviderControllerOptions) {
                 .clearProviderCredential(instanceId)
                 .catch(() => void credentialCleanupRequired.current.add(instanceId));
             }
+            if (setAfterChange && bridge !== undefined) {
+              try {
+                await bridge.addProviderApiKey(instanceId, credentialValue);
+              } catch (storeError) {
+                if (mounted.current) {
+                  setMessage(
+                    storeFailureMessage(
+                      "The account was saved, but its credential could not be stored. Add it, then check the connection.",
+                      storeError,
+                    ),
+                  );
+                }
+                return false;
+              }
+            }
             return true;
           } catch (error) {
-            if (mustSet && previousAuthentication === "subscription" && bridge !== undefined) {
+            if (mustSet && !setAfterChange && !previousUsesKey && bridge !== undefined) {
               try {
                 await bridge.clearProviderCredential(instanceId);
               } catch {

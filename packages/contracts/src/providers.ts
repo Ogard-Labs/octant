@@ -890,7 +890,13 @@ export const IdeogramImageProviderConfiguration = Schema.Struct({
   .pipe(Schema.filter(imageAllowlistContainsDefault))
   .annotations(strict);
 export type IdeogramImageProviderConfiguration = typeof IdeogramImageProviderConfiguration.Type;
-export const ClaudeAuthentication = Schema.Literal("subscription", "api-key");
+/**
+ * How a Claude account signs in: its own claude.ai login, an Anthropic API
+ * key, or a gateway (an address the runtime calls as `ANTHROPIC_BASE_URL`
+ * with a token sent as `ANTHROPIC_AUTH_TOKEN`). The key and the gateway
+ * token live in the host credential store, never in this configuration.
+ */
+export const ClaudeAuthentication = Schema.Literal("subscription", "api-key", "gateway");
 export type ClaudeAuthentication = typeof ClaudeAuthentication.Type;
 
 export const ClaudeResumeIdentityRecord = Schema.Struct({
@@ -966,6 +972,12 @@ export const ClaudeProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("claude-agent-sdk"),
   binaryPath: Schema.NonEmptyTrimmedString,
   authentication: ClaudeAuthentication,
+  /**
+   * The gateway a `gateway` account's runtime calls instead of Anthropic's
+   * own API. Present exactly when the account signs in through a gateway;
+   * the host checks its scheme and reach when it is saved.
+   */
+  gatewayBaseUrl: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048))),
   /** Claude-owned directory for this account. Absent uses Claude's default. */
   configDirectory: Schema.optional(ClaudeConfigDirectory),
   accent: Schema.optional(ClaudeAccountAccent),
@@ -977,7 +989,15 @@ export const ClaudeProviderConfiguration = Schema.Struct({
    * new account never carries it.
    */
   artifactDelivery: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+})
+  .pipe(
+    Schema.filter(
+      (configuration) =>
+        (configuration.authentication === "gateway") ===
+        (configuration.gatewayBaseUrl !== undefined),
+    ),
+  )
+  .annotations(strict);
 export type ClaudeProviderConfiguration = typeof ClaudeProviderConfiguration.Type;
 
 const ProviderInstanceFields = {

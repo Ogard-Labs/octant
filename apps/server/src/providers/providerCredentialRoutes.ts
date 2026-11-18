@@ -485,11 +485,18 @@ export function resolveInstance(
   return { kind: "not-found" };
 }
 
-/** Only an instance that sends an API key or bearer token has a key to store. */
+/**
+ * Only an instance that sends an API key, a bearer token, or (a Claude
+ * gateway account) a gateway token has a key to store.
+ */
 export function usesStoredKey(instance: ProviderInstance): boolean {
   const configuration: object = instance.configuration;
   if (!("authentication" in configuration)) return false;
-  return configuration.authentication === "api-key" || configuration.authentication === "bearer";
+  return (
+    configuration.authentication === "api-key" ||
+    configuration.authentication === "bearer" ||
+    (instance.driverKind === "claude" && configuration.authentication === "gateway")
+  );
 }
 
 function answer(

@@ -51,7 +51,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 16        | 9       | 6            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 9         | 6       | 3            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 12        | 5       | 7            | 0                   |
-| [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 2       | 3            | 0                   |
+| [Credentials and sign-in](#credentials-and-sign-in)                                   | 6         | 3       | 3            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 5         | 5       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
 | [Workspace](#workspace)                                                               | 19        | 14      | 5            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **281**   | **165** | **111**      | **5**               |
+| **All areas**                                                                         | **282**   | **166** | **111**      | **5**               |
 
 ## Principles and hard lines
 
@@ -2576,6 +2576,18 @@ Plan limits for providers that report them only from an account endpoint are rea
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Account usage endpoints](../architecture.md#security-and-authority).
 
+### Claude gateway accounts
+
+A Claude account may sign in through a gateway: a gateway address the account keeps in its configuration and a token kept in the host credential store exactly as an API key is (maintainer decision, 2026-11-18). Its launch gets `ANTHROPIC_BASE_URL` set to that address and `ANTHROPIC_AUTH_TOKEN` set to that token, in its own account directory, with every other ambient Anthropic and Claude credential stripped.
+
+- The token is stored, replaced and removed through the same broker and routes as an API key (desktop renderer over native IPC, `octant provider key set`, or a paired device); a browser without credential authority creates the account without its token, gets the host-terminal guidance, and has a typed token refused before the account is created.
+- The address must be HTTPS, or plain HTTP only on this computer or a private network under the Ollama address rule with the same unencrypted-traffic warning; it carries no credentials, query or fragment. Changing it, or moving between a gateway and Anthropic's own API, deletes the stored token or key.
+- Other accounts are untouched: no account receives another's address or token, and Octant never rotates, fails over or balances between accounts. Credentials never appear in process arguments.
+- Settings offers the host environment's `ANTHROPIC_BASE_URL` as a prefill for the address only when the person chooses it; the host never sends a token value, only whether `ANTHROPIC_AUTH_TOKEN` is set.
+- The connection check reads the gateway's models as an API-key account's check reads Anthropic's; Claude artifacts and plan limits are not offered, as for an API-key account.
+
+Status: Built. Since: 2026-11-18. Detail: [Model endpoints: Claude gateway accounts](model-endpoints.md#claude-gateway-accounts).
+
 ### Artifact replica membership
 
 Each artifact replica entry is signed by a per-host device signing key, and membership is derived from signed approvals chained back to a founder the host pinned.
@@ -3419,7 +3431,7 @@ Status: Built. Since: —. Detail: [Provider runtimes: key provider sandbox](pro
 
 A key provider's artifact publishing is off for every account until the person enables it on the host, and Canvas stays the default. The launch lifts exactly one telemetry guard, only for the sessions that need it.
 
-- The switch is per account, changed from the host's own window or a paired device (maintainer decision, 2026-11-12; not built yet: today only from the host's own window), and refused for API-key accounts and for hosts that export their own telemetry opt-out.
+- The switch is per account, changed from the host's own window or a paired device (maintainer decision, 2026-11-12; not built yet: today only from the host's own window), and refused for API-key and gateway accounts and for hosts that export their own telemetry opt-out.
 - Enabling shows a confirmation that says it also turns on the provider's usage telemetry; error reports and conversation uploads stay off.
 - The launch offers the tool only in a Work or Code session outside Plan, on a subscription sign-in, for a thread that chose it. Every other launch keeps the full guard set.
 - The person's own opt-out always wins over the setting, and a host-level umbrella opt-out is never removed.

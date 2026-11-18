@@ -11,7 +11,11 @@ import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { moveWithinRadioGroup } from "../../ui/base/radioGroupKeys";
-import { ClaudeAccountAccentPicker } from "../configuration/ClaudeAccountFields";
+import { normalizeClaudeGatewayBaseUrl } from "@octant/domain";
+import {
+  ClaudeAccountAccentPicker,
+  ClaudeGatewayAddressField,
+} from "../configuration/ClaudeAccountFields";
 import { claudeConfigurationFromFields } from "../configuration/claudeAccountValues";
 import type { ProviderCreateProviderType } from "../configuration/ProviderCreateForm";
 import { ProviderGlyph } from "../ProviderGlyph";
@@ -83,6 +87,7 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
   );
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [accent, setAccent] = useState<ClaudeAccountAccent | "">("");
+  const [gatewayAddress, setGatewayAddress] = useState("");
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const [creating, setCreating] = useState(false);
   const knownIds = useRef<ReadonlySet<string>>(new Set());
@@ -112,6 +117,12 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
   const detected = detectedBinaryPath(type, props.instances, props.discoverySnapshot);
   const binary = binaryEdit ?? detected ?? "";
   const hasAccount = type === "claude" || type === "codex";
+  const gateway = type === "claude" && choice?.id === "gateway";
+  // A Claude profile may be added from a browser without its key or token;
+  // the person then stores it on the host (Providers: Claude API-key
+  // profiles on a headless host).
+  const claudeKeyLater =
+    type === "claude" && choice?.needsKey === true && !props.credentialManagementAvailable;
   const shownName = nameEdited ? name : suggestedProviderName(type, props.instances);
   const selectedCard = cards.find((card) => card.type === type);
   const stepIndex = WIZARD_STEPS.indexOf(step);
@@ -120,7 +131,15 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
     if (target === "provider" && selectedCard?.unavailable !== undefined) {
       return selectedCard.unavailable;
     }
-    if (target === "sign-in" && choice?.needsKey === true) {
+    if (target === "sign-in" && gateway) {
+      if (gatewayAddress.trim() === "") return "Enter the gateway's address.";
+      try {
+        normalizeClaudeGatewayBaseUrl(gatewayAddress);
+      } catch (refusal) {
+        return refusal instanceof Error ? refusal.message : "Gateway address is not valid.";
+      }
+    }
+    if (target === "sign-in" && choice?.needsKey === true && !claudeKeyLater) {
       if (!props.credentialManagementAvailable) {
         return `${providerName} needs an API key, and this browser cannot store one. Choose another sign-in or add it in the Octant desktop app.`;
       }
@@ -165,15 +184,16 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
       operation = props.onCreate(type, trimmedName, binary, ...(accent === "" ? [] : [accent]));
     } else if (type === "claude") {
       const entered = transientCredential(credentialInput.current);
-      const apiKey = authentication.claude === "api-key";
+      const storesKey = choice?.needsKey === true;
       operation = props.onCreateClaude(
         trimmedName,
         claudeConfigurationFromFields({
           binaryPath: binary,
           authentication: authentication.claude ?? "subscription",
+          gatewayBaseUrl: gatewayAddress,
           accent,
         }),
-        apiKey ? entered : emptyTransientCredential(entered),
+        storesKey ? entered : emptyTransientCredential(entered),
       );
     } else if (isAcpAgentKind(type)) {
       const entered = transientCredential(credentialInput.current);
@@ -315,12 +335,27 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
               </OctantButton>
             ))}
           </div>
+          {gateway ? (
+            <div className="add-provider-wizard__field">
+              <ClaudeGatewayAddressField
+                id="add-provider-wizard-gateway-address"
+                onChange={(value) => {
+                  setGatewayAddress(value);
+                  setProblem(undefined);
+                }}
+                value={gatewayAddress}
+                {...(props.discoverySnapshot?.claudeHostGateway === undefined
+                  ? {}
+                  : { hostGateway: props.discoverySnapshot.claudeHostGateway })}
+              />
+            </div>
+          ) : null}
           {/* Mounted for every step so a typed key survives Back and Next; it
               is read from the field only when the account is created. */}
           <label className="add-provider-wizard__field" hidden={choice?.needsKey !== true}>
-            <span>{choice?.label ?? "API key"}</span>
+            <span>{choice?.keyLabel ?? choice?.label ?? "API key"}</span>
             <OctantInput
-              aria-label={choice?.label ?? "API key"}
+              aria-label={choice?.keyLabel ?? choice?.label ?? "API key"}
               autoComplete="new-password"
               disabled={!props.credentialManagementAvailable}
               ref={credentialInput}
@@ -328,7 +363,14 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
               type="password"
             />
           </label>
-          {choice?.needsKey === true && !props.credentialManagementAvailable ? (
+          {claudeKeyLater ? (
+            <p className="add-provider-wizard__hint">
+              This browser cannot save keys, so the account is added without one. Then, on the host,
+              run <code>octant provider key set &quot;Profile name&quot;</code> with the
+              account&apos;s exact name, or open the account in Octant desktop to add it, and check
+              the connection.
+            </p>
+          ) : choice?.needsKey === true && !props.credentialManagementAvailable ? (
             <p className="add-provider-wizard__hint">
               This browser cannot store API keys. Add the account in the Octant desktop app, or
               choose another sign-in.

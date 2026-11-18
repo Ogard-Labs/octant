@@ -17,7 +17,10 @@ export interface ClaudeEnvironmentScope {
 }
 
 export interface ClaudeEnvironmentScopeOptions {
+  /** The broker-resolved credential: an API key, or a gateway account's token. */
   readonly apiKey?: string;
+  /** A gateway account's address. */
+  readonly gatewayBaseUrl?: string;
   readonly hostEnvironment?: NodeJS.ProcessEnv;
   /** Claude-owned directory for this account. Isolated launches never inherit host Claude dirs. */
   readonly configDirectory?: string;
@@ -27,6 +30,7 @@ export interface ClaudeEnvironmentScopeOptions {
 
 interface ClaudeEnvironmentOverrides {
   readonly apiKey?: string;
+  readonly gatewayBaseUrl?: string;
   readonly configDirectory?: string;
   readonly strict?: boolean;
 }
@@ -106,6 +110,9 @@ export function sanitizeClaudeEnvironment(
       configDirectory: overrides.configDirectory,
       authentication,
       ...(overrides.apiKey === undefined ? {} : { apiKey: overrides.apiKey }),
+      ...(overrides.gatewayBaseUrl === undefined
+        ? {}
+        : { gatewayBaseUrl: overrides.gatewayBaseUrl }),
       ...(overrides.strict === false ? { strict: false } : {}),
     });
     Object.assign(environment, packagedSmokeObserverEnvironment(hostEnvironment));
@@ -134,7 +141,7 @@ export function sanitizeClaudeEnvironment(
     if (hostEnvironment.CLAUDE_SECURESTORAGE_CONFIG_DIR !== undefined) {
       environment.CLAUDE_SECURESTORAGE_CONFIG_DIR = hostEnvironment.CLAUDE_SECURESTORAGE_CONFIG_DIR;
     }
-  } else if (overrides.apiKey !== undefined) {
+  } else if (authentication === "api-key" && overrides.apiKey !== undefined) {
     environment.ANTHROPIC_API_KEY = overrides.apiKey;
   }
 
@@ -161,16 +168,24 @@ export function makeClaudeEnvironmentScope(
   const configDirectory = options.configDirectory;
 
   if (configDirectory !== undefined) {
-    if (authentication === "api-key") {
+    if (authentication === "api-key" || authentication === "gateway") {
       if (options.apiKey === undefined || options.apiKey.trim().length === 0) {
         return Effect.fail(
           failure(
             "invalid-configuration",
-            "Claude API-key authentication requires a resolved credential.",
+            authentication === "gateway"
+              ? "Claude gateway authentication requires a resolved token."
+              : "Claude API-key authentication requires a resolved credential.",
           ),
         );
       }
+      if (authentication === "gateway" && options.gatewayBaseUrl === undefined) {
+        return Effect.fail(
+          failure("invalid-configuration", "Claude gateway authentication requires an address."),
+        );
+      }
       const apiKey = options.apiKey;
+      const gatewayBaseUrl = options.gatewayBaseUrl;
       return Effect.acquireRelease(
         Effect.tryPromise({
           try: async () => {
@@ -179,6 +194,9 @@ export function makeClaudeEnvironmentScope(
               configDirectory,
               environment: sanitizeClaudeEnvironment(authentication, hostEnvironment, {
                 apiKey,
+                ...(authentication === "gateway" && gatewayBaseUrl !== undefined
+                  ? { gatewayBaseUrl }
+                  : {}),
                 configDirectory,
                 ...(options.strict === false ? { strict: false } : {}),
               }),
@@ -190,6 +208,7 @@ export function makeClaudeEnvironmentScope(
         ({ environment }) =>
           Effect.sync(() => {
             delete environment.ANTHROPIC_API_KEY;
+            delete environment.ANTHROPIC_AUTH_TOKEN;
           }),
       );
     }
@@ -226,14 +245,18 @@ export function makeClaudeEnvironmentScope(
     return Effect.fail(
       failure(
         "invalid-configuration",
-        "Claude API-key authentication requires a resolved credential.",
+        authentication === "gateway"
+          ? "Claude gateway authentication requires a resolved token."
+          : "Claude API-key authentication requires a resolved credential.",
       ),
     );
   }
   return Effect.fail(
     failure(
       "invalid-configuration",
-      "Claude API-key authentication requires an assigned account directory.",
+      authentication === "gateway"
+        ? "Claude gateway authentication requires an assigned account directory."
+        : "Claude API-key authentication requires an assigned account directory.",
     ),
   );
 }
