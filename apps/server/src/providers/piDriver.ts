@@ -405,7 +405,14 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
         return result;
       });
     },
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], sandboxPolicy }) => {
+    acquire: ({
+      instanceId,
+      projectRoot,
+      mode,
+      extraFolders = [],
+      attachmentsFolder,
+      sandboxPolicy,
+    }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
@@ -416,8 +423,15 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
           failure("invalid-configuration", "Pi requires an explicit product mode."),
         );
       }
+      // Pi's prompt carries images alone, so a Work or Code turn names any
+      // other attached file by its path in this folder, which Pi reads and
+      // never writes. Chat has no folder, so it is granted none.
+      const readOnlyFolders =
+        attachmentsFolder === undefined || mode === "chat" ? [] : [attachmentsFolder];
       if (
-        [projectRoot, ...extraFolders].some((root) => !isAbsolute(root) || resolve(root) !== root)
+        [projectRoot, ...extraFolders, ...readOnlyFolders].some(
+          (root) => !isAbsolute(root) || resolve(root) !== root,
+        )
       ) {
         return Effect.fail(
           failure(
@@ -430,6 +444,7 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
         { ...options, ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }) },
         projectRoot,
         mode === "chat" ? [] : extraFolders,
+        readOnlyFolders,
         mode,
         resumeIdentities,
         {
@@ -454,6 +469,8 @@ function makeConnection(
   options: PiDriverOptions,
   projectRoot: string,
   extraFolders: ReadonlyArray<string>,
+  /** Folders Pi reads and never writes: the thread's attachments folder. */
+  readOnlyFolders: ReadonlyArray<string>,
   mode: PiSessionMode,
   resumeIdentities: Map<string, ResumeIdentity>,
   factories: {
@@ -893,6 +910,7 @@ function makeConnection(
             options.piHome,
             projectRoot,
             extraFolders,
+            readOnlyFolders,
             mode,
             input.modelId,
             input.executionPolicy,
@@ -971,6 +989,7 @@ function makeConnection(
                     binaryPath: options.binaryPath,
                     root: mode === "chat" ? options.piHome : projectRoot,
                     ...(extraFolders.length === 0 ? {} : { extraFolders }),
+                    ...(readOnlyFolders.length === 0 ? {} : { readOnlyFolders }),
                     piHome: options.piHome,
                     sessionDirectory: join(options.piHome, "sessions"),
                     sessionId: input.sessionId,

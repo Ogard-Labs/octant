@@ -14950,17 +14950,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     runtime, so on Linux a Plan command could read the account's sign-in and
     send it anywhere the runtime may reach. Building it needs a nested capsule
     for the shell alone, or the maintainer's acceptance of that reach.
-  - **Files of any kind as attachments** (designed, not built). A person may
-    attach any file in every mode. Octant keeps it in an Octant-owned
-    attachments folder per thread under the host's data directory, never
-    inside the Project, journaled like an image attachment and under the same
-    size and count limits, and grants the session read access to that one
-    folder at every level, Plan and Chat included, read-only. A provider that
-    takes the file natively (a PDF where its API takes one, OpenCode's PDF
-    capability) gets it natively; any other gets the file's path in the
-    message and reads it with its own tools. The composer accepts any file
-    by choosing or dropping it and shows it as an attachment chip. Until
-    built, attachments are images only.
+  - **Files of any kind as attachments** (built in every mode; the rules
+    are in the Plan and Chat tool parity entry that follows).
 
   Rationale: Plan's and Chat's limits are what the person relies on, not
   the absence of a tool; each of these keeps the limit at the boundary that
@@ -15035,34 +15026,70 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     nested user namespaces off) offers Plan no Bash tool, and a capsule that
     fails to build fails its command; nothing runs in the runtime's capsule
     instead.
-  - **Files of any kind as attachments** (built for Work and Code; Chat
-    designed, not built). A person may attach any file in every mode. Octant
-    keeps it in an Octant-owned attachments folder per thread under the
-    host's data directory (`code-threads/<thread>`, `work-threads/<thread>`),
-    never inside the Project, journaled like an image attachment and under
-    the same size and count limits, and grants the session read access to
-    that one folder at every level, Plan included, read-only: Claude Code's
-    command sandbox, its Plan confinement and the Linux Plan shell capsule
-    bind it read-only and its gate reads it unasked and refuses every file
-    write into it; Codex's and OpenCode's launch confinement bind it
-    read-only and OpenCode's rules allow reading it and deny edits there. At
-    Full access nothing is sandboxed, so only the gate's refusal of file
-    tools holds there. An image goes to a model that reads images as before;
-    a provider that takes the file natively gets it natively (a PDF to
-    OpenCode where its model reads documents); any other file is named in
-    the message by a path in that folder, a second name for the verified
-    file under its own name, and the agent reads it with its own tools. The
-    Work and Code composers and a paired phone accept any file by choosing or
-    dropping it and show it as an attachment chip; a paired device's upload
-    of any `type/subtype` is admitted on those routes. The folder is made
-    before the runtime launches, so a runtime started for a turn with no
-    file, which a later turn may reuse, already binds it. A thread in a
-    server Project works with the server's own file tools and this host's
-    folder is not there, and no transfer to the server exists, so a turn
-    carrying a file it would name by path is refused before it is accepted,
-    with a sentence saying to attach images or copy the file to the server;
-    images and natively taken files still go. Not built: Chat keeps its
-    image, text and PDF types.
+  - **Files of any kind as attachments** (built in every mode). A person may
+    attach any file in every mode, from the web composers and a paired
+    phone, under the existing size and count limits.
+    - **Work and Code.** Octant keeps the file in an Octant-owned
+      attachments folder per thread under the host's data directory
+      (`code-threads/<thread>`, `work-threads/<thread>`), never inside the
+      Project, journaled like an image attachment, and grants the session
+      read access to that one folder at every level, Plan included,
+      read-only: Claude Code's command sandbox, its Plan confinement and the
+      Linux Plan shell capsule bind it read-only and its gate reads it
+      unasked and refuses every file write into it; Codex's, OpenCode's,
+      Pi's and every ACP agent's launch confinement bind it read-only and
+      OpenCode's rules allow reading it and deny edits there. At Full access
+      nothing is sandboxed, so only the gate's refusal of file tools holds
+      there. An image goes to a model that reads images as before; a provider
+      that takes the file natively gets it natively (a PDF to OpenCode where
+      its model reads documents; a document to an ACP agent that advertised
+      embedded context, as an embedded `resource` block); any other file is
+      named in the message by a path in that folder, a second name for the
+      verified file under its own name, and the agent reads it with its own
+      tools. The folder is made before the runtime launches, so a runtime
+      started for a turn with no file, which a later turn may reuse, already
+      binds it.
+    - **Server Projects.** A Work or Code thread in a server Project works
+      with the server's own file tools, so a file it would name by path is
+      first copied over the Project's own SSH connection into the thread's
+      attachments folder on the server,
+      `<home>/.octant/thread-attachments/<thread>/<attachment>/<name>`,
+      outside every Project folder, made read-only there, and checked by its
+      SHA-256 against the journaled digest; the turn names that path. The
+      thread's server file tools read that one folder and write nowhere in
+      it, and another thread's tools do not read it, even through a Project
+      folder that holds the login's home. The copy is made before the turn's
+      start is journaled, and a copy that fails refuses the turn before it is
+      accepted, with a sentence saying so;
+      images and natively taken files go as before. Not built: removing the
+      server copies when the thread is deleted or purged.
+    - **Chat.** Chat has no folder, so no file is named by a path. A file the
+      provider and model take natively goes natively; an image goes to a
+      model that reads images or to Sees images as before; any other file
+      Octant recognizes as a Word, PowerPoint or Excel file or a PDF goes in
+      as the text Octant's own read takes out of it, under the read's limits
+      (a PDF whose bytes happen to be UTF-8 is still read out, never sent as
+      its raw syntax); any other file whose bytes are UTF-8 text, whatever its
+      type, goes in the turn as its text, fenced and marked as the file's
+      content rather than the person's words. The
+      attached text a turn carries is bounded (400,000 characters), and a turn
+      over it is refused rather than cut short. Any other file (an archive,
+      a binary) is refused before the turn is accepted, naming a Work or Code
+      thread as where it can go, and the composer refuses it when it is
+      chosen. The file stays on the turn for the record; as with an image sent
+      natively, its text reaches later turns where the provider keeps its own
+      session, and a host-built history carries only the person's message.
+      Rationale: a read-only tool scoped to the one attachment was the other
+      design. It changes the session's tool catalog on the turn a file
+      arrives, which a resumed native session refuses, it needs app-managed
+      tools that many Chat providers lack, and for a binary it would hand the
+      model bytes it cannot use without the shell Chat withholds; text and
+      document extraction cover what a model can read, and the rest belongs
+      where the agent has a folder.
+      The composers accept any file by choosing or dropping it and show it as
+      an attachment chip; a paired device's upload of any `type/subtype` is
+      admitted on every mode's route. Chat serves an attachment back as its own
+      type only for the types a model takes natively, and as bytes otherwise.
 
   Rationale: Plan's and Chat's limits are what the person relies on, not
   the absence of a tool; each of these keeps the limit at the boundary that

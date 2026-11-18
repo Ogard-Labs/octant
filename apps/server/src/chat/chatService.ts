@@ -279,6 +279,7 @@ import type { ReviewedModelManifest } from "../providers/reviewedModelManifest";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { createDiagnosticsFailureIncidentEvent } from "../diagnosticsExportService";
 import { ChatAttachmentStore } from "./chatAttachmentStore";
+import { chatAttachedFiles } from "./chatAttachedFiles";
 import { ChatScratchStore } from "./chatScratchStore";
 import { ChatTurnRunner, type AppManagedToolSet } from "./chatTurnRunner";
 import { createWebSearchTools } from "./research/webSearchTools";
@@ -608,6 +609,11 @@ interface PreparedChatTurn {
   readonly describedImages?: ChatAttempt["describedImages"];
   /** The words the model gets for those images, sent with the person's message. */
   readonly describedContext?: ReadonlyArray<string>;
+  /**
+   * The text of attached files the model does not take natively, sent with
+   * the person's message because Chat has no folder to name a file in.
+   */
+  readonly attachedTextContext?: ReadonlyArray<string>;
   /**
    * The words as content rows, written in the same journal transaction as the
    * attempt that names them, so a send refused before that leaves none behind.
@@ -4865,7 +4871,22 @@ export class ChatService {
     const previousTurn =
       sinceRewind?.turn ?? (rewoundTail && keptTurns.length === 0 ? undefined : tailTurn);
     const previous = sinceRewind?.attempt ?? previousTurn?.attempts.at(-1);
-    let attachments = await this.#loadFinalizedAttachments(thread.id, attachmentIds);
+    const loadedAttachments = await this.#loadFinalizedAttachments(thread.id, attachmentIds);
+    // A file the model does not take natively goes in as its text when it is
+    // text, since Chat has no folder to name it in; any other is refused.
+    const turnModel = probe.models.find((model) => String(model.id) === String(thread.modelId));
+    const attachedFiles = chatAttachedFiles(loadedAttachments, (mediaType) => {
+      const modality = attachmentMediaTypeToModality(mediaType);
+      return (
+        probe.capabilities.nativeAttachments === "supported" &&
+        modality !== undefined &&
+        turnModel?.inputModalities.includes(modality) === true
+      );
+    });
+    if (attachedFiles.status === "refused") {
+      throw new ChatServiceError({ category: "unsupported", message: attachedFiles.message });
+    }
+    let attachments = attachedFiles.attachments;
     // A model that cannot read images gets the words Sees images writes for
     // each one; the images stay on the turn for the record. With no model to
     // describe them the turn is refused rather than sent without them.
@@ -4878,8 +4899,9 @@ export class ChatService {
         executionContext?.imagesCurrent?.() !== false,
     );
     if (described !== undefined) attachments = [];
-    const promptForModel =
-      described === undefined ? prompt : [...described.texts, prompt].join("\n\n");
+    const promptForModel = [...(described?.texts ?? []), ...attachedFiles.texts, prompt].join(
+      "\n\n",
+    );
     const researchRoute = this.#resolveResearchRoute(thread, settings, probe);
     this.#assertResearchAvailable(thread, researchRoute);
     const carriesAppTools =
@@ -5262,6 +5284,7 @@ export class ChatService {
               describedContext: described.texts,
               describedContents: described.contents,
             }),
+        ...(attachedFiles.texts.length === 0 ? {} : { attachedTextContext: attachedFiles.texts }),
         ...(nativeSession === undefined ? {} : { nativeSession }),
         ...(handoff !== undefined
           ? { handoff: handoff.record }
@@ -7026,6 +7049,10 @@ export class ChatService {
                 // Planned with the person's message (it was sized with them),
                 // the words stand in for the images the model cannot read.
                 ...(input.prepared.describedContext ?? []).map((text) => ({
+                  kind: "user-message" as const,
+                  text,
+                })),
+                ...(input.prepared.attachedTextContext ?? []).map((text) => ({
                   kind: "user-message" as const,
                   text,
                 })),

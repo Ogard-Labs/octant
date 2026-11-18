@@ -1438,6 +1438,26 @@ describe("Pi provider driver", () => {
     await Effect.runPromise(Scope.close(scope, Exit.void));
   });
 
+  it("lets a Work or Code launch read the thread's attachments folder, and a Chat launch none", async () => {
+    const attachmentsFolder = "/data/work-threads/thread-1";
+    const launched = async (mode: "code" | "chat") => {
+      const { driver, starts } = fixture();
+      const scope = Effect.runSync(Scope.make());
+      const connection = await Effect.runPromise(
+        driver
+          .acquire({ instanceId, projectRoot: root, mode, attachmentsFolder })
+          .pipe(Scope.extend(scope)),
+      );
+      await Effect.runPromise(
+        connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      return starts.at(-1);
+    };
+    expect((await launched("code"))?.readOnlyFolders).toEqual([attachmentsFolder]);
+    expect((await launched("chat"))?.readOnlyFolders).toBeUndefined();
+  });
+
   it("fails an active turn exactly once when the owned Pi process disconnects", async () => {
     const client = new FakeClient();
     const processExit = deferredExit();

@@ -1894,8 +1894,11 @@ Octant's bridge, or one naming no extension, still fails it.
 
 Pi's prompt carries images: a model whose `input` in Pi's own model list
 names `image` takes image attachments, sent as the prompt's `images`, and the
-driver reports `nativeAttachments` supported when any listed model does. Any
-other attachment, and an image to a text-only model, is refused. App-managed tools are reported only for the releases whose
+driver reports `nativeAttachments` supported when any listed model does. In
+Work and Code any other file is named by its path in the thread's attachments
+folder, which Pi's launch confinement reads and never writes, at every level;
+in Chat it follows Chat's rule. An image to a text-only model is refused unless
+Sees images describes it. App-managed tools are reported only for the releases whose
 tool attestation, approval bridge, and confinement Octant verified: 0.85.1 and
 every release from 1.1.0 whose probe attests the tool bridge. A newer Pi
 therefore needs no Octant release; a release below 1.1.0 (other than 0.85.1), or
@@ -2141,14 +2144,26 @@ Otherwise the session reports app-managed tools `unsupported`,
 and a session that is offered tools is refused before `session/new` rather
 than started without them.
 
-An ACP agent takes image attachments only where its own `initialize` result
-advertises `promptCapabilities.image` (maintainer decision, 2026-11-14). The
-probe then reports `nativeAttachments` supported and every listed model as
-taking text and images, since ACP states the capability for the agent and
-not per model; each image goes as an ACP `image` content block after the
-prompt text. Any other attachment, and any attachment to an agent that did
-not advertise images, is refused rather than dropped. Audio and embedded
-resources are not sent.
+An ACP agent takes a file natively only as a prompt block its own
+`initialize` result advertises (maintainer decision, 2026-11-14; any-type
+attachments, 2026-11-16). With `promptCapabilities.image` every listed model
+takes images, and each image goes as an ACP `image` content block after the
+prompt text. With `promptCapabilities.embeddedContext` every listed model
+takes documents (text, PDF and office files), and each goes as an embedded
+`resource` block: its text as `TextResourceContents` when its bytes are UTF-8
+text and it is not a PDF or office file, otherwise its bytes as
+`BlobResourceContents` (a PDF stays bytes even when they decode), under an
+`attachment:<id>/<name>` URI that names the attachment, not a path. ACP states
+these for the agent, not per model. The probe reports `nativeAttachments`
+supported when either is advertised. In Work and Code any other file (an
+archive, a binary, or a document to an agent without embedded context) is
+named by its path in the thread's attachments folder, which the agent's launch
+confinement reads and never writes, at every level; an ACP `resource_link`
+block is not sent, since the path in the message already reaches every agent.
+In Chat a file the agent does not take natively follows Chat's rule
+([Plan and Chat tool parity](../architecture.md#security-and-authority)). An
+attachment of a kind the agent advertised no block for is refused rather than
+dropped. Audio is not sent.
 
 ### Registry coverage
 
