@@ -186,8 +186,6 @@ export interface StartOctantServerOptions {
   readonly acpHome?: (kind: AcpProviderKind, instanceId: ProviderInstance["id"]) => string;
   readonly piProcess?: PiProcessPort;
   readonly piHome?: (instanceId: ProviderInstance["id"]) => string;
-  /** Octant's own state folder for one Codex account (not the account's Codex home). */
-  readonly codexStateHome?: (instanceId: ProviderInstance["id"]) => string;
   readonly ohMyPiProcess?: OhMyPiProcessPort;
   readonly ohMyPiHome?: (instanceId: ProviderInstance["id"]) => string;
   readonly claudeProcess?: ClaudeProcessPort;

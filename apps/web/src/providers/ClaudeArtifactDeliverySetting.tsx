@@ -97,7 +97,9 @@ function artifactsUnsupportedReason(
   observed: Pick<ProviderObservedState, "capabilities"> | undefined,
 ): string | undefined {
   if (instance.configuration.authentication !== "subscription") {
-    return "Claude artifacts need a claude.ai sign-in. An API-key account has no claude.ai account to publish to.";
+    return instance.configuration.authentication === "gateway"
+      ? "Claude artifacts need a claude.ai sign-in. A gateway account has no claude.ai account to publish to."
+      : "Claude artifacts need a claude.ai sign-in. An API-key account has no claude.ai account to publish to.";
   }
   if (observed?.capabilities.nativeArtifacts?.unsupportedReason === "host-traffic-disabled") {
     return "This computer’s own telemetry opt-out (CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, DISABLE_TELEMETRY or DO_NOT_TRACK) keeps Claude Code’s telemetry and Claude artifacts off.";

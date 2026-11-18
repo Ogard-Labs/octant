@@ -768,6 +768,23 @@ describe("Claude execution policy", () => {
     }
   });
 
+  it("starts a Chat session on Windows with no tool that reads a folder or runs a command", () => {
+    for (const policy of ["approval-gated", "auto-accept-edits", "full-access", "plan"] as const) {
+      const chat = claudeExecutionOptions(policy, false, "chat", "win32", false);
+      expect(chat.fullToolSet).toBe(false);
+      for (const tool of ["Read", "Grep", "Glob", "LS", "Edit", "Write", "Bash", "NotebookEdit"])
+        expect(chat.tools).not.toContain(tool);
+    }
+    expect(claudeExecutionOptions("approval-gated", false, "chat", "win32", false).tools).toEqual([
+      "AskUserQuestion",
+      "TodoWrite",
+    ]);
+    // Work and Code keep their tools on Windows, held by Claude's own modes.
+    expect(claudeExecutionOptions("approval-gated", false, "code", "win32", false).tools).toContain(
+      "Bash",
+    );
+  });
+
   it("maps every Octant policy to the exact Claude permission options", () => {
     expect(claudeExecutionOptions("full-access", false, "work")).toEqual({
       permissionMode: "bypassPermissions",
@@ -1635,6 +1652,22 @@ describe("Claude execution policy", () => {
     // every command unable to run.
     expect(started.opens[0]?.sandbox).toBeUndefined();
     await acquired.close();
+
+    // Chat starts there outside Strict, holding no file or shell tool at all.
+    const chat = harness("subscription", "current-session", { platform: "win32" });
+    const chatConnection = await acquire(chat.driver, "chat");
+    await Effect.runPromise(
+      chatConnection.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    expect(chat.opens[0]?.withheldTools).toBeUndefined();
+    for (const tool of ["Read", "Grep", "Glob", "Edit", "Write", "Bash"])
+      expect(chat.opens[0]?.tools).not.toContain(tool);
+    await chatConnection.close();
 
     for (const [level, message] of [
       [{ executionPolicy: "approval-gated" }, WINDOWS_STRICT_REFUSAL],

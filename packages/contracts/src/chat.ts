@@ -9,6 +9,7 @@ import { personDecides } from "./hostAnswer";
 import { HarnessRetryNotice } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
+import { AnyAttachmentMediaType } from "./attachmentMediaType";
 import { DescribedImageName, ImageDescribedBy } from "./imageDescription";
 import {
   AgentResultsSteeredIntoTurn,
@@ -87,6 +88,12 @@ export type ThreadWorkItemId = typeof ThreadWorkItemId.Type;
 export const ChatResearchRouting = Schema.Literal("automatic", "searxng", "provider-native");
 export type ChatResearchRouting = typeof ChatResearchRouting.Type;
 
+/**
+ * The types a Chat model may take as a native attachment where its provider
+ * says so. Chat takes a file of any type: one the model does not take natively
+ * goes in as text when its bytes are text, and is otherwise refused at send,
+ * since Chat has no folder for the model to read a file from.
+ */
 export const CHAT_ATTACHMENT_MEDIA_TYPES = [
   "text/plain",
   "image/png",
@@ -95,7 +102,7 @@ export const CHAT_ATTACHMENT_MEDIA_TYPES = [
   "image/gif",
   "application/pdf",
 ] as const;
-export const ChatAttachmentMediaType = Schema.Literal(...CHAT_ATTACHMENT_MEDIA_TYPES);
+export const ChatAttachmentMediaType = AnyAttachmentMediaType;
 export type ChatAttachmentMediaType = typeof ChatAttachmentMediaType.Type;
 export const MAX_CHAT_TURN_ATTACHMENTS = 16;
 export const MAX_CHAT_TURN_PREVIEW_SELECTIONS = 16;

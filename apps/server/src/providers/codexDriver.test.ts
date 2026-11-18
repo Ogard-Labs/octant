@@ -5451,12 +5451,14 @@ describe("Codex running as itself", () => {
 });
 
 describe("Codex sessions begun outside Octant, native copies, and skill and plugin references", () => {
-  const heldThreadsFile = () => {
-    const directory = mkdtempSync(join(tmpdir(), "octant-codex-held-"));
-    processDirectories.push(directory);
-    return join(directory, "state", "held-threads.json");
-  };
-  const fakeCodexDriver = (target: { readonly binaryPath: string }, held: string) =>
+  /** The host's journal, as the session-ownership port reads it: the Codex threads Octant holds. */
+  const journalHolding = (held: ReadonlySet<string>) => ({
+    held: (driverKind: string) => (driverKind === "codex" ? held : new Set<string>()),
+  });
+  const fakeCodexDriver = (
+    target: { readonly binaryPath: string },
+    held: ReadonlySet<string> = new Set(),
+  ) =>
     makeCodexDriver({
       instanceId,
       binaryPath: target.binaryPath,
@@ -5473,13 +5475,12 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
       }),
       runtimeRegistry: new ProviderRuntimeRegistry(),
       idleLeaseMs: 0,
-      heldThreadsFile: held,
+      sessionOwnership: journalHolding(held),
     });
 
   it("offers the person's own Codex session in the folder, takes it up once, and gives it back when released", async () => {
     const target = processFixture("sessions", "0.170.0");
-    const held = heldThreadsFile();
-    const sessions = fakeCodexDriver(target, held).nativeSessions;
+    const sessions = fakeCodexDriver(target).nativeSessions;
     if (sessions === undefined) throw new Error("Codex offers no sessions.");
 
     const listed = await Effect.runPromise(sessions.list({ instanceId, projectRoot }));
@@ -5560,9 +5561,11 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
     ).toEqual(["person-1"]);
   });
 
-  it("refuses a Codex session from another folder, one Octant started, and any on a Codex that does not name who started it", async () => {
-    const held = heldThreadsFile();
-    const sessions = fakeCodexDriver(processFixture("sessions", "0.170.0"), held).nativeSessions;
+  it("refuses a Codex session from another folder, one Octant started, and one an Octant thread already holds", async () => {
+    const sessions = fakeCodexDriver(
+      processFixture("sessions", "0.170.0"),
+      new Set(["person-held"]),
+    ).nativeSessions;
     if (sessions === undefined) throw new Error("Codex offers no sessions.");
     const adopt = (nativeSessionId: string) =>
       Effect.runPromise(
@@ -5583,14 +5586,16 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
         left: { category: "stale-resume" },
       });
 
-    const older = fakeCodexDriver(processFixture("sessions", "0.153.0"), held).nativeSessions;
-    if (older === undefined) throw new Error("Codex offers no sessions.");
-    expect(
-      await Effect.runPromise(Effect.either(older.list({ instanceId, projectRoot }))),
-    ).toMatchObject({
+    // The journal records an Octant thread holding it, so it is neither offered nor taken up.
+    expect(await adopt("person-held")).toMatchObject({
       _tag: "Left",
-      left: { category: "unsupported", message: expect.stringMatching(/0\.154\.0 or later/u) },
+      left: { message: "That Codex session already belongs to an Octant thread." },
     });
+    expect(
+      (await Effect.runPromise(sessions.list({ instanceId, projectRoot }))).map(
+        (session) => session.nativeSessionId,
+      ),
+    ).toEqual(["person-1"]);
   });
 
   it("resumes a taken-up Codex session with Octant's tools offered, rather than handing it over as text", async () => {
@@ -5645,7 +5650,6 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
   });
 
   it("copies a session at a turn with Codex's own fork, on a process that closes before the copy is resumed", async () => {
-    const held = heldThreadsFile();
     const f = fixture({
       version: "0.170.0",
       threadFork: async (value) => ({
@@ -5656,7 +5660,7 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
         cwd: value.cwd,
       }),
     });
-    const driver = makeCodexDriver(f.options({ heldThreadsFile: held }));
+    const driver = makeCodexDriver(f.options());
     const source = {
       driverKind: "codex" as const,
       value: "thread-source",
@@ -5710,10 +5714,6 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
     // The copying process is gone, so the copy's own lease can resume it.
     expect(f.startCount()).toBe(1);
     expect(f.closeCount()).toBe(1);
-    // The copy carries the source's originator, so the record keeps it out of the offered sessions.
-    expect(JSON.parse(readFileSync(held, "utf8"))).toEqual({
-      sessions: { "copy-of-thread-source": String(secondSessionId) },
-    });
 
     // Another folder or mode, or a Codex whose fork cannot cut at a turn, goes back as the text handoff.
     expect(await fork({ projectRoot: "/tmp/another-project" })).toBeUndefined();
@@ -5762,7 +5762,7 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
         };
       },
     });
-    const driver = makeCodexDriver(f.options({ heldThreadsFile: heldThreadsFile() }));
+    const driver = makeCodexDriver(f.options());
     const source = {
       driverKind: "codex" as const,
       value: "thread-source",
@@ -5796,7 +5796,7 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
   it("lists the account's own Codex skills and installed plugins for the composer's @ menu", async () => {
     const target = processFixture("sessions", "0.170.0");
     const result = await Effect.runPromise(
-      Effect.scoped(fakeCodexDriver(target, heldThreadsFile()).probe({ instanceId })),
+      Effect.scoped(fakeCodexDriver(target).probe({ instanceId })),
     );
     // A Project's skill is not the account's, and is not offered here.
     expect(result.mentions).toEqual([

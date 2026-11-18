@@ -1,37 +1,31 @@
 /**
- * Starting an Octant thread from one of the person's own Codex sessions, and
- * the record of the Codex threads Octant holds that it did not start.
+ * Starting an Octant thread from one of the person's own Codex sessions.
  *
  * Octant's Codex runs on the account's own Codex home, so the person's
  * sessions and Octant's sit side by side in Codex's thread store. The list
  * reads it through the app-server's `thread/list`, filtered to the thread's
- * folder: Codex records the folder each thread runs in and the client that
- * created it (`originator`, the `initialize` client name, from codex-cli
- * 0.154.0). A thread Octant started names Octant as its originator and is left
- * out, and so is a subagent's or an ephemeral thread.
+ * folder, and leaves out a subagent's or an ephemeral thread.
+ *
+ * Which Codex threads an Octant thread holds is the host's own journal: every
+ * thread an Octant thread starts, takes up or forks is recorded there with its
+ * resume cursor, and `heldSessions` reads that record through the provider
+ * SDK's `ProviderSessionOwnership` port, for every Codex account, since
+ * accounts may share one Codex home. A held thread is never offered and never
+ * taken up a second time, so two Octant threads never resume one Codex thread.
+ * Between the driver's claim and the host's record, the claim is held here.
+ * A thread whose recorded creator (`originator`, the `initialize` client name,
+ * from codex-cli 0.154.0) is Octant is left out as well: another Octant host on
+ * the same Codex home started it.
  *
  * Adopting resumes the person's own thread, as Codex's own `resume` does:
  * nothing is copied, so the thread's history is the one the person's Codex
- * shows. The adoption is recorded in a file of Octant's own beside the
- * account's other Octant state, naming the Codex thread and the Octant
- * session that holds it; a held thread is neither offered again nor adopted
- * by a second Octant thread, which would leave the first resuming a thread it
- * no longer owned. A native fork's copy is recorded the same way, since Codex
- * copies the source's originator onto it (measured with codex-cli 0.170.0).
+ * shows.
  */
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
-import type {
-  ProviderFailure,
-  ProviderInstanceId,
-  ProviderResumeCursor,
-  ProviderSessionId,
-} from "@octant/contracts";
+import type { ProviderFailure, ProviderInstanceId, ProviderResumeCursor } from "@octant/contracts";
 import type { ProviderDriver, ProviderNativeSession } from "@octant/provider-sdk/driver";
-import { providerResumeBinding } from "./resumeBinding";
 import { Effect } from "effect";
 import type { CodexStoredThread, CodexThreadListResult } from "./codexProtocol";
-import { isAtLeastRelease } from "./releaseVersion";
+import { providerResumeBinding } from "./resumeBinding";
 
 /** How many of the person's sessions in a folder a thread is offered to start from. */
 const MAX_OFFERED_NATIVE_SESSIONS = 50;
@@ -40,8 +34,6 @@ const MAX_LISTED_PAGES = 5;
 const LISTED_PAGE_SIZE = 100;
 /** The `initialize` client name Octant's own app-server connections send. */
 export const CODEX_OCTANT_ORIGINATOR = "Octant";
-/** The first release whose stored threads name the client that created them. */
-export const CODEX_THREAD_ORIGINATOR_RELEASE = [0, 154, 0] as const;
 /** Codex's own interactive and scripted sessions; subagents' threads are left out. */
 const CODEX_PERSON_SOURCE_KINDS = ["cli", "vscode", "exec", "appServer"] as const;
 const THREAD_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
@@ -64,82 +56,11 @@ function failure(category: ProviderFailure["category"], message: string): Provid
   return { category, message };
 }
 
-/**
- * The Codex threads Octant holds that it did not start, by thread id, each
- * naming the Octant session that holds it. A missing or unreadable record
- * holds nothing; an entry that is not two strings is left out.
- */
-export function readCodexHeldThreads(recordFile: string): ReadonlyMap<string, string> {
-  let value: unknown;
-  try {
-    value = JSON.parse(readFileSync(recordFile, "utf8"));
-  } catch {
-    return new Map();
-  }
-  const sessions =
-    typeof value === "object" && value !== null && "sessions" in value
-      ? (value as { readonly sessions: unknown }).sessions
-      : undefined;
-  if (typeof sessions !== "object" || sessions === null || Array.isArray(sessions))
-    return new Map();
-  const held = new Map<string, string>();
-  for (const [threadId, sessionId] of Object.entries(sessions)) {
-    if (typeof sessionId === "string" && THREAD_ID.test(threadId)) held.set(threadId, sessionId);
-  }
-  return held;
-}
-
-/** Replaces the record whole, so a reader never sees half of it. */
-function writeCodexHeldThreads(recordFile: string, held: ReadonlyMap<string, string>): void {
-  mkdirSync(dirname(recordFile), { recursive: true, mode: 0o700 });
-  const staging = `${recordFile}.${process.pid}.tmp`;
-  try {
-    writeFileSync(staging, JSON.stringify({ sessions: Object.fromEntries(held) }), {
-      mode: 0o600,
-    });
-    renameSync(staging, recordFile);
-  } catch (error) {
-    rmSync(staging, { force: true });
-    throw error;
-  }
-}
-
-/**
- * Changes to one record waiting their turn. The check that no Octant session
- * holds a thread and the entry that then claims it are one step, so two
- * threads adopting the same session at once cannot both pass the check.
- */
-const recordChanges = new Map<string, Promise<unknown>>();
-
-export async function changingCodexHeldThreads<A>(
-  recordFile: string,
-  change: (held: Map<string, string>) => A | Promise<A>,
-): Promise<A> {
-  const before = recordChanges.get(recordFile) ?? Promise.resolve();
-  const mine = before
-    .catch(() => undefined)
-    .then(async () => {
-      const held = new Map(readCodexHeldThreads(recordFile));
-      const snapshot = JSON.stringify([...held]);
-      const result = await change(held);
-      if (JSON.stringify([...held]) !== snapshot) writeCodexHeldThreads(recordFile, held);
-      return result;
-    });
-  recordChanges.set(recordFile, mine);
-  try {
-    return await mine;
-  } finally {
-    if (recordChanges.get(recordFile) === mine) recordChanges.delete(recordFile);
-  }
-}
-
 /** Whether a stored thread is the person's own session in exactly this folder. */
 function personSessionIn(thread: CodexStoredThread, projectRoot: string): boolean {
   return (
     thread.cwd === projectRoot &&
     THREAD_ID.test(thread.id) &&
-    thread.originator !== undefined &&
-    thread.originator !== null &&
     thread.originator !== CODEX_OCTANT_ORIGINATOR &&
     (thread.parentThreadId ?? null) === null &&
     thread.ephemeral !== true
@@ -154,18 +75,32 @@ function titleOf(thread: CodexStoredThread): string | undefined {
   return line.length === 0 ? undefined : Array.from(line).slice(0, 200).join("");
 }
 
+/** Adoptions of one Codex thread waiting their turn, so a check and its claim are one step. */
+const adoptionsInFlight = new Map<string, Promise<unknown>>();
+
+async function oneAtATime<A>(key: string, run: () => Promise<A>): Promise<A> {
+  const before = adoptionsInFlight.get(key) ?? Promise.resolve();
+  const mine = before.catch(() => undefined).then(run);
+  adoptionsInFlight.set(key, mine);
+  try {
+    return await mine;
+  } finally {
+    if (adoptionsInFlight.get(key) === mine) adoptionsInFlight.delete(key);
+  }
+}
+
 export function makeCodexNativeSessions(options: {
   readonly instanceId: ProviderInstanceId;
-  /** The record of held threads, in the account's Octant state folder. */
-  readonly recordFile: string;
-  /**
-   * Runs `use` against a catalog app-server for this account, which carries
-   * no thread, with the running Codex's version.
-   */
+  /** The Codex threads the host's journal records an Octant thread holding. */
+  readonly heldSessions: () => ReadonlySet<string>;
+  /** Runs `use` against a catalog app-server for this account, which carries no thread. */
   readonly catalog: <A>(
-    use: (client: CodexSessionCatalog, version: string) => Promise<A>,
+    use: (client: CodexSessionCatalog) => Promise<A>,
   ) => Effect.Effect<A, unknown>;
 }): NonNullable<ProviderDriver["nativeSessions"]> {
+  // Codex thread id -> the Octant session that claimed it, until the host
+  // records the adoption or the driver gives the claim back.
+  const claims = new Map<string, string>();
   // Only these sentences reach the person; anything else thrown on the way is
   // reduced to one generic sentence.
   const refusals = new WeakSet<ProviderFailure>();
@@ -180,26 +115,18 @@ export function makeCodexNativeSessions(options: {
       : failure("unavailable", fallback);
   const wrongInstance = (instanceId: ProviderInstanceId) =>
     String(instanceId) !== String(options.instanceId);
-  // An older Codex cannot tell the person's sessions from Octant's own, and
-  // offering one of Octant's would let two threads resume one Codex thread.
-  const requireOriginator = (version: string) => {
-    if (!isAtLeastRelease(version, CODEX_THREAD_ORIGINATOR_RELEASE))
-      throw refuse(
-        "unsupported",
-        `Codex ${version} does not record who started each session. Update Codex to 0.154.0 or later to continue one here.`,
-      );
-  };
+  const held = (threadId: string) => claims.has(threadId) || options.heldSessions().has(threadId);
+  const key = (threadId: string) => `${String(options.instanceId)}\u0000${threadId}`;
   return {
     list: ({ instanceId, projectRoot }) =>
       wrongInstance(instanceId)
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
         : options
-            .catalog(async (client, version) => {
-              requireOriginator(version);
+            .catalog(async (client) => {
               const threadList = client.threadList;
               if (threadList === undefined)
                 throw refuse("unsupported", "This Codex cannot list its sessions.");
-              const held = readCodexHeldThreads(options.recordFile);
+              const holds = options.heldSessions();
               const offered: ProviderNativeSession[] = [];
               let cursor: string | undefined;
               for (let page = 0; page < MAX_LISTED_PAGES; page += 1) {
@@ -213,7 +140,12 @@ export function makeCodexNativeSessions(options: {
                 });
                 for (const thread of listed.data) {
                   if (offered.length >= MAX_OFFERED_NATIVE_SESSIONS) break;
-                  if (!personSessionIn(thread, projectRoot) || held.has(thread.id)) continue;
+                  if (
+                    !personSessionIn(thread, projectRoot) ||
+                    claims.has(thread.id) ||
+                    holds.has(thread.id)
+                  )
+                    continue;
                   const title = titleOf(thread);
                   const branch = thread.gitInfo?.branch?.trim();
                   offered.push({
@@ -240,10 +172,9 @@ export function makeCodexNativeSessions(options: {
           failure("stale-resume", "That Codex session is not one of this folder's."),
         );
       return options
-        .catalog((client, version) =>
-          changingCodexHeldThreads(options.recordFile, async (held) => {
-            requireOriginator(version);
-            if (held.has(input.nativeSessionId))
+        .catalog((client) =>
+          oneAtATime(key(input.nativeSessionId), async () => {
+            if (held(input.nativeSessionId))
               throw refuse(
                 "unavailable",
                 "That Codex session already belongs to an Octant thread.",
@@ -256,7 +187,13 @@ export function makeCodexNativeSessions(options: {
             const { thread } = await threadRead({ threadId: input.nativeSessionId });
             if (thread.id !== input.nativeSessionId || !personSessionIn(thread, input.projectRoot))
               throw refuse("stale-resume", "That Codex session is not one of this folder's.");
-            held.set(input.nativeSessionId, String(input.sessionId));
+            // Read again: the journal may have recorded it while Codex answered.
+            if (held(input.nativeSessionId))
+              throw refuse(
+                "unavailable",
+                "That Codex session already belongs to an Octant thread.",
+              );
+            claims.set(input.nativeSessionId, String(input.sessionId));
             return {
               driverKind: "codex",
               value: input.nativeSessionId,
@@ -277,23 +214,16 @@ export function makeCodexNativeSessions(options: {
         )
         .pipe(Effect.mapError(passRefusal("The Codex session could not be taken up.")));
     },
+    // Taken in turn with adoptions of the same thread, so a release never
+    // gives back a claim a later adoption made.
     release: (input) =>
       wrongInstance(input.instanceId)
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
-        : Effect.tryPromise({
-            try: () => releaseCodexHeldThread(options.recordFile, input),
-            catch: () => failure("unavailable", "The Codex session could not be released."),
-          }),
+        : Effect.promise(() =>
+            oneAtATime(key(input.nativeSessionId), async () => {
+              if (claims.get(input.nativeSessionId) === String(input.sessionId))
+                claims.delete(input.nativeSessionId);
+            }),
+          ),
   };
-}
-
-/** Removes a thread's entry only while it still names this Octant session. */
-export function releaseCodexHeldThread(
-  recordFile: string,
-  input: { readonly nativeSessionId: string; readonly sessionId: ProviderSessionId },
-): Promise<void> {
-  return changingCodexHeldThreads(recordFile, (held) => {
-    if (held.get(input.nativeSessionId) === String(input.sessionId))
-      held.delete(input.nativeSessionId);
-  });
 }

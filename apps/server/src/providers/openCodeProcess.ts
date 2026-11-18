@@ -168,10 +168,10 @@ export interface OpenCodeProcessStartInput {
    */
   readonly ownToolServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   /**
-   * The person let OpenCode run as itself: a 1.x launch also finds their
-   * global `AGENTS.md` where OpenCode looks for it, as it does on its own
-   * (see `openCodeGlobalAgentsInstructionFile`). Absent, 1.x finds none and
-   * falls back to the global `CLAUDE.md`.
+   * The person let OpenCode run as itself: a 1.x launch, and a 2.x launch
+   * outside Strict, also finds their global `AGENTS.md` where OpenCode looks
+   * for it, as it does on its own (see `openCodeGlobalAgentsInstructionFile`).
+   * Absent, 1.x finds none and falls back to the global `CLAUDE.md`.
    */
   readonly runsAsItself?: true;
 }
@@ -1152,15 +1152,18 @@ function openCodeGlobalClaudeInstructionFile(
 }
 
 /**
- * The person's global OpenCode `AGENTS.md` when an OpenCode 1.x launch may
- * read it, or undefined. Read from the opencode 1.18.21 source
+ * The person's global OpenCode `AGENTS.md` when a launch may read it, or
+ * undefined. Read from the opencode 1.18.21 source
  * (`src/session/instruction.ts` and core `global.ts`), 1.x reads the first of
  * `<global config>/AGENTS.md` and `~/.claude/CLAUDE.md` that exists, where the
  * global config folder is `$OPENCODE_CONFIG_DIR`, else
- * `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`. A launch sets
- * `OPENCODE_CONFIG_DIR` to its private folder, so this is the file the
- * person's own environment names, and the launch links it in there. 2.x is
- * left as it is.
+ * `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`. Read from the
+ * opencode v2.0.22 and v2.2.0 source (`core/src/config/plugin/instruction.ts`
+ * and `util/src/global.ts`), 2.x reads `<global config>/AGENTS.md` from the
+ * same folder, resolved the same way. A launch sets `OPENCODE_CONFIG_DIR` to
+ * its private folder, so this is the file the person's own environment names,
+ * and the launch links it in there. A 2.x launch links it only outside Strict;
+ * under Strict 2.x finds none, as before.
  *
  * The rest of the folder (the person's `opencode.json`, plugins, agents)
  * stays out: the grant names this one file. A protected file stays denied,
@@ -1169,11 +1172,12 @@ function openCodeGlobalClaudeInstructionFile(
  */
 function openCodeGlobalAgentsInstructionFile(
   runtime: OpenCodeRuntime,
+  strict: boolean,
   environment: NodeJS.ProcessEnv,
   platform: NodeJS.Platform,
 ): string | undefined {
   const home = environment.HOME;
-  if (runtime !== "legacy" || home === undefined || !isAbsolute(home)) return undefined;
+  if ((runtime !== "legacy" && strict) || home === undefined || !isAbsolute(home)) return undefined;
   const absolute = (value: string | undefined) =>
     value !== undefined && isAbsolute(value) ? value : undefined;
   try {
@@ -1789,6 +1793,7 @@ function acquireOpenCodeServer(
               profile,
               openCodeGlobalAgentsInstructionFile(
                 runtime,
+                input.strict !== false,
                 options.inheritedEnvironment ?? process.env,
                 options.platform,
               ),

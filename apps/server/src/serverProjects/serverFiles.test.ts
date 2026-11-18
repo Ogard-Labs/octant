@@ -1,11 +1,14 @@
-import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { NO_PROTECTED_FILES_CHANGES } from "@octant/domain/secret-guard-policy";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { applyProtectedFilesChoice } from "../process/secretGuard";
 import { buildDocxFixture } from "../preview/previewTestFixtures";
 import { ServerConnection } from "./serverConnection";
-import { ServerFileSystem } from "./serverFiles";
+import { transferServerAttachments } from "./serverAttachments";
+import { SERVER_THREAD_ATTACHMENTS, ServerFileSystem } from "./serverFiles";
 import {
   canRunThrowawaySshd,
   startThrowawaySshd,
@@ -302,6 +305,92 @@ describe.skipIf(!canRunThrowawaySshd)("the harness's file tools on a server fold
       await tools.grep({ pattern: "SECRETVALUE" });
       expect(sent.join("")).not.toContain("SECRETVALUE");
     });
+  });
+
+  it("copies an attached file to the thread's folder there, which its file tools read and never write", async () => {
+    const threadId = randomUUID();
+    const folder = join(homedir(), SERVER_THREAD_ATTACHMENTS, threadId);
+    try {
+      const bytes = new TextEncoder().encode("attached notes\n");
+      const copied = await transferServerAttachments({
+        connection,
+        server: { alias: sshd.alias, user: sshd.user },
+        threadId,
+        files: [
+          {
+            attachmentId: "attachment-1",
+            displayName: "notes.txt",
+            mediaType: "text/plain",
+            bytes,
+          },
+        ],
+      });
+      expect(copied.status).toBe("transferred");
+      const path = copied.status === "transferred" ? (copied.files[0]?.path ?? "") : "";
+      expect(path).toBe(join(realpathSync(folder), "attachment-1", "notes.txt"));
+      expect(readFileSync(path, "utf8")).toBe("attached notes\n");
+
+      const tools = new ServerFileSystem({
+        connection,
+        server: () => ({ alias: sshd.alias, user: sshd.user }),
+        root,
+        attachmentsOf: threadId,
+      });
+      expect(await tools.read({ path })).toMatchObject({
+        kind: "file",
+        path,
+        lines: ["attached notes", ""],
+      });
+      expect(await tools.write({ path, content: "changed" })).toMatchObject({
+        kind: "refused",
+        reason: "protected-file",
+      });
+      expect(await tools.edit({ path, oldText: "attached", newText: "changed" })).toMatchObject({
+        kind: "refused",
+      });
+      expect(readFileSync(path, "utf8")).toBe("attached notes\n");
+      // Another thread's file tools do not read this thread's folder.
+      const other = new ServerFileSystem({
+        connection,
+        server: () => ({ alias: sshd.alias, user: sshd.user }),
+        root,
+        attachmentsOf: randomUUID(),
+      });
+      expect(await other.read({ path })).toMatchObject({
+        kind: "refused",
+        reason: "protected-file",
+      });
+      // A Project folder that holds the login's home holds every thread's
+      // attachments folder: its own reads still reach only this thread's files,
+      // and its writes none of them.
+      const home = realpathSync(homedir());
+      const homeProject = (thread: string) =>
+        new ServerFileSystem({
+          connection,
+          server: () => ({ alias: sshd.alias, user: sshd.user }),
+          root: home,
+          attachmentsOf: thread,
+        });
+      expect(await homeProject(randomUUID()).read({ path })).toMatchObject({
+        kind: "refused",
+        reason: "protected-file",
+      });
+      expect(
+        await homeProject(randomUUID()).read({ path: join(home, SERVER_THREAD_ATTACHMENTS) }),
+      ).toMatchObject({ kind: "refused", reason: "protected-file" });
+      expect(await homeProject(threadId).read({ path })).toMatchObject({
+        kind: "file",
+        lines: ["attached notes", ""],
+      });
+      expect(
+        await homeProject(threadId).write({
+          path: join(dirname(path), "planted.txt"),
+          content: "x",
+        }),
+      ).toMatchObject({ kind: "refused", reason: "protected-file" });
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
   });
 
   it("reaches nothing, and changes nothing anywhere, when the server cannot be reached", async () => {

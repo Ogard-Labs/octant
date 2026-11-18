@@ -227,6 +227,19 @@ checks never change registry/configuration or journal state.
   host's files. Delegation, Browser, Computer, connectors, and forks are not
   offered there, since each acts on this host. The routine tools are offered,
   since they act only on this host's routine records ([Routines](#routines)).
+- **Attached files.** A file the turn names by path rather than sends (any
+  file but an image or a file the model takes natively) is copied before the
+  turn is accepted, over the Project's own SSH connection, into the thread's
+  attachments folder on the server,
+  `<home>/.octant/thread-attachments/<thread>/<attachment>/<name>`, outside
+  every Project folder. The copy is made read-only, its SHA-256 is checked
+  against the journaled digest, and the turn names its path there. The thread's
+  file tools read that folder and write nowhere in it; another thread's do not
+  read it, even through a Project folder that holds the login's home. The copy
+  is made before the turn's start is journaled, so a failed copy leaves no turn. A copy that fails refuses the turn with a sentence saying so. The
+  copies stay on the server when the thread is deleted (not built: removing
+  them). The same holds for a Work thread there
+  ([Plan and Chat tool parity](../architecture.md#security-and-authority)).
 - **The same levels.** The thread's guardrail level is resolved as it is for
   any Code thread (thread, then the account default), and decides each call as
   it does locally: Plan is read-only, Guarded asks for every command and edit,

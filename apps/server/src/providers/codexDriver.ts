@@ -40,6 +40,7 @@ import type {
   ProviderDriver,
   ProviderSessionCompaction,
   ProviderSessionForkRequest,
+  ProviderSessionOwnership,
 } from "@octant/provider-sdk/driver";
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
@@ -71,7 +72,7 @@ import {
 import { providerApprovalCall } from "./providerApprovalCall";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { isAtLeastRelease } from "./releaseVersion";
-import { changingCodexHeldThreads, makeCodexNativeSessions } from "./codexNativeSessions";
+import { makeCodexNativeSessions } from "./codexNativeSessions";
 import {
   codexRunsNativeSandbox,
   type CodexAppServerConnection,
@@ -620,11 +621,10 @@ export interface CodexDriverOptions {
   readonly planMcpServers?: () => ReadonlyArray<string>;
   readonly idleLeaseMs?: number;
   /**
-   * Octant's record of the account's Codex threads it holds but did not
-   * start (`codexNativeSessions.ts`). Absent, the driver offers none of the
-   * person's own sessions.
+   * Which Codex threads an Octant thread holds, read from the host's journal.
+   * Absent, the driver offers none of the person's own sessions.
    */
-  readonly heldThreadsFile?: string;
+  readonly sessionOwnership?: ProviderSessionOwnership;
   readonly clock?: () => string;
   /**
    * The host environment the runtime's allowlist is applied to when the
@@ -1622,13 +1622,13 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
   const makeTaskId = options.taskId ?? (() => crypto.randomUUID());
   const makeToolCallId = options.toolCallId ?? (() => crypto.randomUUID());
 
-  const heldThreadsFile = options.heldThreadsFile;
-  const sessionCatalog = <A>(use: (client: CodexClientPort, version: string) => Promise<A>) =>
+  const sessionOwnership = options.sessionOwnership;
+  const sessionCatalog = <A>(use: (client: CodexClientPort) => Promise<A>) =>
     Effect.scoped(
       Effect.gen(function* () {
         const runtime = yield* acquireRuntime(options, clientFactory, CATALOG_AUTHORITY);
         return yield* Effect.tryPromise({
-          try: () => use(runtime.client, runtime.version),
+          try: () => use(runtime.client),
           catch: (error) => error,
         });
       }),
@@ -1686,15 +1686,6 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           return yield* Effect.fail(
             failure("unauthorized", "Codex copied the thread into a different Project root."),
           );
-        if (heldThreadsFile !== undefined)
-          yield* Effect.tryPromise({
-            try: () =>
-              changingCodexHeldThreads(heldThreadsFile, (held) => {
-                held.set(copy.thread.id, String(input.sessionId));
-              }),
-            catch: () =>
-              failure("provider-failed", "The copied Codex thread could not be recorded."),
-          });
         return {
           driverKind: "codex" as const,
           value: copy.thread.id,
@@ -1722,12 +1713,12 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
     toolCatalogContinuation,
     contextFacts,
     forkSession,
-    ...(heldThreadsFile === undefined
+    ...(sessionOwnership === undefined
       ? {}
       : {
           nativeSessions: makeCodexNativeSessions({
             instanceId: options.instanceId,
-            recordFile: heldThreadsFile,
+            heldSessions: () => sessionOwnership.held("codex"),
             catalog: sessionCatalog,
           }),
         }),
