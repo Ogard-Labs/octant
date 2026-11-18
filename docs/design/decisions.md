@@ -31,7 +31,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | ------------------------------------------------------------------------------------- | --------- | ------- | ------------ | ------------------- |
 | [Principles and hard lines](#principles-and-hard-lines)                               | 7         | 5       | 2            | 0                   |
 | [Guardrails and review](#guardrails-and-review)                                       | 9         | 3       | 6            | 0                   |
-| [Key providers](#key-providers)                                                       | 9         | 5       | 3            | 1                   |
+| [Key providers](#key-providers)                                                       | 9         | 6       | 3            | 0                   |
 | [Release scope](#release-scope)                                                       | 8         | 2       | 5            | 1                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 6       | 1            | 0                   |
 | [App-managed tools](#app-managed-tools)                                               | 6         | 4       | 2            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **282**   | **167** | **110**      | **5**               |
+| **All areas**                                                                         | **282**   | **168** | **110**      | **4**               |
 
 ## Principles and hard lines
 
@@ -464,10 +464,11 @@ Status: Built. Since: 2026-11-16. Detail: [Provider runtimes: Codex](provider-ru
 
 In a Project the person trusted for Codex, outside Plan and Strict, Codex loads its own Project configuration as it does on its own (maintainer decision, 2026-11-16).
 
-- Codex's loader keeps refusing the keys it refuses from a Project (`PROJECT_LOCAL_CONFIG_DENYLIST`), and the trust prompt lists Codex's Project entries.
-- Today Octant reports `projectCode` unsupported for Codex and its trust loads none of Codex's Project configuration; Plan and Strict keep that.
+- Codex's loader keeps refusing the keys it refuses from a Project (`PROJECT_LOCAL_CONFIG_DENYLIST`), and the trust prompt lists Codex's Project entries (`.codex/config.toml`).
+- Built: Octant reports `projectCode` supported for Codex, and a trusted Project's thread outside Plan and Strict records the folder as trusted in the thread's own config, so Codex loads the file without Octant writing to Codex's `config.toml`. Under Strict and in Plan Octant adds no trust.
+- Known limit: Codex's app-server itself trusts a Project folder, and records that in the account's Codex `config.toml`, when a thread starts with a sandbox that can write the folder and no trust decision exists (codex-cli 0.169.0), whatever Octant's trust. Octant cannot withhold that without marking the folder untrusted, which would also stop Codex reading the Project's `AGENTS.md`, so a folder Codex recorded that way also loads its configuration under Strict and in Plan.
 
-Status: Designed, not built. Since: 2026-11-16. Detail: [Provider runtimes: Codex](provider-runtimes.md#codex) and [Architecture: Providers](../architecture.md#providers).
+Status: Built. Since: 2026-11-16. Detail: [Provider runtimes: Codex](provider-runtimes.md#codex) and [Architecture: Providers](../architecture.md#providers).
 
 ### Any ACP agent can be added
 
@@ -2124,7 +2125,7 @@ Below Full access, a provider that has a sandbox of its own runs in it, as it do
 - Claude Code is the exception: Octant passes its sandbox no settings (no writable roots, network, read or deny rules, or auto-allow change), so it runs as the person's own Claude Code settings configure it; Plan keeps its read-only confinement.
 - The provider's request to run one command outside its sandbox reaches the person as an Octant approval (Reviewed's reviewer at Reviewed); approved runs that one command, and denied or unanswered stays refused.
 - Strict is an opt-in set in the same places as the opt-in sandbox at Full access (per thread, as a Project's default, and in Settings): the provider runs inside Octant's profile, provider sign-ins, `~/.ssh` and cloud keys stay unreadable, and a provider inside Octant's profile has no native escalation. Built: the setting, resolved by the host at each launch and call (a thread's choice, else its Project's, else Settings', else off); a hub-introduced device or an agent grant may turn it on, never off.
-- Built for Codex: outside Strict a Work or Code thread at Guarded or Reviewed runs Codex's workspace-write sandbox, with the Project's folders as writable roots and network open unless Network limits hold the launch; Codex's escalation reaches the person or Reviewed's reviewer, and an approval is answered for that one command, never for the session. Plan and Chat keep Octant's read-only profile, and the lease is keyed on Strict, so a Strict and a non-Strict session never share a process. The workspace-write policy a turn sends has no deny rules, so Octant's protected paths are not yet Codex deny rules (a named Codex permissions profile could carry them). Not built yet: the native sandbox for the other providers; they still run in today's sandbox whether Strict is on or off.
+- Built for Codex: outside Strict a Work or Code thread at Guarded or Reviewed runs Codex's workspace-write sandbox, with the Project's folders as writable roots and network open unless Network limits hold the launch; Codex's escalation reaches the person or Reviewed's reviewer, and an approval is answered for that one command, never for the session. Plan and Chat keep Octant's read-only profile, and the lease is keyed on Strict, so a Strict and a non-Strict session never share a process. From Codex 0.169.0, outside Windows, that sandbox runs as a named Codex permissions profile carrying Octant's protected paths as Codex deny rules: other providers' sign-ins, less the account's own Codex home; Codex's built-in workspace-write policy has no deny field, so an earlier release keeps it without them. Not built yet: the native sandbox for the other providers; they still run in today's sandbox whether Strict is on or off.
 - Strict for Claude Code is today's configuration of Claude's own sandbox, since macOS refuses nested Seatbelt: reads and writes held to the Project's folders, network per Network limits, and `autoAllowBashIfSandboxed: false`, with Claude's own request to run one command outside its sandbox still asking every time (maintainer decision, 2026-11-16).
 - Octant's sandbox stays the default for providers with no sandbox of their own: OpenCode, Mistral Vibe and Pi.
 - Per provider: Codex takes its native workspace-write sandbox and escalation in place of Octant's profile, since macOS refuses nested Seatbelt; Gemini CLI and Qwen Code use their native sandboxes; Copilot CLI and Cursor follow after their ACP releases are checked, and Grok Build after a check of why it launches with `GROK_SANDBOX=off`.

@@ -1416,10 +1416,28 @@ and escalation in place of Octant's profile:
   host's less Octant's variables and other providers' keys. A Plan or Chat
   lease outside Strict keeps Octant's read-only profile, with only other
   providers' sign-ins refused among the protected files.
-- The workspace-write policy takes no deny rules, so Octant's protected paths
-  are not Codex deny rules (not built yet: a named Codex permissions profile
-  could carry them). The runtime's own `ssh` uses the person's own setup, so
-  such a launch gets no server folder.
+- Octant's protected paths become Codex deny rules. Codex's built-in
+  workspace-write policy has no deny field (`SandboxWorkspaceWrite` in codex-rs
+  `config/src/types.rs` holds writable roots, network and temp exclusions
+  only), so from 0.169.0, outside Windows, the sandbox runs as a named
+  permissions profile instead (`codexNativePermissionProfile`): the thread's
+  `config` defines `permissions.octant-workspace` as `:workspace` with the
+  Project's folders `write`, other providers' sign-ins `deny` (the Provider
+  sign-ins group the person has not removed, as the host resolves it at its
+  composition boundary and hands the driver as a plain list, less the
+  account's own Codex home, which stays `write` inside Octant's provider
+  folder), and the network
+  `enabled` only without Octant's egress proxy. `thread/start` and
+  `thread/resume` select it with `permissions` in place of `sandbox`, and each
+  turn restates it by name in place of `sandboxPolicy`, which would replace
+  it. Measured on codex-cli 0.169.0 (Linux): a thread started this way reports
+  the profile as active, a denied file fails with `Permission denied` inside
+  Codex's own sandbox while the Project stays writable, a denied folder with
+  one account home re-allowed reads that home and refuses its sibling, and a
+  denied path that does not exist is accepted without being created. An
+  earlier release keeps the built-in workspace-write policy without deny rules.
+  The runtime's own `ssh` uses the person's own setup, so such a launch gets
+  no server folder.
 
 Under Strict, in Plan and in Chat, every Codex app-server below Full access
 runs under Octant's profile, and the
@@ -1561,13 +1579,26 @@ them; where they cannot be appended the turn still completes, after a note
 that a follow-up turn will not see them.
 
 **Codex's own Project configuration** (maintainer decision, 2026-11-16;
-designed, not built). In a Project the person trusted for Codex, outside Plan
-and Strict, Codex loads its own Project configuration as it does on its own
-(the project-local configuration codex-rs's loader reads for a project Codex
+built). In a Project the person trusted for Codex, outside Plan and Strict,
+Codex loads its own Project configuration as it does on its own (the
+project-local configuration codex-rs's loader reads for a project Codex
 trusts, less the keys codex-rs refuses from a Project, `PROJECT_LOCAL_CONFIG_DENYLIST`
 in `config/src/loader/mod.rs`, rust-v0.162.1), and the trust prompt lists its
-entries. Today Octant reports `projectCode` unsupported for Codex and its trust
-loads none of Codex's Project configuration; Plan and Strict keep that.
+entry, `.codex/config.toml`. Octant reports `projectCode` supported, and such
+a thread's `thread/start` and `thread/resume` config records the Project
+folder as `projects.<root>.trust_level = "trusted"` (`codexProjectTrustConfig`),
+which Codex reads before it loads Project layers (`project_trust_context`).
+Measured on codex-cli 0.169.0: a `read-only` thread loaded the Project's
+`model` with the override and not without it, and nothing was written to the
+account's `config.toml`. Under Strict and in Plan Octant adds no trust. Known
+limit: Codex's app-server trusts a Project folder by itself, and records it in
+the account's Codex `config.toml`, when a thread starts with a sandbox that can
+write the folder (`workspace-write` or `danger-full-access`) and no trust
+decision exists (measured on 0.169.0; `thread_processor.rs` `thread_start`).
+Marking the folder `untrusted` would withhold that, but Codex then also skips
+the Project's `AGENTS.md` (`load_project_instructions`), so Octant leaves it;
+a folder Codex recorded that way also loads its configuration under Strict and
+in Plan.
 
 The installed OpenCode binary's
 version selects its routes: 1.x keeps the legacy session API and its
