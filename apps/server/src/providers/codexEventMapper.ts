@@ -342,6 +342,25 @@ function mapReviewFindings(
   return streamedEvents(context, "text-delta", `${separator}${text}`);
 }
 
+/**
+ * Octant's own note on a review turn, such as what the review could not take
+ * along, as a paragraph of the reply apart from Codex's text. `id` names the
+ * note among the turn's messages; Codex's item ids never start with `octant-`.
+ */
+export function mapCodexReviewNote(
+  context: CodexEventContext,
+  id: string,
+  note: string,
+): ReadonlyArray<ProviderRuntimeEvent> {
+  const key = `octant-${id}`;
+  const text = `_${note}_`;
+  const separator = agentMessageSeparator(context, key);
+  context.agentMessages.set(key, { lifecycle: "terminal", text });
+  return streamedEvents(context, "text-delta", `${separator}${text}`).flatMap((mapped) =>
+    mapped.kind === "event" ? [mapped.event] : [],
+  );
+}
+
 function correlationFailure(): ReadonlyArray<CodexMappedMessage> {
   return protocolFailure("Provider message did not match the active thread and turn.");
 }
