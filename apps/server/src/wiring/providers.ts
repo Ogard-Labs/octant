@@ -267,6 +267,7 @@ export interface ConfiguredProviderDriverOptions {
   readonly acpHome?: (kind: AcpProviderKind, instanceId: ProviderInstance["id"]) => string;
   readonly piProcess?: PiProcessPort;
   readonly piHome?: (instanceId: ProviderInstance["id"]) => string;
+  readonly codexStateHome?: (instanceId: ProviderInstance["id"]) => string;
   readonly ohMyPiProcess?: OhMyPiProcessPort;
   readonly ohMyPiHome?: (instanceId: ProviderInstance["id"]) => string;
   readonly claudeProcess?: ClaudeProcessPort;
@@ -450,6 +451,7 @@ export function makeConfiguredProviderDriver(
       ...(options.acpHome === undefined ? {} : { acpHome: options.acpHome }),
       ...(options.piProcess === undefined ? {} : { piProcess: options.piProcess }),
       ...(options.piHome === undefined ? {} : { piHome: options.piHome }),
+      ...(options.codexStateHome === undefined ? {} : { codexStateHome: options.codexStateHome }),
       ...(options.ohMyPiProcess === undefined ? {} : { ohMyPiProcess: options.ohMyPiProcess }),
       ...(options.ohMyPiHome === undefined ? {} : { ohMyPiHome: options.ohMyPiHome }),
       ...(options.claudeProcess === undefined ? {} : { claudeProcess: options.claudeProcess }),
@@ -1677,6 +1679,10 @@ export function wireProviders(deps: ProvidersDependencies) {
       options.piHome ??
       ((instanceId: ProviderInstance["id"]) =>
         join(providerDataDirectory, "providers", "pi", instanceId));
+    const codexStateHome =
+      options.codexStateHome ??
+      ((instanceId: ProviderInstance["id"]) =>
+        join(providerDataDirectory, "providers", "codex", instanceId));
     const ohMyPiHome =
       options.ohMyPiHome ??
       ((instanceId: ProviderInstance["id"]) =>
@@ -1941,6 +1947,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             acpHome,
             piProcess,
             piHome,
+            codexStateHome,
             ohMyPiProcess,
             ohMyPiHome,
             nativeHarnessTranscripts,
@@ -2207,6 +2214,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       acpHome,
       piProcess,
       piHome,
+      codexStateHome,
       ohMyPiProcess,
       ohMyPiHome,
       nativeHarnessTranscripts,

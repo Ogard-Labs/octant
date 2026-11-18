@@ -67,6 +67,8 @@ export interface ProviderDriverFactoryOptions {
   readonly ohMyPiHome?: (instanceId: ProviderInstance["id"]) => string;
   readonly piProcess?: PiProcessPort;
   readonly piHome?: (instanceId: ProviderInstance["id"]) => string;
+  /** Octant's own state folder for one Codex account (not the account's Codex home). */
+  readonly codexStateHome?: (instanceId: ProviderInstance["id"]) => string;
   readonly ollamaFetch?: OllamaFetch;
   /** Where Ollama's harness sessions keep their conversation, shared with the other harness drivers. */
   readonly nativeHarnessTranscripts?: NativeHarnessTranscriptStore;
@@ -225,6 +227,9 @@ export function makeProviderDriver(
         instanceId: instance.id,
         binaryPath: instance.configuration.binaryPath,
         process: options.codexProcess,
+        ...(options.codexStateHome === undefined
+          ? {}
+          : { heldThreadsFile: join(options.codexStateHome(instance.id), "held-threads.json") }),
         runtimeRegistry: options.runtimeRegistry,
         permissionPersistence: options.permissionPersistence,
         environment: codexEnvironment,

@@ -1488,6 +1488,80 @@ in `config/src/loader/mod.rs`, rust-v0.162.1), and the trust prompt lists its
 entries. Today Octant reports `projectCode` unsupported for Codex and its trust
 loads none of Codex's Project configuration; Plan and Strict keep that.
 
+**Codex sessions started outside Octant** (maintainer request, 2026-11-18;
+built). An empty Work or Code thread can continue one of the person's own
+Codex sessions in its folder, under the same rules as a Claude Code session
+([Sessions started outside Octant](#sessions-started-outside-octant)): only
+the person adopts, the host journals it and marks the thread as carrying
+outside content, and a claim the thread cannot record is given back.
+Octant's Codex runs on the account's own Codex home, so the person's sessions
+and Octant's share Codex's thread store. The driver's `nativeSessions`
+(`codexNativeSessions.ts`) lists them with `thread/list` on a catalog
+app-server, filtered to the thread's folder (`cwd`), newest first by
+`updated_at`, at most 50, from the `cli`, `vscode`, `exec` and `appServer`
+sources; a listing loads no thread. It leaves out a subagent's or ephemeral
+thread and every thread whose `originator` is `Octant`, the client name
+Octant's connections send at `initialize`, which Codex records on each
+thread it creates (from codex-cli 0.154.0; an older Codex is refused with a
+sentence asking for that release, since it cannot tell the person's sessions
+from Octant's). Each carries its name, else the first line of its first
+request, and its branch, for the picker only. Adopting reads the thread with
+`thread/read`, which does not load it either (measured with codex-cli
+0.170.0), refuses one whose folder is not the thread's, and resumes the
+person's own thread: nothing is copied, so the history is the one their
+Codex shows, and the thread's next turn resumes it with `thread/resume`
+through the ordinary checks, which refuse a thread whose folder is not the
+Project's. The claim is a record of Octant's own beside the account's other
+Octant state (`held-threads.json`, naming the Codex thread and the Octant
+session holding it): a held thread is neither offered again nor adopted by a
+second Octant thread, and the check and the entry are one step, so two
+adoptions of one session take turns. `release` removes the entry only while
+it names the adoption's own session. Codex fixes a thread's app tools when it
+starts it and a resume cannot add any, so an adopted thread runs with Codex's
+own tools and none of Octant's: its cursor is marked `adopted`, a turn that
+offers Octant's tools resumes it rather than asking for a text handoff, and
+no rule about an Octant tool reaches its model. A session still open in the
+person's own Codex keeps its writer there, and the resume reports that
+another Codex process is using the thread until it closes.
+
+**Codex fork and rewind** (maintainer request, 2026-11-18; built for fork).
+A Code fork continues a copy of Codex's own thread rather than a text
+handoff where it can, as Claude Code's does ([Fork and rewind](#fork-and-rewind)).
+Each completed turn journals its Codex turn id as its native anchor, and the
+driver's `forkSession` calls `thread/fork` with `lastTurnId` set to it,
+`cwd` set to the Project's folder and `excludeTurns`. The copy keeps the
+source's app tools (measured with codex-cli 0.170.0), so its cursor carries
+the source's tool record and `adopted` mark. Codex leaves the copy loaded in
+the app-server that made it, and another app-server's resume refuses a
+loaded thread, so the copy is made on a short-lived catalog process of its
+own that closes as soon as the copy exists; the fork's first turn then
+resumes it on its own lease. Codex copies the source's `originator` onto the
+copy, so the copy is recorded in `held-threads.json` and never offered as
+the person's session. A copy is made only into the source's own folder and
+mode, and only by a release whose fork cuts at a turn (`lastTurnId`, from
+codex-cli 0.143.0); a fork onto its own worktree, a turn with no anchor, an
+older Codex and a failed copy go back with the text handoff. Codex still
+reports `sessionRollback` unsupported, so a rewind keeps the text handoff.
+
+**Codex skills and plugins in `@`** (maintainer request, 2026-11-18; built).
+The composer's `@` menu lists Codex's own skills and plugins after Octant's,
+labelled as Codex's. The probe reads the account's skills with `skills/list`
+(no folder: the `user`, `system` and `admin` scopes; a Project's skills are
+not the account's) and its installed, enabled plugins with
+`plugin/installed` (codex-cli 0.135.0 and later), into the observation's
+`mentions`; a release that lists neither offers none, and a failed read never
+fails the probe. Choosing one writes Codex's own reference into the draft:
+`$name` for a skill, `@name` for a plugin. At send the driver reads the
+prompt's `$name` and `@name` references and resolves each against Codex's
+own listing for the thread's folder, never a path the client sent: a skill
+becomes a `skill` input item with the `SKILL.md` path `skills/list`
+reported, a plugin a `mention` item naming `plugin://<name>@<marketplace>`,
+beside the text, which keeps the reference. A Project skill Octant switched
+off for the thread, a disabled skill or plugin, plugins on a thread whose
+plugins are off (Chat), and a name two skills or two plugins share are never
+sent as items; a listing that fails sends none, and Codex still reads a
+`$name` in the text by itself. At most 16 items go with one turn.
+
 The installed OpenCode binary's
 version selects its routes: 1.x keeps the legacy session API and its
 per-session permission ruleset. 2.x accepts no per-session ruleset, so each

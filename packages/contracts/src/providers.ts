@@ -2082,6 +2082,21 @@ export const ProviderSlashCommand = Schema.Struct({
 export type ProviderSlashCommand = typeof ProviderSlashCommand.Type;
 export const MAX_PROVIDER_SLASH_COMMANDS = 256;
 
+/**
+ * One of the provider's own skills or plugins a composer's `@` menu offers,
+ * as its runtime listed it: Codex's `skills/list` and `plugin/installed`.
+ * Choosing it writes the runtime's own reference into the draft (`$name` for
+ * a skill, `@name` for a plugin); the driver resolves that reference against
+ * its own listing at send and grants nothing on the client's word.
+ */
+export const ProviderMention = Schema.Struct({
+  kind: Schema.Literal("skill", "plugin"),
+  name: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9:_.-]*$/u), Schema.maxLength(128)),
+  description: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+}).annotations(strict);
+export type ProviderMention = typeof ProviderMention.Type;
+export const MAX_PROVIDER_MENTIONS = 256;
+
 export const ProviderObservedState = Schema.Struct({
   instanceId: ProviderInstanceId,
   readiness: ProviderReadiness,
@@ -2104,6 +2119,14 @@ export const ProviderObservedState = Schema.Struct({
    */
   commands: Schema.optional(
     Schema.Array(ProviderSlashCommand).pipe(Schema.maxItems(MAX_PROVIDER_SLASH_COMMANDS)),
+  ),
+  /**
+   * The provider's own skills and plugins its runtime last listed for the
+   * account (not a Project's), offered in the composer's `@` menu. Absent
+   * when it lists none or cannot say.
+   */
+  mentions: Schema.optional(
+    Schema.Array(ProviderMention).pipe(Schema.maxItems(MAX_PROVIDER_MENTIONS)),
   ),
   // Models a person explicitly verified for tool support through the
   // verify-model-tools command, on any endpoint profile (OpenAI-compatible,
@@ -2639,6 +2662,14 @@ export const ProviderResumeCursor = Schema.Struct({
       }).annotations(strict),
     ).pipe(Schema.maxItems(256)),
   ),
+  /**
+   * The session began outside Octant and was taken up as it stood, with the
+   * runtime's own tools and none of Octant's app tools, which a runtime that
+   * fixes its tools at start (Codex) cannot add later. Its turns run without
+   * them rather than handing the conversation over as text, and a copy of it
+   * keeps the mark.
+   */
+  adopted: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type ProviderResumeCursor = typeof ProviderResumeCursor.Type;
 

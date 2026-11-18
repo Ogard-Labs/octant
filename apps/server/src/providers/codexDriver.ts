@@ -14,6 +14,7 @@ import {
   type ProviderCapabilities,
   type ProviderContextBlock,
   type ProviderInstanceId,
+  type ProviderMention,
   type ProviderModel,
   type ProviderModelOptionValues,
   type ProviderNativeSetup,
@@ -36,6 +37,7 @@ import type {
   ProviderConnection,
   ProviderDriver,
   ProviderSessionCompaction,
+  ProviderSessionForkRequest,
 } from "@octant/provider-sdk/driver";
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
@@ -64,6 +66,7 @@ import {
 import { providerApprovalCall } from "./providerApprovalCall";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { isAtLeastRelease } from "./releaseVersion";
+import { changingCodexHeldThreads, makeCodexNativeSessions } from "./codexNativeSessions";
 import {
   codexRunsNativeSandbox,
   type CodexAppServerConnection,
@@ -83,8 +86,12 @@ import {
   decodeAccountReadResult,
   decodeConfigReadResult,
   decodeModelListResult,
+  decodePluginInstalledResult,
   decodeReviewStartResult,
   decodeSkillsListResult,
+  decodeThreadForkResult,
+  decodeThreadListResult,
+  decodeThreadReadResult,
   decodeThreadResumeResult,
   decodeThreadStartResult,
   decodeThreadCompactStartResult,
@@ -96,11 +103,14 @@ import {
   type CodexConfigReadResult,
   type CodexDynamicToolSpec,
   type CodexModelListResult,
+  type CodexPluginInstalledResult,
   type CodexRpcId,
   type CodexRateLimitsReadResult,
   type CodexReviewStartResult,
   type CodexServerMessage,
   type CodexSkillsListResult,
+  type CodexStoredThread,
+  type CodexThreadListResult,
   type CodexThreadResult,
   type CodexTurnResult,
   type CodexTurnSteerResult,
@@ -419,7 +429,11 @@ function codexProjectSkillsConfig(
 
 export type CodexTurnInputItem =
   | { readonly type: "text"; readonly text: string }
-  | { readonly type: "image"; readonly url: string };
+  | { readonly type: "image"; readonly url: string }
+  /** One of Codex's skills, by the `SKILL.md` path its `skills/list` reported. */
+  | { readonly type: "skill"; readonly name: string; readonly path: string }
+  /** A plugin, as `plugin://<name>@<marketplace>`. */
+  | { readonly type: "mention"; readonly name: string; readonly path: string };
 
 /** One entry of `turn/start.additionalContext`, rendered by Codex under a tag named by its key. */
 export interface CodexAdditionalContextEntry {
@@ -516,10 +530,38 @@ export interface CodexClientPort {
   modelList(cursor?: string): Promise<CodexModelListResult>;
   /** Without `cwd`, the effective config of every layer but a Project's. */
   configRead(input: { readonly cwd?: string }): Promise<CodexConfigReadResult>;
+  /** With no folder, the account's own skills and Codex's bundled ones. */
   skillsList(input: {
-    readonly cwds: readonly [string];
-    readonly forceReload: true;
+    readonly cwds: readonly [string] | readonly [];
+    readonly forceReload?: true;
   }): Promise<CodexSkillsListResult>;
+  /** The plugins installed for the account (codex-cli 0.135.0 and later). */
+  pluginInstalled?(input: {
+    readonly cwds?: readonly [string];
+  }): Promise<CodexPluginInstalledResult>;
+  /** Stored threads in one folder, newest first; a listing loads none of them. */
+  threadList?(input: {
+    readonly cwd: string;
+    readonly cursor?: string;
+    readonly limit: number;
+    readonly sortKey: "updated_at";
+    readonly archived: false;
+    readonly sourceKinds: ReadonlyArray<string>;
+  }): Promise<CodexThreadListResult>;
+  /** One stored thread, read without loading it. */
+  threadRead?(input: {
+    readonly threadId: string;
+  }): Promise<{ readonly thread: CodexStoredThread }>;
+  /**
+   * Copies a stored thread into a new one through `lastTurnId` (codex-cli
+   * 0.143.0 and later). The copy stays loaded in the app-server that made it.
+   */
+  threadFork?(input: {
+    readonly threadId: string;
+    readonly lastTurnId: string;
+    readonly cwd: string;
+    readonly excludeTurns: true;
+  }): Promise<CodexThreadResult>;
   threadStart(input: CodexThreadStartInput): Promise<CodexThreadResult>;
   threadResume(input: CodexThreadResumeInput): Promise<CodexThreadResult>;
   turnStart(input: CodexTurnStartInput): Promise<CodexTurnResult>;
@@ -572,6 +614,12 @@ export interface CodexDriverOptions {
    */
   readonly planMcpServers?: () => ReadonlyArray<string>;
   readonly idleLeaseMs?: number;
+  /**
+   * Octant's record of the account's Codex threads it holds but did not
+   * start (`codexNativeSessions.ts`). Absent, the driver offers none of the
+   * person's own sessions.
+   */
+  readonly heldThreadsFile?: string;
   readonly clock?: () => string;
   /**
    * The host environment the runtime's allowlist is applied to when the
@@ -772,6 +820,133 @@ const CODEX_TURN_CONTEXT_RELEASE = [0, 140, 0] as const;
  * compaction drops both the entries and Codex's memory of them (measured on
  * 0.164.0), and Octant then sends them again.
  */
+/** The longest list of skills and plugins one account offers in the `@` menu. */
+const MAX_CODEX_MENTIONS = 256;
+/** The most skill and plugin items one turn carries. */
+const MAX_CODEX_TURN_MENTIONS = 16;
+const CODEX_MENTION_NAME = /^[A-Za-z0-9][A-Za-z0-9:_.-]{0,127}$/u;
+
+function mentionDescription(...candidates: ReadonlyArray<string | null | undefined>) {
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim();
+    if (trimmed !== undefined && trimmed.length > 0)
+      return Array.from(trimmed).slice(0, 512).join("");
+  }
+  return undefined;
+}
+
+/**
+ * The account's own skills (not a Project's) and its installed plugins, for
+ * the composer's `@` menu. A release that lists neither, or answers either
+ * badly, offers what the other listed: the menu grants nothing, so a failed
+ * read never fails the probe.
+ */
+async function codexAccountMentions(
+  client: CodexClientPort,
+): Promise<ReadonlyArray<ProviderMention>> {
+  const mentions = new Map<string, ProviderMention>();
+  const add = (mention: ProviderMention) => {
+    const key = `${mention.kind}:${mention.name}`;
+    if (mentions.size < MAX_CODEX_MENTIONS && !mentions.has(key)) mentions.set(key, mention);
+  };
+  const skills = await client.skillsList({ cwds: [] }).catch(() => undefined);
+  for (const skill of skills?.data.flatMap((entry) => entry.skills) ?? []) {
+    if (
+      skill.name === undefined ||
+      !CODEX_MENTION_NAME.test(skill.name) ||
+      skill.enabled === false ||
+      !CODEX_SKILL_SCOPES_OUTSIDE_THE_PROJECT.has(skill.scope)
+    )
+      continue;
+    const description = mentionDescription(skill.shortDescription, skill.description);
+    add({ kind: "skill", name: skill.name, ...(description === undefined ? {} : { description }) });
+  }
+  const plugins = await client.pluginInstalled?.({}).catch(() => undefined);
+  for (const plugin of plugins?.marketplaces.flatMap((entry) => entry.plugins) ?? []) {
+    if (!plugin.installed || !plugin.enabled || !CODEX_MENTION_NAME.test(plugin.name)) continue;
+    const description = mentionDescription(plugin.interface?.shortDescription);
+    add({
+      kind: "plugin",
+      name: plugin.name,
+      ...(description === undefined ? {} : { description }),
+    });
+  }
+  return [...mentions.values()];
+}
+
+/** The names a prompt references with one sigil, as Codex's own composer writes them. */
+function referencedNames(prompt: string, sigil: "$" | "@"): ReadonlyArray<string> {
+  const names = new Set<string>();
+  const pattern =
+    sigil === "$"
+      ? /(?:^|\s)\$([A-Za-z0-9][A-Za-z0-9:_.-]*)/gu
+      : /(?:^|\s)@([A-Za-z0-9][A-Za-z0-9:_.-]*)/gu;
+  for (const match of prompt.matchAll(pattern)) {
+    const name = match[1];
+    if (name === undefined) continue;
+    names.add(name);
+    // A sentence may end on the reference.
+    const trimmed = name.replace(/[.:]+$/u, "");
+    if (trimmed.length > 0) names.add(trimmed);
+  }
+  return [...names];
+}
+
+/**
+ * The skills and plugins a turn's prompt names, as Codex input items beside
+ * its text: `$name` for one of Codex's skills, `@name` for an installed
+ * plugin. Each is resolved against Codex's own listing for the thread's
+ * folder, never a path the client sent, so a reference grants nothing Codex
+ * would not load for that thread anyway: a Project skill Octant switched off
+ * for the thread, a disabled skill or plugin, and plugins on a thread whose
+ * plugins are off are never sent. A name two skills or two plugins share is
+ * left to Codex's own reading of the text. A listing that fails sends no
+ * items; the text still carries the reference.
+ */
+async function codexReferencedMentions(
+  client: CodexClientPort,
+  input: {
+    readonly prompt: string;
+    readonly projectRoot: string;
+    readonly threadConfig: CodexThreadConfig;
+  },
+): Promise<ReadonlyArray<CodexTurnInputItem>> {
+  const items: CodexTurnInputItem[] = [];
+  const skillNames = referencedNames(input.prompt, "$");
+  if (skillNames.length > 0) {
+    const switchedOff = new Set(input.threadConfig.skills?.config.map((rule) => rule.path) ?? []);
+    const listed = await client.skillsList({ cwds: [input.projectRoot] }).catch(() => undefined);
+    const byName = new Map<string, Array<string>>();
+    for (const skill of listed?.data.flatMap((entry) => entry.skills) ?? []) {
+      if (skill.name === undefined || skill.enabled === false || switchedOff.has(skill.path))
+        continue;
+      byName.set(skill.name, [...(byName.get(skill.name) ?? []), skill.path]);
+    }
+    for (const name of skillNames) {
+      const paths = byName.get(name);
+      if (paths?.length === 1 && paths[0] !== undefined)
+        items.push({ type: "skill", name, path: paths[0] });
+    }
+  }
+  const pluginNames = referencedNames(input.prompt, "@");
+  if (pluginNames.length > 0 && input.threadConfig["features.plugins"] !== false) {
+    const installed = await client
+      .pluginInstalled?.({ cwds: [input.projectRoot] })
+      .catch(() => undefined);
+    const byName = new Map<string, Array<string>>();
+    for (const plugin of installed?.marketplaces.flatMap((entry) => entry.plugins) ?? []) {
+      if (!plugin.installed || !plugin.enabled) continue;
+      byName.set(plugin.name, [...(byName.get(plugin.name) ?? []), plugin.id]);
+    }
+    for (const name of pluginNames) {
+      const ids = byName.get(name);
+      if (ids?.length === 1 && ids[0] !== undefined)
+        items.push({ type: "mention", name, path: `plugin://${ids[0]}` });
+    }
+  }
+  return items.slice(0, MAX_CODEX_TURN_MENTIONS);
+}
+
 const CODEX_INSTRUCTIONS_KEY = "octant_instructions";
 const CODEX_MATERIAL_KEY = "octant_context";
 
@@ -1316,6 +1491,10 @@ export function makeCodexClient(connection: CodexAppServerConnection): CodexClie
       ),
     configRead: (input) => rpc.request("config/read", input, decodeConfigReadResult),
     skillsList: (input) => rpc.request("skills/list", input, decodeSkillsListResult),
+    pluginInstalled: (input) => rpc.request("plugin/installed", input, decodePluginInstalledResult),
+    threadList: (input) => rpc.request("thread/list", input, decodeThreadListResult),
+    threadRead: (input) => rpc.request("thread/read", input, decodeThreadReadResult),
+    threadFork: (input) => rpc.request("thread/fork", input, decodeThreadForkResult),
     threadStart: (input) => rpc.request("thread/start", input, decodeThreadStartResult),
     threadResume: (input) => rpc.request("thread/resume", input, decodeThreadResumeResult),
     turnStart: (input) => rpc.request("turn/start", input, decodeTurnStartResult),
@@ -1367,6 +1546,10 @@ function toolCatalogContinuation(input: {
   readonly resumeCursor: ProviderResumeCursor;
   readonly tools: ReadonlyArray<ProviderToolDefinition>;
 }): "unchanged" | "handoff-required" {
+  // A session begun outside Octant never had Octant's tools and cannot gain
+  // them, so it runs with the runtime's own: handing it over as text would
+  // lose the session the person chose to continue.
+  if (input.resumeCursor.adopted === true) return "unchanged";
   // Withdrawing a tool keeps the cached native session; the host refuses its
   // later calls. New or changed definitions cannot reach that saved session.
   const recorded = new Map(
@@ -1389,11 +1572,112 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
   const makeTaskId = options.taskId ?? (() => crypto.randomUUID());
   const makeToolCallId = options.toolCallId ?? (() => crypto.randomUUID());
 
+  const heldThreadsFile = options.heldThreadsFile;
+  const sessionCatalog = <A>(use: (client: CodexClientPort, version: string) => Promise<A>) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const runtime = yield* acquireRuntime(options, clientFactory, CATALOG_AUTHORITY);
+        return yield* Effect.tryPromise({
+          try: () => use(runtime.client, runtime.version),
+          catch: (error) => error,
+        });
+      }),
+    );
+  /**
+   * Copies a session Octant holds through a turn with Codex's own
+   * `thread/fork`, for a fork or a rewind, and returns the cursor that
+   * resumes the copy. The copy stays loaded in the app-server that made it,
+   * and another app-server's resume is refused while it does (measured with
+   * codex-cli 0.170.0), so it is made on a process of its own that closes as
+   * soon as the copy exists; the thread's next turn then resumes it on its
+   * own lease. A copy is made only for the source's own folder and mode, and
+   * only by a release that cuts at a turn (`lastTurnId`, 0.143.0); anything
+   * else goes back as the text handoff.
+   */
+  const forkSession = (
+    input: ProviderSessionForkRequest,
+  ): Effect.Effect<ProviderResumeCursor | undefined, ProviderFailure> => {
+    const source = input.source;
+    const binding = source.binding;
+    if (
+      String(input.instanceId) !== String(options.instanceId) ||
+      source.driverKind !== "codex" ||
+      binding === undefined ||
+      String(binding.instanceId) !== String(options.instanceId) ||
+      binding.projectRoot !== input.projectRoot ||
+      binding.mode !== input.mode ||
+      input.anchor.trim().length === 0
+    )
+      return Effect.succeed(undefined);
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const runtime = yield* acquireRuntime(
+          options,
+          clientFactory,
+          CATALOG_AUTHORITY,
+          CODEX_SESSION_COPY_LEASE,
+          0,
+        );
+        const threadFork = runtime.client.threadFork;
+        if (threadFork === undefined || !isAtLeastRelease(runtime.version, CODEX_FORK_RELEASE))
+          return undefined;
+        const copy = yield* request(() =>
+          threadFork({
+            threadId: source.value,
+            lastTurnId: input.anchor,
+            cwd: input.projectRoot,
+            excludeTurns: true,
+          }),
+        );
+        if (copy.cwd !== input.projectRoot)
+          return yield* Effect.fail(
+            failure("unauthorized", "Codex copied the thread into a different Project root."),
+          );
+        if (heldThreadsFile !== undefined)
+          yield* Effect.tryPromise({
+            try: () =>
+              changingCodexHeldThreads(heldThreadsFile, (held) => {
+                held.set(copy.thread.id, String(input.sessionId));
+              }),
+            catch: () =>
+              failure("provider-failed", "The copied Codex thread could not be recorded."),
+          });
+        return {
+          driverKind: "codex" as const,
+          value: copy.thread.id,
+          // A copy keeps the source's app tools (measured with codex-cli 0.170.0).
+          ...(source.tools === undefined ? {} : { tools: source.tools }),
+          ...(source.toolDefinitions === undefined
+            ? {}
+            : { toolDefinitions: source.toolDefinitions }),
+          ...(source.adopted === true ? { adopted: true as const } : {}),
+          binding: providerResumeBinding({
+            instanceId: options.instanceId,
+            sessionId: input.sessionId,
+            projectRoot: input.projectRoot,
+            mode: input.mode,
+            modelId: input.modelId,
+          }),
+        };
+      }),
+    );
+  };
+
   return {
     kind: "codex",
     conversationOwnership: "provider",
     toolCatalogContinuation,
     contextFacts,
+    forkSession,
+    ...(heldThreadsFile === undefined
+      ? {}
+      : {
+          nativeSessions: makeCodexNativeSessions({
+            instanceId: options.instanceId,
+            recordFile: heldThreadsFile,
+            catalog: sessionCatalog,
+          }),
+        }),
     probe: ({ instanceId }) =>
       instanceId !== options.instanceId
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
@@ -1401,11 +1685,12 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             const runtime = yield* acquireRuntime(options, clientFactory, CATALOG_AUTHORITY);
             const accountResult = yield* request(runtime.client.accountRead);
             const models = yield* readModels(runtime.client);
+            const mentions = yield* Effect.promise(() => codexAccountMentions(runtime.client));
             const environment = yield* Effect.promise(() => resolveCodexLaunchEnvironment(options));
             // A Bedrock sign-in through an AWS profile or exported credentials
             // is refused only for a Strict session, when its lease starts;
             // the account itself stays ready for every other thread.
-            const result = normalizeProbe(
+            const probed = normalizeProbe(
               instanceId,
               runtime.version,
               accountResult,
@@ -1413,6 +1698,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
               clock(),
               codexProviderCredential(environment ?? process.env),
             );
+            const result = mentions.length === 0 ? probed : { ...probed, mentions };
             // Publish the fresh catalog like the other drivers do, so a caller
             // that probes before opening a session (Chat probes before every
             // turn) validates model options and turn input against it even
@@ -1570,6 +1856,10 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
 }
 
 const CATALOG_AUTHORITY: CodexLaunchAuthority = { kind: "catalog" };
+/** The lease of the short-lived process a session copy is made on. */
+const CODEX_SESSION_COPY_LEASE = "codex-session-copy";
+/** The first release whose `thread/fork` cuts the copy at a turn (`lastTurnId`). */
+const CODEX_FORK_RELEASE = [0, 143, 0] as const;
 
 /**
  * Everything one thread lease's process is launched for. None of it can
@@ -1632,12 +1922,14 @@ function acquireRuntime(
   clientFactory: (connection: CodexAppServerConnection) => CodexClientPort,
   authority: CodexLaunchAuthority,
   lease?: string,
+  idleMs?: number,
 ) {
   return options.runtimeRegistry.acquireRuntime<CodexLeasedRuntime>(options.instanceId, {
     idleMs:
-      authority.kind === "thread" && authority.sandboxPolicy !== undefined
+      idleMs ??
+      (authority.kind === "thread" && authority.sandboxPolicy !== undefined
         ? 0
-        : (options.idleLeaseMs ?? 30_000),
+        : (options.idleLeaseMs ?? 30_000)),
     ...(lease === undefined ? {} : { lease }),
     start: async () => {
       const scope = await Effect.runPromise(Scope.make());
@@ -3008,12 +3300,24 @@ function makeConnection(
             ensureSubscribed();
             return Effect.tryPromise({
               try: async () => {
+                const turnRequest = codexTurnRequest(
+                  withCarriedToolRules(input, state.carriedTools),
+                  version,
+                );
+                const mentions = await codexReferencedMentions(client, {
+                  prompt: input.prompt,
+                  projectRoot: state.projectRoot,
+                  threadConfig: state.threadConfig,
+                });
                 let lastError: unknown;
                 for (let attempt = 0; attempt <= SATURATION_DELAYS_MS.length; attempt += 1) {
                   try {
                     const turn = await client.turnStart({
                       threadId: state.threadId,
-                      ...codexTurnRequest(withCarriedToolRules(input, state.carriedTools), version),
+                      ...turnRequest,
+                      ...(mentions.length === 0
+                        ? {}
+                        : { input: [...turnRequest.input, ...mentions] }),
                       ...codexTurnExecutionSettings(
                         state.executionPolicy,
                         state.autoApprove,
