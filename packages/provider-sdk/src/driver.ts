@@ -500,10 +500,17 @@ export interface ProviderDriver {
   readonly beginAuthentication?: (
     input: ProviderProbeInput,
   ) => Effect.Effect<ProviderAuthenticationAttempt, ProviderFailure, Scope.Scope>;
+  /**
+   * Pending while the person has not finished signing in yet; the caller asks
+   * again. `code` is a code the sign-in page showed, passed to the provider's
+   * own sign-in.
+   */
   readonly completeAuthentication?: (
-    input: ProviderProbeInput & { readonly attemptId: string },
-  ) => Effect.Effect<void, ProviderFailure, Scope.Scope>;
+    input: ProviderProbeInput & { readonly attemptId: string; readonly code?: string },
+  ) => Effect.Effect<ProviderAuthenticationProgress, ProviderFailure, Scope.Scope>;
 }
+
+export type ProviderAuthenticationProgress = "completed" | "pending";
 
 export interface ProviderSessionForkRequest {
   readonly instanceId: ProviderInstanceId;

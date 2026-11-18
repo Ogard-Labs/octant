@@ -1724,7 +1724,7 @@ describe("useProviderController", () => {
     await act(async () => {
       await expect(
         result.current.completeProviderAuthentication(id, attempt!.attemptId),
-      ).resolves.toBe(true);
+      ).resolves.toBe("completed");
     });
     expect(api.execute).toHaveBeenNthCalledWith(1, {
       kind: "begin-provider-authentication",

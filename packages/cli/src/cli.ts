@@ -69,6 +69,11 @@ import {
 import { decodeAgentConnectionFile } from "@octant/contracts";
 import { readFile } from "node:fs/promises";
 import {
+  resolveAccountCliCommand,
+  runAccountCliCommand,
+  type AccountCliCommand,
+} from "./accountCommand";
+import {
   readAllStdin,
   readHiddenLineFromTerminal,
   resolveProviderKeyCliCommand,
@@ -572,6 +577,14 @@ export async function runCli(
       }),
     );
   }
+  if (args.command === "account") {
+    const command = resolveAccountCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage(context.identity);
+      return 1;
+    }
+    return await runAccountFlow(context, command);
+  }
   if (args.command === "provider" && args.positional[0] === "sign-in") {
     const command = resolveProviderSignInCliCommand(args.positional, args.flags);
     if (command === undefined) {
@@ -828,6 +841,43 @@ const administratorRunner: ServiceCommandRunner = {
     }),
 };
 
+/** `octant account`: a question needs a terminal; sign-in runs the provider's CLI on it. */
+async function runAccountFlow(context: CliContext, command: AccountCliCommand): Promise<number> {
+  // The prompt opens only for the one question and closes at once: a reader
+  // left on stdin while the provider's sign-in owns the terminal would take
+  // the code the person pastes for it (reproduced under a PTY).
+  const ask =
+    process.stdin.isTTY === true
+      ? async (question: string): Promise<string | undefined> => {
+          const prompt = createInterface({ input: process.stdin, output: process.stdout });
+          const closed = new Promise<undefined>((resolve) =>
+            prompt.once("close", () => resolve(undefined)),
+          );
+          try {
+            return await Promise.race([prompt.question(question), closed]);
+          } finally {
+            prompt.close();
+          }
+        }
+      : undefined;
+  return await withLocalControlSession(context, (session) =>
+    runAccountCliCommand({
+      command,
+      session,
+      ask,
+      run: (binary, args, env) =>
+        new Promise((resolve, reject) => {
+          const child = spawn(binary, [...args], { stdio: "inherit", env });
+          child.once("error", reject);
+          child.once("exit", (code) => resolve(code ?? 1));
+        }),
+      env: process.env,
+      stdout: process.stdout,
+      stderr: process.stderr,
+    }),
+  );
+}
+
 /** `octant provider sign-in`: the terms question needs a terminal; the code does not. */
 async function runProviderSignInFlow(
   context: CliContext,
@@ -954,6 +1004,10 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
   { octant: "plugin check-update <package>" },
   { octant: "plugin create <name> [--mcp-url <https address>]" },
   { octant: "plugin check <folder>" },
+  { octant: "account list" },
+  { octant: "account add claude|codex [--name <name>] [--no-sign-in]" },
+  { octant: "account sign-in|status <account>" },
+  { octant: "account remove <account> [--yes]" },
   { octant: "provider key set <instance> [--replace] [--stdin]" },
   { octant: "provider key status|remove <instance>" },
   { octant: "provider remove <instance>" },

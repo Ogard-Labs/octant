@@ -2239,8 +2239,18 @@ export const ProviderAuthenticationAttempt = Schema.Struct({
     }),
   ),
   expiresAt: UtcTimestamp,
+  /** The sign-in page may show a code for the person to paste back into Octant. */
+  codeEntry: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type ProviderAuthenticationAttempt = typeof ProviderAuthenticationAttempt.Type;
+
+// A pasted sign-in code: printable, no spaces, short. It is written to the
+// provider CLI's input as one line, so nothing that could end the line early
+// or steer a terminal is admitted.
+export const ProviderAuthenticationCode = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(512),
+  Schema.pattern(/^[\x21-\x7e]+$/),
+);
 
 export const ProviderRegistryCommand = Schema.Union(
   Schema.Struct({
@@ -2521,6 +2531,11 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("complete-provider-authentication"),
     instanceId: ProviderInstanceId,
     attemptId: ProviderAuthenticationAttemptId,
+    /**
+     * The code a provider's sign-in page shows when its own CLI could not
+     * take the browser's answer itself; the host hands it to that CLI.
+     */
+    code: Schema.optional(ProviderAuthenticationCode),
   }).annotations(strict),
 );
 export type ProviderRegistryCommand = typeof ProviderRegistryCommand.Type;
@@ -2586,6 +2601,10 @@ export const ProviderRegistryCommandResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("provider-authentication-completed"),
+    instanceId: ProviderInstanceId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("provider-authentication-pending"),
     instanceId: ProviderInstanceId,
   }).annotations(strict),
 );
