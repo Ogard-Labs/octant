@@ -1,4 +1,5 @@
-import { CircleCheck, Info, TriangleAlert, X } from "lucide-react";
+import { useEffect, useRef, useState, type FocusEvent } from "react";
+import { CircleCheck, Info, TriangleAlert, X } from "../icons";
 import { OctantButton, OctantIconButton } from "./OctantButton";
 
 export interface OctantToastProps {
@@ -10,6 +11,14 @@ export interface OctantToastProps {
     readonly onSelect: () => void;
   };
   readonly onDismiss: () => void;
+  /**
+   * A notice that only reports something done leaves by itself after this
+   * long, as if dismissed. It stays while the pointer or the keyboard is on
+   * it, and a notice the person must act on never sets it. A notice that
+   * stayed until dismissed stood over the top of the pane under it for as long
+   * as the person did not go and close it.
+   */
+  readonly leavesAfterMs?: number;
 }
 
 export function OctantToast({
@@ -18,7 +27,31 @@ export function OctantToast({
   tone = "neutral",
   action,
   onDismiss,
+  leavesAfterMs,
 }: OctantToastProps) {
+  // The pointer and the keyboard each hold the notice. As one flag, the
+  // pointer leaving let go of a notice the keyboard was still on.
+  const [pointerOn, setPointerOn] = useState(false);
+  const [focusOn, setFocusOn] = useState(false);
+  const held = pointerOn || focusOn;
+  const dismiss = useRef(onDismiss);
+  dismiss.current = onDismiss;
+  useEffect(() => {
+    if (leavesAfterMs === undefined || held) return;
+    const timer = window.setTimeout(() => dismiss.current(), leavesAfterMs);
+    return () => window.clearTimeout(timer);
+  }, [held, leavesAfterMs]);
+  const hold =
+    leavesAfterMs === undefined
+      ? {}
+      : {
+          onBlur: (event: FocusEvent<HTMLDivElement>) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setFocusOn(false);
+          },
+          onFocus: () => setFocusOn(true),
+          onPointerEnter: () => setPointerOn(true),
+          onPointerLeave: () => setPointerOn(false),
+        };
   const Icon =
     tone === "success"
       ? CircleCheck
@@ -26,7 +59,7 @@ export function OctantToast({
         ? TriangleAlert
         : Info;
   return (
-    <div className="toast" data-tone={tone} role={tone === "danger" ? "alert" : "status"}>
+    <div className="toast" data-tone={tone} role={tone === "danger" ? "alert" : "status"} {...hold}>
       <Icon aria-hidden="true" className="toast__icon" size={16} />
       <div className="toast__content">
         <strong className="toast-title">{title}</strong>

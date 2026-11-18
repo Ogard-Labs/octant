@@ -9,7 +9,9 @@
     "build:canvas-preview": "vite build --config vite.canvas-preview.config.ts",
     "dev": "vite",
     "test": "vitest run --testTimeout=15000",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "visual:check": "OCTANT_VISUAL_CHECK=1 vitest run --testTimeout=280000 src/visualCheck/visualCheck.chromium.test.ts",
+    "visual:update": "OCTANT_VISUAL_CHECK=1 OCTANT_VISUAL_UPDATE=1 vitest run --testTimeout=280000 src/visualCheck/visualCheck.chromium.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "1.6.0",
@@ -29,7 +31,7 @@
     "clsx": "2.1.1",
     "katex": "0.18.9",
     "lean-qr": "2.7.4",
-    "lucide-react": "1.24.0",
+    "lucide-react": "1.74.0",
     "monaco-editor": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",

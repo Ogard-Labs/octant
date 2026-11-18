@@ -1,10 +1,12 @@
+import { SettingsSetupAction } from "./SettingsSetupLink";
+import type { ExternalUrlHost } from "../shell/openExternalUrl";
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
 import type { PrivateListenerPublicStatus } from "../shell/hostBridge";
 import { RemoteSetupChecks } from "./RemoteSetupChecks";
 import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
-import { SettingsPanel } from "./primitives";
+import { SettingsDisclosure, SettingsPanel } from "./primitives";
 
 export type RemoteSetupIntent = "control-host" | "server-command" | "server-folder";
 
@@ -28,6 +30,7 @@ const CHOICES: ReadonlyArray<{
 
 /** Choosing a journey grants no access and starts no connection or command. */
 export function RemoteSetupGuide(props: {
+  readonly externalUrlHost?: ExternalUrlHost | undefined;
   readonly focusedSetting?: string | undefined;
   readonly canConfigureHost: boolean;
   readonly checks?: Pick<ServerProjectsClient, "check"> | undefined;
@@ -46,7 +49,7 @@ export function RemoteSetupGuide(props: {
   return (
     <div ref={root}>
       <SettingsPanel
-        description="Choose where the work runs before connecting a device or a server."
+        description="Choose where work runs before you connect a device or server."
         title="What do you want to do remotely?"
       >
         <div
@@ -74,13 +77,13 @@ export function RemoteSetupGuide(props: {
                 <p>Files, providers and the journal stay on the Octant host.</p>
                 <ol className="remote-setup__steps">
                   <li>
-                    Keep Octant running on that computer and enable its private HTTPS listener.
+                    Keep Octant running on that computer and turn on its private HTTPS listener.
                   </li>
                   <li>Pair this device and confirm the request on the host.</li>
                   <li>Open a thread and read its latest message before sending a first task.</li>
                 </ol>
                 <p>
-                  An unavailable host cannot accept work. Check its network and that it is awake;
+                  An unavailable computer cannot take work. Check its network and that it is awake;
                   reconnecting never repeats an uncertain task. Scheduled work needs its executing
                   host awake, or separately configured wake support.
                 </p>
@@ -153,6 +156,76 @@ export function RemoteSetupGuide(props: {
             )}
           </div>
         )}
+        <SettingsDisclosure
+          title="Connect with Tailscale"
+          variant="inline"
+          settingId="tailscale-setup"
+          focused={props.focusedSetting === "tailscale-setup"}
+        >
+          <ol className="remote-setup__steps">
+            <li>
+              Install Tailscale on both computers or devices. Sign in from each Tailscale app to
+              join the same tailnet. On a headless devbox, run <code>tailscale up</code> and open
+              the sign-in URL it prints.
+              <SettingsSetupAction
+                host={props.externalUrlHost}
+                href="https://tailscale.com/download"
+              >
+                Get Tailscale
+              </SettingsSetupAction>
+            </li>
+            <li>
+              Find the destination’s Tailscale IP or full MagicDNS name in the Tailscale app. From
+              the connecting computer, run <code>tailscale ping</code> followed by that name. Allow
+              the required SSH or Octant listener port in your tailnet access rules.
+            </li>
+            <li>
+              For a devbox, use its tailnet address in your SSH alias and choose a server workflow.
+              For an Octant host, choose Control my Octant host. For browser access, enable HTTPS
+              certificates in the tailnet and run <code>tailscale cert</code> with the host’s full
+              MagicDNS name on that host.{" "}
+              {props.canConfigureHost
+                ? "Enter that name, certificate and key in Remote listener."
+                : "Enter that name, certificate and key in Remote listener in Settings on the host."}{" "}
+              Pair the device, or turn on the hub and use its join code.
+            </li>
+          </ol>
+        </SettingsDisclosure>
+        <SettingsDisclosure
+          title="Set up Cloudflare private routing"
+          variant="inline"
+          settingId="cloudflare-setup"
+          focused={props.focusedSetting === "cloudflare-setup"}
+        >
+          <ol className="remote-setup__steps">
+            <li>
+              In Cloudflare Zero Trust, create a Cloudflare Tunnel. Follow its connector install
+              instructions on a machine that can reach the destination’s private LAN address. Wait
+              for the tunnel to show Healthy.
+              <SettingsSetupAction
+                host={props.externalUrlHost}
+                href="https://one.dash.cloudflare.com/"
+              >
+                Open Cloudflare Zero Trust
+              </SettingsSetupAction>
+            </li>
+            <li>
+              Add a private CIDR route to the tunnel. For one devbox at 192.168.1.20, use{" "}
+              <code>192.168.1.20/32</code>. Configure your device profile’s split tunnels to send
+              that address through WARP and restrict access to the intended users and port with
+              Gateway network policies.
+            </li>
+            <li>
+              Enroll the connecting device in your Zero Trust organization using Cloudflare One
+              Client (WARP) and enable traffic routing. For a devbox, verify SSH to its private
+              address from that device, then continue to server registration. For an Octant host,
+              {props.canConfigureHost
+                ? " enable its HTTPS listener on the routed private address and pair through Remote access."
+                : " enable its HTTPS listener on the routed private address in Settings on the host, then pair this device."}{" "}
+              Browser pairing needs a certificate trusted for that address.
+            </li>
+          </ol>
+        </SettingsDisclosure>
       </SettingsPanel>
     </div>
   );

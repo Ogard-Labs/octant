@@ -1,6 +1,6 @@
 import { OctantCollapsible } from "../../ui/base/OctantCollapsible";
 import type { CSSProperties } from "react";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare } from "../../ui/icons";
 import {
   Bell,
   Calendar,
@@ -26,8 +26,8 @@ import {
   TriangleAlert,
   User,
   X,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "../../ui/icons";
 import { OctantButton } from "../../ui/base/OctantButton";
 import type {
   CanvasMockupBlock,
@@ -46,7 +46,7 @@ import {
 import { MARK_TICK_STROKE_WIDTH } from "../../ui/IconDefaults";
 
 // The bundled icon set: each meaning in the contract maps to one glyph here.
-const ICON: Record<CanvasMockupIcon, LucideIcon> = {
+const ICON: Record<CanvasMockupIcon, IconComponent> = {
   search: Search,
   settings: Settings,
   user: User,

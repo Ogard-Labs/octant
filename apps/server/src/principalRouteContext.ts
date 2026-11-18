@@ -3,6 +3,7 @@ import {
   assertNoPrincipalIdentityInPayload,
   ClientPrincipalError,
   principalActsAsHostPerson,
+  isAgentGrantSession,
   WINDOW_CAPABILITY_HEADER,
   resolveAuthenticatedPrincipal,
   type ClientPrincipal,
@@ -41,6 +42,10 @@ export function bindPrincipalRouteContext(request: Request, context: PrincipalRo
 /** Read a context previously bound by the server-owned dispatch boundary. */
 export function readPrincipalRouteContext(request: Request): PrincipalRouteContext | undefined {
   return boundContexts.get(request);
+}
+export function boundPrincipalIsAgent(request: Request): boolean {
+  const principal = readPrincipalRouteContext(request)?.principal;
+  return principal !== undefined && isAgentGrantSession(principal);
 }
 
 /**

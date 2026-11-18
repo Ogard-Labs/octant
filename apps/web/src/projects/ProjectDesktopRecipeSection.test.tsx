@@ -503,7 +503,7 @@ describe("ProjectDesktopRecipeSection", () => {
           project={project()}
         />,
       );
-      expect(await screen.findByText(/no credential store Octant can reach/)).toBeTruthy();
+      expect(await screen.findByText(/cannot reach a credential store here/)).toBeTruthy();
       expect(screen.getByLabelText("Cloud desktops API key")).toBeDisabled();
       expect(screen.getByRole("button", { name: "Set recipe" })).toBeDisabled();
     });

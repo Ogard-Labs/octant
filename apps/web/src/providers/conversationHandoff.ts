@@ -1,6 +1,7 @@
 import type { ChatAttemptHandoff, WorkTurnHandoff } from "@octant/contracts";
 import { providerKeepsConversation, type PickerGroup } from "@octant/domain";
 import {
+  accountMoveSessionDisclosure,
   conversationHandoffDisclosure,
   omissionsDisclosure,
   pendingProviderSwitchNotice,
@@ -22,6 +23,7 @@ export function threadHandoffDisclosure(
   label: (selection: { readonly providerInstanceId: string; readonly modelId: string }) => string,
 ): string {
   if (handoff.reason === "provider-switch") return conversationHandoffDisclosure(handoff, label);
+  if (handoff.reason === "account-move") return accountMoveSessionDisclosure(handoff, label);
   if (handoff.reason === "rewind")
     return [
       `After the rewind, a fresh session started with ${count(handoff.messages, "recent message", "recent messages")} of the kept conversation as text.`,

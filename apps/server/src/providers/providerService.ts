@@ -35,11 +35,19 @@ import {
   type ProviderModelToolCheck,
   type ProviderExecutionPolicy,
   type OctantMode,
+  type AddedAcpAgentConfiguration,
+  type AddedAcpAgentProviderInstance,
+  type ProviderRegistryCommand,
 } from "@octant/contracts";
 import {
   ProviderPolicyRejected,
+  addedAcpAgentSteps,
   changeAcpAgentConfiguration,
   createAcpAgentProvider,
+  createAddedAcpAgentProvider,
+  installAddedAcpAgent,
+  isAddedAcpAgentInstance,
+  setAddedAcpAgentTrust,
   isAcpAgentInstance,
   isChangeAcpAgentConfigurationCommand,
   isCreateAcpAgentProviderCommand,
@@ -63,6 +71,7 @@ import {
   createBflImageProvider,
   createIdeogramImageProvider,
   assignedClaudeAccountConfigDirectory,
+  claudeAccountUsesStoredKey,
   assignedCodexHome,
   changeCodexConfiguration,
   codexChangeKeepsRuntime,
@@ -115,7 +124,13 @@ import {
   admittedBundledProviderDriverKinds,
   bundledProviderDriverWithheldReason,
 } from "@octant/plugin-host/provider-drivers";
+import {
+  acpAgentCommandRefusal,
+  acpAgentEnableRefusal,
+  acpRegistryAgent,
+} from "@octant/plugin-host/acp-agents";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import type { AcpAgentInstallResult } from "./acpAgentInstall";
 import {
   ConcurrencyConflict,
   JournalWriteFailed,
@@ -262,6 +277,14 @@ export interface ProviderServiceOptions {
   readonly latestNpmVersion?: (packageName: string) => Promise<string | undefined>;
   /** Read-only host fact used to refuse enabling a missing local CLI. */
   readonly isProviderExecutableAvailable?: (instance: ProviderInstance) => boolean;
+  /**
+   * Puts an added ACP agent on disk, and removes what an install left when
+   * the agent is removed. Absent, the install step is refused.
+   */
+  readonly acpAgentInstall?: {
+    readonly install: (instance: AddedAcpAgentProviderInstance) => Promise<AcpAgentInstallResult>;
+    readonly remove: (instanceId: ProviderInstanceId) => Promise<void>;
+  };
   readonly uuid: () => string;
   readonly clock: () => string;
 }
@@ -309,6 +332,7 @@ export class ProviderService implements ProviderServiceApi {
   readonly #runCliUpdate: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
   readonly #latestNpmVersion: (packageName: string) => Promise<string | undefined>;
   readonly #isProviderExecutableAvailable: (instance: ProviderInstance) => boolean;
+  readonly #acpAgentInstall: ProviderServiceOptions["acpAgentInstall"];
 
   constructor(options: ProviderServiceOptions) {
     this.#persistence = options.persistence;
@@ -353,6 +377,68 @@ export class ProviderService implements ProviderServiceApi {
     this.#runCliUpdate = options.runCliUpdate ?? runProviderCliUpdate;
     this.#latestNpmVersion = options.latestNpmVersion ?? (async () => undefined);
     this.#isProviderExecutableAvailable = options.isProviderExecutableAvailable ?? (() => true);
+    this.#acpAgentInstall = options.acpAgentInstall;
+  }
+
+  /**
+   * What an added agent is created from. A registry agent's name, release,
+   * distribution, arguments and environment come from the host's own listing;
+   * a local command is refused unless it is an absolute executable with
+   * literal arguments that carry no key.
+   */
+  #addedAcpAgentSource(
+    source: Extract<ProviderRegistryCommand, { readonly kind: "add-acp-agent" }>["source"],
+  ): { readonly displayName: string; readonly configuration: AddedAcpAgentConfiguration } {
+    if (source.kind === "registry") {
+      const listing = acpRegistryAgent(source.registryId);
+      if (listing === undefined) {
+        throw this.#invalid("This agent is not in Octant's ACP registry listing.");
+      }
+      const { distribution } = listing;
+      return {
+        displayName: listing.name,
+        configuration: {
+          kind: "acp-agent",
+          source: {
+            kind: "registry",
+            registryId: listing.registryId,
+            version: listing.version,
+            distribution: distribution.kind,
+          },
+          args: distribution.args,
+          ...(distribution.env === undefined ? {} : { environment: distribution.env }),
+          trusted: false,
+        },
+      };
+    }
+    const refusal = acpAgentCommandRefusal({ command: source.command, args: source.args });
+    if (refusal !== undefined) {
+      throw this.#invalid(
+        refusal === "not-absolute"
+          ? "The command must be an absolute path to an executable."
+          : refusal === "secret-argument"
+            ? "An argument names a key, token or password. Octant records an agent's arguments, so sign the agent in with its own command instead."
+            : refusal === "too-many-arguments"
+              ? "The command takes at most 32 arguments."
+              : "The command or an argument holds a control character.",
+      );
+    }
+    return {
+      displayName: source.displayName,
+      configuration: {
+        kind: "acp-agent",
+        source: { kind: "local", command: source.command },
+        args: source.args,
+        trusted: false,
+      },
+    };
+  }
+
+  async #installAcpAgent(instance: AddedAcpAgentProviderInstance): Promise<AcpAgentInstallResult> {
+    if (this.#acpAgentInstall === undefined) {
+      throw this.#unsupported("This host does not install ACP agents.");
+    }
+    return this.#acpAgentInstall.install(instance);
   }
 
   async bootstrap(_authenticatedWindowId: WindowId): Promise<ProviderRegistrySnapshot> {
@@ -621,6 +707,43 @@ export class ProviderService implements ProviderServiceApi {
     }
   }
 
+  /**
+   * Drops "CLI" from the two default names older installs saved: an account
+   * named exactly "Codex CLI" on the codex driver, or "OpenCode CLI" on the
+   * opencode driver, becomes "Codex" / "OpenCode" through the same rename a
+   * person's Settings edit uses. An account whose name was ever changed by a
+   * rename is left alone, so a person who renames it back keeps their choice,
+   * and a name another account already holds is skipped. A refused rename is
+   * logged once and never fails startup.
+   */
+  async renameLegacyDefaultNames(authenticatedWindowId: WindowId): Promise<void> {
+    for (const instance of this.#persistence.readProviderInstances()) {
+      const newName =
+        instance.driverKind === "codex" && instance.displayName === "Codex CLI"
+          ? "Codex"
+          : instance.driverKind === "opencode" && instance.displayName === "OpenCode CLI"
+            ? "OpenCode"
+            : undefined;
+      if (newName === undefined) continue;
+      try {
+        const renamedBefore = this.#persistence.journal.firstAggregateEvent({
+          aggregateType: "provider-instance",
+          aggregateId: instance.id,
+          kind: "provider.instance-renamed@1",
+        });
+        if (renamedBefore !== undefined) continue;
+        await this.execute(authenticatedWindowId, {
+          kind: "rename-provider",
+          instanceId: instance.id,
+          expectedVersion: instance.version,
+          displayName: newName,
+        });
+      } catch (error) {
+        console.warn("A saved provider name was not shortened; it keeps its name.", error);
+      }
+    }
+  }
+
   async smokeTurn(
     _authenticatedWindowId: WindowId,
     inputInstanceId: unknown,
@@ -801,14 +924,21 @@ export class ProviderService implements ProviderServiceApi {
           if (driver.completeAuthentication === undefined) {
             throw this.#unsupported("This provider does not support browser authentication.");
           }
-          await runProviderEffect(
+          const progress = await runProviderEffect(
             Effect.scoped(
               driver.completeAuthentication({
                 instanceId: instance.id,
                 attemptId: command.attemptId,
+                ...(command.code === undefined ? {} : { code: command.code }),
               }),
             ),
           );
+          if (progress === "pending") {
+            return decodeProviderRegistryCommandResult({
+              kind: "provider-authentication-pending",
+              instanceId: instance.id,
+            });
+          }
           this.#invalidateCatalog(
             instance.id,
             { kind: "authentication" },
@@ -867,6 +997,29 @@ export class ProviderService implements ProviderServiceApi {
           this.#assertReady();
           const current = this.#persistence.readProviderInstance(command.instanceId);
           const instances = this.#persistence.readProviderInstances();
+          if (command.kind === "add-acp-agent") {
+            if (current !== undefined || command.expectedVersion !== 0) {
+              throw this.#invalid("Provider configuration changed; reload and retry.");
+            }
+            const instance = createAddedAcpAgentProvider({
+              id: command.instanceId,
+              ...this.#addedAcpAgentSource(command.source),
+              existingInstances: instances,
+              expectedVersion: command.expectedVersion,
+              createdAt: decodeTimestamp(this.#clock()),
+            });
+            this.#assertDriverPluginEffective(instance);
+            this.#appendInstance(
+              command.expectedVersion,
+              "provider.instance-created@1",
+              instance,
+              actor,
+            );
+            return decodeProviderRegistryCommandResult({
+              kind: "provider-created",
+              instance: this.#authoritativeInstance(instance),
+            });
+          }
           if (
             command.kind === "create-opencode-provider" ||
             command.kind === "create-codex-provider" ||
@@ -922,13 +1075,13 @@ export class ProviderService implements ProviderServiceApi {
               }
               case "create-claude-provider": {
                 // The host profile belongs to one subscription account. An
-                // API-key account never takes it, so one created first does
+                // API-key or gateway account never takes it, so one created first does
                 // not push the first subscription account onto a new leaf
                 // and a second sign-in.
                 const assignedDirectory =
                   command.configuration.configDirectory !== undefined
                     ? command.configuration.configDirectory
-                    : command.configuration.authentication === "api-key" ||
+                    : claudeAccountUsesStoredKey(command.configuration.authentication) ||
                         implicitClaudeAccountOwnerId(instances) !== undefined
                       ? assignedClaudeAccountConfigDirectory(homedir(), command.instanceId)
                       : undefined;
@@ -1101,6 +1254,11 @@ export class ProviderService implements ProviderServiceApi {
             }
             if (current.driverKind === "claude") {
               await this.#clearResumeIdentities?.(current.id);
+            }
+            if (isAddedAcpAgentInstance(current)) {
+              // What the install step put in Octant's managed folder goes with
+              // the agent; a local command is the person's and stays.
+              await this.#acpAgentInstall?.remove(current.id).catch(() => undefined);
             }
             this.#invalidateCatalog(current.id, { kind: "all" }, "provider removed", updatedAt);
             this.#clearRuntimeUsageLimits?.(current.id);
@@ -1446,7 +1604,58 @@ export class ProviderService implements ProviderServiceApi {
             );
             await this.#runtime.invalidateRuntime(current.id);
             eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "install-acp-agent") {
+            if (!isAddedAcpAgentInstance(current)) {
+              throw this.#unsupported("Only an added ACP agent is installed this way.");
+            }
+            if (this.#runtime.activeSessionCount(current.id) !== 0) {
+              throw this.#invalid("Stop active sessions before reinstalling this agent.");
+            }
+            const installed = await this.#installAcpAgent(current);
+            if (installed.status === "refused") {
+              throw new ProviderServiceError({
+                category:
+                  installed.reason === "checksum-mismatch" ||
+                  installed.reason === "not-https" ||
+                  installed.reason === "unsafe-archive"
+                    ? "unauthorized"
+                    : installed.reason === "executable-missing" ||
+                        installed.reason === "not-listed" ||
+                        installed.reason === "fetches-off"
+                      ? "invalid-configuration"
+                      : "unavailable",
+                message: installed.message,
+              });
+            }
+            instance = installAddedAcpAgent(
+              current,
+              { executable: installed.executable, integrity: installed.integrity },
+              updatedAt,
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "set-acp-agent-trust") {
+            if (!isAddedAcpAgentInstance(current)) {
+              throw this.#unsupported("Only an added ACP agent is trusted this way.");
+            }
+            instance = setAddedAcpAgentTrust(current, command.trusted, updatedAt);
+            // A running process keeps the wall it started with; the next one
+            // starts under the new trust.
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
           } else {
+            if (command.kind === "set-provider-enabled" && command.enabled) {
+              const refusal = isAddedAcpAgentInstance(current)
+                ? acpAgentEnableRefusal(addedAcpAgentSteps(current))
+                : undefined;
+              if (refusal !== undefined) {
+                throw this.#invalid(
+                  refusal === "not-installed"
+                    ? "Install this agent before turning it on."
+                    : "Trust this agent before turning it on.",
+                );
+              }
+            }
             const withheldReason =
               command.kind === "set-provider-enabled" && command.enabled
                 ? bundledProviderDriverWithheldReason(current.driverKind)
@@ -2320,7 +2529,7 @@ export class ProviderService implements ProviderServiceApi {
   ): ClaudeProviderConfiguration {
     if (configuration.configDirectory !== undefined) return configuration;
     if (current.configuration.configDirectory !== undefined) return configuration;
-    if (configuration.authentication === "api-key") {
+    if (claudeAccountUsesStoredKey(configuration.authentication)) {
       return {
         ...configuration,
         configDirectory: assignedClaudeAccountConfigDirectory(homedir(), current.id),
@@ -2539,7 +2748,9 @@ export class ProviderService implements ProviderServiceApi {
         instanceId: instance.id,
         readiness: "checking",
         processState: "stopped",
-        ...(authentication === "api-key" ? { credentialStatus: "missing" } : {}),
+        ...(authentication === "api-key" || authentication === "gateway"
+          ? { credentialStatus: "missing" }
+          : {}),
         models: [],
         capabilities: unavailableCapabilities,
         observedAt: decodeTimestamp(this.#clock()),
@@ -2735,6 +2946,11 @@ function credentialBinding(instance: ProviderInstance): string | undefined {
       const { baseUrl, key } = instance.configuration;
       return [baseUrl, key === undefined ? "no-key" : "key"].join("\n");
     }
+    case "claude":
+      // A gateway token is entered for one gateway: moving the address, or
+      // moving between a gateway and Anthropic's own API, must not send the
+      // stored token or key somewhere it was not entered for.
+      return instance.configuration.gatewayBaseUrl;
     case "bfl-image":
     case "ideogram-image":
       // Absent means the provider's own endpoint, so setting or clearing a
@@ -3042,7 +3258,7 @@ function effectiveClaudeAccountDirectories(
   if (instance.configuration.configDirectory !== undefined) {
     return [instance.configuration.configDirectory];
   }
-  if (instance.configuration.authentication === "api-key") {
+  if (claudeAccountUsesStoredKey(instance.configuration.authentication)) {
     return [assignedClaudeAccountConfigDirectory(homeDirectory, instance.id)];
   }
   if (claudeAccountNeedsOwnConfigDirectory(instances, instance)) {
@@ -3123,10 +3339,15 @@ function providerBinaryPath(instance: ProviderInstance): string {
  * immediately, while authentication and catalog readiness remain probe facts.
  */
 export function isProviderExecutableAvailable(instance: ProviderInstance): boolean {
-  if (!("binaryPath" in instance.configuration)) return true;
+  const executable = isAddedAcpAgentInstance(instance)
+    ? instance.configuration.install?.executable
+    : "binaryPath" in instance.configuration
+      ? instance.configuration.binaryPath
+      : undefined;
+  if (executable === undefined) return !isAddedAcpAgentInstance(instance);
   try {
-    if (!statSync(instance.configuration.binaryPath).isFile()) return false;
-    accessSync(instance.configuration.binaryPath, constants.X_OK);
+    if (!statSync(executable).isFile()) return false;
+    accessSync(executable, constants.X_OK);
     return true;
   } catch {
     return false;

@@ -2061,6 +2061,9 @@ function conversationHandoff(
         externalContentIngested: event.externalContentIngested,
         ...(event.inherited === undefined ? {} : { inherited: event.inherited }),
         ...(event.handoverSummary === undefined ? {} : { handoverSummary: event.handoverSummary }),
+        ...(event.accountMoveTextCause === undefined
+          ? {}
+          : { accountMoveTextCause: event.accountMoveTextCause }),
       };
     case "fork":
       return {
@@ -2078,6 +2081,13 @@ function conversationHandoff(
         reason: event.reason,
         previousSessionId: event.previousSessionId,
         throughOperationId: event.throughOperationId,
+      };
+    case "account-move-native-session":
+      return {
+        reason: event.reason,
+        previousProviderInstanceId: event.previousProviderInstanceId,
+        previousModelId: event.previousModelId,
+        previousSessionId: event.previousSessionId,
       };
   }
 }

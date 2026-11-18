@@ -1,4 +1,7 @@
-import { readdir, readFile, realpath, lstat, stat } from "node:fs/promises";
+import { readConfinedWorkFile } from "../work/workConfinedRead";
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
+import { recordSandboxDenial } from "../process/sandboxRuntimePolicy";
+import { realpath, lstat, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { classifyPathContainment } from "@octant/domain";
 import {
@@ -185,6 +188,8 @@ export type NativeHarnessFileSystemPort = Pick<
 };
 
 export interface NativeHarnessFileSystemOptions {
+  readonly sandboxPolicy?: () => SandboxPolicySelection | undefined;
+  readonly threadId?: string;
   /** Absolute, already-canonical root relative paths resolve against. */
   readonly root: string;
   /**
@@ -256,6 +261,9 @@ async function directoryIdentity(path: string): Promise<WorkFileIdentity | undef
  */
 export class NativeHarnessFileSystem {
   readonly #root: string;
+  readonly #editIdentities = new Map<string, { readonly device: string; readonly inode: string }>();
+  readonly #sandboxPolicy: (() => SandboxPolicySelection | undefined) | undefined;
+  readonly #threadId: string | undefined;
   readonly #extraRoots: ReadonlyArray<string>;
   readonly #maxFileBytes: number;
   readonly #readMarks = new Map<string, string>();
@@ -266,6 +274,8 @@ export class NativeHarnessFileSystem {
     if (!isAbsolute(options.root)) {
       throw new Error("Native harness file system root must be absolute.");
     }
+    this.#sandboxPolicy = options.sandboxPolicy;
+    this.#threadId = options.threadId;
     this.#root = options.root.replace(/\/+$/, "");
     if ((options.extraRoots ?? []).some((root) => !isAbsolute(root))) {
       throw new Error("Native harness file system extra roots must be absolute.");
@@ -280,7 +290,9 @@ export class NativeHarnessFileSystem {
 
   /** A refusal naming the rule, for a path the secret guard protects. */
   #protected(...paths: ReadonlyArray<string>): NativeHarnessFileRefused | undefined {
-    const fullAccess = this.#fullAccess();
+    // Strict keeps the full protected-file list even when the thread's own
+    // access level is Full access. Enforce that invariant at the file boundary.
+    const fullAccess = this.#fullAccess() && this.#sandboxPolicy?.() === undefined;
     for (const path of paths) {
       const message = this.#protectedFileRefusal(path, fullAccess);
       if (message !== undefined) return { kind: "refused", reason: "protected-file", message };
@@ -316,13 +328,13 @@ export class NativeHarnessFileSystem {
     if (guarded !== undefined) return guarded;
     let info;
     try {
-      info = await stat(resolved);
+      info = await stat(resolved, { bigint: true });
     } catch {
       return { kind: "refused", reason: "path-not-found" };
     }
     const display = this.#display(resolved);
     if (info.isDirectory()) {
-      const names = await readdir(resolved, { withFileTypes: true });
+      const names = await this.#entries(resolved);
       return {
         kind: "directory",
         path: display,
@@ -341,10 +353,12 @@ export class NativeHarnessFileSystem {
     }
     if (!info.isFile()) return { kind: "refused", reason: "not-a-file" };
     if (info.size > this.#maxFileBytes) return { kind: "refused", reason: "file-too-large" };
-    const content = await readFile(resolved);
+    const raw = await this.#readBytes(resolved, this.#maxFileBytes);
+    if (raw === undefined) return { kind: "refused", reason: "path-not-found" };
+    const content = Buffer.from(raw);
     const result = readFileContent(display, content, input);
     if (input.marksRead !== false && countsAsTextRead(result)) {
-      this.#readMarks.set(resolved, info.mtime.toISOString());
+      this.#readMarks.set(resolved, String(info.mtimeNs));
     }
     return result;
   }
@@ -358,10 +372,15 @@ export class NativeHarnessFileSystem {
     const { target, parent } = placement;
     const guarded = this.#protected(this.#lexical(input.path), target);
     if (guarded !== undefined) return guarded;
+    let expected: { readonly device: string; readonly inode: string } | undefined;
     let created = true;
     try {
-      const existing = await lstat(target);
+      // Read as bigint, as `liveWorkFilesystem` reads the identity it checks
+      // this against: a numeric inode past 2^53 loses digits, and the write
+      // then refuses an unchanged file as moved.
+      const existing = await lstat(target, { bigint: true });
       created = false;
+      expected = { device: String(existing.dev), inode: String(existing.ino) };
       if (!existing.isFile()) return { kind: "refused", reason: "not-a-file" };
     } catch {
       created = true;
@@ -382,11 +401,12 @@ export class NativeHarnessFileSystem {
           filesystem: liveWorkFilesystem,
           canonicalPath: target,
           allowCreate: false,
+          ...(expected === undefined ? {} : { expected }),
           bytes,
         });
     if (!wrote) return movedWhileWriting();
-    const info = await stat(target);
-    this.#readMarks.set(target, info.mtime.toISOString());
+    const info = await stat(target, { bigint: true });
+    this.#readMarks.set(target, String(info.mtimeNs));
     return {
       kind: "written",
       path: this.#display(target),
@@ -431,28 +451,42 @@ export class NativeHarnessFileSystem {
     if (mark === undefined) return { kind: "refused", reason: "not-read-first" };
     let info;
     try {
-      info = await stat(resolved);
+      // Bigint for the same reason as the write path's identity above.
+      info = await stat(resolved, { bigint: true });
     } catch {
       return { kind: "refused", reason: "path-not-found" };
     }
     if (!info.isFile()) return { kind: "refused", reason: "not-a-file" };
-    if (info.mtime.toISOString() !== mark) {
+    if (String(info.mtimeNs) !== mark) {
       return { kind: "refused", reason: "file-changed-since-read" };
     }
-    const content = await readFile(resolved, "utf8");
-    return { kind: "loaded", key: resolved, path: this.#display(resolved), content };
+    const raw = await this.#readBytes(resolved, this.#maxFileBytes);
+    if (raw === undefined) return movedWhileWriting();
+    this.#editIdentities.set(resolved, { device: String(info.dev), inode: String(info.ino) });
+    return {
+      kind: "loaded",
+      key: resolved,
+      path: this.#display(resolved),
+      content: Buffer.from(raw).toString("utf8"),
+    };
   }
 
   async #put(key: string, text: string): Promise<NativeHarnessFileRefused | undefined> {
+    const placement = await this.#containedForWrite(key);
+    if (placement === undefined || placement.target !== key)
+      return { kind: "refused", reason: "path-escapes-root" };
+    const expected = this.#editIdentities.get(key);
+    if (expected === undefined) return movedWhileWriting();
     const wrote = await writeConfinedWorkFile({
       filesystem: liveWorkFilesystem,
       canonicalPath: key,
+      expected,
       allowCreate: false,
       bytes: Buffer.from(text, "utf8"),
     });
     if (!wrote) return movedWhileWriting();
-    const after = await stat(key);
-    this.#readMarks.set(key, after.mtime.toISOString());
+    const after = await stat(key, { bigint: true });
+    this.#readMarks.set(key, String(after.mtimeNs));
     return undefined;
   }
 
@@ -537,7 +571,9 @@ export class NativeHarnessFileSystem {
         continue;
       }
       if (info.size > MAX_GREP_SCANNED_FILE_BYTES) continue;
-      const content = await readFile(entry.path);
+      const raw = await this.#readBytes(entry.path, MAX_GREP_SCANNED_FILE_BYTES);
+      if (raw === undefined) continue;
+      const content = Buffer.from(raw);
       if (content.includes(0)) continue;
       filesScanned += 1;
       const lines = content.toString("utf8").split("\n");
@@ -581,7 +617,7 @@ export class NativeHarnessFileSystem {
       const directory = pending.pop()!;
       let entries;
       try {
-        entries = await readdir(directory, { withFileTypes: true });
+        entries = await this.#entries(directory);
       } catch {
         continue;
       }
@@ -612,6 +648,41 @@ export class NativeHarnessFileSystem {
     }
   }
 
+  async #readBytes(path: string, maximumBytes: number): Promise<Uint8Array | undefined> {
+    const canonical = await this.#contained(path);
+    if (canonical === undefined || this.#protected(path, canonical) !== undefined) return undefined;
+    const info = await liveWorkFilesystem.stat(canonical).catch(() => undefined);
+    if (info === undefined) return undefined;
+    return readConfinedWorkFile({
+      filesystem: liveWorkFilesystem,
+      canonicalPath: canonical,
+      expected: info,
+      maximumBytes,
+    });
+  }
+
+  async #entries(path: string) {
+    const canonical = await this.#contained(path);
+    if (canonical === undefined) return [];
+    const directory = await liveWorkFilesystem.openDirectory(canonical);
+    try {
+      const names = await directory.read(MAX_WALKED_ENTRIES);
+      return await Promise.all(
+        names.map(async ({ name }) => {
+          const info = await lstat(join(canonical, name)).catch(() => undefined);
+          return {
+            name,
+            isSymbolicLink: () => info?.isSymbolicLink() ?? false,
+            isDirectory: () => info?.isDirectory() ?? false,
+            isFile: () => info?.isFile() ?? false,
+          };
+        }),
+      );
+    } finally {
+      await directory.close();
+    }
+  }
+
   async #contained(candidate: string): Promise<string | undefined> {
     const absolute = isAbsolute(candidate) ? candidate : resolve(this.#root, candidate);
     let canonical: string;
@@ -620,7 +691,11 @@ export class NativeHarnessFileSystem {
     } catch {
       return undefined;
     }
-    return this.#inProject(canonical) ? canonical : undefined;
+    if (!this.#inProject(canonical)) {
+      this.#denied(canonical, "read");
+      return undefined;
+    }
+    return canonical;
   }
 
   /**
@@ -630,8 +705,21 @@ export class NativeHarnessFileSystem {
    */
   async #containedForWrite(candidate: string): Promise<NativeHarnessWritePlacement | undefined> {
     const absolute = isAbsolute(candidate) ? candidate : resolve(this.#root, candidate);
+    const policy = this.#sandboxPolicy?.()?.policy;
+    if (
+      policy?.filesystem.readOnlyRoots.some(
+        (root) => classifyPathContainment(root, absolute) === "contained",
+      )
+    ) {
+      this.#denied(absolute, "write");
+      return undefined;
+    }
     const existing = await this.#contained(absolute);
     if (existing !== undefined) {
+      if (!this.#inProject(existing, true)) {
+        this.#denied(existing, "write");
+        return undefined;
+      }
       return {
         target: existing,
         parent: { absolutePath: dirname(existing), remaining: [basename(existing)] },
@@ -656,9 +744,11 @@ export class NativeHarnessFileSystem {
         if (contained === undefined) return undefined;
         const remaining = trailing.reverse();
         const target = join(contained, ...remaining);
-        return this.#inProject(target)
-          ? { target, parent: { absolutePath: contained, remaining } }
-          : undefined;
+        if (!this.#inProject(target, true)) {
+          this.#denied(target, "write");
+          return undefined;
+        }
+        return { target, parent: { absolutePath: contained, remaining } };
       }
       trailing.push(ancestor.slice(dirname(ancestor).length + 1));
       ancestor = dirname(ancestor);
@@ -666,10 +756,49 @@ export class NativeHarnessFileSystem {
     return undefined;
   }
 
-  #inProject(canonical: string): boolean {
-    return [this.#root, ...this.#extraRoots].some(
-      (root) => classifyPathContainment(root, canonical) === "contained",
+  #denied(path: string, operation: "read" | "write"): void {
+    const selection = this.#sandboxPolicy?.();
+    if (selection === undefined || this.#threadId === undefined) return;
+    const readOnly = selection.policy.filesystem.readOnlyRoots.find(
+      (root) => classifyPathContainment(root, path) === "contained",
     );
+    recordSandboxDenial({
+      threadId: this.#threadId,
+      projectId: selection.context.projectId,
+      code: operation === "read" ? "sandbox-read-denied" : "sandbox-write-denied",
+      ruleId: readOnly === undefined ? "filesystem.allowedFolders" : "filesystem.readOnlyRoots",
+      operation,
+      resource: readOnly ?? dirname(path),
+      message: `${operation === "read" ? "Read" : "Write"} access to ${path} is blocked by this sandbox.`,
+      remedy: "Choose a precise folder exception in Sandbox restrictions, or keep it blocked.",
+      grantable: true,
+    });
+  }
+
+  #inProject(canonical: string, write = false): boolean {
+    const policy = this.#sandboxPolicy?.()?.policy;
+    if (
+      policy !== undefined &&
+      policy.filesystem.protectedPaths.some(
+        (rule) =>
+          classifyPathContainment(rule.path, canonical) === "contained" &&
+          (write || rule.mode === "deny"),
+      )
+    )
+      return false;
+    if (
+      write &&
+      policy?.filesystem.readOnlyRoots.some(
+        (root) => classifyPathContainment(root, canonical) === "contained",
+      )
+    )
+      return false;
+    return [
+      this.#root,
+      ...this.#extraRoots,
+      ...(policy?.filesystem.readWriteRoots ?? []),
+      ...(write ? [] : (policy?.filesystem.readOnlyRoots ?? [])),
+    ].some((root) => classifyPathContainment(root, canonical) === "contained");
   }
 
   #display(canonical: string): string {
@@ -742,6 +871,31 @@ export function readFileContent(
     };
   }
   return readSlice(path, content.toString("utf8"), input);
+}
+
+/**
+ * The text a read takes out of a Word, PowerPoint or Excel file or a PDF,
+ * under the same limits, for a caller that has the file's bytes rather than
+ * a path: `unreadable` when it looks like one and does not parse, undefined
+ * when it is none of them.
+ */
+export function extractedDocumentText(content: Buffer):
+  | {
+      readonly text: string;
+      readonly truncated: boolean;
+      readonly format: NativeHarnessExtractedFormat;
+    }
+  | "unreadable"
+  | undefined {
+  const sniffed = sniffPreviewKind(content, "", "application/octet-stream", {
+    maxSniffBytes: SNIFFED_HEAD_BYTES,
+    maxByteSize: content.length,
+  });
+  const kind = sniffed.ok ? sniffed.kind : "unsupported";
+  if (kind !== "document" && kind !== "slides" && kind !== "workbook" && kind !== "pdf")
+    return undefined;
+  const extracted = extractedText(kind, content);
+  return extracted === undefined ? "unreadable" : { ...extracted, format: EXTRACTED_FORMATS[kind] };
 }
 
 /** How much of a file's start decides whether it is text, as the preview sniffs it. */

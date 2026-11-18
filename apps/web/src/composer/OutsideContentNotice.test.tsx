@@ -9,7 +9,12 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { absoluteTimeFormatter } from "../lib/relativeTime";
-import { ComposerOutsideContentChip, OutsideContentContext } from "./OutsideContentNotice";
+import {
+  ComposerOutsideContentMark,
+  OutsideContentProvider,
+  OutsideContentRow,
+  useReportOutsideContentBusy,
+} from "./OutsideContentNotice";
 
 const threadId = "40000000-0000-4000-8000-000000000001";
 const first = "2026-10-11T08:15:00.000Z";
@@ -67,39 +72,51 @@ function fakeClient(
   return { client, readExternalContent, clearExternalContent };
 }
 
-function renderNotice(client: ContextClient, busy = false) {
-  const view = (turnBusy: boolean) => (
-    <OutsideContentContext value={{ client, mode: "code", threadId }}>
-      <ComposerOutsideContentChip busy={turnBusy} />
-    </OutsideContentContext>
+const MARK_NAME = "This thread read outside content, so risky actions ask first. See Environment.";
+
+/** What the composer's row and the Environment panel share, as one thread's panes. */
+function Surfaces(props: { readonly busy: boolean; readonly fullAccess: boolean }) {
+  useReportOutsideContentBusy(props.busy);
+  return (
+    <>
+      <div data-testid="composer-row">
+        <ComposerOutsideContentMark fullAccess={props.fullAccess} />
+      </div>
+      <OutsideContentRow />
+    </>
   );
-  const rendered = render(view(busy));
-  return { ...rendered, setBusy: (next: boolean) => rendered.rerender(view(next)) };
 }
+
+function renderNotice(client: ContextClient, busy = false, fullAccess = false) {
+  const view = (turnBusy: boolean, atFullAccess: boolean) => (
+    <OutsideContentProvider thread={{ client, mode: "code", threadId }}>
+      <Surfaces busy={turnBusy} fullAccess={atFullAccess} />
+    </OutsideContentProvider>
+  );
+  const rendered = render(view(busy, fullAccess));
+  return {
+    ...rendered,
+    setBusy: (next: boolean) => rendered.rerender(view(next, fullAccess)),
+    setFullAccess: (next: boolean) => rendered.rerender(view(busy, next)),
+  };
+}
+
+const environmentRow = (hidden = false) =>
+  screen.queryByRole("region", { name: "Outside content", hidden });
 
 async function openReview() {
   const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: "Outside content" }));
   await user.click(await screen.findByRole("button", { name: "Review" }));
-  return screen.findByRole("dialog", { name: "Outside content this thread read" });
+  return screen.findByRole("dialog", { name: "Outside content in this thread" });
 }
 
 describe("outside content notice", () => {
-  it("shows a marked thread a chip whose popover holds the sentence and Review, and an unmarked thread nothing", async () => {
+  it("says in the Environment panel how often a marked thread read outside content, and shows an unmarked thread nothing", async () => {
     const marked = fakeClient();
     const { unmount } = renderNotice(marked.client);
-    const chip = await screen.findByRole("button", { name: "Outside content" });
-    // The fact is readable at a glance without a click: a globe and its words.
-    expect(chip).toHaveTextContent("Outside content");
-    expect(chip.querySelector("svg")).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "Review" })).toBeNull();
-    const user = userEvent.setup();
-    await user.click(chip);
-    const popover = await screen.findByRole("dialog", { name: "Outside content" });
-    expect(popover).toHaveTextContent(
-      "This thread has read outside content. Below Full access, some actions ask each time.",
-    );
-    expect(within(popover).getByRole("button", { name: "Review" })).toBeInTheDocument();
+    const row = await screen.findByRole("region", { name: "Outside content" });
+    expect(row).toHaveTextContent("Outside content · read 4 times");
+    expect(within(row).getByRole("button", { name: "Review" })).toBeInTheDocument();
     expect(marked.readExternalContent).toHaveBeenCalledWith(
       { mode: "code", threadId },
       expect.any(AbortSignal),
@@ -109,7 +126,37 @@ describe("outside content notice", () => {
     const clean = fakeClient({ read: async () => unmarked() });
     renderNotice(clean.client);
     await waitFor(() => expect(clean.readExternalContent).toHaveBeenCalled());
-    expect(screen.queryByRole("button", { name: "Outside content" })).not.toBeInTheDocument();
+    expect(environmentRow()).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: MARK_NAME })).not.toBeInTheDocument();
+  });
+
+  it("puts the warning ink on the Environment row's globe only while the mark has an effect", async () => {
+    const { setFullAccess } = renderNotice(fakeClient().client);
+    const row = await screen.findByRole("region", { name: "Outside content" });
+    expect(row).toHaveAttribute("data-effective", "true");
+    setFullAccess(true);
+    await waitFor(() => expect(row).toHaveAttribute("data-effective", "false"));
+    expect(row).toHaveTextContent("Outside content · read 4 times");
+  });
+
+  it("shows a globe before the access control only below Full access, and opens the review from it", async () => {
+    const { setFullAccess } = renderNotice(fakeClient().client);
+    const mark = await screen.findByRole("button", { name: MARK_NAME });
+    expect(within(screen.getByTestId("composer-row")).getByRole("button")).toBe(mark);
+    expect(mark).toHaveTextContent("");
+    expect(mark.querySelector("svg")).not.toBeNull();
+    await userEvent.setup().click(mark);
+    expect(
+      await screen.findByRole("dialog", { name: "Outside content in this thread" }),
+    ).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    setFullAccess(true);
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: MARK_NAME })).not.toBeInTheDocument(),
+    );
+    expect(environmentRow()).toBeInTheDocument();
   });
 
   it("lists each source in plain words with how often and when it was read, and says clearing removes nothing the model read", async () => {
@@ -131,9 +178,9 @@ describe("outside content notice", () => {
     expect(rows[2]?.textContent).toMatch(/Read 2 times$/);
 
     expect(dialog).toHaveAccessibleDescription(
-      /It does not remove anything the model already read, and the next outside content marks the thread again\./,
+      "This thread read text from outside Octant: web pages, 3 times; a GitHub issue, once; results from connected tools, 2 times. While it's marked, risky actions ask you first. Clearing it says you've checked it; it doesn't undo what the model read, and new outside content marks it again.",
     );
-    expect(within(dialog).getByRole("button", { name: "Clear the mark" })).toBeEnabled();
+    expect(within(dialog).getByRole("button", { name: "Clear mark" })).toBeEnabled();
     expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeEnabled();
   });
 
@@ -144,14 +191,16 @@ describe("outside content notice", () => {
     await userEvent.setup().click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(clearExternalContent).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Outside content" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Outside content", hidden: true }),
+    ).toBeInTheDocument();
   });
 
-  it("clears at the version the person was shown and removes the notice", async () => {
+  it("clears at the version the person was shown and removes the mark", async () => {
     const { client, clearExternalContent } = fakeClient();
     renderNotice(client);
     const dialog = await openReview();
-    await userEvent.setup().click(within(dialog).getByRole("button", { name: "Clear the mark" }));
+    await userEvent.setup().click(within(dialog).getByRole("button", { name: "Clear mark" }));
 
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(clearExternalContent).toHaveBeenCalledOnce();
@@ -160,7 +209,7 @@ describe("outside content notice", () => {
       threadId,
       expectedVersion: 3,
     });
-    expect(screen.queryByRole("button", { name: "Outside content" })).not.toBeInTheDocument();
+    expect(environmentRow()).not.toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
@@ -171,11 +220,11 @@ describe("outside content notice", () => {
     });
     renderNotice(client);
     const dialog = await openReview();
-    await userEvent.setup().click(within(dialog).getByRole("button", { name: "Clear the mark" }));
+    await userEvent.setup().click(within(dialog).getByRole("button", { name: "Clear mark" }));
 
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Outside content" })).not.toBeInTheDocument();
+    expect(environmentRow()).not.toBeInTheDocument();
   });
 
   it("reloads the list and says so when new outside content arrived, then clears the newer version", async () => {
@@ -202,16 +251,14 @@ describe("outside content notice", () => {
     renderNotice(client);
     const dialog = await openReview();
     const user = userEvent.setup();
-    await user.click(within(dialog).getByRole("button", { name: "Clear the mark" }));
+    await user.click(within(dialog).getByRole("button", { name: "Clear mark" }));
 
-    expect(
-      await within(dialog).findByText(/New outside content arrived since you looked/),
-    ).toBeVisible();
+    expect(await within(dialog).findByText(/New outside content arrived/)).toBeVisible();
     expect(within(dialog).getByText("A Linear issue")).toBeVisible();
     expect(within(dialog).queryByText("A GitHub issue")).not.toBeInTheDocument();
     expect(screen.getByRole("dialog")).toBe(dialog);
 
-    await user.click(within(dialog).getByRole("button", { name: "Clear the mark" }));
+    await user.click(within(dialog).getByRole("button", { name: "Clear mark" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(clearExternalContent).toHaveBeenLastCalledWith({
       mode: "code",
@@ -233,9 +280,9 @@ describe("outside content notice", () => {
     renderNotice(client);
     const dialog = await openReview();
     const user = userEvent.setup();
-    await user.click(within(dialog).getByRole("button", { name: "Clear the mark" }));
-    await within(dialog).findByText(/New outside content arrived since you looked/);
-    await user.click(within(dialog).getByRole("button", { name: "Clear the mark" }));
+    await user.click(within(dialog).getByRole("button", { name: "Clear mark" }));
+    await within(dialog).findByText(/New outside content arrived/);
+    await user.click(within(dialog).getByRole("button", { name: "Clear mark" }));
     await waitFor(() => expect(clearExternalContent).toHaveBeenCalledTimes(2));
     expect(clearExternalContent).toHaveBeenLastCalledWith({
       mode: "code",
@@ -245,23 +292,21 @@ describe("outside content notice", () => {
   });
 
   it.each([
-    ["turn-active", /This thread is busy\. Try again once its turn and any queued messages/],
-    ["turn-unconfirmed", /last turn did not finish cleanly/],
+    ["turn-active", /This thread is busy\. Try again once its turn and queued messages/],
+    ["turn-unconfirmed", /last turn did not end cleanly/],
     ["unauthorized", /cannot be cleared from this window/],
-    ["thread-unavailable", /cannot be reached from this window/],
+    ["thread-unavailable", /This window cannot reach the thread/],
   ])("tells the person why a %s refusal kept the mark", async (reason, sentence) => {
     const { client } = fakeClient({ clear: async () => refused(reason, stateOf()) });
     renderNotice(client);
     const dialog = await openReview();
-    await userEvent.setup().click(within(dialog).getByRole("button", { name: "Clear the mark" }));
+    await userEvent.setup().click(within(dialog).getByRole("button", { name: "Clear mark" }));
 
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(sentence);
     expect(screen.getByRole("dialog")).toBe(dialog);
     // The page behind a modal dialog is inert, so the notice is found by hidden role.
-    expect(
-      screen.getByRole("button", { name: "Outside content", hidden: true }),
-    ).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Clear the mark" })).toBeEnabled();
+    expect(environmentRow(true)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Clear mark" })).toBeEnabled();
   });
 
   it("says so when the host cannot be reached instead of failing silently", async () => {
@@ -272,28 +317,28 @@ describe("outside content notice", () => {
     });
     renderNotice(client);
     const dialog = await openReview();
-    await userEvent.setup().click(within(dialog).getByRole("button", { name: "Clear the mark" }));
+    await userEvent.setup().click(within(dialog).getByRole("button", { name: "Clear mark" }));
 
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(
       "Octant could not reach the host to clear the mark. Try again.",
     );
   });
 
-  it("holds Clear the mark back, with the reason as text, while a turn runs or messages are queued", async () => {
+  it("holds Clear mark back, with the reason as text, while a turn runs or messages are queued", async () => {
     const { client, clearExternalContent } = fakeClient();
     const { setBusy } = renderNotice(client, true);
     const dialog = await openReview();
 
-    expect(within(dialog).getByRole("button", { name: "Clear the mark" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Clear mark" })).toBeDisabled();
     expect(within(dialog).getByRole("status")).toHaveTextContent(
       "A turn is running or messages are queued. Clear the mark once the thread is idle.",
     );
-    await userEvent.setup().click(within(dialog).getByRole("button", { name: "Clear the mark" }));
+    await userEvent.setup().click(within(dialog).getByRole("button", { name: "Clear mark" }));
     expect(clearExternalContent).not.toHaveBeenCalled();
 
     setBusy(false);
     await waitFor(() =>
-      expect(within(dialog).getByRole("button", { name: "Clear the mark" })).toBeEnabled(),
+      expect(within(dialog).getByRole("button", { name: "Clear mark" })).toBeEnabled(),
     );
     expect(within(dialog).queryByRole("status")).not.toBeInTheDocument();
   });
@@ -322,7 +367,7 @@ describe("outside content notice", () => {
         }),
     });
     const { setBusy } = renderNotice(client);
-    await screen.findByRole("button", { name: "Outside content" });
+    await screen.findByRole("region", { name: "Outside content" });
     // A turn starts and settles; the read that settling begins is still in flight.
     setBusy(true);
     await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
@@ -330,7 +375,7 @@ describe("outside content notice", () => {
     await waitFor(() => expect(read).toHaveBeenCalledTimes(3));
 
     const dialog = await openReview();
-    await userEvent.setup().click(within(dialog).getByRole("button", { name: "Clear the mark" }));
+    await userEvent.setup().click(within(dialog).getByRole("button", { name: "Clear mark" }));
     await waitFor(() => expect(clearExternalContent).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
@@ -338,7 +383,7 @@ describe("outside content notice", () => {
       answerLate(stateOf());
       await late;
     });
-    expect(screen.queryByRole("button", { name: "Outside content" })).not.toBeInTheDocument();
+    expect(environmentRow()).not.toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
@@ -357,12 +402,17 @@ describe("outside content notice", () => {
     renderNotice(client);
     await Promise.resolve();
     expect(readExternalContent).not.toHaveBeenCalled();
-    expect(screen.queryByRole("button", { name: "Outside content" })).not.toBeInTheDocument();
+    expect(environmentRow()).not.toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("draws nothing where the composer has no thread", () => {
-    render(<ComposerOutsideContentChip busy={false} />);
-    expect(screen.queryByRole("button", { name: "Outside content" })).not.toBeInTheDocument();
+    render(
+      <OutsideContentProvider thread={undefined}>
+        <Surfaces busy={false} fullAccess={false} />
+      </OutsideContentProvider>,
+    );
+    expect(environmentRow()).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: MARK_NAME })).not.toBeInTheDocument();
   });
 });

@@ -1,8 +1,36 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { configureSandboxRestrictionsAuthority } from "./process/sandboxRuntimePolicy";
 
 import { createStrictResolver } from "./strictResolution";
+afterEach(() => configureSandboxRestrictionsAuthority(undefined));
 
 describe("Strict resolution", () => {
+  it("keeps both tightening and relaxation pending while an admitted turn owns its boundary", () => {
+    let active: boolean | undefined = true;
+    let requested = false;
+    configureSandboxRestrictionsAuthority({
+      strictForActiveTurn: () => active,
+      active: () => undefined,
+      validateSelection: () => false,
+      storageDirectory: () => undefined,
+      registerCleanup: () => () => undefined,
+      deny: () => undefined,
+      beginTurn: () => ({ status: "refused", message: "unused" }),
+    });
+    const resolve = createStrictResolver({
+      codeThread: () => ({ projectId: "project", strict: requested }),
+      workThread: () => undefined,
+      project: () => undefined,
+      codeSettings: () => undefined,
+      workSettings: () => undefined,
+    });
+    expect(resolve("thread")).toBe(true);
+    active = false;
+    requested = true;
+    expect(resolve("thread")).toBe(false);
+    active = undefined;
+    expect(resolve("thread")).toBe(true);
+  });
   it("reads each thread's choice, its Project's and Settings' as they are at the moment it is asked", () => {
     const state = {
       codeThreadStrict: undefined as boolean | undefined,

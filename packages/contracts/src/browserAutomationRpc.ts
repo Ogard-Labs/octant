@@ -157,12 +157,27 @@ export const BrowserContextCreateCommand = Schema.Struct({
    * neither take over nor destroy the first server's session.
    */
   dedicated: Schema.optional(Schema.Boolean),
+  /**
+   * Ask for a context of this Open's own only while the thread's shared
+   * context is live; otherwise this Open becomes the shared context. A
+   * Browser tab opened from the tool row asks this way. The host decides as it
+   * registers the context, so two tabs that open together, or a tab and the
+   * agent, cannot both become the shared page or both be handed it.
+   */
+  ownPageWhenShared: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type BrowserContextCreateCommand = typeof BrowserContextCreateCommand.Type;
 
+/**
+ * A read of one context. A headless page gets a fresh picture unless
+ * `freshPicture` is `false`; a page shown in the window gets one only when
+ * `freshPicture` is `true`, which the minimised Browser card asks for because
+ * that page is then off screen. The pane that shows the page never asks.
+ */
 export const BrowserContextInspectCommand = Schema.Struct({
   contextId: BrowserContextId,
   threadId: BrowserThreadId,
+  freshPicture: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type BrowserContextInspectCommand = typeof BrowserContextInspectCommand.Type;
 

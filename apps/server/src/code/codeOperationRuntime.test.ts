@@ -147,7 +147,9 @@ import {
 } from "../siblingThreads/siblingThreadTools";
 import type { CodePlannerToolPort } from "./codePlannerTools";
 import {
+  APPROVAL_NOT_WAITING_MESSAGE,
   APPROVAL_POSTURE_CHANGED_MESSAGE,
+  APPROVAL_REFUSED_IN_PLAN_MESSAGE,
   defaultWindowWorkspace,
   contextKeyForProject,
   WINDOWS_SANDBOX_MISSING_REASON,
@@ -207,8 +209,9 @@ afterEach(() => {
 });
 
 describe("CodeOperationRuntime", () => {
-  it("refuses a Windows terminal below Full access, naming the missing sandbox, before it can start", async () => {
+  it("refuses a Windows Strict terminal before it can start", async () => {
     const fixture = runtimeFixture({});
+    fixture.setThread(decodeCodeThread({ ...thread(), strict: true }));
     vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
     try {
       await expect(
@@ -230,13 +233,41 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
-  it("lets a Windows operation on a Full access thread past the sandbox check", async () => {
-    const fixture = runtimeFixture({});
+  it("lets a Windows operation outside Strict past the sandbox check at Full access and below it", async () => {
+    for (const executionPolicy of ["full-access", "approval-gated", "auto-accept-edits"] as const) {
+      const fixture = runtimeFixture({ resolveStrict: () => false });
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy }));
+      vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+      try {
+        const outcome = await fixture.runtime
+          .execute(windowId, {
+            kind: "start-terminal",
+            threadId,
+            checkoutId,
+            operationId: operationId(1),
+            terminalId: operationId(2),
+            columns: 100,
+            rows: 30,
+            credentialRefs: [],
+          })
+          .then(
+            (result) => JSON.stringify(result),
+            (error: unknown) => JSON.stringify(error),
+          );
+        expect(outcome).not.toContain(WINDOWS_SANDBOX_MISSING_REASON);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    }
+  });
+
+  it("refuses a Windows operation on a thread whose Project or Settings make it Strict", async () => {
+    const fixture = runtimeFixture({ resolveStrict: () => true });
     fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
     vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
     try {
-      const outcome = await fixture.runtime
-        .execute(windowId, {
+      await expect(
+        fixture.runtime.execute(windowId, {
           kind: "start-terminal",
           threadId,
           checkoutId,
@@ -245,12 +276,10 @@ describe("CodeOperationRuntime", () => {
           columns: 100,
           rows: 30,
           credentialRefs: [],
-        })
-        .then(
-          (result) => JSON.stringify(result),
-          (error: unknown) => JSON.stringify(error),
-        );
-      expect(outcome).not.toContain(WINDOWS_SANDBOX_MISSING_REASON);
+        }),
+      ).rejects.toMatchObject({
+        failure: { category: "unavailable", message: WINDOWS_SANDBOX_MISSING_REASON },
+      });
     } finally {
       vi.unstubAllGlobals();
     }
@@ -2507,235 +2536,192 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
-  it.each(["approved", "denied", "cancelled"] as const)(
-    "honors %s browser approval without changing thread access",
-    async (decision) => {
-      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-      const request = new AbortController();
-      const provider = { ...providerConnection(queue), toolRequestSignal: () => request.signal };
-      const authority = decodeToolActionAuthority({
-        hostId: "90000000-0000-4000-8000-000000000001",
-        mode: "code",
-        projectId: thread().projectId,
-        rootId: "90000000-0000-4000-8000-000000000009",
-        worktreeId: checkoutId,
-        providerInstanceId: thread().providerInstanceId,
-        extension: { kind: "core" },
-      });
-      const snapshot = decodeBrowserAutomationSnapshot({
-        status: "running",
+  it("opens a Private Browser page without asking the person", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const authority = decodeToolActionAuthority({
+      hostId: "90000000-0000-4000-8000-000000000001",
+      mode: "code",
+      projectId: thread().projectId,
+      rootId: "90000000-0000-4000-8000-000000000009",
+      worktreeId: checkoutId,
+      providerInstanceId: thread().providerInstanceId,
+      extension: { kind: "core" },
+    });
+    const snapshot = decodeBrowserAutomationSnapshot({
+      status: "running",
+      threadId,
+      evidence: [],
+      context: {
+        contextId: "90000000-0000-4000-8000-000000000060",
         threadId,
-        evidence: [],
-        context: {
-          contextId: "90000000-0000-4000-8000-000000000060",
-          threadId,
-          actionId: "90000000-0000-4000-8000-000000000061",
-          correlationId: "90000000-0000-4000-8000-000000000062",
-          authority,
-          policy: {
-            profileMode: "isolated",
-            allowedOrigins: ["https://example.com"],
-            credentialFieldProtection: true,
-            maxConcurrentTabs: 1,
-            sessionTimeoutMs: 600000,
-          },
-          state: "active",
-          createdAt: now,
+        actionId: "90000000-0000-4000-8000-000000000061",
+        correlationId: "90000000-0000-4000-8000-000000000062",
+        authority,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 600000,
+        },
+        state: "active",
+        createdAt: now,
+      },
+    });
+    let currentSnapshot = decodeBrowserAutomationSnapshot({
+      status: "ready",
+      threadId,
+      evidence: [],
+    });
+    const create = vi.fn(async () => {
+      currentSnapshot = snapshot;
+      return snapshot;
+    });
+    const act = vi.fn(async () => snapshot);
+    const fixture = runtimeFixture({
+      provider: providerDriver(provider),
+      browserAutomation: {
+        resolveAuthority: () => authority,
+        inspectThread: () => currentSnapshot,
+        create,
+        act,
+        releaseThread: vi.fn(async () => snapshot),
+      },
+    });
+    try {
+      const operation = operationId(70);
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "browser-request",
+            toolName: "octant_browser",
+            inputJson: '{"operation":"navigate","url":"https://example.com"}',
+          }),
+        ),
+      );
+      await vi.waitFor(() =>
+        expect(provider.answerTool).toHaveBeenCalledWith(
+          expect.objectContaining({ requestId: "browser-request", isError: false }),
+        ),
+      );
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(act).toHaveBeenCalledTimes(1);
+      currentSnapshot = decodeBrowserAutomationSnapshot({
+        ...snapshot,
+        status: "stale",
+        context: { ...snapshot.context, state: "expired" },
+        failure: {
+          category: "context-expired",
+          message: "The Browser page expired. It used the Private profile.",
         },
       });
-      let currentSnapshot = decodeBrowserAutomationSnapshot({
-        status: "ready",
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "browser-expired",
+            toolName: "octant_browser",
+            inputJson: '{"operation":"snapshot"}',
+          }),
+        ),
+      );
+      await vi.waitFor(() => {
+        const answer = vi
+          .mocked(provider.answerTool)
+          .mock.calls.find(([reply]) => reply.requestId === "browser-expired")?.[0];
+        expect(answer?.isError).toBe(true);
+        expect(JSON.parse(answer?.resultJson ?? "null")).toMatchObject({
+          failure: { category: "context-expired" },
+        });
+      });
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(act).toHaveBeenCalledTimes(1);
+      currentSnapshot = snapshot;
+      await fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(72),
         threadId,
-        evidence: [],
+        checkoutId,
       });
-      const create = vi.fn(async () => {
-        currentSnapshot = snapshot;
-        return snapshot;
+      await vi.waitFor(() => expect(provider.stop).toHaveBeenCalled());
+      const nextOperation = operationId(73);
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: nextOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
       });
-      const act = vi.fn(async () => snapshot);
-      const fixture = runtimeFixture({
-        provider: providerDriver(provider),
-        browserAutomation: {
-          resolveAuthority: () => authority,
-          inspectThread: () => currentSnapshot,
-          create,
-          act,
-          releaseThread: vi.fn(async () => snapshot),
-        },
+      await vi.waitFor(() => expect(provider.send).toHaveBeenCalledTimes(2));
+      currentSnapshot = decodeBrowserAutomationSnapshot({
+        ...snapshot,
+        status: "stale",
+        context: { ...snapshot.context, state: "expired" },
+        failure: { category: "context-expired", message: "Expired Private page." },
       });
-      try {
-        const operation = operationId(70);
-        await fixture.runtime.execute(windowId, {
-          kind: "start-provider-turn",
-          operationId: operation,
-          threadId,
-          checkoutId,
-          sessionId,
-          prompt: fixture.prompt,
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "browser-expired-after-cancel",
+            toolName: "octant_browser",
+            inputJson: '{"operation":"snapshot"}',
+          }),
+        ),
+      );
+      await vi.waitFor(() => {
+        const reply = vi
+          .mocked(provider.answerTool)
+          .mock.calls.find(([answer]) => answer.requestId === "browser-expired-after-cancel")?.[0];
+        expect(JSON.parse(reply?.resultJson ?? "null")).toMatchObject({
+          error: "browser-navigation-required",
         });
-        await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
-        await Effect.runPromise(
-          Queue.offer(
-            queue,
-            providerEvent({
-              kind: "tool-request",
-              requestId: "browser-request",
-              toolName: "octant_browser",
-              inputJson: '{"operation":"navigate","url":"https://example.com"}',
-            }),
-          ),
-        );
-        let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
-        await vi.waitFor(async () => {
-          const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 30);
-          approval = frames
-            .map((frame) => frame.event)
-            .find((event) => event.kind === "approval-requested");
-          expect(approval).toBeDefined();
-        });
-        expect(create).not.toHaveBeenCalled();
-        if (approval === undefined) throw new Error("Expected browser approval");
-        if (decision === "cancelled") request.abort();
-        await fixture.runtime.execute(windowId, {
-          kind: "answer-provider-approval",
-          operationId: operationId(71),
-          threadId,
-          checkoutId,
-          approvalId: approval.approvalId,
-          decision: decision === "denied" ? "denied" : "approved",
-        });
-        if (decision === "cancelled") {
-          await vi.waitFor(async () => {
-            const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 30);
-            expect(
-              frames.some(
-                (frame) =>
-                  frame.event.kind === "tool-activity" &&
-                  frame.event.state === "failed" &&
-                  frame.event.summary === "App-managed action was cancelled.",
-              ),
-            ).toBe(true);
-          });
-          expect(provider.answerTool).not.toHaveBeenCalled();
-        } else {
-          await vi.waitFor(() =>
-            expect(provider.answerTool).toHaveBeenCalledWith(
-              expect.objectContaining({
-                requestId: "browser-request",
-                isError: decision === "denied",
-              }),
-            ),
-          );
-        }
-        expect(create).toHaveBeenCalledTimes(decision === "approved" ? 1 : 0);
-        expect(act).toHaveBeenCalledTimes(decision === "approved" ? 1 : 0);
-        if (decision === "approved") {
-          currentSnapshot = decodeBrowserAutomationSnapshot({
-            ...snapshot,
-            status: "stale",
-            context: { ...snapshot.context, state: "expired" },
-            failure: {
-              category: "context-expired",
-              message: "The Browser page expired. It used the Private profile.",
-            },
-          });
-          await Effect.runPromise(
-            Queue.offer(
-              queue,
-              providerEvent({
-                kind: "tool-request",
-                requestId: "browser-expired",
-                toolName: "octant_browser",
-                inputJson: '{"operation":"snapshot"}',
-              }),
-            ),
-          );
-          await vi.waitFor(() => {
-            const answer = vi
-              .mocked(provider.answerTool)
-              .mock.calls.find(([reply]) => reply.requestId === "browser-expired")?.[0];
-            expect(answer?.isError).toBe(true);
-            expect(JSON.parse(answer?.resultJson ?? "null")).toMatchObject({
-              failure: { category: "context-expired" },
-            });
-          });
-          expect(create).toHaveBeenCalledTimes(1);
-          expect(act).toHaveBeenCalledTimes(1);
-          currentSnapshot = snapshot;
-          await fixture.runtime.execute(windowId, {
-            kind: "cancel-provider-turn",
-            operationId: operationId(72),
-            threadId,
-            checkoutId,
-          });
-          await vi.waitFor(() => expect(provider.stop).toHaveBeenCalled());
-          const nextOperation = operationId(73);
-          await fixture.runtime.execute(windowId, {
-            kind: "start-provider-turn",
-            operationId: nextOperation,
-            threadId,
-            checkoutId,
-            sessionId,
-            prompt: fixture.prompt,
-          });
-          await vi.waitFor(() => expect(provider.send).toHaveBeenCalledTimes(2));
-          currentSnapshot = decodeBrowserAutomationSnapshot({
-            ...snapshot,
-            status: "stale",
-            context: { ...snapshot.context, state: "expired" },
-            failure: { category: "context-expired", message: "Expired Private page." },
-          });
-          await Effect.runPromise(
-            Queue.offer(
-              queue,
-              providerEvent({
-                kind: "tool-request",
-                requestId: "browser-expired-after-cancel",
-                toolName: "octant_browser",
-                inputJson: '{"operation":"snapshot"}',
-              }),
-            ),
-          );
-          await vi.waitFor(() => {
-            const reply = vi
-              .mocked(provider.answerTool)
-              .mock.calls.find(
-                ([answer]) => answer.requestId === "browser-expired-after-cancel",
-              )?.[0];
-            expect(JSON.parse(reply?.resultJson ?? "null")).toMatchObject({
-              error: "browser-navigation-required",
-            });
-          });
-          currentSnapshot = snapshot;
-          await Effect.runPromise(
-            Queue.offer(
-              queue,
-              providerEvent({
-                kind: "tool-request",
-                requestId: "browser-again",
-                toolName: "octant_browser",
-                inputJson: '{"operation":"navigate","url":"https://example.com"}',
-              }),
-            ),
-          );
-          await vi.waitFor(async () => {
-            const frames = await fixture.runtime.subscribe(
-              windowId,
-              threadId,
-              nextOperation,
-              0,
-              30,
-            );
-            expect(frames.some((frame) => frame.event.kind === "approval-requested")).toBe(true);
-          });
-          expect(act).toHaveBeenCalledTimes(1);
-        }
-      } finally {
-        await fixture.runtime.close();
-        fixture.close();
+      });
+      currentSnapshot = snapshot;
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "browser-again",
+            toolName: "octant_browser",
+            inputJson: '{"operation":"navigate","url":"https://example.com"}',
+          }),
+        ),
+      );
+      await vi.waitFor(() =>
+        expect(
+          vi
+            .mocked(provider.answerTool)
+            .mock.calls.some(([reply]) => reply.requestId === "browser-again"),
+        ).toBe(true),
+      );
+      for (const id of [operation, nextOperation]) {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, id, 0, 60);
+        expect(frames.some((frame) => frame.event.kind === "approval-requested")).toBe(false);
       }
-    },
-  );
+      // The reopened page is used straight away: nothing waits on the person.
+      expect(act).toHaveBeenCalledTimes(2);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
 
   it.each([
     ["an approval-gated thread", "approval-gated", undefined],
@@ -3612,6 +3598,7 @@ describe("CodeOperationRuntime", () => {
       command = "git status",
       withoutShield = false,
       rejectAnswer = false,
+      requiresUser = false,
     ) => {
       const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
       // The pending call comes from the connection, never from the event.
@@ -3651,6 +3638,7 @@ describe("CodeOperationRuntime", () => {
             requestId: "provider-approval-9",
             action: "Bash",
             description: "Bash · git status",
+            ...(requiresUser ? { requiresUser: true } : {}),
           }),
         ),
       );
@@ -3660,6 +3648,26 @@ describe("CodeOperationRuntime", () => {
         );
       return { connection, review, fixture, frames, approvalCall };
     };
+
+    it("keeps every Strict escape with the person when Shield would approve it", async () => {
+      const { connection, review, fixture, frames } = await runWith(
+        "allow",
+        "git status",
+        false,
+        false,
+        true,
+      );
+      try {
+        await vi.waitFor(async () =>
+          expect((await frames()).some((event) => event.kind === "approval-requested")).toBe(true),
+        );
+        expect(review).not.toHaveBeenCalled();
+        expect(connection.answerApproval).not.toHaveBeenCalled();
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
 
     it("asks the person about a push from the runtime's own shell below Full access instead of refusing it", async () => {
       const { connection, review, fixture, frames } = await runWith(
@@ -4500,11 +4508,17 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
-  it("runs a Windows Code turn at Full access and refuses a Strict one the composer narrows below it, naming Strict", async () => {
+  it("refuses Windows Strict and then starts a native guarded turn when Strict is turned off", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
-    const fixture = runtimeFixture({ provider: providerDriver(connection) });
-    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+    let strict = true;
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      resolveStrict: () => strict,
+    });
+    fixture.setThread(
+      decodeCodeThread({ ...thread(), executionPolicy: "full-access", strict: true }),
+    );
     vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
     try {
       await expect(
@@ -4522,6 +4536,10 @@ describe("CodeOperationRuntime", () => {
         failure: { category: "unavailable", message: WINDOWS_STRICT_REFUSAL },
       });
       expect(connection.send).not.toHaveBeenCalled();
+      strict = false;
+      fixture.setThread(
+        decodeCodeThread({ ...thread(), executionPolicy: "approval-gated", strict: false }),
+      );
       await expect(
         fixture.runtime.execute(windowId, {
           kind: "start-provider-turn",
@@ -4730,90 +4748,191 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
-  it("refuses a browser allow answered after the thread's posture changed, opening nothing", async () => {
+  it("records each delivered approval answer in the turn's stream, so a re-read no longer offers it", async () => {
+    type AskedApprovalId = Extract<
+      OperationFrame["event"],
+      { kind: "approval-requested" }
+    >["approvalId"];
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-    const provider = providerConnection(queue);
-    const authority = decodeToolActionAuthority({
-      hostId: "90000000-0000-4000-8000-000000000001",
-      mode: "code",
-      projectId: thread().projectId,
-      rootId: "90000000-0000-4000-8000-000000000009",
-      worktreeId: checkoutId,
-      providerInstanceId: thread().providerInstanceId,
-      extension: { kind: "core" },
-    });
-    const ready = decodeBrowserAutomationSnapshot({ status: "ready", threadId, evidence: [] });
-    const create = vi.fn(async () => ready);
-    const act = vi.fn(async () => ready);
+    const connection = providerConnection(queue);
     const fixture = runtimeFixture({
-      provider: providerDriver(provider),
-      browserAutomation: {
-        resolveAuthority: () => authority,
-        inspectThread: () => ready,
-        create,
-        act,
-        releaseThread: vi.fn(async () => ready),
-      },
+      provider: providerDriver(connection),
+      approvalValidator: false,
     });
-    const operation = operationId(150);
-    await fixture.runtime.execute(windowId, {
-      kind: "start-provider-turn",
-      operationId: operation,
-      threadId,
-      checkoutId,
-      sessionId,
-      prompt: fixture.prompt,
-    });
-    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
-    await Effect.runPromise(
-      Queue.offer(
-        queue,
-        providerEvent({
-          kind: "tool-request",
-          requestId: "browser-before-auto",
-          toolName: "octant_browser",
-          inputJson: '{"operation":"navigate","url":"https://example.com"}',
-        }),
-      ),
-    );
-    let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
-    await vi.waitFor(async () => {
-      const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 40);
-      approval = frames
-        .map((frame) => frame.event)
-        .find((event) => event.kind === "approval-requested");
-      expect(approval).toBeDefined();
-    });
-    if (approval === undefined) throw new Error("Expected browser approval");
-    fixture.setThread(decodeCodeThread({ ...thread(), autoApprove: true }));
-
+    const startOperation = operationId(21);
     await expect(
       fixture.runtime.execute(windowId, {
-        kind: "answer-provider-approval",
-        operationId: operationId(151),
+        kind: "start-provider-turn",
+        operationId: startOperation,
         threadId,
         checkoutId,
-        approvalId: approval.approvalId,
-        decision: "approved",
-      }),
-    ).resolves.toMatchObject({
-      failure: { category: "failed", message: APPROVAL_POSTURE_CHANGED_MESSAGE },
-    });
-    expect(create).not.toHaveBeenCalled();
-    expect(act).not.toHaveBeenCalled();
-    expect(await fixture.runtime.pendingRequests?.(windowId)).toMatchObject([{ kind: "approval" }]);
-    await expect(
-      fixture.runtime.execute(windowId, {
-        kind: "answer-provider-approval",
-        operationId: operationId(152),
-        threadId,
-        checkoutId,
-        approvalId: approval.approvalId,
-        decision: "denied",
+        sessionId,
+        prompt: fixture.prompt,
       }),
     ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
-    expect(act).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    const streamEvents = async () =>
+      (await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 40)).map(
+        (frame) => frame.event,
+      );
+    const ask = async (requestId: string, index: number) => {
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId,
+            action: "write",
+            description: "Modify src/a.ts",
+          }),
+        ),
+      );
+      let approvalId: AskedApprovalId | undefined;
+      await vi.waitFor(async () => {
+        approvalId = (await streamEvents()).filter((event) => event.kind === "approval-requested")[
+          index
+        ]?.approvalId;
+        expect(approvalId).toBeDefined();
+      });
+      if (approvalId === undefined) throw new Error("Expected a provider approval");
+      return approvalId;
+    };
+    const answer = (
+      approvalId: AskedApprovalId,
+      decision: "approved" | "denied",
+      operation: number,
+    ) =>
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(operation),
+        threadId,
+        checkoutId,
+        approvalId,
+        decision,
+      });
+
+    const approved = await ask("provider-approval-answered-allow", 0);
+    await expect(answer(approved, "approved", 22)).resolves.toMatchObject({ state: "running" });
+    const denied = await ask("provider-approval-answered-deny", 1);
+    await expect(answer(denied, "denied", 23)).resolves.toMatchObject({ state: "running" });
+
+    // A window that reads the turn again from its start (a reopened thread, a
+    // second window) must see that both asks were answered, or it offers them
+    // again and an Approve on them is refused.
+    const answers = (await streamEvents()).filter((event) => event.kind === "approval-answered");
+    expect(answers).toEqual([
+      { kind: "approval-answered", approvalId: approved, decision: "approved" },
+      { kind: "approval-answered", approvalId: denied, decision: "denied" },
+    ]);
     expect(await fixture.runtime.pendingRequests?.(windowId)).toEqual([]);
+    fixture.close();
+  });
+
+  it("delivers an allow for this one call after the thread's grant persistence changed mid-turn, and names every refusal", async () => {
+    type AskedApprovalId = Extract<
+      OperationFrame["event"],
+      { kind: "approval-requested" }
+    >["approvalId"];
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    const startOperation = operationId(24);
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    const ask = async (requestId: string, index: number) => {
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId,
+            action: "write",
+            description: "Modify src/a.ts",
+          }),
+        ),
+      );
+      let approvalId: AskedApprovalId | undefined;
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 60);
+        approvalId = frames
+          .map((frame) => frame.event)
+          .filter((event) => event.kind === "approval-requested")[index]?.approvalId;
+        expect(approvalId).toBeDefined();
+      });
+      if (approvalId === undefined) throw new Error("Expected a provider approval");
+      return approvalId;
+    };
+    const answer = (
+      approvalId: AskedApprovalId,
+      decision: "approved" | "denied",
+      operation: number,
+    ) =>
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(operation),
+        threadId,
+        checkoutId,
+        approvalId,
+        decision,
+      });
+
+    // Asked while the turn runs gated with grants for this session; the person
+    // then switches the thread to Full access remembered for the Project.
+    const first = await ask("provider-approval-before-persistence", 0);
+    fixture.setThread(
+      decodeCodeThread({
+        ...thread(),
+        executionPolicy: "full-access",
+        permissionPersistence: "project-default",
+      }),
+    );
+    await expect(answer(first, "approved", 25)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+    // The running turn keeps the persistence it started with, so this allow
+    // covers the one call and nothing is remembered under either setting.
+    expect(connection.answerApproval).toHaveBeenCalledWith({
+      sessionId,
+      requestId: "provider-approval-before-persistence",
+      approved: true,
+      scope: "once",
+    });
+
+    // An answer to an ask that no longer waits says so instead of a bare failure.
+    const stale = await answer(first, "approved", 26);
+    expect(stale).toMatchObject({ kind: "provider-turn-state", state: "failed" });
+    expect(stale).toHaveProperty("failure.message", APPROVAL_NOT_WAITING_MESSAGE);
+
+    // Narrowed to Plan: the allow is asked again, then refused in words.
+    const second = await ask("provider-approval-before-plan-refusal", 1);
+    fixture.setThread(
+      decodeCodeThread({
+        ...thread(),
+        executionPolicy: "plan",
+        permissionPersistence: "project-default",
+      }),
+    );
+    await expect(answer(second, "approved", 27)).resolves.toMatchObject({
+      failure: { message: APPROVAL_POSTURE_CHANGED_MESSAGE },
+    });
+    await expect(answer(second, "approved", 28)).resolves.toMatchObject({
+      state: "failed",
+      failure: { message: APPROVAL_REFUSED_IN_PLAN_MESSAGE },
+    });
+    expect(connection.answerApproval).toHaveBeenCalledTimes(1);
     fixture.close();
   });
 
@@ -5220,75 +5339,6 @@ describe("CodeOperationRuntime", () => {
       approved: false,
     });
     expect(connection.interrupt).not.toHaveBeenCalled();
-    fixture.close();
-  });
-
-  it("keeps a browser approval waiting a day later and gives it up when its thread is archived, which journals nothing", async () => {
-    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-    const provider = providerConnection(queue);
-    const authority = decodeToolActionAuthority({
-      hostId: "90000000-0000-4000-8000-000000000001",
-      mode: "code",
-      projectId: thread().projectId,
-      rootId: "90000000-0000-4000-8000-000000000009",
-      worktreeId: checkoutId,
-      providerInstanceId: thread().providerInstanceId,
-      extension: { kind: "core" },
-    });
-    const ready = decodeBrowserAutomationSnapshot({ status: "ready", threadId, evidence: [] });
-    const withdrawn = vi.fn();
-    const fixture = runtimeFixture({
-      provider: providerDriver(provider),
-      onPendingRequestWithdrawn: withdrawn,
-      browserAutomation: {
-        resolveAuthority: () => authority,
-        inspectThread: () => ready,
-        create: vi.fn(async () => ready),
-        act: vi.fn(async () => ready),
-        releaseThread: vi.fn(async () => ready),
-      },
-    });
-    const operation = operationId(910);
-    await fixture.runtime.execute(windowId, {
-      kind: "start-provider-turn",
-      operationId: operation,
-      threadId,
-      checkoutId,
-      sessionId,
-      prompt: fixture.prompt,
-    });
-    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    try {
-      await Effect.runPromise(
-        Queue.offer(
-          queue,
-          providerEvent({
-            kind: "tool-request",
-            requestId: "browser-waiting",
-            toolName: "octant_browser",
-            inputJson: '{"operation":"navigate","url":"https://example.com"}',
-          }),
-        ),
-      );
-      await vi.waitFor(async () =>
-        expect((await fixture.runtime.pendingRequests?.(windowId))?.map((r) => r.kind)).toEqual([
-          "approval",
-        ]),
-      );
-      // The listing names the site, so a terminal can tell this ask from a provider's own.
-      expect(await fixture.runtime.pendingRequests?.(windowId)).toMatchObject([
-        { kind: "approval", browserOrigin: "https://example.com" },
-      ]);
-      vi.advanceTimersByTime(24 * 60 * 60_000);
-      expect(withdrawn).not.toHaveBeenCalled();
-      expect(await fixture.runtime.pendingRequests?.(windowId)).toHaveLength(1);
-    } finally {
-      vi.useRealTimers();
-    }
-    fixture.runtime.withdrawThreadAsks?.(String(threadId));
-    expect(withdrawn).toHaveBeenCalledOnce();
-    expect(await fixture.runtime.pendingRequests?.(windowId)).toEqual([]);
     fixture.close();
   });
 
@@ -7203,7 +7253,7 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
-  it("keeps a thread executing until its shell exits", async () => {
+  it("never calls a thread executing for its person's shell, and closes the record when it exits", async () => {
     const fixture = runtimeFixture({ terminalExit: { exitCode: 0 } });
     const terminalId = operationId(70);
 
@@ -7221,7 +7271,7 @@ describe("CodeOperationRuntime", () => {
     expect(fixture.runtimeWorks()).toEqual([
       { id: String(terminalId), kind: "terminal", state: "running" },
     ]);
-    expect(fixture.boardActivity()).toMatchObject({ executing: true });
+    expect(fixture.boardActivity()).toMatchObject({ executing: false });
 
     // A shell that ends on its own tells nobody. The next command that looks at
     // it is what closes the record, which is why every terminal command settles
@@ -9600,6 +9650,84 @@ describe("provider switch handoff", () => {
     }
   });
 
+  it("continues the provider's own session in the new account when its files are carried there", async () => {
+    const drivers = twoHarnesses();
+    const carried: Array<{ readonly sessionId: string; readonly mode: string }> = [];
+    const fixture = runtimeFixture({
+      resolveProviderDriver: drivers.resolveProviderDriver,
+      accountSessionCarrier: {
+        sameProvider: () => true,
+        carry: async (request) => {
+          carried.push({ sessionId: String(request.sessionId), mode: request.mode });
+          return {
+            status: "carried",
+            resumeCursor: { ...request.resumeCursor, value: "carried-session" },
+          };
+        },
+      },
+    });
+    fixture.setThread(onProvider(providerInstance, "model-a"));
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      fixture.setThread(onProvider(harnessInstance, "model-a", 2));
+      await sendAfterSwitch(fixture);
+      const next = drivers.connection(harnessInstance);
+      await vi.waitFor(() => expect(next.send).toHaveBeenCalledOnce());
+      expect(carried).toEqual([{ sessionId: String(switchSession), mode: "code" }]);
+      expect(next.start).not.toHaveBeenCalled();
+      expect(vi.mocked(next.resume).mock.calls[0]?.[0].resumeCursor.value).toBe("carried-session");
+      expect(JSON.stringify(vi.mocked(next.send).mock.calls[0]?.[0].context ?? [])).not.toContain(
+        "First reply.",
+      );
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({
+        reason: "account-move-native-session",
+        previousProviderInstanceId: providerInstance,
+        previousModelId: "model-a",
+        nativeSessionTransferred: true,
+      });
+      expect(fixture.conversation().turns.at(-1)?.handoff).toMatchObject({
+        reason: "account-move-native-session",
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("hands over as text and says why when a moved session cannot be carried", async () => {
+    const drivers = twoHarnesses();
+    const fixture = runtimeFixture({
+      resolveProviderDriver: drivers.resolveProviderDriver,
+      accountSessionCarrier: {
+        sameProvider: () => true,
+        carry: async () => ({ status: "text", cause: "session-not-adopted" }),
+      },
+    });
+    fixture.setThread(onProvider(providerInstance, "model-a"));
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      fixture.setThread(onProvider(harnessInstance, "model-a", 2));
+      await sendAfterSwitch(fixture);
+      const next = drivers.connection(harnessInstance);
+      await vi.waitFor(() => expect(next.send).toHaveBeenCalledOnce());
+      expect(next.resume).not.toHaveBeenCalled();
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({
+        reason: "provider-switch",
+        nativeSessionTransferred: false,
+        accountMoveTextCause: "session-not-adopted",
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it("leads a provider switch with the limit rule's summary, and says so on the journal", async () => {
     const drivers = twoHarnesses();
     const fixture = runtimeFixture({
@@ -11691,6 +11819,7 @@ function runtimeFixture(options: {
     | "none";
   /** The limit rule's summary a provider switch leads with, when one waits. */
   handoverSummary?: Parameters<typeof createCodeOperationRuntime>[0]["handoverSummary"];
+  accountSessionCarrier?: Parameters<typeof createCodeOperationRuntime>[0]["accountSessionCarrier"];
   /** Whether the selector reports the thread as having taken in outside content. */
   externalContentIngested?: boolean;
   /** Reopen another fixture's journal and content, the way a restarted host does. */
@@ -12057,6 +12186,9 @@ function runtimeFixture(options: {
       ? {}
       : { providerSwitchContext: options.providerSwitchContext ?? selectConversation }),
     ...(options.handoverSummary === undefined ? {} : { handoverSummary: options.handoverSummary }),
+    ...(options.accountSessionCarrier === undefined
+      ? {}
+      : { accountSessionCarrier: options.accountSessionCarrier }),
     ...(options.forkContext === "none"
       ? {}
       : { forkContext: options.forkContext ?? selectForkConversation }),

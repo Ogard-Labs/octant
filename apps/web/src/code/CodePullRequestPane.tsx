@@ -21,6 +21,7 @@ import {
   decidesCodeEffectsByApproval,
 } from "@octant/domain";
 import { useEffect, useRef, useState } from "react";
+import { PullRequestStatePill } from "./PullRequestStatePill";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import {
   browserProofSaveLabel,
@@ -47,23 +48,6 @@ type ProofState =
   | { readonly kind: "unavailable"; readonly message: string };
 
 type PullRequestResult = Extract<CodeOperationResult, { readonly kind: "pull-request-state" }>;
-
-const PR_STATE_LABELS: Record<CodePullRequestReviewObserved["pullRequestState"], string> = {
-  open: "Open",
-  draft: "Draft",
-  merged: "Merged",
-  closed: "Closed",
-};
-
-const PR_STATE_VARIANTS: Record<
-  CodePullRequestReviewObserved["pullRequestState"],
-  NonNullable<OctantBadgeProps["variant"]>
-> = {
-  open: "secondary",
-  draft: "outline",
-  merged: "success",
-  closed: "destructive",
-};
 
 const CHECK_STATE_LABELS: Record<CodePullRequestReviewObserved["checks"][number]["state"], string> =
   {
@@ -116,7 +100,7 @@ export function CodePullRequestPane(props: CodePullRequestPaneProps) {
     return (
       <section aria-label="Pull request" className="code-delivery-pane code-pr-pane">
         <ReviewHeader {...(props.onRefresh === undefined ? {} : { onRefresh: props.onRefresh })} />
-        <OctantAlert tone="warning">
+        <OctantAlert layout="row" tone="warning">
           {props.review.failureCode === "no-remote"
             ? "This checkout has no GitHub remote, so there is no pull request to observe or open. Add a GitHub remote to the repository, then retry."
             : "The linked pull request could not be observed from GitHub. Check GitHub authentication and retry."}
@@ -169,9 +153,7 @@ function ReviewWindow(
           <span>Pull request #{review.number}</span>
           <h1>{review.title.length === 0 ? `Pull request #${review.number}` : review.title}</h1>
           <p className="code-pr-review__meta">
-            <OctantBadge variant={PR_STATE_VARIANTS[review.pullRequestState]}>
-              {PR_STATE_LABELS[review.pullRequestState]}
-            </OctantBadge>
+            <PullRequestStatePill solid state={review.pullRequestState} />
             <span>
               {review.headBranch} → {review.baseRepository}:{review.baseBranch}
             </span>
@@ -194,7 +176,7 @@ function ReviewWindow(
               type="button"
               variant="ghost"
             >
-              Go to thread
+              Open thread
             </OctantButton>
           )}
           {props.onNavigateWorktree === undefined ? null : (
@@ -226,7 +208,7 @@ function ReviewWindow(
       </p>
 
       {waiting ? (
-        <OctantAlert className="code-pr-review__waiting" tone="warning">
+        <OctantAlert layout="row" className="code-pr-review__waiting" tone="warning">
           <strong>Waiting on a fresh GitHub observation.</strong>
           <p>
             {review.freshness === "stale"
@@ -351,7 +333,11 @@ function EvidenceBlock(props: {
 }) {
   if (props.state.kind === "loading") return <p role="status">Loading {props.label} evidence…</p>;
   if (props.state.kind === "unavailable")
-    return <OctantAlert tone="warning">{props.state.message}</OctantAlert>;
+    return (
+      <OctantAlert layout="row" tone="warning">
+        {props.state.message}
+      </OctantAlert>
+    );
   if (props.state.text.trim().length === 0) return <p role="status">{props.empty}</p>;
   return props.pre === true ? (
     <pre className="code-pr-review__diff">{props.state.text}</pre>
@@ -636,7 +622,9 @@ function CreatePullRequest(
               </label>
               {proof.kind === "loading" ? <p role="status">Reading the Browser proof…</p> : null}
               {proof.kind === "unavailable" ? (
-                <OctantAlert tone="warning">{proof.message}</OctantAlert>
+                <OctantAlert layout="row" tone="warning">
+                  {proof.message}
+                </OctantAlert>
               ) : null}
               {proof.kind === "ready" ? (
                 <p className="code-delivery-pane__notice" role="status">
@@ -681,13 +669,17 @@ function CreatePullRequest(
         </div>
       )}
       {result?.state === "unavailable" || result?.state === "failed" ? (
-        <OctantAlert tone="warning">
+        <OctantAlert layout="row" tone="warning">
           {result.state === "unavailable" && result.failureCode === "no-remote"
             ? "This checkout has no GitHub remote, so there is nowhere to open a pull request. Add a GitHub remote to the repository, then retry."
             : `Pull request creation is ${result.state}. Confirm the GitHub CLI is installed and signed in and that the delivery target names a GitHub repository.`}
         </OctantAlert>
       ) : null}
-      {failure === undefined ? null : <OctantAlert tone="warning">{failure}</OctantAlert>}
+      {failure === undefined ? null : (
+        <OctantAlert layout="row" tone="warning">
+          {failure}
+        </OctantAlert>
+      )}
     </section>
   );
 }

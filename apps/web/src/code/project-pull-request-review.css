@@ -15,30 +15,94 @@
 .code-pr-review__header,
 .code-pr-review__header > div {
   display: grid;
-  gap: 8px;
+  gap: var(--oct-space-2);
   min-width: 0;
 }
 
-.code-pr-review__eyebrow,
+.code-pr-review__header {
+  gap: var(--oct-space-3);
+  padding-bottom: var(--oct-space-4);
+}
+
 .code-pr-review__meta-item,
 .code-pr-review__freshness {
   display: inline-flex;
   align-items: center;
   gap: var(--oct-space-1);
+  min-width: 0;
 }
 
-.code-pr-review__eyebrow {
+/* The title is the largest text on the page and the number rides on its last
+   line, lighter: a request is found by its title and named by its number. */
+.code-pr-review__header h1 {
+  margin: 0;
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-strong, 600);
+  line-height: 1.3;
+  text-wrap: balance;
+}
+
+.code-pr-review__number {
   color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: var(--oct-weight-regular, 400);
+  font-variant-numeric: tabular-nums;
 }
 
-.code-pr-review__header h1,
 .code-pr-review__section-header h2 {
   margin: 0;
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-strong, 600);
   line-height: 1.4;
+}
+
+/* Branch names and commit ids are the repository's own words: mono, on a
+   chip, so they read apart from the sentence around them. */
+.code-pr-review__branch,
+.code-pr-review__sha {
+  min-width: 0;
+  padding: 0 var(--oct-space-1);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-fill-4);
+  color: var(--oct-fg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.code-pr-review__sha {
+  color: var(--oct-link);
+}
+
+/* The two branches and the arrow are one meta item. At 320px they sat on one
+   line, each chip shrunk until its name broke after two or three characters
+   ("acme/wi / dgets:m / ain"); wrapping puts the arrow and the base on the next
+   line so each name keeps the whole width. */
+.code-pr-review__meta-item:has(> .code-pr-review__branch) {
+  flex-wrap: wrap;
+}
+
+/* Lines added and removed, in the host's green and red, with figures that
+   keep one width so a column of them lines up. */
+.code-pr-review__tally {
+  display: inline-flex;
+  flex: none;
+  gap: var(--oct-space-2);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--oct-weight-medium, 500);
+}
+
+.code-pr-review__added {
+  color: var(--oct-pr-open);
+}
+
+.code-pr-review__removed {
+  color: var(--oct-pr-closed);
+}
+
+.code-pr-review__path {
+  min-width: 0;
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
 }
 
 .code-pr-review__header > div > span,
@@ -144,16 +208,41 @@
   list-style: none;
 }
 
-.code-pr-review__commits > li,
 .code-pr-review__reviews > li,
 .code-pr-review__comments > li {
   display: grid;
   gap: var(--oct-space-1);
 }
 
+/* A commit is one line: its id, what it says, and who wrote it at the end. */
+.code-pr-review__commits > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--oct-space-1) var(--oct-space-2);
+}
+
+/* In a 320px pane the author used to keep its column and squeeze the headline
+   to a word per line; below 20 characters of headline it drops to its own line. */
+.code-pr-review__commits > li > span:nth-of-type(1) {
+  flex: 1 1 20ch;
+  min-width: 0;
+}
+
+.code-pr-review__commits > li > .code-pr-review__muted {
+  margin-inline-start: auto;
+}
+
+.code-pr-review__commits,
+.code-pr-review__files,
+.code-pr-review__checks {
+  gap: var(--oct-space-2);
+}
+
 .code-pr-review__files > li,
 .code-pr-review__checks > li {
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
   gap: 12px;
 }
@@ -174,6 +263,17 @@
 .code-pr-review__diff {
   max-height: 360px;
   overflow: auto;
+}
+
+/* The diff's lines are the review tool's height, not the code block's reading
+   leading (measured 22px against the review tool's rows). The description's
+   original source shares the wrapper and is reading text, so it keeps the
+   code block's own size. */
+:is(pre.code-pr-review__diff, .code-pr-review__diff .code-block__pre):not(
+  .code-pr-review__source *
+) {
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-line-diff);
 }
 
 .code-pr-review__prose ul {
@@ -251,14 +351,44 @@
 .code-pr-actions__threads {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--oct-space-2);
+  gap: var(--oct-space-1) var(--oct-space-2);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+/* A label is a chip with a hairline, whether it is on the request or offered
+   for it. The labels a repository offers stay folded away until asked for:
+   thirty of them in the open buried the request's own text. */
+.code-pr-actions__labels button {
+  box-shadow: inset 0 0 0 1px var(--oct-hairline);
+}
+
+.code-pr-actions__more-labels > summary {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  cursor: default;
+}
+
+.code-pr-actions__more-labels .code-pr-actions__labels {
+  padding-top: var(--oct-space-2);
+}
+
 .code-pr-actions__threads {
   display: grid;
+}
+
+/* The labels row's place while the labels are read: one small button tall. */
+.code-pr-actions__labels-skeleton {
+  display: flex;
+  align-items: center;
+  min-height: var(--oct-space-6);
+}
+
+.code-pr-actions__labels-skeleton-chip {
+  width: 96px;
+  height: var(--oct-space-6);
+  border-radius: var(--oct-radius-sm);
 }
 
 .code-pr-actions__threads > li {

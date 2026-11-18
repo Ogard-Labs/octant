@@ -1,3 +1,6 @@
+import { configureSandboxNetworkSnapshot } from "../process/sandboxRuntimePolicy";
+import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
+import { activeSandboxPolicy, configureSandboxToolNetwork } from "../process/sandboxRuntimePolicy";
 import { RemoteSetupChecks } from "../serverProjects/remoteSetupChecks";
 import { createRemoteSetupCheckRoutes } from "../serverProjects/remoteSetupCheckRoutes";
 import { ServerPreviewTunnels } from "../serverProjects/serverPreviewTunnel";
@@ -11,7 +14,7 @@ import { realpath, stat as statFromDisk } from "node:fs/promises";
 import { join } from "node:path";
 import { queueSteeringWhereDelivered, withSteerable } from "../harness/nativeHarnessSteerability";
 import { createHostShield, shieldRoutesApprovals } from "../shield/hostShield";
-import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
+import { chosenAutoReviewer, hostSandboxRefusal } from "@octant/domain/guardrail-policy";
 import { readsSecretsThenEgress } from "@octant/domain/shield-judge-policy";
 import { createAutomaticModelAccountCheck } from "../automaticModels/automaticModelAccount";
 import { createPersonMemorySweep } from "../personMemory/personMemoryWiring";
@@ -444,9 +447,9 @@ export function wireHarness(deps: HarnessDependencies) {
       platform: "win32",
       windowsShell: persistence.readCodeSettings()?.settings.windowsTerminalShell,
     });
-  // Full access on Windows runs harness commands in the terminal shell
-  // Settings › Code names; each keeps a receipt beside the other harness
-  // commands' so a restart finds and stops what a crash left running.
+  // On Windows harness commands run in the terminal shell Settings › Code
+  // names; each keeps a receipt beside the other harness commands' so a
+  // restart finds and stops what a crash left running.
   const windowsHarnessShellPort =
     process.platform === "win32"
       ? createWindowsFullAccessShellPort({
@@ -479,11 +482,51 @@ export function wireHarness(deps: HarnessDependencies) {
   }
   const decodeEgressAggregateId = Schema.decodeUnknownSync(AggregateId);
   const decodeEgressLaunchId = Schema.decodeUnknownSync(ToolEgressLaunchId);
+  configureSandboxNetworkSnapshot((threadId, selection) => ({
+    places: structuredClone(safeNetworkStore.placesFor(String(selection.context.projectId))),
+    limitsOn: safeNetworkStore.limitsOn(),
+    rules: structuredClone(
+      toolEgressRules.sandboxRules({
+        launchId: decodeEgressLaunchId(randomUUID()),
+        threadId: decodeEgressAggregateId(threadId),
+        projectId: decodeEgressAggregateId(String(selection.context.projectId)),
+      }),
+    ),
+  }));
+  configureSandboxToolNetwork(
+    async (threadId, policy) => {
+      if (harnessEgressEndpoint === undefined)
+        throw new Error("This host cannot mediate the selected network policy.");
+      const started = await toolEgressRules.startLaunch({
+        launch: {
+          launchId: decodeEgressLaunchId(randomUUID()),
+          threadId: decodeEgressAggregateId(threadId),
+          projectId: decodeEgressAggregateId(String(policy.context.projectId)),
+        },
+        endpoint: harnessEgressEndpoint,
+      });
+      if (started.status === "refused")
+        throw new Error("The sandbox network broker is unavailable. No command was started.");
+      return {
+        permitsHostRequest: (host, port) => started.launch.proxy.permitsHostRequest(host, port),
+        networkEgress: { kind: "proxied", endpoint: started.launch.proxy.endpoint },
+        environment: proxiedLaunchEnvironment(
+          started.launch.proxy.endpoint,
+          started.launch.proxy.token,
+        ),
+        close: async () => {
+          await started.launch.finish();
+        },
+      };
+    },
+    () => safeNetworkStore.limitsOn(),
+  );
   const harnessProxiedShell =
     harnessEgressEndpoint === undefined
       ? undefined
       : (scope: HarnessEgressScope) =>
           createNativeHarnessShell({
+            sandboxPolicy: () => activeSandboxPolicy(scope.threadId),
             process: harnessProcessPort,
             scriptDirectory: harnessScriptDirectory,
             sshAgentSocket,
@@ -1021,6 +1064,29 @@ export function wireHarness(deps: HarnessDependencies) {
   });
   // A provider runtime's own shell reports a command only as it starts, so
   // its pushes and pull-request changes are recorded, never stopped.
+  // A running turn keeps the sandbox it started with, so turning it off
+  // never opens commands the turn has not run yet; turning it on applies
+  // at once, since that only narrows.
+  const threadKeepsSandbox = (threadId: string): boolean => {
+    const code = persistence.readCodeThread(threadId as never);
+    if (code !== undefined) {
+      return (codeParentActiveTurn?.(code) ?? code).fullAccessSandbox === true;
+    }
+    const stored = workThreadProjection.read(threadId as never)?.fullAccessSandbox === true;
+    return stored || runningWorkTurnSandbox(threadId) === true;
+  };
+  // Windows has no Octant sandbox, so every harness command there runs in the
+  // terminal shell Settings › Code names, unconfined, at every level outside
+  // Strict; the POSIX form runs `/bin/sh` inside a sandbox Windows lacks.
+  const windowsHarnessCommandShell =
+    windowsHarnessShellPort === undefined
+      ? undefined
+      : createNativeHarnessShell({
+          process: windowsHarnessShellPort,
+          scriptDirectory: harnessScriptDirectory,
+          scriptFileName: () => windowsScriptFileName(windowsHarnessShell()),
+          scriptText: (command) => windowsScriptText(windowsHarnessShell(), command),
+        });
   const runtimeForgeChanges = createRuntimeForgeChangeObserver({
     branches: (threadId) => codeThreadBranches(persistence, threadId),
     record: (input) => shieldServerStore.recordForgeChange(input),
@@ -1095,38 +1161,49 @@ export function wireHarness(deps: HarnessDependencies) {
         .observedState(providerInstanceId)
         ?.models.find((candidate) => String(candidate.id) === modelId)
         ?.inputModalities.includes("image") === true,
-    shell: createNativeHarnessShell({
-      process: harnessProcessPort,
-      scriptDirectory: harnessScriptDirectory,
-      sshAgentSocket,
-      cloudCliEnvironment,
-      googleCliCredentials: googleCliCommands.prepare,
-    }),
-    offlineShell: createNativeHarnessShell({
-      process: harnessOfflineProcessPort,
-      scriptDirectory: harnessScriptDirectory,
-      sshAgentSocket,
-      cloudCliEnvironment,
-      googleCliCredentials: googleCliCommands.prepare,
-    }),
-    // Full access on Windows runs commands in the terminal shell Settings ›
-    // Code names, since the POSIX form runs `/bin/sh`; the levels below
-    // refuse on Windows before any command is planned.
-    fullAccessShell:
-      windowsHarnessShellPort !== undefined
-        ? createNativeHarnessShell({
-            process: windowsHarnessShellPort,
-            scriptDirectory: harnessScriptDirectory,
-            scriptFileName: () => windowsScriptFileName(windowsHarnessShell()),
-            scriptText: (command) => windowsScriptText(windowsHarnessShell(), command),
-          })
-        : createNativeHarnessShell({
-            process: harnessFullAccessProcessPort,
+    shell:
+      windowsHarnessCommandShell ??
+      createNativeHarnessShell({
+        process: harnessProcessPort,
+        scriptDirectory: harnessScriptDirectory,
+        sshAgentSocket,
+        cloudCliEnvironment,
+        googleCliCredentials: googleCliCommands.prepare,
+      }),
+    // A child without network authority runs its commands where the sandbox
+    // closes the network; Windows has no such sandbox, so it runs none there.
+    ...(windowsHarnessCommandShell === undefined
+      ? {
+          offlineShell: createNativeHarnessShell({
+            process: harnessOfflineProcessPort,
             scriptDirectory: harnessScriptDirectory,
             sshAgentSocket,
             cloudCliEnvironment,
             googleCliCredentials: googleCliCommands.prepare,
           }),
+        }
+      : {
+          // Under Strict, or with the sandbox kept, a Windows command would
+          // need the sandbox it lacks, so it is refused before it is planned.
+          hostCommandRefusal: ({ threadId, executionPolicy }) =>
+            hostSandboxRefusal({
+              platform: "win32",
+              access: {
+                executionPolicy: executionPolicy ?? "plan",
+                fullAccessSandbox: threadKeepsSandbox(threadId),
+              },
+              strict: resolveThreadStrict(threadId),
+            }),
+        }),
+    fullAccessShell:
+      windowsHarnessCommandShell ??
+      createNativeHarnessShell({
+        process: harnessFullAccessProcessPort,
+        scriptDirectory: harnessScriptDirectory,
+        sshAgentSocket,
+        cloudCliEnvironment,
+        googleCliCredentials: googleCliCommands.prepare,
+      }),
     ...(harnessProxiedShell === undefined
       ? {}
       : {
@@ -1145,18 +1222,8 @@ export function wireHarness(deps: HarnessDependencies) {
       codeSessionAuthority,
       codeOperationRuntime: { threadWithActiveTurnPosture: codeParentActiveTurn },
     }),
-    // A running turn keeps the sandbox it started with, so turning it off
-    // never opens commands the turn has not run yet; turning it on applies
-    // at once, since that only narrows.
     readStrict: (threadId) => resolveThreadStrict(threadId),
-    readFullAccessSandbox: (threadId) => {
-      const code = persistence.readCodeThread(threadId as never);
-      if (code !== undefined) {
-        return (codeParentActiveTurn?.(code) ?? code).fullAccessSandbox === true;
-      }
-      const stored = workThreadProjection.read(threadId as never)?.fullAccessSandbox === true;
-      return stored || runningWorkTurnSandbox(threadId) === true;
-    },
+    readFullAccessSandbox: threadKeepsSandbox,
     resolveWebSearch: () =>
       harnessWebSearch({
         readEligible: () => webSearchSettings.eligible(),
@@ -1207,6 +1274,8 @@ export function wireHarness(deps: HarnessDependencies) {
   contributeChildTools((input) => nativeHarnessComposition.forAgentRun(input));
   const prepareCredentialCommand = createCommandCredentialPreparation({
     readThread: (id) => persistence.readCodeThread(id),
+    providerKind: (thread) =>
+      persistence.readProviderInstance(thread.providerInstanceId)?.driverKind,
     ordinary: nativeHarnessComposition,
     egress: toolEgressRules,
     endpoint: harnessEgressEndpoint,

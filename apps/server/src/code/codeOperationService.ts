@@ -426,6 +426,8 @@ export interface CodeOperationTerminalPort {
     }[];
     readonly launcher?: TerminalLauncher;
     readonly executionPolicy?: CodeThread["executionPolicy"];
+    /** The thread's resolved Strict value, passed on a host without Octant's sandbox. */
+    readonly strict?: boolean;
   }) => Promise<CodeOperationTerminalSnapshot>;
   readonly attach: (terminalId: string) => CodeOperationTerminalSnapshot;
   readonly observe?: (
@@ -586,6 +588,8 @@ export interface CodeOperationRepositoryTestPort {
     readonly executionPolicy: CodeThread["executionPolicy"];
     readonly checkoutRoot: string;
     readonly environment: Readonly<Record<string, string | undefined>>;
+    /** The thread's resolved Strict value, passed on a host without Octant's sandbox. */
+    readonly strict?: boolean;
   }) => Promise<CodeRepositoryTestRun>;
   readonly cancel: (input: {
     readonly testRunId: string;
@@ -610,6 +614,7 @@ export interface CodeOperationScaffoldPort {
     readonly checkoutId: CodeThread["checkoutId"];
     readonly executionPolicy: CodeThread["executionPolicy"];
     readonly checkoutRoot: string;
+    readonly strict?: boolean;
   }) => Promise<
     | { readonly status: "ran"; readonly run: ScaffoldRun }
     | { readonly status: "refused"; readonly message: string }
@@ -1256,6 +1261,18 @@ export interface CodeOperationServiceOptions {
    * on its folder. Absent, every `remote-root` thread is refused.
    */
   readonly holdsServerThread?: (thread: CodeThread) => boolean;
+  /**
+   * Copies files a server thread's turn names by path to the thread's
+   * attachments folder on its server, where its file tools read them. Absent,
+   * such a turn is refused before it starts.
+   */
+  readonly transferServerAttachments?: (
+    thread: CodeThread,
+    files: ReadonlyArray<ProviderAttachmentInput>,
+  ) => Promise<
+    | { readonly status: "transferred"; readonly files: ReadonlyArray<AttachedFileByPath> }
+    | { readonly status: "refused"; readonly message: string }
+  >;
   /** The login a server thread's terminal opens on its server, or undefined when it has none now. */
   readonly serverTerminalLogin?: (
     thread: CodeThread,
@@ -1573,6 +1590,11 @@ export class CodeOperationService {
    * its check, and the turn then started on the overwritten files.
    */
   readonly #startingTurns = new Set<StartingTurn>();
+  /**
+   * The server paths of files a server thread's start copied there before it
+   * was journaled, by operation, taken once by the provider call.
+   */
+  readonly #serverAttachmentPaths = new Map<string, ReadonlyArray<AttachedFileByPath>>();
   /**
    * Restores and discards past their check and still overwriting files. Git
    * queues work per checkout id, and two Projects on one folder have two ids,
@@ -2013,23 +2035,41 @@ export class CodeOperationService {
               }
               // A server thread's agent works with the server's file tools, and
               // this host's attachments folder is not there: a file the turn
-              // would name by path is refused before the start is journaled.
-              if (
+              // would name by path is copied to the thread's folder on the
+              // server before the start is journaled, so a copy that fails
+              // leaves no turn behind; with no transfer it is refused.
+              const serverFiles =
                 command.kind === "start-provider-turn" &&
                 recordedStart === undefined &&
                 turnRefusal === undefined &&
-                this.#options.holdsServerThread?.(turnThread) === true &&
-                partitionAttachedFiles(starting.attachments).files.some(
-                  (reference) =>
-                    this.#options.takesFileNatively?.(turnThread, reference.mediaType) !== true,
-                )
-              ) {
-                turnRefusal = this.#failed(
-                  command.operationId,
-                  "unsupported",
-                  SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
-                  "refused",
-                );
+                this.#options.holdsServerThread?.(turnThread) === true
+                  ? partitionAttachedFiles(starting.attachments).files.filter(
+                      (reference) =>
+                        this.#options.takesFileNatively?.(turnThread, reference.mediaType) !== true,
+                    )
+                  : [];
+              if (serverFiles.length > 0) {
+                const transfer = this.#options.transferServerAttachments;
+                const inputs =
+                  transfer === undefined
+                    ? undefined
+                    : await this.#attachmentInputs(command.threadId, serverFiles);
+                const transferred =
+                  transfer === undefined || inputs === undefined
+                    ? undefined
+                    : await transfer(turnThread, inputs);
+                if (transferred?.status === "transferred") {
+                  this.#serverAttachmentPaths.set(String(command.operationId), transferred.files);
+                } else {
+                  turnRefusal = this.#failed(
+                    command.operationId,
+                    transfer === undefined ? "unsupported" : "unavailable",
+                    transfer === undefined
+                      ? SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL
+                      : (transferred?.message ?? "A file attached to this turn is unavailable."),
+                    "refused",
+                  );
+                }
               }
               // Images for a model that cannot read them are described before
               // the start is journaled, so the start records who described
@@ -3938,6 +3978,7 @@ export class CodeOperationService {
             : {}),
           ...(serverLogin === undefined ? {} : { server: serverLogin }),
           executionPolicy: thread.executionPolicy,
+          ...this.#windowsStrict(thread),
         });
         owner.starting = starting;
         this.#terminalOwners.set(command.terminalId, owner);
@@ -4109,6 +4150,7 @@ export class CodeOperationService {
           executionPolicy: thread.executionPolicy,
           checkoutRoot: root.checkoutRoot,
           environment: root.environment,
+          ...this.#windowsStrict(thread),
         });
         if (
           run.id !== command.testRunId ||
@@ -4189,6 +4231,7 @@ export class CodeOperationService {
           checkoutId: checkout.id,
           executionPolicy: thread.executionPolicy,
           checkoutRoot: root.checkoutRoot,
+          ...this.#windowsStrict(thread),
         });
         if (outcome.status === "refused") {
           return this.#failed(command.operationId, "invalid", outcome.message);
@@ -6393,14 +6436,39 @@ export class CodeOperationService {
     );
     const filesByPath = files.filter((reference) => !nativeFiles.includes(reference));
     if (serverThread && filesByPath.length > 0) {
-      return this.#failed(
-        command.operationId,
-        "unsupported",
-        SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
-        "refused",
-      );
-    }
-    if (filesByPath.length > 0) {
+      // Copied to the thread's attachments folder on its server, where its
+      // file tools read them; with no transfer, the turn is refused.
+      const transfer = this.#options.transferServerAttachments;
+      if (transfer === undefined)
+        return this.#failed(
+          command.operationId,
+          "unsupported",
+          SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
+          "refused",
+        );
+      // Copied before the start was journaled; a start resumed after a
+      // restart, which prepared nothing here, copies them now.
+      const copied = this.#serverAttachmentPaths.get(String(command.operationId));
+      this.#serverAttachmentPaths.delete(String(command.operationId));
+      const inputs =
+        copied === undefined
+          ? await this.#attachmentInputs(command.threadId, filesByPath)
+          : undefined;
+      const transferred =
+        copied !== undefined
+          ? { status: "transferred" as const, files: copied }
+          : inputs === undefined
+            ? undefined
+            : await transfer(thread, inputs);
+      if (transferred === undefined || transferred.status === "refused")
+        return this.#failed(
+          command.operationId,
+          "unavailable",
+          transferred?.message ?? "A file attached to this turn is unavailable.",
+          "refused",
+        );
+      context.push({ kind: "user-message", text: attachedFilesMessage(transferred.files) });
+    } else if (filesByPath.length > 0) {
       const named = await this.#attachedFilePaths(command.threadId, filesByPath);
       if (named === undefined) {
         return this.#failed(
@@ -6910,6 +6978,18 @@ export class CodeOperationService {
     });
   }
 
+  /**
+   * The thread's resolved Strict value for a launch on Windows, which has no
+   * Octant sandbox: a terminal, test or scaffold runs there unconfined outside
+   * Strict and refuses under it. Elsewhere the launch keeps the confinement it
+   * has at every setting, so nothing is passed.
+   */
+  #windowsStrict(thread: CodeThread): { readonly strict?: boolean } {
+    return process.platform === "win32"
+      ? { strict: this.#options.threadStrict?.(thread) ?? true }
+      : {};
+  }
+
   #failed(
     operationId: CodeOperationCommand["operationId"],
     category:
@@ -7207,7 +7287,9 @@ function evidenceReferences(event: CodeOperationEvent): readonly CodeEvidenceRef
     case "diff":
       return [event.content];
     case "context-handoff-attached":
-      return event.reason === "fork-native-session" || event.reason === "rewind-native-session"
+      return event.reason === "fork-native-session" ||
+        event.reason === "rewind-native-session" ||
+        event.reason === "account-move-native-session"
         ? []
         : [event.content];
     case "fork-context-merged":

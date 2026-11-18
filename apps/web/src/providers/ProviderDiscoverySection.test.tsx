@@ -5,7 +5,7 @@ import { ProviderDiscoverySection } from "./ProviderDiscoverySection";
 
 const codexCandidate: DiscoveryCandidate = {
   driverKind: "codex",
-  displayName: "Codex CLI",
+  displayName: "Codex",
   binaryPath: "/usr/local/bin/codex",
   version: "codex-cli 0.1.0",
   readiness: "ready",
@@ -54,7 +54,7 @@ const defaultProps = {
 describe("ProviderDiscoverySection", () => {
   it("renders detected candidates", () => {
     render(<ProviderDiscoverySection {...defaultProps} />);
-    expect(screen.getByText("Codex CLI")).toBeDefined();
+    expect(screen.getByText("Codex")).toBeDefined();
     expect(screen.getByText("Claude Code")).toBeDefined();
     expect(screen.getByText("codex-cli 0.1.0")).toBeDefined();
   });
@@ -94,7 +94,7 @@ describe("ProviderDiscoverySection", () => {
     } as unknown as ProviderInstance;
     render(<ProviderDiscoverySection {...defaultProps} instances={[configuredInstance]} />);
     // Codex is configured, so only Claude should show
-    expect(screen.queryByText("Codex CLI")).toBeNull();
+    expect(screen.queryByText("Codex")).toBeNull();
     expect(screen.getByText("Claude Code")).toBeDefined();
   });
 
@@ -107,7 +107,7 @@ describe("ProviderDiscoverySection", () => {
     } as unknown as ProviderInstance;
     render(<ProviderDiscoverySection {...defaultProps} instances={[configuredDisabledInstance]} />);
 
-    expect(screen.queryByText("Codex CLI")).toBeNull();
+    expect(screen.queryByText("Codex")).toBeNull();
     expect(screen.getByText("Claude Code")).toBeDefined();
   });
 

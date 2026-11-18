@@ -26,7 +26,7 @@ export function refusalText(reason: CodeDebugRefusalReason): string {
     case "no-debug-adapter":
       return "No debug adapter for this configuration is installed and switched on for Code. Add one in Settings › Skills & Extensions.";
     case "unsupported-platform":
-      return "This host cannot debug this program. Debugging runs on macOS and Linux, and native programs are not debugged on macOS yet.";
+      return "This host cannot debug this program. Debugging runs on macOS and Linux, and on Windows outside Strict; native programs are not debugged on macOS yet.";
     case "mode-prohibited":
       return "Debugging is available in Code threads only.";
     case "plan-read-only":

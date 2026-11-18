@@ -5,7 +5,14 @@ import type {
   CanvasPlanView,
   CanvasStatusTone,
 } from "@octant/contracts/canvas";
-import { Circle, CircleCheck, CircleDot, CircleSlash, Play, type LucideIcon } from "lucide-react";
+import {
+  Circle,
+  CircleCheck,
+  CircleDot,
+  CircleSlash,
+  Play,
+  type IconComponent,
+} from "../../ui/icons";
 import { useEffect, useState } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantMenu } from "../../ui/base/OctantMenu";
@@ -22,7 +29,7 @@ const STATUS_LABEL: Record<CanvasPlanTaskStatus, string> = {
   done: "Done",
 };
 
-const STATUS_ICON: Record<CanvasPlanTaskStatus, LucideIcon> = {
+const STATUS_ICON: Record<CanvasPlanTaskStatus, IconComponent> = {
   todo: Circle,
   doing: CircleDot,
   blocked: CircleSlash,

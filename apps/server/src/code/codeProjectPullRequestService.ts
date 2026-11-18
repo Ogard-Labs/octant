@@ -1219,6 +1219,10 @@ export class CodeProjectPullRequestService {
             })),
           }),
       ...(row.crossRepository ? { crossRepository: true } : {}),
+      ...(row.additions === undefined ? {} : { additions: row.additions }),
+      ...(row.deletions === undefined ? {} : { deletions: row.deletions }),
+      ...(row.checkCounts === undefined ? {} : { checkCounts: row.checkCounts }),
+      ...(row.merging === undefined ? {} : { merging: row.merging }),
       linkedThreads: matchLinkedThreadsToPullRequest({
         pullRequest: {
           repository: { owner: project.repositoryOwner, name: project.repositoryName },
@@ -1301,6 +1305,10 @@ export class CodeProjectPullRequestService {
       updatedAt: pullRequest.updatedAt ?? knownObservedAt,
       checks: summarizeObservedChecks(observed.checks),
       review: summarizeObservedReviews(observed.reviews),
+      ...(pullRequest.additions === undefined ? {} : { additions: pullRequest.additions }),
+      ...(pullRequest.deletions === undefined ? {} : { deletions: pullRequest.deletions }),
+      ...(pullRequest.checkCounts === undefined ? {} : { checkCounts: pullRequest.checkCounts }),
+      ...(pullRequest.merging === undefined ? {} : { merging: pullRequest.merging }),
       linkedThreads: matchLinkedThreadsToPullRequest({
         pullRequest: {
           projectId: String(project.projectId),

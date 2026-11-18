@@ -6,6 +6,60 @@ import {
 } from "./terminalService";
 
 describe("TerminalService", () => {
+  it("refuses to replace an exited terminal until its protection cleanup succeeds", async () => {
+    const process = fakeProcess();
+    const port = { start: vi.fn(() => process) };
+    const cleanup = vi.fn<() => Promise<void>>().mockRejectedValue(new Error("Cleanup uncertain"));
+    const service = new TerminalService({
+      port,
+      inheritedEnvironment: {},
+      credentials: { resolve: async () => "unused" },
+    });
+    const request = {
+      terminalId: "protected-terminal",
+      shell: "/bin/sh",
+      cwd: "/repo",
+      stateScope: "project:test",
+      columns: 80,
+      rows: 24,
+      credentialReferences: [],
+      onClosed: cleanup,
+    } as const;
+    await service.launch(request);
+    process.emitExit({ exitCode: 0 });
+    await vi.waitFor(() => expect(cleanup).toHaveBeenCalledOnce());
+    await expect(service.launch(request)).rejects.toThrow("Cleanup uncertain");
+    expect(port.start).toHaveBeenCalledOnce();
+    cleanup.mockResolvedValue(undefined);
+    await expect(service.launch(request)).resolves.toMatchObject({ status: "running" });
+    expect(port.start).toHaveBeenCalledTimes(2);
+  });
+  it("retains failed protection cleanup after shell exit and retries it when the terminal is closed", async () => {
+    const process = fakeProcess();
+    const cleanup = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("Cleanup uncertain"))
+      .mockResolvedValue(undefined);
+    const service = new TerminalService({
+      port: { start: () => process },
+      inheritedEnvironment: {},
+      credentials: { resolve: async () => "unused" },
+    });
+    await service.launch({
+      terminalId: "protected-terminal",
+      shell: "/bin/sh",
+      cwd: "/repo",
+      stateScope: "project:test",
+      columns: 80,
+      rows: 24,
+      credentialReferences: [],
+      onClosed: cleanup,
+    });
+    process.emitExit({ exitCode: 0 });
+    await vi.waitFor(() => expect(cleanup).toHaveBeenCalledOnce());
+    expect((await service.terminate("protected-terminal")).status).toBe("exited");
+    expect(cleanup).toHaveBeenCalledTimes(2);
+  });
   it("refuses a command when its authority is revoked during credential resolution", async () => {
     const process = fakeProcess();
     const port = { start: vi.fn(() => process) };

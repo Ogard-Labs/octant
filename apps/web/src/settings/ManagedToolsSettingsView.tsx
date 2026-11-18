@@ -105,7 +105,7 @@ export function ManagedToolsSettingsView(props: { readonly bridge?: ManagedTools
     >
       <SettingsSection
         title="Bundled tools"
-        description="Octant ships its own verified copy of each tool and can replace it when upstream publishes a newer release."
+        description="Octant ships a verified copy of each tool and can replace it when a newer release is out."
       >
         <div className="setgroup">
           {tools.length === 0 ? (
@@ -136,7 +136,7 @@ export function ManagedToolsSettingsView(props: { readonly bridge?: ManagedTools
       </SettingsSection>
       <SettingsSection
         title="Updates"
-        description="Which tool builds Octant runs, and when it looks for newer ones."
+        description="Which tool versions Octant runs, and when it checks for updates."
       >
         <div className="setgroup">
           <SettingRow

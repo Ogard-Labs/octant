@@ -1,0 +1,7 @@
+{$SHARE_DOMAIN} {
+	reverse_proxy share:4100
+}
+
+{$CONTENT_DOMAIN} {
+	reverse_proxy share:4101
+}

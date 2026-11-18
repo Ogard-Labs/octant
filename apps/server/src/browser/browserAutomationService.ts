@@ -13,6 +13,7 @@ import {
   type OwnerBrowserTarget,
 } from "@octant/contracts/owner-browser";
 import type { EventActor, HubMemberId, UtcTimestamp } from "@octant/contracts";
+import { isBrowserFaviconDataUrl } from "@octant/contracts/browser-automation";
 import type { PersistentBrowserLeaseBinding } from "@octant/contracts/persistent-browser-owner";
 import type { OwnerBrowserHost } from "./ownerBrowserControl";
 import type {
@@ -584,17 +585,16 @@ export class BrowserAutomationService {
     /** True when this Open needs a context of its own. See `OwnedContext`. */
     readonly dedicated?: boolean | undefined;
     /**
+     * True when this Open is the thread's shared context if there is none, and
+     * a context of its own if there is one. See the create command.
+     */
+    readonly ownPageWhenShared?: boolean | undefined;
+    /**
      * Who is behind the request, for a page in a stored profile. A paired device
      * and a terminal grant name themselves; anything else is the person at a
      * local window unless the scope is the host acting alone.
      */
     readonly profileCaller?: Extract<BrowserProfileCaller, "remote-device" | "terminal-grant">;
-    /**
-     * Set only by the agent tool for a thread at Full access, whose Private
-     * page needs no site approval. No route sets it, so a window or a paired
-     * device cannot open a page that admits every site.
-     */
-    readonly fullAccessAgent?: true;
   }): Promise<BrowserAutomationSnapshot> {
     if (!this.#flowRunAllows(input.threadId, input.flowRun))
       return failedSnapshot(
@@ -605,7 +605,6 @@ export class BrowserAutomationService {
         },
         "failed",
       );
-    const dedicated = input.dedicated === true;
     const current = this.#current(input.windowId, input.threadId);
     if (
       !this.#authority.canAccessWindow(input.windowId, input.threadId, input.action.authority.mode)
@@ -617,12 +616,7 @@ export class BrowserAutomationService {
         "failed",
       );
     }
-    const denied = this.#authorizeCreate(
-      input.action,
-      input.policy,
-      input.threadId,
-      input.fullAccessAgent === true,
-    );
+    const denied = this.#authorizeCreate(input.action, input.policy, input.threadId);
     if (denied !== undefined) {
       if (current !== undefined && !this.#authorityIsActive(current)) {
         this.#revokeAuthority(current);
@@ -637,27 +631,36 @@ export class BrowserAutomationService {
         { category: "stale", message: "Browser flow custody changed before opening the page." },
         "failed",
       );
+    // An Open that takes a page of its own only when the shared one is live is
+    // judged here, against the thread as it stands now: nothing below awaits
+    // before the new context is registered, so of two such Opens that arrive
+    // together exactly one becomes the shared page. Read earlier, both saw no
+    // shared page and the second was handed the first's.
+    const shared =
+      input.ownPageWhenShared === true ? this.#current(input.windowId, input.threadId) : current;
+    const dedicated =
+      input.dedicated === true || (input.ownPageWhenShared === true && shared !== undefined);
     // A dedicated Open never reconciles against the thread's shared context: it
     // must neither inherit that context's origin nor stop it to take the slot.
-    if (!dedicated && current !== undefined) {
-      if (!this.#authorityIsActive(current)) {
-        this.#revokeAuthority(current);
+    if (!dedicated && shared !== undefined) {
+      if (!this.#authorityIsActive(shared)) {
+        this.#revokeAuthority(shared);
         return failedSnapshot(
           input.threadId,
           { category: "unauthorized", message: "Browser context authority is no longer active." },
           "failed",
         );
       }
-      if (current.record.state === "creating") await current.creation;
-      if (!this.#authorityIsActive(current)) {
-        this.#revokeAuthority(current);
+      if (shared.record.state === "creating") await shared.creation;
+      if (!this.#authorityIsActive(shared)) {
+        this.#revokeAuthority(shared);
         return failedSnapshot(
           input.threadId,
           { category: "unauthorized", message: "Browser context authority is no longer active." },
           "failed",
         );
       }
-      return snapshot(current);
+      return snapshot(shared);
     }
     if (!dedicated) this.#forgetExpiry(input.windowId, input.threadId);
     const contextId = this.#uuid() as BrowserContextId;
@@ -738,12 +741,7 @@ export class BrowserAutomationService {
           };
           return;
         }
-        const refreshedDenial = this.#authorizeCreate(
-          input.action,
-          input.policy,
-          input.threadId,
-          input.fullAccessAgent === true,
-        );
+        const refreshedDenial = this.#authorizeCreate(input.action, input.policy, input.threadId);
         if (refreshedDenial !== undefined) {
           owned.status = "failed";
           owned.failure = refreshedDenial;
@@ -1230,6 +1228,20 @@ export class BrowserAutomationService {
     readonly holdDownloads?: boolean;
     /** Set by the agent tool for a turn at Full access; no route can name it. */
     readonly fullAccess?: true;
+    /**
+     * Set only by the Work and Code agent tools, for their own calls: this call
+     * takes back a page the person took over. A replayed flow step, a terminal
+     * grant and a route never set it, so their calls keep waiting for Hand back.
+     */
+    readonly takesBack?: true;
+    /**
+     * Set only by the action route, for a window of this computer: the person
+     * typed the address. A `navigate` so marked is their browsing, as a link
+     * they click on the page is, and the desktop Browser follows its redirects
+     * to a site only their view shows. It approves no origin: the agent reads
+     * and acts only inside the context's approved origins, as before.
+     */
+    readonly startedBy?: "person";
   }): Promise<BrowserAutomationSnapshot> {
     const owned = this.#contexts.get(input.request.contextId);
     const foreign =
@@ -1374,9 +1386,17 @@ export class BrowserAutomationService {
       readonly refuseStaleRevision?: boolean;
       readonly holdDownloads?: boolean;
       readonly fullAccess?: true;
+      readonly takesBack?: true;
+      readonly startedBy?: "person";
     },
   ): Promise<BrowserAutomationSnapshot> {
     const activityBy = input.activityBy ?? input.capturedBy;
+    // Never an agent's call or a flow's, whatever else the caller passed.
+    const personNavigation =
+      input.startedBy === "person" &&
+      input.request.kind === "navigate" &&
+      activityBy !== "agent" &&
+      input.flowRun === undefined;
     if (owned.abort.signal.aborted || owned.record.state !== "active") {
       return this.#failure(
         owned,
@@ -1386,7 +1406,17 @@ export class BrowserAutomationService {
     }
     // The tool checked the hold before it queued this call, but the person may
     // have taken the page while it waited behind another action. Checked again
-    // here, after dequeuing, so a queued agent call never runs under a hold.
+    // here, after dequeuing: the agent tool's own call takes back a page the
+    // person took over, and any other hold, or another caller, is refused.
+    // A reviewed flow run holds the page under its own custody and waits for
+    // the person, whoever's port carried its step.
+    if (
+      input.takesBack === true &&
+      input.flowRun === undefined &&
+      owned.waitingForPerson === "take-over"
+    ) {
+      this.#takeBack(owned);
+    }
     if (activityBy === "agent" && owned.waitingForPerson !== undefined) {
       return this.#failure(
         owned,
@@ -1614,6 +1644,7 @@ export class BrowserAutomationService {
             (input.fullAccess === true || this.#agentDownloadsEnabled())
               ? { downloads: "hold" as const, downloadLimits: this.#transferLimits() }
               : {}),
+            ...(personNavigation ? { startedBy: "person" as const } : {}),
           },
           owned.abort.signal,
         ),
@@ -1710,15 +1741,21 @@ export class BrowserAutomationService {
           );
         }
       }
-      const change = describeChange(
-        input.request.kind,
-        {
-          url: owned.observation?.url,
-          title: owned.observation?.title,
-          contentHash: owned.contentHash,
-        },
-        observed,
-      );
+      // The desktop Browser answers the person's own navigation with nothing
+      // of a page that ended outside the approved origins. Compared as a
+      // page, that reads as a blank one holding a credential field.
+      const change =
+        personNavigation && observed.url === undefined
+          ? "The person took this page to a site outside its approved origins. Nothing of that page was read."
+          : describeChange(
+              input.request.kind,
+              {
+                url: owned.observation?.url,
+                title: owned.observation?.title,
+                contentHash: owned.contentHash,
+              },
+              observed,
+            );
       const observation: BrowserObservation = {
         contextId: owned.record.contextId,
         actionId: owned.record.actionId,
@@ -2893,15 +2930,19 @@ export class BrowserAutomationService {
     threadId: BrowserThreadId,
     contextId: BrowserContextId,
     signal?: AbortSignal,
+    options: { readonly freshPicture?: boolean } = {},
   ): Promise<BrowserAutomationSnapshot> {
     const owned = this.#contexts.get(contextId);
     if (
       owned !== undefined &&
       owned.windowId === windowId &&
       String(owned.threadId) === String(threadId) &&
-      // A native page is on the person's screen already; only a headless one
-      // is seen as a picture.
-      owned.record.presentation !== "native-live" &&
+      // A native page is on screen while its pane shows it, and that pane's
+      // poll spends no capture. Minimised, its surface is detached and the
+      // dock's card is the only place it is seen, so the card asks for one.
+      (owned.record.presentation === "native-live"
+        ? options.freshPicture === true
+        : options.freshPicture !== false) &&
       this.#authorityIsActive(owned)
     ) {
       await this.#refreshPicture(owned, signal);
@@ -2970,6 +3011,10 @@ export class BrowserAutomationService {
           ...(observed.screenshotDataUrl === undefined
             ? {}
             : { screenshotDataUrl: observed.screenshotDataUrl }),
+          ...(observed.faviconDataUrl === undefined ||
+          !isBrowserFaviconDataUrl(observed.faviconDataUrl)
+            ? {}
+            : { faviconDataUrl: observed.faviconDataUrl }),
           ...(observed.viewport === undefined ? {} : { viewport: observed.viewport }),
           revision: samePage ? owned.observationRevision : ++owned.observationRevision,
           observedAt: this.#clock() as BrowserObservation["observedAt"],
@@ -3061,7 +3106,6 @@ export class BrowserAutomationService {
     request: ToolActionRequest,
     policy: BrowserContextPolicy,
     threadId: BrowserThreadId,
-    fullAccessAgent: boolean,
   ): BrowserAutomationFailure | undefined {
     if (this.#executionOwner !== undefined && !this.#executionOwner.isCurrent())
       return { category: "unauthorized", message: "Browser execution owner is no longer current." };
@@ -3077,14 +3121,13 @@ export class BrowserAutomationService {
     if (decision.kind === "deny" || decision.kind === "prompt") {
       return mapToolCallDenial(decision.reason, request);
     }
-    // Every site is the reach of one page only: the Private page the agent
-    // opens at Full access. A stored profile keeps its site approval per
-    // origin at every level, so it never carries the any-site entry.
+    // A Private page admits every site at every level (maintainer decision,
+    // 2026-11-17; before, only the agent's page at Full access did). A stored
+    // profile keeps its site approval per origin, so it never carries the
+    // any-site entry, and the entry stands alone.
     if (
       policy.allowedOrigins.includes(ANY_BROWSER_ORIGIN) &&
-      (!fullAccessAgent ||
-        policy.allowedOrigins.length !== 1 ||
-        storedBrowserProfile(policy.profile) !== undefined)
+      (policy.allowedOrigins.length !== 1 || storedBrowserProfile(policy.profile) !== undefined)
     ) {
       return { category: "policy-denied", message: "Browser context policy exceeds host limits." };
     }
@@ -3288,6 +3331,41 @@ export class BrowserAutomationService {
     // person's to change.
     this.#notePersonInput(owned);
     return snapshot(owned);
+  }
+
+  /**
+   * The agent takes the page back from the person's Take over and carries on
+   * (maintainer decision, 2026-11-17; before, its calls waited until the
+   * person handed the page back). It ends the hold as Hand back does, and the
+   * person can take the page over again at any time. A sign-in ask and a page
+   * a paired owner device controls are not taken back: the first is the
+   * agent's own request, the second the person's from another computer.
+   */
+  takeBack(windowId: WindowId, threadId: BrowserThreadId): BrowserAutomationSnapshot {
+    const owned = this.#current(windowId, threadId);
+    if (owned === undefined || owned.record.state !== "active") {
+      return failedSnapshot(
+        threadId,
+        { category: "unavailable", message: "There is no page to take back." },
+        "failed",
+      );
+    }
+    this.#takeBack(owned);
+    return snapshot(owned);
+  }
+
+  #takeBack(owned: OwnedContext): void {
+    if (
+      owned.waitingForPerson !== "take-over" ||
+      owned.releaseTakeOver === undefined ||
+      owned.credentialFill !== undefined ||
+      this.#ownerControllers.has(owned.record.contextId)
+    )
+      return;
+    owned.releaseTakeOver();
+    // What the person did while they held the page is still theirs to have
+    // done: the agent's next reading is a fresh one, as after Hand back.
+    owned.handedBack = true;
   }
 
   /** Hand the page back: the agent's next call gets a fresh reading. Same rules as `takeOver`. */

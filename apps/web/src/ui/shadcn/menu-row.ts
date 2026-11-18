@@ -10,14 +10,21 @@
  * it never shrinks under the height.
  *
  * An icon that is a direct child takes the 16px column whatever size the call
- * site drew it at; a feature stylesheet that sets a row's own font size, gap or
- * padding is repainting the recipe.
+ * site drew it at, and so does one inside `menuIconColumn` (an adapter's item),
+ * so every menu draws one glyph size; a feature stylesheet that sets a row's own
+ * font size, gap or padding is repainting the recipe.
+ *
+ * A destructive row (`data-destructive`, set by the item's `destructive` prop)
+ * draws its label and icon in the danger ink at rest and when highlighted; its
+ * hover fill is the one every row has, never a red fill (maintainer request,
+ * 2026-11-16).
  */
 export const menuRow =
-  "relative flex min-h-(--oct-menu-row-h) has-[.oct-menu-detail]:min-h-(--oct-menu-row-two-h) cursor-default items-center gap-(--oct-menu-row-gap) rounded-md px-(--oct-menu-row-inset) py-1 oct-menu-option outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-(--oct-disabled-opacity) data-highlighted:bg-accent data-highlighted:text-accent-foreground [&>svg]:shrink-0 [&>svg:not([class*='size-'])]:size-(--oct-icon-md)";
+  "relative flex min-h-(--oct-menu-row-h) has-[.oct-menu-detail]:min-h-(--oct-menu-row-two-h) cursor-default items-center gap-(--oct-menu-row-gap) rounded-md px-(--oct-menu-row-inset) py-1 oct-menu-option outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-(--oct-disabled-opacity) data-highlighted:bg-accent data-highlighted:text-accent-foreground active:bg-(--octant-float-pressed) [&>svg]:shrink-0 [&>svg:not([class*='size-'])]:size-(--oct-icon-md) data-destructive:text-destructive data-destructive:data-highlighted:text-destructive data-destructive:[&_svg]:text-destructive";
 
 /** The 16px box an icon stands in, so labels without one can reserve it. */
-export const menuIconColumn = "flex size-(--oct-icon-md) shrink-0 items-center justify-center";
+export const menuIconColumn =
+  "flex size-(--oct-icon-md) shrink-0 items-center justify-center [&_svg]:size-(--oct-icon-md)";
 
 /** A group's heading is the navigation group label, on the rows' inset so its words line up with theirs, and 24px tall so the heading is a whole pixel at any type size. */
 export const menuGroupLabel =

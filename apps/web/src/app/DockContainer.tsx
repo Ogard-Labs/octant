@@ -1,8 +1,10 @@
 import { coordinatorWorkersOf } from "../agents/coordinatorWorkers";
+import { confirmFilesClose } from "../code/filesCloseGuard";
 import { requestThreadControl } from "../composer/threadControlNavigation";
 import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { ChatThreadId } from "@octant/contracts/chat";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
+import { useBrowserThreadSnapshot } from "../threadActivity/useBrowserThreadSnapshot";
 import {
   decodeCodeThreadId,
   type CodeCheckoutId,
@@ -16,7 +18,7 @@ import type { ProjectId } from "@octant/contracts/projects";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import type { buildModelPickerGroups } from "@octant/domain";
 import type { SideChatSidecar } from "@octant/contracts";
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo } from "react";
 import { useMinuteTick } from "../polling/useMinuteTick";
 import type { AgentRunViewRequest } from "../agents/AgentRunHierarchy";
 import type { createChatReadCursorStore } from "../chat/useChatController";
@@ -29,6 +31,13 @@ import { modelDisplayName } from "../providers/providerModelLabel";
 import type { ProviderController } from "../providers/useProviderController";
 import { BottomUtilityPanel } from "../shell/BottomUtilityPanel";
 import { DockBrowserCard } from "../shell/DockBrowserCard";
+import {
+  browserTabName,
+  browserTabPageOf,
+  forgetClosedBrowserTabs,
+  useBrowserTabPages,
+} from "../browser/browserTabPages";
+import { PageFavicon } from "../shell/PageFavicon";
 import { dockShelfEntries, type DockShelfEntry } from "../shell/DockShelf";
 import type { DockCardControls } from "../shell/RightUtilityDockSurface";
 import { DockTerminalCard } from "../shell/DockTerminalCard";
@@ -80,9 +89,11 @@ export interface DockContainerProps {
     | "hideDockTile"
     | "minimiseDockTool"
     | "restoreDockTool"
+    | "previewDockCardPage"
     | "runDockToolMenu"
     | "toggleDockTool"
     | "moveDockTile"
+    | "placeDockTile"
     | "openDockTabBeside"
     | "loadCodeBoard"
     | "mergeProjectPullRequest"
@@ -152,6 +163,8 @@ export interface DockContainerProps {
   readonly codeThreadView?: CodeThreadView;
   readonly contextSnapshot?: ContextInspectorSnapshot;
   readonly displayedDockState: ThreadUtilityDockState;
+  /** The thread's stored tabs, dock and bottom panel; absent until its state has loaded. */
+  readonly storedDockTabs?: ReadonlyArray<{ readonly id: string; readonly surface: string }>;
   readonly dockPresentationWidth: number;
   readonly dockPresentedOpen: boolean;
   /** The pull requests the thread is about, listed in More tools. */
@@ -179,6 +192,8 @@ export interface DockContainerProps {
   readonly dockToolsAwaitingThread?: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly hostBridge?: OctantHostBridge;
   readonly isNarrow: boolean;
+  /** What the panes of a split keep between them beside the dock. */
+  readonly splitPrimaryMinimum?: number | undefined;
   readonly navigation: ShellNavigationModel;
   readonly overviewThread?: DockOverviewThread;
   readonly projectNames: ReadonlyMap<string, string>;
@@ -211,6 +226,8 @@ export interface DockContainerProps {
  * so a streaming turn re-renders them only while a tool that shows the turn
  * is open.
  */
+const NO_THREAD = "00000000-0000-4000-8000-000000000000";
+
 export const DockContainer = memo(function DockContainer(props: DockContainerProps) {
   const {
     actions,
@@ -249,6 +266,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     dockThreadOnThisComputer,
     dockToolsAwaitingThread,
     isNarrow,
+    splitPrimaryMinimum,
     navigation,
     overviewThread,
     projectNames,
@@ -587,6 +605,50 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     [activeMode, agentBrowserLive, displayedDockState],
   );
 
+  // The pages' icons for the tab row, read from what the host already holds
+  // (no new picture, so next to free). A page the read does not list keeps the globe.
+  const browserTabCount = displayedDockState.tabs.filter((tab) => tab.surface === "browser").length;
+  const pageIconSnapshot = useBrowserThreadSnapshot({
+    client: browserAutomationClient,
+    enabled:
+      browserAutomationClient !== undefined && dockThread !== undefined && browserTabCount > 0,
+    liveOnly: false,
+    picture: false,
+    threadId: decodeBrowserThreadId(dockThread?.threadId ?? NO_THREAD),
+  });
+  const pageObservation = (tabId: string) => {
+    const contextId = displayedDockState.tabs.find((tab) => tab.id === tabId)?.browserContextId;
+    if (contextId === undefined) return pageIconSnapshot?.observation;
+    const listed = pageIconSnapshot?.contexts?.find(
+      (entry) => String(entry.context.contextId) === contextId,
+    )?.observation;
+    if (listed !== undefined) return listed;
+    // A page opened from a new Browser tab is the thread's current context,
+    // which the list of the thread's other contexts does not repeat: the tab
+    // kept the name "New tab" over the page it was showing.
+    return pageIconSnapshot?.context !== undefined &&
+      String(pageIconSnapshot.context.contextId) === contextId
+      ? pageIconSnapshot.observation
+      : undefined;
+  };
+  const pageIcon = (tabId: string): string | undefined => pageObservation(tabId)?.faviconDataUrl;
+  // The tab's name is what the page shows: the pane's live title, else its
+  // host; the server's last read only for a tab whose pane has not reported.
+  const livePages = useBrowserTabPages();
+  const pageThreadId = dockThread?.threadId;
+  // Pruned against the stored tabs: the displayed list leaves out tabs the
+  // bottom panel holds, and a mounted pane would not republish a forgotten name.
+  const storedDockTabs = props.storedDockTabs;
+  useEffect(() => {
+    if (pageThreadId === undefined) return;
+    forgetClosedBrowserTabs(pageThreadId, storedDockTabs);
+  }, [pageThreadId, storedDockTabs]);
+  const pageTitle = (tabId: string): string =>
+    browserTabName(
+      pageThreadId === undefined ? undefined : browserTabPageOf(livePages, pageThreadId, tabId),
+      pageObservation(tabId),
+    );
+
   /** The Browser context of the page a card stands for, when that page has one of its own. */
   function contextOf(entry: DockShelfEntry): string | undefined {
     return displayedDockState.tabs.find((tab) => tab.id === entry.tabId)?.browserContextId;
@@ -657,6 +719,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
             : threadUtility("delivery")
         }
         isNarrow={isNarrow}
+        primaryMinimum={splitPrimaryMinimum}
         files={
           bottomPanelOpen && activeBottomSurface?.id === "files"
             ? undefined
@@ -695,6 +758,13 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
           if (closed?.surface === "browser" && dockThread !== undefined) {
             dismissLiveBrowserCard(dockThread.threadId);
           }
+          if (closed?.surface === "files") {
+            // A Files tool with unsaved edits asks per file before it goes.
+            void confirmFilesClose().then((proceed) => {
+              if (proceed) actions.closeDockTab(tabId);
+            });
+            return;
+          }
           actions.closeDockTab(tabId);
         }}
         onCommitWidth={(width) => {
@@ -730,9 +800,23 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
                     <DockBrowserCard
                       client={browserAutomationClient}
                       {...(contextId === undefined ? {} : { contextId })}
+                      {...(hostBridge === undefined ? {} : { hostBridge })}
                       key={`browser:${dockThread.threadId}:${contextId ?? ""}`}
+                      onClose={controls.onClose}
                       onExpand={controls.onShow}
-                      onHide={controls.onHide}
+                      pageName={pageTitle(entry.tabId)}
+                      pages={{
+                        label: "Browser pages",
+                        items: displayedDockState.tabs
+                          .filter((tab) => tab.surface === "browser")
+                          .map((tab) => ({
+                            id: tab.id,
+                            label: pageTitle(tab.id),
+                            icon: <PageFavicon src={pageIcon(tab.id)} />,
+                            current: tab.id === entry.tabId,
+                          })),
+                        onChoose: actions.previewDockCardPage,
+                      }}
                       threadId={decodeBrowserThreadId(dockThread.threadId)}
                     />
                   ) : dockThread.mode === "code" ? (
@@ -742,6 +826,21 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
                       key={`terminal:${dockThread.threadId}:${String(dockThread.checkoutId)}`}
                       onExpand={controls.onShow}
                       onHide={controls.onHide}
+                      sessions={{
+                        label: "Terminal sessions",
+                        items: displayedDockState.tabs
+                          .filter((tab) => tab.surface === "terminal")
+                          .map((tab, index) => ({
+                            id: tab.id,
+                            label:
+                              dockTabs.find((candidate) => candidate.id === tab.id)?.label ??
+                              "Terminal",
+                            current: index === 0,
+                          })),
+                        // The card follows the thread's first shell; another
+                        // session is shown in its pane, not in the card.
+                        onChoose: actions.selectDockTab,
+                      }}
                       threadId={decodeCodeThreadId(dockThread.threadId)}
                     />
                   ) : null;
@@ -795,6 +894,8 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
             ? undefined
             : threadUtility("tests")
         }
+        pageIcon={pageIcon}
+        pageTitle={pageTitle}
         tabs={dockTabs}
         tiles={{
           ...(displayedDockState.layout === undefined ? {} : { layout: displayedDockState.layout }),
@@ -803,11 +904,14 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
           onHideTile: actions.hideDockTile,
           onMinimise: actions.minimiseDockTool,
           onMove: actions.moveDockTile,
+          onPlace: actions.placeDockTile,
           onResizeColumn: actions.resizeDockTileColumn,
           onResizeColumns: actions.resizeDockTileColumns,
           onShowAlone: actions.showDockTabAlone,
           onShowBelow: actions.showDockTabBelow,
           onShowBeside: actions.showDockTabBeside,
+          bottomSurfaces: bottomPanelSurfaces.map((surface) => surface.id),
+          onMoveToBottom: actions.openBottomTool,
           resolveSurface: dockResolveSurface,
         }}
         width={dockPresentationWidth}

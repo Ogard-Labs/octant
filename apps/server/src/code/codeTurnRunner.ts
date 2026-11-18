@@ -1,3 +1,4 @@
+import { beginSandboxTurn } from "../process/sandboxRuntimePolicy";
 import type { Questionnaire } from "@octant/contracts";
 import type { StalledTurnScope } from "../providers/turnBudget";
 import { isAbsolute } from "node:path";
@@ -158,6 +159,7 @@ export type CodeTurnEventCategory =
 
 export interface CodeTurnEvent {
   readonly category: CodeTurnEventCategory;
+  readonly requiresUser?: boolean;
   /** An approval that asks to change the thread's level rather than to run a tool. */
   readonly levelChange?: {
     readonly kind: "enter-plan" | "exit-plan";
@@ -170,6 +172,8 @@ export interface CodeTurnEvent {
   readonly sequence: number;
   readonly occurredAt: ProviderRuntimeEvent["occurredAt"];
   readonly text?: string;
+  /** The provider's wording while a task runs; only on `task-progress`. */
+  readonly runningText?: string;
   readonly requestId?: string;
   /** The labels a provider question offers; absent on every other category. */
   readonly options?: ReadonlyArray<string>;
@@ -473,6 +477,22 @@ export class CodeTurnRunner {
       ) {
         return yield* fail("failed", FULL_ACCESS_SANDBOX_UNSUPPORTED);
       }
+      const sandboxAdmission = beginSandboxTurn({
+        threadId: String(input.thread.id),
+        projectId: String(input.thread.projectId),
+        mode: "code",
+        root: input.checkoutRoot,
+        provider: input.providerDriverKind ?? "unknown",
+      });
+      if (sandboxAdmission.status === "refused")
+        return yield* fail("failed", sandboxAdmission.message);
+      const sandboxTurn = sandboxAdmission.turn;
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(async () => {
+          await sandboxTurn.end();
+        }),
+      );
+      const sandboxPolicy = sandboxTurn.selection;
       const outsideContentMarks = input.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS;
       // An earlier turn's read that could not be marked is still in the
       // session this turn would resume.
@@ -483,6 +503,7 @@ export class CodeTurnRunner {
       const connection = yield* input.provider
         .acquire({
           instanceId: input.thread.providerInstanceId,
+          ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }),
           mode: "code",
           projectRoot: input.providerRoot ?? input.checkoutRoot,
           ...(input.extraFolders === undefined || input.extraFolders.length === 0
@@ -518,9 +539,14 @@ export class CodeTurnRunner {
           ? {}
           : { modelOptionValues: input.thread.modelOptionValues }),
         executionPolicy: input.thread.executionPolicy,
+        ...(sandboxTurn.strict !== undefined
+          ? { strict: sandboxTurn.legacy === true ? false : sandboxTurn.strict }
+          : {}),
         ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),
-        ...(input.thread.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
-        ...(input.strict === false ? { strict: false } : {}),
+        ...((sandboxTurn.strict ?? input.thread.fullAccessSandbox) === true ||
+        sandboxPolicy !== undefined
+          ? { fullAccessSandbox: true }
+          : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         ...(input.wakeups === undefined ? {} : { wakeups: input.wakeups }),
         // The host answers the runtime's own asks to plan or to leave Plan.
@@ -747,7 +773,11 @@ export class CodeTurnRunner {
                       return yield* fail("failed", "Provider event sanitization failed closed.");
                     }
                     if (!answeredToolRequests.answer(sanitizedEvent.requestId)) return;
-                    const toolSet = recordedToolSet(input.toolEffects, input.appManagedTools);
+                    const toolSet = recordedToolSet(
+                      input.toolEffects,
+                      input.appManagedTools,
+                      String(input.thread.id),
+                    );
                     const allowed = toolSet?.definitions.some(
                       (definition) => definition.name === sanitizedEvent.toolName,
                     );
@@ -876,7 +906,16 @@ export class CodeTurnRunner {
             .send({
               sessionId: input.sessionId,
               prompt: input.prompt,
-              ...(input.context === undefined ? {} : { context: input.context }),
+              ...(input.context === undefined && sandboxTurn.summary === ""
+                ? {}
+                : {
+                    context: [
+                      ...(sandboxTurn.summary === ""
+                        ? []
+                        : [{ kind: "instructions" as const, text: sandboxTurn.summary }]),
+                      ...(input.context ?? []),
+                    ],
+                  }),
               attachments: input.attachments ?? [],
               tools: [...(input.appManagedTools?.definitions ?? [])],
               ...providerWebSearchAtSend(input.appManagedTools, input.sessionId),
@@ -1094,6 +1133,7 @@ function normalizeProviderEvent(
         requestId: text(event.taskId),
         status: event.status,
         text: text(event.summary),
+        ...(event.runningSummary === undefined ? {} : { runningText: text(event.runningSummary) }),
       });
     case "task-list":
       return Effect.succeed({
@@ -1114,6 +1154,7 @@ function normalizeProviderEvent(
       return Effect.succeed({
         ...base,
         category: "approval",
+        ...(event.requiresUser === undefined ? {} : { requiresUser: event.requiresUser }),
         requestId: text(event.requestId),
         // A description that already names the tool is not prefixed with it
         // again; "Edit: Claude requests permission to use Edit." said the same

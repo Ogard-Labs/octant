@@ -3,9 +3,13 @@ import type {
   AutomationDefinition,
   AutomationDetailResponse,
   AutomationId,
+  AutomationListResponse,
   AutomationRun,
   AutomationSummary,
 } from "@octant/contracts";
+
+/** The host's counts for every Automation the caller may see, not just this page. */
+export type AutomationListTotals = NonNullable<AutomationListResponse["totals"]>;
 import {
   AutomationClientFailure,
   type AutomationClient,
@@ -28,12 +32,14 @@ export type AutomationListState =
       readonly status: "ready";
       readonly items: readonly AutomationSummary[];
       readonly nextCursor?: string;
+      readonly totals?: AutomationListTotals;
     }
   | {
       /** A newer query is in flight; the previous rows stay on screen. */
       readonly status: "refreshing";
       readonly items: readonly AutomationSummary[];
       readonly nextCursor?: string;
+      readonly totals?: AutomationListTotals;
     }
   | { readonly status: "unavailable"; readonly message: string };
 
@@ -144,6 +150,7 @@ export function useAutomationCenterController(
             status: "refreshing",
             items: previous.items,
             ...(previous.nextCursor === undefined ? {} : { nextCursor: previous.nextCursor }),
+            ...(previous.totals === undefined ? {} : { totals: previous.totals }),
           }
         : { status: "loading" },
     );
@@ -171,6 +178,7 @@ export function useAutomationCenterController(
           status: "ready",
           items: response.items,
           ...(response.nextCursor === undefined ? {} : { nextCursor: response.nextCursor }),
+          ...(response.totals === undefined ? {} : { totals: response.totals }),
         });
       })
       .catch((error: unknown) => {

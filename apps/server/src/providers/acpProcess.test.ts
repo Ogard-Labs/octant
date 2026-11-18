@@ -85,6 +85,8 @@ const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, strin
   cline: ["3.0.61", "3.0.60", "cline release 3.0.61 private-noise"],
   qwen: ["0.23.0", "0.22.9", "qwen-code release 0.23.0 private-noise"],
   fx: ["0.0.13", "0.0.12", "fx release 0.0.13 private-noise"],
+  // An added agent has no floor, so it has no too-old release.
+  "acp-agent": ["1.2.3", "1.2.3", "no version"],
 };
 const readyVersions: Record<AcpProviderProfile["kind"], string> = {
   opencode: "0.0.0",
@@ -100,6 +102,7 @@ const readyVersions: Record<AcpProviderProfile["kind"], string> = {
   cline: "3.0.61",
   qwen: "0.23.0",
   fx: "0.0.13",
+  "acp-agent": "1.2.3",
 };
 
 function fixture(profile: AcpProviderProfile, mode = "ready") {
@@ -2275,7 +2278,10 @@ describe("System Keychain read for fx", () => {
       // Only the server control-socket denial, which names no Keychain, follows it.
       const guard = SEATBELT_DENY_SERVER_CONTROL_SOCKETS.length;
       expect(lines.slice(-guard)).toEqual(SEATBELT_DENY_SERVER_CONTROL_SOCKETS);
-      expect(lines.at(-1 - guard)).toBe(allow);
+      expect(lines).toContain(allow);
+      expect(lines.lastIndexOf(allow)).toBeGreaterThan(
+        lines.lastIndexOf('(deny file-read* (subpath "/Library/Keychains"))'),
+      );
       expect(lines).toContain('(deny file-read* (subpath "/Library/Keychains"))');
       expect(
         lines.filter((line) => line.includes("Keychains/") && line.startsWith("(allow")),

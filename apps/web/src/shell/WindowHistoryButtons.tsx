@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "../ui/icons";
 import { IconButton } from "./IconButton";
 import type { WindowHistory } from "./windowHistory";
 

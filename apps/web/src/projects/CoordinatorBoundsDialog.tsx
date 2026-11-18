@@ -59,7 +59,7 @@ export function CoordinatorBoundsDialog(props: {
       <p className="oct-row-detail" id="coordinator-bounds-dialog-detail">
         {props.workerLevel === undefined
           ? `${props.title}: how often this coordinator and its workers wake for each other, and how many workers it starts. Changes apply from the next wake or start.`
-          : "What its workers may do, and how often this coordinator and its workers wake for each other."}
+          : "What its workers may do, and how often they wake each other."}
       </p>
       {props.workerLevel === undefined ? null : (
         <div className="coordinator-bounds-dialog__row coordinator-bounds-dialog__row--level">

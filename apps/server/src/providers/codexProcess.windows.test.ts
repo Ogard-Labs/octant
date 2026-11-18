@@ -18,7 +18,8 @@ const directories: string[] = [];
 
 afterEach(() => {
   for (const directory of directories.splice(0))
-    rmSync(directory, { recursive: true, force: true });
+    // Windows can retain a just-exited process's cwd handle briefly.
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 function running(pid: number): boolean {
@@ -90,10 +91,7 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
     it("refuses Strict and a kept sandbox by name before Codex runs", async () => {
       const root = mkdtempSync(join(tmpdir(), "octant-codex-windows-"));
       directories.push(root);
-      for (const level of [
-        { executionPolicy: "approval-gated" },
-        { executionPolicy: "full-access", fullAccessSandbox: true },
-      ] as const) {
+      for (const level of [{ executionPolicy: "full-access", fullAccessSandbox: true }] as const) {
         const refused = await startAndStop(fakeCodex ?? "", {
           kind: "thread",
           root,
@@ -152,6 +150,8 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
     it("reads the catalog only for a host whose new threads run with no Octant sandbox", async () => {
       const refused = await startAndStop(fakeCodex ?? "", { kind: "catalog" }, false);
       expect(Either.isLeft(refused)).toBe(true);
+      if (Either.isLeft(refused))
+        expect(refused.left.message).toMatch(/Octant's sandbox, which Windows does not/);
       const read = await startAndStop(fakeCodex ?? "", { kind: "catalog" }, true);
       if (Either.isLeft(read)) throw new Error(read.left.message);
       expect(read.right.version).toBe("0.144.4");

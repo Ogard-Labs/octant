@@ -12,7 +12,7 @@ import {
   MinusCircle,
   SkipForward,
   Loader,
-} from "lucide-react";
+} from "../ui/icons";
 import { useMemo } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";

@@ -8,7 +8,7 @@ import type {
   ProviderInstanceId,
   ProviderModelId,
 } from "@octant/contracts";
-import { Image as ImageIcon, X } from "lucide-react";
+import { Image as ImageIcon, X } from "../ui/icons";
 import { useCallback, useEffect, useId, useState } from "react";
 import "../followUps/follow-up-suggestions.css";
 import {

@@ -7,7 +7,7 @@ import {
 } from "../polling/ThreadActivityRevisions";
 import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
-import { X } from "lucide-react";
+import { X } from "../ui/icons";
 import "../followUps/follow-up-suggestions.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
@@ -175,10 +175,10 @@ function RoutineChangeCard(props: {
         : "Archive routine";
   const summary =
     request.change === "pause"
-      ? "It stops running until you resume it in Automation Center."
+      ? "It stops until you resume it in Automations."
       : followUp
         ? "Its scheduled turn will not be sent."
-        : "It stops for good. Its run history stays in Automation Center.";
+        : "It stops for good. Its run history stays in Automations.";
   return (
     <article aria-label={`${action} request`} className="follow-up-card">
       <div className="follow-up-card__head">

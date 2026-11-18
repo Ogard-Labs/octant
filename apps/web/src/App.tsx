@@ -3,7 +3,6 @@ import { attachmentMediaType } from "./composer/attachmentMediaType";
 import { OctantEmpty } from "./ui/base/OctantEmpty";
 import { AgentThreadAttributionProvider } from "./agentAccess/agentThreadAttribution";
 import { QuestionnaireDraftsProvider } from "./transcript/questionnaireDrafts";
-import { useAgentBrowserCard } from "./threadActivity/browserCardActivity";
 import {
   WorktreePreparationDialog,
   type PreparationTarget,
@@ -103,6 +102,7 @@ import type { ShellActions } from "./app/shellActions";
 import { SidebarContainer } from "./app/SidebarContainer";
 import { ThreadPaneContainer } from "./app/ThreadPaneContainer";
 import { useStableActions } from "./app/useStableActions";
+import { PaneDockToolsContext, type PaneDockTools } from "./shell/PaneDockTools";
 import { WindowChromeContainer } from "./app/WindowChromeContainer";
 import { ZenContainer } from "./app/ZenContainer";
 import {
@@ -219,6 +219,7 @@ import {
 import "./styles.css";
 import "./styles/shell.css";
 import "./styles/dock.css";
+import "./styles/panels.css";
 import "./styles/environment.css";
 import { PrepareToShutDownHost } from "./environment/threadMove/PrepareToShutDownHost";
 import { threadMoveClientForBridge } from "./environment/threadMove/threadMoveClient";
@@ -239,6 +240,8 @@ import { useWindowHistory, type WindowPage, type WindowPlace } from "./shell/win
 import {
   StartQuickToolsContext,
   StartQuickToolsPlacementProvider,
+  type QuickToolKind,
+  type QuickToolRequest,
   type StartQuickToolsServices,
 } from "./shell/StartQuickTools";
 import {
@@ -270,7 +273,10 @@ import {
   rememberHealthyCreateHost,
 } from "./shell/createHostPreference";
 import { useLaunchSession } from "./shell/useLaunchSession";
-import { adoptLegacySidebarRowProperties } from "./shell/sidebarRowProperties";
+import {
+  adoptLegacySidebarRowProperties,
+  adoptSidebarAgeDefault,
+} from "./shell/sidebarRowProperties";
 import {
   SidebarThreadDragContext,
   useWorkspaceSurfaceDrag,
@@ -323,7 +329,10 @@ import {
   useAutomaticUpdateCheckSync,
   useQuitShortcutSecondPressSync,
   useReleaseRingSync,
+  glassOffNote,
+  useHostReportedGlassRefusal,
   useHostFullScreen,
+  useHostWindowActive,
   useHostReportedSidebarVibrancy,
   useNarrowViewport,
   useSidebarDrawerViewport,
@@ -337,11 +346,13 @@ import {
 } from "./shell/useShellPresentation";
 import { useRendererOverlayReport } from "./browser/useRendererOverlayReport";
 import { useHomeShortcut } from "./shell/useHomeShortcut";
+import { useNewThreadShortcut } from "./shell/useNewThreadShortcut";
 import { useJumpToWaitingShortcut } from "./shell/useJumpToWaitingShortcut";
+import { octantSettingsRegistry } from "./settings/octantSettingsRegistry";
 import { useSidebarToggleShortcut } from "./shell/useSidebarToggleShortcut";
 import { PlanUsageProvider } from "./usage/PlanUsageContext";
-import { RailUsageRings } from "./usage/RailUsageRings";
 import { FollowUpLineageProvider } from "./followUps/followUpLineage";
+import { SubagentProvidersProvider } from "./agents/subagentProviders";
 import { AppBackdrop } from "./theme/AppBackdrop";
 import { useThreadUtilityPresentation } from "./shell/useThreadUtilityPresentation";
 import {
@@ -405,7 +416,7 @@ import {
   ProjectActionRunDialog,
   type ProjectActionTarget,
 } from "./projects/ProjectActionRunDialog";
-import { ProjectIconProvider } from "./projects/ProjectIcon";
+import { ProjectIconPrefetch, ProjectIconProvider } from "./projects/ProjectIcon";
 import {
   type ProjectThreadsAccess,
   ProjectThreadsProvider,
@@ -419,7 +430,6 @@ import { useProviderController } from "./providers/useProviderController";
 import { ModelToolVerificationContext } from "./providers/ModelToolVerificationContext";
 import { useDiscoveryController } from "./providers/useDiscoveryController";
 import { useProviderBootstrap } from "./providers/useProviderBootstrap";
-import { hasSelectableProviderModels } from "./providers/providerBootstrapPolicy";
 import { useArchivedChatThreadSearch } from "./chat/useArchivedChatThreadSearch";
 import { threadSearchAnswer, useTranscriptSearch } from "./shell/useTranscriptSearch";
 import type { ThreadSearchClient } from "@octant/client-runtime/thread-search-client";
@@ -427,7 +437,8 @@ import type { ThreadSearchScope } from "./shell/threadSearchViewModel";
 import { createChatReadCursorStore, useChatController } from "./chat/useChatController";
 import { autoConfigureChatDefaults } from "./chat/autoConfigureChatDefaults";
 import { ShellFrame } from "./shell/ShellFrame";
-import { PluginThemesContext, useHostPluginThemes } from "./theme/pluginThemes";
+import { PluginContributionsProvider, useHostPluginGrounds } from "./theme/pluginGrounds";
+import { useHostPluginThemes } from "./theme/pluginThemes";
 import { useRepositoryPullRequests } from "./environment/useRepositoryPullRequests";
 import { composerThreadDrafts } from "./composer/composerThreadDraftStore";
 import type { AgentRunViewRequest } from "./agents/AgentRunHierarchy";
@@ -436,6 +447,10 @@ import {
   MULTI_INSTANCE_DOCK_SURFACES,
   RIGHT_UTILITY_DOCK_SURFACES,
   resolveDockPresentationWidth,
+  resolveTwoColumnDockWidth,
+  splitPrimaryMinimum,
+  dockTotalWidth,
+  ENVIRONMENT_STRIP_WIDTH,
   resolveRightUtilityDockSurface,
   type RightUtilityDockResolution,
   type RightUtilityDockSurfaceId,
@@ -449,11 +464,14 @@ import {
   hideUtilityTile,
   minimisedUtilityTabIds,
   minimiseUtilityTool,
+  previewUtilityCardPage,
   MAX_DOCK_TILE_COLUMNS,
   MAX_DOCK_TILES_PER_COLUMN,
+  announcedBrowserSessionsHeld,
   offeredBrowserStaysMinimised,
   restoreUtilityTool,
   moveUtilityTile,
+  placeUtilityTile,
   openThreadUtilityTab,
   openUtilityTabBesideState,
   openUtilityTabState,
@@ -467,13 +485,22 @@ import {
   showUtilityTabAlone,
   showUtilityTabBelow,
   showUtilityTabBeside,
+  showUtilityTabStacked,
   threadUtilityDockState,
   threadUtilityDockKey,
   withoutTileLayout,
+  type DockTileEdge,
   type DockTileMove,
   type ThreadUtilityDockKey,
   type ThreadUtilityDockState,
 } from "./shell/rightUtilityDockSelection";
+import {
+  environmentApart,
+  environmentGivenWay,
+  splitEnvironmentStrip,
+  withEnvironmentOpen,
+  workspaceHoldsEnvironmentBesideTools,
+} from "./shell/dockEnvironmentStrip";
 import { describeUtilityTabs } from "./shell/utilityTabs";
 import { sidebarRowMode, threadDragSurface } from "./shell/threadDragSurface";
 import { deliverComposerThreadDrop } from "./chat/composerThreadDrop";
@@ -481,6 +508,7 @@ import { RemotePairingView } from "./shell/deferredSurfaces";
 import { firstSelectableProviderSelection } from "./providers/firstSelectableProviderSelection";
 import {
   isAuthorizedCanvasDocument,
+  dockToolUnavailableReason,
   isDockToolLaunchable,
   isDockToolStillOpenable,
 } from "./shell/dockToolAvailability";
@@ -665,6 +693,8 @@ const NO_COMPUTER_SNAPSHOTS: ReadonlyArray<never> = [];
 
 // Matches the desktop's double-press window for ⌘Q.
 const QUIT_HINT_VISIBLE_MS = 1500;
+/** How long a notice that only reports something done stays before it leaves. */
+const TRANSIENT_NOTICE_MS = 10_000;
 
 export function App(props: AppProps) {
   const [locationLaunch] = useState(() =>
@@ -868,6 +898,21 @@ function LaunchedShell(
       delete root.dataset.octantNativeHost;
     };
   }, [hostReservesTitlebarInset]);
+  // A Mac window that is not in front greys its toolbar and its accent. Only
+  // the desktop host knows which window that is, so the mark stands on its
+  // word alone and a browser tab is never greyed.
+  const hostWindowActive = useHostWindowActive(props.hostBridge);
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (hostWindowActive) {
+      delete root.dataset.octantWindowInactive;
+      return;
+    }
+    root.dataset.octantWindowInactive = "true";
+    return () => {
+      delete root.dataset.octantWindowInactive;
+    };
+  }, [hostWindowActive]);
   // The near-opaque native sidebar wash relaxes only on the host's word that
   // window vibrancy is applied — never on the renderer's own preference, which
   // the host may have refused (Reduce Transparency, thermals, high contrast).
@@ -885,12 +930,19 @@ function LaunchedShell(
   }, [hostSidebarVibrancyActive]);
   const viewportIsNarrow = useNarrowViewport();
   const isNarrow = props.isNarrow ?? viewportIsNarrow;
+  // Whether the workspace holds the Environment section beside a tool column.
+  // Only the answer is kept, so a window resize renders the shell when it
+  // crosses that width and not on every frame.
+  const [workspaceHoldsEnvironment, setWorkspaceHoldsEnvironment] = useState(true);
+  const noteWorkspaceWidth = useCallback((width: number) => {
+    setWorkspaceHoldsEnvironment(workspaceHoldsEnvironmentBesideTools(width));
+  }, []);
   const nativeHost = props.nativeHost ?? props.hostBridge;
   const controller = useShellController({
     ...(props.shellClient === undefined ? {} : { client: props.shellClient }),
     isNarrow,
     ...(nativeHost === undefined ? {} : { nativeHost }),
-    openDockBrowser: ({ threadId, offered }) => {
+    openDockBrowser: ({ threadId, offered, sessionIds }) => {
       // The dock is thread-scoped: a Browser session belongs in it only when
       // the announcing thread is the subject the dock already describes.
       if (
@@ -908,6 +960,9 @@ function LaunchedShell(
       if (offeredBrowserStaysMinimised(displayedDockState, { offered, shelfDrawn: !isNarrow })) {
         return true;
       }
+      // The page the person just opened from a Browser tab is announced too.
+      // It is already that tab, so the offer has nothing to add.
+      if (offered && announcedBrowserSessionsHeld(dockState, sessionIds)) return true;
       openDockTab("browser");
       return true;
     },
@@ -955,6 +1010,7 @@ function LaunchedShell(
     props.hostBridge,
   );
   const sidebarVibrancySupported = useSidebarVibrancySupported(props.hostBridge);
+  const glassRefusal = useHostReportedGlassRefusal(props.hostBridge);
   useAutomaticUpdateCheckSync(props.hostBridge, controller.settings?.automaticUpdateChecks);
   useReleaseRingSync(props.hostBridge, controller.settings?.releaseRing);
   useQuitShortcutSecondPressSync(
@@ -1055,6 +1111,10 @@ function LaunchedShell(
     if (adoptedLegacySidebarRowProperties.current || settings === undefined) return;
     adoptedLegacySidebarRowProperties.current = true;
     adoptLegacySidebarRowProperties({
+      current: settings.sidebarRowProperties,
+      updateSettings: (sidebarRowProperties) => controller.updateSettings({ sidebarRowProperties }),
+    });
+    adoptSidebarAgeDefault({
       current: settings.sidebarRowProperties,
       updateSettings: (sidebarRowProperties) => controller.updateSettings({ sidebarRowProperties }),
     });
@@ -1285,9 +1345,21 @@ function LaunchedShell(
   // choice directly: routed here it would have opened the draft's dock and
   // left the thread it was meant for closed.
   const draftDockKeyRef = useRef<string | undefined>(undefined);
+  const closedDockTabsThisTick = useRef(new Set<string>());
+  // Set when the last open tool is closed: the empty dock then stays away
+  // until the dock toggle asks for it.
+  const [emptyDockDismissed, setEmptyDockDismissed] = useState(false);
   // Kept per draft: with two new tasks open, opening the dock on one must not
   // close it on the other.
   const [draftDocksShown, setDraftDocksShown] = useState<ReadonlySet<string>>(() => new Set());
+  // The header's Project terminal and Project browser buttons on a new Code
+  // task: the request they make of the dock, the tool it reports open, and the
+  // Project the start screen chose (which decides whether they are enabled).
+  const [quickToolRequest, setQuickToolRequest] = useState<QuickToolRequest | undefined>(undefined);
+  const [quickToolOpen, setQuickToolOpen] = useState<QuickToolKind | undefined>(undefined);
+  const [quickToolsProjectId, setQuickToolsProjectId] = useState<ProjectId | undefined>(undefined);
+  const quickToolNonce = useRef(0);
+  const consumeQuickToolRequest = useCallback(() => setQuickToolRequest(undefined), []);
   const setActivePaneDockVisible = useCallback(
     (next: boolean) => {
       const draftKey = draftDockKeyRef.current;
@@ -1489,6 +1561,7 @@ function LaunchedShell(
     | undefined
   >(undefined);
   const activeMode = controller.workspace?.activeMode ?? "chat";
+  useNewThreadShortcut(() => startNewThreadDraft(activeMode));
   // Opening a Chat or Work thread from anywhere also counts as using that kind.
   useEffect(() => {
     if (activeMode === "code") return;
@@ -1599,6 +1672,18 @@ function LaunchedShell(
     dockThreadKey === undefined
       ? fallbackDockState
       : threadUtilityDockState(dockStatesByThread, dockThreadKey);
+  // Every tab the thread holds, in the dock and in the bottom panel, for the
+  // dock to forget the names of closed Browser tabs; absent until a state exists.
+  const storedDockTabs = useMemo(
+    () =>
+      dockThreadKey === undefined || !dockStatesByThread.has(dockThreadKey)
+        ? undefined
+        : [
+            ...dockState.tabs,
+            ...threadUtilityDockState(bottomPanelStatesByThread, dockThreadKey).tabs,
+          ],
+    [bottomPanelStatesByThread, dockState, dockStatesByThread, dockThreadKey],
+  );
   // One drag pipeline for pane grips and sidebar rows. A sidebar row of
   // another Project of this mode lands as its own pane; the host resolves that
   // pane's Project and judges every call made from it.
@@ -1823,6 +1908,8 @@ function LaunchedShell(
   );
   // Themes the person's installed, trusted and enabled plugins contribute.
   const pluginThemes = useHostPluginThemes(extensionClient, machineChanges.extensions);
+  // Character grounds the same plugins offer, as data to copy.
+  const pluginGrounds = useHostPluginGrounds(extensionClient, machineChanges.extensions);
   const zenSwitchedOn = firstPartyPluginsEffective.get("zen") === true;
   useEffect(() => setZenPluginEffective(zenSwitchedOn), [zenSwitchedOn]);
   // Switching the Board plugin off hides the board layers and every opener;
@@ -3573,12 +3660,19 @@ function LaunchedShell(
     // divider's shares and the caps always address the tiles on screen.
     const displayDockState = (stored: ThreadUtilityDockState) => {
       const retained = retainAvailableUtilityTabs(stored, openableDockSurfaces);
-      return bottomPanelOpen
+      const held = bottomPanelOpen
         ? removeUtilityTabs(
             retained,
             new Set(renderedBottomPanelState.tabs.map((tab) => tab.surface)),
           )
         : retained;
+      // Beside the tool columns Environment is a section of its own, never a
+      // tile; the drawer has no section and shows it as any tool.
+      if (isNarrow) return held;
+      // Where the window cannot hold the section and a tool column together,
+      // the section gives way while a tool pane is shown.
+      const apart = environmentApart(held);
+      return workspaceHoldsEnvironment ? apart : environmentGivenWay(apart);
     };
     const displayedDockState = displayDockState(dockState);
     const dockSurface = displayedDockState.tabs.find(
@@ -3587,9 +3681,19 @@ function LaunchedShell(
     const dockResolution = resolveDockSurface(dockSurface);
     // The modal dock has room for one tool, so a stored layout is not drawn
     // there and only the focused tool is on screen.
+    // Beside the tool columns the Environment section is on screen whenever its
+    // tab is open, though it is never a tile: left out of the shown tabs, the
+    // section was drawn with nothing in it.
     const dockShownTabIds = isNarrow
       ? shownUtilityTabIds(withoutTileLayout(displayedDockState))
-      : shownUtilityTabIds(displayedDockState);
+      : [
+          ...new Set([
+            ...shownUtilityTabIds(displayedDockState),
+            ...displayedDockState.tabs
+              .filter((tab) => tab.surface === "environment")
+              .map((tab) => tab.id),
+          ]),
+        ];
     const dockShownTabs = displayedDockState.tabs.filter(
       (tab) =>
         dockShownTabIds.includes(tab.id) && resolveDockSurface(tab.surface).kind === "surface",
@@ -3655,6 +3759,7 @@ function LaunchedShell(
       dockToolsAwaitingThread,
       launchableDockSurfaces,
       renderedBottomPanelState,
+      retainedBottomPanelState,
     };
   }, [
     activeMode,
@@ -3669,6 +3774,7 @@ function LaunchedShell(
     fallbackBottomPanelState,
     isNarrow,
     projectPullRequestReviewOpen,
+    workspaceHoldsEnvironment,
   ]);
   const {
     activeBottomSurface,
@@ -3691,6 +3797,7 @@ function LaunchedShell(
     dockToolsAwaitingThread,
     launchableDockSurfaces,
     renderedBottomPanelState,
+    retainedBottomPanelState,
   } = dockPresentation;
   // The pull requests the active Code thread is already about, offered where a
   // reader adds a tab. Read from the same catalogue the Environment panel uses,
@@ -3726,7 +3833,8 @@ function LaunchedShell(
       dockTabs.length > 0 ||
       launchableDockSurfaces.length > 0 ||
       dockHoldsForCodeDraft);
-  const dockOpen = dockShown && dockAvailable;
+  const dockOpen =
+    dockShown && dockAvailable && !(emptyDockDismissed && dockState.tabs.length === 0);
   // A Browser tab bound to one host-opened context (a link or a local server)
   // is not the thread's shared Browser, so it does not stand in for the agent's
   // session: only a tab with no context of its own counts as that view.
@@ -3737,15 +3845,6 @@ function LaunchedShell(
     bottomPanelOpen &&
     activeBottomSurface?.id === "browser" &&
     activeBottomTab?.browserContextId === undefined;
-  // The agent's Browser is live, out of sight, and has a tab the dock's card
-  // would stand for: with the dock closed that card is invisible, so the toggle
-  // says so. Only a thread's own Browser tab counts as the card's tab.
-  const agentBrowserContext = useAgentBrowserCard(
-    activeMode === "chat" || dockThreadId === undefined ? undefined : String(dockThreadId),
-  );
-  const dockBrowserActive =
-    agentBrowserContext !== undefined &&
-    displayedDockState.tabs.some((tab) => tab.surface === "browser");
   const bottomPanelHeight = previewBottomPanelHeight ?? bottomPanelPresentation.height;
   const providerController = useProviderController({
     ...(props.providerClient === undefined ? {} : { client: props.providerClient }),
@@ -3774,20 +3873,6 @@ function LaunchedShell(
       providerController.threadNativeSetup,
       projectController.projects,
     ],
-  );
-  // Built once per client and provider list: a new element on every render
-  // re-rendered the whole memoized sidebar for each streamed event.
-  // The settings opener is a new function each render, so it is read through
-  // the latest-actions ref rather than listed as a dependency.
-  const railUsage = useMemo(
-    () =>
-      launchedClients.providerUsageLimitsClient === undefined ? undefined : (
-        <RailUsageRings
-          instances={providerController.instances}
-          onOpenUsage={() => void latestShellActions.current.openSettings({ section: "usage" })}
-        />
-      ),
-    [launchedClients.providerUsageLimitsClient, providerController.instances],
   );
   // A custom image source (Settings › Image generation) is an image profile
   // too: the host's own profile list and the agent tool already offer it, and
@@ -4017,7 +4102,6 @@ function LaunchedShell(
     providerController,
     providerGroups: bootstrapProviderGroups,
   });
-  const providerReady = hasSelectableProviderModels(bootstrapProviderGroups);
   // A ready or degraded provider still lists chat-only and unverified-tool
   // models in the Code picker, each carrying the reason it cannot be used.
   // Those entries are not choices: offering them here would let create,
@@ -4602,6 +4686,13 @@ function LaunchedShell(
     changeDockTiles((state) => showUtilityTabBeside(state, tabId));
   }
   function openDockTabBeside(surface: RightUtilityDockSurfaceId) {
+    openDockTabPlaced(surface, "beside");
+  }
+  /** A tool button's press: the tool opens under the focused tile, in its column. */
+  function openDockTabStacked(surface: RightUtilityDockSurfaceId) {
+    openDockTabPlaced(surface, "stacked");
+  }
+  function openDockTabPlaced(surface: RightUtilityDockSurfaceId, direction: "beside" | "stacked") {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
     if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
     if (surface === "review") setRequestedAgentReview(undefined);
@@ -4610,9 +4701,11 @@ function LaunchedShell(
     if (surface === "terminal") {
       dockTabActivation.noteActivated(workspaceDockTabId(instanceId, "terminal"));
     }
-    widenDockForColumns(openUtilityTabBesideState(displayedDockState, surface, instanceId));
+    widenDockForColumns(
+      openUtilityTabBesideState(displayedDockState, surface, instanceId, direction),
+    );
     setActivePaneDockVisible(true);
-    changeDockTiles((state) => openUtilityTabBesideState(state, surface, instanceId));
+    changeDockTiles((state) => openUtilityTabBesideState(state, surface, instanceId, direction));
   }
   function showDockTabBelow(tabId: string) {
     noteTerminalShown(tabId);
@@ -4628,14 +4721,26 @@ function LaunchedShell(
   function hideDockCard(tabId: string) {
     changeDockTiles((state) => hideUtilityCard(state, tabId));
   }
+  function previewDockCardPage(tabId: string) {
+    changeDockTiles((state) => previewUtilityCardPage(state, tabId));
+  }
   function restoreDockTool(tabId: string) {
     changeDockTiles((state) => restoreUtilityTool(state, tabId));
   }
   function minimiseDockTool(tabId: string) {
-    changeDockTiles((state) => minimiseUtilityTool(state, tabId));
+    changeDockTiles((state) => {
+      const next = minimiseUtilityTool(state, tabId);
+      // The card stands in the Environment section, so a tool minimised while
+      // the section is closed opens it: at the foot of an empty dock the card
+      // read as the tool having gone.
+      return next === state || isNarrow ? next : withEnvironmentOpen(next);
+    });
   }
   function moveDockTile(tabId: string, direction: DockTileMove) {
     changeDockTiles((state) => moveUtilityTile(state, tabId, direction));
+  }
+  function placeDockTile(tabId: string, targetTabId: string, edge: DockTileEdge) {
+    changeDockTiles((state) => placeUtilityTile(state, tabId, targetTabId, edge));
   }
   function resizeDockTileColumns(shares: ReadonlyArray<number>) {
     changeDockTiles((state) => resizeUtilityTileColumns(state, shares));
@@ -4646,6 +4751,18 @@ function LaunchedShell(
   function closeDockTab(tabId: string) {
     const closedTab = dockState.tabs.find((tab) => tab.id === tabId);
     changeDockTiles((state) => closeUtilityTabState(state, tabId));
+    // The last tool to close takes the tool region with it, so the thread has
+    // the window again and its header (and the tool buttons at its end) stands
+    // where it stood before anything was opened. Left open and empty, the
+    // region kept a column for one card and moved the buttons a second time.
+    // The window's own choice stays "open": another thread's tools still show
+    // when it takes the focus. A Browser closes page by page in one press, so
+    // the closes of one tick are counted together.
+    closedDockTabsThisTick.current.add(tabId);
+    queueMicrotask(() => closedDockTabsThisTick.current.clear());
+    if (dockState.tabs.every((tab) => closedDockTabsThisTick.current.has(tab.id))) {
+      setEmptyDockDismissed(true);
+    }
     // A dock Browser tab bound to a context owns it: closing the tab is the
     // only close path a dedicated context has, so the context stops here.
     // The shared tab binds the thread's context the same way once it exists,
@@ -4820,9 +4937,17 @@ function LaunchedShell(
     }
     persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
     if (restoreFocus) {
-      queueMicrotask(() =>
-        document.querySelector<HTMLElement>('[data-bottom-panel-opener="true"]')?.focus(),
-      );
+      // The window has no panel switch to return to, so focus goes to the
+      // button of the tool the panel was showing, as closing its last tab does.
+      const surface = activeBottomSurface?.id;
+      queueMicrotask(() => {
+        if (surface === undefined) return;
+        (
+          document.querySelector<HTMLElement>(
+            `.workspace-pane[data-active="true"] [data-dock-tool="${surface}"]`,
+          ) ?? document.querySelector<HTMLElement>(`[data-dock-tool="${surface}"]`)
+        )?.focus();
+      });
     }
   }
 
@@ -4840,44 +4965,16 @@ function LaunchedShell(
     }
     if (nextState.tabs.length === 0) closeBottomPanel(restoreFocus);
   }
-  function toggleBottomPanel(opener: HTMLElement) {
-    // With a reader up the panel is stepped aside, not closed, so the toggle
-    // leaves the reader and shows it again rather than closing something the
-    // person cannot see (the dock's toggle reads the same way).
-    if (readerOpen) {
-      closeWorkspaceReaders();
-      if (bottomPanelOpen) return;
-    } else if (bottomPanelOpen) {
-      closeBottomPanel(false);
-      opener.focus();
-      return;
-    }
-    if (!bottomPanelAvailable) return;
-    const nextSurface = activeBottomSurface ?? bottomPanelSurfaces[0];
-    if (nextSurface === undefined) return;
-    if (nextSurface.id === "terminal") {
-      dockTabActivation.noteActivated(workspaceDockTabId(undefined, "terminal"));
-    }
-    const nextBottomState = openUtilityTabState(renderedBottomPanelState, nextSurface.id);
-    if (dockThreadKey === undefined) {
-      setFallbackBottomPanelState(nextBottomState);
-    } else {
-      setBottomPanelStatesByThread((current) =>
-        new Map(current).set(dockThreadKey, nextBottomState),
-      );
-    }
-    closeDockTab(nextSurface.id);
-    if (dockTabs.length === 1 && dockTabs[0]?.id === nextSurface.id) setDockVisible(false);
-    persistBottomPanelPresentation({ ...bottomPanelPresentation, open: true });
-  }
-
   function openBottomTool(surface: RightUtilityDockSurfaceId) {
     if (!bottomPanelSurfaces.some((candidate) => candidate.id === surface)) return;
     if (surface === "review") setRequestedAgentReview(undefined);
     if (surface === "terminal") {
       dockTabActivation.noteActivated(workspaceDockTabId(undefined, "terminal"));
     }
-    const nextBottomState = openUtilityTabState(renderedBottomPanelState, surface);
+    // From the panel's own tabs, not the ones it draws: an empty panel draws a
+    // Terminal so it is never blank, and opening from that drawing put a
+    // Terminal nobody asked for beside every tool moved below.
+    const nextBottomState = openUtilityTabState(retainedBottomPanelState, surface);
     if (dockThreadKey === undefined) {
       setFallbackBottomPanelState(nextBottomState);
     } else {
@@ -4913,7 +5010,11 @@ function LaunchedShell(
         }
         return;
       case "open-beside":
-        openDockTabBeside(surface);
+        openDockTabStacked(surface);
+        return;
+      case "open-section":
+        if (!dockOpen) setActivePaneDockVisible(true);
+        changeDockTiles(withEnvironmentOpen);
         return;
       case "open":
         openDockTab(surface);
@@ -4924,7 +5025,8 @@ function LaunchedShell(
         return;
       case "show-beside":
         if (!dockOpen) setActivePaneDockVisible(true);
-        showDockTabBeside(press.tabId);
+        noteTerminalShown(press.tabId);
+        changeDockTiles((state) => showUtilityTabStacked(state, press.tabId));
         return;
       case "close":
         for (const tabId of press.tabIds) closeDockTab(tabId);
@@ -4936,6 +5038,16 @@ function LaunchedShell(
       case "restore":
         if (!dockOpen) setActivePaneDockVisible(true);
         restoreDockTool(press.tabId);
+        return;
+      case "quick-open":
+        quickToolNonce.current += 1;
+        setQuickToolRequest({ tool: press.tool, nonce: quickToolNonce.current });
+        if (!dockOpen) setActivePaneDockVisible(true);
+        return;
+      case "quick-close":
+        // Closing the dock unmounts the quick tools, which stops the shell.
+        setQuickToolRequest(undefined);
+        setActivePaneDockVisible(false);
         return;
       case "close-bottom":
         // The panel's own close sends focus to its toggle; this press came
@@ -4967,6 +5079,32 @@ function LaunchedShell(
    * model that drew the menu.
    */
   function runDockToolMenu(surface: RightUtilityDockSurfaceId, value: string) {
+    if (value === "to-side") {
+      // The reverse of the drag to the thread's foot. The tool leaves the
+      // panel's own tabs, so the panel stays for the tools still in it (and
+      // closes when this was its last) and a later move below does not bring
+      // a forgotten copy back; beside, it opens as the same tool, not a
+      // second one.
+      closeBottomPanelTab(surface, false);
+      // Under the tools already shown beside the thread, as a tool button's
+      // press places a tool. Opened the plain way it took the focused tile's
+      // place, and the tool that stood there left the view (seen in the real
+      // window: Files gone when Review came back from the panel).
+      if (surface === "review") setRequestedAgentReview(undefined);
+      if (surface === "terminal") {
+        dockTabActivation.noteActivated(workspaceDockTabId(undefined, "terminal"));
+      }
+      const placed = (state: ThreadUtilityDockState) =>
+        state.tabs.some((tab) => tab.id === surface)
+          ? showUtilityTabStacked(state, surface)
+          : openUtilityTabBesideState(state, surface, surface, "stacked");
+      // A Browser or Terminal asks for its width again wherever it opens.
+      widenDockFor(surface);
+      widenDockForColumns(placed(displayedDockState));
+      setActivePaneDockVisible(true);
+      changeDockTiles(placed);
+      return;
+    }
     const button = [...dockToolButtons.buttons, ...dockToolButtons.more].find(
       (candidate) => candidate.id === surface,
     );
@@ -4982,7 +5120,8 @@ function LaunchedShell(
       for (const id of surface === "browser" ? button.tabIds : [tabId]) closeDockTab(id);
       return;
     }
-    if (value === "minimise") minimiseDockTool(tabId);
+    if (value === "to-bottom") openBottomTool(surface);
+    else if (value === "minimise") minimiseDockTool(tabId);
     else if (value === "below") {
       if (!dockOpen) setActivePaneDockVisible(true);
       showDockTabBelow(tabId);
@@ -4995,6 +5134,11 @@ function LaunchedShell(
   }
   function toggleDock(opener: HTMLElement) {
     dockOpener.current = { element: opener, logicalTarget: "dock" };
+    // The toggle asks for the dock as it is, empty or not.
+    if (emptyDockDismissed) {
+      setEmptyDockDismissed(false);
+      if (dockShown && dockState.tabs.length === 0) return;
+    }
     // With a reader up the dock is stepped aside, not closed: the toggle
     // leaves the reader so the dock shows again, and opens it if it was
     // closed. Closing it here instead lost the dock the reader had hidden.
@@ -5357,6 +5501,10 @@ function LaunchedShell(
       new Map(projectController.allProjects.map((project) => [String(project.id), project.name])),
     [projectController.allProjects],
   );
+  const projectIconIds = useMemo(
+    () => projectController.allProjects.map((project) => String(project.id)),
+    [projectController.allProjects],
+  );
   const workingNowProjectNames = useMemo(
     () => new Map(projectController.projects.map((project) => [String(project.id), project.name])),
     [projectController.projects],
@@ -5697,8 +5845,10 @@ function LaunchedShell(
       hideDockCard,
       hideDockTile,
       restoreDockTool,
+      previewDockCardPage,
       minimiseDockTool,
       moveDockTile,
+      placeDockTile,
       openDockTabBeside,
       resizeDockTileColumn,
       resizeDockTileColumns,
@@ -5781,9 +5931,10 @@ function LaunchedShell(
       spendRevealTurn,
       splitPane: controller.splitPane,
       startNewThreadDraft,
-      toggleBottomPanel,
       toggleDock,
       toggleDockTool,
+      pressPaneDockTool,
+      showDockToolFromRest,
       runDockToolMenu,
       touchMemoryRevision: projectController.touchMemoryRevision,
       tryWorkRestCommand,
@@ -5915,6 +6066,16 @@ function LaunchedShell(
     dockAvailable
       ? buildDockToolButtons({
           surfaces: dockToolSurfaces,
+          unavailable: Object.fromEntries(
+            dockToolSurfaces.flatMap((surface) => {
+              const reason = dockToolUnavailableReason(
+                surface.id,
+                { hasAppleSimulator: dockHasAppleSimulator },
+                activeProjectId !== undefined,
+              );
+              return reason === undefined ? [] : [[surface.id, reason]];
+            }),
+          ),
           ...(dockToolsAwaitingThread === undefined
             ? {}
             : {
@@ -5936,15 +6097,111 @@ function LaunchedShell(
           layout: displayedDockState.layout,
           dockPresentedOpen,
           bottomHeld: bottomHeldSurfaces,
+          ...(bottomPanelAvailable && !isNarrow
+            ? { bottomAccepts: bottomPanelSurfaces.map((surface) => surface.id) }
+            : {}),
+          ...(dockHoldsForCodeDraft && quickToolsProjectId !== undefined
+            ? {
+                quickTools: {
+                  tools:
+                    serverCodeProjectFor(serverCodeProjects.projects, quickToolsProjectId) ===
+                    undefined
+                      ? (["terminal", "browser"] as const)
+                      : (["terminal"] as const),
+                  open: dockPresentedOpen ? quickToolOpen : undefined,
+                },
+              }
+            : {}),
           bottomPresentedOpen: bottomPanelPresentedOpen,
           bottomActive: activeBottomSurface?.id,
           capsFull: dockCapsFull,
+          environmentSection: !isNarrow,
+          ...(!isNarrow &&
+          !workspaceHoldsEnvironment &&
+          splitEnvironmentStrip(displayedDockState).toolTabIds.length > 0
+            ? {
+                environmentGaveWay: {
+                  open: dockState.tabs.some((tab) => tab.surface === "environment"),
+                },
+              }
+            : {}),
         })
       : NO_DOCK_TOOL_BUTTONS,
   );
   const dockToolButtons = useMemo(
     () => JSON.parse(dockToolButtonsKey) as DockToolButtonsModel,
     [dockToolButtonsKey],
+  );
+  // A tool button in a pane's header. In the focused pane it is the dock's own
+  // button. From another pane of a split the press first focuses that pane and
+  // the tool is then shown for its thread; it never closes one, because nothing
+  // of that thread's was on screen to close. Focusing a pane is a host command,
+  // so the tool waits for the pane to become the active one.
+  const pendingPaneTool = useRef<{
+    readonly paneId: string;
+    readonly surface: RightUtilityDockSurfaceId;
+    readonly opener: HTMLElement;
+    readonly at: number;
+  }>(undefined);
+  const [pendingPaneToolRevision, setPendingPaneToolRevision] = useState(0);
+  function showDockToolFromRest(surface: RightUtilityDockSurfaceId, opener: HTMLElement) {
+    const button = [...dockToolButtons.buttons, ...dockToolButtons.more].find(
+      (candidate) => candidate.id === surface,
+    );
+    if (button === undefined || button.pressed) return;
+    toggleDockTool(surface, opener);
+  }
+  function pressPaneDockTool(
+    paneId: PaneId,
+    surface: RightUtilityDockSurfaceId,
+    opener: HTMLElement,
+    fromRest: boolean,
+  ) {
+    if (String(activePaneId) === String(paneId)) {
+      if (fromRest) showDockToolFromRest(surface, opener);
+      else toggleDockTool(surface, opener);
+      return;
+    }
+    const pending = { paneId: String(paneId), surface, opener, at: performance.now() };
+    pendingPaneTool.current = pending;
+    setPendingPaneToolRevision((revision) => revision + 1);
+    // A focus the host refused leaves nothing waiting: the tool must not open
+    // later because the person focused that pane some other way.
+    void Promise.resolve(controller.activatePane(paneId)).catch(() => {
+      if (pendingPaneTool.current === pending) pendingPaneTool.current = undefined;
+    });
+  }
+  useEffect(() => {
+    const pending = pendingPaneTool.current;
+    if (pending === undefined || String(activePaneId) !== pending.paneId) return;
+    pendingPaneTool.current = undefined;
+    // A pane that took seconds to focus was focused for another reason.
+    if (performance.now() - pending.at > 2000) return;
+    actions.showDockToolFromRest(pending.surface, pending.opener);
+  }, [actions, activePaneId, dockToolButtonsKey, pendingPaneToolRevision]);
+  // A wide window draws each thread's tool buttons in its pane's header. The
+  // drawer of a narrow one carries the row itself.
+  const paneDockTools = useMemo<PaneDockTools | undefined>(
+    () =>
+      isNarrow
+        ? undefined
+        : {
+            model: dockToolButtons,
+            references: dockReferences,
+            // A thread keeps its dock's tabs while another pane has the dock,
+            // so a resting row can mark what its own thread has open.
+            openTools: (mode, threadId) => [
+              ...new Set(
+                threadUtilityDockState(
+                  dockStatesByThread,
+                  threadUtilityDockKey(mode, threadId),
+                ).tabs.map((tab) => tab.surface),
+              ),
+            ],
+            onPress: actions.pressPaneDockTool,
+            onMenuAction: actions.runDockToolMenu,
+          },
+    [actions, dockReferences, dockStatesByThread, dockToolButtons, isNarrow],
   );
   const homeActive =
     !readerOpen &&
@@ -6532,11 +6789,43 @@ function LaunchedShell(
     }));
   }
 
-  const dockPresentationWidth = resolveDockPresentationWidth({
+  // Environment is a strip beside the tool columns, so the stored and the
+  // presented widths are the tool columns'; the strip adds its own.
+  const dockSplit = splitEnvironmentStrip(displayedDockState);
+  const dockEnvironmentOpen =
+    !isNarrow &&
+    dockSplit.environmentTabId !== undefined &&
+    !(dockToolsAwaitingThread !== undefined && dockResolution.kind !== "surface");
+  const dockToolColumns = dockEnvironmentOpen
+    ? (dockSplit.toolLayout?.columns.length ?? 1)
+    : dockTileColumns;
+  const dockToolsWidth = resolveDockPresentationWidth({
     storedWidth: contextSidebarWidth,
     widthChosen: dockWidthChosen || previewContextWidth !== undefined,
     tabSurfaces: dockTabs.map((tab) => tab.surface.id),
-    tileColumns: dockTileColumns,
+  });
+  // Two columns ask for more only where the window has it; the stylesheet
+  // chooses between the two widths, since it knows the room.
+  const dockTwoColumnWidth =
+    dockToolColumns >= 2
+      ? dockTotalWidth({
+          toolsWidth: resolveTwoColumnDockWidth({
+            storedWidth: contextSidebarWidth,
+            widthChosen: dockWidthChosen || previewContextWidth !== undefined,
+          }),
+          environmentOpen: dockEnvironmentOpen,
+          toolsShown: true,
+        })
+      : undefined;
+  // The panes of a split keep 440px each beside the dock; the tool columns
+  // give first.
+  const dockSplitPrimaryMinimum = isNarrow
+    ? undefined
+    : splitPrimaryMinimum(controller.presentedLayout);
+  const dockPresentationWidth = dockTotalWidth({
+    toolsWidth: dockToolsWidth,
+    environmentOpen: dockEnvironmentOpen,
+    toolsShown: dockSplit.toolTabIds.length > 0,
   });
 
   /** The pages back and forward can return to, by the destination that opens them. */
@@ -8046,6 +8335,40 @@ function LaunchedShell(
     onNewThread: () => startNewThreadDraft(activeMode),
     onOpenSearch: openThreadSearch,
     onOpenSettings: () => void controller.openSettings(),
+    onToggleSidebar: () =>
+      setSidebarCollapsedPersistent(!presentedSidebarCollapsed, { keepFocus: true }),
+    destinations: [
+      { id: "home", label: "Home", onOpen: openHome },
+      { id: "inbox", label: "Inbox", onOpen: openInbox },
+      ...(activeMode === "chat"
+        ? []
+        : [
+            { id: "thread-board", label: "Board", onOpen: openThreadBoard },
+            { id: "automations", label: "Automations", onOpen: openAutomationCenter },
+          ]),
+      { id: "agents", label: "Agents", onOpen: openAgentsCenter },
+      { id: "artifact-library", label: "Artifacts", onOpen: openArtifactLibrary },
+      { id: "projects", label: "Projects", onOpen: openProjects },
+    ],
+    settingsPages: octantSettingsRegistry.sections
+      .filter((section) => section.nativeRequired === undefined)
+      .map((section) => ({
+        sectionId: section.id,
+        label: section.label,
+        onOpen: () => void controller.openSettings({ section: section.id }),
+      })),
+    dockTools: dockToolSurfaces.filter(
+      (surface) =>
+        dockToolUnavailableReason(
+          surface.id,
+          { hasAppleSimulator: dockHasAppleSimulator },
+          true,
+        ) === undefined,
+    ),
+    onOpenDockTool: (tool) => {
+      const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === tool.id);
+      if (surface !== undefined) openDockTab(surface.id);
+    },
     ...(controller.settings === undefined
       ? {}
       : {
@@ -8198,6 +8521,7 @@ function LaunchedShell(
       settings={loadedSettings}
       presentation={presentation}
       surface={surface}
+      glassOffNote={glassOffNote(glassRefusal, props.hostBridge !== undefined)}
       sidebarVibrancySupported={sidebarVibrancySupported}
       themeController={themeController}
       {...(props.typography === undefined ? {} : { typography: props.typography })}
@@ -8251,6 +8575,7 @@ function LaunchedShell(
         {...(shellBackdrop === undefined
           ? {}
           : { backdrop: shellBackdrop, backdropCoversSidebar: shellBackdropCoversSidebar })}
+        {...(welcomeBackdrop === undefined ? {} : { welcomeGround: welcomeBackdrop })}
         {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
         {...(themeController.draft?.typography === undefined && props.typography === undefined
           ? {}
@@ -8262,13 +8587,22 @@ function LaunchedShell(
             actions={actions}
             activeMode={activeMode}
             activeSurface={activeSurface}
-            bottomPanelAvailable={bottomPanelAvailable}
-            bottomPanelPresentedOpen={bottomPanelPresentedOpen}
+            {...(activeCodeThreadId === undefined
+              ? {}
+              : { activeCodeThreadId: String(activeCodeThreadId) })}
+            {...(activeProjectId === undefined ? {} : { activeProjectId })}
+            activeProjectIsCode={
+              projectController.allProjects.find(
+                (project) => String(project.id) === String(activeProjectId),
+              )?.type === "code"
+            }
+            codeDraft={activeMode === "code" && activeDraftKey !== undefined}
+            {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
+            serverUrl={props.launch.serverUrl}
+            windowCapability={props.projectWindowCapability}
+            codeBoardRevision={machineChanges.codeNavigation}
             dockAvailable={dockAvailable}
-            dockBrowserActive={dockBrowserActive}
             dockPresentedOpen={dockPresentedOpen}
-            dockReferences={dockReferences}
-            dockTools={dockToolButtons}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             hostReservesTitlebarInset={hostReservesTitlebarInset}
             isNarrow={isNarrow}
@@ -8351,7 +8685,6 @@ function LaunchedShell(
               {...(sidebarListRequest === undefined ? {} : { sidebarListRequest })}
               sidebarRail={sidebarRail}
               sidebarRailBeside={sidebarRailBeside}
-              {...(railUsage === undefined ? {} : { railUsage })}
               whatsNew={whatsNew}
               sidebarTileCounts={sidebarTileCounts}
               {...(projectThreadsAccess.errorMessage === undefined
@@ -8368,8 +8701,19 @@ function LaunchedShell(
         }
         sidebarResizable={!isNarrow}
         sidebarWidth={sidebarWidth}
+        onWorkspaceWidth={noteWorkspaceWidth}
+        splitPrimaryMinimum={dockSplitPrimaryMinimum}
         wideContextOpen={!isNarrow && dockPresentedOpen}
-        dockTileColumns={dockPresentedOpen ? dockTileColumns : 1}
+        dockTileColumns={dockPresentedOpen ? dockToolColumns : 1}
+        {...(dockPresentedOpen && dockTwoColumnWidth !== undefined
+          ? { contextSidebarTwoColumnWidth: dockTwoColumnWidth }
+          : {})}
+        {...(dockPresentedOpen && dockEnvironmentOpen
+          ? {
+              dockEnvironmentWidth: ENVIRONMENT_STRIP_WIDTH,
+              dockToolsShown: dockSplit.toolTabIds.length > 0,
+            }
+          : {})}
         workspace={
           <ThreadNativeSetupProvider services={threadNativeSetupServices}>
             <ThreadNotesProvider services={launchedClients.threadNotesClient}>
@@ -8381,6 +8725,10 @@ function LaunchedShell(
                       ? `code:${String(activePaneId)}`
                       : undefined
                   }
+                  onConsumeRequest={consumeQuickToolRequest}
+                  onOpenChange={setQuickToolOpen}
+                  onProjectChange={setQuickToolsProjectId}
+                  request={quickToolRequest}
                 >
                   <div className="primary-workspace-layer">
                     <ReaderPagesContainer
@@ -8413,6 +8761,9 @@ function LaunchedShell(
                       githubClient={githubClient}
                       githubIssuesOpen={githubIssuesOpen}
                       githubIssuesReadAvailable={githubIssuesReadAvailable}
+                      {...(githubPullRequestCapability.login === undefined
+                        ? {}
+                        : { githubViewerLogin: githubPullRequestCapability.login })}
                       {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
                       imageLibraryOpen={imageLibraryOpen}
                       imageProfiles={imageGenerationProfiles ?? NO_IMAGE_PROFILES}
@@ -8449,6 +8800,7 @@ function LaunchedShell(
                     />
                     <ThreadPaneContainer
                       actions={actions}
+                      onOpenWorktrees={setPreparationTarget}
                       activeCodeThreadUsageFallback={activeCodeThreadUsageFallback}
                       activeMode={activeMode}
                       {...(activeThreadUsageReporting === undefined
@@ -8477,7 +8829,6 @@ function LaunchedShell(
                       crossContextOffer={controller.crossContextOffer}
                       createHostId={createHostId}
                       createHostViewScope={createHostViewScope}
-                      discoveryController={discoveryController}
                       dockOpen={dockOpen}
                       {...(dockSurface === undefined
                         ? {}
@@ -8544,12 +8895,11 @@ function LaunchedShell(
                       tabActivation={controller.tabActivation}
                       workspaceVersion={controller.workspaceVersion}
                       providerController={providerController}
-                      providerReady={providerReady}
                       {...(revealTurn === undefined ? {} : { revealTurn })}
                       serverUrl={props.launch.serverUrl}
                       settings={controller.settings}
                       threadStatsSummary={threadStatsSummary}
-                      {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
+                      {...(welcomeBackdrop === undefined ? {} : { welcomeGround: true })}
                       windowCapability={props.projectWindowCapability}
                       workCreateThreadAvailable={workCreateThreadAvailable}
                       workNavigation={workNavigation}
@@ -8573,6 +8923,7 @@ function LaunchedShell(
                   <TabActivationProvider registry={dockTabActivation}>
                     <DockContainer
                       actions={actions}
+                      splitPrimaryMinimum={dockSplitPrimaryMinimum}
                       {...(activeBottomSurface === undefined ? {} : { activeBottomSurface })}
                       activeCodeThreadUsageFallback={activeCodeThreadUsageFallback}
                       activeMode={activeMode}
@@ -8603,6 +8954,7 @@ function LaunchedShell(
                         ? {}
                         : { contextSnapshot: contextController.snapshot })}
                       displayedDockState={displayedDockState}
+                      {...(storedDockTabs === undefined ? {} : { storedDockTabs })}
                       dockPresentationWidth={dockPresentationWidth}
                       dockPresentedOpen={dockPresentedOpen}
                       dockReferences={dockReferences}
@@ -8656,6 +9008,8 @@ function LaunchedShell(
           hostId={createHostId}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
           whatsNew={whatsNew}
+          firstRunStatus={controller.settings?.firstRunOnboarding}
+          tourBlocked={controller.settingsOpen || inboxCount > 0}
           mode={projectCreateMode ?? controller.workspace.activeMode}
           onCloseCreate={() => {
             setCreateOpen(false);
@@ -8913,6 +9267,10 @@ function LaunchedShell(
                 onSelect: () => void controller.openSettings({ section: "host" }),
               }}
               detail={hostMemoryNotice.detail}
+              // A new notice is a new toast: kept mounted, the one after a
+              // notice that left by itself never started its own timer.
+              key={hostMemoryNotice.id}
+              {...(hostMemoryNotice.transient ? { leavesAfterMs: TRANSIENT_NOTICE_MS } : {})}
               onDismiss={dismissHostMemoryNotice}
               title={hostMemoryNotice.title}
             />
@@ -8963,226 +9321,242 @@ function LaunchedShell(
 
   return (
     <AgentThreadAttributionProvider client={launchedClients.agentGrantClient}>
-      <GuardrailDefaultsContext.Provider value={guardrailDefaults}>
-        <FirstPartyPluginsEffectiveContext.Provider value={firstPartyPluginsEffective}>
-          <PluginThemesContext.Provider value={pluginThemes}>
-            <ImageJobChangeRevisionContext.Provider value={machineChanges.imageJobs}>
-              <ThreadActivityRevisionsContext.Provider value={threadActivityRevisions}>
-                <SpeechCapabilityProvider
-                  client={speechClient}
-                  instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
-                  settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
-                >
-                  <TodoListHostSettingsContext.Provider value={todoListHostSettings}>
-                    <OctantCommandProvider commands={octantCommands}>
-                      <OctantDialogPresence>
-                        {todoQuickAddOpen ? (
-                          <TodoQuickAddDialog
-                            list={todoList}
-                            {...(todoThisHostId === undefined
-                              ? {}
-                              : { thisHostId: todoThisHostId })}
-                            onClose={() => setTodoQuickAddOpen(false)}
-                            open
-                            projects={todoProjects}
-                          />
-                        ) : null}
-                        {projectActionRun === undefined ? null : (
-                          <ProjectActionRunDialog
-                            key={JSON.stringify(projectActionRun.target)}
-                            client={projectTerminalClient}
-                            target={projectActionRun.target}
-                            storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
-                            open={projectActionRun.open}
-                            onClose={() =>
-                              setProjectActionRun((current) =>
-                                current === undefined ? undefined : { ...current, open: false },
+      <SubagentProvidersProvider
+        instances={providerController.instances}
+        observedByInstance={providerController.observedByInstance}
+        showMarks={controller.settings.showThreadProviderIcons}
+      >
+        <GuardrailDefaultsContext.Provider value={guardrailDefaults}>
+          <FirstPartyPluginsEffectiveContext.Provider value={firstPartyPluginsEffective}>
+            <PluginContributionsProvider grounds={pluginGrounds} themes={pluginThemes}>
+              <ImageJobChangeRevisionContext.Provider value={machineChanges.imageJobs}>
+                <ThreadActivityRevisionsContext.Provider value={threadActivityRevisions}>
+                  <SpeechCapabilityProvider
+                    client={speechClient}
+                    instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
+                    settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
+                  >
+                    <TodoListHostSettingsContext.Provider value={todoListHostSettings}>
+                      <OctantCommandProvider commands={octantCommands}>
+                        <OctantDialogPresence>
+                          {todoQuickAddOpen ? (
+                            <TodoQuickAddDialog
+                              list={todoList}
+                              {...(todoThisHostId === undefined
+                                ? {}
+                                : { thisHostId: todoThisHostId })}
+                              onClose={() => setTodoQuickAddOpen(false)}
+                              open
+                              projects={todoProjects}
+                            />
+                          ) : null}
+                          {projectActionRun === undefined ? null : (
+                            <ProjectActionRunDialog
+                              key={JSON.stringify(projectActionRun.target)}
+                              client={projectTerminalClient}
+                              target={projectActionRun.target}
+                              storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
+                              open={projectActionRun.open}
+                              onClose={() =>
+                                setProjectActionRun((current) =>
+                                  current === undefined ? undefined : { ...current, open: false },
+                                )
+                              }
+                              {...(zen.enabled &&
+                              !serverCodeProjects.workProjects.some(
+                                (project) =>
+                                  project.projectId === projectActionRun.target.projectId,
                               )
-                            }
-                            {...(zen.enabled &&
-                            !serverCodeProjects.workProjects.some(
-                              (project) => project.projectId === projectActionRun.target.projectId,
-                            )
+                                ? {
+                                    onOpenTerminal: (
+                                      terminalId: ReturnType<typeof decodeCodeTerminalId>,
+                                    ) => {
+                                      void (async () => {
+                                        if (!zen.active) await zen.enterZen();
+                                        await zen.pinProjectTerminal({
+                                          projectId: projectActionRun.target.projectId,
+                                          terminalId,
+                                        });
+                                      })();
+                                    },
+                                  }
+                                : {})}
+                            />
+                          )}
+                        </OctantDialogPresence>
+
+                        <OctantDialogPresence>
+                          {preparationTarget === undefined ? null : (
+                            <WorktreePreparationDialog
+                              key={JSON.stringify(preparationTarget)}
+                              client={projectTerminalClient}
+                              runs={agentRunClient}
+                              target={preparationTarget}
+                              onClose={() => setPreparationTarget(undefined)}
+                            />
+                          )}
+                        </OctantDialogPresence>
+                        {actionsProject === undefined ? null : (
+                          <ProjectActionButtons
+                            actions={activeProjectActions}
+                            {...(activeMode === "code" &&
+                            activeCodeThreadView !== undefined &&
+                            activeCodeThreadView.checkout.kind !== "remote-root" &&
+                            String(activeCodeThreadView.thread.projectId) ===
+                              String(actionsProject.id)
                               ? {
-                                  onOpenTerminal: (
-                                    terminalId: ReturnType<typeof decodeCodeTerminalId>,
-                                  ) => {
-                                    void (async () => {
-                                      if (!zen.active) await zen.enterZen();
-                                      await zen.pinProjectTerminal({
-                                        projectId: projectActionRun.target.projectId,
-                                        terminalId,
-                                      });
-                                    })();
+                                  onSetup: () => {
+                                    const view = activeCodeThreadView;
+                                    setPreparationTarget({
+                                      projectId: actionsProject.id,
+                                      thread: {
+                                        threadId: view.thread.id,
+                                        checkoutId: view.checkout.id,
+                                        ...(view.checkout.head.kind === "none"
+                                          ? {}
+                                          : { head: view.checkout.head.oid }),
+                                      },
+                                    });
                                   },
                                 }
                               : {})}
+                            {...(activeMode === "code" &&
+                            activeCodeThreadView !== undefined &&
+                            String(activeCodeThreadView.thread.projectId) ===
+                              String(actionsProject.id)
+                              ? { defaultFolderLabel: "Active checkout" }
+                              : {})}
+                            {...(actionsProject.type === "code"
+                              ? {
+                                  mainFolder: actionsProject.binding.canonicalRoot,
+                                  extraFolders: (actionsProject.extraFolders ?? []).map(
+                                    (folder) => folder.canonicalRoot,
+                                  ),
+                                }
+                              : {})}
+                            onRun={(action, folder) =>
+                              void runProjectAction(actionsProject.id, action, folder)
+                            }
                           />
                         )}
-                      </OctantDialogPresence>
-
-                      <OctantDialogPresence>
-                        {preparationTarget === undefined ? null : (
-                          <WorktreePreparationDialog
-                            key={JSON.stringify(preparationTarget)}
-                            client={projectTerminalClient}
-                            runs={agentRunClient}
-                            target={preparationTarget}
-                            onClose={() => setPreparationTarget(undefined)}
+                        {serverActionsProject === undefined ? null : (
+                          <ProjectActionButtons
+                            actions={serverActionsProject.actions ?? NO_PROJECT_ACTIONS}
+                            {...(serverActionsProject.folder === undefined
+                              ? {}
+                              : { mainFolder: serverActionsProject.folder })}
+                            defaultFolderLabel={
+                              activeMode === "work" ? "Task folder" : "Active server checkout"
+                            }
+                            onRun={(action, folder) =>
+                              void runProjectAction(serverActionsProject.projectId, action, folder)
+                            }
                           />
                         )}
-                      </OctantDialogPresence>
-                      {actionsProject === undefined ? null : (
-                        <ProjectActionButtons
-                          actions={activeProjectActions}
-                          {...(activeMode === "code" &&
-                          activeCodeThreadView !== undefined &&
-                          activeCodeThreadView.checkout.kind !== "remote-root" &&
-                          String(activeCodeThreadView.thread.projectId) ===
-                            String(actionsProject.id)
-                            ? {
-                                onSetup: () => {
-                                  const view = activeCodeThreadView;
-                                  setPreparationTarget({
-                                    projectId: actionsProject.id,
-                                    thread: {
-                                      threadId: view.thread.id,
-                                      checkoutId: view.checkout.id,
-                                      ...(view.checkout.head.kind === "none"
-                                        ? {}
-                                        : { head: view.checkout.head.oid }),
-                                    },
-                                  });
-                                },
-                              }
-                            : {})}
-                          {...(activeMode === "code" &&
-                          activeCodeThreadView !== undefined &&
-                          String(activeCodeThreadView.thread.projectId) ===
-                            String(actionsProject.id)
-                            ? { defaultFolderLabel: "Active checkout" }
-                            : {})}
-                          {...(actionsProject.type === "code"
-                            ? {
-                                mainFolder: actionsProject.binding.canonicalRoot,
-                                extraFolders: (actionsProject.extraFolders ?? []).map(
-                                  (folder) => folder.canonicalRoot,
-                                ),
-                              }
-                            : {})}
-                          onRun={(action, folder) =>
-                            void runProjectAction(actionsProject.id, action, folder)
-                          }
-                        />
-                      )}
-                      {serverActionsProject === undefined ? null : (
-                        <ProjectActionButtons
-                          actions={serverActionsProject.actions ?? NO_PROJECT_ACTIONS}
-                          {...(serverActionsProject.folder === undefined
-                            ? {}
-                            : { mainFolder: serverActionsProject.folder })}
-                          defaultFolderLabel={
-                            activeMode === "work" ? "Task folder" : "Active server checkout"
-                          }
-                          onRun={(action, folder) =>
-                            void runProjectAction(serverActionsProject.projectId, action, folder)
-                          }
-                        />
-                      )}
-                      <NeedsYouProvider source={needsYouSource}>
-                        {/* Held here rather than with any Code pane: a thread's controller has to
+                        <NeedsYouProvider source={needsYouSource}>
+                          {/* Held here rather than with any Code pane: a thread's controller has to
         outlive the surfaces reading it, so closing a diff tab never tears down
         the turn that thread is running. */}
-                        <CodeThreadControllerSlots
-                          client={codeClient}
-                          navigationBootstrap={codeController.bootstrap}
-                          readCursorStore={codeReadCursorStore}
-                          registry={codeThreadControllers}
-                          threadIds={openCodeThreadIds}
-                        />
-                        <TrackerReferenceProvider ports={trackerReferencePorts}>
-                          <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
-                            <SidebarThreadTabsContext.Provider value={sidebarThreadTabs}>
-                              <ProjectIconProvider
-                                serverUrl={props.launch.serverUrl}
-                                windowCapability={props.projectWindowCapability}
-                              >
-                                <StableProjectThreadsProvider value={projectThreadsAccess}>
-                                  <NewTaskDraftsContext.Provider value={newTaskDrafts}>
-                                    <StreamRepliesContext.Provider
-                                      value={controller.settings?.streamReplies !== false}
-                                    >
-                                      <ReplyDetailSourceContext.Provider value={replyDetailSource}>
-                                        <ReplyDetailContext.Provider
-                                          value={replyDetailSource.reading.defaultLevel}
+                          <CodeThreadControllerSlots
+                            client={codeClient}
+                            navigationBootstrap={codeController.bootstrap}
+                            readCursorStore={codeReadCursorStore}
+                            registry={codeThreadControllers}
+                            threadIds={openCodeThreadIds}
+                          />
+                          <TrackerReferenceProvider ports={trackerReferencePorts}>
+                            <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
+                              <SidebarThreadTabsContext.Provider value={sidebarThreadTabs}>
+                                <ProjectIconProvider
+                                  serverUrl={props.launch.serverUrl}
+                                  windowCapability={props.projectWindowCapability}
+                                >
+                                  <ProjectIconPrefetch projectIds={projectIconIds} />
+                                  <StableProjectThreadsProvider value={projectThreadsAccess}>
+                                    <NewTaskDraftsContext.Provider value={newTaskDrafts}>
+                                      <StreamRepliesContext.Provider
+                                        value={controller.settings?.streamReplies !== false}
+                                      >
+                                        <ReplyDetailSourceContext.Provider
+                                          value={replyDetailSource}
                                         >
-                                          {/* The floor for every rendered link: panes that can host a
+                                          <ReplyDetailContext.Provider
+                                            value={replyDetailSource.reading.defaultLevel}
+                                          >
+                                            {/* The floor for every rendered link: panes that can host a
                     Browser layer their in-app open over this, and surfaces that
                     never can — dock tools, dialogs, Chat — still get the
                     external open and copy rather than a dead anchor. */}
-                                          <MarkdownLinkActionsContext.Provider
-                                            value={rootLinkActions}
-                                          >
-                                            <WorkKindChoiceContext.Provider value={workKindChoice}>
-                                              <ModelToolVerificationContext.Provider
-                                                value={providerController.verifyModelTools}
+                                            <MarkdownLinkActionsContext.Provider
+                                              value={rootLinkActions}
+                                            >
+                                              <WorkKindChoiceContext.Provider
+                                                value={workKindChoice}
                                               >
-                                                <HostFederationStackContext.Provider
-                                                  value={federation}
+                                                <ModelToolVerificationContext.Provider
+                                                  value={providerController.verifyModelTools}
                                                 >
-                                                  <PlanUsageProvider
-                                                    barStyle={
-                                                      controller.settings?.usageBars ?? "smooth"
-                                                    }
-                                                    client={
-                                                      launchedClients.providerUsageLimitsClient
-                                                    }
-                                                    instances={providerController.instances}
+                                                  <HostFederationStackContext.Provider
+                                                    value={federation}
                                                   >
-                                                    <HostPlatformContext.Provider
-                                                      value={hostPlatform}
+                                                    <PlanUsageProvider
+                                                      barStyle={
+                                                        controller.settings?.usageBars ?? "smooth"
+                                                      }
+                                                      client={
+                                                        launchedClients.providerUsageLimitsClient
+                                                      }
+                                                      instances={providerController.instances}
                                                     >
-                                                      <ServerCodeProjectsContext.Provider
-                                                        value={serverCodeProjects}
+                                                      <HostPlatformContext.Provider
+                                                        value={hostPlatform}
                                                       >
-                                                        <CodeDebugWindowProvider
-                                                          origin={
-                                                            new URL(props.launch.serverUrl).origin
-                                                          }
-                                                          windowId={String(props.launch.windowId)}
+                                                        <ServerCodeProjectsContext.Provider
+                                                          value={serverCodeProjects}
                                                         >
-                                                          <QuestionnaireDraftsProvider
-                                                            serverUrl={props.launch.serverUrl}
-                                                            windowId={props.launch.windowId}
+                                                          <CodeDebugWindowProvider
+                                                            origin={
+                                                              new URL(props.launch.serverUrl).origin
+                                                            }
+                                                            windowId={String(props.launch.windowId)}
                                                           >
-                                                            {shell}
-                                                          </QuestionnaireDraftsProvider>
-                                                        </CodeDebugWindowProvider>
-                                                      </ServerCodeProjectsContext.Provider>
-                                                    </HostPlatformContext.Provider>
-                                                  </PlanUsageProvider>
-                                                </HostFederationStackContext.Provider>
-                                              </ModelToolVerificationContext.Provider>
-                                            </WorkKindChoiceContext.Provider>
-                                          </MarkdownLinkActionsContext.Provider>
-                                        </ReplyDetailContext.Provider>
-                                      </ReplyDetailSourceContext.Provider>
-                                    </StreamRepliesContext.Provider>
-                                  </NewTaskDraftsContext.Provider>
-                                </StableProjectThreadsProvider>
-                              </ProjectIconProvider>
-                            </SidebarThreadTabsContext.Provider>
-                          </SidebarThreadDragContext.Provider>
-                        </TrackerReferenceProvider>
-                      </NeedsYouProvider>
-                    </OctantCommandProvider>
-                  </TodoListHostSettingsContext.Provider>
-                </SpeechCapabilityProvider>
-              </ThreadActivityRevisionsContext.Provider>
-            </ImageJobChangeRevisionContext.Provider>
-          </PluginThemesContext.Provider>
-        </FirstPartyPluginsEffectiveContext.Provider>
-      </GuardrailDefaultsContext.Provider>
+                                                            <QuestionnaireDraftsProvider
+                                                              serverUrl={props.launch.serverUrl}
+                                                              windowId={props.launch.windowId}
+                                                            >
+                                                              <PaneDockToolsContext.Provider
+                                                                value={paneDockTools}
+                                                              >
+                                                                {shell}
+                                                              </PaneDockToolsContext.Provider>
+                                                            </QuestionnaireDraftsProvider>
+                                                          </CodeDebugWindowProvider>
+                                                        </ServerCodeProjectsContext.Provider>
+                                                      </HostPlatformContext.Provider>
+                                                    </PlanUsageProvider>
+                                                  </HostFederationStackContext.Provider>
+                                                </ModelToolVerificationContext.Provider>
+                                              </WorkKindChoiceContext.Provider>
+                                            </MarkdownLinkActionsContext.Provider>
+                                          </ReplyDetailContext.Provider>
+                                        </ReplyDetailSourceContext.Provider>
+                                      </StreamRepliesContext.Provider>
+                                    </NewTaskDraftsContext.Provider>
+                                  </StableProjectThreadsProvider>
+                                </ProjectIconProvider>
+                              </SidebarThreadTabsContext.Provider>
+                            </SidebarThreadDragContext.Provider>
+                          </TrackerReferenceProvider>
+                        </NeedsYouProvider>
+                      </OctantCommandProvider>
+                    </TodoListHostSettingsContext.Provider>
+                  </SpeechCapabilityProvider>
+                </ThreadActivityRevisionsContext.Provider>
+              </ImageJobChangeRevisionContext.Provider>
+            </PluginContributionsProvider>
+          </FirstPartyPluginsEffectiveContext.Provider>
+        </GuardrailDefaultsContext.Provider>
+      </SubagentProvidersProvider>
     </AgentThreadAttributionProvider>
   );
 }

@@ -1,5 +1,5 @@
 import type { ArtifactLibraryListing } from "@octant/contracts/artifact-library";
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -123,14 +123,18 @@ describe("the artifact gallery", () => {
     expect(onFiltersChange).toHaveBeenCalledWith({ tab: "shared", query: "" });
   });
 
-  it("sends every filter to the host, and clears one by removing it", async () => {
+  it("sends every filter from one Filter menu, and clears one by removing it", async () => {
     const user = userEvent.setup();
     const { onFiltersChange } = view({
       filters: { tab: "all", query: "", kind: "chart" } as ArtifactLibraryFilters,
     });
 
-    await user.click(screen.getByLabelText("Filter by mode"));
-    await user.click(await screen.findByRole("option", { name: "Code" }));
+    await user.click(screen.getByRole("button", { name: "Filter, 1 active" }));
+    await user.click(
+      within(await screen.findByRole("group", { name: "Mode" })).getByRole("menuitemradio", {
+        name: "Code",
+      }),
+    );
     expect(onFiltersChange).toHaveBeenCalledWith({
       tab: "all",
       query: "",
@@ -138,36 +142,50 @@ describe("the artifact gallery", () => {
       mode: "code",
     });
 
-    await user.click(screen.getByLabelText("Filter by kind"));
-    await user.click(await screen.findByRole("option", { name: "Any kind" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "Any kind" }));
     // Cleared, not set to undefined: the query the host decodes has no room for
     // a field that is explicitly absent.
     expect(onFiltersChange).toHaveBeenLastCalledWith({ tab: "all", query: "" });
+  });
+
+  it("counts the active filters on the Filter button and resets them all, keeping search and tab", async () => {
+    const user = userEvent.setup();
+    const { onFiltersChange } = view({
+      filters: {
+        tab: "all",
+        query: "plan",
+        kind: "chart",
+        mode: "code",
+      } as ArtifactLibraryFilters,
+    });
+
+    expect(screen.getByRole("button", { name: "Filter, 2 active" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Filter, 2 active" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Reset filters" }));
+    expect(onFiltersChange).toHaveBeenLastCalledWith({ tab: "all", query: "plan" });
   });
 
   it("filters by the person's tags and clears the choice the same way", async () => {
     const user = userEvent.setup();
     const { onFiltersChange } = view({ filters: { tab: "all", query: "" } });
 
-    await user.click(screen.getByLabelText("Filter by tag"));
-    await user.click(await screen.findByRole("option", { name: "Launch (1)" }));
+    await user.click(screen.getByRole("button", { name: "Filter" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Launch (1)" }));
     expect(onFiltersChange).toHaveBeenLastCalledWith({
       tab: "all",
       query: "",
       tag: "Launch",
     });
-
-    await user.click(screen.getByLabelText("Filter by tag"));
-    await user.click(await screen.findByRole("option", { name: "Any tag" }));
-    expect(onFiltersChange).toHaveBeenLastCalledWith({ tab: "all", query: "" });
   });
 
   it("offers each Project with how many artifacts it holds", async () => {
     const user = userEvent.setup();
     view();
 
-    await user.click(screen.getByLabelText("Filter by Project"));
-    expect(await screen.findByRole("option", { name: "Storefront (1)" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Filter" }));
+    expect(
+      await screen.findByRole("menuitemradio", { name: "Storefront (1)" }),
+    ).toBeInTheDocument();
   });
 
   it("groups by Project only on the tab that asks for it", () => {
@@ -310,8 +328,28 @@ describe("choosing how the page reads", () => {
     await user.click(screen.getByRole("button", { name: "List view" }));
 
     expect(onViewChange).toHaveBeenCalledWith("list");
-    expect(document.querySelector(".artifact-row")).not.toBeNull();
+    expect(document.querySelector(".artifact-table-row")).not.toBeNull();
     expect(document.querySelector(".artifact-card")).toBeNull();
+  });
+
+  it("shows the list view as a table with a column head and each artifact's facts in its columns", () => {
+    renderView("list", { tab: "all", query: "" });
+
+    const head = document.querySelector(".artifact-table__head");
+    expect(head?.textContent).toBe("NameTagsSharedEdited");
+
+    const row = screen.getByRole("button", { name: "Launch plan" }).closest("li");
+    expect(row).not.toBeNull();
+    const cells = within(row as HTMLElement);
+    expect(cells.getByText(/Storefront/)).toBeInTheDocument();
+    expect(cells.getByText("Launch")).toBeInTheDocument();
+    expect(cells.getByText("Shared")).toBeInTheDocument();
+    expect(cells.getByText("Edited 3 hours ago")).toBeInTheDocument();
+    // Under the Edited head the cell does not say the word again.
+    expect(cells.getByText("3 hours ago")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByRole("button", { name: "Launch plan" })).toHaveAccessibleDescription(
+      /Storefront.*Shared/,
+    );
   });
 
   it("keeps grouped sections in the list view too", async () => {
@@ -504,6 +542,54 @@ describe("Claude pages in the artifact library", () => {
     expect(await within(page).findByText("Hero copy")).toBeInTheDocument();
   });
 
+  it("copies an HTML snapshot into a Canvas under the title the person confirms, and reports what was taken out", async () => {
+    const user = userEvent.setup();
+    const onCopyToCanvas = vi.fn(async () => ({
+      kind: "imported" as const,
+      card: { title: "Hero landing" },
+      frame: "static" as const,
+      dropped: [{ kind: "script-file" as const, count: 1, examples: ["https://cdn.example/x.js"] }],
+    }));
+    view({
+      listing: withClaude,
+      claudePageActions: { onCopyToCanvas: onCopyToCanvas as never },
+    });
+
+    const page = screen.getByRole("listitem", { name: "Claude page: Hero" });
+    await user.click(within(page).getByRole("button", { name: "Copy into Canvas" }));
+    const form = within(page).getByRole("form", { name: "Copy into Canvas" });
+    expect(form).toHaveTextContent("A new Canvas in Storefront");
+    const title = within(form).getByLabelText("Canvas title");
+    expect(title).toHaveValue("Hero");
+    await user.clear(title);
+    await user.type(title, "Hero landing");
+    await user.click(within(form).getByRole("button", { name: "Copy" }));
+
+    expect(onCopyToCanvas).toHaveBeenCalledWith(
+      expect.objectContaining({ toolCallId: "call-2" }),
+      "Hero landing",
+    );
+    expect(
+      await within(page).findByText("“Hero landing” is now a Canvas in Storefront"),
+    ).toBeInTheDocument();
+    expect(within(page).getByText("1 script file")).toBeInTheDocument();
+  });
+
+  it("offers no Copy into Canvas for a Markdown snapshot or where the snapshot cannot be read", () => {
+    const markdown = {
+      ...withClaude,
+      claude: withClaude.claude?.map((entry) => ({ ...entry, snapshot: "markdown" as const })),
+    } as ArtifactLibraryListing;
+    view({
+      listing: markdown,
+      claudePageActions: { onCopyToCanvas: vi.fn() },
+    });
+    expect(screen.queryByRole("button", { name: "Copy into Canvas" })).toBeNull();
+    cleanup();
+    view({ listing: withClaude, claudePageActions: {} });
+    expect(screen.queryByRole("button", { name: "Copy into Canvas" })).toBeNull();
+  });
+
   it("filters by source, Claude type and account, a Claude type replacing a Canvas kind", async () => {
     const user = userEvent.setup();
     const { onFiltersChange } = view({
@@ -511,20 +597,19 @@ describe("Claude pages in the artifact library", () => {
       filters: { tab: "all", query: "", kind: "chart" },
     });
 
-    await user.click(screen.getByLabelText("Filter by kind"));
-    await user.click(await screen.findByRole("option", { name: "Design (Claude)" }));
+    // One Filter menu holds every choice and stays open between picks.
+    await user.click(screen.getByRole("button", { name: "Filter, 1 active" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Design (Claude)" }));
     expect(onFiltersChange).toHaveBeenLastCalledWith({
       tab: "all",
       query: "",
       claudeType: "Design",
     });
 
-    await user.click(screen.getByLabelText("Filter by source"));
-    await user.click(await screen.findByRole("option", { name: "Claude" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "Claude" }));
     expect(onFiltersChange).toHaveBeenLastCalledWith(expect.objectContaining({ source: "claude" }));
 
-    await user.click(screen.getByLabelText("Filter by Claude account"));
-    await user.click(await screen.findByRole("option", { name: "Claude (work) (1)" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "Claude (work) (1)" }));
     expect(onFiltersChange).toHaveBeenLastCalledWith(
       expect.objectContaining({ account: "claude-work" }),
     );

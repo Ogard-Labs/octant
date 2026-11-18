@@ -13,8 +13,7 @@ export class DockModuleBoundary extends Component<
   override render() {
     return this.state.failed ? (
       <OctantAlert tone="warning">
-        This tool could not be displayed. Close and reopen it, or refresh the app if it remains
-        unavailable.
+        This tool could not load. Close and reopen it, or refresh the app if it stays unavailable.
       </OctantAlert>
     ) : (
       this.props.children

@@ -258,6 +258,7 @@ function openFixture(options?: {
   readonly responseFragments?: ReadonlyArray<string>;
   readonly verifyModelToolsOnFirstUse?: ChatServiceOptions["verifyModelToolsOnFirstUse"];
   readonly inputTransfer?: (directory: string) => Pick<ConversationInputTransfer, "prepare">;
+  readonly accountSessionCarrier?: ChatServiceOptions["accountSessionCarrier"];
   readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly nativeConversation?: boolean;
   readonly toolCatalogContinuation?: ProviderDriver["toolCatalogContinuation"];
@@ -734,6 +735,9 @@ function openFixture(options?: {
     ...(options?.verifyModelToolsOnFirstUse === undefined
       ? {}
       : { verifyModelToolsOnFirstUse: options.verifyModelToolsOnFirstUse }),
+    ...(options?.accountSessionCarrier === undefined
+      ? {}
+      : { accountSessionCarrier: options.accountSessionCarrier }),
     ...(options?.inputTransfer === undefined
       ? {}
       : { conversationInputTransfer: options.inputTransfer(dataDirectory) }),
@@ -3204,6 +3208,92 @@ describe("ChatService", () => {
     expect(service.sessionCompactionConversation(created.thread.id)[0]?.content).toContain(
       "A sign-in form with a red error.",
     );
+  });
+
+  it("gives a model that does not read a file's type the file's text in the message", async () => {
+    const textOnly = probeFixture({
+      models: [
+        {
+          id: decodeProviderModelId("model-a"),
+          displayName: "Model A",
+          contextLimit: 8_000,
+          reasoning: "supported",
+          inputModalities: ["text"],
+          options: [],
+          source: "discovered",
+          verification: "verified",
+        },
+      ],
+    });
+    const { service, fakeDriver } = openFixture({ probe: textOnly });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Files",
+      projectId: ids.project,
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const upload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "deploy.yaml",
+      mediaType: "application/yaml",
+      bytes: new TextEncoder().encode("replicas: 3\n"),
+    });
+    expect(upload.mediaType).toBe("application/yaml");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Is this right?",
+      attachmentIds: [upload.id],
+    });
+    const sent = fakeDriver.sentTurns[0];
+    expect(sent?.attachments).toEqual([]);
+    expect(sent?.prompt).toBe("Is this right?");
+    // The file's text goes with the person's message, marked as the file's.
+    const fileText = (sent?.context ?? []).find((block) => block.text.includes("deploy.yaml"));
+    expect(fileText).toMatchObject({ kind: "user-message" });
+    expect(fileText?.text).toContain(
+      'The person attached a file, "deploy.yaml" (application/yaml). Its text follows',
+    );
+    expect(fileText?.text).toContain("```\nreplicas: 3\n\n```");
+    // The file stays on the turn for the record.
+    expect(service.read(created.thread.id).turns[0]?.attachmentIds).toEqual([upload.id]);
+  });
+
+  it("refuses a binary file the model cannot read before any turn is journaled", async () => {
+    const { service, fakeDriver } = openFixture();
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Files",
+      projectId: ids.project,
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const upload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "bundle.zip",
+      mediaType: "application/zip",
+      bytes: new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0xff]),
+    });
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: service.read(created.thread.id).thread.version,
+        prompt: "Unpack this",
+        attachmentIds: [upload.id],
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "unsupported",
+        message: expect.stringMatching(/^bundle\.zip is not text.*Work or Code thread/),
+      },
+    });
+    expect(service.read(created.thread.id).turns).toEqual([]);
+    expect(fakeDriver.sentTurns).toEqual([]);
   });
 
   it("refuses an image Sees images cannot describe, with its reason, before any turn is journaled", async () => {
@@ -12084,6 +12174,99 @@ describe("handing a Chat conversation to a new provider session", () => {
         },
       });
       expect(fixture.fakeDriver.resumeInputs).toEqual([]);
+    });
+
+    it("continues the provider's own session in the new account when its files are carried there", async () => {
+      const carried: Array<{ readonly from: string; readonly to: string }> = [];
+      const fixture = openMoving({
+        nativeConversationFor: ownsConversation,
+        accountSessionCarrier: {
+          sameProvider: () => true,
+          carry: async (request) => {
+            carried.push({
+              from: String(request.fromInstanceId),
+              to: String(request.toInstanceId),
+            });
+            return {
+              status: "carried",
+              resumeCursor: { ...request.resumeCursor, value: "carried-session" },
+            };
+          },
+        },
+      });
+      const threadId = await answeredThread(fixture);
+      const firstSession = fixture.fakeDriver.sentTurns[0]?.sessionId;
+
+      await moveAccount(fixture, threadId, { actor: person });
+      await sendFollowUp(fixture, threadId);
+
+      expect(carried).toEqual([{ from: native, to: otherNative }]);
+      // The same session, resumed under the new account; nothing handed over as text.
+      expect(fixture.fakeDriver.startedSessionIds).toHaveLength(1);
+      expect(fixture.fakeDriver.resumeInputs).toHaveLength(1);
+      expect(fixture.fakeDriver.resumeInputs[0]?.resumeCursor.value).toBe("carried-session");
+      expect(fixture.fakeDriver.sentTurns[1]?.sessionId).toBe(firstSession);
+      expect(
+        fixture.fakeDriver.sentTurns[1]?.context?.some(
+          (block) => block.kind === "conversation-summary",
+        ),
+      ).toBe(false);
+      expect(lastAttempt(fixture, threadId)).toMatchObject({
+        providerInstanceId: otherNative,
+        handoff: {
+          reason: "account-move",
+          previousProviderInstanceId: native,
+          previousModelId: "model-a",
+          nativeSessionTransferred: true,
+        },
+      });
+    });
+
+    it("hands over as text and says why when the session cannot be carried to the new account", async () => {
+      const fixture = openMoving({
+        nativeConversationFor: ownsConversation,
+        accountSessionCarrier: {
+          sameProvider: () => true,
+          carry: async () => ({ status: "text", cause: "session-not-copied" }),
+        },
+      });
+      const threadId = await answeredThread(fixture);
+
+      await moveAccount(fixture, threadId, { actor: person });
+      await sendFollowUp(fixture, threadId);
+
+      expect(fixture.fakeDriver.resumeInputs).toEqual([]);
+      expect(lastAttempt(fixture, threadId)?.handoff).toMatchObject({
+        reason: "provider-switch",
+        previousProviderInstanceId: native,
+        nativeSessionTransferred: false,
+        accountMoveTextCause: "session-not-copied",
+      });
+    });
+
+    it("never tries to carry a session to another provider", async () => {
+      let tried = false;
+      const fixture = openMoving({
+        nativeConversationFor: ownsConversation,
+        accountSessionCarrier: {
+          sameProvider: () => false,
+          carry: async () => {
+            tried = true;
+            return { status: "text", cause: "provider-cannot-carry" };
+          },
+        },
+      });
+      const threadId = await answeredThread(fixture);
+      await moveTo(fixture, threadId, otherNative);
+      await sendFollowUp(fixture, threadId);
+
+      expect(tried).toBe(false);
+      const handoff = lastAttempt(fixture, threadId)?.handoff;
+      expect(handoff).toMatchObject({
+        reason: "provider-switch",
+        nativeSessionTransferred: false,
+      });
+      expect(handoff).not.toHaveProperty("accountMoveTextCause");
     });
 
     it("refuses a move nobody asked for, from the host itself or from an agent", async () => {

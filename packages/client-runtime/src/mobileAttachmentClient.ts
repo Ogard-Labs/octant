@@ -60,9 +60,10 @@ export function mobileAttachmentOffer(
     modalities.includes(attachmentModality(mediaType)),
   );
   const images = mediaTypes.some((mediaType) => mediaType.startsWith("image/"));
-  // Work and Code take a file of any type: the agent opens one its model
-  // cannot read natively by path, so the file picker offers every file.
-  const anyFile = mode !== "chat" && model !== undefined;
+  // Every mode takes a file of any type: in Work and Code the agent opens one
+  // its model cannot read natively by path, and Chat gives the model a text
+  // file as text, so the file picker offers every file.
+  const anyFile = model !== undefined;
   return {
     sources: [
       ...(images ? (["camera", "library"] as const) : []),
@@ -83,17 +84,13 @@ export interface MobileAttachmentUpload {
 
 /**
  * Refuses, before anything is sent, an attachment the mode's route would
- * refuse: an empty or oversized file, or a media type the mode does not take.
+ * refuse: an empty or oversized file, or one with no `type/subtype` media type.
  */
 export function refuseUnsendableAttachment(
   mode: MobileAttachmentMode,
   upload: Pick<MobileAttachmentUpload, "mediaType" | "bytes">,
 ): void {
-  const taken =
-    mode === "chat"
-      ? MODE_MEDIA_TYPES[mode].includes(upload.mediaType)
-      : ATTACHMENT_MEDIA_TYPE_PATTERN.test(upload.mediaType);
-  if (!taken) {
+  if (!ATTACHMENT_MEDIA_TYPE_PATTERN.test(upload.mediaType)) {
     throw new MobileInboxFailure("rejected", "This thread cannot take that kind of file.");
   }
   if (upload.bytes.byteLength === 0) {
@@ -149,7 +146,7 @@ async function answeredAttachment<T>(
 }
 
 /**
- * Upload a Chat attachment (image, PDF, or text) to its thread. Chat keeps the
+ * Upload a Chat attachment of any type to its thread. Chat keeps the
  * attachment as thread content once the host accepts it.
  */
 export async function uploadMobileChatAttachment(

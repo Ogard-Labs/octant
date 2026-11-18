@@ -461,6 +461,25 @@ held HTTP connections are closed and listener completion is awaited. Failures
 remain explicit, including startup and cleanup errors together. This reuses the
 desktop's existing quit deadline rather than adding a separate watchdog.
 
+A Browser page's favicon is the one image the desktop host fetches for the
+person's tab strip. On the page's `page-favicon-updated` the host takes the first
+http(s) icon address and fetches it once, through the page's own session (so it
+follows the profile and network rules the page already has, without the page's
+cookies), only from a site the context admits for the page itself. A redirect is
+refused, not followed: only the declared address is checked against the admitted
+sites, and an admitted site must not be able to send the host on to an address
+the page is kept from, such as one on this computer or its network. One fetch
+runs per tab; a newer declaration ends the older fetch, and a page that rewrites
+its icon address in a loop starts at most one fetch a second. The fetch has
+a 5 second timeout and a 64 KB cap, accepts only PNG, ICO, JPEG, GIF, WebP and SVG
+by sniffing the bytes (the declared type and the address are not trusted), and
+keeps the result as a `data:` URL in memory for the tab, refetched only when the
+icon address changes. Any failure leaves no icon, which the renderer draws as
+the globe. The icon is never written to disk, its address is never logged, and
+it rides only the person's preview read (the `faviconDataUrl` of the Browser
+observation, at most 90,000 characters, validated by the server before it is
+kept); it is never part of an agent's tool result.
+
 Accepted quit is terminal for host start and restart admission, including
 queued work. A start already in progress must close a late desktop-owned
 result; a late borrowed attachment is left alone. Confirmation remains
@@ -1012,13 +1031,15 @@ showed. A remembered origin covers Private pages only; a page in a Project or
 Personal Browser profile asks for each origin and remembers the pair (origin,
 profile), never one without the other
 ([Browser profiles](design/browser-profiles.md#the-agent-on-a-signed-in-page)).
-At Full access a Private page needs no site approval and may navigate across
-origins; a profile page keeps its site approval at every level, which the
-person can remember or widen to "Allow all sites in this profile"
-([the Full access rule](#security-and-authority); maintainer request,
-2026-11-12). Built: the agent tool opens that Private page with the any-site
-entry in its allowlist, which the browser service admits from no other caller
-and never beside a stored profile
+A Private page needs no site approval at any level and may navigate across
+origins, this computer and its network included (maintainer decision,
+2026-11-17; before, only at Full access); a profile page keeps its site
+approval at every level, which the person can remember or widen to "Allow all
+sites in this profile" ([the Full access rule](#security-and-authority)). A
+remembered origin therefore matters only on a profile page now. Built: the
+agent tool and the person's Browser open a Private page with the any-site
+entry in its allowlist, which the browser service admits alone and never
+beside a stored profile
 ([Browser for agents](design/browser-agent-tool.md#refusal-and-expiry-recovery)).
 Plan admits only the Browser operations that read the page already open in
 the thread's own Browser (`audit` among them) and `stop`, and refuses every
@@ -1643,7 +1664,7 @@ that serves several threads from one process (Codex, OpenCode) reports
 Chat, its Stop still waits for the runtime to confirm the turn ended before the
 attempt reads `cancelled`; if no confirmation arrives within ten seconds, the
 attempt is recorded `interrupted` with `stop-unconfirmed` ("Stop was not
-confirmed. The provider may still be running this response."), which frees the
+confirmed. The provider may still be working."), which frees the
 thread without claiming the work stopped. While a Stop is unanswered the
 composer's Stop reads "Stopping response…" and cannot be pressed again. For a provider that supports it, a
 Stop keeps the attempt running until the runtime really ends it, so a Stop that
@@ -2622,10 +2643,13 @@ now also move back in place. Chat's differences are under **Chat** below.
   rewind still holds them, so it is never resumed as it stands. A provider
   that reports `sessionRollback` continues a copy of its own session cut back
   at the last kept turn (`rewind-native-session`): the Octant Harness, whose
-  transcript copy is the one a harness fork makes, and Claude Code, whose
+  transcript copy is the one a harness fork makes; Claude Code, whose
   Agent SDK copies a session through a message (`forkSession` with
-  `upToMessageId`) at the anchor the kept turn's completion journaled (see
-  [native session anchors](#native-session-anchors)). Every other provider
+  `upToMessageId`); OpenCode, through its own fork route; and Pi, whose
+  session file is copied through the anchor entry as its own fork copies one.
+  Each cuts at the anchor the kept turn's completion journaled (see
+  [native session anchors](#native-session-anchors)) and leaves the source
+  session and the files alone. Every other provider
   reports it unsupported in its capability report, and the next turn starts a
   fresh session with a disclosed text handoff of the kept turns (`rewind`),
   journaled before the prompt is sent, as a provider switch's is. A provider
@@ -2725,7 +2749,12 @@ rust-v0.162.1) leaves the copy loaded in the app-server that made it, and a
 thread loaded there is refused by another app-server's resume until that
 process ends, so the copy would have to be made on the lease that resumes
 it, inside the resume, after the host can still fall back to a text
-handoff. OpenCode and ACP agents report no anchor and keep the handoff. Rewinding only the
+handoff. OpenCode's copy ends at the last assistant message the kept turn
+reported, through its own fork route, and Pi's at the last entry it wrote,
+copied into a new session file; both leave the source untouched, and neither
+uses the runtime's own in-place way back (OpenCode's revert also puts files
+back from its own snapshots). ACP agents report no anchor and keep the
+handoff. Rewinding only the
 conversation changes nothing but the thread's own record, so it is gated as a
 read (it runs in Plan and asks for no approval); any rewind that puts files
 back is gated as the in-place restore it performs.
@@ -5450,6 +5479,17 @@ flowchart LR
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
   verify are `unknown`; the map never carries secret values.
+- **Compiled code cache.** The host and the desktop app keep V8's compiled
+  code in a `compile-cache` folder inside the host data folder (for the
+  desktop, the folder its `main` later makes `userData`, resolved by the entry
+  without creating anything, so a test data folder never writes to the default
+  one; skipped on Windows), listed in
+  the host data map. It is enabled only when that data folder already exists,
+  is owned by the current user and is writable by nobody else, and only when
+  `compile-cache` itself is owned by the user, not a symlink and not writable
+  by others; neither process creates the data folder for it, and it is never
+  placed inside the signed app bundle.
+
 - **Streamed output and a full disk.** Text and reasoning deltas are exempt
   from a turn's event budget, so each turn also has a streamed-output budget
   of 32 MiB (`MAX_TURN_STREAMED_OUTPUT_BYTES`, far past any real answer). A
@@ -5742,15 +5782,22 @@ flowchart LR
   - On replay a clear deletes the thread's ingestion rows and zeroes its taint
     row, and the projection ignores an event at or below the last one it
     applied for that thread. A journal without the event replays unchanged.
-  - The surface is one notice in the composer of a Chat, Work, or Code thread
-    that a local window or, not built yet, a paired device has open, drawn only
-    while the thread is marked, with a
-    Review action. The notice reads the mark when the thread opens and again
-    when a turn starts or settles. Review lists the sources in plain words
-    with their counts and times (a row projected before the host recorded
-    times shows none), says that clearing removes nothing the model read and
-    that the next outside content marks the thread again, and holds Clear the
-    mark back while a turn is running or messages are queued. Every refusal
+  - The surface is two places for the thread a local window or, not built yet,
+    a paired device has open, drawn only while the thread is marked (a
+    maintainer's choice, 2026-11-14). In the thread's Environment panel, of
+    every kind that has one, an "Outside content · read N times" row with a
+    Review action; its globe takes the warning ink only while the mark has
+    effect, that is below Full access. In the composer's row, a 16px globe in
+    the warning ink with no words immediately before the mode control, only
+    below Full access, named "This thread read outside content, so risky
+    actions ask first. See Environment." Neither opens a popover: both
+    open the one Review dialog. The mark is read when the thread opens and
+    again when a turn starts or settles. Review ("Outside content in this
+    thread") lists the sources in plain words with their counts and times (a
+    row projected before the host recorded times shows none), says that
+    clearing says the person checked it, undoes nothing the model read, and
+    that new outside content marks the thread again, and holds Clear mark back
+    while a turn is running or messages are queued. Every refusal
     is shown as its own sentence, and a `stale` one reloads the list. A client
     that is not on a loopback host (`externalContentAvailable`) neither
     reads nor draws it. Approval prompts do not yet say that the mark is why
@@ -6893,13 +6940,11 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
     `.vibe/hooks.toml`, `.vibe/plugins`, `.vibe/tools`, and `.vibe/agents`.
     OpenCode's `opencode.jsonc`, `opencode.json`, `.opencode/opencode.jsonc`,
     and `.opencode/opencode.json` (maintainer decision, 2026-11-14). Codex
-    lists none, because Octant's trust loads none of its Project
-    configuration (Codex's own folder trust decides it), and any other
-    provider answers none. Decided (maintainer decision, 2026-11-16; designed,
-    not built): in a Project trusted for Codex, outside Plan and Strict, Codex
-    loads its own Project configuration as it does on its own, and Codex then
-    lists its entries here
-    ([Provider runtimes: Codex](design/provider-runtimes.md#codex)).
+    lists `.codex/config.toml`: in a Project trusted for Codex, outside Plan
+    and Strict, Codex loads its own Project configuration as it does on its
+    own (maintainer decision, 2026-11-16; built,
+    [Provider runtimes: Codex](design/provider-runtimes.md#codex)). Any other
+    provider answers none.
     Untrusted Project code shows one quiet notice card above the thread's
     composer ([Thread view](design/thread-view.md#project-trust-prompt)):
     **Trust for <provider>** sends the same `change-project-native-providers`
@@ -7021,7 +7066,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   snapshot stays. Claude Code 2.1.301 can also report
   `rate_limits_available: false` in that cold process. For a subscription
   account this means unavailable usage, not that a plan does not apply.
-  Only explicit API-key authentication establishes the no-plan state.
+  Only explicit API-key or gateway authentication establishes the no-plan state.
   For Claude and Codex, Octant never reads a token or credential file
   to fetch those numbers, and never calls a vendor usage endpoint
   itself. Each account keeps its own snapshot, keyed by
@@ -7036,7 +7081,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   refresh keeps the last snapshot and shows its age. Every provider
   instance's last plan-limit reading, whatever its source, is also saved
   in `providers/usage-readings.json` (owner-only, listed in the host data
-  map), so the usage rings show it after a host restart as a past
+  map), so the rail's account face shows it after a host restart as a past
   observation with its original `observedAt`. A restored reading is
   never refreshed by starting a provider: the launch pass and the
   schedule leave it as it is, and the first fresh evidence (a turn's
@@ -7077,7 +7122,12 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   two logins cannot share one profile without sharing credentials and
   session history. The implicit first subscription account keeps the
   host profile (`~/.claude`, or the inherited host overlay). Every
-  extra account, and every API-key account, uses its assigned leaf.
+  extra account, and every API-key or gateway account, uses its assigned leaf.
+  A gateway account (maintainer decision, 2026-11-18; built) launches with
+  `ANTHROPIC_BASE_URL` set to its own gateway address and
+  `ANTHROPIC_AUTH_TOKEN` set to its broker-resolved token, under Strict and
+  outside it, and no other account receives either
+  ([Claude gateway accounts](design/model-endpoints.md#claude-gateway-accounts)).
   A leftover custom directory keeps working until the person
   explicitly re-assigns it; Octant never silently points that login
   at another path. Removing an account leaves its assigned directory
@@ -7086,9 +7136,18 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `~/.codex-accounts`, and
   deleting it is the person's step. An accent is presentation only:
   changing it alone neither stops a running session nor resets the
-  account's readiness. Sign-in is the unmodified CLI command in a
-  terminal for that account. Connection check uses what the CLI or
-  SDK reports. Two instances of the same driver cannot share one
+  account's readiness. Sign-in is the unmodified CLI command for that
+  account, run under its directory: by the person in their own
+  terminal (`octant account sign-in <account>` runs it there), or by
+  the host from the account's Settings card. There the host starts
+  the command with no terminal, the CLI opens the browser and keeps
+  its login as it always does, and Octant reads only the sign-in page
+  address the CLI prints and hands a code the person pastes on to the
+  CLI's input. One sign-in runs per account; it stops after ten
+  minutes, when another starts, and when the host exits. An extra
+  Claude account's sign-in gets the account's isolated environment,
+  so an inherited Claude credential cannot sign it in. Connection
+  check uses what the CLI or SDK reports. Two instances of the same driver cannot share one
   effective state directory after trailing-slash identity, including
   when a host overlay points two instances at the same existing
   directory. A relative inherited overlay refuses only that implicit
@@ -7107,9 +7166,38 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   A thread stays on its instance until the person moves it: the thread's
   **Move to account…** action (Chat's thread menu; the thread info panel in
   Work and Code) or the model picker moves it to another account, and the
-  next turn starts there with the disclosed handoff of
-  [Handoffs between providers](design/decisions.md#handoffs-between-providers-forks-and-branches),
-  whose marker names the new account. The host accepts the move only from the
+  next turn starts there. A move between two accounts of the same provider
+  keeps the provider's own session (maintainer decision, 2026-11-17, which
+  reversed the text-only rule for these moves: the person moving between
+  their own accounts expects the conversation to go on as it was, with its
+  tool activity and prompt cache). The first turn on the new account, before
+  the session decision, has the new account's driver copy, through the
+  provider-neutral `nativeSessions.carry` port of the provider SDK, exactly
+  that session's files from the old account's directory (`CLAUDE_CONFIG_DIR`, default `~/.claude`) into the new
+  one's: `projects/<folder>/<session>.jsonl`, the session's own folder beside
+  it and `file-history/<session>/` when present, the folder named after the
+  canonical working directory so it is the same for both accounts on one
+  host. The new account's driver then takes the copy up as it takes up any
+  session begun outside Octant (`nativeSessions.adopt`), and the turn resumes
+  it through the ordinary exact-resume checks; the handoff record is
+  `account-move` (Chat and Work) or `account-move-native-session` (Code),
+  with `nativeSessionTransferred: true` and the account it came from, so the
+  marker still names the change. The copy runs in the host process, never in
+  an agent's sandbox, so no sandbox profile grants one account's directory to
+  another's session. It refuses a session id that is not a UUID, a symbolic
+  link anywhere below either account directory, a file resolving outside its
+  account, account directories inside one another, and a differing file
+  already in the new account (an identical one is left alone, so a repeated
+  move does not refuse itself); it lists nothing but that session's three
+  paths, skips sign-in and settings file names, writes files `0600` and
+  folders `0700`, and removes what it wrote when it or the adoption fails.
+  Codex is not carried: its rollout file is not the whole of a thread's
+  record and its driver has no way to take a thread up in another account.
+  When the copy cannot be made (an account removed, a provider that cannot
+  carry, a refused copy or adoption), the turn carries the disclosed handoff of
+  [Handoffs between providers](design/decisions.md#handoffs-between-providers-forks-and-branches)
+  with the reason (`accountMoveTextCause`), and a move to another provider
+  always does. The host accepts the move only from the
   person, at a window or on a device they paired, and only while no turn runs
   and no model pool is on (the pool names the current account); a move from a
   routine, the host itself or an agent is refused. The person may also set,
@@ -7155,7 +7243,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   ([Coordinator threads: Running workers](design/coordinator-threads.md#running-workers)).
   Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
-  Code or Codex CLI instance is created enabled; every other detected runtime
+  Code or Codex instance is created enabled; every other detected runtime
   is created disabled. Discovery never installs or updates runtimes, never
   toggles an existing instance, and never treats enablement as readiness. A
   runtime created from a scan saves the launcher the scan examined, not the
@@ -7167,6 +7255,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   switch) to say "Update available"; only the person's click runs the
   provider's own updater, per
   [Runtime updates](design/provider-runtimes.md#runtime-updates).
+- **Default account names.** Discovery names an account for its runtime ("Codex",
+  "OpenCode"). An account saved earlier as exactly "Codex CLI" on the codex driver or
+  "OpenCode CLI" on the opencode driver is renamed once when the host starts, through
+  the same rename command and `provider.instance-renamed@1` event a person's edit
+  produces, after the provider projection is read and before a scan registers any
+  account. Any other name is never touched, an account that already has a rename in its
+  journal keeps its name (so renaming it back sticks), a name another account holds is
+  skipped, and a refusal is logged and never fails startup.
 - **Provider catalog.** Settings › Providers & Models › Provider catalog lists the bundled
   provider-driver packages (`bundledProviderDriverCatalog` in
   `@octant/plugin-host`). Each entry is validated against the public
@@ -7416,10 +7512,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   discovery descriptor, the bundled plugin and its identity, picker and
   Settings labels, and the Settings create and configuration forms. A new
   agent adds its row, its runtime profile, its logo, and conformance evidence.
-  Decided (maintainer decision, 2026-11-16; designed, not built): a person may
-  also add an agent from the public ACP registry or their own local command
-  through the plugin model, so a reviewed row is no longer the only way an ACP
-  agent runs ([Provider runtimes: Any ACP agent](design/provider-runtimes.md#any-acp-agent)).
+  Decided (maintainer decision, 2026-11-16; built except the probe-next
+  profiles): a person may also add an agent from the public ACP registry or
+  their own local command through the plugin model, so a reviewed row is no
+  longer the only way an ACP agent runs. Every added agent shares one driver
+  kind, `acp-agent`, outside the rows, admitted by one bundled plugin; which
+  agent an instance runs, how it was installed and whether it is trusted are
+  its configuration, so the vocabulary stays closed
+  ([Provider runtimes: Any ACP agent](design/provider-runtimes.md#any-acp-agent)).
   The row never widens the vocabulary to `string`: an unlisted kind fails to
   decode, a configuration must name the same agent as its instance or command
   and a posture its row lists, and every capability is still the one the
@@ -7559,8 +7659,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   renewal, the way the AWS CLI reads it (`AWS_CONFIG_FILE` and
   `AWS_SHARED_CREDENTIALS_FILE` honoured): shared-file keys, the single
   sign-on token `aws sso login` cached under `~/.aws/sso/cache`, then
-  `credential_process` run through the platform shell; a profile that only
-  assumes a role is refused as unsupported (not built yet). A key pair goes
+  `credential_process` run through the platform shell. A profile with a
+  `role_arn` first assumes that role at the token service (built): from its
+  `source_profile`'s credentials (chained up to five roles), from the
+  broker's environment for `credential_source = Environment`, or with its
+  `web_identity_token_file`, honouring `role_session_name`, `external_id`,
+  `duration_seconds` and `region`; the broker signs `AssumeRole` itself, and
+  a role asking for an MFA code is refused, as Connect has no place to type
+  one. A key pair goes
   to the broker's `/v1/cloud-iam/connect` route once and is kept there; the
   card warns that long-lived keys work until revoked. Either grant is cloud
   material the raw resolve refuses, and the server stores only the pointer
@@ -7800,7 +7906,7 @@ when the session opens (Claude Code 2.1.287 answers `getContextUsage` with
 of a 200000 window), and the Claude mapper stamps it on every usage report of the
 session together with the input the latest request read as `contextTokens`. The
 runtime's separate `autocompact_state` message is only sent to remote workers, so
-the host does not depend on it. Codex CLI and every other runtime report no
+the host does not depend on it. Codex and every other runtime report no
 point and stay `unknown`.
 
 **Provider capacity.** One in-memory `ProviderCapacityScheduler` per host admits
@@ -8937,8 +9043,9 @@ watched has ended.
   If the compaction-state read fails while a compaction runs, the window keeps
   the running answer and asks again, more slowly each time; after five failed
   reads in a row (a host that went away, or a window that lost the thread) it
-  stops holding send and reads "Compaction state unknown: the host stopped
-  answering. It may still be compacting, and refuses a send until it ends."
+  stops holding send and reads "The host stopped answering, so compaction
+  status is unknown. It may still be running, and sending is blocked until it
+  ends."
 - The result line, in the popover and the inspector (and on the
   timeline divider): "Compacted · 41.2K freed · summary by Codex", "Compacted ·
   freed amount shows after the next reply · summary by Codex", "Compacted ·
@@ -9280,7 +9387,12 @@ filesystem, Project, execution or native-writer authority.
 **Provider-switch handoff (Code).** A Code turn whose last recorded session
 belongs to another provider instance on the same checkout starts a new session
 on the thread's current provider; it never resumes or names the previous
-session to the new provider. The turn carries a disclosed text handoff built by
+session to the new provider. The exception is a person's move to another
+account of the same provider whose session can be carried (see **Move to
+account** under [Providers](#providers)): the turn resumes the copied session
+under its new session id and journals `account-move-native-session` instead of
+the text below, and a recovered start that disclosed that and can no longer
+carry it refuses. The turn carries a disclosed text handoff built by
 the same selector that admits a child's parent context
 (`admittedParentCodeContext`, purpose `provider-switch`): the thread's own
 accepted prompts and completed replies, at most 24 blocks of 4,000 characters
@@ -9319,7 +9431,8 @@ fork yet) carries the source's conversation through the fork point, never
 past it. When the fork's provider instance and model can take up the
 source's own session there (the Octant Harness, `seedCodeForkHarnessSession`,
 below; Claude Code when the fork works in the source's own folder, since its
-sessions are kept per folder, see [native session anchors](#native-session-anchors)),
+sessions are kept per folder, see [native session anchors](#native-session-anchors);
+OpenCode and Pi in the source's own folder and mode, through their own fork),
 the fork resumes that copy and is sent no text. Otherwise, including
 every fork onto a provider instance other than the one that wrote the fork
 point, it reads the source through the same selector (purpose `fork`,
@@ -9343,14 +9456,18 @@ fixed `false` native-session and hidden-reasoning values; or reason
 <a id="native-session-anchors"></a>**Native session anchors.** A runtime's
 `completed` event may name where the turn ends in its own session
 (`nativeAnchor`): Claude Code reports the transcript id of the turn's last
-assistant message, Codex its turn id. The host journals it on the turn's
+assistant message, Codex its turn id, OpenCode its last assistant message's
+id, and Pi the id of the last entry it wrote to the session file. The host journals it on the turn's
 completed `operation-state` (an additive field, absent from older turns).
 A driver that copies its own session offers `forkSession` in the provider
 SDK; the host asks it, for a fork's first session or a rewound thread's next
 one, with the kept turn's recorded session and anchor, and resumes the copy
 it returns. The driver returns nothing when the copy cannot be exact: Claude
 Code copies only for the source's own folder, mode and sign-in, because
-resume looks for a session under its folder in the account's directory. The
+resume looks for a session under its folder in the account's directory;
+OpenCode forks through its own fork route, and Pi copies the session file as
+its own fork does, each only for the source's own folder and mode (Pi also
+its model) ([detail](design/provider-runtimes.md#opencode-subagents-strict-and-sessions)). The
 copy is made before the prompt is sent, so any refusal or failure falls back
 to the text handoff, and the journal, file checkpoints and transcript are
 the same either way: the rewind's own record still removes the turns, and
@@ -11546,7 +11663,7 @@ launch's tool bridge through the loopback relay.
 (`skill-instructions`, `mcp-server`, `mcp-tool`, `mcp-prompt`, `mcp-resource`,
 `hook`, `app`, `agent`, `apple-development-adapter`, `board`, `integration`,
 `ui-surface`, `appearance-pack`, `preview-viewer`, `provider-driver`, `replica-store`,
-`desktop-provider`, `theme`, `language-server` and `debug-adapter` (Code only)), composer addressing
+`desktop-provider`, `theme`, `ground`, `language-server` and `debug-adapter` (Code only)), composer addressing
 (`@plugin`, `@plugin/component`, `$skill`), and the activation ladder. The
 manifest and component schemas themselves (`ExtensionPackageManifest`,
 component kinds, declared capabilities, and renderer contribution points)
@@ -11604,6 +11721,18 @@ Project, thread, and provider policy allow it. Any other state — `not-installe
 `incompatible`, `mode-prohibited`, `project-prohibited`, `thread-prohibited`,
 `host-prohibited`, `stale-catalog-epoch`, `broken`, `draining` — contributes no
 prompt, schema, tool, route, model, or capability.
+
+**Any ACP agent.** An agent a person adds from the public ACP registry or as
+their own local command takes the same three steps, with no one-step form:
+**Install**, **Trust** (which shows what trusting grants and whether the
+download was unverified) and **Turn on**, each its own journaled command that
+the host decides and refuses out of order, and that only a client acting as
+the host's own person may send. A registry agent is named by its registry id
+alone; its package, release, archive address and checksum come from the
+host's listing. The install runs nothing it fetched. Until trusted, the
+agent runs in Octant's sandbox at every level with nothing remembered and
+none of Octant's tools
+([Provider runtimes: Any ACP agent](design/provider-runtimes.md#any-acp-agent)).
 
 **npm packages.** A person may type an npm package name, with an optional
 version, range, or dist-tag, in Marketplace or as
@@ -11905,8 +12034,9 @@ that is not yet effective for the thread is refused and never reaches the model.
   confined launch reaches only the Project's skills. No launch sets
   `OPENCODE_DISABLE_CLAUDE_CODE` or `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT`, so
   OpenCode reads `CLAUDE.md` where it finds no `AGENTS.md`, as it does on its
-  own, and running as itself OpenCode 1.x also finds the person's global
-  `AGENTS.md`, linked into its private config folder: instruction files are
+  own, and running as itself OpenCode 1.x, and 2.x outside Strict, also
+  finds the person's global `AGENTS.md`, linked into its private config
+  folder: instruction files are
   text with no authority (built;
   [detail](design/provider-runtimes.md#key-providers)). Built for
   Mistral Vibe: the launch leaves `VIBE_SKILL_PATHS` and
@@ -13566,6 +13696,25 @@ selections, so turning the plugin back on restores the theme. _Rationale:_ rewri
 would lose the person's choice to a reversible switch, and the default is
 already what a missing preset draws.
 
+**Character grounds as plugin contributions** (maintainer request, 2026-11-18;
+built). A plugin may also offer character grounds as data only: a component of
+kind `ground` whose `ground` field holds `characterSet` and optionally
+`characterDensity`, `characterSpeed` and `characterPattern`, validated by the
+same schemas as the person's stored ground (`@octant/contracts/theme`). Like a
+theme, the component declares no capability, entry point, configuration or
+content reference; a `ground` field on any other kind, a missing one on this
+kind, a colour, an image, an emoji set, a speed past 100, or any other field is
+refused at decode. `@octant/plugin-host/grounds` lists the grounds of
+effective components only (installed, trusted and enabled at the plugin and
+the component), under a host-assigned id. The renderer reads them from the
+same extension snapshot as the themes and shows them in the Customize fold's
+starter menu under "From plugins". Picking one copies its values into the
+person's own ground and saves once, so the saved ground never refers to the
+plugin: switching the plugin off or removing it takes its grounds out of the
+menu and leaves a copy already picked as it is. _Rationale:_ a saved reference
+would dangle, and a theme declaration that also carried a ground would tie a
+field to a set of colours.
+
 The first-party manifests have one definition,
 `@octant/plugin-host/first-party-plugins`, which the server and the renderer
 both read; it also marks which of them are switchable. A switchable plugin's
@@ -13937,7 +14086,10 @@ mechanisms are:
     agent in the person's name
     ([Context and usage accounting](#context-and-usage-accounting), _Approvals_). Not built yet: the limits the owning
     sections name are still constants.
-  - **Opt-in sandbox at Full access.** A Code or Work thread may set
+  - **Legacy opt-in sandbox at Full access.** The retained compatibility
+    choice described here predates the shared Strict preference below. New
+    controls use Strict; existing `fullAccessSandbox` records keep this meaning
+    until the person explicitly replaces them. A Code or Work thread may set
     `fullAccessSandbox`. Prompts stay off exactly as at Full access, and the
     thread keeps the confinement the guarded levels have:
     - **Which runtimes.** Codex, whose app-server stays inside Octant's
@@ -14006,11 +14158,11 @@ mechanisms are:
       (`defaultFullAccessSandbox`, set with the Project's mode through the
       `change-*-project-permission-mode` commands), else Settings'
       (`defaultFullAccessSandbox` on Code and Work settings), else off
-      (`defaultFullAccessSandboxFor`). In the app: "Keep the sandbox" under
-      Full access in a thread's mode picker (disabled, with the reason, on a
-      runtime that cannot keep it), "Keep the sandbox at Full access" in
-      Settings › Code › Access and Settings › Work, and "Sandbox at Full
-      access" beside a Project's default mode. In the terminal: `octant
+      (`defaultFullAccessSandboxFor`). The app now shows this retained value
+      as **Legacy sandbox** or **Full access only (previous choice)** in the
+      shared Strict control. Explicit Strict preferences take precedence and
+      new threads do not rematerialize the old default after Strict is chosen.
+      In the terminal: `octant
 settings sandbox on|off [--work]`. Only a window on this host or a device
       its person paired can turn
       it off for a Full access thread, because that change names Full access,
@@ -14019,6 +14171,173 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
       Project root succeed, and writes outside it and reads of `HOME` files are
       denied. A live Codex turn under the external-sandbox mapping is a
       maintainer check.
+  - **Configurable protections within Strict (opt-in maintainer preview).**
+    Protection is independent of autonomy. The shared **Strict** preference
+    resolves thread → Project → Settings → off. Configure protections edits the
+    supported policy within Strict; saving never enables Strict. With Strict
+    off, saved configuration stays inactive and adds no approval asks. The
+    provider-native behavior and the migration of other Octant limits remain
+    governed by **Octant adds no restrictions of its own unless Strict is on**.
+    Plan remains read-only and Chat has no folder or command escape.
+
+    Strict restores the standard bundle at every access level. A turn with no
+    custom configuration receives the standard policy rather than bypassing
+    backend admission. Full access · Strict still permits routine work without
+    redundant prompts, but mandatory asks remain. In particular, Claude's
+    native command escape asks the person for each command, including at Full
+    access. Its question discloses that the command leaves the command sandbox
+    and can access personal files and host services. A reviewer cannot answer
+    it and no remembered answer authorizes another escape. Denied or unanswered
+    requests remain refused. No host executor, unsandboxed retry or wider-session
+    restart implements that exception.
+
+    Previous `fullAccessSandbox` choices retain their Full-access-only meaning
+    until explicitly replaced by Strict or Off. Previous custom-policy records
+    retain their opt-in protection. New explicit preferences take precedence;
+    replay and rollback do not silently drop a saved boundary. Full-access
+    Strict choices retain the legacy compatibility bit; Settings and Project
+    defaults dual-write it so an older reader retains that Full-access wall.
+    Explicit Off clears the compatibility choice. The picker marks
+    retained protection **Legacy sandbox**, rather than claiming the full Strict
+    bundle. Settings and Project controls show the previous choice alongside
+    On/Off; Project also offers inheritance. Access level changes do not change
+    the independent Strict preference. Recorded Network limits are never reset,
+    and new Strict configuration cannot bypass them with unrestricted network.
+
+    The host journals typed versioned Settings and Project policies outside
+    agent-writable roots; session grants remain in memory. Canonical machine,
+    Project, checkout, extra-folder and inode identities bind saved grants.
+    Every turn receives an immutable policy/network snapshot and a new session
+    identity before acquisition. Every launch and host-brokered call revalidates
+    its authority. Helpers intersect their parent's grants and cannot move to a
+    broader workspace. Process, provider and language/debug reuse keys include
+    the policy and scope. Changed settings are requested values, not changes to
+    a running OS wall. The panel and picker report the running policy separately;
+    stop the turn and begin a new run to apply pending changes. Tightening and
+    relaxation both use that safe boundary.
+
+    Cleanup revokes host-broker authority, closes scoped proxies, terminates
+    owned descendants and verifies cleanup. Uncertainty retains receipts and
+    blocks new admission. Temporary grants expire at scope end/restart, not just
+    when an ordinary child exits. Brokers never retry without confinement.
+    Kernel-owned scopes cover detached descendants, not only a process group.
+
+    Personal Project terminals own an admitted policy and broker lifetime;
+    Work terminals also inherit their thread's current protection ceiling.
+    Configured folder grants and network policy reach the actual PTY launcher,
+    including at Full access under Strict. Their proxy grants no inference
+    endpoints, and closing the terminal revokes it and verifies the native
+    scope. Failed cleanup remains retryable and blocks replacement admission.
+    An explicit Strict-off terminal runs natively; Plan cannot start a terminal.
+
+    Settings › Permissions › **Configure protections**, thread pickers and
+    Project defaults open the same panel. It shows actual Strict/legacy state,
+    provenance, active versus pending policy, full folder paths and supported
+    read/write grants. Expanded details separate toolchain reads, private scratch,
+    cache and account exceptions. An inline grouped denial describes its exact
+    resource, operation and session/Project impact before a trusted grant. Stable
+    codes and rule IDs return to the model; repeated denials do not end a turn.
+    Only a local person or an authenticated device paired by that person may
+    change custom policies or grants, or turn Strict off. The shared activation
+    rules allow an authenticated restricted device to turn Strict on; an agent
+    grant cannot change protection. Agents, model output, repository manifests and hub-only
+    devices cannot grant it. Journals preserve the actor; bounded audit records
+    omit commands, raw paths, contents and secrets.
+
+    Direct file tools use handle-bound operations. Launch planners cover shell,
+    package scripts, builds/tests, Git, terminals and supported provider tools.
+    A route without the required enforcement refuses before effects; this does
+    not claim that remote connector or provider-cloud effects are locally
+    confined. Withheld tools and approval rules are disclosed separately from
+    OS enforcement. Protected-path denials take precedence over folder grants.
+
+    Network policy reuses recorded Safe networks, or blocks tool networking with
+    an explicit separately brokered provider/control channel. Narrow exceptions
+    identify the destination and port. DNS pinning, redirects, IPv4/IPv6,
+    private/local endpoints, authentication and scope expiry remain enforced by
+    the proxy. Blocking host services also denies ambient Unix sockets and
+    io_uring routes on Linux. Private fixed-purpose runtime control relays are
+    separate authorities, not general proxies. Proxy loss never opens a direct
+    route. Authentication exceptions retain their existing account scope.
+
+    Explicit local-service exceptions name `127.0.0.1` or `::1` and one port.
+    They require ambient host-service blocking and use the authenticated scoped
+    proxy. Names, ranges, Unix sockets and neighboring ports are not grants;
+    literal connections do not consult DNS. Helpers inherit only an exact
+    parent endpoint. Each redirect is independently authorized, and scope
+    expiry closes live proxy tunnels and host-owned HTTP requests. The panel
+    and denial card disclose that the service's effects are a separate authority;
+    access to a service does not promise that its downstream effects are
+    confined to Project files. No raw Docker socket or host executor is granted.
+
+    | Backend/route                     | Supported boundary and required proof                                                                                                                                                                                                                                                                                                                                                                             |
+    | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+    | Linux Bubblewrap                  | PID/network namespaces, capability isolation, configured writable roots, separate-filesystem read-only mounts, enforced proxy and descendant revocation. A static launch helper pins mount sources by object identity using `openat2`, then closes inherited mount descriptors before loading workload code; changed paths refuse. Requires the installed helper and a kernel supporting `openat2`/`close_range`. |
+    | macOS Seatbelt                    | Installed native scope helper and an active GUI session required for enrollment. Unique launchd resource coalitions own detached descendants; durable per-boot receipts support normal exit, client/host failure and restart recovery. Scoped process and PTY launches retain stdio, cwd and terminal semantics.                                                                                                  |
+    | Claude Strict                     | Configured provider-native command sandbox and Octant file-tool gate. The trusted CLI has a lifetime scope, without an incompatible outer filesystem sandbox; approved one-command native escape is the disclosed exception. Plan retains its outer read-only wall.                                                                                                                                               |
+    | Codex, Pi, ACP and Octant Harness | Carry selection through their supported provider/shell and direct-tool routes. Required unsupported protections refuse by name. Live account acceptance is recorded separately from native launch evidence.                                                                                                                                                                                                       |
+    | OpenCode Linux                    | An authenticated fixed-port control relay uses a pinned private Unix socket; ownership admission precedes workload release. Revocation closes the relay and the owned namespace.                                                                                                                                                                                                                                  |
+    | Windows                           | Custom Strict confinement remains unavailable. Ordinary Strict-off provider execution and native approvals follow their owning Windows/provider-native implementation; a successful unrestricted probe never admits Strict.                                                                                                                                                                                       |
+
+    | Provider / level                                      | Explicit Strict off                                            | Strict on, supported macOS/Linux backend                                                               | Windows                                                   |
+    | ----------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------- |
+    | Codex, Ask first / Accept edits / Auto                | Native workspace-write and its approval policy/reviewer        | External Octant profile, policy-bound lease                                                            | Native guarded launches allowed; Strict refused           |
+    | Codex, Plan                                           | Native read-only, restated on every turn/resume                | Read-only Octant profile                                                                               | Native Plan allowed; Strict refused                       |
+    | Claude, Ask first / Accept edits / Auto / Full access | Person's native sandbox settings; no custom policy activation  | Configured native command sandbox, file-tool gate and owned CLI lifetime; every escape asks the person | Ordinary native launch allowed; Strict refused            |
+    | Claude, Plan                                          | Read-only Plan boundary, provider-native on Windows            | Outer read-only wall; no escape                                                                        | Native Plan allowed; Strict refused                       |
+    | OpenCode / Pi / ACP                                   | Documented existing fallback on macOS/Linux; native on Windows | Supported outer wall and inherited descendant scope; named route refusals                              | Ordinary guarded/native approvals allowed; Strict refused |
+    | Full access, other providers                          | No added custom enforcement or asks                            | Supported Strict boundary and its required asks                                                        | Native Full access allowed; Strict refused                |
+    | Chat                                                  | No filesystem or shell                                         | No filesystem or shell                                                                                 | Same tool boundary                                        |
+
+    Claude Strict withholds native startup hooks, MCP servers and Project startup
+    code outside its command sandbox. Native web tools are withheld when tool
+    networking is filtered. A standalone native CLI outside writable roots is
+    required; interpreted launchers cannot claim the protected startup path.
+    In-process REPL/Workflow scripts, native worktree creation and future
+    unreviewed native execution routes are also withheld through an explicit
+    supported tool list. The panel distinguishes these withheld features from enforced command
+    confinement. This integration does not claim completion of the separate
+    migration of every application limit or provider feature into Strict.
+
+    Read-only folders on the same filesystem as writable roots remain unavailable
+    until access-time alias mediation exists: a read-only mount or named-path
+    rule does not protect a writable hard-link alias. Overlapping grants refuse.
+    Selected protected paths and general credential isolation are
+    explicitly unsupported capabilities, not delivered effects or silently
+    ignored configuration. Linux late-created-name protection retains its
+    production access-time mediation dependency; enumeration and watchers are
+    not proof. These capability gaps must remain visible without blocking
+    unrelated native provider features.
+
+    Claude Strict refuses a command-read folder that overlaps a required
+    protected-file rule its native sandbox cannot carry. This includes selected
+    names that do not exist yet: a direct-file hook is not shell confinement.
+    The rule stays selected and the refusal names the missing support.
+
+    Claude's native command read boundary includes the disclosed public system
+    toolchains and loader/resolver files, without adding home/account folders
+    or system writes. Linux lifetime setup materializes top-level directory
+    aliases for merged-`/usr` compatibility, then pins selected folders by
+    their immutable admitted identities before native CLI code starts. Native
+    command rules, not that lifetime root, enforce effects. Real vendor-runtime
+    probes pair a successful Project write with an outside-write denial and
+    an unrestricted positive control.
+
+    Desktop and headless artifacts carry the native launch helper as a verified
+    native executable. The Linux server snapshots its installed helper image
+    before workloads run and stages a private hash-checked copy; the headless
+    manifest preserves its executable role. macOS headless scope lookup uses
+    the artifact's server-native directory and still requires a GUI session.
+
+    `OCTANT_SANDBOX_RESTRICTIONS_PREVIEW=1` permits new custom enrollment on
+    supported hosts. Disabling preview stops new enrollment, not enforcement of
+    saved restrictions. If a selected boundary becomes unavailable, its launch
+    refuses with the missing prerequisite. Native tests exercise denied and
+    successful effects, object replacement, loader injection, descriptors,
+    networking, control bridges and descendant cleanup. Real-provider accounts
+    and signed-package acceptance remain explicit maintainer checks; native
+    fixture success alone does not establish those results.
+
   - **Full access is full access for secret files too** (maintainer
     decision, 2026-10-31: "softer guard — full access is full access").
     No runtime or command runs under an OS wall at this level, and a shell
@@ -14093,11 +14412,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     moves to Plan from its own mode picker, as a Code thread does.
   - **Computer keeps its first-action ask** at every level, Full access
     included: it asks at the first action in each application, once per
-    thread. The Browser asks at Full access only on a signed-in profile; a
-    Private page asks nothing there. Both are entries in the Full access
-    rule above (maintainer request, 2026-11-12, replacing the earlier
-    decision that both asked at every level). Not built yet: the Browser
-    still asks for each site on a Private page.
+    thread. The Browser asks only on a signed-in profile, at every level; a
+    Private page asks nothing at any level (maintainer decision, 2026-11-17;
+    before, only at Full access). Both are entries in the Full access rule
+    above (maintainer request, 2026-11-12, replacing the earlier decision
+    that both asked at every level). Built.
   - **Plan is an overlay,** not a level: a mode of a thread at any level,
     always read-only.
   - **Lowering is journaled and shown.** Each change records who lowered it,
@@ -14145,8 +14464,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     an old account report cannot survive a failed refresh as a current fact.
     Every actual action still passes its own host admission. Routine-created
     Work and Code tasks read these same host inputs and running ceilings.
-    The existing outside-content notice qualifies its prompt explanation to
-    levels below Full access; review/clear remains a separate person act.
+    The Outside content row in Environment qualifies its warning to levels
+    below Full access; review/clear remains a separate person act.
   - **Older recorded levels replay as Full access.** A level journaled by
     the earlier design, which kept a sandboxed no-prompt level and a
     separate switch, replays as Full access; nothing recorded is dropped.
@@ -14595,13 +14914,20 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   paired browser and phone, as the coordinator asked for it; Canvas HTML
   import, whose request names its Project in its workspace scope; and Full
   access and extension install, built earlier. Each is journaled with the
-  device as the actor. Not built yet: the Browser's Take over and Hand back,
-  `sign-in`, profile pages and saved flows, which drive the desktop's native
-  Browser and have no remote input path; finishing a connector sign-in,
-  whose redirect returns to this host's loopback; provider cloud sessions,
-  whose submission policy and job records know only a local window; and
-  server Projects beyond reading, whose journaled records name only a local
-  window. Each owning section keeps its own "not built yet" line until it is
+  device as the actor. The paired browser offers the Project terminal and
+  Private page under **Project tools** in Work and Code, through the start
+  screen's quick tools, and **Import HTML…** alone in a Chat thread's Canvas
+  tools. Not built yet: the Browser's Take over and Hand back, `sign-in`,
+  profile pages and saved flows, which drive the desktop's native Browser in
+  the person's signed-in profiles and need a remote input stream and a rule
+  for what a device sees of a signed-in page, neither designed; finishing a
+  connector sign-in, whose redirect returns to this host's loopback and needs
+  a device-completable flow; provider cloud sessions, whose submission policy
+  and job records know only a local window; and server Projects beyond
+  reading, whose journaled records name only a local window. Each reason is
+  recorded in full in
+  [Decisions and requirements](design/decisions.md#paired-devices-act-as-the-person).
+  Each owning section keeps its own "not built yet" line until it is
   built. A device the host knows only through the hub's roster is unchanged.
 
   **Provider reach Octant no longer narrows** (maintainer decision,
@@ -14637,16 +14963,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   **Plan and Chat tool parity** (maintainer decision, 2026-11-16; partly
   built). Plan and Chat keep their rules (Plan writes nothing, Chat has no
   folder), and inside those rules a provider keeps what it offers on its own:
-  - **Read-only MCP servers in Plan** (designed, not built). A server's own
-    `readOnlyHint` is the server's claim and is never trusted. The person may
-    mark one MCP server "Read-only — allowed in Plan", per server and per
-    host, from the Settings surfaces that manage MCP servers today; the mark
-    is journaled, and a tool's `readOnlyHint` may pre-suggest the mark in the
-    dialog but never sets it. In Plan the tools of a marked server are offered
-    and run under the thread's ask rules; an unmarked server stays withheld,
-    as every server is in Plan today. It is to be wired for every provider
-    whose MCP servers Octant controls: Claude Code, Codex and OpenCode at
-    least. Until built, Plan starts no MCP server but Octant's own.
+  - **Read-only MCP servers in Plan** (built for Claude Code, Codex and
+    OpenCode; the full rule, and why a `readOnlyHint` never pre-suggests the
+    mark, is in the second **Plan and Chat tool parity** entry below).
   - **Provider memory, read-only** (built for Claude Code and Codex). Claude
     Code loads its memory in Plan and Chat with the account's memory setting
     on: the account's `CLAUDE.md` (in Chat the only instruction file, since
@@ -14683,17 +15002,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     runtime, so on Linux a Plan command could read the account's sign-in and
     send it anywhere the runtime may reach. Building it needs a nested capsule
     for the shell alone, or the maintainer's acceptance of that reach.
-  - **Files of any kind as attachments** (designed, not built). A person may
-    attach any file in every mode. Octant keeps it in an Octant-owned
-    attachments folder per thread under the host's data directory, never
-    inside the Project, journaled like an image attachment and under the same
-    size and count limits, and grants the session read access to that one
-    folder at every level, Plan and Chat included, read-only. A provider that
-    takes the file natively (a PDF where its API takes one, OpenCode's PDF
-    capability) gets it natively; any other gets the file's path in the
-    message and reads it with its own tools. The composer accepts any file
-    by choosing or dropping it and shows it as an attachment chip. Until
-    built, attachments are images only.
+  - **Files of any kind as attachments** (built in every mode; the rules
+    are in the Plan and Chat tool parity entry that follows).
 
   Rationale: Plan's and Chat's limits are what the person relies on, not
   the absence of a tool; each of these keeps the limit at the boundary that
@@ -14723,8 +15033,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     the person may answer exactly those calls, once each. A hosted (HTTP)
     server works in Plan; one that runs on this computer may not start where
     Plan's sandbox starts no program (OpenCode on macOS), which the Settings
-    page says. Not built: a tool's `readOnlyHint` pre-suggesting the mark,
-    since Octant does not connect to a provider's own servers to read it.
+    page says. A tool's `readOnlyHint` pre-suggesting the mark has no place
+    to appear, and stays unbuilt until one exists. Octant never connects to a
+    provider's own servers to read it, and keeps not connecting. The servers
+    Octant does connect to (installed MCP extensions and connectors) carry no
+    mark, because in Plan each of their calls is put to the person.
   - **Provider memory, read-only** (built for Claude Code and Codex). Claude
     Code loads its memory in Plan and Chat with the account's memory setting
     on: the account's `CLAUDE.md` (in Chat the only instruction file, since
@@ -14768,34 +15081,70 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     nested user namespaces off) offers Plan no Bash tool, and a capsule that
     fails to build fails its command; nothing runs in the runtime's capsule
     instead.
-  - **Files of any kind as attachments** (built for Work and Code; Chat
-    designed, not built). A person may attach any file in every mode. Octant
-    keeps it in an Octant-owned attachments folder per thread under the
-    host's data directory (`code-threads/<thread>`, `work-threads/<thread>`),
-    never inside the Project, journaled like an image attachment and under
-    the same size and count limits, and grants the session read access to
-    that one folder at every level, Plan included, read-only: Claude Code's
-    command sandbox, its Plan confinement and the Linux Plan shell capsule
-    bind it read-only and its gate reads it unasked and refuses every file
-    write into it; Codex's and OpenCode's launch confinement bind it
-    read-only and OpenCode's rules allow reading it and deny edits there. At
-    Full access nothing is sandboxed, so only the gate's refusal of file
-    tools holds there. An image goes to a model that reads images as before;
-    a provider that takes the file natively gets it natively (a PDF to
-    OpenCode where its model reads documents); any other file is named in
-    the message by a path in that folder, a second name for the verified
-    file under its own name, and the agent reads it with its own tools. The
-    Work and Code composers and a paired phone accept any file by choosing or
-    dropping it and show it as an attachment chip; a paired device's upload
-    of any `type/subtype` is admitted on those routes. The folder is made
-    before the runtime launches, so a runtime started for a turn with no
-    file, which a later turn may reuse, already binds it. A thread in a
-    server Project works with the server's own file tools and this host's
-    folder is not there, and no transfer to the server exists, so a turn
-    carrying a file it would name by path is refused before it is accepted,
-    with a sentence saying to attach images or copy the file to the server;
-    images and natively taken files still go. Not built: Chat keeps its
-    image, text and PDF types.
+  - **Files of any kind as attachments** (built in every mode). A person may
+    attach any file in every mode, from the web composers and a paired
+    phone, under the existing size and count limits.
+    - **Work and Code.** Octant keeps the file in an Octant-owned
+      attachments folder per thread under the host's data directory
+      (`code-threads/<thread>`, `work-threads/<thread>`), never inside the
+      Project, journaled like an image attachment, and grants the session
+      read access to that one folder at every level, Plan included,
+      read-only: Claude Code's command sandbox, its Plan confinement and the
+      Linux Plan shell capsule bind it read-only and its gate reads it
+      unasked and refuses every file write into it; Codex's, OpenCode's,
+      Pi's and every ACP agent's launch confinement bind it read-only and
+      OpenCode's rules allow reading it and deny edits there. At Full access
+      nothing is sandboxed, so only the gate's refusal of file tools holds
+      there. An image goes to a model that reads images as before; a provider
+      that takes the file natively gets it natively (a PDF to OpenCode where
+      its model reads documents; a document to an ACP agent that advertised
+      embedded context, as an embedded `resource` block); any other file is
+      named in the message by a path in that folder, a second name for the
+      verified file under its own name, and the agent reads it with its own
+      tools. The folder is made before the runtime launches, so a runtime
+      started for a turn with no file, which a later turn may reuse, already
+      binds it.
+    - **Server Projects.** A Work or Code thread in a server Project works
+      with the server's own file tools, so a file it would name by path is
+      first copied over the Project's own SSH connection into the thread's
+      attachments folder on the server,
+      `<home>/.octant/thread-attachments/<thread>/<attachment>/<name>`,
+      outside every Project folder, made read-only there, and checked by its
+      SHA-256 against the journaled digest; the turn names that path. The
+      thread's server file tools read that one folder and write nowhere in
+      it, and another thread's tools do not read it, even through a Project
+      folder that holds the login's home. The copy is made before the turn's
+      start is journaled, and a copy that fails refuses the turn before it is
+      accepted, with a sentence saying so;
+      images and natively taken files go as before. Not built: removing the
+      server copies when the thread is deleted or purged.
+    - **Chat.** Chat has no folder, so no file is named by a path. A file the
+      provider and model take natively goes natively; an image goes to a
+      model that reads images or to Sees images as before; any other file
+      Octant recognizes as a Word, PowerPoint or Excel file or a PDF goes in
+      as the text Octant's own read takes out of it, under the read's limits
+      (a PDF whose bytes happen to be UTF-8 is still read out, never sent as
+      its raw syntax); any other file whose bytes are UTF-8 text, whatever its
+      type, goes in the turn as its text, fenced and marked as the file's
+      content rather than the person's words. The
+      attached text a turn carries is bounded (400,000 characters), and a turn
+      over it is refused rather than cut short. Any other file (an archive,
+      a binary) is refused before the turn is accepted, naming a Work or Code
+      thread as where it can go, and the composer refuses it when it is
+      chosen. The file stays on the turn for the record; as with an image sent
+      natively, its text reaches later turns where the provider keeps its own
+      session, and a host-built history carries only the person's message.
+      Rationale: a read-only tool scoped to the one attachment was the other
+      design. It changes the session's tool catalog on the turn a file
+      arrives, which a resumed native session refuses, it needs app-managed
+      tools that many Chat providers lack, and for a binary it would hand the
+      model bytes it cannot use without the shell Chat withholds; text and
+      document extraction cover what a model can read, and the rest belongs
+      where the agent has a folder.
+      The composers accept any file by choosing or dropping it and show it as
+      an attachment chip; a paired device's upload of any `type/subtype` is
+      admitted on every mode's route. Chat serves an attachment back as its own
+      type only for the types a model takes natively, and as bytes otherwise.
 
   Rationale: Plan's and Chat's limits are what the person relies on, not
   the absence of a tool; each of these keeps the limit at the boundary that
@@ -14912,6 +15261,18 @@ approval-gated` command that undoes it. The terminal shows no one-time
   decided against the one the thread holds now. Re-presenting the same
   approval rather than minting a new one keeps one identity per provider
   call and needs no new answer route.
+  A running Code turn keeps the grant persistence it started with, as it
+  keeps a narrower mode (a wider mode applies from the next message, which
+  the mode control's tooltip says while such a turn runs). A persistence
+  change alone therefore does not ask again: the allow is delivered for that
+  one call (`scope: "once"`), so nothing is remembered beyond what either
+  setting allows. Plan still refuses an allow. Every answer the host refuses
+  names its reason in words, among them a request that no longer waits (it
+  was answered, withdrawn, or its turn ended), Plan, and a provider session
+  that is gone; a delivered answer is journaled as `approval-answered` on the
+  turn that asked, so a re-read of the turn no longer offers it. Rationale:
+  a person who switched to Full access mid-turn could never approve that
+  turn's remaining asks, and each Approve failed with no reason given.
   A native-harness "always" grant follows the same rule: it records the
   posture it was granted under and answers a later ask in its class only
   while the thread still holds that posture. After a permissions change the
@@ -15516,10 +15877,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `workspace-write`, with the approval policies above. That lease is keyed on
   Strict as well as root, mode and posture, so it never serves a Strict
   session. Plan and Chat stay in Octant's read-only profile at every Strict
-  value, and Strict keeps Octant's profile as described here. The
-  workspace-write policy a turn sends takes no deny rules, so Octant's
-  protected paths are not Codex deny rules (not built yet: a named Codex
-  permissions profile could carry them). Inside Octant's profile approving a
+  value, and Strict keeps Octant's profile as described here. From Codex
+  0.169.0, outside Windows, that sandbox runs as a named Codex permissions
+  profile carrying other providers' sign-ins as Codex deny rules, since the
+  built-in workspace-write policy has no deny field
+  ([Provider runtimes: Codex](design/provider-runtimes.md#codex)). Inside Octant's profile approving a
   command no longer lifts any sandbox: it runs inside Octant's profile. Under that
   profile a Codex command cannot read `HOME` outside the root and the account
   home, and cannot write the account home's configuration, `.env`, rules,
@@ -15652,8 +16014,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   (`OCTANT_*`) and every other model provider's credential
   (`providerHostEnvironment`); the account's own sign-in still decides
   which account a turn runs as, so no host Anthropic key or token crosses,
-  Octant's account directory is applied, and an API-key account gets its
-  broker key. It sets only the self-update, auto-memory and built-in-agents
+  Octant's account directory is applied, an API-key account gets its
+  broker key, and a gateway account gets its own address and broker token
+  in place of any host `ANTHROPIC_BASE_URL`. It sets only the self-update, auto-memory and built-in-agents
   switches (`OPEN_CLAUDE_LAUNCH_GUARDS`); telemetry, error reports, `/bug`,
   `/feedback`, the survey and marketplace auto-install follow the person's
   own Claude Code settings, and the Claude artifacts switch below lifts
@@ -16063,7 +16426,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   | `appManagedToolsAtFullAccess` | `absent`                                                                                                                           | `absent`                                                                                                 | `absent` in the static block; reported `mixed` once a connection check proved the runtime accepts the tool endpoint without the exclusivity proof | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `acpClientCapabilities`       | `absent`                                                                                                                           | `absent`                                                                                                 | `absent`                                                                                                                                          | `absent`                                                                                          | `supported`                                                                                                                                         | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `modelSwitch`                 | `supported`                                                                                                                        | `supported`                                                                                              | `supported`; the resume names the thread's current model on every prompt                                                                          | `absent`; same                                                                                    | `absent`; same                                                                                                                                      | `absent`; Octant replays history, so the model may change                               | `absent`; Octant replays history, so the model may change                                                 | `absent`; Octant replays history, so the model may change                                    | `absent`                              |
-  | `sessionRollback`             | `supported`; a rewind continues a copy of its session cut at the kept turn's anchor, or a text handoff when it has none            | `absent`; a rewind starts a fresh session with a text handoff                                            | `absent`; same                                                                                                                                    | `absent`; same                                                                                    | `absent`; same                                                                                                                                      | `supported`; a rewind continues a copy of the transcript cut back at the last kept turn | `supported`; same                                                                                         | `supported`; same                                                                            | `absent`; same                        |
+  | `sessionRollback`             | `supported`; a rewind continues a copy of its session cut at the kept turn's anchor, or a text handoff when it has none            | `absent`; a rewind starts a fresh session with a text handoff                                            | `supported`; same as Claude Code, through its own fork route                                                                                      | `supported`; same, a copy of the session file                                                     | `absent`; same as Codex                                                                                                                             | `supported`; a rewind continues a copy of the transcript cut back at the last kept turn | `supported`; same                                                                                         | `supported`; same                                                                            | `absent`; same                        |
   | `forceStop`                   | `supported`                                                                                                                        | `unsupported`; one process serves every thread                                                           | `unsupported`; one process serves every thread                                                                                                    | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `sessionCompaction.chat`      | `supported`; `unavailable` when the install lacks `/compact`                                                                       | `supported`; `unavailable` before Codex 0.162.1                                                          | `unavailable`; `supported` from 2.2.0                                                                                                             | `absent`                                                                                          | `absent`                                                                                                                                            | `unsupported`; Octant summarizes                                                        | `unsupported`; Octant summarizes                                                                          | `unsupported`; Octant summarizes                                                             | `absent`                              |
   | `sessionCompaction.work`      | as Chat                                                                                                                            | as Chat                                                                                                  | as Chat                                                                                                                                           | `absent`                                                                                          | `absent`                                                                                                                                            | `unsupported`; Octant summarizes                                                        | `unsupported`; Octant summarizes                                                                          | `unsupported`; Octant summarizes                                                             | `absent`                              |
@@ -16081,24 +16444,24 @@ approval-gated` command that undoes it. The terminal shows no one-time
   | `nativeSetup.skills`          | `supported`; a Project's skills only in a trusted Project                                                                          | `supported`; no Project skill switched off by path                                                       | `supported`; `.claude` and `.agents` skills, the `skill` permission asked                                                                         | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `nativeSetup.toolServers`     | `supported`; the account's servers, connectors, and plugins, a Project's `.mcp.json` held until trusted                            | `supported`; the person's servers and plugins stay on in Chat                                            | `supported`; the MCP servers in the person's own OpenCode configuration, their tools following the level                                          | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, connectors included                                                                       | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `nativeSetup.hooks`           | `supported`                                                                                                                        | `supported`; the account home's hooks were never switched off                                            | `unsupported`                                                                                                                                     | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
-  | `nativeSetup.projectCode`     | `supported`; also starts the Project's MCP servers                                                                                 | `unsupported`; Codex's own folder trust decides                                                          | `unsupported`; project configuration and plugins stay off                                                                                         | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, under its own folder trust                                                                | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `nativeSetup.projectCode`     | `supported`; also starts the Project's MCP servers                                                                                 | `supported` outside Plan and Strict in a Project trusted for Codex; loads `.codex/config.toml`           | `unsupported`; project configuration and plugins stay off                                                                                         | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, under its own folder trust                                                                | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
 
   Which driver kinds each column covers, and how each may be used in a mode, as
   `providerCatalogCapabilities` in `@octant/domain` holds it. A runtime's Work and
   Code tools reach the models its connection check reports with tool use;
   Harness endpoints reach them only for models a person verified.
 
-  | Column                    | Driver kinds                                                                                                     | Chat  | Work              | Code              | Agent loop       |
-  | ------------------------- | ---------------------------------------------------------------------------------------------------------------- | ----- | ----------------- | ----------------- | ---------------- |
-  | Claude Code               | `claude`                                                                                                         | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | Codex                     | `codex`                                                                                                          | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | OpenCode                  | `opencode`                                                                                                       | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | Pi                        | `pi`                                                                                                             | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | ACP agents                | `kilo`, `devin`, `mistral-vibe`, `kimi-code`, `grok`, `goose`, `glm`, `gemini`, `copilot`, `cline`, `qwen`, `fx` | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
-  | Ollama                    | `ollama`                                                                                                         | `yes` | `verified-models` | `verified-models` | `octant-harness` |
-  | Harness endpoints         | `openai-compatible`, `anthropic-compatible`, `azure-foundry`, `amazon-bedrock`                                   | `yes` | `verified-models` | `verified-models` | `octant-harness` |
-  | Outside harness endpoints | `outside-harness-endpoint`                                                                                       | `yes` | `verified-models` | `verified-models` | `octant-harness` |
-  | Oh My Pi                  | `oh-my-pi`                                                                                                       | `no`  | `no`              | `no`              | `none`           |
+  | Column                    | Driver kinds                                                                                                                  | Chat  | Work              | Code              | Agent loop       |
+  | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----- | ----------------- | ----------------- | ---------------- |
+  | Claude Code               | `claude`                                                                                                                      | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Codex                     | `codex`                                                                                                                       | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | OpenCode                  | `opencode`                                                                                                                    | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Pi                        | `pi`                                                                                                                          | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | ACP agents                | `kilo`, `devin`, `mistral-vibe`, `kimi-code`, `grok`, `goose`, `glm`, `gemini`, `copilot`, `cline`, `qwen`, `fx`, `acp-agent` | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Ollama                    | `ollama`                                                                                                                      | `yes` | `verified-models` | `verified-models` | `octant-harness` |
+  | Harness endpoints         | `openai-compatible`, `anthropic-compatible`, `azure-foundry`, `amazon-bedrock`                                                | `yes` | `verified-models` | `verified-models` | `octant-harness` |
+  | Outside harness endpoints | `outside-harness-endpoint`                                                                                                    | `yes` | `verified-models` | `verified-models` | `octant-harness` |
+  | Oh My Pi                  | `oh-my-pi`                                                                                                                    | `no`  | `no`              | `no`              | `none`           |
 
   The image profiles (`openai-image`, `gemini-native-image`, `bfl-image`,
   `ideogram-image`) are not turn drivers and are not in the matrix.
@@ -16875,7 +17238,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   switches, and closes tabs, takes the page over from the agent and hands it
   back, writes to a thread terminal, answers profile site approvals, and
   raises a thread to Full access or starts one there. The host's navigation
-  guards and site approvals apply to it as they do to a window, and each
+  guards and site approvals apply to it as they do to a window, with one
+  difference: only an address typed at a local window follows a redirect to a
+  site outside the approved origins, as that person's own view
+  ([Refusal and expiry recovery](design/browser-agent-tool.md#refusal-and-expiry-recovery));
+  a paired device's navigation refuses it. Each
   action is journaled with the device as its actor. Built: it navigates,
   types, and sends every page action the route takes, writes to a thread
   terminal, and sets Full access. A
@@ -17437,9 +17804,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     `octant provider key remove <instance>`. `<instance>` is an instance id or
     an exact, unique display name; an ambiguous name is refused with the
     candidates. `set` and `status` need an existing instance that uses
-    API-key or bearer authentication, so no secret is written for an
-    instance that cannot use it. A browser may create a Claude API-key
-    instance without a key through the existing configuration command. The
+    API-key or bearer authentication (or a Claude gateway account, whose
+    token is kept the same way), so no secret is written for an
+    instance that cannot use it. A browser may create a Claude API-key or
+    gateway instance without a key through the existing configuration command. The
     host allocates its separate managed account directory; the host-local
     CLI fills the missing credential afterward. Browser secret entry stays
     unavailable.
@@ -17842,7 +18210,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
     the originating registered local window or, not built yet, the originating
     paired device, and ordinary Code command policy.
     Ask for approvals and Auto-accept edits keep the recipient OS-confined;
-    Full access permits ordinary unrestricted commands. Plan and unknown postures
+    Full access with Strict off permits ordinary unrestricted commands. Strict
+    keeps the recipient confined at Full access too. A host command borrows the
+    active turn's immutable policy or owns a freshly admitted command scope;
+    credential consent records the effective Strict state. Changes to that
+    authority invalidate pending consent. Plan and unknown postures
     refuse. Ordinary approvals and Auto Shield remain additional to credential
     consent; saving a binding never approves an ordinary command or destination.
     No routine, managed-child tool set,
@@ -17873,7 +18245,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     variables are excluded before startup, and bootstrap-only Electron flags
     are removed before the recipient. The runtime remains part of the trusted
     host installation; its replacement is not covered by the recipient pin.
-    Below Full access, `op` authenticates outside confinement and can launch only
+    Below Full access and under Strict, `op` authenticates outside confinement and can launch only
     the already prepared Seatbelt or Bubblewrap target. The policy, read roots
     and pin derive from the recipient, not `op`. The capsule runs only fixed
     host code before the recipient: native env promotes the launch proxy URL
@@ -17892,7 +18264,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     their own-account exemption, and the default `~/.op` and `~/.config/op`
     directories stay denied even beneath broader roots. Credentials remain in
     the recipient environment; no file or callback returns them to Octant.
-    At Full access the recipient and descendants have ordinary Full access.
+    At Full access with Strict off the recipient and descendants have ordinary Full access.
     All postures receive credentials directly from `op`; default vendor concealment cannot
     prevent encoding, file writes or network disclosure. Octant does not claim
     exact-value redaction for values it never receives.
@@ -18556,115 +18928,89 @@ cards; general Azure CLI credentials remain unavailable by design.
   actor; a window on this host or a device the host's own person paired changes the list (maintainer decision, 2026-11-12). The journal holds changes, not the list, so a group a later Octant
   adds is protected on every host. Changes reach every launch prepared after
   them.
-- **Linux access-time mediation is not yet shipped.** Parked (maintainer
-  request, 2026-11-12): the candidate is unselected with zero production
-  coverage, and no further work is scheduled until
-  [the Full access rule](#security-and-authority) is built. Existing Bubblewrap
-  file covers are prepared at launch; they do not enforce the complete rule
-  for absent files or later companion/alias changes. The replacement must use
-  the original structured rules and exact own-account exceptions, preserve live
-  permitted files, durable writes, real hardlinks and native notifications, and
-  leave Full access unchanged. Modern pre-access hooks cover new mappings as
-  well as reads, but the measured stock listener permits unanswered and future
-  reads after its group closes. Its lifecycle cannot be a fail-closed guard.
-  An original credential-bound kernel admission core is being built only in an
-  owned networkless disposable guest. It has finite requests, one-use enrollment
-  after `no_new_privs`, and broker-loss refusal; its production coverage remains
-  zero. Complete namespace and pre-effect mutation ordering, effective policy,
-  aliases and process/data routes, the production launch and native compatibility
-  proof remain required before any production integration. No live kernel,
-  driver, boot configuration or installed host policy changes as part of this
-  development path. Prior admitted operations and mappings need not be erased.
-  A mediated workload must not weaken that live policy by destructively moving
-  or removing a current companion or ancestor when doing so would declassify
-  still-existing protected content. The pre-effect admission binds the actual
-  operation, source, destination and current namespace epoch. This adds no
-  content denial for public keys: their reads/writes, new public-key creation,
-  unrelated aliases and legitimate permitted namespace operations remain
-  available. Host/unconfined changes and Full access retain their normal
-  behavior. There is no sticky per-launch protection floor and no freeze of
-  external writers while userspace inspects metadata. An own-account exception
-  retains its initially enrolled lexical/canonical forms; replacing that path
-  with a link never transfers the exception to a different sign-in.
-  Audited creation entries prepare the actual parent, copied name and any
-  held hardlink source before inode locks. A task/context-bound one-use scope
-  compares those identities and the current epoch immediately before the
-  filesystem effect; every return and delegation retry retires it. Filesystem
-  Unix socket binding follows the same rule. Its failed-bind rollback obtains
-  a fresh UNLINK decision outside the parent lock, then revalidates the exact
-  created socket before removal. It never removes a replacement. Only that
-  rollback may wait through a pending signal, within the existing two-second
-  admission ceiling, so ordinary interruption need not strand its own new
-  node. Broker loss, policy refusal and changed identity or epoch still refuse;
-  unused approval is discarded. Other admission waits remain interruptible.
-  The disposable candidate's owned session prepares the unchanged shared
-  Bubblewrap builder in a separate trusted worker, carrying the exact protected
-  file configuration and structured policy. Real ABI/status and a policy
-  snapshot precede command creation; a second barrier holds exec until the
-  command's actual PID/birth receipt is durable. Private control descriptors
-  never become command stdio. Input, output and error streams use bounded
-  backpressure, with no normal-output drain timeout shorter than the caller's
-  deadline. Closed input refuses before dispatch; an accepted write that loses
-  its pipe reports uncertainty and is never replayed. Preparation shares the
-  caller's finite deadline, capped at this candidate's existing 180 seconds.
-  Cancellation or owner-channel loss closes admission before owned group
-  cleanup. Cleanup has its own four-second bound and reports uncertainty for
-  unconfirmed identities, groups or pipe retirement; relay exit alone is not
-  proof that every descendant joined. The existing canonical owner-only
-  receipt directory is denied read/write by the actual capsule. This port is
-  not selected by production launchers, the device remains root-only, and
-  complete eligible-host lifecycle, data-route and controller reliability
-  acceptance remains required with production coverage zero.
-  Metadata mediation includes a protected symlink's own inode and its followed
-  target; a dangling protected link still has link text and metadata. Blocking
-  preparation belongs before inode locks, under one paired user-operation
-  scope. The final LSM check only compares the actual native identity,
-  operation, live context and current epoch and consumes that scope's decision.
-  Every return clears unused state, and fork, clone and exec inherit none.
-  An unprepared path in the current restricted context refuses until its compatibility is proved; a
-  callback never waits for broker metadata while holding an inode lock.
-  The disposable candidate covers ordinary mode, owner, timestamp and truncate
-  requests at their four pinned entries: preparation precedes the inode lock,
-  and the final write comparison immediately precedes `notify_change`.
-  Delegation retries end the consumed scope before waiting and prepare a fresh
-  attempt. Early refusal retains mount-write and automatic-scope cleanup.
-  Ordinary filesystem-attribute writes prepare in the three audited user
-  entry points: `ioctl_setflags`, `ioctl_fssetxattr` and `file_setattr`. Each
-  uses its actual held file or resolved path after copying values and acquiring
-  mount-write access. Its automatic scope ends before mount-write cleanup,
-  including on refusal. The common setter only compares the decision after
-  the existing security check, immediately before the filesystem effect under
-  the inode lock; it never prepares or waits. Ordinary attribute reads prepare
-  READ in `ioctl_getflags`, `ioctl_fsgetxattr` and `file_getattr`, using their
-  actual held file or resolved path. Their scopes end before copying the
-  admitted result to userspace. The exported getter consumes only an exact READ
-  decision. Only the setter's private internal getter inspects its exact
-  prepared WRITE without consuming it; the final setter consumes once. Both
-  retain native checks and perform no broker I/O. The private purpose is not
-  caller-selectable, and an ordinary read cannot borrow WRITE authority. Failed
-  inspection exits through unlock and outer cleanup, without retry or reuse.
-  Native acceptance requires refusing a protected held attribute read with its
-  output unchanged, and refusing the protected inode's NODUMP
-  change with flags and metadata unchanged while the public file's same toggle,
-  readback, restoration and permitted writes succeed.
-  The bounded ordinary ioctl-read correction covers `FIONREAD` and `FIOQSIZE`
-  on regular file descriptors through the native and conditional compat LSM
-  entries before copyout. Protected observations require pre-effect EACCES with
-  output sentinels unchanged; public files, pipes and sockets retain their
-  permitted observations. Actual native and compat acceptance for this added
-  correction remains pending; it is not a generic ioctl framework.
-  This is not a global `inode_setattr` or ioctl guard. Other attribute routes,
-  internal privilege clearing during writes, other filesystem ioctls, stacked
-  filesystems and kernel credential overrides remain unfinished and must be
-  proved before any production coverage is enabled;
-  the candidate's production coverage remains zero. A global callback without
-  their pre-lock lifetimes would break permitted writes or wait under locks.
-  _Rationale._ Otherwise deleting a readable `name.pub` marker could make its
-  still-existing custom-named private key readable. Retaining all former secret
-  inodes forever would instead reject legitimate host changes and require
-  additional inode-lifetime state. Operation-specific namespace admission keeps
-  the live policy without either shortcut. Complete implementation and native
-  proof of this boundary remain required above.
+- **Linux access-time mediation is an explicitly opted-in production preview.**
+  A compatible custom-kernel host may enroll it with
+  `OCTANT_LINUX_MEDIATION_PREVIEW=1` (maintainer approval, 2026-11-16).
+  Octant never installs a kernel, changes the bootloader or reboots the host.
+  The packaged relay must report the exact UAPI and production coverage bit
+  before a launch can be selected. Missing eligibility, a zero-coverage
+  component or a selected rule outside the proven backend refuses before the
+  workload starts. Stock-kernel Bubblewrap remains the backend for rules it can
+  enforce; it is never presented as late-name, same-filesystem read-only or
+  complete alias mediation.
+- **The original structured policy remains authoritative.** The broker consumes
+  the current read-only roots, protected paths and exact own-account exceptions,
+  indexes actual device/inode identities without opening content, and retains
+  invalid Linux byte names. It permits ordinary Project work, public keys,
+  durable writes, hardlinks, native notifications, installs, builds and tests
+  where the policy permits them. Full access outside Strict and unconfined host
+  changes are unchanged. Replacing an enrolled account path with a symlink does
+  not transfer its exception.
+- **Server-owned file tools do not borrow subprocess coverage.** Native-harness
+  model file calls and ACP client file calls (including OpenCode's ACP stack)
+  execute in the server rather than the enrolled provider process. Their turns
+  therefore refuse same-filesystem read-only grants and selected protected-path
+  or isolated-credential rules that require object-level mediation.
+  Separate-filesystem folder rules remain supported. The refusal names the
+  unsupported rule before any file effect; path checks are never presented as
+  alias-safe kernel enforcement. An active Strict selection also keeps the full
+  protected-file guard on those host-owned reads at Full access. Agent language
+  diagnostics are another host-owned read: when protected-path denial or isolated
+  credentials require object mediation, that tool route refuses before opening
+  the saved file or starting a language server.
+- **Admission follows the effect.** One-use enrollment begins only after
+  `no_new_privs`; inherited proc-memory/pidfd and asynchronous contexts refuse.
+  Blocking broker work happens before native locks. The final LSM checks compare
+  the exact task/context, object, operation and namespace epoch without waiting
+  under a filesystem lock, then consume the decision. Fork, clone and exec
+  inherit no pending scope. Broker loss, timeout, replay, stale epoch, identity
+  change and unprepared restricted routes fail closed.
+- **The covered data and metadata routes form one production unit.** Reads,
+  writes, truncate, mapping/protection, execution, descriptor receipt,
+  process-memory inspection, supported asynchronous fallback, regular-file
+  metadata, link metadata, xattrs, ACLs, mode/owner/time, file attributes,
+  generation/block-size queries, FIEMAP, FIONREAD/FIOQSIZE and seek observations
+  are admitted at their audited entries. Output-changing reads refuse before
+  copyout. Write preparation precedes locks and the comparison immediately
+  precedes the effect. Public file, pipe and socket controls preserve their
+  normal behavior.
+- **Namespace effects use one-use pre-effect identities.** Create, hardlink,
+  unnamed-file link, Unix-socket bind, unlink, rmdir and rename bind the actual
+  parent/source/destination, copied byte names, flags and current epoch. A
+  failed socket bind obtains a fresh UNLINK decision outside the parent lock
+  and removes only its retained created socket. Destructive companion or
+  ancestor changes that would declassify still-existing protected content
+  refuse; unrelated aliases and legitimate namespace changes remain available.
+  Outside mount and namespace mutations advance the epoch so a stale userspace
+  allow cannot cross them.
+- **OverlayFS is admitted at its backing objects.** The audited Linux 6.18 open
+  path admits the current data inode before copy-up and the resolved real inode
+  before backing-file open. Its private metacopy marker lookup is allowed only
+  during the kernel's unconfined mounter-credential override; a direct enrolled
+  caller, any other xattr, an enrolled mounter or a dead broker uses normal
+  admission. Private backing reads and writes refuse, ordinary overlay reads
+  succeed, and denied writes leave lower/upper content unchanged. Other stacked
+  filesystems and unaudited routes fail closed.
+- **Production lifecycle is owned and finite.** At server startup Octant captures
+  the packaged native relay, policy worker and supervisor. A launch copies their
+  hash-addressed images into a private host-owned runtime, writes a one-use
+  private configuration and holds exec until the command's PID/birth receipt is
+  durable. Control descriptors never become command stdio. Stdio is bounded and
+  backpressured; accepted writes are never replayed after uncertainty.
+  Cancellation, deadline or owner-channel loss closes kernel admission before
+  bounded process-group and adopted-descendant cleanup. Unconfirmed identity,
+  pipe retirement or descendant join stays uncertain and blocks replacement
+  admission.
+- **Native proof is the coverage gate.** The pinned networkless Linux 6.18 guest
+  requires the effective policy, same-filesystem read-only, protected and
+  credential paths, late-created names, aliases, held descriptors, mappings,
+  metadata, namespace effects, credential override, OverlayFS, broker loss,
+  lifecycle, packaged supervisor and actual Bun/Node workloads to pass together.
+  The hosted parser rejects missing or partial receipts. The stock modern
+  pre-access experiment remains negative evidence because pending and future
+  reads survive listener loss. Credentialed-provider, signed-package and live
+  eligible-host checks stay explicit maintainer acceptance in OCT-764; they do
+  not weaken or substitute for this implementation gate.
 - **Work goes through the channel instead of the file.** SSH through the
   agent socket in `SSH_AUTH_SOCK`, a password manager's SSH agent included;
   Git over HTTPS through the system credential helper, which reaches the
@@ -19436,7 +19782,7 @@ the [Windows sequence](#current-release-boundary) below; maintainer request,
 2026-11-15), and below Full access with the provider's own approvals and no
 Octant sandbox claimed, under
 [Windows below Full access](#current-release-boundary) below (partly built);
-Strict below Full access, and Full access with the sandbox kept, stay refused
+Strict at every level, and Full access with the sandbox kept, stay refused
 there until the Windows confinement launcher has run a real provider on a
 person's Windows machine. Finding and removing worktrees on this computer is
 authorized on Windows hosts too (maintainer request, 2026-11-11): it runs
@@ -19471,10 +19817,10 @@ picker names what is missing instead of refusing the level.
 Built (2026-11-16): a Work or Code provider turn on Windows below Full access
 starts outside Strict with the provider's own approvals, every ask still
 answered and journaled on the server (`hostProviderTurnRefusal` in the
-domain's `guardrailPolicy.ts`); Strict below Full access is refused by name
+domain's `guardrailPolicy.ts`); Strict at every level is refused by name
 ("Strict needs a sandbox Windows doesn't have yet") and so is Full access with
-the sandbox kept, before anything is journaled or started. Strict at Full
-access runs, because Strict confines nothing at Full access on any platform.
+the sandbox kept, before anything is journaled or started. The shared Strict
+control retains confinement at Full access too; it cannot be enabled on Windows.
 The mode picker offers those levels with the line "On Windows the provider's
 own approvals decide; Octant's sandbox does not run here", and shows them
 unavailable on a Strict thread. Each provider launch decides again from its
@@ -19486,12 +19832,49 @@ launch that does not carry its Strict value is Strict. Codex below Full access
 is told to keep its own sandbox (`workspace-write`, `read-only` in Plan) with
 its own approvals rather than an external one; a Codex or OpenCode process
 started outside Strict is never reused by a Strict session at the same level.
-A Chat provider launch stays refused on Windows: Chat's no-folder, no-shell
-rule is held by Octant's sandbox, which a provider's own approvals do not
-replace. Project actions run there in the terminal shell Settings › Code
-names. Octant's own terminals, tests and harness shell commands on a thread
-below Full access still refuse on Windows, since they run in Octant's sandbox
-elsewhere and no provider's approvals hold them.
+Project actions run there in the terminal shell Settings › Code names.
+
+Built (2026-11-18, maintainer request: providers and Octant's tools on
+Windows work as on macOS and Linux, restricted no more than in other agent
+workspaces there):
+
+- **Chat.** A Chat thread keeps no folder and no shell. On Windows it starts
+  outside Strict on a provider that is told so natively
+  (`windowsProviderLaunch` with `chatWithoutFolderOrShell`): Codex, whose
+  Chat threads get no execution environment and start with the shell, image,
+  plugin and app features off on every platform; Pi, which starts in Chat
+  with no built-in tool, no extension and none of the person's resources; and
+  Claude, whose Chat session on Windows holds no file or shell tool at all
+  (`Read`, `Grep`, `Glob`, `LS`, `Edit`, `Write`, `NotebookEdit`, `Bash`
+  and its task tools are left out of the session's tool list), where
+  elsewhere those tools ask and are declined inside Octant's sandbox.
+  OpenCode's permission rules can deny its file and shell tools, but its
+  command templates run shell substitutions and its plugins run code in its
+  own process outside those rules; an ACP agent's client capabilities decide
+  only whether it may use Octant's file and terminal methods, and no
+  reviewed agent profile can be told to drop its own built-in file and shell
+  tools. So a Chat thread on them stays refused on Windows with the
+  reason ("This provider keeps Chat without a folder or shell only inside
+  Octant's sandbox, which Windows doesn't have yet."). Chat under Strict is
+  refused like every Strict launch there.
+- **Octant's own terminals and harness shell.** Outside Strict they run on
+  Windows unconfined at every level: a thread or Project terminal, which the
+  person types into, opens the configured shell at every level but Plan, and
+  the harness shell runs each command in that shell, still asking the person
+  below Full access as it does elsewhere (`resolveThreadElevation`). Under Strict, or with the sandbox kept at Full
+  access, they refuse before anything is journaled or started
+  (`hostSandboxRefusal`, read with the thread's resolved Strict value; work
+  that names no thread counts as Strict), and a harness command is refused
+  at the moment it runs, so Strict turned on mid-turn holds the next one. A
+  Windows command has no Octant egress rules or registered-server relays,
+  having no sandbox to hold them to, and a child run without network
+  authority runs no command there. The Code thread terminal elsewhere keeps
+  the confinement it has at every setting.
+- **App-managed tools for OpenCode and the ACP agents.** A Windows launch
+  has no Octant sandbox, so it reaches the host's loopback tool bridge (an
+  HTTP endpoint opened only with its per-bridge bearer token) directly, and
+  the tools are reported and offered there as on macOS and Linux
+  (`appToolBridgeReachesLaunchOn`); no named pipe or relay is needed.
 
 Also in scope, each design-first (build it only once its owning specification
 documents its authority, privacy, and release boundaries):
@@ -19611,8 +19994,8 @@ no Octant sandbox claimed
 ([Windows below Full access](#current-release-boundary), partly built); the
 confinement port still refuses Windows unless its caller opts into the dormant
 launcher, which no production caller does, so every launch that would need
-Octant's sandbox (Strict below Full access, a kept sandbox, Octant's own
-terminals and commands below Full access) fails closed there. Simulator, the Apple workbench, and vibrancy stay
+Octant's sandbox (Strict at every level, including Octant's own terminals and
+commands, and a kept sandbox) fails closed there. Simulator, the Apple workbench, and vibrancy stay
 macOS-only.
 
 **Windows sequence** (maintainer decision, 2026-11-14). Each step is its own
@@ -19635,15 +20018,17 @@ deliverable and keeps every gate above:
 3. Work and Code at Full access on Windows. Partly built (maintainer request,
    2026-11-15: build it now, without waiting for the launcher):
    - **The level gate.** A Work turn, a Code turn and every Code operation on
-     a thread (terminal, tests, and the rest) on a Windows host run only at
-     Full access with the sandbox off. A provider turn below Full access runs
+     a thread (terminal, tests, and the rest) on a Windows host run outside
+     Strict, at Full access with the sandbox off and, since 2026-11-18, at
+     every level below it. A provider turn below Full access runs
      outside Strict with the provider's own approvals
      (`hostProviderTurnRefusal`, under
      [Windows below Full access](#current-release-boundary)); Octant's own
-     operations below Full access are refused on the server before they are
-     journaled or start a process, with the reason that Windows
-     has no Octant process sandbox yet (`hostSandboxRefusal` in the domain's
-     `guardrailPolicy.ts`). The gate reads the level the work runs at: a Work
+     operations under Strict or with the sandbox kept are refused on the
+     server before they are journaled or start a process, with the reason
+     that Windows has no Octant sandbox yet (`hostSandboxRefusal` in the
+     domain's `guardrailPolicy.ts`, read with the thread's resolved Strict
+     value). The gate reads the level the work runs at: a Work
      turn's level clamped to its caller's ceiling, a Code turn's composer
      level, recorded start or coordinator Plan clamped to the thread, and a
      live turn's narrower posture, never only the thread's stored level. A
@@ -19660,7 +20045,9 @@ deliverable and keeps every gate above:
      PowerShell 7 (`%ProgramFiles%\PowerShell\7\pwsh.exe`) or Command Prompt,
      each by absolute path with its own arguments (`-NoLogo`, `-Command`;
      `/D /S /C`), never a guessed POSIX shell and never POSIX `-l`. It runs
-     unconfined, only at Full access, through node-pty's ConPTY, with the
+     unconfined outside Strict at every level but Plan, and is refused under
+     Strict or a protection policy (a launch that does not carry its Strict
+     value counts as Strict), through node-pty's ConPTY, with the
      inherited environment names a Windows shell needs (`SYSTEMROOT`,
      `USERPROFILE`, `PSMODULEPATH` and their kin) added to the terminal's
      allowlist. A Project action runs in that shell, written in its own words
@@ -19690,7 +20077,8 @@ deliverable and keeps every gate above:
    - **Process-tree stop.** Windows has no process groups, and
      `ChildProcess.kill` there ends only the root. Every stop that signals a
      process group elsewhere (each provider family's runtime, owned-process
-     receipts, agent runs, terminals) ends the whole tree on Windows with
+     receipts, agent runs, terminals, repository tests and scaffolds,
+     language servers and debug sessions) ends the whole tree on Windows with
      `System32\taskkill.exe /PID <pid> /T /F`, run by absolute path through no
      shell (`process/windowsProcessTree.ts`). Rationale: the launcher's
      `--full-access` job object would end a tree that re-parented itself too,
@@ -19707,7 +20095,7 @@ deliverable and keeps every gate above:
      precedes has the same reach, and the confined read has no Windows form.
      The decision is made per launch, from that launch's own mode, level and
      Strict value (`windowsProviderLaunch`), so no earlier read or cached
-     result admits another launch; Strict below Full access, a kept sandbox
+     result admits another launch; Strict at every level, a kept sandbox
      and a Chat launch are refused by name, and the server gate above refuses
      those turns first. A read that serves no one thread (Codex's model
      catalog lease, OpenCode's and an ACP agent's readiness check) runs
@@ -19731,8 +20119,11 @@ deliverable and keeps every gate above:
      Octant cannot read a program from, or a script with no `node.exe`, is
      refused with the reason, naming the `.exe` to point Settings at (for
      Codex, the `codex.exe` its package carries).
-   - **Harness shell.** The Octant Harness's shell tool at Full access on
-     Windows runs each command in the terminal shell Settings › Code names
+   - **Harness shell.** The Octant Harness's shell tool on Windows runs each
+     command, at Full access and, outside Strict, below it (since 2026-11-18;
+     before then the composition still routed a Windows lead's commands to
+     the POSIX sandboxed shell, which refused every one), in the terminal
+     shell Settings › Code names
      (Windows PowerShell by default) from a `.ps1` (`-NoProfile
 -NonInteractive -ExecutionPolicy Bypass -File`) or `.cmd` script in its
      own script folder, with the Windows names a shell needs in its
@@ -19750,20 +20141,44 @@ deliverable and keeps every gate above:
      receipt cannot be kept is stopped and reported unavailable. The tool
      keeps its name, and a Work or Code lead on a Windows host is told
      which shell runs its commands (Windows PowerShell 5.1, PowerShell 7 or a
-     Command Prompt batch script), read from the same setting. The levels below Full access refuse on Windows
-     before a command is planned.
-   - **Not yet on Windows.** These run on macOS and Linux and are
-     unavailable on Windows: the
-     [agent debug tool](design/language-services.md#agent-debug-tool-rules);
-     a Project's [own toolchain copy](design/language-services.md#user-added-servers);
-     Octant's own terminals, tests and harness shell commands on a thread
-     below Full access; a Chat thread on a provider runtime; app-managed
-     tools for the ACP agents, which reach their bridge only through a
-     loopback rule in Octant's sandbox; and every launch under Strict below
-     Full access or with the sandbox kept.
+     Command Prompt batch script), read from the same setting. Under Strict
+     or with the sandbox kept a command is refused when it runs, with the
+     reason, and nothing starts.
+   - **Tests, scaffolds, language servers and debug sessions** (since
+     2026-11-18; before then each was refused on Windows, its runner or
+     launch policy admitting only a Seatbelt or Bubblewrap capsule and owned
+     process groups) run unconfined outside Strict, as a thread terminal
+     does, and are refused under Strict with the reason. A repository test
+     or scaffold starts the program it names with no shell, a bare name
+     found on `Path` with `PATHEXT`'s extensions and an npm `.cmd` shim
+     read for the program it starts (as above), with the Windows names a
+     program needs in its environment, and ends its whole tree on timeout
+     or cancellation. A scaffold's generator counts as installed when
+     `Path` holds it under one of `PATHEXT`'s extensions (`bunx.exe`), as
+     Windows finds it. A
+     [language server](design/language-services.md#launch-classes), a
+     Project's own toolchain copy among them, starts for a thread outside
+     Strict (`decideLanguageServerLaunch` answers confinement `none`);
+     `repo-tooling` still needs the person's start and approval and gets no
+     egress proxy, having no wall to hold it to, and a crash restart is
+     held to the watched thread's Strict value as it is then. A
+     [debug session](design/language-services.md#approval-and-starting),
+     the agent's `octant_debug` tool included, starts after the level's
+     confirmation on the open network, its child connecting on loopback,
+     and ends when Strict turns on. Each keeps its receipt, private cache
+     or state folder, and the tree stop. A server's or session's receipt
+     (and a session's state folder) goes only once the tree stop ran and the
+     root was seen to exit (`stopWindowsTreeConfirmed`); a failed or
+     unconfirmed stop keeps them, so a restarted host still stops the tree,
+     and the stop is tried again when the root exits.
+   - **Not yet on Windows.** A Chat thread on OpenCode or an ACP agent
+     (above), and every launch under Strict at any level or with the
+     sandbox kept, until the confinement launcher has run a real provider
+     on a person's Windows machine.
      A provider that starts no local process before its
-     turn (an Octant Harness model over an endpoint) runs Full access turns
-     there with Octant's own file tools and the harness shell.
+     turn (an Octant Harness model over an endpoint) runs turns there
+     outside Strict, at Full access and below it, with Octant's own file
+     tools and the harness shell.
    - **Evidence.** The level gate, the picker, the settings and the launch
      rules are tested on Linux CI with the host's platform set to Windows.
      The `server-windows` CI job runs against real processes on
@@ -19773,7 +20188,7 @@ deliverable and keeps every gate above:
      the terminal port starts again, a long harness command a "crashed" port
      left running stopped from its receipt by a fresh port, the production Codex driver reading its
      catalog through a runtime registry that keeps receipts, a failed native
-     program, cmdlet and Command Prompt command each reported as a failure, a Full access PowerShell terminal that writes a file
+     program, cmdlet and Command Prompt command each reported as a failure, a PowerShell terminal below Full access outside Strict that writes a file
      and a live one that close ends, the harness shell running a turn's
      PowerShell command that writes a file in the checkout and returns its
      output and ending a timed-out command's tree, and a fake Codex app-server
@@ -19783,10 +20198,20 @@ deliverable and keeps every gate above:
      under Strict and with a kept sandbox, and its catalog read only for a host
      whose new threads run unconfined; fake Claude and OpenCode runtimes
      compiled the same way read their version, and OpenCode starts at Full
-     access and outside Strict and is stopped with its tree. Pi and the ACP
-     agents have no compiled fake runtime and are tested on Linux CI with the
-     host's platform set to Windows. A whole Work or Code turn through a real
-     provider on a person's Windows machine has not run.
+     access and outside Strict and is stopped with its tree; fake Pi and Kilo
+     ACP runtimes compiled the same way start at Full access and below it
+     outside Strict (Pi in Chat too) with an unconfined version read, the
+     Kilo agent answering ACP's `initialize`, are stopped with their tree, and
+     are refused under Strict, a Kilo Chat thread by Chat's reason; a
+     repository test outside Strict runs a real program and returns its output
+     and exit code, and a timed-out one is ended with the program it started;
+     and a language server and a debug adapter start unconfined, answer on
+     their pipes and are stopped. Chat on
+     Codex and Claude, the harness shell's level routing and app-managed tools
+     on Windows, and the language server, debug and test launch policies under
+     Strict, are tested on Linux CI with the host's platform set to
+     Windows. A whole Work, Code or Chat turn through a real provider on a
+     person's Windows machine has not run.
 4. The `octant` CLI on Windows: native host paths, a browser opener that runs
    no shell, and a service manager equivalent. Partly built (maintainer
    request, 2026-11-15); detail in the next paragraph. It has run only on a

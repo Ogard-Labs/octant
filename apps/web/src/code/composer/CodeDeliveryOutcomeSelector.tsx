@@ -1,5 +1,5 @@
 import type { CodeDeliveryOutcomeKind } from "@octant/contracts/code";
-import { ChevronDown, FileSearch, GitMerge, GitPullRequest, Save } from "lucide-react";
+import { ChevronDown, FileSearch, GitMerge, GitPullRequest, Save } from "../../ui/icons";
 import { useState } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantPopover } from "../../ui/base/OctantPopover";

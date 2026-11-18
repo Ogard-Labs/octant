@@ -1,3 +1,4 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { planReadOnlyToolServers, providerCommandOf, providerRunsAsItself } from "@octant/domain";
 import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
 import { readBoundedResponseBody } from "../extensions/boundedResponseBody";
@@ -36,6 +37,7 @@ import type {
   ProviderConnection,
   ProviderDriver,
   ProviderSessionCompaction,
+  ProviderSessionOwnership,
 } from "@octant/provider-sdk/driver";
 import {
   renderProviderContextSections,
@@ -58,6 +60,11 @@ import {
   type OutsideContentCall,
 } from "./openCodeEventMapper";
 import type { ManagedToolAnswer, ManagedToolCallContext } from "./managedMcpTools";
+import {
+  forkOpenCodeSession,
+  makeOpenCodeNativeSessions,
+  type OpenCodeSessionClient,
+} from "./openCodeNativeSessions";
 import {
   createOpenCodeManagedToolsBridge,
   type OpenCodeManagedToolsBridge,
@@ -86,6 +93,17 @@ export interface OpenCodeSessionRecord {
   };
 }
 
+/** One of the sessions OpenCode lists for a directory. */
+export interface OpenCodeListedSession {
+  readonly id: string;
+  readonly directory: string;
+  readonly title?: string;
+  /** When OpenCode last changed it, in milliseconds since the epoch. */
+  readonly updated: number;
+  /** Set on a session OpenCode started inside another, for a subagent or a fork. */
+  readonly parentId?: string;
+}
+
 export interface OpenCodeClientPort {
   readonly health: () => Promise<{ readonly healthy: true; readonly version: string }>;
   readonly providers: () => Promise<{
@@ -100,6 +118,30 @@ export interface OpenCodeClientPort {
   readonly getSession: (sessionId: string) => Promise<OpenCodeSessionRecord>;
   /** Removes a session and its history from the provider's own store. */
   readonly deleteSession: (sessionId: string) => Promise<void>;
+  /**
+   * The sessions OpenCode keeps for this client's directory, the person's own
+   * and Octant's alike (they share OpenCode's store), newest first.
+   */
+  readonly listSessions?: (() => Promise<ReadonlyArray<OpenCodeListedSession>>) | undefined;
+  /**
+   * The message that follows `messageId` in the session: `next` is absent when
+   * it is the newest. `missing` when the session holds no such message.
+   */
+  readonly messageAfter?:
+    | ((
+        sessionId: string,
+        messageId: string,
+      ) => Promise<
+        { readonly status: "found"; readonly next?: string } | { readonly status: "missing" }
+      >)
+    | undefined;
+  /**
+   * OpenCode's own fork: a new session holding the source's history before
+   * `before`, or all of it when `before` is absent. The source is not changed.
+   */
+  readonly forkSession?:
+    | ((sessionId: string, before: string | undefined) => Promise<OpenCodeSessionRecord>)
+    | undefined;
   readonly prompt: (input: {
     readonly sessionId: string;
     readonly providerId: string;
@@ -179,6 +221,7 @@ export function openCodeProtectedPathsFor(
 }
 
 export interface OpenCodeDriverOptions {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly instanceId: ProviderInstanceId;
   readonly binaryPath: string;
   readonly process: OpenCodeProcessPort;
@@ -206,6 +249,13 @@ export interface OpenCodeDriverOptions {
   readonly idleLeaseMs?: number;
   readonly clock?: () => string;
   readonly correlationId?: () => string;
+  /**
+   * Which runtime sessions an Octant thread holds, the provider SDK's port
+   * the host hands every driver, read at each call. Absent, the driver offers
+   * none of OpenCode's own sessions to start a thread from: without that
+   * record it could not keep two threads off one session.
+   */
+  readonly sessionOwnership?: ProviderSessionOwnership;
 }
 
 interface SessionState {
@@ -273,6 +323,11 @@ interface SessionState {
   turnSent?: boolean;
   managedTools: ManagedToolsLease | undefined;
   readonly stopMemory: { current: ProviderOutputStopReason | undefined };
+  /**
+   * The newest assistant message of this session OpenCode reported, the
+   * anchor a completed turn names for a later fork or rewind.
+   */
+  lastAssistantMessageId?: string | undefined;
 }
 
 /**
@@ -429,6 +484,12 @@ const capabilities = {
   // current model first (then the cursor's binding, then the session record),
   // and every prompt names it, so the session never silently runs the old one.
   modelSwitch: "supported",
+  // A rewound Code thread continues OpenCode's own fork of its session cut
+  // at the last kept turn's anchor (`forkOpenCodeSession`), which leaves the
+  // source and the files alone. OpenCode's revert route is not used: it also
+  // puts files back from OpenCode's own snapshots, which Octant's checkpoints
+  // already do when the person asks for files, and it changes the source.
+  sessionRollback: "supported",
   // One server process serves every thread, so killing it ends them all.
   forceStop: "unsupported",
   ...unsupportedChatCapabilities,
@@ -1235,6 +1296,36 @@ function betaMcpStatus(body: unknown, name: string): string | undefined {
   return undefined;
 }
 
+/** How many of a directory's sessions are read to offer a thread. */
+const OPENCODE_LISTED_SESSIONS = 100;
+/** 2.x serves at most 200 messages a page; a fork's anchor is looked for this far back. */
+const OPENCODE_MESSAGE_PAGE_SIZE = 200;
+const OPENCODE_MESSAGE_PAGES = 50;
+
+function adaptBetaListedSession(
+  record: Readonly<Record<string, unknown>>,
+): OpenCodeListedSession | undefined {
+  const id = betaString(record.id);
+  const directory = betaString(asRecord(record.location)?.directory);
+  const updatedValue = asRecord(record.time)?.updated;
+  const updated =
+    typeof updatedValue === "number"
+      ? updatedValue
+      : typeof updatedValue === "string"
+        ? Date.parse(updatedValue)
+        : Number.NaN;
+  if (id === undefined || directory === undefined || !Number.isFinite(updated)) return undefined;
+  const title = betaString(record.title);
+  const parentId = betaString(record.parentID);
+  return {
+    id,
+    directory,
+    updated,
+    ...(title === undefined ? {} : { title }),
+    ...(parentId === undefined ? {} : { parentId }),
+  };
+}
+
 export function makeOfficialOpenCodeClient(
   server: OpenCodeServerConnection,
   projectRoot: string,
@@ -1245,6 +1336,17 @@ export function makeOfficialOpenCodeClient(
     directory: projectRoot,
     headers: { authorization: server.authorization },
   });
+  const betaRead = async (path: string): Promise<unknown> => {
+    const response = await fetch(new URL(path, server.url).toString(), {
+      headers: {
+        authorization: server.authorization,
+        "x-opencode-directory": encodeURIComponent(projectRoot),
+      },
+      signal: AbortSignal.timeout(BETA_API_TIMEOUT_MS),
+    });
+    if (!response.ok) throw new Error(`OpenCode 2 read failed with status ${response.status}.`);
+    return response.json();
+  };
   return {
     health: async () => {
       if (!beta) return resultData(await client.global.health({ throwOnError: true }));
@@ -1327,6 +1429,101 @@ export function makeOfficialOpenCodeClient(
       if (!response.ok) {
         throw new Error(`OpenCode 2 session delete failed with status ${response.status}.`);
       }
+    },
+    // The pinned SDK 1.18.0 names no 2.x session list, message list or fork;
+    // 2.0.22 and 2.2.0 serve `GET /api/session`, `GET
+    // /api/session/{id}/message` and `POST /api/session/{id}/fork` (opencode
+    // source, `protocol/src/groups/session.ts` and `message.ts`).
+    listSessions: async () => {
+      if (!beta) {
+        const listed = resultData(
+          await client.session.list(
+            { directory: projectRoot, limit: OPENCODE_LISTED_SESSIONS },
+            { throwOnError: true },
+          ),
+        );
+        return listed.map((session) => ({
+          id: session.id,
+          directory: session.directory,
+          ...(session.title.length === 0 ? {} : { title: session.title }),
+          updated: session.time.updated,
+          ...(session.parentID === undefined ? {} : { parentId: session.parentID }),
+        }));
+      }
+      const body = await betaRead(
+        `/api/session?${new URLSearchParams({
+          directory: projectRoot,
+          limit: String(OPENCODE_LISTED_SESSIONS),
+          order: "desc",
+        })}`,
+      );
+      return betaRecords(body).flatMap((record) => {
+        const listed = adaptBetaListedSession(record);
+        return listed === undefined ? [] : [listed];
+      });
+    },
+    messageAfter: async (sessionId, messageId) => {
+      if (!beta) {
+        const messages = resultData(
+          await client.session.messages({ sessionID: sessionId }, { throwOnError: true }),
+        );
+        const index = messages.findIndex((message) => message.info.id === messageId);
+        if (index < 0) return { status: "missing" as const };
+        const next = messages[index + 1]?.info.id;
+        return next === undefined
+          ? { status: "found" as const }
+          : { status: "found" as const, next };
+      }
+      // Newest first, so the message read just before the anchor is the one
+      // after it in the session.
+      let newer: string | undefined;
+      let cursor: string | undefined;
+      for (let page = 0; page < OPENCODE_MESSAGE_PAGES; page += 1) {
+        const query = new URLSearchParams({ limit: String(OPENCODE_MESSAGE_PAGE_SIZE) });
+        if (cursor === undefined) query.set("order", "desc");
+        else query.set("cursor", cursor);
+        const body = asRecord(
+          await betaRead(`/api/session/${encodeURIComponent(sessionId)}/message?${query}`),
+        );
+        for (const message of betaRecords(body)) {
+          const id = betaString(message.id);
+          if (id === undefined) continue;
+          if (id === messageId)
+            return newer === undefined
+              ? { status: "found" as const }
+              : { status: "found" as const, next: newer };
+          newer = id;
+        }
+        cursor = betaString(asRecord(body?.cursor)?.next);
+        if (cursor === undefined) break;
+      }
+      return { status: "missing" as const };
+    },
+    forkSession: async (sessionId, before) => {
+      if (!beta)
+        return resultData(
+          await client.session.fork(
+            { sessionID: sessionId, ...(before === undefined ? {} : { messageID: before }) },
+            { throwOnError: true },
+          ),
+        );
+      const response = await fetch(
+        new URL(`/api/session/${encodeURIComponent(sessionId)}/fork`, server.url).toString(),
+        {
+          method: "POST",
+          headers: {
+            authorization: server.authorization,
+            "content-type": "application/json",
+            "x-opencode-directory": encodeURIComponent(projectRoot),
+          },
+          body: JSON.stringify(before === undefined ? {} : { before }),
+          signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`OpenCode 2 session fork failed with status ${response.status}.`);
+      }
+      return adaptBetaSession(await response.json());
     },
     prompt: async ({ sessionId, providerId, modelId, prompt, attachments = [], permission }) => {
       if (beta) {
@@ -1541,9 +1738,50 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
     rememberedEditGrants.set(projectRoot, created);
     return created;
   };
+  // A server for a folder outside any thread, for listing, taking up and
+  // forking OpenCode's own sessions there: the readiness check's launch,
+  // leased per folder so its confinement binds that folder.
+  const withSessionClient: OpenCodeSessionClient = async (projectRoot, use) => {
+    const probesTurnJail = !openCodeChatPlanJailStartsProcesses(process.platform);
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.scoped(
+          acquireRuntime(
+            options,
+            projectRoot,
+            [],
+            probesTurnJail ? "code" : "chat",
+            probesTurnJail ? "approval-gated" : "plan",
+            `sessions\u0000${projectRoot}`,
+          ).pipe(
+            Effect.flatMap((runtime) =>
+              Effect.tryPromise({
+                try: () => use(clientFactory(runtime, projectRoot)),
+                catch: (error) => error,
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+    if (result._tag === "Left") throw result.left;
+    return result.right;
+  };
+  const sessionOwnership = options.sessionOwnership;
   return {
     kind: "opencode",
     conversationOwnership: "provider",
+    ...(sessionOwnership === undefined
+      ? {}
+      : {
+          nativeSessions: makeOpenCodeNativeSessions({
+            instanceId: options.instanceId,
+            heldSessions: () => sessionOwnership.held("opencode"),
+            withClient: withSessionClient,
+          }),
+        }),
+    forkSession: (input) =>
+      forkOpenCodeSession({ instanceId: options.instanceId, withClient: withSessionClient }, input),
     probe: ({ instanceId }) =>
       instanceId !== options.instanceId
         ? Effect.fail(fail("invalid-configuration", "Provider instance does not match driver."))
@@ -1552,8 +1790,8 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
             // Probe the app-owned transport with an empty, private catalogue.
             // This is a non-generating declaration check: it does not send a
             // model prompt and its bridge is closed before the probe scope
-            // returns. It runs wherever the launch can reach the bridge (macOS
-            // and Linux).
+            // returns. It runs wherever the launch can reach the bridge (macOS,
+            // Linux, and Windows, whose launches have no Octant sandbox).
             const bridge = appToolBridgeReachesLaunchOn(process.platform)
               ? yield* Effect.acquireRelease(
                   Effect.tryPromise({
@@ -1680,7 +1918,14 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
             }
             return normalized;
           }),
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], attachmentsFolder }) =>
+    acquire: ({
+      instanceId,
+      projectRoot,
+      mode,
+      extraFolders = [],
+      attachmentsFolder,
+      sandboxPolicy,
+    }) =>
       instanceId !== options.instanceId
         ? Effect.fail(fail("invalid-configuration", "Provider instance does not match driver."))
         : Effect.gen(function* () {
@@ -1698,7 +1943,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               );
             }
             return yield* makeConnection(
-              options,
+              { ...options, ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }) },
               clientFactory,
               projectRoot,
               mode === "chat" ? [] : extraFolders,
@@ -1720,6 +1965,7 @@ function acquireRuntime(
   loopbackPorts: ReadonlyArray<number> = [],
   probeMode: "chat" | "work" | "code" = "chat",
   probePolicy: ProviderExecutionPolicy = "plan",
+  lease?: string,
 ) {
   const betaPermissions = betaSessionPermissionRules(
     probePolicy,
@@ -1731,6 +1977,7 @@ function acquireRuntime(
     options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
   );
   return options.runtimeRegistry.acquireRuntime(options.instanceId, {
+    ...(lease === undefined ? {} : { lease }),
     idleMs: options.idleLeaseMs ?? 30_000,
     start: async () => {
       const scope = await Effect.runPromise(Scope.make());
@@ -2185,6 +2432,9 @@ function makeConnection(
             const startedExit = await Effect.runPromiseExit(
               options.process
                 .start({
+                  ...(options.sandboxPolicy === undefined
+                    ? {}
+                    : { sandboxPolicy: options.sandboxPolicy }),
                   binaryPath: options.binaryPath,
                   cwd: projectRoot,
                   ...(extraFolders.length === 0 ? {} : { extraFolders }),
@@ -3293,6 +3543,27 @@ function makeConnection(
   });
 }
 
+/**
+ * Remembers the session's newest assistant message: 1.x names it on
+ * `message.updated` (`info`, with its role), 2.x on each step and output
+ * event (`assistantMessageID`, opencode `schema/src/session-event.ts`). A
+ * delegated session's messages are not this session's.
+ */
+function noteAssistantMessage(state: SessionState, event: OpenCodeEvent): void {
+  const properties = asRecord((event as { readonly properties?: unknown }).properties);
+  if (properties === undefined) return;
+  if (event.type === "message.updated") {
+    const info = asRecord(properties.info);
+    const id = betaString(info?.id);
+    if (info?.role === "assistant" && info.sessionID === state.sourceId && id !== undefined)
+      state.lastAssistantMessageId = id;
+    return;
+  }
+  const id = betaString(properties.assistantMessageID);
+  if (id !== undefined && properties.sessionID === state.sourceId)
+    state.lastAssistantMessageId = id;
+}
+
 function newSessionState(
   sessionId: ProviderSessionId,
   modelId: string,
@@ -3575,6 +3846,7 @@ function mapAndOffer(
     });
     state.nextSequence += 1;
   }
+  noteAssistantMessage(state, event);
   let mapped: ReadonlyArray<ProviderRuntimeEvent>;
   try {
     mapped = mapOpenCodeEvent(
@@ -3694,6 +3966,14 @@ function mapAndOffer(
       if (state.questionAnswers.get(providerRequestId)?.has(index)) continue;
       state.questions.set(requestId, { providerRequestId, index, count });
       normalized = { ...normalized, requestId };
+    }
+    // Where the turn ends in OpenCode's own session, for a later fork or rewind.
+    if (
+      normalized.kind === "completed" &&
+      normalized.nativeAnchor === undefined &&
+      state.lastAssistantMessageId !== undefined
+    ) {
+      normalized = { ...normalized, nativeAnchor: state.lastAssistantMessageId };
     }
     // A shutdown's hold ends the turn, as every runner treats `waiting`.
     if (isTerminalEvent(normalized) || event.type === "session.execution.interrupted") {

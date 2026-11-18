@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0 OR MIT
 /*
- * Original deny-only admission bridge. Built only in the disposable guest.
- * Production coverage deliberately stays zero: a compiled hook is not proof
- * that create/truncate, namespace, alias and all data routes are complete.
+ * Original deny-only admission bridge. The opt-in production path is enabled
+ * only on a compatible custom kernel after the complete hook, namespace,
+ * alias, data-route, lifecycle and OverlayFS contract passes in the owned
+ * disposable guest.
  */
 #include <asm/ioctls.h>
 #include <linux/anon_inodes.h>
@@ -23,6 +24,7 @@
 #include <linux/lsm_hooks.h>
 #include <linux/magic.h>
 #include <linux/miscdevice.h>
+#include <linux/mman.h>
 #include <linux/mm.h>
 #include <linux/mutex.h>
 #include <linux/poll.h>
@@ -33,6 +35,7 @@
 #include <linux/sched/task.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
+#include <linux/string.h>
 #include <linux/uaccess.h>
 #include <linux/wait.h>
 #include "octant_mediation.h"
@@ -95,11 +98,24 @@ struct octant_creation {
 	bool prepared;
 };
 
+struct octant_open {
+	u64 next_scope;
+	u64 scope;
+	struct task_struct *owner;
+	struct octant_context *context;
+	u64 epoch;
+	u32 operation;
+	u32 depth;
+	bool active;
+	bool prepared;
+};
+
 /* Per-task rather than per-credential: same-policy threads may propose
  * concurrent namespace operations without replacing each other's token. */
 struct octant_task {
 	struct octant_metadata metadata;
 	struct octant_creation creation;
+	struct octant_open open;
 	struct octant_mediation_request approved;
 	u64 mutation_base;
 	u64 own_changes;
@@ -128,9 +144,22 @@ static struct octant_cred *octant_cred(const struct cred *cred)
 	return cred->security + octant_blobs.lbs_cred;
 }
 
+/* Filesystem overrides change access-check credentials, not the actor whose
+ * effects are restricted. OverlayFS backing reads otherwise borrow the
+ * unconfined mounter's credentials and escape their enrolled process scope.
+ * The current task pins its real credentials throughout this kernel entry. */
+static struct octant_context *current_context(void)
+{
+	struct octant_context *actor = octant_cred(current_real_cred())->context;
+	/* An unconfined kernel worker using an enrolled caller's credentials must
+	 * retain that original scope as well. Filesystem overrides may not replace
+	 * a real enrolled actor's own scope with the mounter's different one. */
+	return actor ? actor : octant_cred(current_cred())->context;
+}
+
 bool octant_mediation_restricted(void)
 {
-	return initialized && octant_cred(current_cred())->context;
+	return initialized && current_context();
 }
 
 static struct octant_task *octant_task(void)
@@ -177,8 +206,17 @@ void octant_namespace_end(void)
 		else {
 			task->mutation_depth--;
 			task->own_changes++;
-			if (!task->mutation_depth)
+			if (!task->mutation_depth) {
 				task->has_approved = false;
+				/* An admitted stacked open may require several consecutive
+				 * internal mutations. Advance it only across this task's exact
+				 * completed mutation, with no overlapping foreign change. */
+				if (task->open.active && task->open.prepared && !active_mutations &&
+				    task->open.epoch == task->mutation_base &&
+				    namespace_epoch >= task->mutation_base &&
+				    namespace_epoch - task->mutation_base == task->own_changes)
+					task->open.epoch = namespace_epoch;
+			}
 		}
 	}
 	spin_unlock_irqrestore(&namespace_lock, flags);
@@ -191,7 +229,7 @@ static bool broker_authorized(struct octant_context *context)
 {
 	return task_tgid(current) == context->broker_pid &&
 		current_cred() == context->broker_cred &&
-		!octant_cred(current_cred())->context;
+		!current_context();
 }
 
 static bool broker_alive(struct octant_context *context)
@@ -250,7 +288,7 @@ static void free_cred(struct cred *cred)
 static int admit_request_wait(struct octant_mediation_request *request,
 	const struct path *source, const struct path *destination, bool socket_cleanup)
 {
-	struct octant_context *context = octant_cred(current_cred())->context;
+	struct octant_context *context = current_context();
 	struct octant_pending *pending = NULL;
 	unsigned long flags;
 	long waited;
@@ -351,6 +389,174 @@ static int admit_inode(struct inode *inode, u32 operation)
 	return admit_inode_request(inode, operation, &request);
 }
 
+static bool scope_epoch_valid(u64 epoch, struct octant_task *task)
+{
+	if (namespace_overflow)
+		return false;
+	if (!task->mutation_depth)
+		return !active_mutations && epoch == namespace_epoch;
+	return active_mutations == task->mutation_depth && epoch == task->mutation_base &&
+		namespace_epoch >= task->mutation_base &&
+		namespace_epoch - task->mutation_base == task->own_changes;
+}
+
+static void clear_open(struct octant_open *open)
+{
+	u64 next = open->next_scope;
+	*open = (struct octant_open) { .next_scope = next };
+}
+
+/* Admit the stacked inode before the filesystem open callback can copy up or
+ * inspect backing metadata. Audited stacked filesystems explicitly admit each
+ * backing inode at the point where they can resolve it without side effects.
+ * The scope remains private to this one kernel call and is never a userspace
+ * authority. */
+struct octant_open_scope octant_open_begin(struct file *file)
+{
+	struct octant_open_scope scope = {};
+	struct octant_task *task;
+	struct octant_open *open;
+	struct octant_context *context;
+	struct inode *inode;
+	struct octant_mediation_request logical = {};
+	unsigned long flags;
+	u32 operation;
+	bool valid;
+	if (!octant_mediation_restricted())
+		return scope;
+	inode = d_inode(file->f_path.dentry);
+	if (!guarded_inode(inode))
+		return scope;
+	operation = ((file->f_flags & O_ACCMODE) != O_RDONLY ||
+		(file->f_mode & FMODE_WRITE)) ? OCTANT_MEDIATION_WRITE : OCTANT_MEDIATION_READ;
+	task = octant_task();
+	open = &task->open;
+	context = current_context();
+	if (open->active) {
+		if (open->owner != current || open->context != context || !open->prepared ||
+		    (operation == OCTANT_MEDIATION_WRITE && open->operation != OCTANT_MEDIATION_WRITE)) {
+			scope.error = -EACCES;
+			return scope;
+		}
+		spin_lock_irqsave(&context->lock, flags);
+		spin_lock(&namespace_lock);
+		valid = !context->dead && broker_alive(context) && scope_epoch_valid(open->epoch, task);
+		spin_unlock(&namespace_lock);
+		spin_unlock_irqrestore(&context->lock, flags);
+		if (!valid || open->depth == U32_MAX) {
+			scope.error = -EACCES;
+			return scope;
+		}
+		open->depth++;
+		scope.identity = open->scope;
+		scope.nested = true;
+		return scope;
+	}
+	if (open->next_scope == U64_MAX) {
+		scope.error = -EACCES;
+		return scope;
+	}
+	scope.identity = ++open->next_scope;
+	open->scope = scope.identity;
+	open->owner = current;
+	open->context = context;
+	open->operation = operation;
+	open->depth = 1;
+	open->active = true;
+	scope.error = admit_inode_request(inode, operation, &logical);
+	if (!scope.error) {
+		open->epoch = logical.namespace_epoch;
+		spin_lock_irqsave(&context->lock, flags);
+		spin_lock(&namespace_lock);
+		valid = !context->dead && broker_alive(context) && scope_epoch_valid(open->epoch, task);
+		spin_unlock(&namespace_lock);
+		spin_unlock_irqrestore(&context->lock, flags);
+		if (!valid)
+			scope.error = -EACCES;
+		else
+			open->prepared = true;
+	}
+	return scope;
+}
+
+/* OverlayFS calls this before copy-up for the current data inode and after
+ * resolving the final real path. Do not use d_real_inode() here: resolving an
+ * OverlayFS metacopy through that generic helper performs backing metadata I/O
+ * before the backing object has been admitted. */
+int octant_open_backing(struct inode *inode)
+{
+	struct octant_task *task;
+	struct octant_open *open;
+	struct octant_context *context;
+	struct octant_mediation_request request = {};
+	unsigned long flags;
+	bool valid;
+	int error;
+	if (!octant_mediation_restricted() || !guarded_inode(inode))
+		return 0;
+	task = octant_task();
+	open = &task->open;
+	context = open->context;
+	if (!open->active || !open->prepared || open->owner != current || !context ||
+	    current_context() != context)
+		return -EACCES;
+	error = admit_inode_request(inode, open->operation, &request);
+	if (error)
+		return error;
+	if (request.namespace_epoch != open->epoch)
+		return -EAGAIN;
+	spin_lock_irqsave(&context->lock, flags);
+	spin_lock(&namespace_lock);
+	valid = !context->dead && broker_alive(context) && scope_epoch_valid(open->epoch, task);
+	spin_unlock(&namespace_lock);
+	spin_unlock_irqrestore(&context->lock, flags);
+	return valid ? 0 : -EACCES;
+}
+
+void octant_open_end(struct octant_open_scope *scope)
+{
+	struct octant_open *open;
+	if (!scope->identity || !initialized)
+		return;
+	open = &octant_task()->open;
+	if (!open->active || open->scope != scope->identity || open->owner != current)
+		return;
+	if (scope->nested && open->depth > 1)
+		open->depth--;
+	else if (!scope->nested)
+		clear_open(open);
+	scope->identity = 0;
+}
+
+/* A stacked filesystem may perform only kernel-internal work inside the exact
+ * admitted open. OverlayFS performs some verification under the caller's
+ * credentials and other backing work under its creator credentials, so the
+ * scope—not a credential transition—is the authority boundary. It cannot mint
+ * a reusable metadata or namespace decision, and an external or foreign
+ * mutation invalidates it. */
+static bool stacked_open_allows(u32 operation)
+{
+	struct octant_task *task = octant_task();
+	struct octant_open *open = &task->open;
+	struct octant_context *context = open->context;
+	unsigned long flags;
+	bool valid;
+	/* OverlayFS may temporarily override the caller credential with the
+	 * mounter's credential while resolving metacopy/backing state. The scope
+	 * is bound to this task and exact kernel call, so validate its retained
+	 * enrolled context rather than treating that credential override as a
+	 * different workload. */
+	if (!open->active || !open->prepared || open->owner != current || !context ||
+	    (operation == OCTANT_MEDIATION_WRITE && open->operation != OCTANT_MEDIATION_WRITE))
+		return false;
+	spin_lock_irqsave(&context->lock, flags);
+	spin_lock(&namespace_lock);
+	valid = !context->dead && broker_alive(context) && scope_epoch_valid(open->epoch, task);
+	spin_unlock(&namespace_lock);
+	spin_unlock_irqrestore(&context->lock, flags);
+	return valid;
+}
+
 static void clear_metadata(struct octant_metadata *metadata)
 {
 	u64 next = metadata->next_scope;
@@ -374,7 +580,7 @@ struct octant_metadata_scope octant_metadata_begin(struct dentry *dentry, u32 op
 	scope.identity = ++metadata->next_scope;
 	metadata->scope = scope.identity;
 	metadata->owner = current;
-	metadata->context = octant_cred(current_cred())->context;
+	metadata->context = current_context();
 	metadata->active = true;
 	metadata->prepared = false;
 	scope.error = admit_inode_request(inode, operation, &request);
@@ -411,7 +617,7 @@ static int check_metadata_decision(struct dentry *dentry, u32 operation, bool co
 	bool valid;
 	if (!octant_mediation_restricted() || !guarded_inode(inode))
 		return 0;
-	context = octant_cred(current_cred())->context;
+	context = current_context();
 	metadata = &octant_task()->metadata;
 	spin_lock_irqsave(&context->lock, flags);
 	spin_lock(&namespace_lock);
@@ -432,6 +638,13 @@ static int check_metadata_decision(struct dentry *dentry, u32 operation, bool co
 static int check_metadata(struct dentry *dentry, u32 operation)
 {
 	return check_metadata_decision(dentry, operation, true);
+}
+
+static int check_metadata_hook(struct dentry *dentry, u32 operation)
+{
+	if (stacked_open_allows(operation))
+		return 0;
+	return check_metadata(dentry, operation);
 }
 
 int octant_metadata_check_read(struct dentry *dentry)
@@ -471,49 +684,74 @@ static void octant_creation_task_free(struct task_struct *task)
 
 static int octant_metadata_getattr(const struct path *path)
 {
-	return check_metadata(path->dentry, OCTANT_MEDIATION_READ);
+	return check_metadata_hook(path->dentry, OCTANT_MEDIATION_READ);
 }
 
 static int octant_metadata_readlink(struct dentry *dentry)
 {
-	return check_metadata(dentry, OCTANT_MEDIATION_READ);
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_READ);
+}
+
+/* OverlayFS checks only this private marker while resolving a new lower dentry,
+ * before its file open callback can create an object-bound admission scope.
+ * Permit that kernel-internal query only under the unconfined mounter credential
+ * saved by the audited production mount. A direct caller, setfsuid credential,
+ * enrolled mounter, other xattr, dead broker or later backing access still uses
+ * normal admission. The open callback separately admits the resolved backing
+ * inode before copy-up or backing-file open. */
+static bool overlay_lookup_xattr_allows(const char *name)
+{
+	struct octant_context *actor = octant_cred(current_real_cred())->context;
+	struct octant_context *subjective = octant_cred(current_cred())->context;
+	unsigned long flags;
+	bool valid;
+	if (!actor || subjective == actor ||
+	    (strcmp(name, "trusted.overlay.metacopy") &&
+	     strcmp(name, "user.overlay.metacopy")))
+		return false;
+	spin_lock_irqsave(&actor->lock, flags);
+	valid = !actor->dead && broker_alive(actor);
+	spin_unlock_irqrestore(&actor->lock, flags);
+	return valid;
 }
 
 static int octant_metadata_getxattr(struct dentry *dentry, const char *name)
 {
-	return check_metadata(dentry, OCTANT_MEDIATION_READ);
+	if (overlay_lookup_xattr_allows(name))
+		return 0;
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_READ);
 }
 
 static int octant_metadata_listxattr(struct dentry *dentry)
 {
-	return check_metadata(dentry, OCTANT_MEDIATION_READ);
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_READ);
 }
 
 static int octant_metadata_get_acl(struct mnt_idmap *idmap, struct dentry *dentry, const char *name)
 {
-	return check_metadata(dentry, OCTANT_MEDIATION_READ);
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_READ);
 }
 
 static int octant_metadata_setxattr(struct mnt_idmap *idmap, struct dentry *dentry,
 	const char *name, const void *value, size_t size, int flags)
 {
-	return check_metadata(dentry, OCTANT_MEDIATION_WRITE);
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_WRITE);
 }
 
 static int octant_metadata_removexattr(struct mnt_idmap *idmap, struct dentry *dentry, const char *name)
 {
-	return check_metadata(dentry, OCTANT_MEDIATION_WRITE);
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_WRITE);
 }
 
 static int octant_metadata_set_acl(struct mnt_idmap *idmap, struct dentry *dentry, const char *name,
 	struct posix_acl *acl)
 {
-	return check_metadata(dentry, OCTANT_MEDIATION_WRITE);
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_WRITE);
 }
 
 static int octant_metadata_remove_acl(struct mnt_idmap *idmap, struct dentry *dentry, const char *name)
 {
-	return check_metadata(dentry, OCTANT_MEDIATION_WRITE);
+	return check_metadata_hook(dentry, OCTANT_MEDIATION_WRITE);
 }
 
 static int copy_name(struct octant_mediation_name *output, struct inode *parent,
@@ -574,7 +812,7 @@ struct octant_creation_scope octant_creation_begin(u32 operation, const struct p
 		scope.error = -EACCES;
 		return scope;
 	}
-	context = octant_cred(current_cred())->context;
+	context = current_context();
 	scope.identity = ++creation->next_scope;
 	creation->scope = scope.identity;
 	creation->owner = current;
@@ -614,11 +852,11 @@ int octant_creation_check(u32 operation, struct inode *parent, struct dentry *na
 	unsigned long flags;
 	bool valid;
 	int result;
-	if (!octant_mediation_restricted())
+	if (!octant_mediation_restricted() || stacked_open_allows(OCTANT_MEDIATION_WRITE))
 		return 0;
 	task = octant_task();
 	creation = &task->creation;
-	context = octant_cred(current_cred())->context;
+	context = current_context();
 	result = creation_identity(&actual, operation, parent, name ? &name->d_name : NULL, source);
 	if (result) {
 		creation->prepared = false;
@@ -703,7 +941,7 @@ static int check_namespace(u32 operation, struct inode *source, struct dentry *n
 	unsigned long flags;
 	bool valid;
 	int result;
-	if (!octant_mediation_restricted())
+	if (!octant_mediation_restricted() || stacked_open_allows(OCTANT_MEDIATION_WRITE))
 		return 0;
 	task = octant_task();
 	result = copy_name(&actual.source, source, &name->d_name);
@@ -713,8 +951,8 @@ static int check_namespace(u32 operation, struct inode *source, struct dentry *n
 		return result;
 	spin_lock_irqsave(&namespace_lock, flags);
 	valid = task->has_approved && !namespace_overflow &&
-		!READ_ONCE(octant_cred(current_cred())->context->dead) &&
-		broker_alive(octant_cred(current_cred())->context) &&
+		!READ_ONCE(current_context()->dead) &&
+		broker_alive(current_context()) &&
 		task->approved.operation == actual.operation &&
 		task->approved.flags == actual.flags &&
 		!memcmp(&task->approved.source, &actual.source, sizeof(actual.source)) &&
@@ -767,17 +1005,20 @@ struct octant_metadata_scope octant_seek_begin(struct file *file, unsigned int w
 
 static int truncate_file(struct file *file)
 {
-	return admit_file(file, OCTANT_MEDIATION_WRITE);
+	return stacked_open_allows(OCTANT_MEDIATION_WRITE) ? 0 :
+		admit_file(file, OCTANT_MEDIATION_WRITE);
 }
 
 static int truncate_path(const struct path *path)
 {
-	return admit_inode(d_inode(path->dentry), OCTANT_MEDIATION_WRITE);
+	return stacked_open_allows(OCTANT_MEDIATION_WRITE) ? 0 :
+		admit_inode(d_inode(path->dentry), OCTANT_MEDIATION_WRITE);
 }
 
 static int octant_file_permission(struct file *file, int mask)
 {
-	return admit_file(file, mask & MAY_WRITE ? OCTANT_MEDIATION_WRITE : OCTANT_MEDIATION_READ);
+	u32 operation = mask & MAY_WRITE ? OCTANT_MEDIATION_WRITE : OCTANT_MEDIATION_READ;
+	return stacked_open_allows(operation) ? 0 : admit_file(file, operation);
 }
 
 /* The pinned native and compat syscall entries call these hooks before
@@ -808,12 +1049,14 @@ static int octant_file_ioctl_compat(struct file *file, unsigned int command, uns
 static int mmap_file(struct file *file, unsigned long requested, unsigned long prot,
 		     unsigned long flags)
 {
-	return admit_file(file, OCTANT_MEDIATION_MAP);
+	return admit_file(file, (prot & PROT_WRITE) && (flags & MAP_SHARED) ?
+		OCTANT_MEDIATION_WRITE : OCTANT_MEDIATION_MAP);
 }
 
 static int protect_mapping(struct vm_area_struct *vma, unsigned long requested, unsigned long prot)
 {
-	return admit_file(vma->vm_file, OCTANT_MEDIATION_MAP);
+	return admit_file(vma->vm_file, (prot & PROT_WRITE) && (vma->vm_flags & VM_SHARED) ?
+		OCTANT_MEDIATION_WRITE : OCTANT_MEDIATION_MAP);
 }
 
 static int check_exec(struct linux_binprm *bprm)
@@ -828,25 +1071,25 @@ static int check_exec(struct linux_binprm *bprm)
  * an inherited ordinary FD later passed between peers of the same policy. */
 int octant_mediation_receive_scm(const struct cred *sender)
 {
-	struct octant_context *ours = octant_cred(current_cred())->context;
+	struct octant_context *ours = current_context();
 	return ours && (!sender || octant_cred(sender)->context != ours) ? -EACCES : 0;
 }
 
 static int receive_file(struct file *file)
 {
-	return octant_cred(current_cred())->context && io_is_uring_fops(file) ? -EACCES : 0;
+	return current_context() && io_is_uring_fops(file) ? -EACCES : 0;
 }
 
 #ifdef CONFIG_IO_URING
 static int allow_uring(void)
 {
-	return octant_cred(current_cred())->context ? -ENOSYS : 0;
+	return current_context() ? -ENOSYS : 0;
 }
 #endif
 
 static int may_read_process(struct task_struct *target, unsigned int mode)
 {
-	struct octant_context *ours = octant_cred(current_cred())->context;
+	struct octant_context *ours = current_context();
 	const struct cred *theirs;
 	int result;
 	if (!ours)
@@ -999,7 +1242,7 @@ static long enroll(struct file *file, unsigned int command, unsigned long argume
 	if (command != OCTANT_MEDIATION_ENROLL || argument)
 		return -EINVAL;
 	if (!task_no_new_privs(current) || !uid_eq(current_euid(), context->uid) ||
-	    octant_cred(current_cred())->context || READ_ONCE(context->dead))
+	    current_context() || READ_ONCE(context->dead))
 		return -EPERM;
 	/* A trusted single-thread bootstrap must finish before untrusted code can
 	 * share its address space or descriptor table with an unenrolled peer. */
@@ -1078,7 +1321,10 @@ static long parent_descriptor(struct octant_context *context, unsigned long argu
 static long broker_ioctl(struct file *file, unsigned int command, unsigned long argument)
 {
 	struct octant_context *context = file->private_data;
-	struct octant_mediation_status status = { .abi = OCTANT_MEDIATION_ABI };
+	struct octant_mediation_status status = {
+		.abi = OCTANT_MEDIATION_ABI,
+		.production_coverage = 1,
+	};
 	struct octant_enrollment *enrollment;
 	unsigned long flags;
 	int descriptor;
@@ -1095,7 +1341,7 @@ static long broker_ioctl(struct file *file, unsigned int command, unsigned long 
 	}
 	if (command != OCTANT_MEDIATION_ENROLL_FD || argument)
 		return -EINVAL;
-	if (octant_cred(current_cred())->context || !uid_eq(current_euid(), context->uid))
+	if (current_context() || !uid_eq(current_euid(), context->uid))
 		return -EPERM;
 	enrollment = kzalloc(sizeof(*enrollment), GFP_KERNEL);
 	if (!enrollment)
@@ -1115,7 +1361,7 @@ static int open_broker(struct inode *inode, struct file *file)
 {
 	struct octant_context *context;
 	int i;
-	if (octant_cred(current_cred())->context)
+	if (current_context())
 		return -EPERM;
 	if (atomic_inc_return(&contexts) > 64) {
 		atomic_dec(&contexts);
@@ -1195,7 +1441,7 @@ static int __init octant_security_init(void)
 {
 	security_add_hooks(octant_hooks, ARRAY_SIZE(octant_hooks), &octant_lsm_id);
 	initialized = true;
-	pr_info("Octant mediation: experimental production coverage=0\n");
+	pr_info("Octant mediation: opt-in production coverage=1\n");
 	return 0;
 }
 

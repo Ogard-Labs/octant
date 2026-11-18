@@ -99,6 +99,11 @@ describe("theme contracts", () => {
     expect(DEFAULT_THEME_SETTINGS).not.toHaveProperty("translucency");
   });
 
+  it("draws text at the system's fuller strokes by default, and keeps a stored choice", () => {
+    expect(DEFAULT_THEME_SETTINGS.fontSmoothing).toBe("on");
+    expect(decodeThemeSettings({ ...validSettings, fontSmoothing: "on" }).fontSmoothing).toBe("on");
+  });
+
   it("rejects unknown theme mode and density", () => {
     expect(() => decodeThemeSettings({ ...validSettings, mode: "auto" })).toThrow();
     expect(() => decodeThemeSettings({ ...validSettings, density: "dense" })).toThrow();
@@ -480,6 +485,39 @@ describe("application background contracts", () => {
     effectTones: 8,
   };
 
+  it("keeps the character field's set, density and speed, and decodes older rows without them", () => {
+    expect(
+      decodeAppBackground({
+        kind: "characters",
+        characterSet: "·•●",
+        characterDensity: 70,
+        characterSpeed: 30,
+      }),
+    ).toMatchObject({ characterSet: "·•●", characterDensity: 70, characterSpeed: 30 });
+    expect(decodeAppBackground({ kind: "characters" })).toEqual({ kind: "characters", ...tuning });
+    expect(() => decodeAppBackground({ kind: "characters", characterDensity: 101 })).toThrow();
+    expect(() => decodeAppBackground({ kind: "characters", characterSpeed: -1 })).toThrow();
+  });
+
+  it("keeps the character field's chosen pattern and refuses one it does not draw", () => {
+    for (const characterPattern of ["cycle", "blotches", "currents", "rings"]) {
+      expect(decodeAppBackground({ kind: "characters", characterPattern })).toMatchObject({
+        characterPattern,
+      });
+    }
+    expect(() => decodeAppBackground({ kind: "characters", characterPattern: "spiral" })).toThrow();
+  });
+
+  it("refuses character sets that are emoji, controls, bidi overrides, spaces or too long", () => {
+    const refused = ["😀", "a\u0007", "a\u202e", "a b", "", "a\u0301", "x".repeat(65)];
+    for (const characterSet of refused) {
+      expect(() => decodeAppBackground({ kind: "characters", characterSet })).toThrow();
+    }
+    expect(decodeAppBackground({ kind: "characters", characterSet: "x".repeat(64) })).toMatchObject(
+      { characterSet: "x".repeat(64) },
+    );
+  });
+
   it("keeps a picture's effect and motion, and refuses cells or colours out of range", () => {
     expect(
       decodeAppBackground({
@@ -538,11 +576,37 @@ describe("application background contracts", () => {
     expect(() => decodeAppBackground({ kind: "theme", scope: "sidebar" })).toThrow();
   });
 
+  it("decodes a pixel ground with and without a scene, so a print saved before scenes still loads", () => {
+    // A row saved before scenes existed carries none; the policy reads it as Drift.
+    expect(decodeAppBackground({ kind: "pixels" })).toEqual({ kind: "pixels", ...tuning });
+    expect(decodeAppBackground({ kind: "pixels", effect: "pixelate", motion: "wave" })).toEqual({
+      kind: "pixels",
+      ...tuning,
+      effect: "pixelate",
+      motion: "wave",
+    });
+    for (const scene of ["ridges", "burst", "drift", "picture"] as const) {
+      expect(decodeAppBackground({ kind: "pixels", scene })).toMatchObject({
+        kind: "pixels",
+        scene,
+      });
+    }
+    expect(
+      decodeAppBackground({
+        kind: "pixels",
+        scene: "picture",
+        backgroundId: "00000000-0000-4000-8000-000000000b01",
+      }),
+    ).toMatchObject({ scene: "picture", backgroundId: "00000000-0000-4000-8000-000000000b01" });
+    expect(() => decodeAppBackground({ kind: "pixels", scene: "waterfall" })).toThrow();
+    expect(() => decodeAppBackground({ kind: "pixels", backgroundId: "x" })).toThrow();
+  });
+
   it("replays settings written before the application background existed as the plain page", () => {
     expect(decodeThemeSettings(validSettings).appBackground).toEqual({ kind: "none", ...tuning });
-    // A fresh install is the one place the soft gradient arrives on its own.
+    // A fresh install is the one place the character field arrives on its own.
     expect(DEFAULT_THEME_SETTINGS.appBackground).toEqual(DEFAULT_APP_BACKGROUND);
-    expect(DEFAULT_APP_BACKGROUND).toMatchObject({ kind: "builtin", presetId: "soft-glow" });
+    expect(DEFAULT_APP_BACKGROUND).toMatchObject({ kind: "characters" });
     const event = decodeThemeSettingsUpdated({
       settings: { ...validSettings, sidebarBackground: DEFAULT_THEME_SETTINGS.sidebarBackground },
       version: 3,

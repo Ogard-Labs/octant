@@ -178,7 +178,7 @@ function renderWorkspace(
 ) {
   const load = options.load ?? vi.fn(async () => view());
   const refresh = options.refresh ?? vi.fn(async () => view());
-  render(
+  const rendered = render(
     <CodeProjectPullRequests
       {...(options.isNarrow === undefined ? {} : { isNarrow: options.isNarrow })}
       load={load}
@@ -195,7 +195,7 @@ function renderWorkspace(
         : { agentForgeChoices: options.agentForgeChoices })}
     />,
   );
-  return { load, refresh };
+  return { load, refresh, unmount: rendered.unmount };
 }
 
 describe("CodeProjectPullRequests", () => {
@@ -288,7 +288,8 @@ describe("CodeProjectPullRequests", () => {
     renderWorkspace({ load: async () => ({ ...view(), rows }) });
 
     const draft = await screen.findByRole("button", { name: /A draft/ });
-    expect(within(draft).getByText("Draft", { selector: "[data-status]" })).toBeVisible();
+    // A draft is said by its glyph at the row's start, not by a pill.
+    expect(within(draft).queryByText("Draft", { selector: "[data-status]" })).toBeNull();
     expect(within(draft).getByRole("img", { name: "Draft" })).toBeInTheDocument();
     expect(
       within(screen.getByRole("button", { name: /A conflict/ })).getByText("Conflicts", {
@@ -337,7 +338,7 @@ describe("CodeProjectPullRequests", () => {
     expect(titlesInOrder()).toEqual(["Newest in octant", "Middle in aurora", "Oldest in octant"]);
 
     await openMenu(user, "Sort pull requests");
-    expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
+    expect((await screen.findAllByRole("menuitemradio")).map((item) => item.textContent)).toEqual([
       "Recently updated",
       "Least recently updated",
       "Repository",
@@ -377,6 +378,94 @@ describe("CodeProjectPullRequests", () => {
     );
     expect(await screen.findByRole("region", { name: "octant/aurora" })).toBeVisible();
     expect(titlesInOrder()).toEqual(["Middle in aurora", "Newest in octant", "Oldest in octant"]);
+  });
+
+  it("shows every pull request on a first visit and ignores review, checks and involvement left from an earlier visit", async () => {
+    renderWorkspace({
+      load: async () => threeRepositoryView(),
+      storage: memoryStorage({
+        "octant.code.pull-requests.filter-review": "changes-requested",
+        "octant.code.pull-requests.filter-checks": "failing",
+        "octant.code.pull-requests.filter-involvement": "authored",
+      }),
+    });
+    await screen.findByText("Newest in octant");
+    expect(titlesInOrder()).toHaveLength(3);
+    expect(screen.queryByText("No pull requests match these filters")).toBeNull();
+  });
+
+  it("counts each status chip under the other filters, so a chip never promises rows the list lacks", async () => {
+    const user = userEvent.setup();
+    const base = view().rows[0];
+    if (base === undefined) throw new Error("fixture has a row");
+    const rows = [
+      { ...base, number: 1, title: "Green", checks: "passing" as const },
+      { ...base, number: 2, title: "Red", checks: "failing" as const },
+      { ...base, number: 3, title: "Red draft", checks: "failing" as const, draft: true },
+    ];
+    renderWorkspace({ load: async () => ({ ...view(), rows }) });
+    await screen.findByText("Green");
+    await openMenu(user, "Filter pull requests");
+    await user.click(await screen.findByRole("menuitemradio", { name: "Checks failing" }));
+    await user.keyboard("{Escape}");
+
+    const chips = screen.getByRole("group", { name: "Narrow by status" });
+    expect(within(chips).getByRole("button", { name: /^All/ })).toHaveTextContent("2");
+    expect(within(chips).getByRole("button", { name: /^Open/ })).toHaveTextContent("1");
+    expect(within(chips).getByRole("button", { name: /^Drafts/ })).toHaveTextContent("1");
+  });
+
+  it("names what is narrowing an empty list", async () => {
+    const user = userEvent.setup();
+    renderWorkspace({ load: async () => view() });
+    await screen.findByText("List active pull requests");
+    await openMenu(user, "Filter pull requests");
+    await user.click(await screen.findByRole("menuitemradio", { name: "Changes requested" }));
+    await user.keyboard("{Escape}");
+    expect(await screen.findByText("No pull requests match these filters")).toBeVisible();
+    expect(screen.getByText("Changes requested")).toBeVisible();
+  });
+
+  it("lists every repository with its count in the Repository control and narrows to the ones chosen", async () => {
+    const user = userEvent.setup();
+    const storage = memoryStorage();
+    const first = renderWorkspace({ load: async () => threeRepositoryView(), storage });
+    await screen.findByText("Newest in octant");
+    const trigger = screen.getByRole("button", { name: "Repository: All repositories" });
+    await user.click(trigger);
+    expect(
+      (await screen.findAllByRole("menuitemcheckbox")).map((item) => item.textContent),
+    ).toEqual(["All repositories", "octant/aurora1", "octant/octant2"]);
+
+    await user.click(screen.getByRole("menuitemcheckbox", { name: /octant\/aurora/ }));
+    expect(titlesInOrder()).toEqual(["Middle in aurora"]);
+    await user.click(screen.getByRole("menuitemcheckbox", { name: /octant\/octant/ }));
+    expect(titlesInOrder()).toHaveLength(3);
+    expect(screen.getByRole("button", { name: "Repository: 2 repositories" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    first.unmount();
+
+    renderWorkspace({ load: async () => threeRepositoryView(), storage });
+    await screen.findByText("Newest in octant");
+    expect(screen.getByRole("button", { name: "Repository: 2 repositories" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Repository: 2 repositories" }));
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: "All repositories" }));
+    expect(titlesInOrder()).toHaveLength(3);
+  });
+
+  it("keeps the Repository control in place when a status chip narrows the list to one repository", async () => {
+    const user = userEvent.setup();
+    const base = threeRepositoryView();
+    const rows = base.rows.map((row) =>
+      row.repositoryName === "aurora" ? { ...row, draft: true } : row,
+    );
+    renderWorkspace({ load: async () => ({ ...base, rows }) });
+    await screen.findByText("Newest in octant");
+    expect(screen.getByRole("button", { name: "Repository: All repositories" })).toBeVisible();
+    const chips = screen.getByRole("group", { name: "Narrow by status" });
+    await user.click(within(chips).getByRole("button", { name: /^Open/ }));
+    expect(titlesInOrder()).toEqual(["Newest in octant", "Oldest in octant"]);
+    expect(screen.getByRole("button", { name: "Repository: All repositories" })).toBeVisible();
   });
 
   it("groups by repository under a slim header with its count", async () => {
@@ -579,7 +668,7 @@ describe("CodeProjectPullRequests", () => {
     expect(await screen.findByText(/GitHub rate-limited the last refresh/)).toBeVisible();
     expect(screen.getByText(/preview bound of 25/)).toBeVisible();
     expect(screen.getByText(/preview bound of 100/)).toBeVisible();
-    expect(screen.getByText("Draft")).toBeVisible();
+    expect(screen.getByRole("img", { name: "Draft" })).toBeInTheDocument();
     expect(document.querySelector(".code-project-pull-requests")).toHaveAttribute(
       "data-narrow",
       "false",
@@ -664,6 +753,54 @@ describe("CodeProjectPullRequests", () => {
       />,
     );
     expect(await screen.findByText("Not refreshed yet: Divetools.")).toBeVisible();
+  });
+
+  it("says once, with one Refresh button, that nothing has been refreshed yet", async () => {
+    const neverRefreshed = view({
+      rows: [],
+      freshness: { status: "empty" },
+      projectFreshness: [{ projectId: projectA, freshness: { status: "empty" } }],
+    });
+    render(
+      <CodeProjectPullRequests
+        load={async () => neverRefreshed}
+        refresh={async () => neverRefreshed}
+      />,
+    );
+
+    expect(await screen.findByText("Refresh to load pull requests")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeVisible();
+    expect(screen.queryByText(/No GitHub snapshot yet/)).toBeNull();
+    expect(screen.queryByText(/will list here/)).toBeNull();
+    expect(screen.queryByText(/Not refreshed yet/)).toBeNull();
+    expect(screen.queryByRole("searchbox", { name: "Search pull requests" })).toBeNull();
+    expect(document.querySelector(".pr-page")).toHaveAttribute("data-empty", "true");
+  });
+
+  it("shows a first refresh that failed, and gives the list's controls back", async () => {
+    const user = userEvent.setup();
+    const neverRefreshed = view({
+      rows: [],
+      freshness: { status: "empty" },
+      projectFreshness: [{ projectId: projectA, freshness: { status: "empty" } }],
+    });
+    render(
+      <CodeProjectPullRequests
+        load={async () => neverRefreshed}
+        refresh={async () => {
+          throw new Error("GitHub is offline");
+        }}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Refresh" }));
+
+    // The failure is said, and the page is the list again: its Refresh and its
+    // repository settings are not left behind the one-sentence state.
+    expect(await screen.findByRole("button", { name: "Refresh all" })).toBeVisible();
+    expect(document.querySelector(".pr-page")).not.toHaveAttribute("data-empty");
+    expect(screen.getByRole("searchbox", { name: "Search pull requests" })).toBeVisible();
+    expect(document.querySelector(".code-project-pull-requests__status")).not.toBeNull();
   });
 
   it("selects a pull request row without refreshing GitHub", async () => {
@@ -791,12 +928,13 @@ describe("CodeProjectPullRequests", () => {
         enabledFor: (projectId) => String(projectId) === projectB,
         setEnabled: vi.fn(async () => true),
       },
-      storage: memoryStorage({
-        "octant.code.pull-requests.group-by-repository": "true",
-        "octant.code.pull-requests.filter-checks": "failing",
-      }),
+      storage: memoryStorage({ "octant.code.pull-requests.group-by-repository": "true" }),
     });
 
+    await screen.findByRole("region", { name: "octant/aurora" });
+    await openMenu(user, "Filter pull requests");
+    await user.click(await screen.findByRole("menuitemradio", { name: "Checks failing" }));
+    await user.keyboard("{Escape}");
     const aurora = await screen.findByRole("region", { name: "octant/aurora" });
     const octant = screen.getByRole("region", { name: "octant/octant" });
     expect(within(aurora).getByText("0")).toBeVisible();
@@ -1072,21 +1210,62 @@ describe("CodeProjectPullRequests", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it("keeps the list to a readable measure at the page's leading edge", () => {
-    const surface = ruleBody(stylesheet, ".code-project-pull-requests-surface");
-    expect(surface).toMatch(/--oct-surface-measure:\s*720px/);
-    expect(ruleBody(stylesheet, ".code-project-pull-requests-surface > .surface__inner")).toMatch(
-      /margin-inline:\s*var\(--oct-surface-gutter\)\s+auto/,
+  it("opens the chosen pull request beside the list, and counts the status chips", async () => {
+    const user = userEvent.setup();
+    const onSelectRow = vi.fn();
+    render(
+      <CodeProjectPullRequests
+        load={async () => view()}
+        onSelectRow={onSelectRow}
+        refresh={async () => view()}
+        renderDetail={(row) => <p>Reading #{row.number}</p>}
+        storage={memoryStorage()}
+      />,
     );
+    await screen.findByText("List active pull requests");
+    const chips = screen.getByRole("group", { name: "Narrow by status" });
+    expect(within(chips).getByRole("button", { name: /^All/ })).toHaveTextContent("All");
+    expect(screen.getByText("Choose a pull request to read it.")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: /List active pull requests/ }));
+    expect(await screen.findByText("Reading #12")).toBeVisible();
+    expect(onSelectRow).not.toHaveBeenCalled();
   });
 
-  it("sizes a row from its two lines and cuts the title after two", () => {
+  it("narrows the list to a pasted pull request link", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+    await screen.findByText("List active pull requests");
+    await user.click(screen.getByRole("searchbox", { name: "Search pull requests" }));
+    await user.paste("https://github.com/octant/octant/pull/999");
+    expect(screen.queryByText("List active pull requests")).not.toBeInTheDocument();
+  });
+
+  it("gives the list a 384px column of its own beside a reading pane", () => {
+    const page = readFileSync(resolve(import.meta.dirname, "pull-request-page.css"), "utf8");
+    expect(ruleBody(page, ".pr-page__frame")).toMatch(/grid-template-columns:\s*384px\s+minmax/);
+    expect(ruleBody(page, ".pr-page__list")).toMatch(/overflow:\s*hidden\s+auto/);
+    expect(ruleBody(page, ".pr-page .work-list__list")).toMatch(/gap:\s*4px/);
+  });
+
+  it("shares one grid between the tab bar and the body, centred, and left-aligned at 48px where centring would leave a hole", () => {
+    const page = readFileSync(resolve(import.meta.dirname, "pull-request-page.css"), "utf8");
+    const shared = ruleBody(page, ".pr-detail__bar,\n.pr-detail__body");
+    expect(shared).toMatch(/grid-template-columns:\s*minmax\(0,\s*720px\)\s+260px/);
+    expect(shared).toMatch(/justify-content:\s*center/);
+    expect(ruleBody(page, ".pr-detail__tools")).toMatch(/justify-content:\s*flex-end/);
+    expect(ruleBody(page, ".pr-detail__tools")).toMatch(/justify-self:\s*end/);
+    expect(page).toMatch(/@container pr-detail \(min-width: 1205px\)/);
+    expect(page).toMatch(/justify-content:\s*start;\s*padding-inline:\s*var\(--oct-space-12\)/);
+  });
+
+  it("sizes a row from its two lines and cuts the title after one", () => {
     const row = ruleBody(stylesheet, ".work-list__row");
     expect(row).toMatch(/height:\s*auto/);
     expect(row).toMatch(/padding:\s*var\(--oct-space-2\)/);
     expect(row).not.toMatch(/border-bottom/);
     const title = ruleBody(stylesheet, ".work-list__title");
-    expect(title).toMatch(/-webkit-line-clamp:\s*2/);
+    expect(title).toMatch(/-webkit-line-clamp:\s*1/);
     expect(title).toMatch(/font-weight:\s*var\(--oct-weight-medium\)/);
     expect(ruleBody(stylesheet, ".work-list__number")).toMatch(
       /font-variant-numeric:\s*tabular-nums/,

@@ -203,6 +203,13 @@
   gap: var(--oct-space-2);
 }
 
+.run-debug__heading-line {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
 .run-debug__heading {
   margin: 0;
   color: var(--oct-meta);

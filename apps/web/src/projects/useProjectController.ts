@@ -295,34 +295,23 @@ export function useProjectController(options: ProjectControllerOptions) {
      * Project's current choice, since the command returns an unmentioned
      * choice to Settings.
      */
-    fullAccessSandbox: boolean | "settings" | "keep" = "keep",
-    /** Strict for this Project's threads that did not choose, read the same way. */
-    strictChoice: boolean | "settings" | "keep" = "keep",
+    strict: boolean | "inherit" | "keep" = "keep",
   ): Promise<boolean> {
     const project = projectById.get(projectId);
     if (project?.type !== "work" && project?.type !== "code") return false;
-    const strict =
-      strictChoice === "keep"
-        ? project.defaultStrict
-        : strictChoice === "settings"
-          ? undefined
-          : strictChoice;
-    const sandbox =
-      fullAccessSandbox === "keep"
-        ? project.defaultFullAccessSandbox
-        : fullAccessSandbox === "settings"
-          ? undefined
-          : fullAccessSandbox;
+    const selectedStrict =
+      strict === "keep" ? project.defaultStrict : strict === "inherit" ? undefined : strict;
     if (
       project.defaultPermissionMode === permissionMode &&
-      project.defaultFullAccessSandbox === sandbox &&
-      project.defaultStrict === strict
-    ) {
+      project.defaultStrict === selectedStrict &&
+      (strict !== "inherit" || project.defaultFullAccessSandbox === undefined)
+    )
       return true;
-    }
     const sandboxField = {
-      ...(sandbox === undefined ? {} : { fullAccessSandbox: sandbox }),
-      ...(strict === undefined ? {} : { strict }),
+      ...(strict === "keep" ? {} : { strict: strict === "inherit" ? null : strict }),
+      ...(strict === "inherit" || project.defaultFullAccessSandbox === undefined
+        ? {}
+        : { fullAccessSandbox: project.defaultFullAccessSandbox }),
     };
     if (project.type === "work") {
       if (permissionMode === "plan") return false;

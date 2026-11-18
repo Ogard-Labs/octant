@@ -240,7 +240,7 @@ describe("Create from issue picker", () => {
     });
     render(<CreateFromIssuePicker client={client} onSelect={vi.fn()} />);
     await user.click(await screen.findByText("octant/octant"));
-    await user.click(await screen.findByRole("button", { name: "Change" }));
+    await user.click(await screen.findByRole("button", { name: "Change repository" }));
     await user.click(await screen.findByText("octant/atlas"));
     releaseFirst?.();
     expect(await screen.findByRole("button", { name: /#9 New repo issue/ })).toBeVisible();

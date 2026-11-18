@@ -4,6 +4,8 @@ import { connect as netConnect, createServer, Socket, type Server } from "node:n
 import type { Duplex } from "node:stream";
 import { join } from "node:path";
 import { Option, Schema } from "effect";
+import type { SandboxLocalService } from "@octant/contracts/sandbox-policy";
+import { sandboxLocalServiceAllowed } from "@octant/domain/sandbox-policy";
 import {
   MAX_TOOL_EGRESS_DECISION_BATCH_ENTRIES,
   MAX_TOOL_EGRESS_SUMMARY_ENTRIES,
@@ -115,6 +117,8 @@ export type ToolEgressProxyEndpoint =
   | { readonly kind: "unix-socket"; readonly path: string };
 
 export interface ToolEgressProxyOptions {
+  readonly localServices?: ReadonlyArray<SandboxLocalService>;
+  readonly blockAmbientPrivateAddresses?: boolean;
   readonly launch: ToolEgressLaunch;
   /** Read for every decision. A read that throws counts as tainted. */
   readonly taint: () => { readonly threadTainted: boolean; readonly parentTainted: boolean };
@@ -915,6 +919,9 @@ export class ToolEgressProxy {
     port: number,
     by: RuntimeEgressAllowedBy | undefined,
   ): boolean {
+    if (by === "local-service")
+      return sandboxLocalServiceAllowed(this.#options.localServices, address, port);
+    if (this.#options.blockAmbientPrivateAddresses === true && by !== "launch") return false;
     const runtime = this.#runtimeDecider();
     try {
       if (runtime !== undefined) {
@@ -972,7 +979,25 @@ export class ToolEgressProxy {
     return this.#decide(host, port);
   }
 
+  /** The same frozen policy for host-owned, DNS-pinned HTTP transports. */
+  permitsHostRequest(host: string, port: number): boolean {
+    return (
+      this.#accepting &&
+      !this.#closed &&
+      !this.#auditUnavailable &&
+      this.#decide(host, port).kind === "allow"
+    );
+  }
+
   #decide(host: string, port: number): ProxyDecision {
+    if (sandboxLocalServiceAllowed(this.#options.localServices, host, port))
+      return {
+        kind: "allow",
+        host: host === "[::1]" ? "::1" : host,
+        port,
+        ruleId: undefined,
+        by: "local-service",
+      };
     const runtime = this.#runtimeDecider();
     if (runtime !== undefined) {
       let decision: RuntimeEgressDecision;
@@ -1085,6 +1110,10 @@ export class ToolEgressProxy {
   }
 
   async #resolve(host: string): Promise<ReadonlyArray<string> | undefined> {
+    // A local-service authority names the literal endpoint. It never consults
+    // DNS, including an injected resolver, or follows an alternate answer.
+    if (host === "127.0.0.1" || host === "::1" || host === "[::1]")
+      return [host === "[::1]" ? "::1" : host];
     const resolveAll = this.#options.resolveAll ?? defaultResolveAll;
     let timer: NodeJS.Timeout | undefined;
     try {

@@ -110,12 +110,6 @@
   margin: 0;
 }
 
-.code-delivery-pane__warning {
-  color: var(--oct-warn-fg);
-  background: var(--oct-warn-soft);
-  border-bottom: 1px solid color-mix(in oklab, var(--oct-warn) 45%, transparent);
-}
-
 /* The label wraps a system-styled control; only the label text is ours. */
 .code-delivery-pane__field {
   display: grid;
@@ -415,6 +409,7 @@ html:not([data-octant-reduced-transparency="true"])
 
 .code-file-explorer {
   --oct-file-row-h: 28px;
+  --oct-tree-indent: var(--oct-space-3);
   --oct-file-inset: 8px;
   --oct-file-depth-max: 10;
   --oct-file-depth: 0;
@@ -464,7 +459,7 @@ html:not([data-octant-reduced-transparency="true"])
 }
 
 .code-file-explorer__search input {
-  height: 30px;
+  height: 28px;
   padding: 0 32px 0 var(--oct-space-8);
   border-color: var(--input);
   background: var(--oct-surface);
@@ -479,7 +474,7 @@ html:not([data-octant-reduced-transparency="true"])
 .code-file-explorer__empty {
   margin: 0;
   padding: var(--oct-space-2) var(--oct-space-3);
-  color: var(--oct-muted);
+  color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   line-height: var(--oct-leading-snug);
 }
@@ -511,11 +506,6 @@ html:not([data-octant-reduced-transparency="true"])
   font-weight: 600;
 }
 
-.code-file-explorer-panel__recovery {
-  display: flex;
-  padding: 0 var(--oct-space-3) var(--oct-space-3);
-}
-
 .code-file-explorer__tree {
   min-height: 0;
   overflow: auto;
@@ -545,9 +535,16 @@ html:not([data-octant-reduced-transparency="true"])
   );
   overflow: hidden;
   border-radius: var(--oct-radius-sm);
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
   text-align: left;
+}
+
+/* Dotfolders, dotfiles and ignored folders are quiet: the muted ink, for the
+   row and what it holds. */
+.code-file-explorer__entry[data-muted="true"] {
+  color: var(--oct-muted);
 }
 
 /* A guide down each ancestor level, under the row's own fill. */
@@ -568,7 +565,7 @@ html:not([data-octant-reduced-transparency="true"])
 
 .code-file-explorer__entry > svg {
   flex: 0 0 auto;
-  color: var(--oct-meta);
+  color: var(--oct-muted);
 }
 
 .code-file-explorer__entry:hover,
@@ -576,12 +573,14 @@ html:not([data-octant-reduced-transparency="true"])
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
 }
+.code-file-explorer__entry:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
 
 /* The file the editor is showing takes the selection fill and the hairline
    edge the sidebar and dock tabs draw. */
 .code-file-explorer__entry--file[aria-selected="true"] {
   background: var(--oct-selection);
-  box-shadow: inset 0 0 0 1px var(--oct-border);
   color: var(--oct-fg);
 }
 
@@ -615,7 +614,35 @@ html:not([data-octant-reduced-transparency="true"])
   white-space: nowrap;
 }
 
+/* A file row holds the chevron's place, so a file's glyph stands under its
+   sibling folders' glyphs. */
+.code-file-explorer__chevron-slot {
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+}
+
+.code-file-explorer__entry > svg[data-file-kind="code"] {
+  color: var(--oct-muted);
+}
+
+/* A changed file: one small dot at the row's end, in the status tokens the
+   review surfaces use. The row's title names the change in words. */
+.code-file-explorer__mark {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-inline-start: auto;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-warn);
+}
+
+.code-file-explorer__mark[data-change="added"] {
+  background: var(--oct-success);
+}
+
 .code-file-explorer__chevron {
+  color: var(--oct-muted);
   transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
@@ -792,23 +819,20 @@ html:not([data-octant-reduced-transparency="true"])
   white-space: normal;
 }
 
-.code-editor-pane__warning,
-.code-diff-pane__warning {
+.code-editor-pane__warning {
   padding: var(--oct-space-3) var(--oct-space-4);
   color: var(--oct-warn-fg);
   background: var(--oct-warn-soft);
   border-bottom: 1px solid color-mix(in oklab, var(--oct-warn) 45%, transparent);
 }
 
-.code-editor-pane__warning p,
-.code-diff-pane__warning p {
+.code-editor-pane__warning p {
   margin: var(--oct-space-1) 0 0;
   font-size: var(--oct-text-xs);
   line-height: var(--oct-leading-snug);
 }
 
-.code-editor-pane__warning button,
-.code-diff-pane__warning button {
+.code-editor-pane__warning button {
   margin-top: var(--oct-space-2);
 }
 
@@ -913,7 +937,7 @@ html:not([data-octant-reduced-transparency="true"])
   border-collapse: collapse;
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  line-height: var(--oct-leading-body);
+  line-height: var(--oct-line-diff);
 }
 
 .unified-diff__number {
@@ -999,6 +1023,9 @@ html:not([data-octant-reduced-transparency="true"])
 
 .code-diff-pane__file:hover {
   background: var(--oct-fg-soft);
+}
+.code-diff-pane__file:active {
+  background: var(--oct-wash-pressed);
 }
 
 .code-diff-pane__file[aria-current="true"] {
@@ -1111,8 +1138,7 @@ html:not([data-octant-reduced-transparency="true"])
   }
 }
 
-html[data-octant-increased-contrast="true"] .code-editor-pane__warning,
-html[data-octant-increased-contrast="true"] .code-diff-pane__warning {
+html[data-octant-increased-contrast="true"] .code-editor-pane__warning {
   box-shadow: inset 0 0 0 1px currentColor;
 }
 
@@ -1144,6 +1170,16 @@ html[data-octant-increased-contrast="true"] .code-diff-pane__warning {
 .github-picker__search {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* Loading, the rows, "none" and an error all stand in this one box, so a
+   popup that fixes its height gives the box a size and keeps it. */
+.github-picker__results {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  min-height: 0;
 }
 
 .github-picker__listbox {
@@ -1418,6 +1454,9 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .work-files-panel__row--openable:focus-visible {
   background: var(--oct-fg-soft);
 }
+.work-files-panel__row--openable:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
+}
 
 /* Code surfaces moved from styles.css. */
 
@@ -1443,6 +1482,9 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-views__filter[aria-expanded="true"] {
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
+}
+.code-project-views__filter:active {
+  background: var(--octant-control-pressed);
 }
 
 .code-project-views__row {
@@ -1473,7 +1515,9 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   align-items: center;
   justify-content: flex-start;
   gap: var(--oct-space-2);
-  padding: 0 var(--oct-nav-inset);
+  /* The menu trigger's 1px transparent border is inside its edge: it comes out
+     of the inset so the glyph column starts at the rows' x. */
+  padding: 0 calc(var(--oct-nav-inset) - 1px);
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-medium);
@@ -1517,30 +1561,33 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   min-height: 28px;
   border-radius: var(--oct-radius-sm);
   color: var(--octant-text-muted);
-  transition:
-    background var(--oct-motion-fast) ease,
-    color var(--oct-motion-fast) ease;
 }
 
 .code-project-views__inline-button:focus-visible {
-  background-color: var(--muted);
+  background-color: var(--oct-fill-4);
 }
 
 .code-project-views__inline-button:hover {
   color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  background: var(--oct-fill-4);
+}
+.code-project-views__inline-button:active {
+  background: var(--oct-wash-pressed);
 }
 
 /* The chosen view keeps its own colour: the rail is glyphs only, so colour is
    the fastest way to read which one is showing. */
 .code-project-views__inline-button[aria-pressed="true"] {
   color: var(--octant-text-primary);
-  background: var(--octant-control-pressed);
+  background: var(--oct-fill-2);
   box-shadow: inset 0 0 0 1px var(--octant-border-subtle);
 }
 
 .code-project-views__glyph {
   display: inline-flex;
+  /* The icon column is 16px wide, so the label starts at the rows' label x
+     whatever the glyph (a folder or a colour dot) draws inside it. */
+  width: var(--oct-icon-md);
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
@@ -1568,6 +1615,10 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-views__swatch:hover,
 .code-project-views__swatch:focus-visible {
   background-color: var(--muted);
+}
+.code-project-views__new:active,
+.code-project-views__swatch:active {
+  background: var(--oct-wash-pressed);
 }
 
 .code-project-views__fieldset {
@@ -1678,7 +1729,8 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   background: var(--octant-surface-raised);
   border: 0;
   border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
 }
 
 .code-overview__card--delivery {
@@ -1894,8 +1946,9 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   gap: var(--oct-space-3);
 }
 
-/* Section labels follow Settings: sentence case, 14px, medium weight, the
-   primary ink, and a count at the far end where there is one. */
+/* Section labels are the page's one section label role (`oct-section-label`):
+   sentence case, 14px, strong weight, the secondary ink, and a count at the
+   far end where there is one. */
 .code-project-overview__section-header {
   display: flex;
   align-items: baseline;
@@ -1905,11 +1958,11 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 .code-project-overview__section-header h2 {
   margin: 0;
-  color: var(--oct-fg);
+  color: var(--oct-muted);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-  letter-spacing: 0;
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-sf-14);
 }
 
 .code-project-overview__count,
@@ -2210,11 +2263,14 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 /* Placement only: the recipe is the system's `.callout`, the measure the
    shared `.thread-column`. A notice about this thread spans the thread's
-   own column — running it edge to edge made it read as window chrome. */
+   own column, at its left edge, as wide as its content and no wider than
+   480px: running it edge to edge made it read as window chrome. */
 .code-thread-workspace__callout {
   flex: 0 0 auto;
   align-items: center;
-  margin: 12px auto 0;
+  width: fit-content;
+  max-width: min(480px, var(--oct-thread-column));
+  margin: 12px 0 0 max(0px, calc((100% - var(--oct-thread-column)) / 2));
 }
 
 /* A provider's question takes the approval row with its answer field. */
@@ -2262,13 +2318,6 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   .code-thread-workspace__transcript {
   display: grid;
   gap: 20px;
-}
-
-.code-thread-workspace__empty {
-  margin: 0;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-sm);
-  line-height: var(--oct-leading-body);
 }
 
 .code-thread-workspace__message {
@@ -2338,8 +2387,8 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 /* The action is the last thing on the line, so the facts read first. */
 .code-checkout-bar__action {
   margin-inline-start: auto;
-  height: 26px;
-  min-height: 26px;
+  height: 24px;
+  min-height: 24px;
   padding-inline: 8px;
 }
 
@@ -2609,6 +2658,12 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   gap: var(--oct-space-3);
 }
 
+/* In a pane, a list with nothing but its state shows the state in the pane's
+   middle, as every tool does; it stood at the top of the pane. */
+.code-project-pull-requests[data-presentation="dock"]:has(> .surface-empty) {
+  align-content: center;
+}
+
 .code-project-pull-requests__status {
   width: 100%;
   margin: -2px 0 0;
@@ -2632,26 +2687,16 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-pull-requests__search-clear {
   position: absolute;
   right: 4px;
-  width: 26px;
-  min-width: 26px;
-  height: 26px;
-  min-height: 26px;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
   padding: 0;
 }
 
 .code-project-pull-requests__count {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
-}
-
-/* The page keeps a reading measure of its own and sits at the leading edge: a
-   list a person scans is not centred in a wide window. */
-.code-project-pull-requests-surface {
-  --oct-surface-measure: 720px;
-}
-
-.code-project-pull-requests-surface > .surface__inner {
-  margin-inline: var(--oct-surface-gutter) auto;
 }
 
 .code-project-pull-requests__empty {
@@ -2711,7 +2756,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   flex-wrap: nowrap;
   margin: 0 calc(-1 * var(--oct-space-3));
   padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
-  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
 }
 
 .code-project-pull-requests[data-bar-hosted="true"] .surface-toolbar__search {
@@ -2832,4 +2877,630 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
     width: 100%;
     height: auto;
   }
+}
+
+/* Where a new Code thread works: one quiet chip and a plain menu of 28px rows,
+   the same rows every menu uses. The chip says the branch (or "New worktree ·
+   from main"); the menu holds the choice, the branch it starts from, the
+   subfolder, and whether the Project remembers it. Rare settings open as
+   dialogs from their rows, so the menu never becomes a form. */
+.code-where__trigger {
+  max-width: min(22rem, 60vw);
+}
+
+.code-where__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.code-where__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-where__chevron {
+  flex: none;
+  opacity: 0.7;
+}
+
+.code-where__trigger[data-invalid="true"] {
+  color: var(--oct-danger-fg);
+}
+
+.code-where__panel {
+  display: flex;
+  flex-direction: column;
+  width: min(300px, calc(100vw - 32px));
+  padding: var(--oct-menu-inset);
+}
+
+.code-where__caption {
+  margin: 0;
+  padding: var(--oct-space-1) var(--oct-menu-row-inset);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-where__choices {
+  display: flex;
+  flex-direction: column;
+}
+
+.code-where__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  width: 100%;
+  height: var(--oct-menu-row-h);
+  min-height: 0;
+  padding: 0 var(--oct-menu-row-inset);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
+  text-align: start;
+  cursor: default;
+}
+
+.code-where__row:is(button):not(:disabled):hover,
+.code-where__row:is(button)[aria-expanded="true"] {
+  background: var(--octant-control-hover);
+}
+
+.code-where__row:disabled {
+  color: var(--octant-text-secondary);
+}
+
+.code-where__row-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-menu-row-gap);
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.code-where__row-value {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  min-width: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+}
+
+.code-where__row-value-text {
+  min-width: 0;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-where__row[data-invalid="true"] .code-where__row-value {
+  color: var(--oct-danger-fg);
+}
+
+.code-where__dot {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border: 1px solid var(--octant-border-strong);
+  border-radius: 50%;
+}
+
+.code-where__row[aria-checked="true"] .code-where__dot {
+  border: 4px solid var(--octant-text-primary);
+}
+
+.code-where__tick {
+  display: inline-flex;
+  width: 14px;
+  flex: none;
+}
+
+.code-where__separator {
+  height: 1px;
+  margin: var(--oct-space-1) var(--oct-menu-row-inset);
+  background: var(--oct-hairline);
+}
+
+/* The Subfolder pop-out beside its row: just the field and its note. */
+.code-where__subfolder {
+  width: min(280px, calc(100vw - 32px));
+  padding: var(--oct-space-2) var(--oct-space-1);
+}
+
+/* The small dialogs a row opens: a title, one line of what it is for, the
+   fields, and Done at the trailing edge. */
+.code-where-dialog {
+  width: min(380px, calc(100vw - 32px));
+}
+
+.code-where-dialog__title {
+  margin: 0;
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-strong);
+}
+
+.code-where-dialog__lead {
+  margin: var(--oct-space-1) 0 var(--oct-space-3);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+.code-where-dialog__lead code {
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+}
+
+.code-where-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+}
+
+.code-where-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--oct-space-4);
+}
+
+/* The editor's own header, drawn only where no dock tile hosts its actions: the
+   file name and one cluster of icon buttons. Save stands at the cluster's left
+   end, so the buttons beside it keep their places when it appears. */
+.code-editor-pane__toolbar:has(> .code-editor-pane__actions) {
+  min-height: 36px;
+  padding: 2px var(--oct-space-2) 2px var(--oct-space-3);
+  background: transparent;
+}
+
+.code-editor-pane__toolbar > h1 {
+  flex: 1 1 auto;
+}
+
+.code-editor-pane__toolbar > .code-editor-pane__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+/* The path in muted ink, with the checkout and the posture at its end. The row
+   is one line at every width; the path gives way first. */
+.code-editor-pane__crumbs {
+  display: flex;
+  min-width: 0;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-3);
+  padding: 0 var(--oct-space-3);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.code-editor-pane__path {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-editor-pane__crumb-note {
+  flex: none;
+  margin-inline-start: auto;
+  white-space: nowrap;
+}
+
+/* The Files tool in a Code thread: the open files are the pane bar's tabs, the
+   editor fills the pane and the tree is a 260px column at the right with its
+   filter on top. The container is sized by the dock, so the editor has its
+   final size from the first frame whatever is open. */
+.code-files-viewer {
+  container: files-viewer / inline-size;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--octant-pane-fill, var(--oct-bg));
+}
+
+.code-files-viewer__frame {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0;
+}
+
+.code-files-viewer__main {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0;
+  flex-direction: column;
+}
+
+/* Where no pane bar hosts the tabs (the bottom panel), the viewer draws the
+   same 36px row itself. */
+.code-files-viewer__strip {
+  display: flex;
+  height: 36px;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-2) 0 0;
+  background: var(--octant-sidebar-fill);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
+}
+
+/* The strip row draws the bar's background and hairline itself; the tab list
+   inside it is only the scrolling run of tabs. */
+.code-files-viewer__strip > .panel-tabs {
+  min-width: 0;
+  flex: 1 1 auto;
+  background: transparent;
+  box-shadow: none;
+}
+
+.code-files-viewer__strip-fill {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.code-files-viewer__tree-toggle {
+  flex: none;
+}
+
+.code-files-viewer__body {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0;
+  flex-direction: column;
+}
+
+.code-files-viewer__body > .code-editor-pane {
+  min-height: 0;
+  flex: 1 1 0;
+}
+
+/* Nothing open: one quiet line in the middle of the editor's place. */
+.code-files-viewer__empty {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 0;
+  /* The panes' one empty pattern: the mark over its line. */
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: var(--oct-space-3);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+  text-align: center;
+}
+
+.code-files-viewer__tree {
+  display: flex;
+  width: 260px;
+  min-width: 0;
+  min-height: 0;
+  flex: 0 0 260px;
+  flex-direction: column;
+  box-shadow: inset 1px 0 0 var(--octant-pane-line, var(--octant-border-soft));
+}
+
+.code-files-viewer__frame[data-tree="closed"] > .code-files-viewer__tree {
+  display: none;
+}
+
+/* The checkout cannot be read and no file is open: there is no tree to browse
+   and no file to choose, so the pane is the one state, in its middle. The
+   split drew "Choose a file to open it here." beside "Code checkout is
+   unavailable.", under a tab row with nothing in it. */
+.code-files-viewer[data-unavailable="true"] > .code-files-viewer__strip,
+.code-files-viewer[data-unavailable="true"] .code-files-viewer__main {
+  display: none;
+}
+
+.code-files-viewer[data-unavailable="true"] .code-files-viewer__tree {
+  display: flex;
+  width: auto;
+  flex: 1 1 0;
+  box-shadow: none;
+}
+
+.code-files-viewer__tree .code-file-explorer-panel {
+  min-height: 0;
+  overflow: auto;
+}
+
+/* The tree column: 28px rows hung from the pane's 12px inset, under a 32px
+   filter row on the same inset. */
+.code-files-viewer__tree .code-file-explorer {
+  --oct-file-inset: 4px;
+}
+
+/* Too narrow for both (under 480px): the tree and the editor take turns. With
+   the tree open it fills the pane, and choosing a file closes it. The rule
+   used to restyle the query container itself, which a container query cannot
+   do: the editor's column collapsed to the 40px of its toggle and stood as an
+   empty gutter left of the tree. */
+@container files-viewer (max-width: 479px) {
+  .code-files-viewer__frame[data-tree="open"] > .code-files-viewer__main {
+    display: none;
+  }
+
+  .code-files-viewer__frame[data-tree="open"] > .code-files-viewer__tree {
+    width: auto;
+    flex: 1 1 0;
+    box-shadow: none;
+  }
+}
+
+/* Review: one toolbar row, one status row, then the changed files beside the
+   diffs. The switch (when this pane draws its own row) stands left and the
+   diff's controls right; the status row carries the counts and the quiet
+   checks and findings marks. */
+.git-history__toolbar-actions,
+.code-diff-pane__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+/* The menu that holds layout and whitespace wears a dot while either is off
+   its default, the same mark the dock bar's menu button wears. */
+.code-diff-pane__controls .octant-menu__trigger[data-active="true"] {
+  position: relative;
+}
+
+.code-diff-pane__controls .octant-menu__trigger[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  top: var(--oct-space-1);
+  right: var(--oct-space-1);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--oct-accent);
+}
+
+.git-history__toolbar-actions {
+  margin-inline-start: auto;
+}
+
+.code-diff-pane__toolbar {
+  min-height: 36px;
+  flex: none;
+  justify-content: flex-end;
+  padding: 0 var(--oct-space-2);
+  background: var(--octant-sidebar-fill);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
+  border-bottom: 0;
+}
+
+/* One status line: the counts lead and keep their whole text, the checks and
+   findings marks trail and shorten first. It never wraps to a second line. */
+.code-diff-pane__status {
+  display: flex;
+  height: 32px;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
+}
+
+.code-diff-pane__totals {
+  flex: none;
+}
+
+.code-diff-pane__trail {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-3);
+  overflow: hidden;
+}
+
+.code-diff-pane__trail > .review-status-chip {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.code-diff-pane__trail > .code-diff-pane__info {
+  flex: none;
+}
+
+.review-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  white-space: nowrap;
+}
+
+/* The 12px glyph keeps its size when the pane is narrow: left to shrink it
+   measured 9.5px wide. */
+.review-status-chip > svg {
+  flex: none;
+}
+
+/* Where the tile cannot hold the checks and findings words beside the counts
+   (measured: "No tests run" and "No findings" cut to "No te" and "No fi" at a
+   320px tile), the chips keep their glyph and the words stay for screen readers
+   and the tooltip. This is the first thing to give way, ahead of any ellipsis.
+   The review measures itself: a tile's width is not the viewport's. */
+@container git-history (max-width: 519px) {
+  .review-status-chip {
+    position: relative;
+  }
+
+  .review-status-chip__words {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+.code-diff-pane__file-status {
+  flex: none;
+  width: 12px;
+  font-family: var(--oct-font-mono);
+  text-align: center;
+}
+
+.code-diff-pane__file-status[data-change="created"] {
+  color: var(--oct-success-fg);
+}
+
+.code-diff-pane__file-status[data-change="deleted"] {
+  color: var(--oct-danger-fg);
+}
+
+.code-diff-pane__file-status[data-change="modified"],
+.code-diff-pane__file-status[data-change="renamed"] {
+  color: var(--oct-warn-fg);
+}
+
+/* The path as one left-to-right run, isolated from the box that cuts it. */
+.code-diff-pane__file-run {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.code-diff-pane__file-folder {
+  color: var(--oct-muted);
+}
+
+.code-diff-pane__file-name {
+  flex: none;
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
+}
+
+.code-review-pane__header {
+  display: flex;
+  height: 28px;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: 0 var(--oct-space-3);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.code-review-pane__header h2 {
+  margin: 0;
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+/* Diffs run edge to edge, each file under its sticky header. */
+.unified-diff {
+  gap: 0;
+  padding: 0 0 var(--oct-space-6);
+}
+
+.unified-diff__file {
+  border: 0;
+  border-bottom: 1px solid var(--octant-pane-line, var(--octant-border-soft));
+  border-radius: 0;
+  background: transparent;
+}
+
+.unified-diff__file-gap {
+  height: 0;
+}
+
+.unified-diff__file-header {
+  min-height: 28px;
+  background: var(--octant-sidebar-fill);
+}
+
+/* The changed files: a left column when the pane is wide, a short list above
+   the diffs when it is narrow. */
+.code-diff-pane__body {
+  flex: 1 1 0;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.code-diff-pane__files {
+  width: auto;
+  max-height: 112px;
+  border-right: 0;
+  border-bottom: 1px solid var(--octant-pane-line, var(--octant-border-soft));
+}
+
+@container workspace (min-width: 640px) {
+  .code-diff-pane__body {
+    flex-direction: row;
+  }
+
+  .code-diff-pane__files {
+    width: 220px;
+    max-height: none;
+    border-right: 1px solid var(--octant-pane-line, var(--octant-border-soft));
+    border-bottom: 0;
+  }
+}
+
+/* A capped tree ends in one muted row, not a paragraph above the list. */
+.code-file-explorer__more {
+  display: flex;
+  min-height: var(--oct-file-row-h);
+  align-items: center;
+  padding-inline: var(--oct-file-inset);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+/* Bars never shrink and content never covers them. The review's toolbar row
+   and status row keep their height whatever the pane's width or height: a row
+   too narrow for its controls grows a second line instead of cutting one off
+   (the toolbar was a fixed 36px that wrapped, and at a narrow width stacked its
+   controls in a column, so the icons ran under the bar above). The files and
+   diffs below scroll inside themselves. */
+.code-diff-pane > .code-diff-pane__toolbar {
+  flex: none;
+  flex-wrap: wrap;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.code-diff-pane > .code-diff-pane__toolbar > .code-diff-pane__controls {
+  display: flex;
+  flex: none;
+  margin-inline-start: auto;
+}
+
+.git-history__toolbar {
+  flex: none;
+}
+
+.git-history__toolbar--tab-bar {
+  flex-wrap: wrap;
+}
+
+.git-history__toolbar--tab-bar {
+  padding-block: var(--oct-space-1);
 }

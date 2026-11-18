@@ -126,10 +126,20 @@ describe("octantSettingsRegistry", () => {
     ]);
     expect(section("permissions")?.label).toBe("Permissions");
     expect(ids("permissions")).toEqual([
+      "sandbox-restrictions",
+      "sandbox-policy-summary",
+      "sandbox-policy-folders",
+      "sandbox-policy-add-folder",
+      "sandbox-policy-blocked-actions",
+      "sandbox-policy-network",
+      "sandbox-policy-services",
+      "sandbox-policy-local-services",
+      "sandbox-policy-credentials",
       "protected-files",
       "protected-files-add",
       "public-links",
       "public-link-service",
+      "public-link-setup",
       "browser-site-approvals",
       "browser-agent-downloads",
       "browser-captures-per-thread",
@@ -197,7 +207,6 @@ describe("octantSettingsRegistry", () => {
     expect(work?.settings.map((setting) => setting.id)).toEqual([
       "work-default-model",
       "work-default-access",
-      "work-full-access-sandbox",
       "work-strict",
       "work-restart-continuation",
     ]);
@@ -258,9 +267,9 @@ describe("octantSettingsRegistry", () => {
     expect(material?.nativeRequired).toBeUndefined();
   });
 
-  it("keeps Usage opaque and registers the Chat and Code setup destinations", () => {
+  it("registers only the spend ceiling switch in Usage, and the Chat and Code setup destinations", () => {
     const usage = octantSettingsRegistry.sections.find((s) => s.id === "usage");
-    expect(usage?.settings).toEqual([]);
+    expect(usage?.settings.map((setting) => setting.id)).toEqual(["spend-ceiling-shown"]);
     const providers = octantSettingsRegistry.sections.find((s) => s.id === "providers");
     expect(providers?.settings.map((setting) => setting.id)).toEqual([
       "automatic-model-judge",
@@ -298,7 +307,6 @@ describe("octantSettingsRegistry", () => {
       "project-view-switcher",
       "code-default-access",
       "code-auto-reviewer",
-      "code-full-access-sandbox",
       "code-strict",
       "code-terminal-shell",
       "code-editor-executable",
@@ -439,6 +447,7 @@ describe("octantSettingsRegistry", () => {
  * Project's overview, not in Settings, so Settings search does not list them.
  */
 const UNLISTED_SETTING_ROWS = new Set([
+  "app-background-characters-reset",
   "agent-access-code",
   "agent-access-edit",
   "browser-hub-claim",
@@ -462,6 +471,8 @@ const UNLISTED_SETTING_ROWS = new Set([
  * named here, which opens the page that lists the items.
  */
 const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
+  "appearance.custom.*.*": "appearance.custom",
+  "appearance.custom.*.contrast": "appearance.custom",
   "resource-*": "resource-limits",
   "provider-*-display-name": "provider-display-name",
   "provider-*-binary-path": "provider-binary-path",

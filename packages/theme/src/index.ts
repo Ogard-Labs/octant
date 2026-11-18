@@ -12,4 +12,5 @@ export * from "./typography";
 export * from "./editorColors";
 export * from "./terminalColors";
 export * from "./presets";
+export * from "./customPreset";
 export * from "./provider-glyph-colors";

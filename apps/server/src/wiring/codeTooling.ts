@@ -137,7 +137,7 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
     "browserAuthority" | "workThreadProjection" | "resolveThreadStrict" | "resolveProjectStrict"
   > &
   Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
-  Pick<IntegrationsWiring, "toolEgressRules"> &
+  Pick<IntegrationsWiring, "toolEgressRules" | "providerRuntimeNetwork"> &
   Pick<
     ProvidersWiring,
     | "extensionLifecycleService"
@@ -272,6 +272,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       sharedTerminals === undefined
         ? undefined
         : new ProjectTerminalService({
+            network: deps.providerRuntimeNetwork,
             ...serverActions,
             strict: ({ projectId, workThreadId }) =>
               workThreadId === undefined
@@ -682,6 +683,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       },
       processes: languageServerProcesses,
       platform: languageServerHostPlatform(process.platform),
+      threadStrict: (threadId) => deps.resolveThreadStrict(String(threadId)),
       cacheRoot: join(persistence.dataDirectory, "code", "language-server-cache"),
       watcher: codeFileWatch,
     });
@@ -775,6 +777,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       },
       records: debugSessionRecords,
       platform: languageServerHostPlatform(process.platform),
+      threadStrict: (threadId) => deps.resolveThreadStrict(String(threadId)),
       stateRoot: debugStateRoot,
       uuid: randomUUID,
     });

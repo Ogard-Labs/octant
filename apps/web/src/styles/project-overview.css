@@ -1,0 +1,510 @@
+/* The Project page: a header, then the Project's threads and context in a main
+   column with a side column for where it lives and how work starts. It reads
+   like the pull request page: quiet rows, a status word beside a small dot,
+   cards in the Settings family (12px radius, 2% ink, a hairline).
+
+   Every rule is scoped to the page (`[data-project-type]`), so the thread
+   Overview and the Chat Project keep the older layout this file overrides.
+   The page is one grid at every width: one column in the order the sections
+   are read, and two columns when the page itself is wide enough. Placement is
+   explicit so the short side cards never stretch to the height of the list.
+   Spacing is margins, not a row gap, because an empty row would still carry
+   its gap. */
+
+.projects-workspace--detail-only {
+  container: project-page / inline-size;
+}
+
+.projects-workspace--detail-only > .project-overview[data-project-type] {
+  --project-overview-card-fill: color-mix(in oklab, var(--oct-fg) 2%, var(--oct-bg));
+  --project-overview-side: 300px;
+  --project-overview-gap: var(--oct-space-6);
+
+  display: grid;
+  max-width: 1120px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: auto;
+  align-content: start;
+  gap: 0;
+}
+
+html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+  .shell--material-translucent:not(.shell--app-backdrop)
+  .project-overview[data-project-type] {
+  --project-overview-card-fill: var(--octant-card);
+}
+
+/* The wrappers the components still render add no box: their children are the
+   grid's items. */
+.project-overview[data-project-type]
+  :is(.project-overview__primary, .project-overview__inspectors, .code-project-overview) {
+  display: contents;
+}
+
+/* One column: the order a person reads in. */
+.project-overview[data-project-type] > .project-overview__warning {
+  order: -3;
+}
+.project-overview[data-project-type] > .project-overview__toolbar {
+  order: -2;
+}
+.project-overview[data-project-type] > .folder-picker {
+  order: 0;
+}
+.project-overview[data-project-type]
+  :is(.project-overview__primary > :not(.code-project-overview), .code-project-overview__sessions) {
+  order: 1;
+}
+.project-overview[data-project-type] .code-project-overview__quick-start {
+  order: 2;
+}
+.project-overview[data-project-type] .project-overview__group:first-child {
+  order: 3;
+}
+.project-overview[data-project-type] .project-overview__group:not(:first-child) {
+  order: 4;
+}
+.project-overview[data-project-type] .project-overview__repo {
+  order: 5;
+}
+.project-overview[data-project-type] .code-project-planner {
+  order: 6;
+}
+.project-overview[data-project-type] .code-project-planner + .code-project-planner {
+  order: 7;
+}
+
+.project-overview[data-project-type]
+  :is(
+    .project-overview__warning,
+    .project-overview__toolbar,
+    .folder-picker,
+    .project-overview__primary > *,
+    .code-project-overview__sessions,
+    .code-project-overview__quick-start,
+    .project-overview__group,
+    .project-overview__repo,
+    .code-project-planner
+  ) {
+  min-width: 0;
+  margin-block-end: var(--project-overview-gap);
+  align-self: start;
+}
+
+.project-overview[data-project-type] > .project-overview__warning {
+  text-align: left;
+}
+
+/* ---- header ---------------------------------------------------------- */
+
+.project-overview[data-project-type] .project-overview__identity {
+  align-items: center;
+  gap: var(--oct-space-3);
+}
+
+.project-overview[data-project-type] .project-overview__identity .project-tile {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--oct-radius-sm);
+  font-size: var(--oct-text-xs);
+}
+
+.project-overview[data-project-type] .project-overview__heading {
+  gap: 0;
+}
+
+.project-overview[data-project-type] .project-overview__type {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--oct-space-2);
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.project-overview[data-project-type] .project-overview__root {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--oct-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-overview[data-project-type] .project-overview__actions {
+  position: relative;
+  gap: var(--oct-space-2);
+}
+
+/* A change's outcome ("Icon changed.", a refusal) is said under the buttons,
+   out of the row: beside them it pushed New thread left every time. */
+.project-overview[data-project-type] .project-overview__status {
+  position: absolute;
+  inset-block-start: calc(100% + var(--oct-space-1));
+  inset-inline-end: 0;
+  margin: 0;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+}
+
+.project-overview[data-project-type] .project-overview__status:empty {
+  display: none;
+}
+
+/* ---- cards ----------------------------------------------------------- */
+
+.project-overview[data-project-type] :is(.project-overview__repo, .code-project-planner) {
+  display: grid;
+  /* One column that may shrink under its content: a planner thread's long
+     title must not widen the card past the side column. */
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  /* One rhythm for every card: title row, one-line help, control. */
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-4);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--project-overview-card-fill);
+}
+
+.project-overview[data-project-type] .project-overview__card-title {
+  margin: 0;
+  color: var(--oct-muted);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-sf-14);
+}
+
+.project-overview[data-project-type] .project-overview__repo {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* The folder rows stack in a narrow card: the kind of folder above its path. */
+.project-overview[data-project-type] .project-folders__row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  row-gap: 0;
+}
+
+.project-overview[data-project-type] .project-folders__label {
+  grid-column: 1 / -1;
+  font-size: var(--oct-text-xs);
+}
+
+.project-overview[data-project-type] .project-folders__path {
+  grid-column: 1;
+}
+
+.project-overview[data-project-type] .project-folders__list {
+  gap: var(--oct-space-2);
+}
+
+.project-overview[data-project-type] .project-overview__card-header {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+}
+
+.project-overview[data-project-type] .project-overview__availability {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+}
+
+.project-overview[data-project-type] .project-overview__availability-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: var(--oct-radius-pill);
+  background: currentColor;
+}
+
+.project-overview[data-project-type]
+  .project-overview__availability[data-state="quiet"]
+  .project-overview__availability-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+
+.project-overview[data-project-type] :is(.project-overview__description, .project-folders__note) {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-overview[data-project-type] .project-folders {
+  gap: var(--oct-space-3);
+}
+
+.project-overview[data-project-type] .project-folders__status:empty {
+  display: none;
+}
+
+.project-overview[data-project-type] .project-overview__repo .project-overview__warning {
+  text-align: left;
+}
+
+/* The planner and Starting workers: a short help line, then the one control. */
+.project-overview[data-project-type] .code-project-planner .code-project-overview__section-header {
+  min-height: 24px;
+  align-items: center;
+}
+
+.project-overview[data-project-type]
+  :is(.code-project-planner__help, .code-project-planner .oct-row-detail) {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A refusal fills a line the card already holds, so the card never grows. */
+.project-overview[data-project-type] .code-project-planner__status {
+  min-height: 1lh;
+  margin-block-start: calc(var(--oct-space-2) * -1);
+}
+
+.project-overview[data-project-type] .code-project-planner__proposals:empty {
+  display: none;
+}
+
+.project-overview[data-project-type] .code-project-planner__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+/* A select takes the card's whole row, so its button sits under it at the
+   same gap every other control in the card uses. */
+.project-overview[data-project-type] .code-project-planner__controls > [role="combobox"] {
+  flex: 1 1 100%;
+}
+
+.project-overview[data-project-type]
+  .code-project-planner__controls
+  > :is([role="combobox"], .octant-select) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* ---- threads --------------------------------------------------------- */
+
+.project-overview[data-project-type] .code-project-overview__sessions {
+  align-content: start;
+}
+
+.project-overview[data-project-type] .code-project-thread {
+  gap: 2px;
+  padding: var(--oct-space-3) var(--oct-space-4);
+}
+
+.project-overview[data-project-type] .code-project-thread__row {
+  gap: var(--oct-space-3);
+}
+
+/* The status is a small dot and a word in a column of its own, so a list of
+   threads reads down its right edge. */
+.code-project-thread__status {
+  display: inline-flex;
+  min-width: 6.5rem;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-1);
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+}
+
+.code-project-thread__status-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: var(--oct-radius-pill);
+  background: currentColor;
+}
+
+.code-project-thread__status[data-state="ready"],
+.code-project-thread__status[data-state="quiet"] {
+  color: var(--oct-meta);
+}
+
+.code-project-thread__status[data-state="ready"] .code-project-thread__status-dot,
+.code-project-thread__status[data-state="quiet"] .code-project-thread__status-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+
+.code-project-thread__status[data-state="active"] {
+  color: var(--oct-fg);
+}
+
+.code-project-thread__status[data-state="attention"] {
+  color: var(--oct-warn-fg);
+}
+
+.code-project-thread__status[data-state="danger"] {
+  color: var(--octant-danger-text);
+}
+
+.code-project-thread__meta > span:not(.tag):not(.badge) {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-snug);
+}
+
+.code-project-overview__empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-4);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--project-overview-card-fill);
+}
+
+.code-project-overview__empty > .code-project-overview__note {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+/* ---- context and access ----------------------------------------------- */
+
+.project-overview[data-project-type] .project-overview__card {
+  border-color: var(--oct-border);
+  border-radius: var(--oct-radius-md);
+}
+
+.project-overview[data-project-type] .project-overview-inspector__row {
+  min-height: 52px;
+}
+
+.project-overview[data-project-type] .project-overview-inspector__row p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A switch is a plain on or off, so on is the page's ink, not the accent. */
+.project-overview[data-project-type] .octant-switch[data-slot="switch"][data-checked] {
+  border-color: var(--oct-fg);
+  background: var(--oct-fg);
+}
+
+/* ---- two columns -------------------------------------------------------- */
+
+/* Wide enough, the side cards float in the right-hand column and everything
+   else keeps a margin that clears them. Two stacks of different heights share
+   no rows this way: the Context card follows the list even when the side cards
+   run longer, and the short side cards never stretch to the list's height. */
+@container project-page (min-width: 880px) {
+  .projects-workspace--detail-only
+    > .project-overview[data-project-type]:not([data-project-type="chat"]) {
+    display: flow-root;
+  }
+
+  .project-overview[data-project-type]:not([data-project-type="chat"])
+    :is(
+      .project-overview__primary > :not(.code-project-overview),
+      .code-project-overview__sessions,
+      .code-project-overview__quick-start,
+      .project-overview__group
+    ) {
+    margin-inline-end: calc(var(--project-overview-side) + var(--oct-space-8));
+  }
+
+  .project-overview[data-project-type]:not([data-project-type="chat"])
+    :is(.project-overview__repo, .code-project-planner) {
+    float: right;
+    clear: right;
+    width: var(--project-overview-side);
+    margin-block-end: var(--oct-space-4);
+  }
+}
+
+/* A Work Project's overview and its promotion are one block of the page. */
+.project-overview__stack {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-6);
+}
+
+/* ---- Manage panels ------------------------------------------------------- */
+
+/* A panel opened from a row is one inset section under that row: a faint well
+   inside the card, one rhythm between its parts, quiet 12px help, and buttons
+   in a row. It repeats nothing the row above already says. */
+.project-overview[data-project-type] .project-overview-inspector__content {
+  display: grid;
+  gap: var(--oct-space-3);
+  margin-block-end: var(--oct-space-4);
+  padding: var(--oct-space-4);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-md);
+  background: color-mix(in oklab, var(--oct-fg) 3%, transparent);
+}
+
+.project-overview[data-project-type]
+  .project-overview-inspector__content
+  :is(
+    .project-provider-policy,
+    .project-brand-kit,
+    .project-design-system,
+    .project-desktop-recipe,
+    .project-actions,
+    .project-overview__memory
+  ) {
+  display: grid;
+  gap: var(--oct-space-3);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* The section's own heading would say the row's label a second time. */
+.project-overview[data-project-type]
+  .project-overview-inspector__content
+  .project-provider-policy__header
+  > div
+  > h2 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.project-overview[data-project-type]
+  .project-overview-inspector__content
+  :is(.project-provider-policy__header p, .project-provider-policy__hint) {
+  margin: 0;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-snug);
+}
+
+.project-overview[data-project-type]
+  .project-overview-inspector__content
+  div:has(> button):not(:has(> :not(button))) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.project-overview[data-project-type] .project-overview-inspector__content :is(h3, h4) {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}

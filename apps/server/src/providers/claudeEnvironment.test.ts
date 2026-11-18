@@ -246,6 +246,56 @@ describe("makeClaudeEnvironmentScope", () => {
     }
   });
 
+  it("prepares a gateway launch with only its address and token, and redacts the token on release", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "octant-claude-gateway-account-"));
+    const configDirectory = join(parent, "account");
+    const scope = await Effect.runPromise(Scope.make());
+    try {
+      const acquired = await Effect.runPromise(
+        makeClaudeEnvironmentScope("gateway", {
+          hostEnvironment: {
+            ...hostileHostEnvironment,
+            ANTHROPIC_BASE_URL: "https://host.invalid",
+          },
+          apiKey: "broker-resolved-gateway-token-sentinel",
+          gatewayBaseUrl: "https://gateway.example.com",
+          configDirectory,
+        }).pipe(Effect.provideService(Scope.Scope, scope)),
+      );
+
+      expect(acquired.environment).toEqual({
+        PATH: "/usr/bin:/bin",
+        HOME: "/Users/provider-user",
+        LANG: "en_US.UTF-8",
+        CLAUDE_CONFIG_DIR: configDirectory,
+        CLAUDE_SECURESTORAGE_CONFIG_DIR: configDirectory,
+        ANTHROPIC_BASE_URL: "https://gateway.example.com",
+        ANTHROPIC_AUTH_TOKEN: "broker-resolved-gateway-token-sentinel",
+        ...requiredGuards,
+      });
+
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      expect(acquired.environment.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+
+    await expect(
+      failureOf(
+        Effect.scoped(
+          makeClaudeEnvironmentScope("gateway", {
+            hostEnvironment: hostileHostEnvironment,
+            apiKey: "token-without-an-address",
+            configDirectory,
+          }),
+        ),
+      ),
+    ).resolves.toEqual({
+      category: "invalid-configuration",
+      message: "Claude gateway authentication requires an address.",
+    });
+  });
+
   it("refuses an API-key launch that names no account directory", async () => {
     const scope = await Effect.runPromise(Scope.make());
     const result = await Effect.runPromise(

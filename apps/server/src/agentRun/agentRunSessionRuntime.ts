@@ -1,3 +1,8 @@
+import {
+  activeSandboxPolicy,
+  beginSandboxTurn,
+  outsideSandboxToolCall,
+} from "../process/sandboxRuntimePolicy";
 import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
 import type { ConversationInputManifest } from "@octant/contracts/conversation-inputs";
 import type { ProviderAttachmentInput } from "@octant/contracts";
@@ -1027,148 +1032,150 @@ export function createAgentRunSessionRuntime(
     };
     sessions.set(run.id, live);
 
-    void Effect.runPromiseExit(
-      Effect.scoped(
-        runManagedSession({
-          recordWorkingTime: (fact) => {
-            workingTime = fact;
-          },
-          run,
-          driver,
-          authority,
-          projectRoot,
-          context: continuation === undefined ? context : [],
-          ...(continuation !== undefined || run.routingReceipt.admittedInputCount === undefined
-            ? {}
-            : {
-                inputManifest: options.context.inputs?.({
-                  runId: run.id,
-                  contextSnapshotId: run.routingReceipt.contextSnapshotId,
+    void outsideSandboxToolCall(() =>
+      Effect.runPromiseExit(
+        Effect.scoped(
+          runManagedSession({
+            recordWorkingTime: (fact) => {
+              workingTime = fact;
+            },
+            run,
+            driver,
+            authority,
+            projectRoot,
+            context: continuation === undefined ? context : [],
+            ...(continuation !== undefined || run.routingReceipt.admittedInputCount === undefined
+              ? {}
+              : {
+                  inputManifest: options.context.inputs?.({
+                    runId: run.id,
+                    contextSnapshotId: run.routingReceipt.contextSnapshotId,
+                  }),
                 }),
-              }),
-          inputsCurrent: () => {
-            if (run.routingReceipt.admittedInputCount === undefined) return true;
-            const manifest = options.context.inputs?.({
-              runId: run.id,
-              contextSnapshotId: run.routingReceipt.contextSnapshotId,
-            });
-            return manifest !== undefined && options.inputsCurrent?.(manifest) === true;
-          },
-          prepareInputs: async (signal) => {
-            if (run.routingReceipt.admittedInputCount === undefined) return [];
-            const snapshot = {
-              runId: run.id,
-              contextSnapshotId: run.routingReceipt.contextSnapshotId,
-            };
-            const manifest = options.context.inputs?.(snapshot);
-            if (manifest === undefined) return undefined;
-            const attachments = await options.prepareInputs?.({ run, manifest, signal });
-            if (signal.aborted || options.context.inputs?.(snapshot) === undefined)
-              return undefined;
-            // A native continuation already owns its original inputs; revalidate
-            // source revocation without appending duplicates to the provider.
-            return continuation === undefined
-              ? attachments
-              : attachments === undefined
-                ? undefined
-                : [];
-          },
-          reservationId,
-          ...(spendReservationId === undefined ? {} : { spendReservationId }),
-          ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
-          ...(options.recordUsage === undefined ? {} : { recordUsage: options.recordUsage }),
-          capacityScheduler: options.capacityScheduler,
-          providerInstanceId: target.providerInstanceId,
-          modelId: target.modelId,
-          ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
-          sessionId: providerSessionId,
-          prompt,
-          verifyWorkspace,
-          onSessionReady: () => {
-            publishedStart = true;
-            try {
-              options.onSessionRunning?.({ runId: run.id });
-            } catch {
-              // Recording Running is a lifecycle fact, not a precondition for the turn.
-            }
-            try {
-              options.onSessionStarted?.({
+            inputsCurrent: () => {
+              if (run.routingReceipt.admittedInputCount === undefined) return true;
+              const manifest = options.context.inputs?.({
                 runId: run.id,
-                resumed: continuation !== undefined,
-                workingTimeLimitMs,
+                contextSnapshotId: run.routingReceipt.contextSnapshotId,
               });
-              options.onUserMessage?.({
+              return manifest !== undefined && options.inputsCurrent?.(manifest) === true;
+            },
+            prepareInputs: async (signal) => {
+              if (run.routingReceipt.admittedInputCount === undefined) return [];
+              const snapshot = {
                 runId: run.id,
-                kind:
-                  continuation === undefined
-                    ? "task"
-                    : continuation.message === undefined &&
-                        record.pendingContinuation?.generation !== (run.generation ?? 1)
-                      ? "resume"
-                      : "follow-up",
-                text: prompt,
-                occurredAt: decodeUtcTimestamp(new Date().toISOString()),
-              });
-            } catch {
-              // A transient observer must never prevent provider startup.
-            }
-          },
-          resumeCursor: previous?.resumeCursor,
-          recordCursor,
-          recordContinuation,
-          requireResumeCursor: options.supportsResume?.(target.providerInstanceId) === true,
-          maxEvents,
-          timeoutMs: workingTimeLimitMs,
-          shutdownTimeoutMs,
-          shutdown,
-          onTextDelta: options.onTextDelta,
-          onChildActivity: options.onChildActivity,
-          outsideContentMarks: options.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS,
-          onUserMessage: options.onUserMessage,
-          interactions: options.interactions,
-          onSessionEnding: () => {
-            live.steer = undefined;
-            inputController.abort();
-          },
-          onConnectionReady: (connection, providerSessionId) => {
-            if (connection.steer === undefined) return;
-            live.steer = async (message) => {
-              if (
-                controller.signal.aborted ||
-                inputController.signal.aborted ||
-                sessions.get(run.id) !== live
-              )
-                return "unsupported";
-              const steer = connection.steer;
-              if (steer === undefined) return "unsupported";
-              const result = await Effect.runPromiseExit(
-                steer({ sessionId: providerSessionId, message }).pipe(
-                  Effect.tap((acknowledgement) =>
-                    Effect.sync(() => {
-                      if (acknowledgement !== "steered") return;
-                      options.onUserMessage?.({
-                        runId: run.id,
-                        kind: "steering",
-                        text: message,
-                        occurredAt: decodeUtcTimestamp(new Date().toISOString()),
-                      });
-                    }),
+                contextSnapshotId: run.routingReceipt.contextSnapshotId,
+              };
+              const manifest = options.context.inputs?.(snapshot);
+              if (manifest === undefined) return undefined;
+              const attachments = await options.prepareInputs?.({ run, manifest, signal });
+              if (signal.aborted || options.context.inputs?.(snapshot) === undefined)
+                return undefined;
+              // A native continuation already owns its original inputs; revalidate
+              // source revocation without appending duplicates to the provider.
+              return continuation === undefined
+                ? attachments
+                : attachments === undefined
+                  ? undefined
+                  : [];
+            },
+            reservationId,
+            ...(spendReservationId === undefined ? {} : { spendReservationId }),
+            ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
+            ...(options.recordUsage === undefined ? {} : { recordUsage: options.recordUsage }),
+            capacityScheduler: options.capacityScheduler,
+            providerInstanceId: target.providerInstanceId,
+            modelId: target.modelId,
+            ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
+            sessionId: providerSessionId,
+            prompt,
+            verifyWorkspace,
+            onSessionReady: () => {
+              publishedStart = true;
+              try {
+                options.onSessionRunning?.({ runId: run.id });
+              } catch {
+                // Recording Running is a lifecycle fact, not a precondition for the turn.
+              }
+              try {
+                options.onSessionStarted?.({
+                  runId: run.id,
+                  resumed: continuation !== undefined,
+                  workingTimeLimitMs,
+                });
+                options.onUserMessage?.({
+                  runId: run.id,
+                  kind:
+                    continuation === undefined
+                      ? "task"
+                      : continuation.message === undefined &&
+                          record.pendingContinuation?.generation !== (run.generation ?? 1)
+                        ? "resume"
+                        : "follow-up",
+                  text: prompt,
+                  occurredAt: decodeUtcTimestamp(new Date().toISOString()),
+                });
+              } catch {
+                // A transient observer must never prevent provider startup.
+              }
+            },
+            resumeCursor: previous?.resumeCursor,
+            recordCursor,
+            recordContinuation,
+            requireResumeCursor: options.supportsResume?.(target.providerInstanceId) === true,
+            maxEvents,
+            timeoutMs: workingTimeLimitMs,
+            shutdownTimeoutMs,
+            shutdown,
+            onTextDelta: options.onTextDelta,
+            onChildActivity: options.onChildActivity,
+            outsideContentMarks: options.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS,
+            onUserMessage: options.onUserMessage,
+            interactions: options.interactions,
+            onSessionEnding: () => {
+              live.steer = undefined;
+              inputController.abort();
+            },
+            onConnectionReady: (connection, providerSessionId) => {
+              if (connection.steer === undefined) return;
+              live.steer = async (message) => {
+                if (
+                  controller.signal.aborted ||
+                  inputController.signal.aborted ||
+                  sessions.get(run.id) !== live
+                )
+                  return "unsupported";
+                const steer = connection.steer;
+                if (steer === undefined) return "unsupported";
+                const result = await Effect.runPromiseExit(
+                  steer({ sessionId: providerSessionId, message }).pipe(
+                    Effect.tap((acknowledgement) =>
+                      Effect.sync(() => {
+                        if (acknowledgement !== "steered") return;
+                        options.onUserMessage?.({
+                          runId: run.id,
+                          kind: "steering",
+                          text: message,
+                          occurredAt: decodeUtcTimestamp(new Date().toISOString()),
+                        });
+                      }),
+                    ),
                   ),
-                ),
-                { signal: AbortSignal.any([controller.signal, inputController.signal]) },
-              );
-              // An acknowledged delivery already happened. Completion/cancellation
-              // before this Promise continuation cannot retract the provider's receipt.
-              return Exit.isSuccess(result) && result.value === "steered"
-                ? "steered"
-                : "unsupported";
-            };
-          },
-          ...(appManagedTools === undefined ? {} : { appManagedTools }),
-          ...(toolEffects === undefined ? {} : { toolEffects }),
-        }),
+                  { signal: AbortSignal.any([controller.signal, inputController.signal]) },
+                );
+                // An acknowledged delivery already happened. Completion/cancellation
+                // before this Promise continuation cannot retract the provider's receipt.
+                return Exit.isSuccess(result) && result.value === "steered"
+                  ? "steered"
+                  : "unsupported";
+              };
+            },
+            ...(appManagedTools === undefined ? {} : { appManagedTools }),
+            ...(toolEffects === undefined ? {} : { toolEffects }),
+          }),
+        ),
+        { signal: controller.signal },
       ),
-      { signal: controller.signal },
     ).then(
       async (exit) => {
         let outcome = outcomeFromExit(exit);
@@ -1798,10 +1805,50 @@ function runSessionTurn(
         message:
           "The admitted source inputs are unavailable or unsupported. Restore them or explicitly delegate with text-only context.",
       } satisfies ProviderFailure);
+    const sandboxProjectId =
+      input.run.routingReceipt.projectId ??
+      ("projectId" in input.run.workspaceReceipt
+        ? input.run.workspaceReceipt.projectId
+        : undefined);
+    const sandboxMode = input.run.routingReceipt.mode;
+    if (
+      (sandboxMode === "chat" || sandboxProjectId === undefined) &&
+      activeSandboxPolicy(String(input.run.parentThreadId)) !== undefined
+    )
+      return yield* Effect.fail({
+        category: "unsupported",
+        message:
+          "This helper cannot inherit the parent's sandbox boundary. Delegate to a Work or Code helper in the same Project.",
+      } satisfies ProviderFailure);
+    const sandboxAdmission =
+      sandboxProjectId === undefined || sandboxMode === "chat"
+        ? undefined
+        : beginSandboxTurn({
+            threadId: String(input.run.id),
+            parentThreadId: String(input.run.parentThreadId),
+            projectId: String(sandboxProjectId),
+            mode: sandboxMode,
+            root: input.projectRoot,
+            provider: input.driver.kind,
+          });
+    if (sandboxAdmission?.status === "refused")
+      return yield* Effect.fail({
+        category: "unsupported",
+        message: sandboxAdmission.message,
+      } satisfies ProviderFailure);
+    const sandboxTurn = sandboxAdmission?.turn;
+    if (sandboxTurn !== undefined)
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(async () => {
+          await sandboxTurn.end();
+        }),
+      );
+    const sandboxPolicy = sandboxTurn?.selection;
     input.onSessionReady();
     const connection = yield* input.driver
       .acquire({
         instanceId: input.providerInstanceId,
+        ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }),
         projectRoot: input.projectRoot,
         mode: input.run.routingReceipt.mode,
       })
@@ -1842,6 +1889,7 @@ function runSessionTurn(
             // The clamped run authority is what reaches the provider. Nothing here
             // may widen it, and no parent-thread policy is consulted.
             executionPolicy: input.authority.executionPolicy,
+            ...(sandboxPolicy === undefined ? {} : { fullAccessSandbox: true }),
             tools: input.appManagedTools?.definitions ?? [],
           })
         : connection.resume({
@@ -1852,6 +1900,7 @@ function runSessionTurn(
               ? {}
               : { modelOptionValues: input.modelOptionValues }),
             executionPolicy: input.authority.executionPolicy,
+            ...(sandboxPolicy === undefined ? {} : { fullAccessSandbox: true }),
             tools: input.appManagedTools?.definitions ?? [],
           });
     const handle = yield* startup.pipe(
@@ -1898,7 +1947,7 @@ function runSessionTurn(
         state.promptSent = true;
         return connection.send({
           sessionId: input.sessionId,
-          prompt: input.prompt,
+          prompt: sandboxTurn?.summary ? `${sandboxTurn.summary}\n\n${input.prompt}` : input.prompt,
           context: [
             ...input.context,
             ...(input.inputManifest === undefined
@@ -2238,7 +2287,11 @@ function collectSessionEvents(
                   ? toolAbort.signal
                   : AbortSignal.any([toolAbort.signal, requestSignal]);
               if (executionSignal.aborted) return;
-              const toolSet = recordedToolSet(input.toolEffects, input.appManagedTools);
+              const toolSet = recordedToolSet(
+                input.toolEffects,
+                input.appManagedTools,
+                String(input.run.id),
+              );
               const offered = toolSet?.definitions.some(
                 (definition) => definition.name === event.toolName,
               );

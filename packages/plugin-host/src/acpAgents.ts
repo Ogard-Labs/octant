@@ -46,8 +46,8 @@ export const ACP_AGENT_DISCOVERED: AcpAgentSteps = {
  * - `octant`: Octant's sandbox, at the thread's level; a Full access thread
  *   gets the wall Accept edits has, since the agent is not yet trusted to run
  *   open.
- * - `own`: no Octant sandbox below Full access, as for a shipped profile with
- *   a sandbox of its own: a trusted agent outside Strict runs as on its own.
+ * - `own`: the launch a shipped profile gets outside Strict below Full
+ *   access: the agent's own settings decide what Strict would fix.
  * - `none`: Full access, which keeps no sandbox.
  * `remembers` is false until the agent is trusted: no remembered approval and
  * no Project trust is recorded for it, and an answer covers one call.
@@ -78,13 +78,38 @@ export function decideAcpAgentLaunch(input: {
   return { status: "starts", sandbox: "own", remembers: true };
 }
 
+/**
+ * Why an agent cannot be enabled yet. Enabling comes last: the person installs
+ * it, then trusts it having seen what trusting grants and how its bytes were
+ * checked, and only then turns it on. Untrusting an enabled agent leaves it
+ * on, and it then starts in Octant's sandbox remembering nothing
+ * (`decideAcpAgentLaunch`).
+ */
+export function acpAgentEnableRefusal(
+  steps: AcpAgentSteps,
+): "not-installed" | "not-trusted" | undefined {
+  if (!steps.installed) return "not-installed";
+  if (!steps.trusted) return "not-trusted";
+  return undefined;
+}
+
 /** Why a typed-in or registry command is refused before it is ever added. */
-export type AcpAgentCommandRefusal = "not-absolute" | "control-character" | "too-many-arguments";
+export type AcpAgentCommandRefusal =
+  | "not-absolute"
+  | "control-character"
+  | "too-many-arguments"
+  | "secret-argument";
+
+/** A flag or assignment that names a key, token, secret or password. */
+const SECRET_ARGUMENT =
+  /^(?:--?[a-z0-9_-]*(?:api[-_]?key|token|secret|password|passwd|credential)s?(?:=|$)|[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)=)/iu;
 
 /**
  * A command is an absolute executable path plus literal arguments. Nothing is
  * expanded or passed to a shell, so a control character is refused outright
- * rather than escaped.
+ * rather than escaped. The arguments are journaled with the agent, so one
+ * that carries a key is refused: a key reaches an agent through its own
+ * sign-in, never through Octant's record.
  */
 export function acpAgentCommandRefusal(source: {
   readonly command: string;
@@ -96,17 +121,45 @@ export function acpAgentCommandRefusal(source: {
   if (source.args.length > 32) return "too-many-arguments";
   if ([source.command, ...source.args].some((part) => control.test(part)))
     return "control-character";
+  if (source.args.some((argument) => SECRET_ARGUMENT.test(argument))) return "secret-argument";
   return undefined;
 }
+
+/**
+ * How a registry distribution reaches disk. `npx` and `uvx` name a package at
+ * an exact version that the package manager installs into Octant's managed
+ * folder, with its own lockfile and integrity checks and with install scripts
+ * off; `binary` names an archive Octant downloads over HTTPS from the URL the
+ * registry lists. The registry's `sha256` is optional: an archive that has one
+ * is checked against it and refused on a mismatch, and one without is
+ * installed as an unverified download, which the Trust step says plainly.
+ * `command` is the executable's path inside the archive.
+ */
+export type AcpRegistryDistribution =
+  | {
+      readonly kind: "npx" | "uvx";
+      readonly package: string;
+      readonly version: string;
+      readonly args: ReadonlyArray<string>;
+      readonly env?: Readonly<Record<string, string>>;
+    }
+  | {
+      readonly kind: "binary";
+      readonly archive: string;
+      readonly sha256?: string;
+      readonly command: string;
+      readonly args: ReadonlyArray<string>;
+      readonly env?: Readonly<Record<string, string>>;
+    };
 
 /** One agent as the public ACP registry lists it for this host. */
 export interface AcpRegistryAgent {
   readonly registryId: string;
   readonly name: string;
-  /** The registry's distribution: an npm package run with `npx`, or a binary in an archive. */
-  readonly distribution:
-    | { readonly kind: "npx"; readonly package: string; readonly args: ReadonlyArray<string> }
-    | { readonly kind: "binary"; readonly command: string; readonly args: ReadonlyArray<string> };
+  /** The release the registry entry pins; an install takes exactly this one. */
+  readonly version: string;
+  /** The registry's distribution for Apple Silicon macOS. */
+  readonly distribution: AcpRegistryDistribution;
   /** Why Octant has no reviewed profile for it yet. */
   readonly unreviewedBecause: string;
 }
@@ -114,26 +167,37 @@ export interface AcpRegistryAgent {
 /**
  * The registry agents Octant was asked to make first-class, as the registry's
  * source repository `agentclientprotocol/registry` listed them at commit
- * `131167e` (2026-11-16), macOS distribution. None has a signed-in probe on
- * record, so each is offered as an agent the person may add, not as a
- * reviewed profile. Trae is not in the registry at that commit; a person adds
- * it as a local command.
+ * `131167e` (2026-11-16), `darwin-aarch64` distribution. None has a signed-in
+ * probe on record, so each is offered as an agent the person may add, not as
+ * a reviewed profile. Trae is not in the registry at that commit; a person
+ * adds it as a local command.
  */
 export const ACP_REGISTRY_AGENTS: ReadonlyArray<AcpRegistryAgent> = [
   {
     registryId: "antigravity-acp",
     name: "Google Antigravity",
-    distribution: { kind: "binary", command: "agy_acp_server.par", args: [] },
+    version: "1.5.0",
+    distribution: {
+      kind: "binary",
+      archive:
+        "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.5.0-darwin-arm64.zip",
+      sha256: "c82ecb4ef476bfc35cbe5b2745cdddef873b99c9f5bd7fd11e5ca1fc1667a3fc",
+      command: "agy_acp_server.par",
+      args: [],
+    },
     unreviewedBecause:
       "How it signs in outside its IDE extension, and whether it runs without the IDE, needs a signed-in probe.",
   },
   {
     registryId: "factory-droid",
     name: "Factory Droid",
+    version: "1.12.1",
     distribution: {
       kind: "npx",
-      package: "droid@1.12.1",
+      package: "droid",
+      version: "1.12.1",
       args: ["exec", "--output-format", "acp-daemon"],
+      env: { DROID_DISABLE_AUTO_UPDATE: "true", FACTORY_DROID_AUTO_UPDATE_ENABLED: "false" },
     },
     unreviewedBecause:
       "Its ACP entry is a daemon output mode; its modes and sign-in folder need a signed-in probe.",
@@ -141,8 +205,11 @@ export const ACP_REGISTRY_AGENTS: ReadonlyArray<AcpRegistryAgent> = [
   {
     registryId: "junie",
     name: "Junie",
+    version: "4020.10.0",
     distribution: {
       kind: "binary",
+      archive:
+        "https://github.com/JetBrains/junie-acp-release/releases/download/4020.10/junie-release-4020.10-macos-aarch64.zip",
       command: "Applications/junie.app/Contents/MacOS/junie",
       args: ["--acp=true"],
     },
@@ -152,21 +219,39 @@ export const ACP_REGISTRY_AGENTS: ReadonlyArray<AcpRegistryAgent> = [
   {
     registryId: "amp-acp",
     name: "Amp",
-    distribution: { kind: "binary", command: "amp-acp", args: [] },
+    version: "0.13.0",
+    distribution: {
+      kind: "binary",
+      archive:
+        "https://github.com/tao12345666333/amp-acp/releases/download/v0.13.0/amp-acp-darwin-aarch64.tar.gz",
+      sha256: "ca3315e3e54ea85c7e5db09d19a1908cd2ea149c8e83a728cefb814c7a490edf",
+      command: "amp-acp",
+      args: [],
+    },
     unreviewedBecause:
       "The registry entry is a third-party wrapper around Amp, whose modes and sign-in need a signed-in probe.",
   },
   {
     registryId: "auggie",
     name: "Auggie CLI",
-    distribution: { kind: "npx", package: "@augmentcode/auggie@0.37.0", args: ["--acp"] },
+    version: "0.37.0",
+    distribution: {
+      kind: "npx",
+      package: "@augmentcode/auggie",
+      version: "0.37.0",
+      args: ["--acp"],
+      env: { AUGMENT_DISABLE_AUTO_UPDATE: "1" },
+    },
     unreviewedBecause: "Its modes, sign-in folder and Project entries need a signed-in probe.",
   },
   {
     registryId: "kiro",
     name: "Kiro CLI",
+    version: "3.0.0",
     distribution: {
       kind: "binary",
+      archive: "https://prod.download.cli.kiro.dev/stable/3.0.0/kirocli-universal-darwin.tar.gz",
+      sha256: "fa32d8f2054d79642922db696683630114b2cea99a2c7f655becd923afe33ccf",
       command: "kirocli/bin/kiro-cli",
       args: ["acp", "--agent-engine=v3"],
     },
@@ -175,22 +260,58 @@ export const ACP_REGISTRY_AGENTS: ReadonlyArray<AcpRegistryAgent> = [
   {
     registryId: "muse-code",
     name: "Muse Code",
-    distribution: { kind: "binary", command: "muse", args: ["acp"] },
+    version: "1.4.14",
+    distribution: {
+      kind: "binary",
+      archive:
+        "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.14-R7309.1&file=muse-aarch64-macos",
+      sha256: "1c96114408acbeade9a8fb79e3b4425e5b64d50425938568aef01bdc04ce2e03",
+      command: "muse",
+      args: ["acp"],
+      env: { MUSE_EXPERIMENTAL_ACP: "on" },
+    },
     unreviewedBecause: "Its modes, sign-in folder and Project entries need a signed-in probe.",
   },
   {
     registryId: "cursor",
     name: "Cursor",
-    distribution: { kind: "binary", command: "dist-package/cursor-agent", args: ["acp"] },
+    version: "2026.11.13",
+    distribution: {
+      kind: "binary",
+      archive:
+        "https://downloads.cursor.com/lab/2026.11.13-eacade1/darwin/arm64/agent-cli-package.tar.gz",
+      command: "dist-package/cursor-agent",
+      args: ["acp"],
+    },
     unreviewedBecause:
       "Its compatibility probe through the shared ACP stack has not been run; until it is, Cursor is added as any ACP agent.",
   },
 ];
 
+export function acpRegistryAgent(registryId: string): AcpRegistryAgent | undefined {
+  return ACP_REGISTRY_AGENTS.find((agent) => agent.registryId === registryId);
+}
+
+/**
+ * What the install step can say about the bytes it put on disk, which the
+ * Trust step shows before anything runs.
+ * - `package-manager`: npm or uv installed the exact pinned release, checking
+ *   it against the package registry's own integrity data.
+ * - `sha256-verified`: the archive matched the ACP registry's checksum.
+ * - `unverified-download`: the ACP registry lists no checksum for the
+ *   archive, so only HTTPS vouches for it.
+ * - `local-command`: the person's own executable, which Octant did not fetch.
+ */
+export type AcpAgentInstallIntegrity =
+  | "package-manager"
+  | "sha256-verified"
+  | "unverified-download"
+  | "local-command";
+
 /**
  * Adding a registry agent the person installed: its command resolves to the
- * executable the person's install put on disk, and it starts untrusted and
- * disabled, so adding it alone lets it run nothing.
+ * executable the install put on disk, and it starts untrusted and disabled,
+ * so adding it alone lets it run nothing.
  */
 export function addRegistryAcpAgent(
   agent: AcpRegistryAgent,

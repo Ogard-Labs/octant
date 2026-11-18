@@ -10,7 +10,7 @@ import {
 
 const validCandidate = {
   driverKind: "codex",
-  displayName: "Codex CLI",
+  displayName: "Codex",
   binaryPath: "/usr/local/bin/codex",
   version: "0.1.2507100955",
   readiness: "ready",
@@ -52,7 +52,7 @@ describe("provider discovery contracts", () => {
     it("decodes a candidate without optional fields", () => {
       const minimal = {
         driverKind: "codex",
-        displayName: "Codex CLI",
+        displayName: "Codex",
         binaryPath: "/usr/local/bin/codex",
         readiness: "ready",
         pathSummary: "/usr/local/bin/codex",
@@ -179,7 +179,7 @@ describe("provider discovery contracts", () => {
         kind: "connect",
         driverKind: "codex",
         binaryPath: "/usr/local/bin/codex",
-        displayName: "Codex CLI",
+        displayName: "Codex",
       });
       expect(decoded.kind).toBe("connect");
     });
@@ -190,7 +190,7 @@ describe("provider discovery contracts", () => {
           kind: "connect",
           driverKind: "codex",
           binaryPath: "codex",
-          displayName: "Codex CLI",
+          displayName: "Codex",
         }),
       ).toThrow();
     });

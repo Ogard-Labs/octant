@@ -56,18 +56,13 @@ const codeTabs: ReadonlyArray<
 > = [
   ["code-overview", "Overview", undefined, { role: "region", name: "Code thread" }],
   ["code-terminal", "Terminal", "xterm", { role: "heading", name: "No terminal attached" }],
-  [
-    "code-test",
-    "Tests",
-    undefined,
-    { role: "heading", name: "Repository test approval unavailable" },
-  ],
-  ["code-git", "Git", undefined, { role: "heading", name: "Git mutation approval unavailable" }],
+  ["code-test", "Tests", undefined, { role: "text", name: "Repository test approval unavailable" }],
+  ["code-git", "Git", undefined, { role: "text", name: "Git mutation approval unavailable" }],
   [
     "code-pr",
     "Pull request",
     undefined,
-    { role: "heading", name: "Pull request approval unavailable" },
+    { role: "text", name: "Pull request approval unavailable" },
   ],
   [
     "code-local-review",
@@ -478,9 +473,9 @@ describe("WorkspaceView welcome", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: "What are we building today?" }),
+      await screen.findByRole("heading", { name: "What should we work on in Octant?" }),
     ).toBeVisible();
-    expect(screen.getByText("Octant")).toBeVisible();
+    expect(screen.getAllByText("Octant").length).toBeGreaterThan(0);
     expect(screen.queryByRole("region", { name: "Code welcome" })).not.toBeInTheDocument();
   });
 });
@@ -504,8 +499,12 @@ describe("WorkspaceView Code tab registration", () => {
       // the surface appears only after the deferred chunk resolves. Keep a
       // generous wait budget for loaded CI runners; the assertion itself is
       // unchanged — the exact surface must render and be visible.
+      // A state drawn as the panes' one empty state (a mark and two lines) is a
+      // status with no heading, so it is found by its words.
       expect(
-        await screen.findByRole(expected.role, { name: expected.name }, { timeout: 5_000 }),
+        await (expected.role === "text"
+          ? screen.findByText(expected.name, undefined, { timeout: 5_000 })
+          : screen.findByRole(expected.role, { name: expected.name }, { timeout: 5_000 })),
       ).toBeVisible();
       expect(
         screen.queryByRole("heading", { name: "No Code Project open" }),
@@ -1192,7 +1191,7 @@ describe("WorkspaceView pane title facts", () => {
       await screen.findByRole("region", { name: "Workspace pane: Faster issue validation" })
     ).querySelector<HTMLElement>(".workspace-pane__header")!;
     const chip = within(header).getByText("#917");
-    expect(chip).toHaveAttribute("data-tone", "open");
+    expect(chip).toHaveAttribute("data-pr-state", "open");
     expect(chip).toHaveAttribute("data-checks", "failing");
     // The Project and the branch ride in the title row as two chips.
     expect(within(header).getByText("Octant")).toBeVisible();
@@ -3309,8 +3308,13 @@ describe("WorkspaceView Chat thread Environment", () => {
 
     expect(await screen.findByRole("region", { name: "Environment details" })).toBeVisible();
     expect(screen.getByText(/Planning · Virtual Project/)).toBeVisible();
-    expect(screen.getAllByText("Attachments").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Sources").length).toBeGreaterThan(0);
+    // The Chat's own facts: a count only when there is something to count (this
+    // thread has no attachment or source), and no memory row while memory is
+    // Project-scoped, which is the constant case.
+    expect(screen.queryByText("Memory")).not.toBeInTheDocument();
+    expect(screen.queryByText("Project-scoped")).not.toBeInTheDocument();
+    expect(screen.queryByText("Attachments")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sources")).not.toBeInTheDocument();
     expect(screen.queryByText("Git")).not.toBeInTheDocument();
     expect(screen.queryByText("Approvals")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Thread actions" }));

@@ -71,11 +71,18 @@ function detailJson(number: number): string {
 }
 
 describe("fake-gh project pull-request port", () => {
-  it("executes zero gh commands on query and only bounded list commands on refresh", async () => {
+  it("executes zero gh commands on query, and on refresh only one bounded list and one read-only merge-queue query per repository", async () => {
     const calls: string[][] = [];
     const command: GhCommandPort = {
       run: vi.fn(async (arguments_) => {
         calls.push([...arguments_]);
+        // The merge-queue read: no queue here, so nothing is queued.
+        if (arguments_[0] === "api") {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify({ data: { repository: { pullRequests: { nodes: [] } } } }),
+          } satisfies GhCommandResult;
+        }
         const repo = arguments_[3] ?? "octant/unknown";
         const suffix = repo.split("/")[1] ?? "1";
         const number = Number(suffix.replace(/\D/g, "")) || 1;
@@ -120,8 +127,10 @@ describe("fake-gh project pull-request port", () => {
     expect(calls).toEqual([]);
 
     await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
-    expect(calls).toHaveLength(2);
-    expect(calls[0]).toEqual([
+    const lists = calls.filter((arguments_) => arguments_[0] === "pr");
+    const queueReads = calls.filter((arguments_) => arguments_[0] === "api");
+    expect(lists).toHaveLength(2);
+    expect(lists[0]).toEqual([
       "pr",
       "list",
       "--repo",
@@ -131,12 +140,21 @@ describe("fake-gh project pull-request port", () => {
       "--limit",
       "101",
       "--json",
-      "number,title,isDraft,state,mergeable,author,updatedAt,url,baseRefName,headRefName,isCrossRepository,statusCheckRollup,reviewDecision,reviewRequests",
+      "number,title,isDraft,state,mergeable,author,updatedAt,url,baseRefName,headRefName,isCrossRepository,statusCheckRollup,reviewDecision,reviewRequests,additions,deletions,autoMergeRequest",
     ]);
-    expect(calls[1]?.[3]).toBe("octant/r2");
-    expect(calls.every((arguments_) => arguments_[0] === "pr" && arguments_[1] === "list")).toBe(
-      true,
-    );
+    expect(lists[1]?.[3]).toBe("octant/r2");
+    expect(lists.every((arguments_) => arguments_[1] === "list")).toBe(true);
+    // Besides the lists, a refresh reads the merge queue: at most one query
+    // per repository, a GraphQL query and never a mutation, with the owner
+    // and name passed as variables.
+    expect(queueReads.length).toBeLessThanOrEqual(2);
+    expect(calls).toHaveLength(lists.length + queueReads.length);
+    for (const read of queueReads) {
+      expect(read.slice(0, 2)).toEqual(["api", "graphql"]);
+      expect(read.some((argument) => argument.startsWith("query=query"))).toBe(true);
+      expect(read.some((argument) => /mutation/i.test(argument))).toBe(false);
+      expect(read).toContain("owner=octant");
+    }
     expect(
       calls.some(
         (arguments_) =>

@@ -701,6 +701,37 @@ function createMockTransport(input: {
   // reopened thread shows a finished reply the way the host would.
   const workTurns = new Map<string, Array<Record<string, unknown>>>();
   const codeTurns = new Map<string, Array<Record<string, unknown>>>();
+  // The checklist thread's agent has finished planning and asks to leave
+  // Plan, so the thread screen shows the Plan block.
+  const workRequests = workThreads.some((thread) => String(thread.id) === WORK_THREAD_ID)
+    ? [
+        {
+          requestId: "84000000-0000-4000-8000-000000000101",
+          projectId: PROJECT_ID,
+          threadId: WORK_THREAD_ID,
+          providerInstanceId: PROVIDER_ID,
+          providerSessionId: "84000000-0000-4000-8000-000000000102",
+          providerRequestId: "mock-exit-plan",
+          detail: {
+            kind: "approval",
+            action: "exit-plan",
+            description: "The launch checklist plan is ready for review.",
+            levelChange: {
+              to: "ask-first",
+              plan: [
+                "1. Confirm the venue deposit with the finance thread.",
+                "2. Draft the visa letters from the attendee list.",
+                "3. Assemble the press kit: logo files, one-pager, speaker bios.",
+                "4. Share the checklist with the team and set reminders.",
+              ].join("\n"),
+            },
+          },
+          status: "pending",
+          requestedAt: NOW,
+          version: 1,
+        },
+      ]
+    : [];
   const codeEvidence = new Map<
     string,
     {
@@ -976,6 +1007,32 @@ function createMockTransport(input: {
         );
         workTurns.set(threadId, turns);
         return mockJsonResponse({ threadId, turns, liveCursor: turns.length });
+      }
+      if (request.method === "GET" && request.path === "/api/work/requests") {
+        const threadId = new URLSearchParams(request.query ?? "").get("threadId");
+        return mockJsonResponse({
+          requests: workRequests.filter((entry) => entry.threadId === threadId),
+        });
+      }
+      if (request.method === "POST" && request.path === "/api/work/requests/commands") {
+        const command = JSON.parse(String(request.body ?? "{}")) as {
+          readonly requestId?: string;
+          readonly resolution?: { readonly kind: "approval"; readonly approved: boolean };
+        };
+        const index = workRequests.findIndex((entry) => entry.requestId === command.requestId);
+        const pending = workRequests[index];
+        if (pending === undefined || command.resolution === undefined) {
+          return new Response("Mock route not found", { status: 404 });
+        }
+        const resolved = {
+          ...pending,
+          status: "resolved",
+          resolution: command.resolution,
+          settledAt: NOW,
+          version: pending.version + 1,
+        };
+        workRequests.splice(index, 1);
+        return mockJsonResponse({ kind: "work-request-resolved", request: resolved });
       }
       if (request.method === "POST" && request.path === "/api/work/turns") {
         const command = JSON.parse(String(request.body ?? "{}")) as {

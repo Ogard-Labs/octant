@@ -1,5 +1,5 @@
 import type { WaitingAsk } from "@octant/contracts/pending-requests";
-import { CirclePause } from "lucide-react";
+import { CirclePause } from "../ui/icons";
 import { useEffect, useRef, useState } from "react";
 import { useAgentThreadName } from "../agentAccess/agentThreadAttribution";
 import { elapsedLabel } from "../lib/relativeTime";

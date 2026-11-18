@@ -121,6 +121,7 @@ export function useWorkSettings(
                 defaultModelId: model.modelId,
               }),
           defaultAccess: change.defaultAccess ?? saved.defaultAccess,
+          ...(change.defaultStrict === undefined ? {} : { defaultStrict: change.defaultStrict }),
           ...(change.defaultFullAccessSandbox === undefined
             ? {}
             : { defaultFullAccessSandbox: change.defaultFullAccessSandbox }),

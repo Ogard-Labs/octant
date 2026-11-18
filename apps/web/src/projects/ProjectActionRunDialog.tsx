@@ -62,7 +62,7 @@ export function ProjectActionRunDialog(props: {
           );
       })
       .catch(() => {
-        if (current) setFailure("The action could not be checked. Close and review it again.");
+        if (current) setFailure("Could not check the action. Close and review it again.");
       })
       .finally(() => {
         if (current) setBusy(false);
@@ -111,7 +111,7 @@ export function ProjectActionRunDialog(props: {
       } catch {
         if (!abort.signal.aborted)
           setFailure(
-            "Run status is unknown. Check the terminal before starting another run. Nothing was retried.",
+            "Run status unknown. Check the terminal before starting another run. Nothing was retried.",
           );
       }
     };
@@ -127,7 +127,7 @@ export function ProjectActionRunDialog(props: {
     try {
       sessionStorage.setItem(props.storageKey, id);
     } catch {
-      setFailure("The run could not be retained in this window. Nothing started.");
+      setFailure("Could not keep the run in this window. Nothing started.");
       return;
     }
     submitted.current = true;
@@ -157,9 +157,7 @@ export function ProjectActionRunDialog(props: {
         );
     } catch {
       setTerminalId(id);
-      setFailure(
-        "The action may or may not have started. Nothing was retried; check its terminal.",
-      );
+      setFailure("The action may have started. Nothing was retried. Check its terminal.");
     } finally {
       setBusy(false);
     }
@@ -222,9 +220,9 @@ export function ProjectActionRunDialog(props: {
         <>
           <p role="status">
             {run.terminal.uncertainty === "server-transport-lost"
-              ? "Server connection lost. The command may have run; check the server before preparing another run. Nothing was retried."
+              ? "Lost the server connection. The command may have run. Check the server before another run. Nothing was retried."
               : run.terminal.uncertainty === "server-stop-unconfirmed"
-                ? "Connection stopped. Remote completion is unconfirmed; check the server before preparing another run."
+                ? "Connection stopped. It may not have finished. Check the server before another run."
                 : run.terminal.state === "running"
                   ? "Running"
                   : run.terminal.state === "interrupted"

@@ -925,7 +925,7 @@ describe("RemoteShellView", () => {
 
     expect(
       await screen.findByText(
-        "Setting up sync, joining, and revoking happen in the Octant app on the host machine.",
+        "Set up sync, join, and revoke in the Octant app on the host computer.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("Set up sync · this computer")).toBeInTheDocument();

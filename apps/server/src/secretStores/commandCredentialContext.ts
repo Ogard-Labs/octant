@@ -14,6 +14,7 @@ import type { CodeFileRootAuthorityPort } from "../code/codeService";
 import type { CodeSessionAuthorityStore } from "../code/codeSessionAuthorityStore";
 import type { CodeOperationRuntime } from "../code/codeOperationRuntime";
 import type { CommandCredentialContext } from "./commandCredentialBindings";
+import { sandboxCommandState } from "../process/sandboxRuntimePolicy";
 
 /** Person and provider requests resolve the same effective Code authority. */
 export function commandCredentialContext(options: {
@@ -45,6 +46,8 @@ export function commandCredentialContext(options: {
       thread.profileId,
       thread.toolConstraints,
       thread.executionPolicy,
+      thread.strict,
+      thread.fullAccessSandbox,
       thread.lifecycle,
     ]);
   return async (window, threadId) => {
@@ -100,6 +103,8 @@ export function commandCredentialContext(options: {
       );
       if (root === undefined) return undefined;
       const authorityKey = key(thread);
+      const sandbox = sandboxCommandState(threadId);
+      const sandboxKey = JSON.stringify(sandbox);
 
       const current = () => {
         try {
@@ -110,6 +115,7 @@ export function commandCredentialContext(options: {
             options.providerRevision(stored) === providerRevision &&
             options.canAccess(windowId, thread.projectId) &&
             key(effective(windowId, stored)) === authorityKey &&
+            JSON.stringify(sandboxCommandState(threadId)) === sandboxKey &&
             projectKey !== undefined &&
             projectAuthority() === projectKey &&
             checkoutAuthority() === checkoutKey
@@ -146,6 +152,7 @@ export function commandCredentialContext(options: {
         root: root.rootPath,
         authorityKey,
         executionPolicy: thread.executionPolicy,
+        ...(sandbox === undefined ? {} : { strict: sandbox.strict, legacySandbox: sandbox.legacy }),
         current,
         revalidate,
       };

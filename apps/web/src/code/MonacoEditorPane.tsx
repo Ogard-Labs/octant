@@ -23,9 +23,13 @@ import {
   useRef,
   useState,
 } from "react";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
+import { OctantMenu } from "../ui/base/OctantMenu";
+import { useDockBarControls, type DockBarItem } from "../shell/dockBarControls";
+import { Ellipsis, ExternalLink, Save } from "../ui/icons";
 import {
   MonacoEditorAdapter,
+  type MonacoEditorControls,
   type MonacoAdapterRuntime,
   type MonacoEditorRange,
   type MonacoEditorPosition,
@@ -113,6 +117,18 @@ export interface MonacoEditorPaneProps {
    * ordinary file-open path a definition elsewhere goes through.
    */
   readonly onOpenFile?: (relativePath: string) => void;
+  /** Reports whether the buffer holds unsaved edits, so a viewer can keep its tab. */
+  readonly onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * Hands the viewer this buffer's own Save and Discard, so a tab that closes
+   * with unsaved edits can be saved or dropped through the same paths the
+   * buttons use. `save` answers whether the buffer is clean afterwards.
+   */
+  readonly onRegisterActions?: (
+    actions: { readonly save: () => Promise<boolean>; readonly discard: () => void } | undefined,
+  ) => void;
+  /** Offers "Open in main area" in the file menu: the file as a workspace tab. */
+  readonly onOpenInMainArea?: () => void;
   /** Language-service timing, for tests. */
   readonly languageTiming?: { readonly debounceMs?: number; readonly pollMs?: number };
 }
@@ -360,6 +376,17 @@ function AvailableEditor(
     props.onRequestRefresh?.();
   }, [draftKey, props.draftStore, props.onRequestRefresh]);
 
+  const saveAndReport = useRef<() => Promise<boolean>>(async () => true);
+  saveAndReport.current = async () => {
+    await (editorSave.current?.() ?? save());
+    return !dirtyRef.current;
+  };
+  const onRegisterActions = props.onRegisterActions;
+  useEffect(() => {
+    onRegisterActions?.({ save: () => saveAndReport.current(), discard: discardDraftAndReload });
+    return () => onRegisterActions?.(undefined);
+  }, [onRegisterActions, discardDraftAndReload]);
+
   const { checkoutId, path, threadId } = props.file;
   const onOpenFile = props.onOpenFile;
   const language = useCodeLanguageServices({
@@ -375,7 +402,9 @@ function AvailableEditor(
   const [reveal, setReveal] = useState<{ readonly range: MonacoEditorRange }>();
   const cursor = useRef<MonacoEditorPosition>({ lineNumber: 1, column: 1 });
   const referenceSequence = useRef(0);
-  const referenceTrigger = useRef<HTMLButtonElement>(null);
+  const paneRef = useRef<HTMLElement>(null);
+  const editorControls = useRef<MonacoEditorControls | undefined>(undefined);
+  const [editAction, setEditAction] = useState<"rename" | "quick-fixes">();
   const restoreReferenceFocus = useRef(false);
   const referenceKey = JSON.stringify([
     threadId,
@@ -444,7 +473,7 @@ function AvailableEditor(
   useLayoutEffect(() => {
     if (visibleReferences === undefined && restoreReferenceFocus.current) {
       restoreReferenceFocus.current = false;
-      referenceTrigger.current?.focus();
+      paneRef.current?.querySelector<HTMLElement>('[aria-label^="Editor for"]')?.focus();
     }
   }, [visibleReferences]);
   const chooseReference = useCallback(
@@ -612,10 +641,121 @@ function AvailableEditor(
     if (ready) debugStore.setCurrentFile(debugKey, path);
   }, [debugKey, path, ready, debugStore]);
 
+  const onDirtyChange = props.onDirtyChange;
+  useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
+  const languageOn =
+    props.client.readLanguage !== undefined && props.client.syncLanguageDocument !== undefined;
+  const editorReady = loadState.kind === "ready";
+  const menuItems = [
+    { id: "commands", label: "Commands", disabled: !editorReady },
+    { id: "find", label: "Find", disabled: !editorReady },
+    { id: "replace", label: "Replace", disabled: !editorReady || !writable },
+    { id: "format", label: "Format", disabled: !editorReady || !writable },
+    { id: "goto", label: "Go to line", disabled: !editorReady },
+    ...(props.client.readLanguage === undefined
+      ? []
+      : [{ id: "outline", label: "Outline", disabled: !editorReady }]),
+    ...(props.onAddSelectionToChat === undefined
+      ? []
+      : [{ id: "send-selection", label: "Send selection to agent", disabled: !editorReady }]),
+    { id: "settings", label: "Editor settings", disabled: !editorReady },
+    ...(languageOn
+      ? [
+          {
+            id: "references",
+            label: "Find references in checkout",
+            disabled: !editorReady || visibleReferences?.busy === true,
+          },
+          { id: "rename", label: "Preview rename", disabled: !editorReady },
+          { id: "quick-fixes", label: "Find quick fixes", disabled: !editorReady },
+        ]
+      : []),
+    ...(props.onOpenInMainArea === undefined
+      ? []
+      : [{ id: "open-main", label: "Open in main area" }]),
+  ];
+  const runMenuItem = (id: string) => {
+    const controls = editorControls.current;
+    switch (id) {
+      case "commands":
+        return void controls?.run("editor.action.quickCommand");
+      case "find":
+        return void controls?.run("actions.find");
+      case "replace":
+        return void controls?.run("editor.action.startFindReplaceAction");
+      case "format":
+        return void controls?.run("editor.action.formatDocument");
+      case "goto":
+        return void controls?.run("editor.action.gotoLine");
+      case "outline":
+        return void controls?.toggleOutline();
+      case "send-selection":
+        return controls?.sendSelection();
+      case "settings":
+        return controls?.toggleSettings();
+      case "references":
+        return void findReferences(cursor.current);
+      case "rename":
+      case "quick-fixes":
+        return setEditAction(id);
+      case "open-main":
+        return props.onOpenInMainArea?.();
+    }
+  };
+  const openExternal = () =>
+    void props
+      .onOpenExternalEditor?.()
+      .then(() => setMessage("Opened in the configured external editor."))
+      .catch(() => setMessage("Octant could not open the configured external editor."));
+  // Save stands only while there is something to save, at the cluster's left
+  // end so the buttons beside it do not move when it appears.
+  const showSave = writable && (dirty || saving);
+  const saveDisabled = saving || conflict !== undefined || loadState.kind !== "ready";
+  const saveNow = () => void (editorSave.current?.() ?? save());
+  const barItems: ReadonlyArray<DockBarItem> = [
+    ...(showSave
+      ? [
+          {
+            kind: "button" as const,
+            id: "save",
+            label: `Save ${props.file.path}`,
+            title: "Save",
+            icon: Save,
+            onSelect: saveNow,
+            disabled: saveDisabled,
+          },
+        ]
+      : []),
+    ...(props.onOpenExternalEditor === undefined
+      ? []
+      : [
+          {
+            kind: "button" as const,
+            id: "open-external",
+            label: `Open ${props.file.path} externally`,
+            title: "Open externally",
+            icon: ExternalLink,
+            onSelect: openExternal,
+          },
+        ]),
+    {
+      kind: "menu" as const,
+      id: "file-actions",
+      label: "File actions",
+      icon: Ellipsis,
+      items: menuItems,
+      onSelect: runMenuItem,
+    },
+  ];
+  // Hosted in a dock tile the actions stand in the tile's bar; shown on its own
+  // (a workspace tab) the pane draws one slim header of its own.
+  const placement = useDockBarControls(barItems);
+
   return (
     <section
       aria-label={`Code editor for ${props.file.path}`}
       className="code-editor-pane"
+      ref={paneRef}
       onFocus={(event) => {
         // Coming back to a file is when another file's edits may have changed
         // its errors, or the person may have turned language services back
@@ -627,41 +767,59 @@ function AvailableEditor(
         else if (language.state.kind === "off") retryLanguage();
       }}
     >
-      <header className="code-editor-pane__toolbar">
-        <div>
-          <span>Code file</span>
+      {placement !== undefined ? null : (
+        <header className="code-editor-pane__toolbar">
           <h1>{props.file.path}</h1>
-        </div>
-        {!writable ? <p>Plan · read-only</p> : null}
-        {props.onOpenExternalEditor === undefined ? null : (
-          <OctantButton
-            aria-label={`Open ${props.file.path} externally`}
-            onClick={() =>
-              void props
-                .onOpenExternalEditor?.()
-                .then(() => setMessage("Opened in the configured external editor."))
-                .catch(() => setMessage("Octant could not open the configured external editor."))
-            }
-            size="sm"
-            type="button"
-            variant="secondary"
-          >
-            Open externally
-          </OctantButton>
-        )}
-        {writable ? (
-          <OctantButton
-            aria-label={`Save ${props.file.path}`}
-            disabled={!dirty || saving || conflict !== undefined || loadState.kind !== "ready"}
-            onClick={() => void (editorSave.current?.() ?? save())}
-            size="sm"
-            type="button"
-            variant="secondary"
-          >
-            {saving ? "Saving…" : "Save"}
-          </OctantButton>
-        ) : null}
-      </header>
+          <div className="code-editor-pane__actions">
+            {showSave ? (
+              <OctantIconButton
+                disabled={saveDisabled}
+                label={`Save ${props.file.path}`}
+                onClick={saveNow}
+                type="button"
+              >
+                <Save aria-hidden="true" size={16} />
+              </OctantIconButton>
+            ) : null}
+            {props.onOpenExternalEditor === undefined ? null : (
+              <OctantIconButton
+                label={`Open ${props.file.path} externally`}
+                onClick={openExternal}
+                type="button"
+              >
+                <ExternalLink aria-hidden="true" size={16} />
+              </OctantIconButton>
+            )}
+            <OctantMenu
+              items={menuItems.map((item) => ({
+                label: item.label,
+                value: item.id,
+                ...(item.disabled === true ? { disabled: true } : {}),
+              }))}
+              onValueChange={runMenuItem}
+              selectionMode="action"
+              trigger={<Ellipsis aria-hidden="true" size={16} />}
+              triggerClassName="shell-icon-button"
+              triggerLabel="File actions"
+              value=""
+            />
+          </div>
+        </header>
+      )}
+      <nav aria-label="File location" className="code-editor-pane__crumbs">
+        <span className="code-editor-pane__path">
+          {props.file.path.split("/").map((part, index) => (
+            <span key={index}>
+              {index > 0 ? <span aria-hidden="true"> / </span> : null}
+              {part}
+            </span>
+          ))}
+        </span>
+        {!writable ? <span className="code-editor-pane__crumb-note">Plan · read-only</span> : null}
+        <span className="code-editor-pane__crumb-note">
+          {props.checkoutLabel ?? String(checkoutId).slice(0, 8)}
+        </span>
+      </nav>
 
       {conflict !== undefined ? (
         <OctantAlert className="code-editor-pane__warning" tone="warning">
@@ -778,27 +936,15 @@ function AvailableEditor(
         </div>
       )}
 
-      {props.client.readLanguage === undefined ||
-      props.client.syncLanguageDocument === undefined ? null : (
-        <div className="code-editor-pane__language">
-          <OctantButton
-            ref={referenceTrigger}
-            type="button"
-            size="sm"
-            variant="ghost"
-            disabled={loadState.kind !== "ready" || visibleReferences?.busy === true}
-            onClick={() => void findReferences(cursor.current)}
-          >
-            Find references in checkout
-          </OctantButton>
-        </div>
-      )}
-      {props.client.readLanguage === undefined ||
-      props.client.syncLanguageDocument === undefined ? null : (
+      {!languageOn || editAction === undefined ? null : (
         <CodeEditPreviews
-          key={referenceKey}
+          key={`${referenceKey}:${editAction}`}
+          intent={editAction}
+          onDismiss={() => {
+            setEditAction(undefined);
+            paneRef.current?.querySelector<HTMLElement>('[aria-label^="Editor for"]')?.focus();
+          }}
           text={draft}
-          checkout={props.checkoutLabel ?? String(checkoutId).slice(0, 8)}
           writable={writable && props.draftStore !== undefined}
           prepare={(query) => language.prepareEdits(toLanguagePosition(cursor.current), query)}
           apply={async (preview) => {
@@ -884,14 +1030,6 @@ function AvailableEditor(
               })}
         />
       )}
-      <nav aria-label="File location" className="editor-tools">
-        {props.file.path.split("/").map((part, index) => (
-          <span key={index}>
-            {index > 0 ? "/ " : ""}
-            {part}
-          </span>
-        ))}
-      </nav>
       {language.diagnostics === undefined ? null : (
         <OctantCollapsible
           className="code-editor-pane__references"
@@ -957,6 +1095,8 @@ function AvailableEditor(
       ) : null}
       {loadState.kind === "ready" ? (
         <MonacoEditorAdapter
+          controlsRef={editorControls}
+          toolbar={false}
           ariaLabel={`Editor for ${props.file.path}`}
           {...(props.onAddSelectionToChat === undefined
             ? {}

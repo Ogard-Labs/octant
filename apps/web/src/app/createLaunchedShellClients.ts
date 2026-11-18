@@ -1,4 +1,8 @@
 import {
+  createSandboxRestrictionsClient,
+  type SandboxRestrictionsClient,
+} from "@octant/client-runtime/sandbox-restrictions-client";
+import {
   createAgentGrantClient,
   createAgentProfileClient,
   createBenchmarksClient,
@@ -254,6 +258,7 @@ export interface LaunchedShellClients {
   readonly spendCeilingClient: ReturnType<typeof createSpendCeilingClient>;
   readonly agentGrantClient: ReturnType<typeof createAgentGrantClient>;
   readonly protectedFilesClient: ProtectedFilesClient;
+  readonly sandboxRestrictionsClient: SandboxRestrictionsClient;
   readonly archivedWorktreesClient: ArchivedWorktreesClient;
   readonly diskCleanupClient: DiskCleanupClient;
   readonly personMemoryClient: PersonMemoryClient;
@@ -432,6 +437,7 @@ export function createLaunchedShellClients(
     spendCeilingClient: createSpendCeilingClient(port),
     agentGrantClient: createAgentGrantClient(port),
     protectedFilesClient: createProtectedFilesClient(port),
+    sandboxRestrictionsClient: createSandboxRestrictionsClient(port),
     archivedWorktreesClient: createArchivedWorktreesClient(port),
     diskCleanupClient: createDiskCleanupClient(port),
     personMemoryClient: createPersonMemoryClient(port),

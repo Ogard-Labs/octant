@@ -248,6 +248,115 @@ describe("the To-dos page", () => {
   });
 });
 
+describe("the To-dos page layout", () => {
+  it("shows an empty list as a centred empty state with only the add field above it", async () => {
+    const host = fakeHost();
+    render(<Page client={host.client} />);
+
+    expect(await screen.findByText("No to-dos yet")).toBeVisible();
+    expect(
+      screen.getByText(
+        "Write down what you want to do. Hand a to-do to an agent when you are ready.",
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "New to-do" })).toBeVisible();
+    expect(screen.queryByRole("group", { name: "Show to-dos" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Filter/ })).toBeNull();
+  });
+
+  it("draws no toolbar while the first read is still out", () => {
+    const client: TodoClient = {
+      read: () => new Promise<TodoListView>(() => undefined),
+      change: async () => {
+        throw new Error("unused in this fixture");
+      },
+    };
+    render(<Page client={client} />);
+
+    expect(screen.getByText("Reading your to-dos…")).toBeVisible();
+    expect(screen.queryByRole("group", { name: "Show to-dos" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Filter/ })).toBeNull();
+  });
+
+  it("says nothing is open when every to-do is done, and says nothing beside the title of an empty list", async () => {
+    const user = userEvent.setup();
+    const host = fakeHost();
+    const empty = render(<Page client={host.client} />);
+    await screen.findByText("No to-dos yet");
+    expect(screen.queryByText("Nothing is open.")).toBeNull();
+    empty.unmount();
+
+    host.apply({ kind: "add-todo", todoId: crypto.randomUUID(), title: "Book the venue" });
+    render(<Page client={host.client} />);
+    await user.click(await screen.findByRole("checkbox", { name: "Book the venue" }));
+    expect(await screen.findByText("Nothing is open.")).toBeVisible();
+  });
+
+  it("keeps the toolbar and says nothing matches when to-dos exist but the filters hide them", async () => {
+    const user = userEvent.setup();
+    const host = fakeHost();
+    host.apply({ kind: "add-todo", todoId: crypto.randomUUID(), title: "Book the venue" });
+    render(<Page client={host.client} />);
+    await screen.findByRole("checkbox", { name: "Book the venue" });
+
+    await user.click(screen.getByRole("button", { name: "Done, 0" }));
+    expect(await screen.findByText("No to-do matches these filters.")).toBeVisible();
+    expect(screen.getByRole("group", { name: "Show to-dos" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Filter" })).toBeVisible();
+    expect(screen.queryByText("No to-dos yet")).toBeNull();
+  });
+
+  it("says each state's count in the button's name and draws only the word, so the switch keeps its width", async () => {
+    const host = fakeHost();
+    host.apply({ kind: "add-todo", todoId: crypto.randomUUID(), title: "One" });
+    host.apply({ kind: "add-todo", todoId: crypto.randomUUID(), title: "Two" });
+    render(<Page client={host.client} />);
+
+    expect(await screen.findByRole("button", { name: "Open, 2" })).toHaveTextContent(/^Open$/);
+    expect(screen.getByRole("button", { name: "Done, 0" })).toHaveTextContent(/^Done$/);
+  });
+
+  it("filters by Project, tag and Show dropped from one Filter menu, counts them and resets them but not the state", async () => {
+    const user = userEvent.setup();
+    const host = fakeHost();
+    host.apply({
+      kind: "add-todo",
+      todoId: crypto.randomUUID(),
+      title: "Plain",
+      tags: ["bug"],
+    });
+    host.apply({
+      kind: "add-todo",
+      todoId: crypto.randomUUID(),
+      title: "In the web Project",
+      projects: [{ hostId: HOST, projectId: WEB, name: "Octant web" }],
+    });
+    render(<Page client={host.client} />);
+    await screen.findByRole("checkbox", { name: "Plain" });
+
+    await user.click(screen.getByRole("button", { name: "All, 2" }));
+    await user.click(screen.getByRole("button", { name: "Filter" }));
+    const menu = await screen.findByRole("menu", { name: "Filter" });
+    expect(within(menu).getByText("Project")).toBeVisible();
+    expect(within(menu).getByText("Tag")).toBeVisible();
+
+    await user.click(within(menu).getByRole("menuitemcheckbox", { name: "Octant web" }));
+    expect(rowTitles()).toEqual(["In the web Project"]);
+    await user.click(within(menu).getByRole("menuitemcheckbox", { name: "Octant web" }));
+    await user.click(within(menu).getByRole("menuitemcheckbox", { name: "No Project" }));
+    expect(rowTitles()).toEqual(["Plain"]);
+    await user.click(within(menu).getByRole("menuitemcheckbox", { name: "bug" }));
+    await user.click(within(menu).getByRole("menuitemcheckbox", { name: "Show dropped" }));
+
+    expect(screen.getByRole("button", { name: "Filter, 3 active" })).toBeVisible();
+    await user.click(within(menu).getByRole("menuitem", { name: "Reset filters" }));
+
+    expect(rowTitles()).toEqual(["In the web Project", "Plain"]);
+    expect(screen.getByRole("button", { name: "Filter" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "All, 2" })).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
 describe("starting from a to-do", () => {
   it("starts in the to-do's only Project at once, and offers Chat or a Project when it has none", async () => {
     const user = userEvent.setup();
@@ -329,7 +438,7 @@ describe("a change made elsewhere", () => {
   it("shows a to-do another device added as soon as the host says the list changed", async () => {
     const host = fakeHost();
     const view = render(<Page client={host.client} revision={0} />);
-    expect(await screen.findByText(/Write down what you mean to do/)).toBeVisible();
+    expect(await screen.findByText(/Write down what you want to do/)).toBeVisible();
 
     host.apply({ kind: "add-todo", todoId: crypto.randomUUID(), title: "Added on the phone" });
     view.rerender(<Page client={host.client} revision={1} />);
@@ -372,6 +481,28 @@ describe("a list host that cannot be reached", () => {
     expect(await screen.findByRole("checkbox", { name: "Call the bank" })).toBeVisible();
     expect(screen.queryByRole("region", { name: "Not sent" })).toBeNull();
     expect(host.view().todos.map((todo) => todo.title)).toEqual(["Call the bank", "Already there"]);
+  });
+
+  it("shows the empty state, no toolbar and no promise of a list below when the last list read was empty", async () => {
+    const host = fakeHost();
+    function Unreachable(props: { readonly away: boolean }) {
+      const list = useTodoList(host.client, undefined, {
+        key: "other-host:studio",
+        ...(props.away ? { unreachable: "Studio Mac cannot be reached." } : {}),
+      });
+      return (
+        <TodosView list={list} onClose={() => undefined} projects={[]} readOnly={props.away} />
+      );
+    }
+    const view = render(<Unreachable away={false} />);
+    await screen.findByText("No to-dos yet");
+
+    view.rerender(<Unreachable away />);
+    expect(await screen.findByText("Studio Mac cannot be reached.")).toBeVisible();
+    expect(screen.queryByText(/The list below is the last one read/)).toBeNull();
+    expect(screen.getByText("No to-dos yet")).toBeVisible();
+    expect(screen.queryByRole("group", { name: "Show to-dos" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Filter/ })).toBeNull();
   });
 
   it("draws nothing of the previous host's list after the list moves", async () => {

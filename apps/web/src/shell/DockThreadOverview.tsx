@@ -9,7 +9,7 @@ import {
   LoaderCircle,
   Monitor,
   Radio,
-} from "lucide-react";
+} from "../ui/icons";
 import { useState, type ReactNode } from "react";
 import type { ThreadBoardPullRequestSummary } from "@octant/contracts";
 import { OctantButton } from "../ui/base/OctantButton";

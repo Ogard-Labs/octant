@@ -1,3 +1,5 @@
+import { SettingsSetupLink } from "./SettingsSetupLink";
+import type { ExternalUrlHost } from "../shell/openExternalUrl";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import {
   decodeCanvasPublicLinkSettingsCommand,
@@ -8,11 +10,12 @@ import { useCallback, useEffect, useId, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
-import { SettingRow, SettingsState } from "./primitives";
+import { SettingRow, SettingsDisclosure, SettingsState } from "./primitives";
 
 export interface PublicLinkSettingsProps {
   /** Absent where the host publishes no public link settings. */
   readonly client: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings"> | undefined;
+  readonly externalUrlHost?: ExternalUrlHost | undefined;
   readonly focusedSetting?: string | undefined;
 }
 
@@ -122,7 +125,7 @@ export function PublicLinkSettings(props: PublicLinkSettingsProps) {
         />
       </SettingRow>
       <SettingRow
-        description="Where public links are published: a service you run, or another one you trust. Empty means no service is set and no link can be published."
+        description="Where public links are published: a service you run or trust. Empty means no links can be published."
         focused={props.focusedSetting === "public-link-service"}
         htmlFor={urlId}
         label="Service address"
@@ -147,6 +150,54 @@ export function PublicLinkSettings(props: PublicLinkSettingsProps) {
           Save address
         </OctantButton>
       </SettingRow>
+      <SettingsDisclosure
+        title="Set up the self-hosted Canvas share service"
+        variant="inline"
+        settingId="public-link-setup"
+        focused={props.focusedSetting === "public-link-setup"}
+      >
+        <ol className="remote-setup__steps">
+          <li>
+            On a server with Docker Compose, check out the{" "}
+            <SettingsSetupLink
+              host={props.externalUrlHost}
+              href="https://github.com/Ogard-Labs/octant"
+            >
+              Octant repository
+            </SettingsSetupLink>
+            . Point two DNS names at the server, one for shared pages and one for embedded content.
+            Allow incoming TCP connections on ports 80 and 443 and leave those ports free for the
+            HTTPS proxy.
+          </li>
+          <li>
+            From the repository root, run these commands in a shell after replacing every example
+            value. The domains are bare host names, without <code>https://</code>. Link pages show
+            the abuse contact for reports. The settings file keeps the domains and operator token
+            for every later restart; you need the token to take a link down. Compose starts the
+            share service and Caddy, provisions HTTPS, and keeps published pages and certificates in
+            Docker volumes.
+            <pre className="settings-setup-command">
+              <code>{`cat > apps/share/.env <<EOF
+SHARE_DOMAIN=share.example.com
+CONTENT_DOMAIN=content.example.com
+OCTANT_SHARE_ABUSE_CONTACT=abuse@example.com
+OCTANT_SHARE_OPERATOR_TOKEN=$(openssl rand -hex 32)
+EOF
+chmod 600 apps/share/.env
+docker compose -f apps/share/compose.yaml up -d --build`}</code>
+            </pre>
+          </li>
+          <li>
+            Open <code>https://share.example.com/healthz</code> using your viewer domain and check
+            for <code>ok</code>. Enter that viewer origin without the path in Service address, save
+            it, then turn on Public links.
+          </li>
+          <li>
+            Publish a test Canvas with a design block and open its link in a browser. If the page
+            opens but the design is missing, check DNS and HTTPS for the content domain.
+          </li>
+        </ol>
+      </SettingsDisclosure>
       {problem === undefined ? null : <SettingsState kind="error">{problem}</SettingsState>}
     </>
   );

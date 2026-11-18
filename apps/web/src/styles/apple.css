@@ -168,10 +168,7 @@
 }
 
 .apple-workbench__action-message {
-  padding: var(--oct-space-2) var(--oct-space-3);
-  border-radius: var(--oct-radius-sm);
-  color: var(--oct-warn-fg);
-  background: var(--oct-warn-soft);
+  min-width: 0;
 }
 
 .apple-simulator-frame {

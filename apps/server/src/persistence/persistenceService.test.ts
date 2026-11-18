@@ -344,7 +344,7 @@ describe("PersistenceLive", () => {
         project: true,
         branch: false,
         pullRequest: false,
-        lastUpdated: false,
+        lastUpdated: true,
         status: true,
       },
     });

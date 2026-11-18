@@ -1,7 +1,7 @@
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentObservedChild } from "@octant/contracts";
-import { ArrowLeft } from "lucide-react";
-import { ProviderGlyph } from "../providers/ProviderGlyph";
+import { ArrowLeft } from "../ui/icons";
+import { SubagentProviderMark } from "./subagentProviders";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
@@ -62,7 +62,7 @@ function ObservedChildSteering(props: {
           : STEERING_REFUSALS[result.reason],
       );
     } catch {
-      setNotice("The subagent could not be sent to the background. Try again.");
+      setNotice("Could not move the helper to the background. Try again.");
     } finally {
       setBusy(false);
     }
@@ -199,6 +199,8 @@ export function ObservedChildRow(props: {
   readonly providerName: string;
   /** Present when the surface knows the instance, so its mark is drawn. */
   readonly driverKind?: string;
+  /** The model as the surface names it; the reported id when it is omitted. */
+  readonly model?: string;
   readonly onOpen?: (selectionId: string) => void;
   readonly client?: ObservedChildClient;
 }) {
@@ -208,7 +210,7 @@ export function ObservedChildRow(props: {
   const meta = [
     subagentStatusWord(child.lifecycleStatus),
     `Started by ${props.providerName}`,
-    child.modelId ?? "Model unknown",
+    props.model ?? child.modelId ?? "Model unknown",
     observedChildUsageLine(child.usage),
     age === "" ? undefined : `First seen ${age} ago`,
   ]
@@ -225,9 +227,11 @@ export function ObservedChildRow(props: {
         variant="ghost"
       >
         <SubagentStatusIcon lifecycleStatus={child.lifecycleStatus} />
-        {props.driverKind === undefined ? null : (
-          <ProviderGlyph displayName={props.providerName} driverKind={props.driverKind} size={12} />
-        )}
+        <SubagentProviderMark
+          driverKind={props.driverKind}
+          providerName={props.providerName}
+          size={12}
+        />
         <span className="composer-subagents__content">
           <span className="composer-subagents__task">{task}</span>
           <span className="composer-subagents__meta">{meta}</span>
@@ -270,7 +274,7 @@ export function ObservedChildDetail(props: {
           </>
         ) : (
           <p className="agent-run-detail__fact">
-            Started by its provider. Octant observes it and has no controls for it.
+            Started by its provider. Octant can watch it but not control it.
           </p>
         )}
         <p className="agent-run-detail__fact">Provider: {child.providerInstanceId}</p>
@@ -305,7 +309,7 @@ export function ObservedChildDetail(props: {
             ? "Conflicting observations; the child's current state is unknown."
             : child.historyStatus === "truncated"
               ? "Observation history is truncated."
-              : "Only reported activity is available; observation history is partial."}
+              : "Only reported activity is shown. History is incomplete."}
         </p>
         {child.history.length === 0 ? (
           <p className="agent-run-detail__note">No earlier activity retained.</p>

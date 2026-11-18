@@ -10,6 +10,13 @@ import { ShellSidebar } from "./ShellSidebar";
 
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
 
+/** The band's compose button; the list also carries a New thread row with the same name. */
+function bandButton(name: string): HTMLElement {
+  const band = document.querySelector<HTMLElement>(".sidebar__chrome");
+  if (band === null) throw new Error("the sidebar band is missing");
+  return within(band).getByRole("button", { name });
+}
+
 describe("ShellSidebar", () => {
   it("names Nightly quietly beside its application name below the native controls", () => {
     const { container } = render(
@@ -127,7 +134,7 @@ describe("ShellSidebar", () => {
     expect(screen.queryByLabelText("Octant Nightly")).not.toBeInTheDocument();
     expect(container.querySelector(".sidebar__brand")).toBeNull();
     expect(container.querySelector("[data-traffic-light-safe-space]")).toBeInTheDocument();
-    expect(container.querySelector(".sidebar__drag-surface")).toBeInTheDocument();
+    expect(container.querySelector(".window-drag-region")).toBeNull();
     expect(container.querySelector(".sidebar__native-leading")).toContainElement(
       screen.getByRole("button", { name: "Hide sidebar" }),
     );
@@ -180,9 +187,8 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    for (const label of ["New task", "Board"]) {
-      await user.click(screen.getByRole("button", { name: label }));
-    }
+    await user.click(bandButton("New task"));
+    await user.click(screen.getByRole("button", { name: "Board" }));
     await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     await user.click(await screen.findByRole("menuitem", { name: "Plugins" }));
     expect(actions["new-work-thread"]).toHaveBeenCalledOnce();
@@ -214,7 +220,8 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    for (const label of ["New task", "Board", "Pull requests"]) {
+    await user.click(bandButton("New task"));
+    for (const label of ["Board", "Pull requests"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
     await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
@@ -506,7 +513,7 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "New chat" })).toBeVisible();
+    expect(bandButton("New chat")).toBeVisible();
     expect(screen.getByRole("alert")).toHaveTextContent("Chat request is unauthorized.");
   });
 
@@ -565,18 +572,18 @@ describe("ShellSidebar", () => {
 
     const chrome = container.querySelector(".sidebar__chrome");
     const search = screen.getByRole("button", { name: "Search" });
-    const create = screen.getByRole("button", { name: "New chat" });
+    const create = bandButton("New chat");
     expect(chrome).toContainElement(search);
     expect(chrome).toContainElement(create);
     expect(search).toHaveClass("shell-icon-button");
     expect(search.querySelector("svg")).toHaveAttribute("width", "16");
-    // The header button replaces the row; the same destination is not offered twice.
-    expect(screen.getAllByRole("button", { name: "New chat" })).toHaveLength(1);
+    // The list leads with a New chat row beside the band's button, with the same action.
+    expect(screen.getAllByRole("button", { name: "New chat" })).toHaveLength(2);
     fireEvent.click(create);
     expect(newChat).toHaveBeenCalledOnce();
-    const listSwitch = screen.getByRole("group", { name: "Thread list" });
-    expect(chrome).not.toContainElement(listSwitch);
-    expect(within(listSwitch).getByRole("button", { name: "Activity feed" })).toBeVisible();
+    // With no Project views to filter, the arrangement choice sits behind its own glyph.
+    const listView = screen.getByRole("button", { name: "Thread list view" });
+    expect(chrome).not.toContainElement(listView);
   });
 
   it("offers no Projects/Activity switch before there is a Project or thread to arrange", () => {
@@ -607,7 +614,7 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    expect(screen.queryByRole("group", { name: "Thread list" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Thread list view" })).not.toBeInTheDocument();
   });
 
   it("moves Inbox and Board into count tiles, and brings the rows back when tiles are off", async () => {
@@ -919,7 +926,7 @@ describe("ShellSidebar", () => {
     );
 
     const more = screen.getByRole("button", { name: "More destinations" });
-    const newTask = screen.getByRole("button", { name: "New task" });
+    const newTask = bandButton("New task");
     // More is the last destination row: after the rows, before the Project tree.
     expect(newTask.compareDocumentPosition(more)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
@@ -1131,7 +1138,11 @@ describe("ShellSidebar", () => {
     );
     await user.click(within(rail).getByRole("button", { name: "Work" }));
     expect(onSelectMode).toHaveBeenCalledWith("work");
-    await user.click(within(rail).getByRole("button", { name: "Running, 2" }));
+    // The rail lists places: the Board stands for Running, To review and
+    // Done today, which stay as tiles in the open sidebar.
+    expect(within(rail).queryByRole("button", { name: /^Running/ })).toBeNull();
+    expect(within(rail).queryByRole("button", { name: /^Done today/ })).toBeNull();
+    await user.click(within(rail).getByRole("button", { name: "Board" }));
     expect(actions["thread-board"]).toHaveBeenCalledOnce();
     expect(within(rail).getByRole("button", { name: "Inbox, 3" })).toHaveTextContent("3");
     await user.click(within(rail).getByRole("button", { name: "octant" }));
@@ -1143,8 +1154,41 @@ describe("ShellSidebar", () => {
     // The menu-only destinations have left the account menu, so the collapsed
     // rail still reaches them through More, named on keyboard focus too.
     const more = within(rail).getByRole("button", { name: "More destinations" });
+    // A key that moves focus, not a click's or a sheet's return of it, earns the tooltip.
+    fireEvent.keyDown(document.body, { key: "Tab" });
     more.focus();
     expect(await screen.findByRole("tooltip")).toHaveTextContent("More");
+  });
+
+  it("draws one account control beside the rail, its face, and returns focus there when the update card leaves", async () => {
+    const user = userEvent.setup();
+    const onDismiss = vi.fn();
+    render(
+      <ShellSidebar
+        codeNavigation={{ actions: { "new-code-thread": vi.fn(), inbox: vi.fn() } }}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={<nav aria-label="Projects">Project navigation</nav>}
+        railBeside={{}}
+        settings={defaultShellSettings()}
+        whatsNew={{
+          content: { version: "1.2.0", headline: "Quieter rail" },
+          onDismiss,
+          onOpenNotes: vi.fn(),
+        }}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+    const accounts = screen.getAllByRole("button", { name: /^Account menu/ });
+    expect(accounts).toHaveLength(1);
+    const rail = screen.getByRole("complementary", { name: "Destinations" });
+    expect(within(rail).getByRole("button", { name: /^Account menu/ })).toBe(accounts[0]);
+    expect(within(rail).queryByRole("button", { name: "Settings" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(onDismiss).toHaveBeenCalledOnce();
+    expect(accounts[0]).toHaveFocus();
   });
 
   it("stands the rail beside the open sidebar, with Projects and More, and leaves the sidebar its header, Project list, and threads", async () => {

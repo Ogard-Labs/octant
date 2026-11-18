@@ -9,9 +9,11 @@ import {
 } from "./linuxMediationNamespace";
 import type { SecretGuardMediationPolicy } from "./secretGuard";
 import {
+  linuxMediationObjectAllowed,
   linuxMediationObjectKey,
   readLinuxMediationPolicy,
   type LinuxMediationNamespace,
+  type LinuxMediationPolicySnapshot,
 } from "./linuxMediationPolicy";
 
 const REQUEST_BYTES = 608;
@@ -20,6 +22,30 @@ const MAX_CONTROL_BYTES = 4_096;
 const CONTROL_DEADLINE_MS = 500;
 const POLICY_DEADLINE_MS = 1_500;
 const MAXIMUM_MS = 180_000;
+const NODE_TIMER_MAXIMUM_MS = 2_147_483_647;
+export const LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS = 30 * 24 * 60 * 60 * 1_000;
+
+export function scheduleLinuxMediationDeadline(expire: () => void, maximumMs: number): () => void {
+  let remainingMs = maximumMs;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const schedule = () => {
+    const delayMs = Math.min(remainingMs, NODE_TIMER_MAXIMUM_MS);
+    timer = setTimeout(() => {
+      remainingMs -= delayMs;
+      if (remainingMs <= 0) expire();
+      else schedule();
+    }, delayMs);
+  };
+  schedule();
+  return () => clearTimeout(timer);
+}
+
+export function linuxMediationStatusMatchesProduction(
+  status: Buffer,
+  production: boolean,
+): boolean {
+  return status.readBigUInt64LE(16) === (production ? 1n : 0n);
+}
 
 export type BrokerRefusal =
   | "unsupported-platform"
@@ -36,11 +62,12 @@ export type LinuxMediationBrokerResult =
  * Runs in the separately owned policy process, never in the app request loop.
  * The original native relay owns enrollment and the command's process group.
  * Its private FD 3 carries no command output or credential material. This
- * candidate deliberately requires production_coverage=0 and is not a shipped
- * confinement backend; the full namespace classifier/launch proof is pending.
+ * Production selection is separately gated on the kernel's coverage bit.
  */
 export async function runLinuxMediationBroker(input: {
   readonly nativeExecutable: string;
+  readonly production?: boolean;
+  readonly maximumMs?: number;
   readonly command: string;
   readonly args: ReadonlyArray<string>;
   readonly policy: SecretGuardMediationPolicy;
@@ -49,6 +76,8 @@ export async function runLinuxMediationBroker(input: {
     readonly ready: (relayPid: number) => Promise<boolean>;
     readonly command: (pid: number) => Promise<boolean>;
     readonly stdio: readonly [Readable, Writable, Writable];
+    /** Preserve the caller's exact pipe or PTY descriptors through both owners. */
+    readonly inheritStdio?: boolean;
     readonly environment: Readonly<Record<string, string>>;
     readonly cleanup: (certainty: "confirmed" | "uncertain") => void;
   };
@@ -59,15 +88,19 @@ export async function runLinuxMediationBroker(input: {
   if (!input.nativeExecutable.startsWith("/") || !input.command.startsWith("/"))
     return { status: "unavailable", reason: "native-unavailable" };
   return new Promise((resolve) => {
-    const child = spawn(input.nativeExecutable, [input.command, ...input.args], {
-      stdio:
-        input.lifecycle === undefined
-          ? ["inherit", "inherit", "inherit", "pipe"]
-          : ["pipe", "pipe", "pipe", "pipe"],
-      detached: true,
-      ...(input.lifecycle === undefined ? {} : { env: input.lifecycle.environment }),
-      windowsHide: true,
-    });
+    const child = spawn(
+      input.nativeExecutable,
+      [...(input.production === true ? ["--production"] : []), input.command, ...input.args],
+      {
+        stdio:
+          input.lifecycle === undefined || input.lifecycle.inheritStdio === true
+            ? ["inherit", "inherit", "inherit", "pipe"]
+            : ["pipe", "pipe", "pipe", "pipe"],
+        detached: true,
+        ...(input.lifecycle === undefined ? {} : { env: input.lifecycle.environment }),
+        windowsHide: true,
+      },
+    );
     const control = child.stdio[3];
     let refusal: BrokerRefusal | undefined;
     let settled = false;
@@ -89,14 +122,23 @@ export async function runLinuxMediationBroker(input: {
           readonly side: number;
           readonly accept: (
             value:
-              | { readonly path: string; readonly mount: bigint; readonly object: string }
+              | {
+                  readonly path: string;
+                  readonly mount: bigint;
+                  readonly object: string;
+                }
               | undefined,
           ) => void;
         }
       | undefined;
     let policyTimer: ReturnType<typeof setTimeout> | undefined;
     let stopTimer: ReturnType<typeof setTimeout> | undefined;
-    const maximum = setTimeout(() => refuse("deadline"), MAXIMUM_MS);
+    let cachedSnapshot: LinuxMediationPolicySnapshot | undefined;
+    const clearMaximum = scheduleLinuxMediationDeadline(
+      () => refuse("deadline"),
+      input.maximumMs ??
+        (input.production === true ? LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS : MAXIMUM_MS),
+    );
     const stop = () => {
       if (stopTimer !== undefined || settled) return;
       // The native relay first closes the kernel context, then kills/joins
@@ -120,7 +162,7 @@ export async function runLinuxMediationBroker(input: {
     const complete = (code: number | null) => {
       if (settled) return;
       settled = true;
-      clearTimeout(maximum);
+      clearMaximum();
       clearTimeout(policyTimer);
       clearTimeout(stopTimer);
       statusWait?.accept(undefined);
@@ -154,7 +196,7 @@ export async function runLinuxMediationBroker(input: {
     });
     child.once("close", complete);
     child.once("error", () => complete(null));
-    if (input.lifecycle !== undefined) {
+    if (input.lifecycle !== undefined && input.lifecycle.inheritStdio !== true) {
       if (child.stdin === null || child.stdout === null || child.stderr === null) {
         refuse("native-unavailable");
         return;
@@ -205,7 +247,12 @@ export async function runLinuxMediationBroker(input: {
       });
     const readParent = (request: Buffer, side: number) =>
       new Promise<
-        { readonly path: string; readonly mount: bigint; readonly object: string } | undefined
+        | {
+            readonly path: string;
+            readonly mount: bigint;
+            readonly object: string;
+          }
+        | undefined
       >((accept) => {
         if (
           settled ||
@@ -257,6 +304,22 @@ export async function runLinuxMediationBroker(input: {
         ? before
         : undefined;
     };
+    const readObjectPolicy = async (): Promise<LinuxMediationPolicySnapshot> => {
+      const current = await readNamespace();
+      if (current === undefined) return { status: "unavailable", reason: "namespace-changing" };
+      if (
+        current.activeMutations === 0 &&
+        cachedSnapshot?.status === "ready" &&
+        cachedSnapshot.epoch === current.epoch
+      )
+        return cachedSnapshot;
+      const snapshot = await readLinuxMediationPolicy(
+        input.policy,
+        async () => (await readNamespace()) ?? { epoch: 0n, activeMutations: 1 },
+      );
+      if (snapshot.status === "ready") cachedSnapshot = snapshot;
+      return snapshot;
+    };
     const answer = async (request: Buffer) => {
       if (working) {
         refuse("broker-protocol");
@@ -300,7 +363,10 @@ export async function runLinuxMediationBroker(input: {
                   destination,
                   sourceObject: `${request.readUInt32LE(24)}:${request.readUInt32LE(28)}:${request.readBigUInt64LE(16)}`,
                 }
-              : { operation: operation === 10 ? "tmpfile" : "create", destination };
+              : {
+                  operation: operation === 10 ? "tmpfile" : "create",
+                  destination,
+                };
           const decision = await classifyLinuxMediationCreation(input.policy, creation, namespace);
           const current = await verifyParent(request, 1);
           if (current?.mount !== parent.mount || current.path !== parent.path) {
@@ -362,13 +428,9 @@ export async function runLinuxMediationBroker(input: {
           allow = decision.status === "allowed";
           epoch = decision.epoch;
         } else {
-          const snapshot = await readLinuxMediationPolicy(input.policy, namespace);
+          const snapshot = await readObjectPolicy();
           const object = `${request.readUInt32LE(24)}:${request.readUInt32LE(28)}:${request.readBigUInt64LE(16)}`;
-          allow =
-            snapshot.status === "ready" &&
-            operation >= 1 &&
-            operation <= 4 &&
-            !snapshot.protectedObjects.has(object);
+          allow = linuxMediationObjectAllowed(snapshot, operation, object);
           epoch = snapshot.status === "ready" ? snapshot.epoch : 0n;
         }
         if (settled || refusal !== undefined) return;
@@ -393,6 +455,7 @@ export async function runLinuxMediationBroker(input: {
         refuse("policy-unavailable");
         return;
       }
+      cachedSnapshot = snapshot;
       if (input.lifecycle !== undefined && !(await input.lifecycle.ready(child.pid))) {
         refuse("cancelled");
         return;
@@ -432,7 +495,7 @@ export async function runLinuxMediationBroker(input: {
           if (
             phase !== "hello" ||
             frame.readUInt32LE(12) !== 2 ||
-            frame.readBigUInt64LE(16) !== 0n
+            !linuxMediationStatusMatchesProduction(frame, input.production === true)
           ) {
             refuse("broker-protocol");
             return;
@@ -472,7 +535,7 @@ export async function runLinuxMediationBroker(input: {
           if (
             statusWait === undefined ||
             frame.readUInt32LE(12) !== 2 ||
-            frame.readBigUInt64LE(16) !== 0n
+            !linuxMediationStatusMatchesProduction(frame, input.production === true)
           ) {
             refuse("broker-protocol");
             return;

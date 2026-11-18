@@ -1,3 +1,4 @@
+import { withSandboxToolPolicy, activeSandboxPolicy } from "../process/sandboxRuntimePolicy";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import {
@@ -124,8 +125,23 @@ export interface TurnToolEffects {
 export function recordedToolSet(
   effects: TurnToolEffects | undefined,
   set: AppManagedToolSet | undefined,
+  threadId?: string,
 ): AppManagedToolSet | undefined {
-  return effects === undefined || set === undefined ? set : effects.tools(set);
+  if (set === undefined) return undefined;
+  const admitted = threadId === undefined ? undefined : activeSandboxPolicy(threadId);
+  const bound =
+    threadId === undefined
+      ? set
+      : {
+          ...set,
+          execute: (input: Parameters<AppManagedToolSet["execute"]>[0]) =>
+            withSandboxToolPolicy(threadId, () => {
+              if (admitted !== undefined && activeSandboxPolicy(threadId) !== admitted)
+                throw new Error("This sandbox tool set has expired. Start a new turn.");
+              return set.execute(input);
+            }),
+        };
+  return effects === undefined ? bound : effects.tools(bound);
 }
 
 interface OpenTurn {
@@ -189,7 +205,7 @@ export class ToolEffectLedger {
                 awaitingApproval: () => this.#awaitApproval(turn, toolCallId),
                 approvalAnswered: () => this.#intend(turn, toolCallId, input.name, "host"),
               },
-              () => set.execute(input),
+              () => withSandboxToolPolicy(turn.threadId, () => set.execute(input)),
             );
             if (result.isError !== true) outcome = "succeeded";
             return result;

@@ -13,7 +13,7 @@ export function ComboboxInputGroup({
   return (
     <ComboboxPrimitive.InputGroup
       className={cn(
-        "relative flex h-[round(2.154rem,2px)] w-full min-w-0 items-center rounded-md border border-input bg-transparent shadow-xs transition-[color,box-shadow] outline-none window-no-drag",
+        "relative flex h-[round(2rem,2px)] w-full min-w-0 items-center rounded-md border border-input bg-transparent shadow-xs outline-none window-no-drag",
         className,
       )}
       data-slot="combobox-input-group"
@@ -45,7 +45,7 @@ export function ComboboxTrigger({
   return (
     <ComboboxPrimitive.Trigger
       className={cn(
-        "mr-1 inline-flex size-[round(1.846rem,2px)] cursor-default items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:size-(--oct-icon-md)",
+        "mr-1 inline-flex size-[round(1.714rem,2px)] cursor-default items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:size-(--oct-icon-md)",
         className,
       )}
       data-slot="combobox-trigger"
@@ -60,6 +60,7 @@ export function ComboboxPositioner({
 }: ComponentProps<typeof ComboboxPrimitive.Positioner>) {
   return (
     <ComboboxPrimitive.Positioner
+      sideOffset={4}
       className={cn(
         "z-[var(--oct-z-popup)] w-[var(--anchor-width)] outline-none window-no-drag",
         className,
@@ -77,7 +78,7 @@ export function ComboboxPopup({
   return (
     <ComboboxPrimitive.Popup
       className={cn(
-        "max-h-[min(320px,var(--available-height))] overflow-auto rounded-xl bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
+        "max-h-[min(320px,var(--available-height))] overflow-auto rounded-(--oct-radius-lg) bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-pop)] outline-none",
         className,
       )}
       data-slot="combobox-content"
@@ -124,7 +125,7 @@ export function ComboboxItemIndicator({
   return (
     <ComboboxPrimitive.ItemIndicator
       className={cn(
-        "ml-auto inline-flex size-(--oct-icon-md) shrink-0 items-center justify-center text-foreground [&_svg]:size-(--oct-icon-md)",
+        "ml-auto inline-flex size-(--oct-icon-sm) shrink-0 items-center justify-center text-foreground [&_svg]:size-(--oct-icon-sm)",
         className,
       )}
       data-slot="combobox-item-indicator"

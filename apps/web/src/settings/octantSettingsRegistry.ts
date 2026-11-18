@@ -299,6 +299,25 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "color colour scheme system light dark theme mode preset octant palette",
         },
         {
+          id: settingId("appearance.custom"),
+          label: "Custom theme",
+          scope: "app",
+          keywords:
+            "custom theme preset ground ink accent contrast soft standard firm colours seeds",
+        },
+        {
+          id: settingId("appearance.density"),
+          label: "Density",
+          scope: "app",
+          keywords: "density compact comfortable rows spacing room tight",
+        },
+        {
+          id: settingId("appearance.typography.smoothing"),
+          label: "Smooth text",
+          scope: "app",
+          keywords: "smooth text smoothing antialiasing grayscale font rendering mac",
+        },
+        {
           id: settingId("appearance.scheme.style"),
           label: "Style",
           scope: "app",
@@ -379,10 +398,42 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "background pixel size square cell dither",
         },
         {
+          id: settingId("app-background-scene"),
+          label: "Background scene",
+          scope: "app",
+          keywords:
+            "background pixel ground scene ridges mountains burst rays drift streaks dither",
+        },
+        {
           id: settingId("app-background-effect-tones"),
           label: "Background colours",
           scope: "app",
           keywords: "background colours colors tones shades dither bold",
+        },
+        {
+          id: settingId("app-background-characters"),
+          label: "Background characters",
+          scope: "app",
+          keywords: "background characters ascii letters glyphs symbols custom pattern",
+        },
+        {
+          id: settingId("app-background-character-pattern"),
+          label: "Character pattern",
+          scope: "app",
+          keywords:
+            "background characters pattern blotches currents rings all in turn shape ascii glyphs custom",
+        },
+        {
+          id: settingId("app-background-character-density"),
+          label: "Character density",
+          scope: "app",
+          keywords: "background characters density amount how much ascii glyphs custom",
+        },
+        {
+          id: settingId("app-background-character-speed"),
+          label: "Character speed",
+          scope: "app",
+          keywords: "background characters speed motion drift still ascii glyphs custom",
         },
         {
           id: settingId("app-background-photo"),
@@ -401,12 +452,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Show the background behind",
           scope: "app",
           keywords: "background show behind start screens every page everywhere",
-        },
-        {
-          id: settingId("app-background-sidebar"),
-          label: "Background under the sidebar",
-          scope: "app",
-          keywords: "background cover sidebar under",
         },
         {
           id: settingId("appearance.typography.ui.size"),
@@ -661,12 +706,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "work access ask first auto-accept accept edits approvals files permissions",
         },
         {
-          id: settingId("work-full-access-sandbox"),
-          label: "Keep the sandbox at Full access",
-          scope: "host",
-          keywords: "work full access sandbox seatbelt confinement secrets network prompts",
-        },
-        {
           id: settingId("work-strict"),
           label: "Strict",
           scope: "host",
@@ -759,13 +798,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Auto reviewer",
           scope: "app",
           keywords: "auto reviewer octant shield provider review approvals approve automatic judge",
-        },
-        {
-          id: settingId("code-full-access-sandbox"),
-          label: "Keep the sandbox at Full access",
-          scope: "app",
-          keywords:
-            "full access sandbox seatbelt confinement secrets network prompts codex harness",
         },
         {
           id: settingId("code-strict"),
@@ -1353,6 +1385,25 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       keywords:
         "permissions protected files secrets ssh keys credentials remembered websites sites origins browser always allow forget public links share sharing remembered tool approvals extension tools revoke trust allowed access network safe networks servers ssh trusted hosts domains address ranges local network this mac private network overlay egress proxy refused recently refused trust allow outbound connections",
       settings: [
+        ...[
+          ["sandbox-restrictions", "Sandbox restrictions"],
+          ["sandbox-policy-summary", "Effective sandbox protection"],
+          ["sandbox-policy-folders", "Allowed sandbox folders"],
+          ["sandbox-policy-add-folder", "Add an allowed folder"],
+          ["sandbox-policy-blocked-actions", "Blocked actions"],
+          ["sandbox-policy-network", "Sandbox network"],
+          ["sandbox-policy-services", "Sandbox host services"],
+          ["sandbox-policy-local-services", "Local service exceptions"],
+          ["sandbox-policy-credentials", "Sandbox credentials"],
+        ].map(([id, label]) => ({
+          id: settingId(id ?? "sandbox-restrictions"),
+          label: label ?? "Sandbox restrictions",
+          description:
+            "Configure sandbox limits, inherited policy and precise remembered exceptions.",
+          keywords:
+            "sandbox restrictions allowed folders read only write network blocked session project exception",
+          scope: "host" as const,
+        })),
         {
           id: settingId("protected-files"),
           label: "Protected files",
@@ -1378,6 +1429,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Service address",
           scope: "host",
           keywords: "public links service address url self-hosted publish share",
+        },
+        {
+          id: settingId("public-link-setup"),
+          label: "Set up the self-hosted Canvas share service",
+          scope: "host",
+          keywords:
+            "public links deploy deployment docker compose caddy https self hosted canvas sharing artifact hosting guide",
         },
         {
           id: settingId("browser-site-approvals"),
@@ -1852,6 +1910,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         "remote access private listener lan tailscale https certificate pairing pair link ticket code approve deny device devices paired inventory browser phone revoke rename origin port exposure",
       settings: [
         {
+          id: settingId("tailscale-setup"),
+          label: "Connect with Tailscale",
+          scope: "host",
+          keywords:
+            "tailscale login sign in tailnet magicdns devbox hub private network remote device setup",
+        },
+        {
+          id: settingId("cloudflare-setup"),
+          label: "Set up Cloudflare private routing",
+          scope: "host",
+          keywords:
+            "cloudflare zero trust warp cloudflared tunnel private network routing split tunnels devbox setup",
+        },
+        {
           id: settingId("remote-setup-checks"),
           label: "Remote setup checks",
           scope: "host",
@@ -2077,7 +2149,15 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       scope: "host",
       keywords:
         "usage operational dashboard provider model host mode project thread request shape attribution filters totals daily weekly cumulative top consumers measurement quality exact estimated reconciled stale unavailable export reset retention purge spend ceiling token budget",
-      settings: [],
+      settings: [
+        {
+          id: settingId("spend-ceiling-shown"),
+          label: "Show spend ceiling",
+          scope: "app",
+          keywords:
+            "usage spend ceiling limit budget tokens turns money row thread project hide show",
+        },
+      ],
     },
   ],
 });

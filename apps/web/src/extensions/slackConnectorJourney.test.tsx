@@ -140,7 +140,6 @@ describe.each(["slack", "github-oauth", "github-repositories"] as const)(
       return kind === "library" ? (
         <LibraryView
           items={buildLibrary({ snapshot: undefined, connectors: [slack] })}
-          actions={null}
           marketplaceFetchesEnabled={false}
           disabled={false}
           localHost={localHost}
@@ -155,7 +154,6 @@ describe.each(["slack", "github-oauth", "github-repositories"] as const)(
           snapshot={undefined}
           localHost={localHost}
           disabled={false}
-          actions={null}
           onConnected={vi.fn()}
         />
       );

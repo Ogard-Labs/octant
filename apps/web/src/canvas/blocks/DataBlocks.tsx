@@ -3,7 +3,7 @@ import type {
   CanvasMetricDirection,
   CanvasNumberFormat,
 } from "@octant/contracts/canvas";
-import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Minus } from "../../ui/icons";
 import { Fragment, useId } from "react";
 import { formatCanvasValue, formatScalar } from "../canvasRuntime";
 

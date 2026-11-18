@@ -113,7 +113,13 @@ export class ThemeService implements ThemeServiceApi {
           actualVersion: decodeAggregateVersion(currentVersion),
         });
       }
-      const settings = command.settings;
+      // A save always carries the smoothing choice, so a row written by this
+      // build is told apart from one written before the choice existed (see
+      // withCurrentDefaults).
+      const settings: ThemeSettings =
+        command.settings.fontSmoothing === undefined
+          ? { ...command.settings, fontSmoothing: "on" }
+          : command.settings;
       if (overridesDroppedInAnyShownMode(settings, this.options.contributedThemes())) {
         throw new ThemeServiceError({
           category: "invalid",
@@ -190,16 +196,31 @@ const LEGACY_DEFAULT_TERMINAL_FONT_FAMILY = "'JetBrains Mono', 'SF Mono', Menlo,
 const LEGACY_DEFAULT_UI_FONT_FAMILY =
   "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
 
+/**
+ * The interface size every row carried while 13 was the default.
+ *
+ * The default became 14, and a person who had ever saved an appearance setting
+ * kept 13 without having chosen it (a maintainer's own profile stayed at 13
+ * through three builds that were meant to be larger, 2026-11-16). A row with
+ * no smoothing choice was written before that choice existed, so its 13 is the
+ * old default and reads as the current one. Every save since carries the
+ * smoothing choice, so a 13 saved from now on is a person's own and stays.
+ */
+const LEGACY_DEFAULT_UI_FONT_SIZE = 13;
+
 function withCurrentFontDefaults(settings: ThemeSettings): ThemeSettings {
   const { ui, terminal } = settings.typography;
   const uiIsLegacy = ui.family === LEGACY_DEFAULT_UI_FONT_FAMILY;
   const terminalIsLegacy = terminal.family === LEGACY_DEFAULT_TERMINAL_FONT_FAMILY;
-  if (!uiIsLegacy && !terminalIsLegacy) return settings;
+  const sizeIsLegacy =
+    settings.fontSmoothing === undefined && ui.size === LEGACY_DEFAULT_UI_FONT_SIZE;
+  if (!uiIsLegacy && !terminalIsLegacy && !sizeIsLegacy) return settings;
+  const sized = sizeIsLegacy ? { ...ui, size: DEFAULT_THEME_SETTINGS.typography.ui.size } : ui;
   return {
     ...settings,
     typography: {
       ...settings.typography,
-      ui: uiIsLegacy ? { ...ui, family: DEFAULT_THEME_SETTINGS.typography.ui.family } : ui,
+      ui: uiIsLegacy ? { ...sized, family: DEFAULT_THEME_SETTINGS.typography.ui.family } : sized,
       terminal: terminalIsLegacy
         ? { ...terminal, family: DEFAULT_THEME_SETTINGS.typography.terminal.family }
         : terminal,

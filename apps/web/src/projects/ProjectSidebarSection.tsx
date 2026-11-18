@@ -37,8 +37,8 @@ import {
   Star,
   Terminal,
   X,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "../ui/icons";
 import { groupProjectsForView, sortProjectsForView } from "@octant/domain";
 import { ContextHealthWarning } from "../context/ContextHealthWarning";
 import {
@@ -56,7 +56,6 @@ import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
   OctantMenu,
   OctantMenuCheckboxItem,
@@ -145,13 +144,15 @@ import {
   ThreadRowInfoPopup,
   ProjectThreadRows,
   ProjectThreadStatus,
-  ThreadStatusMark,
+  NO_THREAD_ROW_STATE,
+  threadRowState,
   sidebarThreadStatusIcon,
   threadRowAgeFact,
   hasInlineActions,
   ThreadRowContextMenu,
 } from "./ProjectThreadList";
-import { SidebarThreadRowContent } from "./SidebarThreadRowContent";
+import { useMinuteClock } from "./minuteClock";
+import { SidebarThreadRowContent, sidebarThreadRowLabel } from "./SidebarThreadRowContent";
 import { threadRowMenuIsEmpty, type ThreadRowActions } from "./ThreadRowMenu";
 import { SidebarThreadTabsContext } from "../shell/sidebarThreadTabs";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
@@ -178,7 +179,7 @@ interface OtherModeProjectsHint {
 const SIDEBAR_THREAD_LIMIT = 8;
 type ProjectSort = "manual" | "updated" | "name";
 
-const CODE_PROJECT_VIEW_ICON_COMPONENTS: Readonly<Record<CodeProjectViewIcon, LucideIcon>> = {
+const CODE_PROJECT_VIEW_ICON_COMPONENTS: Readonly<Record<CodeProjectViewIcon, IconComponent>> = {
   folder: Folder,
   "folder-git": FolderGit,
   code: Code,
@@ -239,7 +240,7 @@ function CodeProjectViewGlyph(props: {
  * read as data loss.
  */
 const FILTERED_THREADS_EMPTY_MESSAGE =
-  "No threads match the current filters. Nothing was deleted — clear search or filters to see more.";
+  "No threads match. Nothing was deleted. Clear the search or filters.";
 
 /** Why Pin to rail is disabled once the rail holds as many Projects as it draws. */
 const RAIL_FULL_REASON = `The rail holds ${RAIL_PROJECT_LIMIT} Projects`;
@@ -751,12 +752,18 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               ).length
             }
             state={projectViewState}
+            {...(showListSwitch ? { arrangement, onArrangementChange: showArrangement } : {})}
             rangeOpen={filterRangeOpen}
             onRangeOpenChange={setFilterRangeOpen}
           />
         ) : null}
-        {showListSwitch ? (
-          <ThreadListViewSwitch arrangement={arrangement} onChange={showArrangement} />
+        {showListSwitch &&
+        !(
+          props.projectViewsEnabled === true &&
+          projectViewState !== undefined &&
+          props.projects.length > 0
+        ) ? (
+          <ThreadListViewMenu arrangement={arrangement} onChange={showArrangement} />
         ) : null}
       </div>
     ) : undefined;
@@ -1428,35 +1435,72 @@ function sortProjects(
   );
 }
 
+const THREAD_ARRANGEMENT_OPTIONS = [
+  { id: "status", label: "Status", Icon: ListChecks },
+  { id: "projects", label: "Project tree", Icon: FolderTree },
+  { id: "activity", label: "Activity feed", Icon: History },
+] as const;
+
 /**
- * The list's three arrangements as one visible switch. It used to be a bell in
- * the sidebar header that toggled the feed, which people read as
- * notifications and rarely found; named choices say what each one does.
+ * The list's three arrangements as the first group of the filter menu. They
+ * used to be a three-button switch beside it, which put a second control in a
+ * 28px-per-button row for a choice made rarely; the choice is the same, one
+ * menu further in. Choosing one closes the menu, since it replaces the list.
  */
-function ThreadListViewSwitch(props: {
+function ThreadListViewGroup(props: {
   readonly arrangement: SidebarThreadArrangement;
   readonly onChange: (arrangement: SidebarThreadArrangement) => void;
 }) {
   return (
-    <OctantToggleGroup<SidebarThreadArrangement>
-      aria-label="Thread list"
-      className="project-nav__list-switch"
-      onValueChange={(value) => {
-        const selected = value[0];
-        if (selected !== undefined) props.onChange(selected);
-      }}
-      value={[props.arrangement]}
-    >
-      <OctantToggleGroupItem aria-label="Status" title="Status" value="status">
-        <ListChecks aria-hidden="true" size={14} />
-      </OctantToggleGroupItem>
-      <OctantToggleGroupItem aria-label="Project tree" title="Project tree" value="projects">
-        <FolderTree aria-hidden="true" size={14} />
-      </OctantToggleGroupItem>
-      <OctantToggleGroupItem aria-label="Activity feed" title="Activity feed" value="activity">
-        <History aria-hidden="true" size={14} />
-      </OctantToggleGroupItem>
-    </OctantToggleGroup>
+    <OctantMenuGroup>
+      <OctantMenuGroupLabel>Show threads as</OctantMenuGroupLabel>
+      <OctantMenuRadioGroup
+        onValueChange={(value) => {
+          const next = THREAD_ARRANGEMENT_OPTIONS.find((option) => option.id === value);
+          if (next !== undefined) props.onChange(next.id);
+        }}
+        value={props.arrangement}
+      >
+        {THREAD_ARRANGEMENT_OPTIONS.map((option) => (
+          <OctantMenuRadioItem closeOnClick key={option.id} label={option.label} value={option.id}>
+            <option.Icon aria-hidden="true" size={14} />
+            {option.label}
+          </OctantMenuRadioItem>
+        ))}
+      </OctantMenuRadioGroup>
+    </OctantMenuGroup>
+  );
+}
+
+/**
+ * The same choice where there is no filter menu to hold it (a list with no
+ * Project views yet): a single glyph for the current arrangement, so the way
+ * to the feed or the Project tree is never what went missing.
+ */
+function ThreadListViewMenu(props: {
+  readonly arrangement: SidebarThreadArrangement;
+  readonly onChange: (arrangement: SidebarThreadArrangement) => void;
+}) {
+  const current =
+    THREAD_ARRANGEMENT_OPTIONS.find((option) => option.id === props.arrangement) ??
+    THREAD_ARRANGEMENT_OPTIONS[0];
+  return (
+    <OctantMenuRoot>
+      <OctantMenuTrigger
+        aria-label="Thread list view"
+        className="code-project-views__filter project-nav__list-switch window-no-drag"
+        title="Thread list view"
+      >
+        <current.Icon aria-hidden="true" size={16} />
+      </OctantMenuTrigger>
+      <OctantMenuPortal>
+        <OctantMenuPositioner align="end" className="outline-none window-no-drag" side="bottom">
+          <OctantMenuPopup aria-label="Thread list view" className="min-w-[14rem]">
+            <ThreadListViewGroup arrangement={props.arrangement} onChange={props.onChange} />
+          </OctantMenuPopup>
+        </OctantMenuPositioner>
+      </OctantMenuPortal>
+    </OctantMenuRoot>
   );
 }
 
@@ -1480,7 +1524,11 @@ function ActivityThreadList(props: {
   // recent groups' neighbours off the bottom of a feed meant for what happened
   // lately. It starts folded; the thread the workspace is showing stays visible
   // while it is, as it does in a folded Project list.
-  const [earlierOpen, setEarlierOpen] = useState(false);
+  // When "Earlier" is also the newest group there is nothing recent to look
+  // at, and a fold left shut would leave the column empty behind one heading,
+  // so it starts open then.
+  const [earlierToggled, setEarlierToggled] = useState<boolean | null>(null);
+  const earlierOpen = earlierToggled ?? props.groups[0]?.id === EARLIER_ACTIVITY_GROUP_ID;
   // A fold must never hide a search result. Folded, a query that matched only
   // an older thread left an "Earlier" heading with a count and nothing under
   // it: neither the match nor the line that says nothing matched.
@@ -1537,14 +1585,14 @@ function ActivityThreadList(props: {
                   aria-expanded={shown}
                   className="activity-nav__fold"
                   onClick={() =>
-                    statusFold ? toggleStatusGroup(group.id) : setEarlierOpen((open) => !open)
+                    statusFold ? toggleStatusGroup(group.id) : setEarlierToggled(!earlierOpen)
                   }
                   type="button"
                   variant="link"
                 >
                   <span>{group.label}</span>
+                  <ChevronRight aria-hidden="true" size={14} />
                   <span className="activity-nav__fold-count">{group.threads.length}</span>
-                  <ChevronRight aria-hidden="true" size={12} />
                 </OctantButton>
               </h2>
             ) : (
@@ -1592,12 +1640,30 @@ function ActivityThreadButton(props: {
   const checkout = shows.branch ? props.thread.checkoutChip : undefined;
   // As in the Project tree, a rested row keeps its wake time even when Last
   // updated is hidden.
-  const age = threadRowAgeFact(props.thread, shows.lastUpdated);
+  const now = useMinuteClock();
+  const age = threadRowAgeFact(props.thread, shows.lastUpdated, now);
+  const rowState = shows.status
+    ? threadRowState({
+        activity: props.thread.activity,
+        unread: props.thread.unread,
+        woke: props.thread.woke,
+        followUp: props.thread.followUp,
+        startedAt: props.thread.turnStartedAt,
+      })
+    : NO_THREAD_ROW_STATE;
   const hasMenu = !threadRowMenuIsEmpty(props.actions);
   const inlineActions = hasInlineActions(props.actions);
   const row = (
     <OctantButton
       aria-current={selected ? "page" : undefined}
+      aria-label={sidebarThreadRowLabel({
+        title: props.thread.title,
+        ...(shows.project ? { projectName: props.thread.projectName } : {}),
+        ...(checkout === undefined ? {} : { branch: checkout.label }),
+        ...(pullRequest === undefined ? {} : { pullRequest }),
+        ...(rowState.label === undefined ? {} : { state: rowState.label }),
+        ...(age === undefined ? {} : { age: age.label }),
+      })}
       className="sidebar-navigation__thread activity-nav__thread justify-start"
       data-attention={props.thread.attention}
       data-thread-id={props.thread.threadId}
@@ -1628,7 +1694,7 @@ function ActivityThreadButton(props: {
       variant="bare"
     >
       <SidebarThreadRowContent
-        {...(age === undefined ? {} : { age })}
+        {...(age === undefined || rowState.state !== undefined ? {} : { age })}
         {...(checkout === undefined ? {} : { checkout })}
         {...(props.thread.coordinator === true ? { coordinator: true } : {})}
         {...(props.thread.coordinatorTitle === undefined
@@ -1643,26 +1709,20 @@ function ActivityThreadButton(props: {
           : {})}
         {...(props.thread.provider === undefined ? {} : { provider: props.thread.provider })}
         {...(pullRequest === undefined ? {} : { pullRequest })}
+        {...(rowState.state === undefined ? {} : { state: rowState.state })}
         threadId={props.thread.threadId}
-        status={
-          shows.status ? (
-            <>
-              {props.thread.hiddenWorkers === undefined ? null : (
+        unread={rowState.unread}
+        {...(shows.status && props.thread.hiddenWorkers !== undefined
+          ? {
+              workerCounts: (
                 <CoordinatorWorkerCounts
                   coordinatorTitle={props.thread.title}
                   hidden={props.thread.hiddenWorkers}
                   workers={[]}
                 />
-              )}
-              <ThreadStatusMark
-                activity={props.thread.activity}
-                unread={props.thread.unread}
-                woke={props.thread.woke}
-                followUp={props.thread.followUp}
-              />
-            </>
-          ) : null
-        }
+              ),
+            }
+          : {})}
         title={props.thread.title}
       />
     </OctantButton>
@@ -1709,6 +1769,9 @@ function CodeProjectViewSwitcher(props: {
   readonly onPresentationChange?: (presentation: ProjectViewSwitcherPresentation) => void;
   readonly projectCountFor: (viewId: string) => number;
   readonly state: CodeProjectViewState;
+  /** How the thread list is arranged; absent where the list has nothing to arrange. */
+  readonly arrangement?: SidebarThreadArrangement;
+  readonly onArrangementChange?: (arrangement: SidebarThreadArrangement) => void;
   /** Whether the custom activity range dialog is open; held by the sidebar. */
   readonly rangeOpen: boolean;
   readonly onRangeOpenChange: (open: boolean) => void;
@@ -1750,7 +1813,7 @@ function CodeProjectViewSwitcher(props: {
       ? []
       : [
           { label: "Edit view", value: "edit" },
-          { label: "Delete view", value: "delete" },
+          { destructive: true, label: "Delete view", value: "delete" },
         ]),
   ];
   const onContextValue = (view: Pick<CodeProjectView, "id" | "name">, value: string): void => {
@@ -1815,6 +1878,9 @@ function CodeProjectViewSwitcher(props: {
         {...(props.onPresentationChange === undefined
           ? {}
           : { onPresentationChange: props.onPresentationChange })}
+        {...(props.arrangement === undefined || props.onArrangementChange === undefined
+          ? {}
+          : { arrangement: props.arrangement, onArrangementChange: props.onArrangementChange })}
         onRowPropertiesChange={props.onRowPropertiesChange}
         rangeOpen={props.rangeOpen}
         onRangeOpenChange={props.onRangeOpenChange}
@@ -1855,7 +1921,7 @@ function CodeProjectViewChip(props: {
           ? []
           : [
               { label: "Edit view", value: "edit" },
-              { label: "Delete view", value: "delete" },
+              { destructive: true, label: "Delete view", value: "delete" },
             ]),
       ]}
       onValueChange={(value) => {
@@ -1917,6 +1983,8 @@ function ProjectViewFilterMenu(props: {
   readonly onChange: (filters: ProjectViewFilters) => void;
   readonly presentation: ProjectViewSwitcherPresentation;
   readonly onPresentationChange?: (presentation: ProjectViewSwitcherPresentation) => void;
+  readonly arrangement?: SidebarThreadArrangement;
+  readonly onArrangementChange?: (arrangement: SidebarThreadArrangement) => void;
   readonly onRowPropertiesChange: (properties: SidebarRowPropertyVisibility) => void;
   readonly rowProperties: SidebarRowPropertyVisibility;
   readonly rowPropertyView: SidebarRowPropertyView;
@@ -1974,14 +2042,20 @@ function ProjectViewFilterMenu(props: {
           className="code-project-views__filter window-no-drag"
           title={triggerLabel}
         >
-          <ListFilter aria-hidden="true" size={14} />
+          <ListFilter aria-hidden="true" size={16} />
         </OctantMenuTrigger>
         <OctantMenuPortal>
           <OctantMenuPositioner align="end" className="outline-none window-no-drag" side="bottom">
-            <OctantMenuPopup
-              aria-label="Project view filters"
-              className="min-w-[14rem] max-w-[calc(100vw-24px)]"
-            >
+            <OctantMenuPopup aria-label="Project view filters" className="min-w-[14rem]">
+              {props.arrangement === undefined || props.onArrangementChange === undefined ? null : (
+                <>
+                  <ThreadListViewGroup
+                    arrangement={props.arrangement}
+                    onChange={props.onArrangementChange}
+                  />
+                  <OctantMenuSeparator />
+                </>
+              )}
               <OctantMenuGroup>
                 <OctantMenuGroupLabel>Filters</OctantMenuGroupLabel>
                 <FilterRadioSubmenu
@@ -2100,6 +2174,16 @@ function ProjectViewFilterMenu(props: {
                   </OctantMenuRadioGroup>
                 </OctantMenuSubPopup>
               </OctantMenuSub>
+              {activeCount === 0 ? null : (
+                <>
+                  <OctantMenuSeparator />
+                  <OctantMenuActionItem
+                    onClick={() => props.onChange(normalizeProjectViewFilters(undefined))}
+                  >
+                    Reset filters
+                  </OctantMenuActionItem>
+                </>
+              )}
             </OctantMenuPopup>
           </OctantMenuPositioner>
         </OctantMenuPortal>
@@ -2372,7 +2456,7 @@ function CodeProjectViewEditorDialog(props: {
         </OctantButton>
       </div>
       <p id={descriptionId}>
-        Choose which saved Code Projects appear in this sidebar view. A view changes only what the
+        Choose which saved Code Projects this sidebar view shows. A view changes only what the
         sidebar lists.
       </p>
       <form noValidate onSubmit={submit}>

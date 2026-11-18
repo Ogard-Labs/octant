@@ -114,7 +114,11 @@ import {
 } from "@octant/domain";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { type CodeWiring, stableCodeFileId } from "./code";
-import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
+import {
+  makeConfiguredAccountSessionCarrier,
+  makeConfiguredProviderDriver,
+  type ProvidersWiring,
+} from "./providers";
 import type { ServerStart } from "./serverShape";
 import type { HarnessWiring } from "./harness";
 import type { AuthorityWiring } from "./authority";
@@ -305,6 +309,7 @@ import {
 } from "../serverProjects/serverProjectThreads";
 import type { GitService } from "../code/gitService";
 import { createServerGitService } from "../serverProjects/serverGit";
+import { transferServerAttachments } from "../serverProjects/serverAttachments";
 import { serverTerminalLogin } from "../serverProjects/serverTerminal";
 import { ServerCodeFiles } from "../serverProjects/serverCodeFiles";
 import {
@@ -1072,6 +1077,19 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           }),
         nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
         holdsServerThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
+        transferServerAttachments: (thread, files) => {
+          const place = serverThreadOf(serverProjectStore, thread);
+          const address =
+            place === undefined
+              ? undefined
+              : serverProjectStore.addressOf(String(place.project.id));
+          return transferServerAttachments({
+            connection: serverConnection,
+            server: address?.kind === "address" ? address.server : undefined,
+            threadId: String(thread.id),
+            files,
+          });
+        },
         serverTerminalLogin: (thread) => {
           const place = serverThreadOf(serverProjectStore, thread);
           if (place === undefined) return undefined;
@@ -1206,6 +1224,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         supportsAcpClientCapabilities: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
             .acpClientCapabilities === "supported",
+        accountSessionCarrier: makeConfiguredAccountSessionCarrier(
+          (instanceId) => persistence.readProviderInstance(instanceId),
+          configuredDriverOptions,
+        ),
         supportsModelSwitch: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
             .modelSwitch === "supported",
@@ -1321,6 +1343,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             browserAutomationService.holdForPerson(windowId, threadId),
           holdForAsk: (windowId, threadId) =>
             browserAutomationService.holdForAsk(windowId, threadId),
+          takeBack: (windowId, threadId) => browserAutomationService.takeBack(windowId, threadId),
           snapshotRefs: (windowId, threadId) =>
             browserAutomationService.snapshotRefs(windowId, threadId),
         },
@@ -1334,7 +1357,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             browserModelBindings.delete(contextId);
           },
         },
-        isBrowserOriginRemembered: (origin) => browserToolApprovalService.isRemembered(origin),
         browserTransferApprovals: browserToolApprovalService,
         browserUploadFileCountLimit: () =>
           (persistence.readShellSettings()?.settings ?? defaultShellSettings())

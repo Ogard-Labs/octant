@@ -103,7 +103,8 @@ export function createCommandCredentialExecution(options: {
       !current() ||
       signal.aborted ||
       !commandCredentialPostureAllowed(context.executionPolicy) ||
-      (context.executionPolicy !== "full-access" && options.prepare === undefined) ||
+      ((context.executionPolicy !== "full-access" || context.strict === true) &&
+        options.prepare === undefined) ||
       !commandCredentialDefinitionAllowed(binding.definition)
     )
       return { ...none, status: "refused" };

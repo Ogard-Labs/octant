@@ -7,6 +7,7 @@ import type { DiscoverySnapshot, ProviderDriverKind } from "@octant/contracts";
 import { withClaudeAccountDirectory } from "./claudeAccountDirectory";
 import {
   MAX_ALIAS_FILE_BYTES,
+  claudeHostGateway,
   makeDiscoveryService,
   readDiscoveryText,
   type DiscoveryExecPort,
@@ -78,6 +79,36 @@ const baseEnvironment = {
   PATH: "/usr/local/bin:/usr/bin",
   HOME: "/Users/test",
 };
+
+describe("claudeHostGateway", () => {
+  it("offers the host's gateway address and only whether a token is set, never its value", () => {
+    const offered = claudeHostGateway({
+      ANTHROPIC_BASE_URL: "https://gateway.example.com/anthropic/",
+      ANTHROPIC_AUTH_TOKEN: "host-gateway-token-sentinel",
+    });
+    expect(offered).toEqual({
+      baseUrl: "https://gateway.example.com/anthropic",
+      tokenVariable: true,
+    });
+    expect(JSON.stringify(offered)).not.toContain("host-gateway-token-sentinel");
+    expect(claudeHostGateway({ ANTHROPIC_BASE_URL: "http://10.0.0.5:4000" })).toEqual({
+      baseUrl: "http://10.0.0.5:4000",
+      tokenVariable: false,
+    });
+  });
+
+  it("withholds an address Octant would not accept for a gateway account", () => {
+    for (const baseUrl of [
+      undefined,
+      "",
+      "http://gateway.example.com",
+      "https://user:secret@gateway.example.com",
+      "https://gateway.example.com?token=secret",
+    ]) {
+      expect(claudeHostGateway({ ANTHROPIC_BASE_URL: baseUrl })).toBeUndefined();
+    }
+  });
+});
 
 describe("discoveryService", () => {
   it("discovers an installed codex binary on PATH", async () => {
@@ -342,7 +373,7 @@ describe("discoveryService", () => {
       (candidate) => candidate.driverKind === "opencode",
     );
     expect(openCodeCandidates.map((candidate) => candidate.displayName)).toEqual([
-      "OpenCode CLI",
+      "OpenCode",
       "OpenCode 2 preview",
     ]);
   });

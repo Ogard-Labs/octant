@@ -95,7 +95,8 @@
    in either theme. Free space and reserved room name no tone and stay on the
    neutral fill. */
 .context-window-popover,
-.context-entry-card {
+.context-entry-card,
+.environment-context {
   --context-window-tone: color-mix(
     in oklab,
     var(--octant-text-primary) 38%,
@@ -103,35 +104,35 @@
   );
 }
 
-:is(.context-window-popover, .context-entry-card) [data-tone="1"] {
+:is(.context-window-popover, .context-entry-card, .environment-context) [data-tone="1"] {
   --context-window-tone: var(--octant-palette-blue, var(--oct-fg));
 }
 
-:is(.context-window-popover, .context-entry-card) [data-tone="2"] {
+:is(.context-window-popover, .context-entry-card, .environment-context) [data-tone="2"] {
   --context-window-tone: var(--octant-palette-orange, var(--oct-fg));
 }
 
-:is(.context-window-popover, .context-entry-card) [data-tone="3"] {
+:is(.context-window-popover, .context-entry-card, .environment-context) [data-tone="3"] {
   --context-window-tone: var(--octant-palette-purple, var(--oct-fg));
 }
 
-:is(.context-window-popover, .context-entry-card) [data-tone="4"] {
+:is(.context-window-popover, .context-entry-card, .environment-context) [data-tone="4"] {
   --context-window-tone: var(--octant-palette-teal, var(--oct-fg));
 }
 
-:is(.context-window-popover, .context-entry-card) [data-tone="5"] {
+:is(.context-window-popover, .context-entry-card, .environment-context) [data-tone="5"] {
   --context-window-tone: var(--octant-palette-green, var(--oct-fg));
 }
 
-:is(.context-window-popover, .context-entry-card) [data-tone="6"] {
+:is(.context-window-popover, .context-entry-card, .environment-context) [data-tone="6"] {
   --context-window-tone: var(--octant-palette-pink, var(--oct-fg));
 }
 
-:is(.context-window-popover, .context-entry-card) [data-tone="7"] {
+:is(.context-window-popover, .context-entry-card, .environment-context) [data-tone="7"] {
   --context-window-tone: var(--octant-palette-yellow, var(--oct-fg));
 }
 
-:is(.context-window-popover, .context-entry-card) [data-tone="8"] {
+:is(.context-window-popover, .context-entry-card, .environment-context) [data-tone="8"] {
   --context-window-tone: color-mix(
     in oklab,
     var(--octant-palette-blue, var(--oct-fg)) 55%,
@@ -139,7 +140,7 @@
   );
 }
 
-:is(.context-window-popover, .context-entry-card) [data-tone="9"] {
+:is(.context-window-popover, .context-entry-card, .environment-context) [data-tone="9"] {
   --context-window-tone: color-mix(
     in oklab,
     var(--octant-palette-orange, var(--oct-fg)) 55%,
@@ -147,7 +148,7 @@
   );
 }
 
-:is(.context-window-popover, .context-entry-card) [data-tone="10"] {
+:is(.context-window-popover, .context-entry-card, .environment-context) [data-tone="10"] {
   --context-window-tone: color-mix(
     in oklab,
     var(--octant-palette-purple, var(--oct-fg)) 55%,
@@ -155,7 +156,7 @@
   );
 }
 
-:is(.context-window-popover, .context-entry-card) [data-tone="11"] {
+:is(.context-window-popover, .context-entry-card, .environment-context) [data-tone="11"] {
   --context-window-tone: color-mix(
     in oklab,
     var(--octant-palette-teal, var(--oct-fg)) 55%,
@@ -163,7 +164,7 @@
   );
 }
 
-:is(.context-window-popover, .context-entry-card) [data-tone="12"] {
+:is(.context-window-popover, .context-entry-card, .environment-context) [data-tone="12"] {
   --context-window-tone: color-mix(
     in oklab,
     var(--octant-palette-green, var(--oct-fg)) 55%,
@@ -171,7 +172,7 @@
   );
 }
 
-:is(.context-window-popover, .context-entry-card) [data-tone="13"] {
+:is(.context-window-popover, .context-entry-card, .environment-context) [data-tone="13"] {
   --context-window-tone: color-mix(
     in oklab,
     var(--octant-palette-pink, var(--oct-fg)) 55%,
@@ -179,7 +180,7 @@
   );
 }
 
-:is(.context-window-popover, .context-entry-card) [data-tone="14"] {
+:is(.context-window-popover, .context-entry-card, .environment-context) [data-tone="14"] {
   --context-window-tone: color-mix(
     in oklab,
     var(--octant-palette-yellow, var(--oct-fg)) 55%,

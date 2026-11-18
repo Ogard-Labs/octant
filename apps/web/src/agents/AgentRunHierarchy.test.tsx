@@ -122,7 +122,7 @@ describe("AgentRunHierarchy", () => {
     await user.click(screen.getByRole("button", { name: "Subagents" }));
     await user.click(await screen.findByRole("button", { name: /^Inspect parser\. / }));
     expect(
-      screen.getByText(/Started by its provider\. Octant observes it and has no controls for it\./),
+      screen.getByText(/Started by its provider\. Octant can watch it but not control it\./),
     ).toBeVisible();
     expect(screen.getByText(/Conflicting observations/)).toBeVisible();
     expect(screen.getByText("Model unknown")).toBeVisible();
@@ -619,7 +619,8 @@ describe("AgentRunHierarchy", () => {
       <AgentRunHierarchy client={client} parentThreadId={parentThreadId} creationPosture="off" />,
     );
     // The loading state has a heading too, so wait for the words themselves.
-    expect(await screen.findAllByText(/turned off in Settings/i)).not.toHaveLength(0);
+    expect(await screen.findAllByText("Subagents are turned off")).not.toHaveLength(0);
+    expect(screen.getByText("Turn them on in Settings.")).toBeVisible();
   });
 
   it("cancels a working subagent from its page", async () => {
@@ -709,7 +710,7 @@ describe("AgentRunHierarchy", () => {
     // The host answers only once the child has taken the note at its next step.
     // The form closes on send, so the page says the note is on its way, then that it landed.
     expect(
-      await screen.findByText("Sending the steering note. The subagent takes it at its next step."),
+      await screen.findByText("Sending your note. The helper reads it at its next step."),
     ).toBeVisible();
     act(() => deliver?.());
     expect(await screen.findByText("Steering note delivered.")).toBeVisible();
@@ -765,7 +766,7 @@ describe("AgentRunHierarchy", () => {
     act(() => answers[0]?.({ kind: "run-updated", run: {} as never }));
     await waitFor(() => expect(screen.queryByText("Steering note delivered.")).toBeNull());
     expect(
-      screen.getByText("Sending the steering note. The subagent takes it at its next step."),
+      screen.getByText("Sending your note. The helper reads it at its next step."),
     ).toBeVisible();
 
     act(() => answers[1]?.({ kind: "run-updated", run: {} as never }));
@@ -836,7 +837,7 @@ describe("AgentRunHierarchy", () => {
     await waitFor(() =>
       expect(screen.getByText(/They appear here when the agent hands off/)).toBeVisible(),
     );
-    expect(screen.queryByText(/turned off in Settings/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Subagents are turned off")).not.toBeInTheDocument();
     expect(settingsClient.current).toHaveBeenCalled();
   });
 

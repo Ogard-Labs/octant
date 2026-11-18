@@ -11,7 +11,7 @@ import type {
   CodeThreadId,
 } from "@octant/contracts";
 import { decodeCodeProjectFilePath } from "@octant/contracts";
-import { CornerDownLeft, FileText, Search } from "lucide-react";
+import { CornerDownLeft, FileText, Search } from "../ui/icons";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { matchKeybinding, resolveKeybindings, type OctantKeybindings } from "@octant/domain";
 import { isApplePlatform } from "../platform";

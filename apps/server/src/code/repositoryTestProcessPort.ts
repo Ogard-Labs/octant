@@ -1,8 +1,20 @@
+import { registerSandboxCleanup, sandboxToolPolicy } from "../process/sandboxRuntimePolicy";
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import type { HostResourceBudget } from "../process/hostResourceBudget";
 import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
 import { constants } from "node:fs";
 import { access, lstat, open, realpath, stat } from "node:fs/promises";
-import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  delimiter,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+  win32,
+} from "node:path";
 import {
   MAX_REPOSITORY_TEST_ARTIFACT_BYTES,
   MAX_REPOSITORY_TEST_OUTPUT_BYTES,
@@ -14,8 +26,12 @@ import type { RepositoryTestProcessResult } from "./repositoryTestRunner";
 import {
   persistProcessReceipt,
   reconcileProcessReceipts,
+  reconcileWindowsProcessReceipts,
   type OwnedProcessReceiptHandle,
 } from "../process/nodeOwnedProcessReceipt";
+import { WINDOWS_PROCESS_ENVIRONMENT_NAMES } from "../process/windowsEnvironment";
+import { stopWindowsProcessTree, type WindowsProcessTreeStop } from "../process/windowsProcessTree";
+import { resolveWindowsProviderProgram } from "../process/windowsProviderProgram";
 import {
   escapeSeatbeltPath,
   makeProcessConfinementLive,
@@ -74,6 +90,8 @@ interface RepositoryTestProcessPortOptions {
     options: SpawnOptions,
   ) => SpawnedProcess;
   readonly killProcessGroup?: (groupId: number, signal: NodeJS.Signals) => void;
+  /** Ends a Windows launch and every process it started; Windows has no process groups. */
+  readonly stopWindowsTree?: (pid: number) => Promise<WindowsProcessTreeStop>;
   readonly gracefulTimeoutMs?: number;
   /** How long an interrupt-first launch gets to finish its output after SIGINT. */
   readonly interruptTimeoutMs?: number;
@@ -128,6 +146,7 @@ interface RepositoryTestProcessPortOptions {
  * nothing else.
  */
 export interface HarnessShellScriptInput {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly script: string;
   readonly beforeLaunch?: () => boolean;
   readonly cloudCliConfigurationDirectory?: string;
@@ -168,8 +187,16 @@ export interface HarnessShellScriptInput {
 }
 
 export interface RepositoryTestProcessInput {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly networkAccess?: "none";
   readonly executionPolicy?: ProviderExecutionPolicy;
+  /**
+   * The thread's resolved Strict value. A Windows host has no Octant sandbox,
+   * so a launch there runs unconfined only when this is `false`, as a thread
+   * terminal does; one that does not say counts as Strict and is refused.
+   * Elsewhere the launch is confined at every setting and this is not read.
+   */
+  readonly strict?: boolean;
   readonly checkoutRoot?: string;
   readonly beforeLaunch?: () => boolean;
   /** Rechecks named-command authority after launch preparation, immediately before spawn. */
@@ -289,6 +316,8 @@ const MAX_ARGUMENTS = 64;
 const MAX_ARGUMENT_BYTES = 1_024;
 const MAX_TIMEOUT_MS = 60 * 60 * 1_000;
 const HARNESS_SHELL = "/bin/sh";
+/** How long a Windows launch may take to close once its tree is stopped. */
+const WINDOWS_STOP_WAIT_MS = 10_000;
 /**
  * `ssh` looks up the person's own account before it connects and stops with
  * "No user exists for uid" when the user database is out of reach.
@@ -300,6 +329,7 @@ export class RepositoryTestProcessPort {
   readonly #platform: NodeJS.Platform;
   readonly #spawn: NonNullable<RepositoryTestProcessPortOptions["spawn"]>;
   readonly #killProcessGroup: NonNullable<RepositoryTestProcessPortOptions["killProcessGroup"]>;
+  readonly #stopWindowsTree: (pid: number) => Promise<WindowsProcessTreeStop>;
   readonly #gracefulTimeoutMs: number;
   readonly #interruptTimeoutMs: number;
   readonly #maxOutputBytes: number;
@@ -324,6 +354,7 @@ export class RepositoryTestProcessPort {
         nodeSpawn(executable, [...args], spawnOptions) as unknown as SpawnedProcess);
     this.#killProcessGroup =
       options.killProcessGroup ?? ((groupId, signal) => process.kill(groupId, signal));
+    this.#stopWindowsTree = options.stopWindowsTree ?? ((pid) => stopWindowsProcessTree(pid));
     this.#gracefulTimeoutMs = options.gracefulTimeoutMs ?? 1_000;
     this.#interruptTimeoutMs = options.interruptTimeoutMs ?? 10_000;
     this.#maxOutputBytes = options.maxOutputBytes ?? MAX_REPOSITORY_TEST_OUTPUT_BYTES;
@@ -355,7 +386,8 @@ export class RepositoryTestProcessPort {
     input: RepositoryTestProcessInput,
     signal?: AbortSignal,
   ): Promise<RepositoryTestProcessResult> {
-    if (!supportsOwnedProcessGroups(this.#platform)) return unavailable(false);
+    if (!supportsOwnedProcessGroups(this.#platform) && !this.#runsUnconfinedOnWindows(input))
+      return unavailable(false);
     if (signal?.aborted) return cancelledBeforeSpawn();
     let validated: ReturnType<typeof validateProcessInput>;
     try {
@@ -364,6 +396,22 @@ export class RepositoryTestProcessPort {
       return unavailable(false);
     }
     return this.#launch(input, validated, signal);
+  }
+
+  /**
+   * Whether this launch runs on a Windows host with no confinement: outside
+   * Strict, with no sandbox policy and no network refusal, which only Octant's
+   * sandbox could hold it to. Windows has no process groups, so the launch is
+   * owned through its process tree and ended with the tree stop instead.
+   */
+  #runsUnconfinedOnWindows(input: RepositoryTestProcessInput): boolean {
+    return (
+      this.#platform === "win32" &&
+      input.strict === false &&
+      input.sandboxPolicy === undefined &&
+      sandboxToolPolicy() === undefined &&
+      input.networkAccess === undefined
+    );
   }
 
   /** Only the reviewed Project recipe path uses a shell. Structured repository
@@ -463,6 +511,7 @@ export class RepositoryTestProcessPort {
         };
       }
       launchInput = {
+        ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
         ...(input.beforeLaunch === undefined ? {} : { beforeLaunch: input.beforeLaunch }),
         argv: [HARNESS_SHELL, script],
         cwd: input.cwd,
@@ -518,6 +567,7 @@ export class RepositoryTestProcessPort {
         )
           throw new Error("Server access is invalid.");
         launchInput = {
+          ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
           ...launchInput,
           additionalReadRoots: [
             ...(launchInput.additionalReadRoots ?? []),
@@ -642,105 +692,126 @@ export class RepositoryTestProcessPort {
       readonly owned?: { readonly resource: string; readonly configuration: string };
     },
   ): Promise<RepositoryTestProcessResult> {
-    let launch: { readonly command: string; readonly args: readonly string[] };
+    let launch: {
+      readonly command: string;
+      readonly args: readonly string[];
+      readonly environment?: Readonly<Record<string, string>>;
+    };
     try {
       if (input.executionPolicy === "plan") return unavailable(false);
-      let checkoutRoot = input.cwd;
-      if (input.checkoutRoot !== undefined) {
-        checkoutRoot = await realpath(input.checkoutRoot);
-        const cwd = await realpath(input.cwd);
-        if (!contained(checkoutRoot, cwd)) return unavailable(false);
-      }
-      const executable = isAbsolute(validated.executable)
-        ? validated.executable
-        : await resolveTestExecutable(validated.executable);
-      if (executable === undefined) return unavailable(false);
-      const binaryDirectory = dirname(executable);
-      const binaryParentDirectory = dirname(binaryDirectory);
-      const launchReadRules =
-        this.#platform === "darwin"
-          ? [...this.#literalReadPaths, ...(input.literalReadPaths ?? [])].map(
-              seatbeltAllowLiteralReadRule,
-            )
-          : [];
-      if (this.#platform === "darwin") {
-        for (const path of input.literalMetadataPaths ?? []) {
-          launchReadRules.push(seatbeltAllowLiteralMetadataRule(path));
+      if (this.#platform === "win32") {
+        // Only `execute` admits a Windows launch, and only an unconfined one;
+        // a harness command or a proxied launch has its own Windows form.
+        if (
+          !this.#runsUnconfinedOnWindows(input) ||
+          proxied !== undefined ||
+          cloudCli !== undefined
+        )
+          return unavailable(false);
+        const program = await windowsTestProgram(validated);
+        if (program === undefined) return unavailable(false);
+        launch = program;
+      } else {
+        let checkoutRoot = input.cwd;
+        if (input.checkoutRoot !== undefined) {
+          checkoutRoot = await realpath(input.checkoutRoot);
+          const cwd = await realpath(input.cwd);
+          if (!contained(checkoutRoot, cwd)) return unavailable(false);
         }
-        for (const pattern of input.regexReadWritePaths ?? []) {
-          launchReadRules.push(seatbeltAllowRegexReadWriteRule(pattern));
+        const executable = isAbsolute(validated.executable)
+          ? validated.executable
+          : await resolveTestExecutable(validated.executable);
+        if (executable === undefined) return unavailable(false);
+        const binaryDirectory = dirname(executable);
+        const binaryParentDirectory = dirname(binaryDirectory);
+        const launchReadRules =
+          this.#platform === "darwin"
+            ? [...this.#literalReadPaths, ...(input.literalReadPaths ?? [])].map(
+                seatbeltAllowLiteralReadRule,
+              )
+            : [];
+        if (this.#platform === "darwin") {
+          for (const path of input.literalMetadataPaths ?? []) {
+            launchReadRules.push(seatbeltAllowLiteralMetadataRule(path));
+          }
+          for (const pattern of input.regexReadWritePaths ?? []) {
+            launchReadRules.push(seatbeltAllowRegexReadWriteRule(pattern));
+          }
+          for (const name of input.machLookupNames ?? []) {
+            launchReadRules.push(seatbeltAllowMachLookupRule(name));
+          }
+          if (input.allowPseudoTty === true) {
+            launchReadRules.push(
+              "(allow pseudo-tty)",
+              '(allow file-write* file-ioctl (literal "/dev/ptmx"))',
+              '(allow file-write* file-ioctl (regex #"^/dev/ttys[0-9]+$"))',
+            );
+          }
+          if (input.allowJobCreation === true) {
+            launchReadRules.push("(allow job-creation)");
+          }
+          if (input.allowSignal === true) {
+            launchReadRules.push("(allow signal)");
+          }
+          launchReadRules.push(...(proxied?.extraRules ?? []));
+          if (cloudCli !== undefined) {
+            // Broad reads and ancestor grants must not expose another command's
+            // token, or make this command's read-only token writable.
+            launchReadRules.push(
+              seatbeltDenyRule("file-read*", cloudCli.root),
+              seatbeltDenyRule("file-write*", cloudCli.root),
+              seatbeltAllowLiteralMetadataRule(cloudCli.root),
+              ...(cloudCli.owned === undefined
+                ? []
+                : [
+                    seatbeltAllowRule("file-read*", cloudCli.owned.resource),
+                    seatbeltAllowRule("file-write*", cloudCli.owned.configuration),
+                  ]),
+            );
+          }
         }
-        for (const name of input.machLookupNames ?? []) {
-          launchReadRules.push(seatbeltAllowMachLookupRule(name));
-        }
-        if (input.allowPseudoTty === true) {
-          launchReadRules.push(
-            "(allow pseudo-tty)",
-            '(allow file-write* file-ioctl (literal "/dev/ptmx"))',
-            '(allow file-write* file-ioctl (regex #"^/dev/ttys[0-9]+$"))',
-          );
-        }
-        if (input.allowJobCreation === true) {
-          launchReadRules.push("(allow job-creation)");
-        }
-        if (input.allowSignal === true) {
-          launchReadRules.push("(allow signal)");
-        }
-        launchReadRules.push(...(proxied?.extraRules ?? []));
-        if (cloudCli !== undefined) {
-          // Broad reads and ancestor grants must not expose another command's
-          // token, or make this command's read-only token writable.
-          launchReadRules.push(
-            seatbeltDenyRule("file-read*", cloudCli.root),
-            seatbeltDenyRule("file-write*", cloudCli.root),
-            seatbeltAllowLiteralMetadataRule(cloudCli.root),
-            ...(cloudCli.owned === undefined
+        const additionalWriteRoots = [
+          ...this.#additionalWritePaths,
+          ...(input.additionalWriteRoots ?? []),
+        ];
+        launch = this.#confinement.prepare({
+          executable,
+          args: validated.args,
+          boundRoot: checkoutRoot,
+          ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
+          temporaryDirectory: this.#temporaryDirectory,
+          networkEgress:
+            input.networkAccess === "none"
+              ? "none"
+              : (proxied?.networkEgress ?? this.#networkEgress),
+          allowFileReadStar: true,
+          allowSimulatorControl: this.#allowSimulatorControl,
+          ...(this.#refuseNewSession ? { refuseNewSession: true } : {}),
+          readRoots: [
+            input.cwd,
+            this.#temporaryDirectory,
+            binaryDirectory,
+            ...(dirname(binaryParentDirectory) === binaryParentDirectory
               ? []
-              : [
-                  seatbeltAllowRule("file-read*", cloudCli.owned.resource),
-                  seatbeltAllowRule("file-write*", cloudCli.owned.configuration),
-                ]),
-          );
-        }
+              : [binaryParentDirectory]),
+            ...(input.additionalReadRoots ?? []),
+          ],
+          ...(additionalWriteRoots.length === 0 ? {} : { additionalWriteRoots }),
+          ...(input.isolatedRoots === undefined ? {} : { isolatedRoots: input.isolatedRoots }),
+          ...(cloudCli === undefined || this.#platform !== "linux"
+            ? {}
+            : {
+                additionalDenyReadPaths: [cloudCli.root],
+                additionalDenyWritePaths: [cloudCli.root],
+              }),
+          ...(proxied?.serverRelays === undefined || proxied.serverRelays.length === 0
+            ? {}
+            : { serverRelays: proxied.serverRelays }),
+          ...(this.#platform === "darwin" && launchReadRules.length > 0
+            ? { extraRules: launchReadRules }
+            : {}),
+        });
       }
-      const additionalWriteRoots = [
-        ...this.#additionalWritePaths,
-        ...(input.additionalWriteRoots ?? []),
-      ];
-      launch = this.#confinement.prepare({
-        executable,
-        args: validated.args,
-        boundRoot: checkoutRoot,
-        temporaryDirectory: this.#temporaryDirectory,
-        networkEgress:
-          input.networkAccess === "none" ? "none" : (proxied?.networkEgress ?? this.#networkEgress),
-        allowFileReadStar: true,
-        allowSimulatorControl: this.#allowSimulatorControl,
-        ...(this.#refuseNewSession ? { refuseNewSession: true } : {}),
-        readRoots: [
-          input.cwd,
-          this.#temporaryDirectory,
-          binaryDirectory,
-          ...(dirname(binaryParentDirectory) === binaryParentDirectory
-            ? []
-            : [binaryParentDirectory]),
-          ...(input.additionalReadRoots ?? []),
-        ],
-        ...(additionalWriteRoots.length === 0 ? {} : { additionalWriteRoots }),
-        ...(input.isolatedRoots === undefined ? {} : { isolatedRoots: input.isolatedRoots }),
-        ...(cloudCli === undefined || this.#platform !== "linux"
-          ? {}
-          : {
-              additionalDenyReadPaths: [cloudCli.root],
-              additionalDenyWritePaths: [cloudCli.root],
-            }),
-        ...(proxied?.serverRelays === undefined || proxied.serverRelays.length === 0
-          ? {}
-          : { serverRelays: proxied.serverRelays }),
-        ...(this.#platform === "darwin" && launchReadRules.length > 0
-          ? { extraRules: launchReadRules }
-          : {}),
-      });
     } catch (error) {
       if (error instanceof ProcessConfinementError) return unavailable(false);
       return unavailable(false);
@@ -765,11 +836,13 @@ export class RepositoryTestProcessPort {
       child = this.#spawn(launch.command, launch.args, {
         cwd: input.cwd,
         env: sanitizedEnvironment(
-          { ...input.environment, ...proxied?.environment },
+          { ...input.environment, ...proxied?.environment, ...launch.environment },
           this.#temporaryDirectory,
+          this.#platform,
         ),
         shell: false,
-        detached: true,
+        // A process group exists only off Windows; there the tree stop owns it.
+        detached: this.#platform !== "win32",
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -791,6 +864,14 @@ export class RepositoryTestProcessPort {
       forward(chunk);
     });
     const closed = observeClose(child);
+    const removeSandboxOwner = registerSandboxCleanup(
+      input.sandboxPolicy ?? sandboxToolPolicy(),
+      async () => {
+        const stopped = await this.#terminate(child, closed);
+        if (stopped.uncertain) throw new Error("Sandbox command cleanup is incomplete.");
+      },
+    );
+    void closed.then(removeSandboxOwner, removeSandboxOwner);
     let notificationFailed = false;
     try {
       if (child.pid !== undefined) input.onStarted?.();
@@ -913,6 +994,17 @@ export class RepositoryTestProcessPort {
   }
 
   async reconcile(): Promise<void> {
+    if (this.#platform === "win32") {
+      await reconcileWindowsProcessReceipts({
+        supervisor: "repository-test-runner",
+        ...(this.#receiptDirectory === undefined
+          ? {}
+          : { receiptDirectory: this.#receiptDirectory }),
+        ...(this.#processIdentity === undefined ? {} : { processIdentity: this.#processIdentity }),
+        stopTree: this.#stopWindowsTree,
+      });
+      return;
+    }
     await reconcileProcessReceipts({
       supervisor: "repository-test-runner",
       ...(this.#receiptDirectory === undefined ? {} : { receiptDirectory: this.#receiptDirectory }),
@@ -971,6 +1063,7 @@ export class RepositoryTestProcessPort {
     if (!Number.isSafeInteger(child.pid) || (child.pid ?? 0) <= 0)
       return { code: null, uncertain: true };
     const pid = child.pid ?? -1;
+    if (this.#platform === "win32") return this.#terminateWindowsTree(pid, closed);
     const groupId = -Math.abs(pid);
     if (interruptFirst) {
       try {
@@ -1003,6 +1096,25 @@ export class RepositoryTestProcessPort {
     const forced = await closeWithin(closed, this.#gracefulTimeoutMs);
     if (forced?.kind !== "closed") return { code: null, uncertain: true };
     return (await this.#waitForProcessGroupExit(child.pid!))
+      ? { code: forced.code, uncertain: false }
+      : { code: null, uncertain: true };
+  }
+
+  /**
+   * Windows has no signal to ask a tree to finish, and `ChildProcess.kill`
+   * there ends only the root, so a timed-out or cancelled test ends its whole
+   * tree at once through the tree stop. A stop that failed, or a root that has
+   * not closed after it, leaves the result uncertain and its receipt kept.
+   */
+  async #terminateWindowsTree(
+    pid: number,
+    closed: Promise<ProcessClose>,
+  ): Promise<{ readonly code: number | null; readonly uncertain: boolean }> {
+    const stopped = await this.#stopWindowsTree(pid).catch(() => "failed" as const);
+    if (stopped === "failed") return { code: null, uncertain: true };
+    const forced = await closeWithin(closed, WINDOWS_STOP_WAIT_MS);
+    if (forced?.kind !== "closed") return { code: null, uncertain: true };
+    return (await this.#waitForProcessGroupExit(pid))
       ? { code: forced.code, uncertain: false }
       : { code: null, uncertain: true };
   }
@@ -1292,8 +1404,19 @@ const TEMPORARY_VARIABLES: ReadonlySet<string> = new Set(["TMPDIR", "TMP", "TEMP
 function sanitizedEnvironment(
   explicit: Readonly<Record<string, string>>,
   temporaryDirectory: string,
+  platform: NodeJS.Platform,
 ): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {};
+  if (platform === "win32") {
+    // A Windows program needs its system folder and profile names, which the
+    // POSIX list leaves out; they are matched whatever case the host uses.
+    for (const [key, value] of Object.entries(process.env)) {
+      const name = key.toUpperCase();
+      if (value !== undefined && WINDOWS_PROCESS_ENVIRONMENT_NAMES.has(name))
+        environment[name] = value;
+    }
+    return { ...environment, ...explicit };
+  }
   for (const name of SAFE_INHERITED_ENVIRONMENT) {
     const value = process.env[name];
     if (value === undefined) continue;
@@ -1404,6 +1527,53 @@ function cancelledBeforeSpawn(): RepositoryTestProcessResult {
 
 function isErrorCode(error: unknown, code: string): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+
+/**
+ * The program a test or scaffold command starts on Windows, with no shell. A
+ * bare name is looked up on `Path` with `PATHEXT`'s extensions, as Windows
+ * itself does; an npm `.cmd` shim (`npm`, `npx`, `pnpm`) is read for the
+ * program it starts, since Windows runs a shim only through `cmd.exe`, which
+ * would re-read the arguments. A shim Octant cannot read a program from runs
+ * nothing.
+ */
+async function windowsTestProgram(validated: {
+  readonly executable: string;
+  readonly args: readonly string[];
+}): Promise<{ readonly command: string; readonly args: readonly string[] } | undefined> {
+  const executable = isAbsolute(validated.executable)
+    ? validated.executable
+    : await resolveWindowsTestExecutable(validated.executable);
+  if (executable === undefined) return undefined;
+  const program = resolveWindowsProviderProgram({
+    displayName: "This command",
+    executable,
+    args: validated.args,
+    environment: process.env,
+  });
+  return program.status === "resolved"
+    ? { command: program.command, args: program.args }
+    : undefined;
+}
+
+async function resolveWindowsTestExecutable(command: string): Promise<string | undefined> {
+  if (win32.basename(command) !== command) return undefined;
+  const extensions = (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .filter((extension) => extension.startsWith("."));
+  const candidates = win32.extname(command) === "" ? extensions.map((e) => command + e) : [command];
+  for (const directory of (process.env.PATH ?? "").split(win32.delimiter)) {
+    if (!win32.isAbsolute(directory)) continue;
+    for (const candidate of candidates) {
+      try {
+        const executable = win32.join(directory, candidate);
+        if ((await stat(executable)).isFile()) return executable;
+      } catch {
+        // Missing candidates are normal while searching the host's Path.
+      }
+    }
+  }
+  return undefined;
 }
 
 async function resolveTestExecutable(command: string): Promise<string | undefined> {

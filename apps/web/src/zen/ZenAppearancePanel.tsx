@@ -8,7 +8,7 @@ import type {
 } from "@octant/contracts/zen";
 import { ZEN_FILL_SEED_FROM, ZEN_FILL_SEED_TO } from "../theme/zenFillSeeds";
 import { DEFAULT_ZEN_GROUND_EFFECT, ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
-import { ImagePlus, Monitor } from "lucide-react";
+import { ImagePlus, Monitor } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";

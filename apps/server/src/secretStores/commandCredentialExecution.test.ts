@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { decodeCommandCredentialBinding } from "@octant/contracts/command-credentials";
+import { decodeSandboxPolicySelection } from "@octant/contracts/sandbox-policy";
+import { configureSandboxRestrictionsAuthority } from "../process/sandboxRuntimePolicy";
 import {
   decodeCodeThread,
   decodeToolActionAuthority,
@@ -29,6 +31,7 @@ import {
 } from "./commandCredentialExecution";
 const directories: string[] = [];
 afterEach(async () => {
+  configureSandboxRestrictionsAuthority(undefined);
   await closeEgressHarnesses();
   vi.unstubAllEnvs();
   for (const directory of directories.splice(0))
@@ -117,6 +120,97 @@ function threadFor(
 }
 
 describe("fixed command credential execution", () => {
+  it("refuses a Strict credential command before broker use when confined preparation is unavailable", async () => {
+    const f = await fixture();
+    const execute = vi.fn(),
+      commandUse = vi.fn();
+    const result = await createCommandCredentialExecution({
+      process: { execute },
+      broker: { commandUse },
+    })(
+      f.binding,
+      { ...f.context, strict: true },
+      new AbortController().signal,
+      () => true,
+      () => undefined,
+    );
+    expect(result).toMatchObject({ status: "refused", effect: "none" });
+    expect(commandUse).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+  it.each([false, true])(
+    "does not use the unrestricted credential process at Full access with a running Strict turn: %s",
+    async (running) => {
+      const f = await fixture();
+      const thread = threadFor(f, "full-access");
+      const selected = decodeSandboxPolicySelection({
+        policy: {
+          schemaVersion: 1,
+          revision: 1,
+          filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
+          network: "deny",
+          hostServices: "blocked",
+          credentials: "existing-policy",
+        },
+        context: {
+          root: f.root,
+          hostId: "host",
+          projectId: thread.projectId,
+          checkoutId: "checkout",
+          sessionId: "strict-credential",
+          provider: "codex",
+        },
+      });
+      const end = vi.fn();
+      configureSandboxRestrictionsAuthority({
+        active: () => (running ? selected : undefined),
+        validateSelection: () => true,
+        beginTurn: () => ({
+          status: "admitted",
+          turn: { strict: true, selection: selected, current: () => true, end, summary: "Strict" },
+        }),
+        storageDirectory: () => undefined,
+        deny: () => undefined,
+        registerCleanup: () => () => undefined,
+      });
+      const ordinaryFinish = vi.fn(() => "no-change" as const);
+      const startLaunch = vi.fn(async () => ({
+        status: "refused" as const,
+        reason: "listener-unavailable" as const,
+      }));
+      const prepare = createCommandCredentialPreparation({
+        readThread: () => thread,
+        providerKind: () => "codex",
+        ordinary: {
+          prepareCodeCommand: async () => ({
+            status: "admitted",
+            callId: randomUUID(),
+            admitStart: () => true,
+            finish: ordinaryFinish,
+          }),
+        },
+        egress: { startLaunch },
+        endpoint: { kind: "loopback" },
+        fullAccessProcess: { execute: vi.fn() },
+        temporaryDirectory: f.root,
+        receiptDirectory: join(f.root, "receipts"),
+        uuid: randomUUID,
+      });
+      const recipient = await pinCommandExecutable(f.binding.definition.executable);
+      if (recipient === undefined) throw Error("Missing recipient");
+      expect(
+        await prepare({
+          binding: f.binding,
+          context: { ...f.context, executionPolicy: "full-access" },
+          recipientIdentity: recipient.identity,
+          signal: new AbortController().signal,
+        }),
+      ).toEqual({ status: "refused" });
+      expect(startLaunch).toHaveBeenCalledOnce();
+      expect(ordinaryFinish).toHaveBeenCalledOnce();
+      expect(end).toHaveBeenCalledTimes(running ? 0 : 1);
+    },
+  );
   it("forwards confirmed hosts only to their own proxy launch and finishes each scope once", async () => {
     const f = await fixture();
     const thread = threadFor(f, "approval-gated");
@@ -150,6 +244,7 @@ describe("fixed command credential execution", () => {
     });
     const prepare = createCommandCredentialPreparation({
       readThread: () => thread,
+      providerKind: () => "codex",
       ordinary: { prepareCodeCommand: ordinary },
       egress: { startLaunch },
       endpoint: { kind: "loopback" },
@@ -228,6 +323,7 @@ describe("fixed command credential execution", () => {
     });
     const prepare = createCommandCredentialPreparation({
       readThread: () => thread,
+      providerKind: () => "codex",
       ordinary: { prepareCodeCommand: ordinary },
       egress: { startLaunch },
       endpoint: { kind: "loopback" },
@@ -288,6 +384,7 @@ describe("fixed command credential execution", () => {
     }));
     const prepare = createCommandCredentialPreparation({
       readThread: () => threadFor(f, "approval-gated"),
+      providerKind: () => "codex",
       ordinary: {
         prepareCodeCommand: async () => ({ status: "refused", reason: "approval-denied" }),
       },

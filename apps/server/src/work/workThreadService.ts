@@ -753,7 +753,13 @@ export class WorkThreadService {
           defaultAccess: command.defaultAccess,
           // Absent keeps the stored choice, so a save from a client that does
           // not show the switch never turns it off.
-          ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
+          ...((command.defaultStrict ?? current.defaultStrict) === undefined
+            ? {}
+            : { defaultStrict: command.defaultStrict ?? current.defaultStrict }),
+          ...((command.defaultStrict ??
+            current.defaultStrict ??
+            command.defaultFullAccessSandbox ??
+            current.defaultFullAccessSandbox) === true
             ? { defaultFullAccessSandbox: true }
             : {}),
           ...((command.defaultStrict ?? current.defaultStrict) === true
@@ -910,6 +916,7 @@ export class WorkThreadService {
           ...(command.modelOptionValues === undefined
             ? {}
             : { modelOptionValues: command.modelOptionValues }),
+          ...(command.strict === undefined ? {} : { strict: command.strict }),
           bindingRevisionId: command.bindingRevisionId,
           workingDirectory,
           ...(command.workingFolderId === undefined
@@ -928,7 +935,8 @@ export class WorkThreadService {
             ? undefined
             : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
             this.#currentSettings().defaultAccess) === "full-access" &&
-          (command.fullAccessSandbox ??
+          (command.strict ??
+            command.fullAccessSandbox ??
             defaultFullAccessSandboxFor({ project, settings: this.#currentSettings() }))
             ? { fullAccessSandbox: true }
             : {}),
@@ -1383,11 +1391,13 @@ export class WorkThreadService {
         const {
           fullAccessSandbox: currentSandbox,
           fullAccessRunFlag: currentRunFlag,
+          strict: currentStrict,
           ...unsandboxed
         } = current;
         const sandboxed =
+          command.strict !== null &&
           command.access === "full-access" &&
-          (command.fullAccessSandbox ?? currentSandbox) === true;
+          (command.strict ?? currentStrict ?? command.fullAccessSandbox ?? currentSandbox) === true;
         // Kept while the thread stays at Full access; any other level ends it.
         const runFlag =
           command.access === "full-access" &&
@@ -1395,10 +1405,9 @@ export class WorkThreadService {
             (currentRunFlag === true && current.access === "full-access"));
         // Strict holds at every level: kept from the command, else from the
         // thread; null returns the thread to its Project's and Settings' default.
-        const { strict: currentStrict, ...unchosen } = unsandboxed;
         const strict = command.strict === undefined ? currentStrict : command.strict;
         const updated = decodeWorkThread({
-          ...threadAtAccess(unchosen, command.access, command.planReturnAccess),
+          ...threadAtAccess(unsandboxed, command.access, command.planReturnAccess),
           ...(sandboxed ? { fullAccessSandbox: true } : {}),
           ...(runFlag ? { fullAccessRunFlag: true } : {}),
           ...(strict === null || strict === undefined ? {} : { strict }),
@@ -1810,9 +1819,11 @@ export class WorkThreadService {
         : { modelOptionValues: command.modelOptionValues }),
       bindingRevisionId,
       workingDirectory: ".",
+      ...(command.strict === undefined ? {} : { strict: command.strict }),
       access: this.#currentSettings().defaultAccess,
       ...(this.#currentSettings().defaultAccess === "full-access" &&
-      (command.fullAccessSandbox ??
+      (command.strict ??
+        command.fullAccessSandbox ??
         defaultFullAccessSandboxFor({ settings: this.#currentSettings() }))
         ? { fullAccessSandbox: true }
         : {}),

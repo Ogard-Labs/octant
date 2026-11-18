@@ -1,0 +1,217 @@
+/* One size through every step: the popup is fixed and only the body scrolls. */
+.octant-dialog__popup.add-provider-wizard {
+  --octant-dialog-width: 560px;
+  display: flex;
+  flex-direction: column;
+  height: min(520px, calc(100vh - 48px));
+  max-height: min(520px, calc(100vh - 48px));
+  padding: 0;
+  overflow: hidden;
+}
+
+.add-provider-wizard__head {
+  display: grid;
+  flex: none;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-4) var(--oct-space-4) var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.add-provider-wizard__head h2 {
+  margin: 0;
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
+}
+
+.add-provider-wizard__steps {
+  display: flex;
+  gap: var(--oct-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.add-provider-wizard__steps li {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.add-provider-wizard__steps li > span {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--octant-border);
+  border-radius: 50%;
+}
+
+.add-provider-wizard__steps li[data-state="current"] {
+  color: var(--oct-fg);
+}
+
+.add-provider-wizard__steps li[data-state="current"] > span,
+.add-provider-wizard__steps li[data-state="done"] > span {
+  color: var(--oct-fg);
+  border-color: var(--oct-fg);
+}
+
+.add-provider-wizard__body {
+  display: grid;
+  flex: 1 1 auto;
+  align-content: start;
+  gap: var(--oct-space-3);
+  min-height: 0;
+  padding: var(--oct-space-3) var(--oct-space-4);
+  overflow-y: auto;
+}
+
+.add-provider-wizard__body > section {
+  display: grid;
+  align-content: start;
+  gap: var(--oct-space-3);
+}
+
+.add-provider-wizard__body > section[hidden] {
+  display: none;
+}
+
+.add-provider-wizard__lead,
+.add-provider-wizard__hint {
+  margin: 0;
+}
+
+.add-provider-wizard__lead {
+  color: var(--oct-fg);
+}
+
+.add-provider-wizard__hint {
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  line-height: 1.5;
+}
+
+.add-provider-wizard__cards {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.add-provider-wizard__card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: var(--oct-space-3);
+  width: 100%;
+  height: auto;
+  padding: var(--oct-space-3);
+  text-align: left;
+  white-space: normal;
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+.add-provider-wizard__card[aria-checked="true"] {
+  border-color: var(--oct-fg);
+}
+
+.add-provider-wizard__card[data-unavailable="true"] {
+  color: var(--octant-text-muted);
+}
+
+.add-provider-wizard__card-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.add-provider-wizard__card-name {
+  font-weight: var(--oct-weight-medium);
+}
+
+.add-provider-wizard__card-detail {
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  line-height: 1.5;
+}
+
+.add-provider-wizard__field {
+  display: grid;
+  gap: var(--oct-space-1);
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+}
+
+.add-provider-wizard__field[hidden] {
+  display: none;
+}
+
+.add-provider-wizard__advanced {
+  justify-self: start;
+}
+
+.add-provider-wizard__advanced-body {
+  display: grid;
+  gap: var(--oct-space-3);
+}
+
+.add-provider-wizard__binary,
+.add-provider-wizard__command {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.add-provider-wizard__binary code {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.add-provider-wizard__command > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The result line keeps its height whether it is empty, checking or answered. */
+.add-provider-wizard__check {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.add-provider-wizard__result {
+  min-height: 72px;
+}
+
+.add-provider-wizard__summary {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--oct-space-2) var(--oct-space-4);
+  margin: 0;
+}
+
+.add-provider-wizard__summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A refusal has a place of its own, so saying it moves nothing. */
+.add-provider-wizard__problem {
+  flex: none;
+  min-height: 56px;
+  padding: 0 var(--oct-space-4);
+}
+
+.add-provider-wizard__foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.add-provider-wizard__spacer {
+  flex: 1 1 auto;
+}

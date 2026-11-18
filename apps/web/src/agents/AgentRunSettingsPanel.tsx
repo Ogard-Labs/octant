@@ -26,8 +26,8 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 // back on.
 const DESCRIPTION: Readonly<Record<AgentRunSelectableCreationPosture, string>> = {
   automatic:
-    "The agent can hand part of its work to a helper and get the result back. Helpers never have more access than their thread.",
-  off: "When off, the agent does all the work itself. Helpers it already started stay viewable.",
+    "The agent can hand work to a helper. Helpers never get more access than their thread.",
+  off: "Off: the agent does all the work itself. Helpers already started stay visible.",
 };
 
 /**
@@ -151,12 +151,13 @@ export function AgentRunSettingsPanel(props: {
             />
           </SettingRow>
           <SettingRow
-            description="How many helper agents of one thread run at the same time. Helpers that are only waiting don't count."
+            description="How many helpers one thread runs at once. Waiting helpers don't count."
             label="At once in one thread"
             scope="app"
             settingId="subagent-concurrency-per-thread"
           >
             <OctantNumberStepper
+              field
               label="At once in one thread"
               max={MAX_AGENT_RUN_CONCURRENCY}
               min={1}
@@ -165,12 +166,13 @@ export function AgentRunSettingsPanel(props: {
             />
           </SettingRow>
           <SettingRow
-            description="How many helper agents run at the same time, every thread together."
+            description="How many helpers run at once across all threads."
             label="At once across Octant"
             scope="app"
             settingId="subagent-concurrency-on-host"
           >
             <OctantNumberStepper
+              field
               label="At once across Octant"
               max={MAX_AGENT_RUN_CONCURRENCY}
               min={1}
@@ -185,6 +187,7 @@ export function AgentRunSettingsPanel(props: {
             settingId="subagent-working-minutes"
           >
             <OctantNumberStepper
+              field
               label="Working minutes per attempt"
               min={1}
               max={MAX_AGENT_RUN_WORKING_TIME_MINUTES}
@@ -216,6 +219,7 @@ export function AgentRunSettingsPanel(props: {
             settingId="subagent-provider-wait-minutes"
           >
             <OctantNumberStepper
+              field
               label="Minutes to wait for a full provider"
               min={1}
               max={MAX_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES}

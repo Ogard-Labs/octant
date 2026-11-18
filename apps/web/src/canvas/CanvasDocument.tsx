@@ -1,7 +1,7 @@
 import type { CanvasDefinition } from "@octant/contracts/canvas";
 import { canvasDesignSystemStyle } from "./canvasDesignSystemStyle";
 import type { ReactNode } from "react";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare } from "../ui/icons";
 import type { CanvasActionBlock } from "@octant/contracts/canvas-actions";
 import { canvasReadingOrder, type CanvasReadingItem } from "@octant/domain/canvas-dashboard-layout";
 import { canvasBlockLabel } from "./canvasBlockLabel";

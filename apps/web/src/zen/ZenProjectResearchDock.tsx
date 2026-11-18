@@ -8,7 +8,7 @@ import type {
   ProjectBrowserView,
 } from "@octant/contracts/project-browser";
 import type { ZenProjectResearchDock as ZenProjectResearchDockBinding } from "@octant/contracts/zen";
-import { ArrowLeft, ArrowRight, ChevronRight, RotateCw, ShieldCheck, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronRight, RotateCw, ShieldCheck, X } from "../ui/icons";
 import { useCallback, useEffect, useState } from "react";
 import { normalizeBrowserUrl, RENDERER_OVERLAY_SELECTOR } from "../browser/BrowserWorkspace";
 import { useNativeBrowserSurface } from "../browser/useNativeBrowserSurface";

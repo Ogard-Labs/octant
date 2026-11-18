@@ -127,7 +127,10 @@ record({
   },
 });
 
-if (mode === "spawn-stderr") process.stderr.write("private-runtime-stderr-sentinel".repeat(512));
+if (mode === "spawn-stderr")
+  process.stderr.write("private-runtime-stderr-sentinel".repeat(512), () =>
+    record({ kind: "stderr-ready" }),
+  );
 if (mode === "spawn-stubborn") spawnDescendant(true);
 if (mode === "spawn-root-exits-first") {
   spawnDescendant(true);

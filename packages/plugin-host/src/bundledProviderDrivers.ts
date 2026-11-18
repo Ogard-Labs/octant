@@ -28,9 +28,9 @@ interface BundledDriverSpec {
 }
 
 const NATIVE_PROVIDER_DRIVERS = [
-  { driverKind: "codex", displayName: "Codex CLI", digestNibble: "0", uuidNibble: "01" },
+  { driverKind: "codex", displayName: "Codex", digestNibble: "0", uuidNibble: "01" },
   { driverKind: "claude", displayName: "Claude Code", digestNibble: "1", uuidNibble: "02" },
-  { driverKind: "opencode", displayName: "OpenCode CLI", digestNibble: "2", uuidNibble: "03" },
+  { driverKind: "opencode", displayName: "OpenCode", digestNibble: "2", uuidNibble: "03" },
   { driverKind: "pi", displayName: "Pi RPC", digestNibble: "4", uuidNibble: "05" },
   { driverKind: "oh-my-pi", displayName: "Oh My Pi", digestNibble: "5", uuidNibble: "06" },
   { driverKind: "ollama", displayName: "Ollama", digestNibble: "8", uuidNibble: "09" },
@@ -76,9 +76,23 @@ const ACP_AGENT_DRIVERS: ReadonlyArray<BundledDriverSpec> = ACP_AGENT_KINDS.map(
   };
 });
 
+/**
+ * The one driver every agent a person adds from the ACP registry or as a
+ * local command runs on. Its plugin admits the shared ACP stack; each added
+ * agent still takes its own install, trust and enable steps. The seed follows
+ * Amazon Bedrock's, so no earlier plugin identity moves.
+ */
+const ADDED_ACP_AGENT_DRIVER = {
+  driverKind: "acp-agent",
+  displayName: "Added ACP agents",
+  digestNibble: "1a",
+  uuidNibble: "1b",
+} as const satisfies BundledDriverSpec;
+
 const BUNDLED_PROVIDER_DRIVERS: ReadonlyArray<BundledDriverSpec> = [
   ...NATIVE_PROVIDER_DRIVERS,
   ...ACP_AGENT_DRIVERS,
+  ADDED_ACP_AGENT_DRIVER,
 ];
 
 /**

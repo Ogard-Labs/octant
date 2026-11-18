@@ -1,5 +1,4 @@
-import { ArrowRight, X } from "lucide-react";
-import type { MouseEvent } from "react";
+import { ArrowRight, X } from "../ui/icons";
 import type { WhatsNewCardContent } from "../settings/useWhatsNewAfterUpdate";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ApertureArt } from "./ApertureArt";
@@ -18,13 +17,11 @@ export interface SidebarWhatsNewProps {
  */
 export function SidebarWhatsNew(props: SidebarWhatsNewProps) {
   // The pressed button leaves with the card, which would drop focus to the
-  // page. Focus goes to the profile row, the nearest control that stays: it is
-  // directly under the card.
-  const leave = (answer: () => void) => (event: MouseEvent<HTMLElement>) => {
-    event.currentTarget
-      .closest("[data-octant-sidebar]")
-      ?.querySelector<HTMLElement>(SIDEBAR_ACCOUNT_TRIGGER_SELECTOR)
-      ?.focus();
+  // page. Focus goes to the person's account control, the nearest one that
+  // stays: the profile row under the card, or, with the icon rail beside the
+  // sidebar, the rail's account face, which is outside the sidebar.
+  const leave = (answer: () => void) => () => {
+    document.querySelector<HTMLElement>(SIDEBAR_ACCOUNT_TRIGGER_SELECTOR)?.focus();
     answer();
   };
   return (

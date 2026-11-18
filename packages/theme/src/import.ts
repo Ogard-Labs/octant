@@ -13,6 +13,7 @@ export interface ImportedTheme {
 }
 
 import {
+  DEFAULT_SIDEBAR_BACKGROUND,
   DEFAULT_THEME_SETTINGS,
   decodeThemeSettings,
   type ThemeSettings,
@@ -192,7 +193,68 @@ export function serializeOctantTheme(settings: ThemeSettings): string {
   );
 }
 
-export function importThemeSettings(input: unknown): ThemeSettings {
+/** A photo a theme file names that this computer's library does not hold. */
+export type MissingThemePhoto = "background-photo" | "sidebar-photo";
+
+export interface ImportedThemeSettings {
+  readonly settings: ThemeSettings;
+  /** Each photo the file named that was left out, so the caller can say so. */
+  readonly missing: ReadonlyArray<MissingThemePhoto>;
+}
+
+/**
+ * Replaces a photo this host does not have with what the page draws without
+ * one, so an imported theme never points at an image that cannot load: a photo
+ * ground becomes the plain page with the same tuning, a Pixels ground loses its
+ * Picture photo (and draws Drift), and a sidebar photo gives way to the
+ * sidebar's default.
+ */
+function withoutMissingPhotos(
+  settings: ThemeSettings,
+  photoIds: ReadonlySet<string>,
+): ImportedThemeSettings {
+  const missing: MissingThemePhoto[] = [];
+  let next = settings;
+  const ground = settings.appBackground;
+  if (ground.kind === "photo" && !photoIds.has(String(ground.backgroundId))) {
+    const { kind: _kind, backgroundId: _backgroundId, ...tuning } = ground;
+    next = { ...next, appBackground: { ...tuning, kind: "none" } };
+    missing.push("background-photo");
+  } else if (
+    ground.kind === "pixels" &&
+    ground.backgroundId !== undefined &&
+    !photoIds.has(String(ground.backgroundId))
+  ) {
+    const { backgroundId: _backgroundId, ...rest } = ground;
+    next = { ...next, appBackground: rest };
+    // Another scene draws no photo, so dropping the dead id changes nothing a
+    // person sees; saying the background went plain would be untrue.
+    if (ground.scene === "picture") missing.push("background-photo");
+  }
+  const sidebar = settings.sidebarBackground;
+  if (sidebar.kind === "custom" && !photoIds.has(String(sidebar.backgroundId))) {
+    next = { ...next, sidebarBackground: DEFAULT_SIDEBAR_BACKGROUND };
+    missing.push("sidebar-photo");
+  }
+  return { settings: next, missing };
+}
+
+/**
+ * Reads a theme file. Given `photoIds`, the ids in this computer's photo
+ * library, a photo the file names that the library lacks is dropped and
+ * reported in `missing`. Without it nothing is dropped.
+ */
+export function importThemeSettings(
+  input: unknown,
+  options?: { readonly photoIds?: ReadonlySet<string> },
+): ImportedThemeSettings {
+  const settings = readThemeSettings(input);
+  return options?.photoIds === undefined
+    ? { settings, missing: [] }
+    : withoutMissingPhotos(settings, options.photoIds);
+}
+
+function readThemeSettings(input: unknown): ThemeSettings {
   if (isPlainObject(input) && input.format !== undefined) {
     for (const key of Object.keys(input)) {
       if (key !== "format" && key !== "version" && key !== "settings") {

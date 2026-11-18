@@ -14,7 +14,7 @@ export function sideChatDraftNotice(props: {
     return {
       key: "side-chat-draft",
       tone: "warning",
-      text: "This saved draft’s Side Chat reference is unreadable. Clear the draft and return the reply again before sending or queuing.",
+      text: "This draft’s Side Chat link is broken. Clear it and return the reply again before sending or queuing.",
       action: (
         <OctantButton type="button" size="sm" variant="secondary" onClick={props.onClear}>
           Clear draft

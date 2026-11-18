@@ -39,9 +39,7 @@ describe("ChatSettingsView", () => {
       "Automatic",
     );
     expect(
-      screen.getByText(
-        "These defaults apply only to new threads. Existing threads keep their explicit values.",
-      ),
+      screen.getByText("These apply to new threads. Existing threads keep theirs."),
     ).toBeVisible();
 
     expect(screen.queryByRole("option", { name: /Model B Plus/ })).not.toBeInTheDocument();

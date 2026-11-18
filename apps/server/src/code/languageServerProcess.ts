@@ -1,3 +1,5 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
+import { sandboxToolPolicy, trackSandboxChild } from "../process/sandboxRuntimePolicy";
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { chmod, lstat, mkdir, readdir, rm } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
@@ -5,8 +7,16 @@ import type { Readable, Writable } from "node:stream";
 import {
   persistProcessReceipt,
   reconcileProcessReceipts,
+  reconcileWindowsProcessReceipts,
   type OwnedProcessReceiptHandle,
 } from "../process/nodeOwnedProcessReceipt";
+import { WINDOWS_PROCESS_ENVIRONMENT_NAMES } from "../process/windowsEnvironment";
+import {
+  stopWindowsProcessTree,
+  stopWindowsTreeConfirmed,
+  type WindowsProcessTreeStop,
+} from "../process/windowsProcessTree";
+import { resolveWindowsProviderProgram } from "../process/windowsProviderProgram";
 import type { ExtensionLanguageServerClass } from "@octant/contracts/extensions";
 import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
 import {
@@ -45,6 +55,7 @@ const STOP_GRACE_MS = 2_000;
 const MINIMAL_PATH = "/usr/bin:/bin";
 
 export interface LanguageServerLaunchInput {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   /** Stable owner of the receipt: one server per checkout, component, and class. */
   readonly ownerId: string;
   /** The class decides the confinement; a launch is never given a nearby one. */
@@ -62,6 +73,12 @@ export interface LanguageServerLaunchInput {
   readonly cacheDirectory: string;
   /** The parent of every server's cache, denied so siblings stay unreadable. */
   readonly cacheRoot: string;
+  /**
+   * Runs the server with no Octant sandbox: only on Windows, outside Strict,
+   * which the launch policy decided. A Windows launch without it is refused,
+   * since Windows has no sandbox Octant can use yet.
+   */
+  readonly unconfined?: true;
 }
 
 export interface LanguageServerProcess {
@@ -97,6 +114,9 @@ export interface LanguageServerProcessPortOptions {
     args: ReadonlyArray<string>,
     options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv },
   ) => ChildProcess;
+  readonly platform?: NodeJS.Platform;
+  /** Ends a Windows server and every process it started; Windows has no process groups. */
+  readonly stopWindowsTree?: (pid: number) => Promise<WindowsProcessTreeStop>;
 }
 
 export class LanguageServerProcessPort {
@@ -105,9 +125,13 @@ export class LanguageServerProcessPort {
   readonly #receiptDirectory: string | undefined;
   readonly #processIdentity: ((pid: number) => Promise<string | undefined>) | undefined;
   readonly #spawn: NonNullable<LanguageServerProcessPortOptions["spawn"]>;
+  readonly #platform: NodeJS.Platform;
+  readonly #stopWindowsTree: (pid: number) => Promise<WindowsProcessTreeStop>;
 
   constructor(options: LanguageServerProcessPortOptions = {}) {
     this.#confinement = options.confinement ?? makeProcessConfinementLive();
+    this.#platform = options.platform ?? process.platform;
+    this.#stopWindowsTree = options.stopWindowsTree ?? ((pid) => stopWindowsProcessTree(pid));
     this.#egress = options.egress;
     this.#receiptDirectory = options.receiptDirectory;
     this.#processIdentity = options.processIdentity;
@@ -133,6 +157,8 @@ export class LanguageServerProcessPort {
     ]) {
       if (!isAbsolute(path)) return { status: "failed" };
     }
+    if (this.#platform === "win32") return this.#launchUnconfinedOnWindows(input);
+    if (input.unconfined === true) return { status: "confinement-unavailable" };
     const tooling = input.launchClass === "repo-tooling";
     const egressScope = input.egress;
     if (tooling && (this.#egress === undefined || egressScope === undefined)) {
@@ -162,6 +188,7 @@ export class LanguageServerProcessPort {
       executable: input.executable,
       args: input.args,
       boundRoot: input.checkoutRoot,
+      ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
       temporaryDirectory,
       additionalWriteRoots: [input.cacheDirectory],
       readRoots: [input.installRoot],
@@ -205,6 +232,7 @@ export class LanguageServerProcessPort {
       child = this.#spawn(launch.command, launch.args, {
         cwd: input.checkoutRoot,
         env: {
+          ...launch.environment,
           HOME: input.cacheDirectory,
           TMPDIR: temporaryDirectory,
           PATH: MINIMAL_PATH,
@@ -217,6 +245,7 @@ export class LanguageServerProcessPort {
       await closeNetwork();
       return { status: "failed" };
     }
+    trackSandboxChild(input.sandboxPolicy ?? sandboxToolPolicy(), child);
     const exited = new Promise<void>((resolve) => {
       if (child.exitCode !== null || child.signalCode !== null) resolve();
       else child.once("exit", () => resolve());
@@ -282,8 +311,129 @@ export class LanguageServerProcessPort {
     };
   }
 
+  /**
+   * A server on Windows, outside Strict. Windows has no sandbox Octant can use
+   * yet, so the server runs with the person's own reach, as an editor there
+   * starts it: no read-only checkout, no network wall and no egress proxy for
+   * `repo-tooling`, whose start still needed the person's approval. It keeps
+   * its private cache, a receipt a restarted host stops it from, and the
+   * Windows tree stop in place of a process group. An npm `.cmd` shim is read
+   * for the program it starts, since Windows runs a shim only through a shell.
+   */
+  async #launchUnconfinedOnWindows(
+    input: LanguageServerLaunchInput,
+  ): Promise<LanguageServerLaunchOutcome> {
+    if (
+      input.unconfined !== true ||
+      input.sandboxPolicy !== undefined ||
+      sandboxToolPolicy() !== undefined
+    )
+      return { status: "confinement-unavailable" };
+    const temporaryDirectory = join(input.cacheDirectory, "tmp");
+    try {
+      await prepareCacheDirectory(input.cacheRoot, input.cacheDirectory, temporaryDirectory);
+    } catch {
+      return { status: "failed" };
+    }
+    const program = resolveWindowsProviderProgram({
+      displayName: "This language server",
+      executable: input.executable,
+      args: input.args,
+      environment: process.env,
+    });
+    if (program.status === "refused") return { status: "failed" };
+    const environment: NodeJS.ProcessEnv = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      const name = key.toUpperCase();
+      if (value !== undefined && WINDOWS_PROCESS_ENVIRONMENT_NAMES.has(name))
+        environment[name] = value;
+    }
+    let child: ChildProcess;
+    try {
+      child = this.#spawn(program.command, program.args, {
+        cwd: input.checkoutRoot,
+        env: { ...environment, TEMP: temporaryDirectory, TMP: temporaryDirectory },
+      });
+    } catch {
+      return { status: "failed" };
+    }
+    const exited = new Promise<void>((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) resolve();
+      else child.once("exit", () => resolve());
+      child.once("error", () => resolve());
+    });
+    const { stdin, stdout, stderr, pid } = child;
+    const stop = () =>
+      pid === undefined
+        ? Promise.resolve("uncertain" as const)
+        : stopWindowsTreeConfirmed(pid, exited, this.#stopWindowsTree, STOP_GRACE_MS);
+    if (stdin === null || stdout === null || pid === undefined) {
+      await stop();
+      return { status: "failed" };
+    }
+    stderr?.resume();
+    let receipt: OwnedProcessReceiptHandle;
+    try {
+      receipt = await persistProcessReceipt(
+        {
+          supervisor: RECEIPT_SUPERVISOR,
+          ...(this.#receiptDirectory === undefined
+            ? {}
+            : { receiptDirectory: this.#receiptDirectory }),
+          ...(this.#processIdentity === undefined
+            ? {}
+            : { processIdentity: this.#processIdentity }),
+        },
+        input.ownerId,
+        pid,
+      );
+      await receipt.ready;
+    } catch {
+      await stop();
+      return { status: "failed" };
+    }
+    // A server's own children outlive it on Windows unless its tree is
+    // stopped, so the tree goes before the receipt does. A stop that failed,
+    // or a root not seen to exit, keeps the receipt, so a restarted host
+    // still stops the tree from it.
+    let finished: Promise<void> | undefined;
+    const finish = () => {
+      finished ??= (async () => {
+        if ((await stop()) === "uncertain") {
+          console.warn(
+            `Octant kept language server ${input.ownerId}'s ownership receipt: process ${pid} could not be shown stopped.`,
+          );
+          // Once the root is seen to exit, its tree is stopped again and the
+          // receipt goes only if that stop is confirmed.
+          void exited.then(async () => {
+            if ((await stop()) === "stopped") await receipt.remove().catch(() => undefined);
+          });
+          return;
+        }
+        await receipt.remove();
+      })();
+      return finished;
+    };
+    void exited.then(finish);
+    return {
+      status: "launched",
+      process: { stdin, stdout, exited, kill: finish },
+    };
+  }
+
   /** Ends every server a previous run of this host left behind. */
   async reconcile(): Promise<void> {
+    if (this.#platform === "win32") {
+      await reconcileWindowsProcessReceipts({
+        supervisor: RECEIPT_SUPERVISOR,
+        ...(this.#receiptDirectory === undefined
+          ? {}
+          : { receiptDirectory: this.#receiptDirectory }),
+        ...(this.#processIdentity === undefined ? {} : { processIdentity: this.#processIdentity }),
+        stopTree: this.#stopWindowsTree,
+      });
+      return;
+    }
     await reconcileProcessReceipts({
       supervisor: RECEIPT_SUPERVISOR,
       ...(this.#receiptDirectory === undefined ? {} : { receiptDirectory: this.#receiptDirectory }),

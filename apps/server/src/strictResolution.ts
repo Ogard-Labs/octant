@@ -1,4 +1,5 @@
 import { resolveStrict } from "@octant/domain";
+import { activeSandboxStrict } from "./process/sandboxRuntimePolicy";
 
 /**
  * What the host reads to decide Strict: each thread's own choice, its
@@ -35,6 +36,8 @@ export type StrictResolver = (threadId: string) => boolean;
  */
 export function createStrictResolver(reads: StrictReads): StrictResolver {
   return (threadId) => {
+    const admitted = activeSandboxStrict(threadId);
+    if (admitted !== undefined) return admitted;
     const code = reads.codeThread(threadId);
     if (code !== undefined) {
       return resolveStrict({

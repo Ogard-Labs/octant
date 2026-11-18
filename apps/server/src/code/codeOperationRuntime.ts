@@ -7,6 +7,7 @@ import { withHandoverSummary } from "../agentRun/conversationHandoff";
 import { projectExtraFolderRoots, validateQuestionnaireAnswer } from "@octant/domain";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
+import type { AccountSessionCarrier } from "../providers/accountSessionCarry";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type {
   CodeProviderFileReviewRequest,
@@ -145,7 +146,11 @@ import {
   type CodeRuntimeWorkRecordOutcome,
 } from "./codeRuntimeWorkRecorder";
 import {
+  APPROVAL_NOT_WAITING_MESSAGE,
   APPROVAL_POSTURE_CHANGED_MESSAGE,
+  APPROVAL_REFUSED_IN_PLAN_MESSAGE,
+  APPROVAL_SESSION_GONE_MESSAGE,
+  QUESTION_NOT_WAITING_MESSAGE,
   approvalAnswerUnderPosture,
   approvalPostureOf,
   clampTurnAccessPosture,
@@ -320,6 +325,7 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
       confinement.prepare({
         executable: input.executable,
         args: input.args,
+        ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
         boundRoot: input.boundRoot,
         ...(input.extraBoundRoots === undefined ? {} : { extraBoundRoots: input.extraBoundRoots }),
         temporaryDirectory: input.temporaryDirectory,
@@ -551,6 +557,11 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly supportsModelSwitch?: (thread: CodeThread) => boolean;
   /**
+   * Carries a thread's session to another account of the same provider on the
+   * first turn after a move; absent, every such move hands over as text.
+   */
+  readonly accountSessionCarrier?: AccountSessionCarrier;
+  /**
    * Whether the thread's provider reports it can cut its own session back
    * (`sessionRollback`), which a rewind's preview names. A host that cannot
    * say so previews a rewind as continuing with a text handoff.
@@ -625,11 +636,6 @@ export interface CodeOperationRuntimeOptions {
   readonly browserProfiles?: CodeAppManagedToolsOptions["browserProfiles"];
   /** The Project's Browser flows and the recorder; see the Code Browser tool. */
   readonly browserFlows?: CodeAppManagedToolsOptions["browserFlows"];
-  /**
-   * Whether an origin already holds a remembered "always allow" grant. Read
-   * live so a grant forgotten in Settings stops satisfying it at once.
-   */
-  readonly isBrowserOriginRemembered?: (origin: string) => boolean;
   /** The person's per-file Browser upload limit in bytes, read for each upload. */
   readonly browserUploadFileLimitBytes?: () => number;
   readonly browserUploadFileCountLimit?: () => number;
@@ -754,6 +760,8 @@ export interface CodeOperationRuntimeOptions {
    */
   /** Whether a thread runs in a server Project, on the checkout that Project derives. */
   readonly holdsServerThread?: (thread: CodeThread) => boolean;
+  /** Copies files a server thread's turn names by path to its attachments folder there. */
+  readonly transferServerAttachments?: CodeOperationServiceOptions["transferServerAttachments"];
   /** The login a server thread's terminal opens on its server. */
   readonly serverTerminalLogin?: CodeOperationServiceOptions["serverTerminalLogin"];
   /** Git on a server thread's server, for its Git panel. */
@@ -1473,11 +1481,17 @@ export function createCodeOperationRuntime(
   const operationAccess = (
     windowId: WindowId,
     command: CodeOperationCommand,
-  ): Pick<CodeThread, "executionPolicy" | "fullAccessSandbox"> => {
+  ): {
+    readonly access: Pick<CodeThread, "executionPolicy" | "fullAccessSandbox" | "strict">;
+    readonly strict: boolean;
+  } => {
     const stored =
       "threadId" in command ? options.persistence.readCodeThread(command.threadId) : undefined;
-    if (stored === undefined) return { executionPolicy: "plan" };
-    return authorityForTurn.effectiveThread?.(windowId, stored) ?? stored;
+    if (stored === undefined) return { access: { executionPolicy: "plan" }, strict: true };
+    return {
+      access: authorityForTurn.effectiveThread?.(windowId, stored) ?? stored,
+      strict: options.resolveStrict?.(stored.id) ?? true,
+    };
   };
   const readRuntimeWorks = options.persistence.readCodeRuntimeWorks;
   const service = new CodeOperationService({
@@ -1522,6 +1536,9 @@ export function createCodeOperationRuntime(
     ...(options.holdsServerThread === undefined
       ? {}
       : { holdsServerThread: options.holdsServerThread }),
+    ...(options.transferServerAttachments === undefined
+      ? {}
+      : { transferServerAttachments: options.transferServerAttachments }),
     ...(options.serverTerminalLogin === undefined
       ? {}
       : { serverTerminalLogin: options.serverTerminalLogin }),
@@ -2063,17 +2080,17 @@ export function createCodeOperationRuntime(
       try {
         const command = decodeCodeOperationCommand(rawCommand);
         // A thread's terminals, tests and other operations run on a host
-        // without Octant's sandbox only at the level that uses none, read from
-        // the posture a live turn narrows it to. An operation that names no
-        // thread has no level to read, so it refuses there. A provider turn
-        // runs below Full access with the provider's own approvals, so it is
-        // judged by its own rule at its own clamped level when it starts.
+        // without Octant's sandbox outside Strict, at the posture a live turn
+        // narrows it to, and refuse under Strict or a kept sandbox. An
+        // operation that names no thread has no Strict value to read, so it
+        // refuses there. A provider turn is judged by its own rule at its own
+        // clamped level when it starts.
         const sandboxRefusal =
           command.kind === "start-provider-turn"
             ? undefined
             : hostSandboxRefusal({
                 platform: process.platform,
-                access: operationAccess(windowId, command),
+                ...operationAccess(windowId, command),
               });
         if (sandboxRefusal !== undefined)
           throw new CodeServiceError(
@@ -3440,7 +3457,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     Extract<CodeOperationCommand, { kind: "start-provider-turn" }>
   >();
   readonly #active: CodeActiveTurns;
-  readonly #approvedBrowserContexts = new Set<string>();
   // Full access may open without approval, but recovery still needs the
   // original controller identity. Keeping this separate never manufactures a grant.
   readonly #boundBrowserContexts = new Set<string>();
@@ -3816,6 +3832,73 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         return failStart(REWIND_HANDOFF_REFUSALS["handoff-unreadable"]);
       }
     }
+    // A thread the person moved to another account of the same provider takes
+    // its own session along when the provider's session files can be copied
+    // into the new account (maintainer decision, 2026-11-17): the new account
+    // resumes it under this turn's session, and no text goes. A copy that is
+    // not possible leaves the text handoff chosen above, with the reason on
+    // its record, and a recovered start that disclosed a carried session and
+    // can no longer carry it refuses rather than send something else.
+    const carrier = this.#options.accountSessionCarrier;
+    if (
+      carrier !== undefined &&
+      rewind === undefined &&
+      forkOrigin === undefined &&
+      !remoteThread &&
+      providerSwitch !== undefined &&
+      providerSwitch.resumeCursor !== undefined &&
+      command.toolCatalogHandoff !== true &&
+      // A session goes on under another model only where the provider carries
+      // it there, as a follow-up on the same account does.
+      (String(providerSwitch.modelId) === String(input.thread.modelId) ||
+        this.#options.supportsModelSwitch?.(input.thread) === true) &&
+      switchHandoff?.status === "ready" &&
+      switchHandoff.journaled !== "text" &&
+      carrier.sameProvider(providerSwitch.providerInstanceId, input.thread.providerInstanceId)
+    ) {
+      if (input.folderCurrent?.() === false || input.admissionCurrent?.() === false)
+        return refuseRevokedAdmission();
+      const carried = await carrier
+        .carry({
+          fromInstanceId: providerSwitch.providerInstanceId,
+          toInstanceId: input.thread.providerInstanceId,
+          resumeCursor: providerSwitch.resumeCursor,
+          sessionId: decodeProviderSessionId(input.sessionId),
+          projectRoot: input.providerRoot ?? input.checkoutRoot,
+          mode: "code",
+          modelId: input.thread.modelId,
+        })
+        .catch(() => ({ status: "text", cause: "session-not-copied" }) as const);
+      if (carried.status === "carried") {
+        resumeCursor = carried.resumeCursor;
+        switchHandoff = {
+          status: "ready",
+          blocks: [],
+          ...(switchHandoff.journaled === undefined
+            ? {
+                record: {
+                  kind: "context-handoff-attached",
+                  reason: "account-move-native-session",
+                  previousProviderInstanceId: providerSwitch.providerInstanceId,
+                  previousModelId: providerSwitch.modelId,
+                  previousSessionId: providerSwitch.sessionId,
+                  providerInstanceId: input.thread.providerInstanceId,
+                  modelId: input.thread.modelId,
+                  nativeSessionTransferred: true,
+                },
+              }
+            : { journaled: switchHandoff.journaled }),
+        };
+      } else if (switchHandoff.journaled === "native-session") {
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return failStart(PROVIDER_SWITCH_HANDOFF_REFUSALS["handoff-unreadable"]);
+      } else if (switchHandoff.record?.reason === "provider-switch") {
+        switchHandoff = {
+          ...switchHandoff,
+          record: { ...switchHandoff.record, accountMoveTextCause: carried.cause },
+        };
+      }
+    }
     // Otherwise the fork reads its source's conversation through the fork
     // point as text, journaled like a provider switch's handoff. A fork that
     // can do neither refuses rather than starting from nothing while its
@@ -3870,6 +3953,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         handoff === undefined ||
         handoff.record?.reason === "fork-native-session" ||
         handoff.record?.reason === "rewind-native-session" ||
+        handoff.record?.reason === "account-move-native-session" ||
         ("journaled" in handoff && handoff.journaled === "native-session")
       )
         continue;
@@ -4298,9 +4382,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       const leftSession =
         journaled.reason === "provider-switch" ||
         journaled.reason === "rewind" ||
-        journaled.reason === "rewind-native-session";
+        journaled.reason === "rewind-native-session" ||
+        journaled.reason === "account-move-native-session";
       const subject = leftSession
-        ? journaled.reason === "provider-switch"
+        ? journaled.reason === "provider-switch" ||
+          journaled.reason === "account-move-native-session"
           ? "switch"
           : "rewind"
         : "fork";
@@ -4328,7 +4414,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         return refused({ subject: "inherited", reason: "source-changed" });
       if (
         journaled.reason === "fork-native-session" ||
-        journaled.reason === "rewind-native-session"
+        journaled.reason === "rewind-native-session" ||
+        journaled.reason === "account-move-native-session"
       )
         return { status: "ready", blocks: [], journaled: "native-session" };
       try {
@@ -4626,7 +4713,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       active.harnessQuestions.delete(input.requestId);
       return answeredTurnState(active.state);
     }
-    if (active.connection === undefined) return turnState("failed");
+    if (active.connection === undefined) {
+      return turnState("failed", { category: "failed", message: APPROVAL_SESSION_GONE_MESSAGE });
+    }
     const questionnaire = active.providerQuestionnaires.get(input.requestId);
     if (
       questionnaire !== undefined &&
@@ -4753,7 +4842,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return;
     }
     // A level change is the person's alone: no reviewer answers it.
-    if (event.levelChange !== undefined) {
+    if (event.levelChange !== undefined || event.requiresUser === true) {
       this.#persistNormalized(active, event);
       return;
     }
@@ -4935,19 +5024,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       active.thread.modelId,
       contextId,
     ]);
-  }
-
-  #askBrowserApproval(
-    active: ActiveTurn,
-    origin: string,
-    signal?: AbortSignal,
-  ): Promise<"approved" | "denied" | "cancelled" | "expired"> {
-    return this.#askToolApproval(
-      active,
-      `Allow this thread to use an isolated browser session at ${origin.slice(0, 512)}? Shell and file access stay unchanged.`,
-      origin.slice(0, 2048),
-      signal,
-    );
   }
 
   /**
@@ -5259,7 +5335,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     input: Parameters<CodeOperationTurnPort["answerApproval"]>[0],
     ownerCurrent?: () => boolean,
   ) {
-    if (ownerCurrent !== undefined && !ownerCurrent()) return turnState("failed");
+    if (ownerCurrent !== undefined && !ownerCurrent())
+      return turnState("failed", { category: "failed", message: APPROVAL_NOT_WAITING_MESSAGE });
     const active = this.#owned(input.thread, input.checkoutRoot);
     const providerRequestId = active?.approvals.get(input.approvalId);
     const turnPosture =
@@ -5296,26 +5373,32 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         });
       }
     }
+    // Plan never approves. A grant persistence changed mid-turn is no reason
+    // to refuse: the running turn keeps the persistence it started with, and an
+    // app-managed ask remembers nothing, so its allow covers this one call.
+    const refusedInPlan = turnState("failed", {
+      category: "failed",
+      message: APPROVAL_REFUSED_IN_PLAN_MESSAGE,
+    });
     if (active !== undefined && toolApproval !== undefined) {
-      if (
-        input.decision === "approved" &&
-        (turnPosture === "plan" ||
-          active.thread.permissionPersistence !== input.thread.permissionPersistence)
-      )
-        return turnState("failed");
+      if (input.decision === "approved" && turnPosture === "plan") return refusedInPlan;
       toolApproval.finish(input.decision === "approved" ? "approved" : "denied");
+      if (ownerCurrent === undefined)
+        this.#recordApprovalAnswered(active, input.approvalId, input.decision);
       return answeredTurnState(active.state);
     }
     if (active === undefined || providerRequestId === undefined)
       return this.#settleDeadTurnRequest(input.thread, "approval", String(input.approvalId));
-    if (
-      active.connection === undefined ||
-      (input.decision === "approved" &&
-        (turnPosture === "plan" ||
-          active.thread.permissionPersistence !== input.thread.permissionPersistence))
-    )
-      return turnState("failed");
+    if (active.connection === undefined)
+      return turnState("failed", { category: "failed", message: APPROVAL_SESSION_GONE_MESSAGE });
+    if (input.decision === "approved" && turnPosture === "plan") return refusedInPlan;
     const connection = active.connection;
+    // The provider session was opened with the persistence the turn started
+    // with. After the person changed it, an allow is delivered for this one
+    // call, so nothing is remembered beyond what either setting allows.
+    const once =
+      ownerCurrent !== undefined ||
+      active.thread.permissionPersistence !== input.thread.permissionPersistence;
     if (ownerCurrent === undefined) {
       active.approvals.delete(input.approvalId);
       active.approvalPostures.delete(input.approvalId);
@@ -5332,14 +5415,42 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           sessionId: active.sessionId as never,
           requestId: providerRequestId,
           approved: input.decision === "approved",
-          ...(ownerCurrent === undefined ? {} : { scope: "once" as const }),
+          ...(once ? { scope: "once" as const } : {}),
         });
       }),
     );
+    // An owner's answer journals `owner-approval-settled` instead.
+    if (ownerCurrent === undefined)
+      this.#recordApprovalAnswered(active, input.approvalId, input.decision);
     // A denial goes back to the model, which adjusts, as on the provider's
     // own: no count of denials ends the turn (Architecture: "Octant adds no
     // restrictions of its own unless Strict is on", in Strict too).
     return answeredTurnState(active.state);
+  }
+
+  /**
+   * Journals that a person's answer reached the asker, on the turn that asked.
+   * A re-read of the turn's stream otherwise offers the ask again, and its
+   * Approve is refused because nothing waits for it. The answer was already
+   * delivered, so a journal that refuses the row leaves the result as it is.
+   */
+  #recordApprovalAnswered(
+    active: ActiveTurn,
+    approvalId: string,
+    decision: "approved" | "denied",
+  ): void {
+    try {
+      const frame = this.#appendTurnEvent(active, {
+        event: {
+          kind: "approval-answered",
+          approvalId: CodeApprovalId.make(approvalId),
+          decision,
+        },
+      });
+      active.cursor = frame.cursor;
+    } catch {
+      // The provider already has the answer; the stream keeps the ask.
+    }
   }
 
   /**
@@ -5433,8 +5544,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     kind: "approval" | "input",
     requestId: string,
   ): ReturnType<typeof turnState> {
+    // Every refusal here names its reason: a bare failure reads in the
+    // renderer as "the turn changed", which said nothing about why.
+    const notWaiting = turnState("failed", {
+      category: "failed",
+      message: kind === "approval" ? APPROVAL_NOT_WAITING_MESSAGE : QUESTION_NOT_WAITING_MESSAGE,
+    });
     const history = this.#events.historyForThread(thread.id);
-    if (history.status !== "ok") return turnState("failed");
+    if (history.status !== "ok") return notWaiting;
     const liveOperationId = this.#active.get(String(thread.id))?.operationId;
     let owner:
       | {
@@ -5465,7 +5582,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         owner.unsettled = event.result.state === "running" || event.result.state === "waiting";
       }
     }
-    if (owner === undefined || !owner.unsettled) return turnState("failed");
+    if (owner === undefined || !owner.unsettled) return notWaiting;
     const failure = {
       category: "failed",
       message:
@@ -5473,7 +5590,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     } as const;
     return this.#interruptOwner(thread.id, owner, failure)
       ? turnState("interrupted", failure)
-      : turnState("failed");
+      : notWaiting;
   }
 
   /**
@@ -5853,29 +5970,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               this.#boundBrowserContexts.add(key);
               active.browserGrantKeys.add(key);
             },
-            isApproved: (contextId) => {
-              const key = this.#browserApprovalKey(active, contextId);
-              const approved = this.#approvedBrowserContexts.has(key);
-              if (approved) active.browserGrantKeys.add(key);
-              return approved;
-            },
-            request: (origin, signal) => this.#askBrowserApproval(active, origin, signal),
-            ...(this.#options.isBrowserOriginRemembered === undefined
-              ? {}
-              : { isOriginRemembered: this.#options.isBrowserOriginRemembered }),
-            remember: (contextId) => {
-              if (this.#approvedBrowserContexts.size >= 256) {
-                const oldest = this.#approvedBrowserContexts.values().next().value;
-                if (oldest !== undefined) this.#approvedBrowserContexts.delete(oldest);
-              }
-              const key = this.#browserApprovalKey(active, contextId);
-              this.#approvedBrowserContexts.add(key);
-              active.browserGrantKeys.add(key);
-            },
             forget: (contextId) => {
-              const key = this.#browserApprovalKey(active, contextId);
-              this.#approvedBrowserContexts.delete(key);
-              this.#boundBrowserContexts.delete(key);
+              this.#boundBrowserContexts.delete(this.#browserApprovalKey(active, contextId));
             },
           },
           ...(this.#options.browserSignIn === undefined
@@ -6213,7 +6309,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                   let event: HandoffAttached;
                   if (
                     record.reason === "fork-native-session" ||
-                    record.reason === "rewind-native-session"
+                    record.reason === "rewind-native-session" ||
+                    record.reason === "account-move-native-session"
                   )
                     event = record;
                   else {
@@ -6557,7 +6654,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    */
   #approvalPosture(active: ActiveTurn): string | undefined {
     const thread = this.#effectiveThread(active.windowId, active.thread.id);
-    return thread === undefined ? undefined : approvalPostureOf(thread);
+    // The running turn keeps the grant persistence it started with, and an
+    // allow answered after a change is delivered once, so a persistence change
+    // alone does not ask again.
+    return thread === undefined
+      ? undefined
+      : approvalPostureOf({
+          ...thread,
+          permissionPersistence: active.thread.permissionPersistence,
+        });
   }
 
   #effectiveThread(windowId: WindowId, threadId: CodeThreadId): CodeThread | undefined {
@@ -7149,10 +7254,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     for (const contextId of active.browserProfileContexts)
       this.#options.browserProfiles?.forgetBinding(contextId);
     active.browserProfileContexts.clear();
-    for (const key of active.browserGrantKeys) {
-      this.#approvedBrowserContexts.delete(key);
-      this.#boundBrowserContexts.delete(key);
-    }
+    for (const key of active.browserGrantKeys) this.#boundBrowserContexts.delete(key);
     active.browserGrantKeys.clear();
   }
 
@@ -7482,6 +7584,9 @@ function normalizedOperationEvent(
       state: event.status === "in-progress" ? "running" : ((event.status ?? "waiting") as never),
       summary:
         boundProviderSummary(event.text ?? "Provider task progress.") ?? "Provider task progress.",
+      ...(event.runningText === undefined
+        ? {}
+        : { runningSummary: boundProviderSummary(event.runningText) }),
     };
   if (event.category === "task-list")
     return {

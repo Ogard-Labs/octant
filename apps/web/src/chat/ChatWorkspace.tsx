@@ -28,11 +28,12 @@ import type {
 } from "@octant/contracts";
 import type { ThreadMentionClient } from "@octant/client-runtime";
 import {
-  buildAttachmentCapability,
   buildImageAttachmentCapability,
+  chatFileRefusal,
   COMPOSER_IMAGE_MEDIA_TYPES,
   supportsAttachmentFile,
 } from "./composerAttachmentCapability";
+import { attachmentMediaType, isImageAttachment } from "../composer/attachmentMediaType";
 import { useSeesImages } from "../harness/useSeesImages";
 import { pastedImageName } from "./composerImagePaste";
 import { RewindDialog, composerAfterRewind } from "../transcript/RewindDialog";
@@ -672,7 +673,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       );
     } catch {
       setBrowserApprovalMessage(
-        "Browser approval could not be sent. Keep this request open and retry.",
+        "Could not send the browser approval. Keep this open and try again.",
       );
     } finally {
       setToolApprovalBusy(false);
@@ -714,9 +715,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       modelId: view.thread.modelId,
     },
   });
-  const attachmentCapability: ChatComposerAttachmentCapability = describesImages
-    ? { kind: "supported" }
-    : buildAttachmentCapability(providerState.observation);
+  // Chat takes a file of any type: the model gets it natively where it takes
+  // the type, and otherwise as text when it is text, which any model reads.
+  const attachmentCapability: ChatComposerAttachmentCapability = { kind: "supported" };
   // Images ride the ordinary attachment path but need their own honest check:
   // a provider can accept documents while the selected model rejects images.
   const imageAttachmentCapability: ChatComposerAttachmentCapability = describesImages
@@ -812,7 +813,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     if (String(activeChatTurns(view?.turns ?? []).at(-1)?.id) !== open.tailTurnId) {
       setRewind({
         ...open,
-        message: "The conversation changed while this was open. Close it and try again.",
+        message: "The conversation changed. Close this and try again.",
       });
       return;
     }
@@ -990,7 +991,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const submitTurn = async (draft: string, toolCatalogHandoff = false): Promise<boolean> => {
     if (props.controller.draftSideChatReturnsInvalid) {
       setSendNotice(
-        "The saved Side Chat reference is unreadable. Clear this draft and return the reply again before sending.",
+        "The Side Chat link is broken. Clear this draft and return the reply again before sending.",
       );
       return false;
     }
@@ -1143,7 +1144,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                           ? {}
                           : {
                               unavailableReason:
-                                "Turn off the model pool first; its models stay on the current account.",
+                                "Turn off the model pool first. Its models stay on this account.",
                             }),
                         accounts: accountMoveTargets.map((group) => ({
                           id: group.instance.id,
@@ -1614,7 +1615,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     ? {}
                     : {
                         unavailableReason:
-                          "Turn off the model pool first; its models stay on the current account.",
+                          "Turn off the model pool first. Its models stay on this account.",
                       })}
                   onUsageLimitHandoffChange={async (providerInstanceId) => {
                     const result = await props.controller.execute({
@@ -1691,11 +1692,15 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               // A pasted image usually has no file name; name it once so the chip,
               // its remove control, and any failure message all agree.
               const displayName = pastedImageName(file);
+              const mediaType = attachmentMediaType(file);
               const describedImage =
-                describesImages && COMPOSER_IMAGE_MEDIA_TYPES.includes(file.type);
+                describesImages && COMPOSER_IMAGE_MEDIA_TYPES.includes(mediaType);
               if (
+                isImageAttachment(file) &&
                 !describedImage &&
-                !supportsAttachmentFile(providerState.observation, view.thread.modelId, file)
+                !supportsAttachmentFile(providerState.observation, view.thread.modelId, {
+                  type: mediaType,
+                })
               ) {
                 setAttachmentStatus({
                   kind: "failed",
@@ -1716,6 +1721,24 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               void (async () => {
                 try {
                   const buffer = await file.arrayBuffer();
+                  // A file that is not an image goes to the model natively or
+                  // as text; one that is neither is refused before upload.
+                  const refusal = isImageAttachment(file)
+                    ? undefined
+                    : chatFileRefusal(
+                        providerState.observation,
+                        view.thread.modelId,
+                        { type: mediaType },
+                        new Uint8Array(buffer),
+                        displayName,
+                      );
+                  if (refusal !== undefined) {
+                    cancelledUploadsRef.current.delete(String(attachmentId));
+                    settleUpload();
+                    if (mountedRef.current && activeThreadIdRef.current === String(view.thread.id))
+                      setAttachmentStatus({ kind: "failed", message: refusal });
+                    return;
+                  }
                   if (
                     !mountedRef.current ||
                     activeThreadIdRef.current !== String(view.thread.id) ||
@@ -1732,7 +1755,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     threadId: view.thread.id,
                     attachmentId,
                     displayName,
-                    mediaType: file.type,
+                    mediaType,
                     bytes: new Uint8Array(buffer),
                   });
                   if (
@@ -1904,7 +1927,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                       ? "Waiting for the host to reconnect."
                       : "The host message queue is unavailable."
                     : messageQueue.uncertain
-                      ? "Check the previous queue change before sending another message."
+                      ? "Check the last queue change before sending another message."
                       : "Waiting for the host queue…",
                 })}
             onRemoveExtensionSelection={removeExtensionSelection}
@@ -2251,7 +2274,7 @@ function researchBackend(
     return !webSearchReady || !effectiveAppManagedTools
       ? {
           kind: "unavailable",
-          reason: "No web search backend is ready for this provider under the data policy.",
+          reason: "No web search is available for this provider under the data policy.",
         }
       : { kind: "selected", backend: "searxng" };
   }

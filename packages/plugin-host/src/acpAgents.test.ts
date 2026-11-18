@@ -3,6 +3,7 @@ import {
   ACP_AGENT_DISCOVERED,
   ACP_REGISTRY_AGENTS,
   acpAgentCommandRefusal,
+  acpAgentEnableRefusal,
   addRegistryAcpAgent,
   decideAcpAgentLaunch,
 } from "./acpAgents";
@@ -65,12 +66,45 @@ describe("adding any ACP agent", () => {
     });
   });
 
+  it("refuses to enable an agent before it is installed and trusted", () => {
+    expect(acpAgentEnableRefusal(ACP_AGENT_DISCOVERED)).toBe("not-installed");
+    expect(acpAgentEnableRefusal({ installed: true, trusted: false, enabled: false })).toBe(
+      "not-trusted",
+    );
+    expect(
+      acpAgentEnableRefusal({ installed: true, trusted: true, enabled: false }),
+    ).toBeUndefined();
+  });
+
+  it("lists every registry distribution at an exact release, binaries over HTTPS only", () => {
+    for (const agent of ACP_REGISTRY_AGENTS) {
+      const distribution = agent.distribution;
+      if (distribution.kind === "binary") {
+        expect(new URL(distribution.archive).protocol).toBe("https:");
+        expect(distribution.command.startsWith("/")).toBe(false);
+        if (distribution.sha256 !== undefined)
+          expect(distribution.sha256).toMatch(/^[0-9a-f]{64}$/);
+      } else {
+        expect(distribution.version).toMatch(/^\d+\.\d+\.\d+$/);
+        expect(distribution.package).not.toContain("@" + distribution.version);
+      }
+    }
+  });
+
   it("refuses a command that is not an absolute path or carries control characters", () => {
     expect(acpAgentCommandRefusal({ command: "my-agent", args: [] })).toBe("not-absolute");
     expect(acpAgentCommandRefusal({ command: "/opt/agent", args: ["acp\n--yolo"] })).toBe(
       "control-character",
     );
     expect(acpAgentCommandRefusal({ command: "/opt/agent", args: ["acp"] })).toBeUndefined();
+    for (const secret of ["--api-key=sk-1", "--token", "-password", "OPENAI_API_KEY=sk-1"]) {
+      expect(acpAgentCommandRefusal({ command: "/opt/agent", args: ["acp", secret] })).toBe(
+        "secret-argument",
+      );
+    }
+    expect(
+      acpAgentCommandRefusal({ command: "/opt/agent", args: ["--agent-engine=v3", "--acp=true"] }),
+    ).toBeUndefined();
     const auggie = ACP_REGISTRY_AGENTS.find((agent) => agent.registryId === "auggie");
     expect(addRegistryAcpAgent(auggie!, "auggie")).toEqual({
       status: "refused",

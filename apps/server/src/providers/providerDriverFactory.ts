@@ -7,13 +7,15 @@ import {
   type ProviderInstanceId,
 } from "@octant/contracts";
 import {
+  CLAUDE_ACCOUNT_PROFILE,
   CODEX_ACCOUNT_PROFILE,
   defaultProviderAccountDirectory,
   effectiveClaudeAccountConfigDirectory,
   isAcpAgentInstance,
+  isAddedAcpAgentInstance,
   isImageProfileDriverKind,
 } from "@octant/domain";
-import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import type { ProviderDriver, ProviderSessionOwnership } from "@octant/provider-sdk/driver";
 import type { McpPlanServerProvider } from "@octant/contracts/mcp-plan-read-only";
 import { lastClaudeHostEnvironmentSnapshot } from "./claudeAccountDirectory";
 import {
@@ -34,8 +36,11 @@ import {
 } from "../network/providerRuntimeNetwork";
 import type { ClaudeProcessPort } from "./claudeProcess";
 import { makeCodexDriver } from "./codexDriver";
+import { withAccountSignIn } from "./accountSignIn";
+import { isolatedClaudeAccountEnvironment } from "./claudeAccountIsolation";
 import type { CodexProcessPort } from "./codexProcess";
 import { makeAcpDriver } from "./acpDriver";
+import { addedAcpAgentProfile, withAddedAcpAgentLaunch } from "./addedAcpAgent";
 import type { AcpProcessPort } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind } from "./acpProfiles";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
@@ -76,6 +81,8 @@ export interface ProviderDriverFactoryOptions {
   readonly claudeServerAccess?: ProviderServerAccessPort;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
+  /** Which runtime sessions an Octant thread holds, handed to every driver that takes up its own. */
+  readonly sessionOwnership?: ProviderSessionOwnership;
   /** The host's process authority clock, which Claude's pre-tool grants expire on. */
   readonly claudeAuthorityNow?: () => number;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
@@ -151,6 +158,29 @@ export function makeProviderDriver(
         }
       : driver;
   }
+  if (isAddedAcpAgentInstance(instance)) {
+    const install = instance.configuration.install;
+    if (
+      options.acpProcess === undefined ||
+      options.acpHome === undefined ||
+      install === undefined
+    ) {
+      throw new ProviderDriverConfigurationError(
+        install === undefined ? `Install ${instance.displayName} before starting it.` : undefined,
+      );
+    }
+    return withAddedAcpAgentLaunch(
+      makeAcpDriver({
+        profile: addedAcpAgentProfile(instance),
+        instanceId: instance.id,
+        binaryPath: install.executable,
+        managedHome: options.acpHome("acp-agent", instance.id),
+        process: options.acpProcess,
+        runtimeRegistry: options.runtimeRegistry,
+      }),
+      instance,
+    );
+  }
   const readPlanMcpServers = options.planMcpServers;
   switch (instance.driverKind) {
     case "opencode":
@@ -170,6 +200,9 @@ export function makeProviderDriver(
           ...(options.protectedPaths === undefined
             ? {}
             : { protectedPaths: options.protectedPaths }),
+          ...(options.sessionOwnership === undefined
+            ? {}
+            : { sessionOwnership: options.sessionOwnership }),
         }),
         // Plan windows come from the account behind the CLI's own sign-in,
         // not from the runtime, so both OpenCode lines report them alike.
@@ -206,7 +239,14 @@ export function makeProviderDriver(
       }
       const codexHome = effectiveCodexAccountHome(instance, hostEnvironment, homedir());
       const readCodexOwnMemory = options.providerOwnMemory;
-      return makeCodexDriver({
+      const readProtectedPaths = options.protectedPaths;
+      const codexEnvironment = codexAccountProcessEnvironment({
+        binaryPath: instance.configuration.binaryPath,
+        hostEnvironment,
+        codexHome,
+        ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
+      });
+      const codexDriver = makeCodexDriver({
         ...(readPlanMcpServers === undefined
           ? {}
           : { planMcpServers: () => readPlanMcpServers("codex") }),
@@ -218,12 +258,7 @@ export function makeProviderDriver(
         process: options.codexProcess,
         runtimeRegistry: options.runtimeRegistry,
         permissionPersistence: options.permissionPersistence,
-        environment: codexAccountProcessEnvironment({
-          binaryPath: instance.configuration.binaryPath,
-          hostEnvironment,
-          codexHome,
-          ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
-        }),
+        environment: codexEnvironment,
         openEnvironment: codexAccountProcessEnvironment({
           binaryPath: instance.configuration.binaryPath,
           hostEnvironment,
@@ -234,9 +269,20 @@ export function makeProviderDriver(
         ...(options.credentialResolver === undefined
           ? {}
           : { credentialResolver: options.credentialResolver }),
+        ...(readProtectedPaths === undefined
+          ? {}
+          : { protectedSignIns: () => readProtectedPaths().atFullAccess }),
+      });
+      // Settings signs the account in with its own `codex login`, under its home.
+      return withAccountSignIn(codexDriver, {
+        instanceId: instance.id,
+        binaryPath: instance.configuration.binaryPath,
+        args: CODEX_ACCOUNT_PROFILE.signInArgv,
+        environment: codexEnvironment,
+        codeEntry: false,
       });
     }
-    case "claude":
+    case "claude": {
       if (
         options.claudeProcess === undefined ||
         options.claudeSdk === undefined ||
@@ -286,7 +332,7 @@ export function makeProviderDriver(
       const configDirectory = effectiveClaudeAccountConfigDirectory(instance, homedir());
       const readArtifactDelivery = options.claudeArtifactDelivery;
       const readClaudeOwnMemory = options.providerOwnMemory;
-      return makeClaudeDriver({
+      const claudeDriver = makeClaudeDriver({
         ...(readPlanMcpServers === undefined
           ? {}
           : { planMcpServers: () => readPlanMcpServers("claude") }),
@@ -303,7 +349,25 @@ export function makeProviderDriver(
         instanceId: instance.id,
         binaryPath: instance.configuration.binaryPath,
         authentication: instance.configuration.authentication,
+        ...(instance.configuration.gatewayBaseUrl === undefined
+          ? {}
+          : { gatewayBaseUrl: instance.configuration.gatewayBaseUrl }),
         ...(configDirectory === undefined ? {} : { configDirectory }),
+        // Every Claude account's directory by the rule its launch uses, so a
+        // thread moved between two of them can carry its session across.
+        accountDirectory: (instanceId) => {
+          const peer = options.claudeInstances?.find(
+            (candidate) => String(candidate.id) === String(instanceId),
+          );
+          if (peer === undefined || peer.driverKind !== "claude") return undefined;
+          const hostDirectory = hostEnvironment.CLAUDE_CONFIG_DIR?.trim();
+          return (
+            effectiveClaudeAccountConfigDirectory(peer, homedir()) ??
+            (hostDirectory !== undefined && isAbsolute(hostDirectory)
+              ? hostDirectory
+              : join(homedir(), ".claude"))
+          );
+        },
         process: options.claudeProcess,
         sdk: options.claudeSdk,
         ...(options.claudeRuntimeNetwork === undefined
@@ -323,6 +387,26 @@ export function makeProviderDriver(
           ? {}
           : { credentialResolver: options.credentialResolver }),
       });
+      // An API-key or gateway account has nothing to sign in. A subscription account signs
+      // in with its own `claude auth login`: an extra account under its
+      // directory with inherited Claude credentials dropped, the implicit
+      // first account as the person's own terminal would run it.
+      if (instance.configuration.authentication !== "subscription") return claudeDriver;
+      return withAccountSignIn(claudeDriver, {
+        instanceId: instance.id,
+        binaryPath: instance.configuration.binaryPath,
+        args: CLAUDE_ACCOUNT_PROFILE.signInArgv,
+        environment:
+          configDirectory === undefined
+            ? hostEnvironment
+            : isolatedClaudeAccountEnvironment({
+                hostEnvironment,
+                configDirectory,
+                authentication: "subscription",
+              }),
+        codeEntry: true,
+      });
+    }
     case "pi":
       if (options.piProcess === undefined || options.piHome === undefined) {
         throw new ProviderDriverConfigurationError();

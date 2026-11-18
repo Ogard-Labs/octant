@@ -10,7 +10,7 @@ import {
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "../transcript/CodeBlock";
-import { AppWindow, ExternalLink, Link2 } from "lucide-react";
+import { AppWindow, ExternalLink, Link2 } from "../ui/icons";
 import {
   OctantContextMenuContent,
   OctantContextMenuItem,

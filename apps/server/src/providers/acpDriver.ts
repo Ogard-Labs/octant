@@ -1,3 +1,4 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { compactAcpConversation } from "./acpCompaction";
 import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
 import { readAcpFileReview } from "./acpFileReview";
@@ -26,7 +27,9 @@ import {
   type ProviderToolAnswer,
   type ProviderToolDefinition,
   type ProviderApprovalCall,
+  type ProviderTurnInput,
 } from "@octant/contracts";
+import { attachedFileText } from "../attachments/attachedFiles";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import {
   normalizeAcpElicitation,
@@ -69,7 +72,7 @@ import {
   type AcpConfigOptionsResult,
   type AcpMcpHttpServer,
   type AcpNewSessionResult,
-  type AcpPromptImage,
+  type AcpPromptAttachment,
   type AcpPromptResult,
   type AcpServerRequest,
   type AcpServerRequestMessage,
@@ -111,7 +114,7 @@ export interface AcpClientPort {
   readonly prompt: (
     sessionId: string,
     prompt: string,
-    images?: ReadonlyArray<AcpPromptImage>,
+    attachments?: ReadonlyArray<AcpPromptAttachment>,
   ) => Promise<AcpPromptResult>;
   readonly setConfigOption: (
     sessionId: string,
@@ -131,6 +134,7 @@ export interface AcpClientPort {
 }
 
 export interface AcpDriverOptions {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly profile: AcpProviderProfile;
   readonly instanceId: ProviderInstanceId;
   readonly binaryPath: string;
@@ -177,8 +181,8 @@ interface AcpRetainedRuntime {
   readonly client: AcpClientPort;
   readonly managedTools: AcpManagedToolsLease | undefined;
   readonly appManagedTools: ProviderCapabilitySupport;
-  /** Whether this process's `initialize` reply advertised image prompt blocks. */
-  readonly imageInput: boolean;
+  /** The prompt blocks this process's `initialize` reply advertised beyond text. */
+  readonly promptInputs: AcpPromptInputs;
   readonly version: string;
   readonly commands: Set<string>;
   readonly compatibility: string;
@@ -404,15 +408,72 @@ function providerFailure(
   }
 }
 
-const ACP_IMAGE_INPUT_MODALITIES: readonly ProviderInputModality[] = ["text", "image"];
+interface AcpPromptInputs {
+  /** `promptCapabilities.image`: the agent takes `image` blocks. */
+  readonly image: boolean;
+  /** `promptCapabilities.embeddedContext`: the agent takes embedded `resource` blocks. */
+  readonly embeddedContext: boolean;
+}
 
 /**
- * Whether the agent's own `initialize` reply says it takes image prompt
- * blocks. Attachments reach an ACP agent only then; otherwise it stays
- * text only (maintainer decision, 2026-11-14).
+ * What the agent's own `initialize` reply says it takes beyond text. A file
+ * reaches an ACP agent natively only as a block it advertised: an image as an
+ * `image` block, any other file as an embedded `resource`; otherwise the agent
+ * stays text only (maintainer decision, 2026-11-14) and a Work or Code turn
+ * names the file by its path in the thread's attachments folder.
  */
-function acceptsImagePrompts(initialized: AcpConnection["initialized"]): boolean {
-  return initialized.agentCapabilities.promptCapabilities?.image === true;
+function acceptedPromptInputs(initialized: AcpConnection["initialized"]): AcpPromptInputs {
+  const prompt = initialized.agentCapabilities.promptCapabilities;
+  return { image: prompt?.image === true, embeddedContext: prompt?.embeddedContext === true };
+}
+
+function promptInputModalities(inputs: AcpPromptInputs): readonly ProviderInputModality[] {
+  if (!inputs.image && !inputs.embeddedContext) return textOnlyInputModalities;
+  return [
+    "text",
+    ...(inputs.image ? (["image"] as const) : []),
+    ...(inputs.embeddedContext ? (["document"] as const) : []),
+  ];
+}
+
+/**
+ * One attached file as the prompt block the agent advertised for it, or
+ * undefined when it advertised none that carries it. An embedded resource
+ * names the attachment, not a path: the agent is handed the content itself.
+ */
+function acpPromptAttachment(
+  attachment: ProviderTurnInput["attachments"][number],
+  inputs: AcpPromptInputs,
+): AcpPromptAttachment | undefined {
+  const modality = attachmentMediaTypeToModality(attachment.mediaType);
+  if (modality === "image") {
+    return inputs.image
+      ? {
+          type: "image",
+          mimeType: attachment.mediaType,
+          data: Buffer.from(attachment.bytes).toString("base64"),
+        }
+      : undefined;
+  }
+  if (!inputs.embeddedContext) return undefined;
+  const uri = `attachment:${encodeURIComponent(attachment.attachmentId)}/${encodeURIComponent(attachment.displayName)}`;
+  // A PDF or office file goes as its bytes even when they decode as UTF-8:
+  // its raw syntax is not its text, and the agent reads the format itself.
+  const text =
+    modality === "document" && !attachment.mediaType.startsWith("text/")
+      ? undefined
+      : attachedFileText(attachment.bytes);
+  return {
+    type: "resource",
+    resource:
+      text === undefined
+        ? {
+            uri,
+            mimeType: attachment.mediaType,
+            blob: Buffer.from(attachment.bytes).toString("base64"),
+          }
+        : { uri, mimeType: attachment.mediaType, text },
+  };
 }
 
 function normalizeModels(
@@ -420,7 +481,7 @@ function normalizeModels(
   options: ReadonlyArray<AcpSessionConfigOption>,
   models: AcpSessionModelState | undefined,
   optionsByModel?: ReadonlyMap<string, ReadonlyArray<AcpSessionConfigOption>>,
-  imageInput = false,
+  promptInputs: AcpPromptInputs = { image: false, embeddedContext: false },
 ) {
   const model = options.find((option) => option.id === "model");
   // The config option and the session's model state are two ACP spellings of
@@ -465,9 +526,9 @@ function normalizeModels(
         reasoning !== undefined || declaredLevels.length > 0
           ? ("supported" as const)
           : ("unavailable" as const),
-      // ACP advertises image prompts for the agent, not per model, so every
+      // ACP advertises prompt blocks for the agent, not per model, so every
       // model it lists carries what the agent said it accepts.
-      inputModalities: imageInput ? ACP_IMAGE_INPUT_MODALITIES : textOnlyInputModalities,
+      inputModalities: promptInputModalities(promptInputs),
       // The agent reasons, and that capability is reported above. A level is
       // declared only because the session applies it: the driver sets the
       // profile's reasoning option, or carries it in the session metadata, when
@@ -543,8 +604,8 @@ function normalizeProbe(
   credentialStatus?: "stored",
   optionsByModel?: ReadonlyMap<string, ReadonlyArray<AcpSessionConfigOption>>,
 ): ProviderProbeResult {
-  const imageInput = acceptsImagePrompts(initialized);
-  const models = normalizeModels(profile, options, sessionModels, optionsByModel, imageInput);
+  const promptInputs = acceptedPromptInputs(initialized);
+  const models = normalizeModels(profile, options, sessionModels, optionsByModel, promptInputs);
   const reasoning =
     resolveReasoningOption(profile, options) !== undefined ||
     models.some((model) => model.reasoning === "supported")
@@ -568,7 +629,8 @@ function normalizeProbe(
         negotiatedAppManagedTools(initialized, profile, version),
         version,
       ),
-      nativeAttachments: imageInput ? "supported" : "unsupported",
+      nativeAttachments:
+        promptInputs.image || promptInputs.embeddedContext ? "supported" : "unsupported",
       resume,
       reasoning,
     },
@@ -802,7 +864,10 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
             if (invalid !== undefined) return Effect.fail(invalid);
             return managedHomeClient.pipe(
               Effect.flatMap(({ client }) =>
-                request(() => client.completeBrowserAuthentication(attemptId)),
+                request(async () => {
+                  await client.completeBrowserAuthentication(attemptId);
+                  return "completed" as const;
+                }),
               ),
             );
           },
@@ -902,7 +967,14 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
         return listed;
       });
     },
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
+    acquire: ({
+      instanceId,
+      projectRoot,
+      mode,
+      extraFolders = [],
+      attachmentsFolder,
+      sandboxPolicy,
+    }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
@@ -913,8 +985,13 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
           failure("invalid-configuration", `${name} requires an explicit product mode.`),
         );
       }
+      // Chat has no folder, so it is granted no attachments folder either.
+      const readOnlyFolders =
+        attachmentsFolder === undefined || mode === "chat" ? [] : [attachmentsFolder];
       if (
-        [projectRoot, ...extraFolders].some((root) => !isAbsolute(root) || resolve(root) !== root)
+        [projectRoot, ...extraFolders, ...readOnlyFolders].some(
+          (root) => !isAbsolute(root) || resolve(root) !== root,
+        )
       ) {
         return Effect.fail(
           failure(
@@ -924,12 +1001,13 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
         );
       }
       return makeConnection(
-        options,
+        { ...options, ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }) },
         projectRoot,
         mode === "chat" ? [] : extraFolders,
         mode,
         resumeIdentities,
         factories,
+        readOnlyFolders,
       );
     },
   };
@@ -942,6 +1020,8 @@ function makeConnection(
   mode: AcpSessionMode,
   resumeIdentities: Map<string, ResumeIdentity>,
   factories: Factories,
+  /** Folders the agent reads and never writes: the thread's attachments folder. */
+  readOnlyFolders: ReadonlyArray<string> = [],
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   const { profile } = options;
   const name = profile.displayName;
@@ -1408,10 +1488,14 @@ function makeConnection(
         const processConnection = await Effect.runPromise(
           options.process
             .start({
+              ...(options.sandboxPolicy === undefined
+                ? {}
+                : { sandboxPolicy: options.sandboxPolicy }),
               profile,
               binaryPath: options.binaryPath,
               root: runtimeRoot,
               ...(extraFolders.length === 0 ? {} : { extraFolders }),
+              ...(readOnlyFolders.length === 0 ? {} : { readOnlyFolders }),
               managedHome: options.managedHome,
               mode,
               executionPolicy,
@@ -1540,12 +1624,14 @@ function makeConnection(
           let removeCommands = () => {};
           let runtime: AcpRetainedRuntime | undefined;
           const compatibility = JSON.stringify([
+            options.sandboxPolicy ?? null,
             profile.kind,
             input.sessionId,
             options.binaryPath,
             options.managedHome,
             projectRoot,
             extraFolders,
+            readOnlyFolders,
             mode,
             input.modelId,
             input.modelOptionValues ?? {},
@@ -1754,9 +1840,24 @@ function makeConnection(
             // same confirmation the standard selection would have acted on. A
             // session that already opened the requested model is left alone,
             // because switching it would reset the level it was opened with.
+            // An added agent follows the spelling its session reported: a
+            // `model` config option, or else `models` (answered with
+            // `session/set_model`); a session already on the model is left
+            // alone. A reviewed profile pins its spelling.
+            const followsSession = profile.modelSelection === "follow-session";
+            const sessionHasModelOption = (source.configOptions ?? []).some(
+              (option) => option.id === "model",
+            );
             const modelOpenedWithSession =
-              sessionMeta !== undefined && source.models?.currentModelId === input.modelId;
-            const setModelCall = profile.setModelCall?.(source.sessionId, input.modelId);
+              (sessionMeta !== undefined || followsSession) &&
+              source.models?.currentModelId === input.modelId;
+            const setModelCall =
+              followsSession && !sessionHasModelOption && source.models !== undefined
+                ? {
+                    method: "session/set_model",
+                    params: { sessionId: source.sessionId, modelId: input.modelId },
+                  }
+                : profile.setModelCall?.(source.sessionId, input.modelId);
             // The agent's config options can change with the model selection, so
             // the reply to each standard call carries the current set; keep the
             // newest one rather than the session's original list.
@@ -1789,13 +1890,17 @@ function makeConnection(
                 `${name} does not offer the ${modeValue} mode this thread needs.`,
               );
             const setModeCall = profile.setModeCall?.(source.sessionId, modeValue);
-            if (setModeCall === undefined) {
-              const result = await awaitStartup(() =>
-                client.setConfigOption(source.sessionId, "mode", modeValue),
-              );
-              configOptions = result.configOptions;
-            } else {
-              await awaitStartup(() => client.call(setModeCall.method, setModeCall.params));
+            // A profile that selects no mode leaves the session in the mode it
+            // opened with.
+            if (profile.selectsNoMode !== true) {
+              if (setModeCall === undefined) {
+                const result = await awaitStartup(() =>
+                  client.setConfigOption(source.sessionId, "mode", modeValue),
+                );
+                configOptions = result.configOptions;
+              } else {
+                await awaitStartup(() => client.call(setModeCall.method, setModeCall.params));
+              }
             }
             // Turns carry only the prompt. Restore model settings against the
             // selected session's fresh choices before it can send; apply effort
@@ -1892,7 +1997,7 @@ function makeConnection(
               client,
               managedTools: runtimeTools,
               appManagedTools,
-              imageInput: acceptsImagePrompts(connection.initialized),
+              promptInputs: acceptedPromptInputs(connection.initialized),
               version: connection.version,
               commands: new Set(
                 !commandsMismatch && commandSessionId === source.sessionId ? startupCommands : [],
@@ -2121,24 +2226,30 @@ function makeConnection(
         stateFor(input.sessionId).pipe(
           Effect.flatMap((state) => {
             const { bridgeTools } = partitionTools(input.tools);
-            // Attachments go only to an agent that advertised image prompts,
-            // and only as images; anything else is refused, not dropped.
-            if (input.attachments.length > 0) {
-              if (!state.runtime.imageInput) {
-                return Effect.fail(failure("unsupported", "Native attachments are unsupported."));
-              }
-              if (
-                input.attachments.some(
-                  (attachment) => attachmentMediaTypeToModality(attachment.mediaType) !== "image",
-                )
-              ) {
-                return Effect.fail(failure("unsupported", `${name} takes only image attachments.`));
-              }
+            // Each attachment goes only as a block the agent advertised: an
+            // image as an image, any other file as an embedded resource. One
+            // it advertised no block for is refused, not dropped.
+            const { promptInputs } = state.runtime;
+            if (
+              input.attachments.length > 0 &&
+              !promptInputs.image &&
+              !promptInputs.embeddedContext
+            )
+              return Effect.fail(failure("unsupported", "Native attachments are unsupported."));
+            const attachments: AcpPromptAttachment[] = [];
+            for (const attachment of input.attachments) {
+              const block = acpPromptAttachment(attachment, promptInputs);
+              if (block === undefined)
+                return Effect.fail(
+                  failure(
+                    "unsupported",
+                    promptInputs.image
+                      ? `${name} takes only image attachments.`
+                      : `${name} does not take image attachments.`,
+                  ),
+                );
+              attachments.push(block);
             }
-            const images: ReadonlyArray<AcpPromptImage> = input.attachments.map((attachment) => ({
-              mimeType: attachment.mediaType,
-              data: Buffer.from(attachment.bytes).toString("base64"),
-            }));
             const validationInput = { ...input, attachments: [], tools: bridgeTools };
             return rejectUnsupportedChatTurn(validationInput, {
               ...capabilities,
@@ -2195,7 +2306,7 @@ function makeConnection(
                 if (state.runtime.usage !== undefined) beginAcpUsageTurn(state.runtime.usage);
                 state.promptActive = true;
                 void state.client
-                  .prompt(state.sourceSessionId, prompt, images)
+                  .prompt(state.sourceSessionId, prompt, attachments)
                   .then((result) => {
                     state.promptActive = false;
                     void cancelForms(state);
@@ -2281,6 +2392,7 @@ function makeConnection(
                   .catch(() => undefined);
               }
               if (
+                options.sandboxPolicy === undefined &&
                 state.completed &&
                 profile.retainedSessionVersions?.includes(state.runtime.version) === true &&
                 state.approvals.size === 0 &&

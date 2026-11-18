@@ -54,6 +54,8 @@ export interface BrowserRuntimeObservation {
   readonly snapshot?: string;
   readonly snapshotRefs?: ReadonlyArray<BrowserPageSnapshotRef>;
   readonly screenshotDataUrl?: string;
+  /** Only the person's preview read fills this; it is never put in a tool result. */
+  readonly faviconDataUrl?: string;
   readonly viewport?: { readonly width: number; readonly height: number };
   /** Only a resize fills this: what the page reports about its device now. */
   readonly emulation?: BrowserEmulationReport;
@@ -286,6 +288,14 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
      * is cancelled. It is not part of the action contract, so no route can set it.
      */
     readonly downloads?: "hold";
+    /**
+     * Set only on a `navigate` a person started from the address bar of a
+     * window of this computer. The desktop Browser follows its redirects as
+     * the person's own browsing and answers with nothing of a page that ends
+     * outside the context's approved origins; the headless Browser ignores it
+     * and refuses the redirect as it does for anyone.
+     */
+    readonly startedBy?: "person";
     /**
      * The person's limits for the downloads this action holds, set by the
      * server beside `downloads`. Absent, the runtime uses the defaults.

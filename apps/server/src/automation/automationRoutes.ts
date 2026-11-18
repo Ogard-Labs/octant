@@ -242,6 +242,8 @@ export function createAutomationRouteHandler(dependencies: AutomationRouteDepend
   };
 }
 
+const AUTOMATION_TOTALS_WINDOW_DAYS = 30;
+
 type AccessibleProjects = ReadonlyMap<string, "chat" | "work" | "code">;
 
 /** Active Projects the authenticated principal can reach right now. */
@@ -331,10 +333,20 @@ async function handleList(
     ...(cursor === undefined ? {} : { cursor }),
   });
   const items = page.items.filter((item) => accessible.get(String(item.projectId)) === item.mode);
+  const totals = dependencies.projection.totals({
+    hostId: dependencies.hostId as HostId,
+    mode,
+    ...(projectId === undefined ? {} : { projectId }),
+    accessible,
+    since: new Date(
+      (dependencies.now ?? Date.now)() - AUTOMATION_TOTALS_WINDOW_DAYS * 86_400_000,
+    ).toISOString() as UtcTimestamp,
+  });
   return jsonResponse(
     decodeAutomationQueryResponse({
       kind: "automation-list",
       items,
+      totals: { ...totals, windowDays: AUTOMATION_TOTALS_WINDOW_DAYS },
       ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
     }),
     200,

@@ -14,7 +14,7 @@ import {
   Radio,
   ShieldAlert,
   Square,
-} from "lucide-react";
+} from "../ui/icons";
 import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
