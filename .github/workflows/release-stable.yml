@@ -155,9 +155,13 @@ jobs:
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "$archive" --clobber
           else
+            # gh would otherwise mark the release latest at create time, before
+            # the fixed-name disk image exists; only the final job moves the
+            # link, after every build row published.
             gh release create "$tag" "$archive" \
               --title "Octant ${VERSION}" \
               --generate-notes \
+              --latest=false \
               || gh release upload "$tag" "$archive" --clobber
           fi
           # Constructed rather than read back from the API: the download URL of
@@ -262,7 +266,9 @@ jobs:
   # A stable release already publishes full; the same job still attaches the
   # fixed-name disk image and marks it latest, so the public
   # releases/latest/download URL keeps resolving once a stable release is the
-  # newest. Runs only after every publish row and the installer have shipped.
+  # newest. Runs only after every publish row and the installer have shipped,
+  # and is the only step that moves the link: the create rows stay off latest
+  # so a release can never hold it before its download exists.
   latest:
     name: Mark the release latest
     needs: [verify, publish, windows]

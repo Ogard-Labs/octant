@@ -318,8 +318,12 @@ jobs:
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$tag" "${files[0]}" --clobber --repo "$GITHUB_REPOSITORY"
           elif [ "$RING" = "stable" ]; then
+            # gh would otherwise mark the release latest at create time, before
+            # the fixed-name disk image exists; only the final job moves the
+            # link, after every build row published.
             gh release create "$tag" "${files[0]}" --repo "$GITHUB_REPOSITORY" \
               --title "${PRODUCT} ${VERSION}" --generate-notes \
+              --latest=false \
               || gh release upload "$tag" "${files[0]}" --clobber --repo "$GITHUB_REPOSITORY"
           else
             gh release create "$tag" "${files[0]}" --repo "$GITHUB_REPOSITORY" \
