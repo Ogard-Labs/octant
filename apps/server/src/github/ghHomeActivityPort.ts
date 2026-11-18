@@ -290,8 +290,14 @@ export class GhHomeActivityPort {
 
   #commandFailure(result: GhCommandResult, rows: GhHomeActivityRow[]): GhHomeActivityResult {
     const detail = `${result.stderr ?? ""} ${result.stdout}`;
+    // Rate limit first: GitHub's throttled 403 names the limit itself.
     if (/rate limit/i.test(detail)) return { status: "unavailable", reason: "rate-limited" };
     if (/Could not resolve to a Repository|404|not found/i.test(detail)) {
+      return { status: "partial", rows, reason: "repository-missing" };
+    }
+    // An explicit access refusal is as permanent as a 404: the repository's
+    // cached rows are purged rather than kept as partial coverage.
+    if (/HTTP 403|SAML enforcement|Resource not accessible|FORBIDDEN/i.test(detail)) {
       return { status: "partial", rows, reason: "repository-missing" };
     }
     return rows.length > 0
@@ -306,8 +312,13 @@ export class GhHomeActivityPort {
    */
   #graphQlFailure(errors: ReadonlyArray<string>, rows: GhHomeActivityRow[]): GhHomeActivityResult {
     const detail = errors.join(" ");
+    // Rate limit first: GitHub's throttled 403 names the limit itself.
     if (/rate limit/i.test(detail)) return { status: "unavailable", reason: "rate-limited" };
-    if (/Could not resolve to a Repository/i.test(detail)) {
+    if (
+      /Could not resolve to a Repository|HTTP 403|SAML enforcement|Resource not accessible|FORBIDDEN/i.test(
+        detail,
+      )
+    ) {
       return { status: "partial", rows, reason: "repository-missing" };
     }
     return { status: "unavailable", reason: "read-failed" };
@@ -328,7 +339,14 @@ function graphQlPayload(
   const errors = Array.isArray(value.errors)
     ? value.errors
         .filter(isRecord)
-        .map((entry) => (typeof entry.message === "string" ? entry.message : ""))
+        .map((entry) =>
+          [
+            typeof entry.message === "string" ? entry.message : "",
+            typeof entry.type === "string" ? entry.type : "",
+          ]
+            .filter((part) => part !== "")
+            .join(" "),
+        )
     : [];
   return { data: value.data, errors };
 }

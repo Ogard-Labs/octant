@@ -290,6 +290,45 @@ describe("GhHomeActivityPort", () => {
     expect(result).toEqual({ status: "partial", rows: [], reason: "repository-missing" });
   });
 
+  it("answers a SAML enforcement refusal as a missing repository", async () => {
+    const { port } = fixture([
+      {
+        exitCode: 1,
+        stdout: "",
+        stderr:
+          "HTTP 403: Resource protected by organization SAML enforcement. You must grant your OAuth token access to this organization.",
+      },
+    ]);
+    const result = await observe(port, "prs-merged");
+    expect(result).toEqual({ status: "partial", rows: [], reason: "repository-missing" });
+  });
+
+  it("still answers a throttled 403 as rate-limited, not missing", async () => {
+    const { port } = fixture([
+      {
+        exitCode: 1,
+        stdout: "",
+        stderr: "HTTP 403: API rate limit exceeded for user ID 1.",
+      },
+    ]);
+    const result = await observe(port, "prs-merged");
+    expect(result).toEqual({ status: "unavailable", reason: "rate-limited" });
+  });
+
+  it("answers a FORBIDDEN-typed GraphQL error as a missing repository", async () => {
+    const { port } = fixture([
+      {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          data: { search: null },
+          errors: [{ type: "FORBIDDEN", message: "Resource not accessible by integration" }],
+        }),
+      },
+    ]);
+    const result = await observe(port, "prs-merged");
+    expect(result).toEqual({ status: "partial", rows: [], reason: "repository-missing" });
+  });
+
   it("answers a GraphQL errors array that exits 0 as a read failure", async () => {
     const { port } = fixture([
       {
