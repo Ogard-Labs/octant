@@ -1756,7 +1756,10 @@ starts a Code session at the same level, and a Work turn journals `shell` and
   approval policy and sandbox the level maps to in Code; `command` and
   `permissions` requests inside the root reach the person at Guarded. A Work
   thread reads the folder's `AGENTS.md` as Code does (maintainer decision,
-  2026-11-14).
+  2026-11-14). An empty Work or Code thread can continue one of the person's
+  own Codex sessions in its folder, and a Code fork continues a copy of
+  Codex's own thread
+  ([Provider runtimes: Codex](design/provider-runtimes.md#codex)).
 - **OpenCode:** the session rules no longer deny `bash` and `task` in Work;
   the posture's rules apply as in Code (`task` is to be allowed outside Plan
   at every level; designed, not built,
@@ -4423,9 +4426,14 @@ Draft edits and ordinary image attachments survive validation and refusal.
 Unknown `@` text stays ordinary text. `@` is the one composer
 picker in every composer: it lists the effective snapshot's available skills,
 effective plugin MCP servers, and connectors the person added (a disabled or
-untrusted item is absent), plus the thread's files in Work and Code. Choosing a
-row makes a structured selection chip that the host re-resolves at send; it
-never installs, trusts, enables, or elevates anything. `/` lists Octant's
+untrusted item is absent), then the thread's provider's own skills and plugins
+its runtime listed on the observation (`mentions`; Codex's account skills and
+installed plugins), labelled as the provider's, plus the thread's files in Work
+and Code. Choosing an Octant row makes a structured selection chip that the
+host re-resolves at send; choosing a provider's row writes the runtime's own
+reference (`$name`, `@name`), which its driver resolves against its own listing
+at send ([Provider runtimes: Codex](design/provider-runtimes.md#codex)). Neither
+installs, trusts, enables, or elevates anything. `/` lists Octant's
 commands and, beside them, the thread's provider's own slash commands,
 labelled as the provider's (maintainer principle, 2026-11-14: a workflow
 that works in the provider's own app works in Octant); `$skill` stays a
@@ -5057,7 +5065,7 @@ thread's [guardrail level](#security-and-authority). New tasks may choose an app
   rule under [Security and authority](#security-and-authority). Every Project terminal
   binds all of the Project's folders that exist like the main folder, so the
   shell can move between them; the pick only chooses where it starts. The
-  header's action buttons and the start screen's quick tools offer the pick
+  header's action buttons offer the pick
   once a Project has an extra folder. A Code thread's terminal binds every
   Project folder that exists as a Project terminal does, and its start command
   may name an extra folder to start in, compared as the exact path the Project
@@ -14938,8 +14946,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   import, whose request names its Project in its workspace scope; and Full
   access and extension install, built earlier. Each is journaled with the
   device as the actor. The paired browser offers the Project terminal and
-  Private page under **Project tools** in Work and Code, through the start
-  screen's quick tools, and **Import HTML…** alone in a Chat thread's Canvas
+  Private page under **Project tools** in Work and Code, as a list of the
+  Project's own tools, and **Import HTML…** alone in a Chat thread's Canvas
   tools. Not built yet: the Browser's Take over and Hand back, `sign-in`,
   profile pages and saved flows, which drive the desktop's native Browser in
   the person's signed-in profiles and need a remote input stream and a rule

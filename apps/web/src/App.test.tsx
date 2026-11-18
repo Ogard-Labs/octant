@@ -7141,7 +7141,7 @@ describe("App", () => {
     );
   });
 
-  it("leaves the dock closed on a new Code task until the person opens it, with its tools disabled until the task starts", async () => {
+  it("shows no change count, tool row or dock on a new Code task, and brings them back once the task has a thread", async () => {
     const user = userEvent.setup();
     const base = codes();
     const initialCode = await base.bootstrap();
@@ -7249,27 +7249,22 @@ describe("App", () => {
       expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull(),
     );
 
-    // The window has no dock switch. The row's thread tools wait for the
-    // thread, while the Project's own terminal and browser are enabled and are
-    // the way into the draft's dock.
+    // A start screen has no tools of its own (maintainer request,
+    // 2026-11-18): no dock, no switch for it, no tool row in the title band
+    // or the pane's header and no uncommitted-changes count, with a Project
+    // chosen as well.
     expect(screen.queryByRole("button", { name: /Right sidebar/ })).toBeNull();
-    for (const name of ["Environment", "Files"]) {
-      const tool = bandTool(name);
-      expect(tool).toHaveAttribute("aria-disabled", "true");
-      expect(tool).toHaveAttribute("aria-description", "Available once the task starts");
-    }
+    expect(screen.queryByRole("button", { name: /Uncommitted changes/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Project terminal" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Project browser" })).toBeNull();
+    const draftPane = screen.getByRole("region", { name: "Workspace pane: New Code thread" });
+    expect(within(draftPane).queryByRole("toolbar", { name: "Tools" })).toBeNull();
+    expect(
+      screen
+        .queryAllByRole("toolbar", { name: "Tools" })
+        .some((row) => row.closest(".workspace-pane")?.getAttribute("data-active") === "true"),
+    ).toBe(false);
     expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
-    expect(bandTool("Project browser")).not.toHaveAttribute("aria-disabled");
-    await user.click(bandTool("Project browser"));
-    expect(await screen.findByRole("complementary", { name: "Project browser" })).toBeVisible();
-    await waitFor(() =>
-      expect(bandTool("Project browser")).toHaveAttribute("aria-pressed", "true"),
-    );
-    expect(bandTool("Project terminal")).toHaveAttribute("aria-pressed", "false");
-    await user.click(bandTool("Project browser"));
-    await waitFor(() =>
-      expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull(),
-    );
 
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Start here");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
@@ -7277,9 +7272,8 @@ describe("App", () => {
 
     // The window's own choice, made on the thread earlier, shows the dock again
     // once the task has a thread.
-    const started = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    await screen.findByRole("complementary", { name: "Right Utility Dock" });
     await waitFor(() => expect(bandTool("Terminal")).not.toHaveAttribute("aria-disabled"));
-    expect(within(started).queryByRole("complementary", { name: "Project tools" })).toBeNull();
   });
 
   it("closes the dock when the active pane becomes a Project overview, which holds neither a thread nor a task draft", async () => {
