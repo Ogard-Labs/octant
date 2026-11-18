@@ -551,23 +551,38 @@ card always names where its answer came from — **Your GitHub account** or
 **Recorded by Octant**. Runs always read Octant's journal; the source
 choice applies to the three delivery cards.
 
-The server records delivery and run facts from the journal and answers an
-authorized read over them — merged pull requests, closed issues and run
-finishes witnessed by a thread the window may read, counted and paged
-exactly against a frozen snapshot. A GitHub source answers through the
-connected account's `gh` and counts only that account's own merges,
-closures and releases: each card is a date-bounded read per connected
-repository — merges and closures through GitHub's issue search, releases
-through the repository's own list — and a release counts when that account
-created it and it was published inside the range. A card reads partial
-only when a repository could not be read or a range outgrows its bounded
-walk — 200 matches per repository for each card — rather than presenting a truncated set as complete. A card says
-so when its read is partial, stale or unavailable instead of implying
-completeness. A run counts as canceled when the person stopped it: Chat, Work and agent runs journal a cancelled outcome, and a Code turn counts as canceled when the journal recorded the person's stop request before it was interrupted. Any other interruption, such as a restart, counts as failed. The choices are per device and travel
-inside the existing card order/visibility store: every card follows one
-shared timeframe — **This week** by default — reading the signed-in GitHub
-account by default, and up to four cards may be pinned to their own
-timeframe. A timeframe resolves to a half-open
+Recording is journaled: a confirmed pull-request merge, each issue closure
+it caused, and every finished run become one activity fact per linked
+thread. Facts dedupe by identity, so a delivery witnessed by several
+threads counts once, and a run's first terminal state wins. A delivery
+title longer than 256 UTF-8 bytes is cut on a code-point boundary rather
+than dropping the record. A run counts as canceled when the person stopped
+it: Chat, Work and agent runs journal a cancelled outcome, and a Code turn
+counts as canceled when the journal recorded the person's stop request
+before it was interrupted. Any other interruption, such as a restart,
+counts as failed.
+
+The read authorizes every record against the thread that witnessed it and
+freezes the answer in a snapshot that the drill-down pages from. Losing
+access to any witness, including one that counted only toward the
+comparison, or a change to the Project set expires the snapshot, and the
+page answers `authorization-changed` with no totals.
+
+A GitHub source answers through the connected account's `gh` and counts
+only that account's own merges, closures and releases. Each card is a
+date-bounded read per connected repository: merges and closures through
+GitHub's issue search, releases through the repository's own list. A
+release counts when that account created it and it was published inside
+the range. A card reads partial only when a repository could not be read
+or a range holds more than 200 matches per repository, and it says so when
+its read is partial, stale or unavailable.
+
+The choices are per device and travel inside the existing card
+order/visibility store: every card follows one shared timeframe, **This
+week** by default, reads the signed-in GitHub account by default, and up to
+four cards may be pinned to their own timeframe.
+
+A timeframe resolves to a half-open
 `[start, end)` instant window plus an optional comparison window in the
 person's own time zone and week start (Sunday = 0 through Saturday = 6).
 **Today**, **This week**, **This month** and **This year** run from the
