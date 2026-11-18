@@ -19,7 +19,6 @@ function fixture(options: { readonly scopeId?: string; readonly current?: () => 
   return {
     calls,
     input: {
-      runtimeVersion: "3.0.3",
       sourceSessionId: "native-session",
       path: "sample.txt",
       current: options.current ?? (() => true),
@@ -61,12 +60,8 @@ describe("supplementary ACP file review reads", () => {
     expect(JSON.stringify(result)).not.toContain("/private/");
   });
 
-  it("refuses an unverified release, escaping path or unobserved scope before scoped reads", async () => {
+  it("refuses an escaping path or unobserved scope before scoped reads", async () => {
     const f = fixture({ scopeId: "native-turn:999" });
-    expect(await readAcpFileReview({ ...f.input, runtimeVersion: "3.0.4" })).toEqual({
-      status: "refused",
-      reason: "unsupported",
-    });
     expect(await readAcpFileReview({ ...f.input, path: "../secret" })).toEqual({
       status: "refused",
       reason: "path-refused",

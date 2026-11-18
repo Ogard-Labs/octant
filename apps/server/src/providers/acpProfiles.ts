@@ -302,6 +302,42 @@ export interface AcpProviderProfile {
   readonly process: AcpProcessProfile;
 }
 
+/**
+ * What a feature pinned to exact reviewed releases (`usageVersions`,
+ * `compactionVersions` and the like) may do on the release that runs.
+ * `reviewed`: the release is one of them. `unverified`: at Full access, a
+ * release newer than every reviewed one keeps the feature, offered as
+ * unverified instead of lost, since a person who runs the agent open already
+ * gives it more than the feature reaches. `absent`: below Full access the pin
+ * holds, and an older or unparseable release never inherits newer evidence.
+ */
+export type AcpExactReleaseClaim = "reviewed" | "unverified" | "absent";
+
+export function acpExactReleaseClaim(
+  reviewed: ReadonlyArray<string> | undefined,
+  version: string | undefined,
+  executionPolicy: ProviderExecutionPolicy | undefined,
+): AcpExactReleaseClaim {
+  if (reviewed === undefined || reviewed.length === 0 || version === undefined) return "absent";
+  if (reviewed.includes(version)) return "reviewed";
+  if (executionPolicy !== "full-access") return "absent";
+  return reviewed.every((release) => newerRelease(version, release)) ? "unverified" : "absent";
+}
+
+/** Whether `candidate` is a later major.minor.patch release than `than`. */
+function newerRelease(candidate: string, than: string): boolean {
+  const parse = (text: string) => /^(\d+)\.(\d+)\.(\d+)$/.exec(text)?.slice(1, 4).map(Number);
+  const left = parse(candidate);
+  const right = parse(than);
+  if (left === undefined || right === undefined) return false;
+  for (let index = 0; index < 3; index += 1) {
+    const a = left[index] ?? 0;
+    const b = right[index] ?? 0;
+    if (a !== b) return a > b;
+  }
+  return false;
+}
+
 export const HOST_PASSTHROUGH_VARIABLES: ReadonlyArray<string> = [
   "COLORTERM",
   "HOME",
