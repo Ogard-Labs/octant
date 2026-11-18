@@ -2760,10 +2760,11 @@ Status: Built. Since: —. Detail: [DESIGN.md: Accessibility](../../DESIGN.md#ac
 Quitting the desktop app is guarded so that open provider sessions are never dropped silently.
 
 - Ordinary Quit and Fully quit share one shutdown that confirms when provider sessions remain open or the desktop cannot tell what the host is running.
-- When a window can show the quit notice, the quit keyboard shortcut needs a second press within 1.5 seconds; that double-press guard is a setting, on by default (maintainer request, 2026-11-12). With no window able to show it, the first press enters guarded shutdown. Pointer quits, OS shutdown and updater restarts stay immediate.
+- Explicit Quit checks all open windows for unsaved Code Files edits before closing any. Cancel stops the quit. System shutdown, updater restarts and forced exits do not wait for the Files check.
+- When a window can show the quit notice, the quit keyboard shortcut needs a second press within 1.5 seconds; that double-press guard is a setting, on by default (maintainer request, 2026-11-12). With no window able to show it, the first press enters guarded shutdown. Pointer quits skip only the second-press guard.
 - Once confirmed, quitting never waits on a person; a fixed deadline ends the app.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Accessibility](../../DESIGN.md#accessibility).
+Status: Built. Since: —. Detail: [Workspace: Quitting](workspace.md#quitting), [DESIGN.md: Accessibility](../../DESIGN.md#accessibility).
 
 ### Window defaults, ground and drafts
 

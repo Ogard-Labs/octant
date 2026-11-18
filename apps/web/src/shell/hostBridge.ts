@@ -743,6 +743,23 @@ export interface OctantHostBridge
   readonly reportShutdownProgress?: (
     progress: { readonly ended: number; readonly total: number } | undefined,
   ) => void;
+  /**
+   * The desktop's Files close check. A `check` asks whether this window's
+   * unsaved Files drafts allow it to close and the answer goes back through
+   * `replyFilesClose`; a `release` frees an approval the close no longer
+   * needs. Absent outside the desktop app.
+   */
+  readonly subscribeFilesCloseRequest?: (
+    listener: (request: { readonly requestId: number; readonly kind: "check" | "release" }) => void,
+  ) => () => void;
+  /**
+   * Resolves whether the desktop accepted the reply for its own request; a
+   * refused reply (`false`) never approved anything.
+   */
+  readonly replyFilesClose?: (
+    requestId: number,
+    answer: "checking" | "allow" | "cancel",
+  ) => Promise<boolean>;
   /** The first ⌘Q press: the window shows "press again to quit". */
   readonly subscribeQuitShortcutHint?: (listener: () => void) => () => void;
   /** Reports the person's setting: whether ⌘Q needs a second press. */

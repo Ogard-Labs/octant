@@ -38,6 +38,11 @@ import {
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import type { OctantHostBridge } from "./shell/hostBridge";
 import { App } from "./App";
+import {
+  filesClosePromptSnapshot,
+  filesCloseScope,
+  registerFilesCloseEntry,
+} from "./code/filesCloseGuard";
 import { composerThreadDrafts } from "./composer/composerThreadDraftStore";
 import {
   threadUtilityDockKey,
@@ -6690,6 +6695,111 @@ describe("App", () => {
     await user.click(first);
     await waitFor(() => expect(starts()).toHaveLength(1));
     expect(starts()[0]?.[0].threadId).toBe(codeThreadId);
+  });
+
+  it("does not close another thread's dock tab when its Files prompt outlives a thread switch", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    const codeApi = codes();
+    const initial = codeShellBootstrap();
+    const layout = initial.workspace.layouts.code;
+    if (layout.kind !== "pane") throw new Error("Expected Code pane");
+    const otherId = decodeCodeThreadId("00000000-0000-4000-8000-000000000807");
+    const original = await codeApi.thread(codeThreadId);
+    const other = { ...original.thread, id: otherId, title: "Another Code thread" };
+    vi.mocked(codeApi.thread).mockImplementation(async (id) => ({
+      ...original,
+      thread: String(id) === String(otherId) ? other : original.thread,
+    }));
+    const workspace = applyWorkspaceOperation(
+      initial.workspace,
+      decodeWorkspaceOperation({
+        kind: "split-pane",
+        mode: "code",
+        targetPaneId: layout.paneId,
+        surface: {
+          kind: "code-overview",
+          mode: "code",
+          id: "00000000-0000-4000-8000-000000000808",
+          threadId: otherId,
+          title: other.title,
+        },
+        splitNodeId: "00000000-0000-4000-8000-000000000809",
+        newPaneNodeId: "00000000-0000-4000-8000-000000000810",
+        newPaneId: "00000000-0000-4000-8000-000000000811",
+        orientation: "horizontal",
+        placement: "after",
+        ratio: 0.5,
+      }),
+    );
+    writeUtilityDockPresentation(globalThis, String(windowId), {
+      open: true,
+      threads: new Map(
+        [codeThreadId, otherId].map((id) => [
+          threadUtilityDockKey("code", String(id)),
+          { tabs: [{ id: "files", surface: "files" }], active: "files" },
+        ]),
+      ),
+    });
+    render(
+      <App
+        codeClient={codeApi}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client({ ...initial, workspace, workspaceVersion: workspace.version })}
+      />,
+    );
+    const first = await screen.findByRole("region", {
+      name: "Workspace pane: Controller foundation",
+    });
+    screen.getByRole("region", { name: "Workspace pane: Another Code thread" });
+    await user.click(first);
+    await screen.findByRole("complementary", { name: "Right Utility Dock" });
+
+    let dirty = true;
+    let settleSave!: () => void;
+    const release = registerFilesCloseEntry({
+      scope: filesCloseScope(undefined, String(codeThreadId)),
+      key: "own-doc",
+      name: "draft.ts",
+      isDirty: () => dirty,
+      save: vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            settleSave = () => {
+              dirty = false;
+              resolve(true);
+            };
+          }),
+      ),
+      discard: vi.fn(),
+    });
+    try {
+      await user.pointer({ target: bandTool("Files"), keys: "[MouseRight]" });
+      await user.click(await screen.findByRole("menuitem", { name: "Close Files" }));
+      await vi.waitFor(() => expect(filesClosePromptSnapshot()?.name).toBe("draft.ts"));
+      // The answer leaves the save in flight and dismisses the dialog, so the
+      // person is free to focus the other thread's pane before it settles.
+      await act(async () => {
+        filesClosePromptSnapshot()?.answer("save");
+      });
+      await user.click(screen.getByRole("region", { name: "Workspace pane: Another Code thread" }));
+      await act(async () => {
+        settleSave();
+      });
+      // The consent belonged to the first thread's dock: the second thread's
+      // Files tab was never asked about and stays open.
+      const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+      // The tile and its inner file tree both expose the "Files" region name.
+      expect(within(dock).getAllByRole("region", { name: "Files" }).length).toBeGreaterThan(0);
+    } finally {
+      dirty = false;
+      release();
+    }
   });
 
   it("restores a thread's dock tools after the window reloads", async () => {

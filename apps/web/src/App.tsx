@@ -552,6 +552,9 @@ import { useContextController } from "./context/useContextController";
 import { useSessionCompaction } from "./context/useSessionCompaction";
 import type { ComposerCompaction } from "./context/composerContextMeterScope";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
+import { confirmFilesClose, filesCloseScope } from "./code/filesCloseGuard";
+import { FilesClosePrompt } from "./code/FilesClosePrompt";
+import { useDesktopFilesClose } from "./code/useDesktopFilesClose";
 import { createCodeReadCursorStore, useCodeController } from "./code/useCodeController";
 import { useContinueCards } from "./code/useContinueCards";
 import { coordinatorTitleByWorker } from "./code/codeBoardGrouping";
@@ -884,6 +887,8 @@ function LaunchedShell(
   // is released for as long as the host reports full screen.
   const hostFullScreen = useHostFullScreen(props.hostBridge);
   useRendererOverlayReport(props.hostBridge);
+  // The desktop asks about unsaved Files drafts before this window closes.
+  useDesktopFilesClose(props.hostBridge);
   const hostReservesTitlebarInset =
     props.hostBridge?.windowChrome === "hidden-inset" && !hostFullScreen;
   useLayoutEffect(() => {
@@ -1764,7 +1769,7 @@ function LaunchedShell(
             destination.kind === "center"
           )
             return;
-          void controller.closeContentTab(fromTab.paneId, fromTab.tabId);
+          controller.forgetMovedContentTab(fromTab.paneId, fromTab.tabId);
         });
     },
   });
@@ -4745,6 +4750,26 @@ function LaunchedShell(
   function resizeDockTileColumn(columnIndex: number, shares: ReadonlyArray<number>) {
     changeDockTiles((state) => resizeUtilityTileColumn(state, columnIndex, shares));
   }
+  /**
+   * Close a dock or bottom-panel tool tab, asking the Files close coordinator
+   * first when the tool is a Files tool with drafts to lose. Callers that
+   * move the tool (to the bottom panel, back beside the thread, or to the
+   * shelf) close directly: the tool keeps running and nothing is asked.
+   */
+  function closeToolTab(surface: RightUtilityDockSurfaceId | undefined, close: () => void) {
+    if (surface !== "files" || dockThread === undefined || dockThreadKey === undefined) {
+      close();
+      return;
+    }
+    const asked = dockThreadKey;
+    void confirmFilesClose(filesCloseScope(dockThreadHostId, dockThread.threadId)).then(
+      (proceed) => {
+        // Focus may have moved the dock to another thread while the person
+        // answered; that thread's tabs were never asked about.
+        if (proceed && dockThreadKeyRef.current === asked) close();
+      },
+    );
+  }
   function closeDockTab(tabId: string) {
     const closedTab = dockState.tabs.find((tab) => tab.id === tabId);
     changeDockTiles((state) => closeUtilityTabState(state, tabId));
@@ -5026,7 +5051,9 @@ function LaunchedShell(
         changeDockTiles((state) => showUtilityTabStacked(state, press.tabId));
         return;
       case "close":
-        for (const tabId of press.tabIds) closeDockTab(tabId);
+        closeToolTab(surface, () => {
+          for (const tabId of press.tabIds) closeDockTab(tabId);
+        });
         return;
       case "minimise":
         // The tool keeps running, now as a card on the shelf.
@@ -5049,9 +5076,11 @@ function LaunchedShell(
       case "close-bottom":
         // The panel's own close sends focus to its toggle; this press came
         // from the tool's button, which keeps it.
-        closeBottomPanelTab(surface, false);
-        queueMicrotask(() => {
-          if (opener.isConnected) opener.focus();
+        closeToolTab(surface, () => {
+          closeBottomPanelTab(surface, false);
+          queueMicrotask(() => {
+            if (opener.isConnected) opener.focus();
+          });
         });
         return;
       case "select-bottom":
@@ -5114,7 +5143,9 @@ function LaunchedShell(
     }
     if (tabId === undefined) return;
     if (value === "close") {
-      for (const id of surface === "browser" ? button.tabIds : [tabId]) closeDockTab(id);
+      closeToolTab(surface, () => {
+        for (const id of surface === "browser" ? button.tabIds : [tabId]) closeDockTab(id);
+      });
       return;
     }
     if (value === "to-bottom") openBottomTool(surface);
@@ -8962,6 +8993,7 @@ function LaunchedShell(
                       dockTabs={dockTabs}
                       {...(dockThread === undefined ? {} : { dockThread })}
                       {...(dockThreadHost === undefined ? {} : { dockThreadHost })}
+                      {...(dockThreadHostId === undefined ? {} : { dockThreadHostId })}
                       dockThreadOnThisComputer={dockThreadHostId === String(LOCAL_HOST_ID)}
                       {...(dockThreadKey === undefined ? {} : { dockThreadKey })}
                       {...(dockToolsAwaitingThread === undefined
@@ -9203,6 +9235,9 @@ function LaunchedShell(
           projectAnnouncementSequence={projectController.announcementSequence}
         />
       </ShellFrame>
+      <OctantDialogPresence>
+        <FilesClosePrompt />
+      </OctantDialogPresence>
       <PrepareToShutDownHost
         hostBridge={props.hostBridge}
         onOpenHubSettings={() => void controller.openSettings({ section: "remote-access" })}

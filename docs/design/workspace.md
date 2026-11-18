@@ -956,6 +956,14 @@ with the full-row selected fill, take a hover fill on the others, and end a chan
 success for added) read from the host's Git observation; the incomplete-tree
 note is one muted line.
 
+Closing a Files tab, the Files tool, or its Code thread asks about every
+affected unsaved file, even if Files is no longer visible. **Save** uses the
+file's existing revision check; a failed save cannot close the file.
+**Don't save** drops that draft, and **Cancel** leaves the target open.
+Switching threads, hiding the dock and moving a tab do not ask. Desktop
+window close uses the same check for that window. See [Quitting](#quitting)
+for a quit across windows.
+
 Unsaved text is kept locally on the client, separately from pane references,
 messages and the host journal. Code recovery keys include the endpoint, checkout
 and file identity; Work recovery uses the authorized host, Project and a stable
@@ -3936,6 +3944,10 @@ reach the shell.
 
 ### Quitting
 
+- Explicit Quit checks unsaved edits in the Files tools of every open app
+  window before closing any window or starting shutdown. Cancel in any
+  window stops Quit. A file already saved stays saved. System shutdown,
+  updater restarts and forced exits do not wait for these decisions.
 - The macOS status menu always offers **Fully quit Octant**. Ordinary Quit and
   Fully quit share one guarded shutdown: refresh current host activity, ask for
   confirmation when provider sessions remain open or the desktop cannot confirm
@@ -3958,7 +3970,6 @@ reach the shell.
   first press quits nothing and shows a short "Press ⌘Q again to quit Octant"
   toast in the focused window; the second enters the guarded shutdown above
   unchanged, including its session confirmation. With no window open, the first
-  press quits directly. Choosing Quit with the pointer (app menu, Dock, status
-  menu's Fully quit), OS shutdown or logout, updater restarts and signals stay
-  immediate. A menu accelerator cannot tell a held key from a tap, so a
+  press quits directly. Choosing Quit with the pointer skips the second-press
+  guard, not the unsaved-edits check. A menu accelerator cannot tell a held key from a tap, so a
   double press stands in for hold-to-quit.

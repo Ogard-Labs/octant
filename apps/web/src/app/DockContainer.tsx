@@ -1,5 +1,5 @@
 import { coordinatorWorkersOf } from "../agents/coordinatorWorkers";
-import { confirmFilesClose } from "../code/filesCloseGuard";
+import { confirmFilesClose, filesCloseScope } from "../code/filesCloseGuard";
 import { requestThreadControl } from "../composer/threadControlNavigation";
 import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { ChatThreadId } from "@octant/contracts/chat";
@@ -18,7 +18,7 @@ import type { ProjectId } from "@octant/contracts/projects";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import type { buildModelPickerGroups } from "@octant/domain";
 import type { SideChatSidecar } from "@octant/contracts";
-import { memo, useEffect, useMemo } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import { useMinuteTick } from "../polling/useMinuteTick";
 import type { AgentRunViewRequest } from "../agents/AgentRunHierarchy";
 import type { createChatReadCursorStore } from "../chat/useChatController";
@@ -181,6 +181,8 @@ export interface DockContainerProps {
     readonly threadId: string;
     readonly checkoutId?: CodeCheckoutId;
   };
+  /** The host id of the dock's thread, resolved as workspace thread tabs carry it. */
+  readonly dockThreadHostId?: string;
   readonly dockThreadHost?: string;
   /** Whether the dock's thread runs on this computer rather than a paired one. */
   readonly dockThreadOnThisComputer: boolean;
@@ -261,6 +263,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     dockSidecarsByThread,
     dockTabs,
     dockThread,
+    dockThreadHostId,
     dockThreadHost,
     dockThreadKey,
     dockThreadOnThisComputer,
@@ -281,6 +284,10 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     windowCapability,
     writtenDocumentsByThread,
   } = props;
+  // A Files close prompt resolves after focus may have moved the dock to
+  // another thread; the answer must never act on that other thread's tabs.
+  const dockThreadKeyRef = useRef(dockThreadKey);
+  dockThreadKeyRef.current = dockThreadKey;
   // Relative-time labels tick here, so the minute re-renders this subtree
   // rather than the whole shell.
   const now = useMinuteTick().getTime();
@@ -466,6 +473,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
           mode: dockThread.mode,
           threadId: dockThread.threadId,
           ...(dockThread.checkoutId === undefined ? {} : { checkoutId: dockThread.checkoutId }),
+          ...(dockThreadHostId === undefined ? {} : { hostId: dockThreadHostId }),
           ...(activeProjectId === undefined ? {} : { projectId: activeProjectId }),
         }}
         surface={surface}
@@ -760,9 +768,16 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
           }
           if (closed?.surface === "files") {
             // A Files tool with unsaved edits asks per file before it goes.
-            void confirmFilesClose().then((proceed) => {
-              if (proceed) actions.closeDockTab(tabId);
-            });
+            if (dockThread === undefined) {
+              actions.closeDockTab(tabId);
+              return;
+            }
+            const asked = dockThreadKey;
+            void confirmFilesClose(filesCloseScope(dockThreadHostId, dockThread.threadId)).then(
+              (proceed) => {
+                if (proceed && dockThreadKeyRef.current === asked) actions.closeDockTab(tabId);
+              },
+            );
             return;
           }
           actions.closeDockTab(tabId);
@@ -922,11 +937,23 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
           content={bottomToolContent(activeBottomSurface.id)}
           height={bottomPanelHeight}
           launchableSurfaces={bottomPanelSurfaces}
-          onClose={(surface) =>
-            surface === undefined
-              ? actions.closeBottomPanel()
-              : actions.closeBottomPanelTab(surface)
-          }
+          onClose={(surface) => {
+            if (surface === undefined) {
+              actions.closeBottomPanel();
+              return;
+            }
+            if (surface === "files" && dockThread !== undefined) {
+              const asked = dockThreadKey;
+              void confirmFilesClose(filesCloseScope(dockThreadHostId, dockThread.threadId)).then(
+                (proceed) => {
+                  if (proceed && dockThreadKeyRef.current === asked)
+                    actions.closeBottomPanelTab(surface);
+                },
+              );
+              return;
+            }
+            actions.closeBottomPanelTab(surface);
+          }}
           onCommitHeight={(height) => {
             actions.setPreviewBottomPanelHeight(undefined);
             actions.persistBottomPanelPresentation({

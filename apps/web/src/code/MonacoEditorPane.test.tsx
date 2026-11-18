@@ -9,6 +9,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import {
+  confirmFilesClose,
+  filesClosePromptSnapshot,
+  filesCloseScope,
+  modelUri,
+} from "./filesCloseGuard";
 import type { MonacoAdapterRuntime } from "./MonacoEditorAdapter";
 import { MonacoEditorPane, type CodeEditorFileProjection } from "./MonacoEditorPane";
 import { codeDebugThreadKey, codeDebugWindowState } from "../debug/codeDebugWindowState";
@@ -539,6 +545,122 @@ describe("MonacoEditorPane", () => {
       expect(restoredRuntime.options?.value).toBe("draft survives pane movement"),
     );
     expect(screen.getByRole("status")).toHaveTextContent("Unsaved changes");
+  });
+
+  it("still answers for a Files draft after its editor unmounts, saving on the revision it was based on", async () => {
+    const scope = filesCloseScope(undefined, ids.thread);
+    const values = new Map<string, string>();
+    const draftStore = {
+      clear: (key: string) => values.delete(key),
+      read: (key: string) => values.get(key),
+      write: (key: string, value: string) => values.set(key, value),
+    };
+    const code = client();
+    const fixture = runtime();
+    const mounted = render(
+      <MonacoEditorPane
+        client={code}
+        draftStore={draftStore}
+        file={textFile()}
+        filesCloseScope={scope}
+        loadRuntime={fixture.loadRuntime}
+      />,
+    );
+    await screen.findByRole("region", { name: "Editor for src/index.ts" });
+    await waitFor(() => expect(fixture.options).toBeDefined());
+    act(() => fixture.options?.onChange("draft survives the viewer"));
+    mounted.unmount();
+
+    const draftKey = modelUri(ids.checkout as never, ids.file as never);
+    expect(values.get(draftKey)).toBe("draft survives the viewer");
+
+    let confirmed!: Promise<boolean>;
+    await act(async () => {
+      confirmed = confirmFilesClose(scope);
+    });
+    await vi.waitFor(() => expect(filesClosePromptSnapshot()?.name).toBe("index.ts"));
+    let closed!: boolean;
+    await act(async () => {
+      filesClosePromptSnapshot()?.answer("save");
+      closed = await confirmed;
+    });
+    expect(closed).toBe(true);
+    expect(code.save).toHaveBeenCalledWith({
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      path: "src/index.ts",
+      expectedIdentity: metadata.identity,
+      expectedDigest: metadata.digest,
+      text: "draft survives the viewer",
+    });
+    expect(values.get(draftKey)).toBeUndefined();
+    expect(values.get(`${draftKey}:base`)).toBeUndefined();
+  });
+
+  it("refuses the close and keeps the newer draft that arrived under a detached save", async () => {
+    const scope = filesCloseScope(undefined, ids.thread);
+    const values = new Map<string, string>();
+    const draftStore = {
+      clear: (key: string) => values.delete(key),
+      read: (key: string) => values.get(key),
+      write: (key: string, value: string) => values.set(key, value),
+    };
+    const code = client();
+    let completeSave!: (value: unknown) => void;
+    vi.mocked(code.save).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          completeSave = resolve;
+        }) as never,
+    );
+    const fixture = runtime();
+    const mounted = render(
+      <MonacoEditorPane
+        client={code}
+        draftStore={draftStore}
+        file={textFile()}
+        filesCloseScope={scope}
+        loadRuntime={fixture.loadRuntime}
+      />,
+    );
+    await screen.findByRole("region", { name: "Editor for src/index.ts" });
+    await waitFor(() => expect(fixture.options).toBeDefined());
+    act(() => fixture.options?.onChange("first draft"));
+    mounted.unmount();
+
+    const draftKey = modelUri(ids.checkout as never, ids.file as never);
+    let confirmed!: Promise<boolean>;
+    await act(async () => {
+      confirmed = confirmFilesClose(scope);
+    });
+    await vi.waitFor(() => expect(filesClosePromptSnapshot()?.name).toBe("index.ts"));
+    await act(async () => {
+      filesClosePromptSnapshot()?.answer("save");
+    });
+    await waitFor(() => expect(code.save).toHaveBeenCalledOnce());
+    // A remounted editor wrote its newer draft while the detached save ran.
+    draftStore.write(draftKey, "newer draft text");
+    await act(async () => {
+      completeSave({ status: "completed", metadata: { ...metadata, digest: "c".repeat(64) } });
+    });
+    // The consent covered the draft that was sent, not this one: the close is
+    // refused and the newer draft is asked about on its own.
+    await vi.waitFor(() =>
+      expect(filesClosePromptSnapshot()?.failure).toBe(
+        "index.ts could not be saved. Your edits are still here.",
+      ),
+    );
+    let closed!: boolean;
+    await act(async () => {
+      filesClosePromptSnapshot()?.answer("cancel");
+      closed = await confirmed;
+    });
+    expect(closed).toBe(false);
+    expect(values.get(draftKey)).toBe("newer draft text");
+    expect(values.get(`${draftKey}:base`)).toBeDefined();
+    // Leave the shared registry as the retained clean record found it.
+    draftStore.clear(draftKey);
+    draftStore.clear(`${draftKey}:base`);
   });
 
   it.each([

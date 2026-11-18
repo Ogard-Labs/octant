@@ -50,6 +50,7 @@ import type {
   PreviewTargetKind,
 } from "@octant/contracts/previews";
 import { createShellClient, type ShellClient } from "@octant/client-runtime/shell-client";
+import { confirmFilesClose, filesCloseScope } from "../code/filesCloseGuard";
 import type { OctantMode } from "@octant/contracts/modes";
 import {
   ShellPolicyRejected,
@@ -318,6 +319,10 @@ export function useShellController(options: ShellControllerOptions) {
   const [status, setStatus] = useState<ShellControllerStatus>("loading");
   const [authoritative, setAuthoritative] = useState<AuthoritativeShell>();
   const [contentTabs, setContentTabs] = useState<WorkspaceContentTabs>(new Map());
+  // Close decisions re-read the row after the person answers an async prompt,
+  // when this render's snapshot is already stale.
+  const contentTabsRef = useRef(contentTabs);
+  contentTabsRef.current = contentTabs;
   const contentStorageKey = workspaceContentStorageKey(options.serverUrl, options.windowId);
   const contentOwner = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -747,18 +752,56 @@ export function useShellController(options: ShellControllerOptions) {
   }
 
   async function closeContentTab(paneId: PaneId, tabId: WorkspaceTabId): Promise<void> {
-    const entries = contentTabs.get(paneId) ?? [];
-    const index = entries.findIndex((entry) => entry.id === tabId);
-    if (index < 0) return;
     const shell = committedShell.current;
-    const active =
-      shell === undefined ? undefined : findPaneInWorkspace(shell.workspace, paneId)?.surface;
-    if (active?.id === tabId) {
+    const pane = shell === undefined ? undefined : findPaneInWorkspace(shell.workspace, paneId);
+    const entries = contentTabs.get(paneId) ?? [];
+    const entry = entries.find((candidate) => candidate.id === tabId);
+    const shown = pane !== undefined && pane.surface.id === tabId;
+    // The user's Close on a Code thread's own tab destroys it whether or not
+    // the pane currently shows it; moving a tab between panes goes through
+    // `forgetMovedContentTab`, which destroys nothing and asks nothing.
+    const target = shown ? pane.surface : entry;
+    if (target === undefined) return;
+    const scope = filesCloseScopeOfSurface(target);
+    if (scope !== undefined) {
+      if (!(await confirmFilesClose(scope))) return;
+      // The person took time to answer; the committed workspace may have
+      // moved on. Act only on the target they were asked about, found again
+      // where it lives now.
+      const latest = committedShell.current;
+      const latestPane =
+        latest === undefined ? undefined : findPaneInWorkspace(latest.workspace, paneId);
+      const latestEntries = contentTabsRef.current.get(paneId) ?? [];
+      const indexNow = latestEntries.findIndex((candidate) => candidate.id === tabId);
+      const shownNow = latestPane !== undefined && latestPane.surface.id === tabId;
+      if (!shownNow && indexNow < 0) return;
+      if (shownNow) {
+        const neighbor = latestEntries[indexNow - 1] ?? latestEntries[indexNow + 1];
+        if (neighbor === undefined) {
+          if (!(await removePaneUnchecked(paneId))) return;
+        } else if (!(await activateContentTab(paneId, neighbor.id))) return;
+      }
+    } else if (shown) {
+      const index = entries.findIndex((candidate) => candidate.id === tabId);
       const neighbor = entries[index - 1] ?? entries[index + 1];
       if (neighbor === undefined) {
-        if (!(await closePane(paneId))) return;
+        if (!(await removePaneUnchecked(paneId))) return;
       } else if (!(await activateContentTab(paneId, neighbor.id))) return;
     }
+    setContentTabs((current) =>
+      new Map(current).set(
+        paneId,
+        (current.get(paneId) ?? []).filter((entry) => entry.id !== tabId),
+      ),
+    );
+  }
+
+  /**
+   * Drops a row entry whose surface finished moving to another pane. Unlike
+   * `closeContentTab` it destroys nothing and never asks about drafts: the
+   * surface lives on where it was placed.
+   */
+  function forgetMovedContentTab(paneId: PaneId, tabId: WorkspaceTabId): void {
     setContentTabs((current) =>
       new Map(current).set(
         paneId,
@@ -1049,8 +1092,25 @@ export function useShellController(options: ShellControllerOptions) {
    * Resolves to whether the pane's surface actually left the workspace. When
    * the pane showed the last remaining welcome surface, closing it recreates
    * the default welcome pane and this reports `false` — nothing was lost.
+   * A Code thread's pane first asks about its Files drafts.
    */
   async function closePane(paneId: PaneId): Promise<boolean> {
+    const before = committedShell.current;
+    const surface =
+      before === undefined ? undefined : findPaneInWorkspace(before.workspace, paneId)?.surface;
+    const scope = surface === undefined ? undefined : filesCloseScopeOfSurface(surface);
+    if (surface !== undefined && scope !== undefined) {
+      if (!(await confirmFilesClose(scope))) return false;
+      const latest = committedShell.current;
+      const current =
+        latest === undefined ? undefined : findPaneInWorkspace(latest.workspace, paneId)?.surface;
+      if (current?.id !== surface.id) return false;
+    }
+    return removePaneUnchecked(paneId);
+  }
+
+  /** The pane removal itself, for callers that already confirmed the same target. */
+  async function removePaneUnchecked(paneId: PaneId): Promise<boolean> {
     const before = committedShell.current;
     const surfaceId =
       before === undefined ? undefined : findPaneInWorkspace(before.workspace, paneId)?.surface.id;
@@ -1333,6 +1393,7 @@ export function useShellController(options: ShellControllerOptions) {
     activateContentTab,
     showAnotherContentTab,
     closeContentTab,
+    forgetMovedContentTab,
     commitSplitResize,
     crossContextOffer,
     dismissCrossContextOffer,
@@ -2429,6 +2490,20 @@ function surfaceTab(
     };
   }
   return undefined;
+}
+
+/**
+ * The Files close scope of the thread a surface owns, or nothing when the
+ * surface is not a Code thread's own tab. The host comes from the surface
+ * itself — never the window's focus — so a close asks about the thread it is
+ * actually destroying.
+ */
+function filesCloseScopeOfSurface(surface: WorkspaceTab): string | undefined {
+  if (surface.kind !== "code-overview") return undefined;
+  return filesCloseScope(
+    surface.hostId === undefined ? undefined : String(surface.hostId),
+    String(surface.threadId),
+  );
 }
 
 function boundThreadId(surface: WorkspaceTab): BrowserThreadId | undefined {

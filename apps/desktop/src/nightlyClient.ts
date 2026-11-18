@@ -20,6 +20,7 @@ import { clearSecretServiceTestData, type DesktopIdentity } from "@octant/host-r
 import { decodeAppVersion } from "@octant/contracts/app-updates";
 import type { NightlyWindowBootstrap } from "@octant/contracts/nightly-browser";
 import { createNativeMainAuthority } from "./nightlyNativeMainAuthority";
+import { createDesktopFilesClose } from "./desktopFilesClose";
 import { installNightlyBrokeredFlows } from "./nightlyBrokeredFlows";
 import { installNightlyProviderCredentials } from "./nightlyProviderCredentials";
 import { installNightlyCodeApprovals } from "./nightlyCodeApprovals";
@@ -137,12 +138,29 @@ export async function runNightlyClient(
       return handler(event, ...values);
     });
   };
+  // Each window's renderer answers for its unsaved Files drafts before an
+  // ordinary close or an explicit Quit may go through.
+  const filesClose = createDesktopFilesClose();
+  const liveWindows = () => [...windows.values()].filter((window) => !window.isDestroyed());
+  // Set only by the menu Quit that a Files preflight just approved; any other
+  // quit path is noninteractive and releases whatever question stands open.
+  let filesQuitApproved = false;
   const surfaces = installNightlyClientSurfaces({
     identity,
     platform: process.platform,
     register,
     owns,
-    quit: () => app.quit(),
+    quit: () => {
+      if (filesClose.preflighting() || filesQuitApproved) return;
+      void filesClose.prepareAll(liveWindows).then(
+        (allowed) => {
+          if (!allowed) return;
+          filesQuitApproved = true;
+          app.quit();
+        },
+        () => undefined,
+      );
+    },
   });
   // The inbox holds each link until the first window has loaded.
   launchLinks.handOff(surfaces.acceptCodeLink);
@@ -153,6 +171,9 @@ export async function runNightlyClient(
     else window.maximize();
   });
   register(DESKTOP_IPC_CHANNELS.close, (event) => owns(event).close());
+  register(DESKTOP_IPC_CHANNELS.filesCloseReply, (event, payload) =>
+    filesClose.reply(owns(event), payload),
+  );
   register(DESKTOP_IPC_CHANNELS.hostCapabilities, () => ({
     sidebarVibrancySupported: process.platform === "darwin",
     liveBrowserSupported: true,
@@ -366,6 +387,8 @@ export async function runNightlyClient(
     event.preventDefault();
     if (quitRequested) return;
     quitRequested = true;
+    if (!filesQuitApproved) filesClose.releaseAll();
+    filesQuitApproved = false;
     updates?.dispose();
     void (async () => {
       const result = await closeClientResources();
@@ -482,6 +505,23 @@ export async function runNightlyClient(
               void presentation.hide();
             });
             windows.set(id, window);
+            filesClose.install(window);
+            // Quit, updater and recovery close the window directly; only the
+            // person's own close asks about unsaved Files drafts first.
+            window.on("close", (event) => {
+              if (quitRequested || updating || acceptedQuit) return;
+              // While a Quit preflight owns the question, a manual close may
+              // not consume the approval another window is being asked about.
+              if (filesClose.preflighting()) {
+                event.preventDefault();
+                return;
+              }
+              if (filesClose.holds(window)) return;
+              event.preventDefault();
+              void filesClose.prepare(window).then((allowed) => {
+                if (allowed && filesClose.holds(window) && !window.isDestroyed()) window.close();
+              });
+            });
             capabilities.set(id, bootstrap.capability);
             bootstraps.set(id, bootstrap);
             nativeMain.remember(id, bootstrap);
