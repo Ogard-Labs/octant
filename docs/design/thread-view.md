@@ -433,14 +433,13 @@ where it is. Side-task offers stack above them as hairline cards: a target icon
 the one-line reason, a collapsed "Prompt" disclosure, and one primary
 **Start in new worktree** / **Start in new thread** button.
 
-## Turn figures and plan meters
+## Turn figures and plan usage
 
 A thread's turn figures sit at the top of its Thread info panel, not under the
 composer: with the row of controls and the line of figures under the box, plus a
-card, the composer read as four stacked layers. Above the box, one strip holds
-where the thread runs (Project and branch) on the left and the plan meters
-described below on the right, so the box holds only the message and its
-controls. The figures are one compact block of the 12px meta step in the meta
+card, the composer read as four stacked layers. A thread's composer
+carries no plan usage and no strip of figures, so the box holds only the message
+and its controls. The figures are one compact block of the 12px meta step in the meta
 ink, separated by middle dots, with no hue on any number and no fill: the
 thread's turns, input and output tokens, thinking tokens when the provider
 reported them (part of the output), the cache hit, speed, first token, and cost.
@@ -453,31 +452,17 @@ cost with Previous and Next turn controls. There is no hide control and no
 setting: the panel is closed until asked for, so the figures cost the page
 nothing.
 
-**Plan meters.** Remaining plan usage stands beside the composer, right-aligned on
-the same row as where the work runs: the row under a thread's box, and on a
-start screen the end of the context-chip row above the card (it drops to its
-own right-aligned line when the chips leave no room). A meter is a bar and the
-share **left**: `▬▬▬ 28%`. The bar is a 56px groove 6px tall with a raised
-fill (the pressed-control inset on the track, the bevel's highlight on the
-fill); the figure is in the primary ink at medium weight, in tabular numerals,
-at the 12px meta step, with no fill behind the row. One meter carries no name:
-the bar and its figure say what it is, and its tooltip and accessible name say
-which window ("7-day limit, 28% left"). When a provider reports two windows
-the shortest and the longest stand side by side, and only then does each lead
-with a quiet name in words, `5h ▬▬▬ 85%  week ▬▬ 43%`, because two bare
-figures cannot be told apart. (The single meter read `wk ▬ 28%`: a code to
-look up beside a hairline.) They describe the
-provider the composer will send to (a start screen follows the model menu's
-choice) and read the same host observation as the rail's rings, picked by window
-length (`windowSpan`). A provider that reports no window gets no meters, never
-an empty bar. The fill is the theme's accent role (`--oct-accent`, the ink under
-Mono); a window with a fifth or less left takes the warning ink and
-a spent one the danger ink. The Appearance setting **Usage bars** (`usageBars`,
-Settings › Appearance › Reading) chooses the bar: **Smooth** (default) is a
-three-pixel rounded line; **Pixelated** is a 17 × 3 grid of 2px square cells with
-1px gaps, lit in the same accent, whose last four columns thin out in steps (two
-thirds, a checker, a third, a stipple) so the fill dissolves at its leading edge.
-Neither animates, so reduced motion needs no variant. The row under the box
+**Plan meters.** Remaining plan usage shows in the account menu and the rail's
+ring, on a start screen as the [plan usage line](start-screen.md#plan-usage-line)
+at the end of the context-chip row above the card, and in Settings › Usage. It
+does not stand beside a thread's composer, and the Environment panel's Usage row
+shows the thread's own tokens and cost, not the plan. Its form is the start
+screen's line: each window's share left and its reset, no bar (the bar meters
+went with the Inbox card and the Usage bars setting, maintainer request,
+2026-11-18). The line describes the provider the composer will send to (a start
+screen follows the model menu's choice) and reads the same host observation as
+the rail's ring, picked by window length (`windowSpan`). A provider that reports
+no window shows none. The row under the box
 ([The row under the box](../../DESIGN.md#composer-row)) keeps its controls: the
 approval mode is its shield icon alone, the model button names the model with a
 chosen effort in muted ink and no chevron, the microphone sits just before send,

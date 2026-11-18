@@ -1146,8 +1146,8 @@ under rules.
   window leaves ground, it does not stretch the cards. The To-dos page keeps the
   same measure, so both pages end on one right edge; it has no card, so its
   field, toolbar and list sit on the page itself.
-- **Cards.** **Needs you** is the left card and **GitHub**, **Linear** and
-  **Plan usage** stack to its right: Needs you takes a 560px column when the page's own width
+- **Cards.** **Needs you** is the left card and **GitHub** and **Linear**
+  stack to its right: Needs you takes a 560px column when the page's own width
   (a container query, not the window's) is 900px or more, and every card is one
   column below that. Each
   card's label sits inside it at the top in the meta ink. The Needs you filters
@@ -1157,16 +1157,14 @@ under rules.
   quiet text button. A GitHub or Linear source still loading is one quiet
   skeleton row, never a sentence that reads as an error; empty and failed are
   one sentence in their card.
-- **Plan usage** lists each provider account that reports a plan window: its
-  name, the share left on the plan usage meter and, where the reading carries
-  it, when the window resets. It reads the host observation the composer and the
-  rail already hold, adds no request, and is absent while no account reports a
-  window.
+- The Inbox shows no plan usage: that reading lives in the account menu and the
+  rail's ring, the start screen's composer line and Settings › Usage (maintainer
+  request, 2026-11-18).
 - **Inset.** A card's label, its rows' glyphs and text and its notes stand on one
   16px inset, and a row's trailing items end 16px in, on the filters' right edge.
 - **Rows** in every card carry no rule between them; the row under the pointer
   takes the quiet hover fill with the row radius. Screen readers meet the title,
-  the state sentence, Needs you, GitHub, Linear, then Plan usage.
+  the state sentence, Needs you, GitHub, then Linear.
 
 ## Tool lifecycles
 
@@ -2823,7 +2821,7 @@ reports a window, with its lowest window's share and when it resets; a row
 opens Settings › Usage), then the Workspace and Octant groups (Settings among
 them). It replaced a Settings gear and one ring per provider, two kinds of
 thing at the foot where one does (maintainer request, 2026-11-17). The reading
-is the host's last observation, the one the composer and the Inbox read, never
+is the host's last observation, the one the start screen's composer line reads, never
 a fresh provider call, and it survives a restart.
 
 **Back and forward.** Back and Forward sit in the title band beside the

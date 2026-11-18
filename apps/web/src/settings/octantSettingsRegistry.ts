@@ -273,13 +273,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "reply detail transcript thinking reasoning tool calls expand collapse fold open verbose quiet low medium high",
         },
         {
-          id: settingId("usage-bars"),
-          label: "Usage bars",
-          scope: "app",
-          keywords:
-            "usage bars plan limits meters remaining left 5h week composer smooth pixelated pixel cells dither",
-        },
-        {
           id: settingId("app-background"),
           label: "Background",
           scope: "app",
