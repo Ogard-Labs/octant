@@ -413,4 +413,16 @@ describe("resolveActivityRange", () => {
       endMs: ms("2018-11-05T02:00:00.000Z"),
     });
   });
+
+  it("opens a day whose skipped midnight is only now arriving without a comparison", () => {
+    // Sao Paulo's 2018 spring-forward erased 00:00–01:00 on 4 November, so
+    // the day's first real instant is 01:00 local; one hour of wall time has
+    // elapsed on the clock but none of the day has actually passed.
+    const result = ready(resolve({ kind: "today" }, "2018-11-04T03:00:00.000Z", SAO_PAULO));
+    expect(result.current).toEqual({
+      startMs: ms("2018-11-04T03:00:00.000Z"),
+      endMs: ms("2018-11-04T03:00:00.000Z"),
+    });
+    expect(result.comparison).toBeNull();
+  });
 });

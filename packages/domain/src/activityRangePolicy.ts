@@ -352,7 +352,11 @@ export function resolveActivityRange(input: {
   let comparison: ActivityWindow | null = null;
   if (span.elapsedPosition) {
     const elapsedWall = nowWall - span.currentStartWall;
-    if (elapsedWall > 0) {
+    // Wall elapsed can already be positive while the period's first real
+    // instant is still arriving — a skipped local midnight shifts the start
+    // ahead of now, and a comparison measured against an empty window is
+    // worse than none.
+    if (elapsedWall > 0 && input.nowMs > start) {
       const comparisonStart = resolveBoundary(span.previousStartWall);
       const comparisonEndWall = Math.min(
         span.previousStartWall + elapsedWall,
