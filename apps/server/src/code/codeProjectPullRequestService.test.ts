@@ -2009,6 +2009,55 @@ describe("CodeProjectPullRequestService", () => {
     });
   });
 
+  it("records a merged delivery performed by a GitHub app actor", async () => {
+    const recordDelivery = vi.fn();
+    const { service } = serviceFixture({
+      recordDelivery,
+      detail: async () =>
+        ({
+          ...observedDetail,
+          pullRequest: {
+            ...observedDetail.pullRequest,
+            state: "merged",
+            mergedAt: "2026-08-22T08:00:00Z",
+            mergedBy: "github-actions[bot]",
+          },
+        }) satisfies GhPullRequestReviewResult,
+    });
+
+    await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+
+    expect(recordDelivery).toHaveBeenCalledTimes(1);
+    expect(recordDelivery.mock.calls[0]?.[0]).toMatchObject({
+      kind: "prs-merged",
+      mergedBy: "github-actions[bot]",
+    });
+  });
+
+  it.each(["not a login", "octocat[bot", "octocat[bot][bot]", "[bot]octocat"])(
+    "skips the delivery when the merger login is not a GitHub actor (%s)",
+    async (mergedBy) => {
+      const recordDelivery = vi.fn();
+      const { service } = serviceFixture({
+        recordDelivery,
+        detail: async () =>
+          ({
+            ...observedDetail,
+            pullRequest: {
+              ...observedDetail.pullRequest,
+              state: "merged",
+              mergedAt: "2026-08-22T08:00:00Z",
+              mergedBy,
+            },
+          }) satisfies GhPullRequestReviewResult,
+      });
+
+      await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+
+      expect(recordDelivery).not.toHaveBeenCalled();
+    },
+  );
+
   it("keeps the last authorized detail when refresh fails", async () => {
     let next: GhPullRequestReviewResult = observedDetail;
     const { service } = serviceFixture({

@@ -13,6 +13,18 @@ const boundedNonEmptyText = (maximumBytes: number) =>
   );
 const PositiveInt = Schema.Int.pipe(Schema.positive());
 
+/**
+ * A GitHub login that may have performed a merge: the repository-owner login
+ * shape, plus the `\[bot\]` suffix app actors such as `github-actions[bot]`
+ * carry. Other bracket forms stay refused.
+ */
+export const GithubActorLogin = Schema.String.pipe(
+  Schema.filter((value) =>
+    /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}(?:\[bot\])?$/.test(value),
+  ),
+);
+export type GithubActorLogin = typeof GithubActorLogin.Type;
+
 export const ActivityKind = Schema.Literal(
   "prs-merged",
   "issues-closed",
@@ -55,7 +67,7 @@ export const ActivityPullRequestMergedObserved = Schema.Struct({
   ...repositoryIdentity,
   title: Schema.optional(boundedNonEmptyText(256)),
   occurredAt: UtcTimestamp,
-  mergedBy: GithubRepositoryOwner,
+  mergedBy: GithubActorLogin,
 }).annotations(strict);
 export type ActivityPullRequestMergedObserved = typeof ActivityPullRequestMergedObserved.Type;
 
@@ -147,7 +159,7 @@ export const ActivityRecord = Schema.Union(
     repositoryOwner: GithubRepositoryOwner,
     repositoryName: GithubRepositoryName,
     number: PositiveInt,
-    mergedBy: GithubRepositoryOwner,
+    mergedBy: GithubActorLogin,
     threadId: CodeThreadId,
     projectId: Schema.optional(ProjectId),
   }),
