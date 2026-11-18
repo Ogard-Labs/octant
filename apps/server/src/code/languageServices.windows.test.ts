@@ -9,9 +9,25 @@ import { LanguageServerProcessPort, type LanguageServerLaunchInput } from "./lan
 const directories: string[] = [];
 
 afterEach(() => {
+  // Windows holds a folder busy until the processes started in it have
+  // exited, which can trail the kill by a moment, so let the delete retry.
   for (const directory of directories.splice(0))
-    rmSync(directory, { recursive: true, force: true });
+    rmSync(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
 });
+
+async function waitForExit(pids: ReadonlyArray<number>): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  for (const pid of pids) {
+    while (Date.now() < deadline) {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+}
 
 function folder(): string {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), "octant-windows-language-")));
@@ -165,6 +181,7 @@ describe("a Windows tree stop that fails", () => {
           // Already gone.
         }
       }
+      await waitForExit(pids);
     }
   }, 90_000);
 });
