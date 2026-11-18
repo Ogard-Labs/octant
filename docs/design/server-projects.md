@@ -235,7 +235,8 @@ checks never change registry/configuration or journal state.
   every Project folder. The copy is made read-only, its SHA-256 is checked
   against the journaled digest, and the turn names its path there. The thread's
   file tools read that folder and write nowhere in it; another thread's do not
-  read it. A copy that fails refuses the turn with a sentence saying so. The
+  read it, even through a Project folder that holds the login's home. The copy
+  is made before the turn's start is journaled, so a failed copy leaves no turn. A copy that fails refuses the turn with a sentence saying so. The
   copies stay on the server when the thread is deleted (not built: removing
   them). The same holds for a Work thread there
   ([Plan and Chat tool parity](../architecture.md#security-and-authority)).

@@ -46,16 +46,17 @@ export function chatAttachedFiles(
       kept.push(attachment);
       continue;
     }
-    const plain = attachedFileText(attachment.bytes);
-    const document =
-      plain === undefined ? extractedDocumentText(Buffer.from(attachment.bytes)) : undefined;
+    // A recognized document is read out first: a PDF can be valid UTF-8
+    // throughout, and its raw syntax is not the text a person sees in it.
+    const document = extractedDocumentText(Buffer.from(attachment.bytes));
+    const plain = document === undefined ? attachedFileText(attachment.bytes) : undefined;
     if (document === "unreadable") {
       return {
         status: "refused",
         message: `${attachment.displayName} looks like a document, but Octant could not read its text, and the selected model does not read ${attachment.mediaType} files. Attach it in a Work or Code thread, where the agent opens it from the thread's attachments folder. Nothing was sent.`,
       };
     }
-    const text = plain ?? document?.text;
+    const text = document?.text ?? plain;
     if (text === undefined) {
       return {
         status: "refused",

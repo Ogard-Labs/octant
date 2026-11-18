@@ -343,7 +343,7 @@ describe.skipIf(!canRunThrowawaySshd)("the harness's file tools on a server fold
       });
       expect(await tools.write({ path, content: "changed" })).toMatchObject({
         kind: "refused",
-        reason: "path-escapes-root",
+        reason: "protected-file",
       });
       expect(await tools.edit({ path, oldText: "attached", newText: "changed" })).toMatchObject({
         kind: "refused",
@@ -358,8 +358,36 @@ describe.skipIf(!canRunThrowawaySshd)("the harness's file tools on a server fold
       });
       expect(await other.read({ path })).toMatchObject({
         kind: "refused",
-        reason: "path-escapes-root",
+        reason: "protected-file",
       });
+      // A Project folder that holds the login's home holds every thread's
+      // attachments folder: its own reads still reach only this thread's files,
+      // and its writes none of them.
+      const home = realpathSync(homedir());
+      const homeProject = (thread: string) =>
+        new ServerFileSystem({
+          connection,
+          server: () => ({ alias: sshd.alias, user: sshd.user }),
+          root: home,
+          attachmentsOf: thread,
+        });
+      expect(await homeProject(randomUUID()).read({ path })).toMatchObject({
+        kind: "refused",
+        reason: "protected-file",
+      });
+      expect(
+        await homeProject(randomUUID()).read({ path: join(home, SERVER_THREAD_ATTACHMENTS) }),
+      ).toMatchObject({ kind: "refused", reason: "protected-file" });
+      expect(await homeProject(threadId).read({ path })).toMatchObject({
+        kind: "file",
+        lines: ["attached notes", ""],
+      });
+      expect(
+        await homeProject(threadId).write({
+          path: join(dirname(path), "planted.txt"),
+          content: "x",
+        }),
+      ).toMatchObject({ kind: "refused", reason: "protected-file" });
     } finally {
       rmSync(folder, { recursive: true, force: true });
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDocxFixture } from "../preview/previewTestFixtures";
+import { buildDocxFixture, buildPdfFixture } from "../preview/previewTestFixtures";
 import { chatAttachedFiles, MAX_CHAT_ATTACHED_TEXT_CHARACTERS } from "./chatAttachedFiles";
 
 const file = (displayName: string, mediaType: string, bytes: Uint8Array) => ({
@@ -47,6 +47,15 @@ describe("what a Chat turn gives the model for each attached file", () => {
     );
     const planned = chatAttachedFiles([docx], nothingNative);
     expect(planned.status === "ready" && planned.texts[0]).toContain("First point\nSecond point");
+  });
+
+  it("gives a PDF as its page text even when its bytes are valid UTF-8", () => {
+    const bytes = new Uint8Array(buildPdfFixture([["Quarterly total"]]));
+    expect(new TextDecoder("utf-8", { fatal: true }).decode(bytes)).toContain("%PDF");
+    const planned = chatAttachedFiles([file("q3.pdf", "application/pdf", bytes)], nothingNative);
+    const text = planned.status === "ready" ? (planned.texts[0] ?? "") : "";
+    expect(text).toContain("Quarterly total");
+    expect(text).not.toContain("%PDF");
   });
 
   it("refuses a binary file it can neither send nor read, naming where it can go", () => {

@@ -3003,6 +3003,49 @@ describe("CodeOperationService", () => {
     expect(attachments.readablePath).not.toHaveBeenCalled();
   });
 
+  it("refuses before journaling a server Project's turn whose file could not be copied to its server", async () => {
+    const file = {
+      attachmentId: "40000000-0000-4000-8000-000000000041",
+      displayName: "report.pdf",
+      mediaType: "application/pdf",
+      byteLength: 3,
+      digest: "f".repeat(64),
+    };
+    const attachments = {
+      peek: () => ({ status: "ok" as const, attachments: [file] }),
+      release: vi.fn(),
+      read: vi.fn(async () => new Uint8Array([1, 2, 3])),
+      readablePath: vi.fn(async () => "/octant-data/code-threads/thread/report.pdf"),
+      threadFolder: () => "/octant-data/code-threads/thread",
+    };
+    const fixture = providerTurnFixture({
+      remoteRoot: true,
+      holdsServerThread: () => true,
+      transferServerAttachments: async () => ({
+        status: "refused",
+        message: "The copy to the server failed.",
+      }),
+      attachments: attachments as never,
+      supportsAttachments: () => true,
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }),
+    });
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        attachmentIds: [file.attachmentId],
+      } as never),
+    ).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unavailable", message: "The copy to the server failed." },
+    });
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+    expect(
+      fixture.events.append.mock.calls
+        .map(([entry]) => (entry as { readonly event: { readonly kind: string } }).event)
+        .filter((event) => event.kind === "conversation-turn-started"),
+    ).toHaveLength(0);
+  });
+
   it("runs a server Project's Git panel with Git on its server, and refuses it when the server has none", async () => {
     const localStage = vi.fn(async () => ({ status: "applied" as const }));
     const serverStage = vi.fn(async () => ({ status: "applied" as const }));

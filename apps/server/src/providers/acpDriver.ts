@@ -457,7 +457,12 @@ function acpPromptAttachment(
   }
   if (!inputs.embeddedContext) return undefined;
   const uri = `attachment:${encodeURIComponent(attachment.attachmentId)}/${encodeURIComponent(attachment.displayName)}`;
-  const text = attachedFileText(attachment.bytes);
+  // A PDF or office file goes as its bytes even when they decode as UTF-8:
+  // its raw syntax is not its text, and the agent reads the format itself.
+  const text =
+    modality === "document" && !attachment.mediaType.startsWith("text/")
+      ? undefined
+      : attachedFileText(attachment.bytes);
   return {
     type: "resource",
     resource:

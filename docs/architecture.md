@@ -15051,17 +15051,21 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
       outside every Project folder, made read-only there, and checked by its
       SHA-256 against the journaled digest; the turn names that path. The
       thread's server file tools read that one folder and write nowhere in
-      it, and another thread's tools do not read it. A copy that fails
-      refuses the turn before it is accepted, with a sentence saying so;
+      it, and another thread's tools do not read it, even through a Project
+      folder that holds the login's home. The copy is made before the turn's
+      start is journaled, and a copy that fails refuses the turn before it is
+      accepted, with a sentence saying so;
       images and natively taken files go as before. Not built: removing the
       server copies when the thread is deleted or purged.
     - **Chat.** Chat has no folder, so no file is named by a path. A file the
       provider and model take natively goes natively; an image goes to a
       model that reads images or to Sees images as before; any other file
-      whose bytes are UTF-8 text, whatever its type, goes in the turn as its
-      text, fenced and marked as the file's content rather than the person's
-      words; a Word, PowerPoint or Excel file or a PDF goes in as the text
-      Octant's own read takes out of it, under the read's limits. The
+      Octant recognizes as a Word, PowerPoint or Excel file or a PDF goes in
+      as the text Octant's own read takes out of it, under the read's limits
+      (a PDF whose bytes happen to be UTF-8 is still read out, never sent as
+      its raw syntax); any other file whose bytes are UTF-8 text, whatever its
+      type, goes in the turn as its text, fenced and marked as the file's
+      content rather than the person's words. The
       attached text a turn carries is bounded (400,000 characters), and a turn
       over it is refused rather than cut short. Any other file (an archive,
       a binary) is refused before the turn is accepted, naming a Work or Code

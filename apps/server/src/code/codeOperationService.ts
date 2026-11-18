@@ -1586,6 +1586,11 @@ export class CodeOperationService {
    */
   readonly #startingTurns = new Set<StartingTurn>();
   /**
+   * The server paths of files a server thread's start copied there before it
+   * was journaled, by operation, taken once by the provider call.
+   */
+  readonly #serverAttachmentPaths = new Map<string, ReadonlyArray<AttachedFileByPath>>();
+  /**
    * Restores and discards past their check and still overwriting files. Git
    * queues work per checkout id, and two Projects on one folder have two ids,
    * so a turn starting in the other Project would not wait for the overwrite;
@@ -2024,26 +2029,42 @@ export class CodeOperationService {
                 }
               }
               // A server thread's agent works with the server's file tools, and
-              // this host's attachments folder is not there: with no transfer
-              // to the server, a file the turn would name by path is refused
-              // before the start is journaled.
-              if (
+              // this host's attachments folder is not there: a file the turn
+              // would name by path is copied to the thread's folder on the
+              // server before the start is journaled, so a copy that fails
+              // leaves no turn behind; with no transfer it is refused.
+              const serverFiles =
                 command.kind === "start-provider-turn" &&
                 recordedStart === undefined &&
                 turnRefusal === undefined &&
-                this.#options.transferServerAttachments === undefined &&
-                this.#options.holdsServerThread?.(turnThread) === true &&
-                partitionAttachedFiles(starting.attachments).files.some(
-                  (reference) =>
-                    this.#options.takesFileNatively?.(turnThread, reference.mediaType) !== true,
-                )
-              ) {
-                turnRefusal = this.#failed(
-                  command.operationId,
-                  "unsupported",
-                  SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
-                  "refused",
-                );
+                this.#options.holdsServerThread?.(turnThread) === true
+                  ? partitionAttachedFiles(starting.attachments).files.filter(
+                      (reference) =>
+                        this.#options.takesFileNatively?.(turnThread, reference.mediaType) !== true,
+                    )
+                  : [];
+              if (serverFiles.length > 0) {
+                const transfer = this.#options.transferServerAttachments;
+                const inputs =
+                  transfer === undefined
+                    ? undefined
+                    : await this.#attachmentInputs(command.threadId, serverFiles);
+                const transferred =
+                  transfer === undefined || inputs === undefined
+                    ? undefined
+                    : await transfer(turnThread, inputs);
+                if (transferred?.status === "transferred") {
+                  this.#serverAttachmentPaths.set(String(command.operationId), transferred.files);
+                } else {
+                  turnRefusal = this.#failed(
+                    command.operationId,
+                    transfer === undefined ? "unsupported" : "unavailable",
+                    transfer === undefined
+                      ? SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL
+                      : (transferred?.message ?? "A file attached to this turn is unavailable."),
+                    "refused",
+                  );
+                }
               }
               // Images for a model that cannot read them are described before
               // the start is journaled, so the start records who described
@@ -6417,8 +6438,20 @@ export class CodeOperationService {
           SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
           "refused",
         );
-      const inputs = await this.#attachmentInputs(command.threadId, filesByPath);
-      const transferred = inputs === undefined ? undefined : await transfer(thread, inputs);
+      // Copied before the start was journaled; a start resumed after a
+      // restart, which prepared nothing here, copies them now.
+      const copied = this.#serverAttachmentPaths.get(String(command.operationId));
+      this.#serverAttachmentPaths.delete(String(command.operationId));
+      const inputs =
+        copied === undefined
+          ? await this.#attachmentInputs(command.threadId, filesByPath)
+          : undefined;
+      const transferred =
+        copied !== undefined
+          ? { status: "transferred" as const, files: copied }
+          : inputs === undefined
+            ? undefined
+            : await transfer(thread, inputs);
       if (transferred === undefined || transferred.status === "refused")
         return this.#failed(
           command.operationId,

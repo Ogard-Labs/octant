@@ -2075,7 +2075,8 @@ takes images, and each image goes as an ACP `image` content block after the
 prompt text. With `promptCapabilities.embeddedContext` every listed model
 takes documents (text, PDF and office files), and each goes as an embedded
 `resource` block: its text as `TextResourceContents` when its bytes are UTF-8
-text, otherwise its bytes as `BlobResourceContents`, under an
+text and it is not a PDF or office file, otherwise its bytes as
+`BlobResourceContents` (a PDF stays bytes even when they decode), under an
 `attachment:<id>/<name>` URI that names the attachment, not a path. ACP states
 these for the agent, not per model. The probe reports `nativeAttachments`
 supported when either is advertised. In Work and Code any other file (an
