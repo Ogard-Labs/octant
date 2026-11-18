@@ -2473,12 +2473,17 @@ describe("BrowserSurfaceHost", () => {
         return preventDefault.mock.calls.length === 0;
       };
       /** A navigation the page itself starts; answers whether the guard let it pass. */
-      const start = (url: string, top = true): boolean => {
+      const start = (url: string, top = true, initiator: object | null = null): boolean => {
         const preventDefault = vi.fn();
-        startGuard?.({ preventDefault, isMainFrame: top, url });
+        startGuard?.({ preventDefault, isMainFrame: top, url, initiator });
         return preventDefault.mock.calls.length === 0;
       };
-      return { created, host, hop, start, guardOf };
+      /** The document Chromium reports as committed onto the tab. */
+      const commit = (url: string): void => {
+        vi.mocked(created.webContents.getURL).mockReturnValue(url);
+        guardOf(created, "did-navigate")?.({}, url);
+      };
+      return { created, host, hop, start, commit, guardOf };
     }
 
     it("refuses a move the page starts itself, even on a page that admits every site", async () => {
@@ -2569,6 +2574,110 @@ describe("BrowserSurfaceHost", () => {
         name: "BrowserNavigationBlockedError",
         url: "https://localhost:4101/next",
       });
+    });
+
+    it("lets a local document the person opened keep links and redirects on its exact origin", async () => {
+      const { created, host, hop, start, commit } = await opened();
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
+        commit(url);
+      });
+      await host.act(contextId, {
+        kind: "navigate",
+        target: "http://127.0.0.1:4101/",
+        startedBy: "person",
+      });
+      // Its own main frame may move within the exact committed origin, and a
+      // same-origin redirect of such a move stays with it.
+      expect(start("http://127.0.0.1:4101/next", true, created.webContents.mainFrame)).toBe(true);
+      expect(hop("http://127.0.0.1:4101/deeper", true, created.webContents.mainFrame)).toBe(true);
+      // Once a redirect leaves the origin, a later hop cannot return to it.
+      expect(hop("https://moved.example.net/", true, created.webContents.mainFrame)).toBe(true);
+      expect(hop("http://127.0.0.1:4101/", true, created.webContents.mainFrame)).toBe(false);
+      expect(start("http://127.0.0.1:4101/next", true, created.webContents.mainFrame)).toBe(true);
+      // A new browser-driven load supersedes an earlier renderer chain.
+      namedStart(created, "https://moved.example.net/");
+      expect(hop("http://127.0.0.1:4101/", true, created.webContents.mainFrame)).toBe(false);
+      // A different port or scheme is another origin, still a refused hop.
+      expect(start("http://127.0.0.1:4102/", true, created.webContents.mainFrame)).toBe(false);
+      expect(start("https://127.0.0.1:4101/", true, created.webContents.mainFrame)).toBe(false);
+      // A public move is still ordinary: it and its own redirects are
+      // admitted, but its chain cannot return to this computer's network.
+      expect(start("https://moved.example.net/", true, created.webContents.mainFrame)).toBe(true);
+      expect(hop("https://cdn.example.net/x", true, created.webContents.mainFrame)).toBe(true);
+      expect(hop("http://127.0.0.1:4101/", true, created.webContents.mainFrame)).toBe(false);
+      // Once a public document commits, the local continuation is gone.
+      commit("https://moved.example.net/");
+      expect(start("http://127.0.0.1:4101/", true, created.webContents.mainFrame)).toBe(false);
+    });
+
+    it("lets a local document the agent opened keep links on its exact origin only", async () => {
+      const { created, host, hop, start, commit } = await opened([
+        "http://127.0.0.1:4101",
+        "https://short.example",
+      ]);
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
+        commit(url);
+      });
+      await host.act(contextId, { kind: "navigate", target: "http://127.0.0.1:4101/" });
+      expect(start("http://127.0.0.1:4101/next", true, created.webContents.mainFrame)).toBe(true);
+      expect(hop("http://127.0.0.1:4101/deeper", true, created.webContents.mainFrame)).toBe(true);
+      expect(start("http://127.0.0.1:4102/", true, created.webContents.mainFrame)).toBe(false);
+      expect(start("https://short.example/", true, created.webContents.mainFrame)).toBe(true);
+      expect(hop("http://127.0.0.1:4101/", true, created.webContents.mainFrame)).toBe(false);
+    });
+
+    it("requires a committed explicit open and the same tab's main frame to continue a local page", async () => {
+      const unnamed = await opened();
+      vi.mocked(unnamed.created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        // A start reported but never committed acquires nothing.
+        namedStart(unnamed.created, url);
+      });
+      await unnamed.host.act(contextId, {
+        kind: "navigate",
+        target: "http://192.168.1.1/",
+        startedBy: "person",
+      });
+      expect(
+        unnamed.start("http://192.168.1.1/next", true, unnamed.created.webContents.mainFrame),
+      ).toBe(false);
+      // A commit nobody explicitly opened acquires no continuation either.
+      unnamed.commit("http://192.168.1.1/");
+      expect(
+        unnamed.start("http://192.168.1.1/next", true, unnamed.created.webContents.mainFrame),
+      ).toBe(false);
+
+      const { created, host, start, commit } = await opened();
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
+        commit(url);
+      });
+      await host.act(contextId, {
+        kind: "navigate",
+        target: "http://127.0.0.1:4101/",
+        startedBy: "person",
+      });
+      // A top-level move another frame started is not the main frame's own.
+      expect(start("http://127.0.0.1:4101/next", true, {})).toBe(false);
+      // A subframe's own move never continues the document it lives in.
+      expect(start("http://127.0.0.1:4101/next", false, created.webContents.mainFrame)).toBe(false);
+      // No initiator at all means no continuation either.
+      expect(start("http://127.0.0.1:4101/next")).toBe(false);
+      // The refused starts did not take the committed document's own rule.
+      expect(start("http://127.0.0.1:4101/next", true, created.webContents.mainFrame)).toBe(true);
+    });
+
+    it("does not treat a named public address as an explicit open of its local redirect", async () => {
+      const { created, host, hop, start, commit } = await opened();
+      const local = "http://127.0.0.1:4101/";
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
+        expect(hop(local)).toBe(true);
+        commit(local);
+      });
+      await host.act(contextId, { kind: "navigate", target: "https://short.example/" });
+      expect(start(`${local}next`, true, created.webContents.mainFrame)).toBe(false);
     });
 
     it("names only the tab the host loaded, not a neighbour", async () => {

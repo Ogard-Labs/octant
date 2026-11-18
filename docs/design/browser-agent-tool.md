@@ -300,8 +300,8 @@ the page, the workspace, or the person is reached.
     that Browser cannot keep a typed address's redirect off this computer's
     network. A page the agent opened admits every site there too, and the
     redirects of a load the host named for it — its `navigate`, its `tab-open`
-    with a target — are followed wherever they go; a move the page itself
-    starts is refused there under the page-started rule below. Credential-field
+    with a target — are followed wherever they go. The page-started rule
+    below is not built on the headless Browser. Credential-field
     protection, Take over and Hand back, and the paired-device reach are the
     same on it as on any page.
   - A Private page opened for one site (before this rule, or for a local
@@ -322,18 +322,21 @@ the page, the workspace, or the person is reached.
   IPv6 one included), `localhost`, a name under `.localhost`, `.local`,
   `.internal`, `.lan`, or `.home.arpa`, or a bare name. The text alone is
   read, never a resolver, and only http(s) addresses get the decision. A
-  context approved for exactly one origin keeps hops to that origin — a page
-  opened for its own local server may reach it; every wider allowlist, the
-  any-site one included, admits no page-started hop. Open link in the context
-  menu follows the clicked-link rule because the page supplied the address.
-  Only the top-level redirect chain of a load the host itself named may hop
-  there, and only in its own tab: the agent's `navigate` or `tab-open` under
-  the context's allowlist, and a person's typed address within the exact
-  scheme, host, and port they typed. The name ends with the load — an admitted
-  page-started main navigation supersedes it, and a committed main document
-  ends it — and a renderer
-  start, a subframe, an extension's load, a script, and a held or reopened
-  page never borrow it.
+  context approved for exactly one origin keeps hops to that origin. On
+  desktop, a local document committed after an explicit open of its exact
+  origin may also follow
+  links and redirects in its own tab, even in a wider context. The main
+  frame must start the move and each hop must stay on the exact scheme,
+  host, and port. This adds no site approval and carries nothing to a new
+  tab or a reopened sleeping tab. Open link in the context menu opens a new
+  tab and follows the ordinary page-started rule. A host-named load has a
+  separate exception for its own top-level redirect chain: the agent's
+  `navigate` or `tab-open` under the context's allowlist, and a person's
+  typed address within the exact scheme, host, and port they typed. An
+  admitted page-started main navigation supersedes that named load, and a
+  main document commit ends it. A renderer start, a subframe, an
+  extension's load, a script, and a held or reopened page never borrow the
+  named-load exception.
 - After a page expires, ordinary agent calls answer `context-expired` and name
   its former Private, Project, or Personal profile, rather than claiming it
   never opened. Reopening requires an explicit `navigate`; a stored profile

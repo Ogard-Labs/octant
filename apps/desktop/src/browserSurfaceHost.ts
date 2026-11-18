@@ -437,7 +437,7 @@ interface HibernatedTab {
  */
 interface NamedBrowserLoad {
   readonly kind: "agent" | "person";
-  /** The origin the person typed; meaningful only for `person`. */
+  /** Exact origin of the address the host was asked to open. */
   readonly origin: string | undefined;
   readonly url: string;
   started: boolean;
@@ -453,6 +453,10 @@ interface OwnedTab {
    * the main document commits.
    */
   namedLoad?: NamedBrowserLoad | undefined;
+  /** Exact local origin acquired by a committed named load in this live tab. */
+  openedLocalOrigin?: string | undefined;
+  /** Local renderer load that has not left its starting origin. */
+  pageLocalRedirectOrigin?: string | undefined;
   /**
    * The page's declared icon and the address it came from, in memory only. An
    * address already fetched is not fetched again; a failed fetch keeps the
@@ -1645,7 +1649,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       "did-navigate-in-page",
       "page-title-updated",
     ]) {
-      view.webContents.on(event, () => {
+      view.webContents.on(event, (_event, url) => {
         if (
           event === "did-start-loading" ||
           event === "did-navigate" ||
@@ -1655,7 +1659,20 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           if (owned.pointSelection?.tabId === tabId) clearPointSelection(owned);
         }
         // Committed: the named load this document belongs to names no further hops.
-        if (event === "did-navigate") tab.namedLoad = undefined;
+        if (event === "did-navigate") {
+          const committed = typeof url === "string" ? originOf(url) : undefined;
+          const named = tab.namedLoad;
+          const namedHere = named?.started === true && named.origin === committed;
+          // A pending load says nothing about the document actually on screen.
+          tab.openedLocalOrigin =
+            committed !== undefined &&
+            (committed === tab.openedLocalOrigin ||
+              (namedHere && onThisComputerOrNetwork(committed)))
+              ? committed
+              : undefined;
+          tab.namedLoad = undefined;
+          tab.pageLocalRedirectOrigin = undefined;
+        }
         // A displayed frame belongs to this document, not its navigation successor.
         if (event === "did-start-loading") {
           void owned.textComposition.close();
@@ -1720,18 +1737,36 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       });
     });
     /**
+     * Whether the committed local document's own main frame started this hop
+     * on its exact origin. A local page the host explicitly opened keeps its
+     * own links: the origin was acquired by the commit, not borrowed from a
+     * named load, so it is compared exactly — scheme, host, and port — and a
+     * move another frame started, or one with no initiator at all, is not it.
+     */
+    const continuesOpenedLocalPage = (event: unknown, target: string): boolean =>
+      tab.openedLocalOrigin !== undefined &&
+      typeof event === "object" &&
+      event !== null &&
+      "initiator" in event &&
+      event.initiator === view.webContents.mainFrame &&
+      originOf(target) === tab.openedLocalOrigin;
+    /**
      * May this hop proceed? The shared local guard answers first for every
      * http(s) navigation, before any allowlist or temporary grant — except
      * the redirect chain of the one load the host itself named on this tab:
      * the agent's named load follows its own top-level redirects (its target
      * already passed the allowlist), and the person's follows only the
-     * origin they typed. Renderer-started moves and subframes never inherit
-     * it, and neither does a tab the person has moved off the front.
+     * origin they typed. The other exception is the committed document's
+     * own continuation: a local page the host explicitly opened lets its
+     * main frame move within its exact origin. Renderer-started moves and
+     * subframes never inherit the name, and neither does a tab the person
+     * has moved off the front.
      */
     const admitPageNavigation = (
       target: string,
       top: boolean,
       named?: NamedBrowserLoad,
+      continuesLocalPage = false,
     ): boolean => {
       if (named?.kind === "person") {
         // A typed load's local redirects depend on what the person typed,
@@ -1743,6 +1778,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           return false;
         }
       } else if (
+        !continuesLocalPage &&
         !(named?.kind === "agent" && owned.activeTabId === tab.tabId) &&
         refusesPageNavigation(target, owned.policy.allowedOrigins)
       ) {
@@ -1750,7 +1786,13 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       }
       return owned.ownerNavigationRestricted || ownerControls.holdsPage(owned)
         ? originAllowed(target, owned.policy.allowedOrigins)
-        : admitNavigation(owned, target, top ? view : undefined, !scriptHolds.has(owned));
+        : admitNavigation(
+            owned,
+            target,
+            top ? view : undefined,
+            // Continuing a local page is not a person reaching a new site.
+            !continuesLocalPage && !scriptHolds.has(owned),
+          );
     };
     const refusePageNavigation = (event: unknown): void => {
       (event as { preventDefault?: () => void }).preventDefault?.();
@@ -1762,11 +1804,18 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       (event: unknown, ...details: readonly unknown[]) => {
         const target = navigationUrl(event, details);
         const top = navigationMainFrame(event, details, knownMainFrame);
-        if (typeof target === "string" && admitPageNavigation(target, top)) {
+        const continuesLocalPage =
+          top && typeof target === "string" && continuesOpenedLocalPage(event, target);
+        if (top) tab.pageLocalRedirectOrigin = undefined;
+        if (
+          typeof target === "string" &&
+          admitPageNavigation(target, top, undefined, continuesLocalPage)
+        ) {
           // A page-started main navigation that is admitted supersedes the
           // host-named load still in flight: its own later redirects may not
           // borrow that load's admission.
           if (top) tab.namedLoad = undefined;
+          if (continuesLocalPage) tab.pageLocalRedirectOrigin = tab.openedLocalOrigin;
           return;
         }
         refusePageNavigation(event);
@@ -1778,8 +1827,18 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         top && tab.namedLoad?.started === true && !navigationHasInitiator(event)
           ? tab.namedLoad
           : undefined;
-      if (typeof target === "string" && admitPageNavigation(target, top, named)) return;
+      const continuesLocalPage =
+        top &&
+        named === undefined &&
+        tab.pageLocalRedirectOrigin !== undefined &&
+        typeof target === "string" &&
+        originOf(target) === tab.pageLocalRedirectOrigin &&
+        continuesOpenedLocalPage(event, target);
+      if (top && !continuesLocalPage) tab.pageLocalRedirectOrigin = undefined;
+      if (typeof target === "string" && admitPageNavigation(target, top, named, continuesLocalPage))
+        return;
       if (named !== undefined && typeof target === "string") named.refusedUrl = target;
+      if (top) tab.pageLocalRedirectOrigin = undefined;
       refusePageNavigation(event);
     };
     // Electron emits will-frame-navigate for the main frame too. Redirects can be subframes.
@@ -2027,8 +2086,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     view.webContents.on("render-process-gone", () => forgetTab(String(contextId), owned, tab));
     view.webContents.on("did-start-navigation", (event, ...details) => {
       scriptGenerations.set(view, (scriptGenerations.get(view) ?? 0) + 1);
-      const named = tab.namedLoad;
-      if (named === undefined || !navigationMainFrame(event, details, false)) return;
+      if (!navigationMainFrame(event, details, false)) return;
       if (
         typeof event === "object" &&
         event !== null &&
@@ -2036,6 +2094,12 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         event.isSameDocument === true
       )
         return;
+      // Every new main start supersedes the old redirect chain — the named
+      // load's and a continued local page's alike, whether the page, the
+      // browser UI, or an extension started it.
+      tab.pageLocalRedirectOrigin = undefined;
+      const named = tab.namedLoad;
+      if (named === undefined) return;
       const target = navigationUrl(event, details);
       // A pending redirect from the previous document must not spend the
       // next load's admission before Chromium reports the named start.
@@ -4331,7 +4395,7 @@ async function loadNamedBrowserUrl(
   const url = normalizeUrl(target);
   const named: NamedBrowserLoad = {
     kind,
-    origin: kind === "person" ? originOf(url) : undefined,
+    origin: originOf(url),
     url,
     started: false,
   };
