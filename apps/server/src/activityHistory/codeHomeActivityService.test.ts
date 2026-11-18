@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { decodeUtcTimestamp, type WindowId } from "@octant/contracts";
 import type { ActivityQuery } from "@octant/contracts/code-home-activity";
 import type { ActivityFact } from "../persistence/activityHistoryProjection";
-import { CodeHomeActivityService } from "./codeHomeActivityService";
+import {
+  CodeHomeActivityService,
+  type CodeHomeActivityForgeRecord,
+  type CodeHomeActivityForgeResult,
+} from "./codeHomeActivityService";
 
 const windowId = "83000000-0000-4000-8000-0000000000aa" as WindowId;
 const otherWindow = "83000000-0000-4000-8000-0000000000bb" as WindowId;
@@ -53,6 +57,9 @@ function fixture(
     readonly projects?: ReadonlyArray<string>;
     readonly deniedThreads?: ReadonlySet<string>;
     readonly held?: boolean;
+    readonly forgeScope?: ReadonlyArray<string>;
+    readonly forge?: () => Promise<CodeHomeActivityForgeResult>;
+    readonly forgeAccount?: () => Promise<string | undefined>;
   } = {},
 ) {
   const projects = options.projects ?? [project];
@@ -66,6 +73,9 @@ function fixture(
           (input.from === null || fact.occurredAt >= input.from) && fact.occurredAt < input.until,
       ),
     projectionHeld: () => options.held === true,
+    listForgeScope: async () => options.forgeScope ?? [`${project}|octant-dev/octant`],
+    ...(options.forge === undefined ? {} : { forgeRead: options.forge }),
+    ...(options.forgeAccount === undefined ? {} : { forgeAccount: options.forgeAccount }),
     uuid: () => `83000000-0000-4000-8000-${String(++uuidCounter).padStart(12, "0")}`,
     now: () => Date.now(),
     clock: () => now,
@@ -437,59 +447,191 @@ describe("CodeHomeActivityService", () => {
     expect(view.coverageFrom).toBeUndefined();
   });
 
-  it("expires a snapshot when the reach witness proving coverage loses access", async () => {
-    const denied = new Set<string>();
-    // Coverage reaches the comparison window only through an older fact
-    // witnessed by T2 — outside the bounded current window, so its witness
-    // is the sole proof the zero rests on and losing T2 must expire the
-    // snapshot.
-    const facts = [
-      mergeFact({
-        identity: "octant-dev/octant#7",
-        threadId: otherThread,
-        occurredAt: "2025-11-01T00:00:00.000Z",
+  const forgeRecord = (
+    recordOverrides: Record<string, unknown> = {},
+    projectOverride: string = project,
+    repositoryKey = "octant-dev/octant",
+  ): CodeHomeActivityForgeRecord => ({
+    projectId: projectOverride,
+    repositoryKey,
+    record: {
+      kind: "prs-merged",
+      occurredAt: now,
+      id: "octant-dev/octant#42",
+      label: "Ship it",
+      repositoryOwner: "octant-dev",
+      repositoryName: "octant",
+      number: 42,
+      mergedBy: "henrik",
+      ...recordOverrides,
+    } as CodeHomeActivityForgeRecord["record"],
+  });
+
+  it("answers github history from authorized forge records only", async () => {
+    const { read } = fixture([mergeFact()], {
+      forge: async () => ({
+        status: "ready",
+        account: "henrik",
+        checkedAt: now,
+        records: [
+          forgeRecord(),
+          forgeRecord(
+            { id: "octant-dev/octant#77", number: 77 },
+            "83000000-0000-4000-8000-000000000009",
+          ),
+          // An admitted Project name is not enough: the record's own
+          // repository must still be connected for this window.
+          forgeRecord({ id: "octant-dev/other#3", number: 3 }, project, "octant-dev/other"),
+        ],
       }),
-      mergeFact({ occurredAt: "2026-08-19T10:00:00.000Z" }),
-    ];
+      forgeAccount: async () => "henrik",
+    });
+    const view = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "github",
+      current: { from: null, until },
+    });
+    expect(view.status).toBe("ready");
+    expect(view.source).toBe("github");
+    expect(view.count).toBe(1);
+    expect(view.records).toHaveLength(1);
+  });
+
+  it("labels an insecure forge account as a fallback on the Octant view", async () => {
+    const { read } = fixture([], {
+      forge: async () => ({ status: "fallback", fallback: "insecure-github-storage" }),
+    });
+    const view = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "github",
+      current: { from: null, until },
+    });
+    expect(view.status).toBe("ready");
+    expect(view.fallback).toBe("insecure-github-storage");
+  });
+
+  it("answers a forge refusal as unavailable rather than an empty history", async () => {
+    const { read } = fixture([], {
+      forge: async () => ({ status: "unavailable", reason: "rate-limited" }),
+    });
+    const view = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "github",
+      current: { from: null, until },
+    });
+    expect(view).toMatchObject({ status: "unavailable", reason: "rate-limited" });
+  });
+
+  it("expires a github snapshot when the account behind it changes", async () => {
+    let account: string | undefined = "henrik";
+    const { read } = fixture([], {
+      forge: async () => ({
+        status: "ready",
+        account: "henrik",
+        checkedAt: now,
+        records: [forgeRecord()],
+      }),
+      forgeAccount: async () => account,
+    });
+    const first = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "github",
+      current: { from: null, until },
+    });
+    expect(first.status).toBe("ready");
+    account = "other-login";
+    const next = await read({
+      kind: "page",
+      snapshotId: first.snapshotId!,
+      offset: 0,
+    });
+    expect(next.status).toBe("unavailable");
+    expect(next.records).toHaveLength(0);
+    expect(next.count).toBeUndefined();
+  });
+
+  it("expires a page when a thread loses read access with the same Project roster", async () => {
+    const denied = new Set<string>();
     const service = new CodeHomeActivityService({
       listProjects: async () => [project],
       canReadThread: async ({ threadId }) => !denied.has(threadId),
-      readFacts: (input) =>
-        facts.filter(
-          (fact) =>
-            (input.from === null || fact.occurredAt >= input.from) && fact.occurredAt < input.until,
-        ),
+      readFacts: () => [mergeFact()],
       projectionHeld: () => false,
       uuid: () => `83000000-0000-4000-8000-${String(++uuidCounter).padStart(12, "0")}`,
       now: () => Date.now(),
       clock: () => now,
     });
-    const view = await service.read(
+    const first = await service.read(windowId, readQuery("prs-merged"), () => true);
+    expect(first.count).toBe(1);
+    denied.add(codeThread);
+    const next = await service.read(
       windowId,
+      { kind: "page", snapshotId: first.snapshotId!, offset: 0 },
+      () => true,
+    );
+    expect(next.status).toBe("unavailable");
+    expect(next.count).toBeUndefined();
+    expect(next.records).toHaveLength(0);
+  });
+
+  it("expires a github snapshot when a connected repository leaves the admitted scope", async () => {
+    let scope: ReadonlyArray<string> = [`${project}|octant-dev/octant`];
+    const service = new CodeHomeActivityService({
+      listProjects: async () => [project],
+      canReadThread: async () => true,
+      readFacts: () => [],
+      projectionHeld: () => false,
+      listForgeScope: async () => scope,
+      forgeRead: async () => ({
+        status: "ready",
+        account: "henrik",
+        checkedAt: now,
+        records: [forgeRecord()],
+      }),
+      forgeAccount: async () => "henrik",
+      uuid: () => `83000000-0000-4000-8000-${String(++uuidCounter).padStart(12, "0")}`,
+      now: () => Date.now(),
+      clock: () => now,
+    });
+    const first = await service.read(
+      windowId,
+      { kind: "read", card: "prs-merged", source: "github", current: { from: null, until } },
+      () => true,
+    );
+    expect(first.status).toBe("ready");
+    scope = [];
+    const next = await service.read(
+      windowId,
+      { kind: "page", snapshotId: first.snapshotId!, offset: 0 },
+      () => true,
+    );
+    expect(next.status).toBe("unavailable");
+    expect(next.count).toBeUndefined();
+  });
+
+  it("never asks the forge for runs and reads the local journal instead", async () => {
+    let forgeCalled = false;
+    const { read } = fixture(
+      [runFact("chat", "83000000-0000-4000-8000-000000000101", "successful")],
       {
-        kind: "read",
-        card: "prs-merged",
-        source: "octant",
-        current: {
-          from: decodeUtcTimestamp("2026-08-18T00:00:00.000Z"),
-          until: decodeUtcTimestamp("2026-08-25T00:00:00.000Z"),
-        },
-        comparison: {
-          from: decodeUtcTimestamp("2025-12-01T00:00:00.000Z"),
-          until: decodeUtcTimestamp("2026-01-01T00:00:00.000Z"),
+        forge: async () => {
+          forgeCalled = true;
+          return { status: "unavailable", reason: "read-failed" };
         },
       },
-      () => true,
     );
-    expect(view.comparisonCount).toBe(0);
-
-    denied.add(otherThread);
-    const page = await service.read(
-      windowId,
-      { kind: "page", snapshotId: view.snapshotId!, offset: 0 },
-      () => true,
-    );
-    expect(page).toMatchObject({ status: "unavailable", reason: "authorization-changed" });
-    expect(page.records).toHaveLength(0);
+    const view = await read({
+      kind: "read",
+      card: "runs",
+      source: "github",
+      current: { from: null, until },
+    });
+    expect(forgeCalled).toBe(false);
+    expect(view.status).toBe("ready");
+    expect(view.count).toBe(1);
   });
 });

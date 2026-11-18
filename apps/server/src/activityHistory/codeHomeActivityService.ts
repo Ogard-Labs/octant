@@ -14,6 +14,7 @@ import {
   type ActivityRecord,
   type ActivitySnapshotId,
   type ActivityView,
+  type ActivityWindow as ActivityWindowContract,
 } from "@octant/contracts/code-home-activity";
 import type { ActivityFact } from "../persistence/activityHistoryProjection";
 
@@ -80,18 +81,68 @@ export interface CodeHomeActivityServicePorts {
   /** The derived projection is held after a failed apply: its rows lag. */
   readonly projectionHeld: () => boolean;
   /**
-   * Whether the forge seam could answer for this host. Absent means no
-   * connection; `github` reads then fall back to Octant facts.
+   * The window's currently connected and admitted `projectId|owner/name`
+   * pairs. GitHub selections are authorized against this live set — never
+   * against the broader active-Project roster — and pages recheck it.
    */
-  readonly forgeReadiness?: () => "connected" | "disconnected" | "insecure";
+  readonly listForgeScope?: (windowId: WindowId) => Promise<ReadonlyArray<string>>;
+  /**
+   * The resolved forge history read; absent means no GitHub connection at
+   * all, so `github` reads fall back to Octant facts. Never called for runs.
+   */
+  readonly forgeRead?: (input: {
+    readonly windowId: WindowId;
+    readonly card: Exclude<ActivityKind, "runs">;
+    readonly current: ActivityWindowContract;
+    readonly comparison?: ActivityWindowContract;
+    readonly refresh: boolean;
+    readonly signal?: AbortSignal;
+    readonly admission?: () => boolean;
+  }) => Promise<CodeHomeActivityForgeResult>;
+  /**
+   * The normalized login the forge seam answers as, or undefined when no
+   * secure account is connected; github snapshots recheck it on every page.
+   */
+  readonly forgeAccount?: () => Promise<string | undefined>;
   readonly uuid: () => string;
   readonly now: () => number;
   readonly clock: () => UtcTimestamp;
 }
 
+/** One forge row plus the Project and repository that witnessed it. */
+export interface CodeHomeActivityForgeRecord {
+  readonly record: ActivityRecord;
+  readonly projectId: string;
+  /** Normalized `owner/name`; authority is the projectId|repositoryKey pair. */
+  readonly repositoryKey: string;
+}
+
+/**
+ * What the forge seam answers: a connection problem the Octant facts cover,
+ * an honest refusal, or normalized rows the window is authorized for.
+ */
+export type CodeHomeActivityForgeResult =
+  | Readonly<{
+      status: "fallback";
+      fallback: "no-github-connection" | "insecure-github-storage";
+    }>
+  | Readonly<{
+      status: "unavailable";
+      reason: "not-connected" | "not-checked" | "incomplete" | "rate-limited" | "read-failed";
+    }>
+  | Readonly<{
+      status: "ready" | "partial";
+      /** The account whose `gh` answered, normalized; pages recheck it. */
+      account: string;
+      checkedAt: UtcTimestamp;
+      coverageFrom?: UtcTimestamp;
+      records: ReadonlyArray<CodeHomeActivityForgeRecord>;
+    }>;
+
 interface ThreadWitness {
   readonly mode: OctantMode;
-  readonly threadId: string;
+  /** Absent on forge-resolved rows, which witness a Project, not a thread. */
+  readonly threadId: string | undefined;
   readonly projectId: string | null;
 }
 
@@ -99,6 +150,8 @@ interface ActivitySnapshot {
   readonly windowId: string;
   readonly source: ActivityCardSource;
   readonly admittedKey: string;
+  /** The forge account a github view was read as; octant snapshots carry none. */
+  readonly forgeKey: string | undefined;
   readonly all: ReadonlyArray<ActivityRecord>;
   readonly filtered: ReadonlyArray<ActivityRecord>;
   readonly authorityOf: ReadonlyMap<string, ThreadWitness>;
@@ -121,14 +174,23 @@ export class CodeHomeActivityService {
     windowId: WindowId,
     query: ActivityQuery,
     admission: () => boolean,
+    signal?: AbortSignal,
   ): Promise<ActivityView> {
     if (query.kind === "page") return this.#page(windowId, query, admission);
-    return this.#initial(windowId, query, admission);
+    return this.#initial(windowId, query, admission, signal);
   }
 
   #unavailable(
     source: ActivityCardSource,
-    reason: "read-failed" | "expired" | "authorization-changed" | "not-recorded" | "not-checked",
+    reason:
+      | "read-failed"
+      | "expired"
+      | "authorization-changed"
+      | "not-recorded"
+      | "not-checked"
+      | "not-connected"
+      | "incomplete"
+      | "rate-limited",
     fallback?: "no-github-connection" | "insecure-github-storage",
   ): ActivityView {
     return {
@@ -144,21 +206,43 @@ export class CodeHomeActivityService {
     windowId: WindowId,
     query: Extract<ActivityQuery, { kind: "read" }>,
     admission: () => boolean,
+    signal?: AbortSignal,
   ): Promise<ActivityView> {
-    // Releases are not journaled anywhere yet: the card answers honestly
-    // rather than inventing history or a fake zero.
-    if (query.card === "releases-published") {
-      return { status: "unavailable", source: query.source, reason: "not-recorded", records: [] };
+    // Octant has no release journal; GitHub resolves them through the forge
+    // seam. An Octant release read still answers honestly unavailable.
+    if (query.card === "releases-published" && query.source === "octant") {
+      return { status: "unavailable", source: "octant", reason: "not-recorded", records: [] };
     }
     let fallback: "no-github-connection" | "insecure-github-storage" | undefined;
-    if (query.source === "github") {
-      const readiness = this.#ports.forgeReadiness?.() ?? "disconnected";
-      if (readiness === "connected") {
-        // The resolved forge read arrives with its own slice; until then the
-        // card says it has not checked rather than claiming coverage.
-        return this.#unavailable("github", "not-checked");
+    if (query.source === "github" && query.card !== "runs") {
+      if (this.#ports.forgeRead === undefined) {
+        fallback = "no-github-connection";
+      } else {
+        const forge = await this.#ports.forgeRead({
+          windowId,
+          card: query.card,
+          current: query.current,
+          ...(query.comparison === undefined ? {} : { comparison: query.comparison }),
+          refresh: query.refresh === true,
+          ...(signal === undefined ? {} : { signal }),
+          admission,
+        });
+        if (forge.status === "fallback") fallback = forge.fallback;
+        else if (forge.status === "unavailable") {
+          return this.#unavailable("github", forge.reason);
+        } else {
+          return this.#forgeView(windowId, query, forge, admission);
+        }
       }
-      fallback = readiness === "insecure" ? "insecure-github-storage" : "no-github-connection";
+    }
+    if (query.card === "releases-published") {
+      return {
+        status: "unavailable",
+        source: "octant",
+        reason: "not-recorded",
+        ...(fallback === undefined ? {} : { fallback }),
+        records: [],
+      };
     }
     if (!admission()) return this.#unavailable("octant", "authorization-changed", fallback);
     if (this.#ports.projectionHeld()) {
@@ -236,6 +320,7 @@ export class CodeHomeActivityService {
     this.#snapshots.set(snapshotId, {
       windowId: String(windowId),
       source: "octant",
+      forgeKey: undefined,
       admittedKey: admitted.slice().sort().join("|"),
       all: records,
       filtered,
@@ -269,6 +354,104 @@ export class CodeHomeActivityService {
     };
   }
 
+  /**
+   * The authorized forge view: records arrive normalized with the Project
+   * each was witnessed for, authority filters before dedupe just like the
+   * journal path, and the frozen snapshot is what every later page reads.
+   */
+  async #forgeView(
+    windowId: WindowId,
+    query: Extract<ActivityQuery, { kind: "read" }>,
+    forge: Extract<CodeHomeActivityForgeResult, { status: "ready" | "partial" }>,
+    admission: () => boolean,
+  ): Promise<ActivityView> {
+    const scope = (await this.#ports.listForgeScope?.(windowId)) ?? [];
+    if (!admission()) return this.#unavailable("github", "authorization-changed");
+    const admittedSet = new Set(scope);
+    const scopeOf = (row: CodeHomeActivityForgeRecord) => `${row.projectId}|${row.repositoryKey}`;
+    const inWindow = (record: CodeHomeActivityForgeRecord) =>
+      (query.current.from === null || record.record.occurredAt >= query.current.from) &&
+      record.record.occurredAt < query.current.until;
+    const byId = new Map<string, CodeHomeActivityForgeRecord>();
+    for (const row of forge.records) {
+      if (!inWindow(row) || byId.has(row.record.id)) continue;
+      if (!admittedSet.has(scopeOf(row))) continue;
+      byId.set(row.record.id, row);
+    }
+    const records = [...byId.values()]
+      .map((row) => row.record)
+      .sort(
+        (a, b) =>
+          (a.occurredAt < b.occurredAt ? 1 : a.occurredAt > b.occurredAt ? -1 : 0) ||
+          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      );
+    const capped = records.slice(0, MAX_SELECTED_RECORDS);
+    const partial = forge.status === "partial" || capped.length < records.length;
+
+    let comparisonCount: number | undefined;
+    if (
+      query.comparison !== undefined &&
+      forge.coverageFrom !== undefined &&
+      forge.coverageFrom < query.comparison.until
+    ) {
+      const inComparison = (record: CodeHomeActivityForgeRecord) =>
+        (query.comparison?.from === undefined ||
+          query.comparison.from === null ||
+          record.record.occurredAt >= query.comparison.from) &&
+        record.record.occurredAt < (query.comparison?.until ?? record.record.occurredAt);
+      const comparisonIds = new Set<string>();
+      for (const row of forge.records) {
+        if (!inComparison(row) || !admittedSet.has(scopeOf(row))) continue;
+        comparisonIds.add(row.record.id);
+      }
+      comparisonCount = comparisonIds.size;
+    }
+
+    const authorityOf = new Map<string, ThreadWitness>();
+    for (const row of byId.values()) {
+      authorityOf.set(row.record.id, {
+        mode: "code",
+        threadId: undefined,
+        projectId: row.projectId,
+      });
+    }
+    this.#evictSnapshots();
+    const snapshotId = this.#ports.uuid();
+    this.#snapshots.set(snapshotId, {
+      windowId: String(windowId),
+      source: "github",
+      forgeKey: forge.account,
+      admittedKey: scope.slice().sort().join("|"),
+      all: capped,
+      filtered: capped,
+      authorityOf,
+      count: capped.length,
+      comparisonCount,
+      finished: undefined,
+      partial,
+      expiresAtMs: this.#ports.now() + SNAPSHOT_TTL_MS,
+    });
+    while (this.#snapshots.size > MAX_SNAPSHOTS) {
+      const oldest = this.#snapshots.keys().next().value;
+      if (oldest === undefined) break;
+      this.#snapshots.delete(oldest);
+    }
+    const page = capped.slice(0, PAGE_SIZE);
+    if (!admission()) return this.#unavailable("github", "authorization-changed");
+    return {
+      status: partial ? "partial" : "ready",
+      source: "github",
+      ...(partial ? { reason: "incomplete" as const } : {}),
+      checkedAt: forge.checkedAt,
+      ...(forge.coverageFrom === undefined ? {} : { coverageFrom: forge.coverageFrom }),
+      count: capped.length,
+      ...(comparisonCount === undefined ? {} : { comparisonCount }),
+      snapshotId: snapshotId as ActivitySnapshotId,
+      records: page,
+      ...(page.length < capped.length ? { nextOffset: page.length } : {}),
+    };
+  }
+
   async #page(
     windowId: WindowId,
     query: Extract<ActivityQuery, { kind: "page" }>,
@@ -281,10 +464,23 @@ export class CodeHomeActivityService {
     if (snapshot === undefined || snapshot.windowId !== String(windowId) || !admission()) {
       return this.#unavailable("octant", "expired");
     }
-    const admitted = await this.#ports.listProjects(windowId);
-    if (admitted.slice().sort().join("|") !== snapshot.admittedKey) {
+    const scope =
+      snapshot.source === "github"
+        ? ((await this.#ports.listForgeScope?.(windowId)) ?? [])
+        : await this.#ports.listProjects(windowId);
+    if (scope.slice().sort().join("|") !== snapshot.admittedKey) {
       this.#snapshots.delete(query.snapshotId);
       return this.#unavailable(snapshot.source, "authorization-changed");
+    }
+    // A github view also re-proves the secure account it was read as: a
+    // logout or a different signed-in login ends the snapshot rather than
+    // paging another account's history under this one.
+    if (snapshot.forgeKey !== undefined) {
+      const account = await this.#ports.forgeAccount?.();
+      if (account !== snapshot.forgeKey) {
+        this.#snapshots.delete(query.snapshotId);
+        return this.#unavailable(snapshot.source, "authorization-changed");
+      }
     }
     const list = query.allFinished === true ? snapshot.all : snapshot.filtered;
     const page = list.slice(query.offset, query.offset + PAGE_SIZE);
@@ -292,7 +488,13 @@ export class CodeHomeActivityService {
     // witnessed; losing any one of them expires the whole snapshot rather
     // than letting totals or rows leak past a scope change.
     for (const witness of snapshot.authorityOf.values()) {
-      const allowed = await this.#ports.canReadThread({ windowId, ...witness });
+      if (witness.threadId === undefined) continue;
+      const allowed = await this.#ports.canReadThread({
+        windowId,
+        mode: witness.mode,
+        threadId: witness.threadId,
+        projectId: witness.projectId,
+      });
       if (!allowed) {
         this.#snapshots.delete(query.snapshotId);
         return this.#unavailable(snapshot.source, "authorization-changed");
@@ -415,10 +617,16 @@ export class CodeHomeActivityService {
     // never admit them, and only Chat's own personal scope may.
     if (witness.projectId === null && witness.mode !== "chat") return false;
     if (witness.projectId !== null && !admitted.has(witness.projectId)) return false;
+    if (witness.threadId === undefined) return false;
     const key = `${witness.mode}:${witness.threadId}:${witness.projectId ?? ""}`;
     let pending = threadReads.get(key);
     if (pending === undefined) {
-      pending = this.#ports.canReadThread({ windowId, ...witness });
+      pending = this.#ports.canReadThread({
+        windowId,
+        mode: witness.mode,
+        threadId: witness.threadId,
+        projectId: witness.projectId,
+      });
       threadReads.set(key, pending);
     }
     return pending;

@@ -558,6 +558,12 @@ fabricated zero.
 
 A run counts as canceled when the person stopped it: Chat, Work and agent runs journal a cancelled outcome, and a Code turn counts as canceled when the journal recorded the person's stop request before it was interrupted. Any other interruption, such as a restart, counts as failed.
 
+A GitHub source answers through the connected account's `gh` and counts
+only that account's own merges, closures and releases; release history only
+reaches what GitHub's event history exposes — roughly the last 30 days or
+300 events per repository — so release coverage is always reported as
+partial rather than presented as complete.
+
 A timeframe resolves to a half-open
 `[start, end)` instant window plus an optional comparison window in the
 person's own time zone and week start (Sunday = 0 through Saturday = 6).

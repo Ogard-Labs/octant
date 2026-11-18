@@ -1138,6 +1138,30 @@ export class CodeProjectPullRequestService {
     );
   }
 
+  /**
+   * The connected GitHub repositories this window's admitted Code Projects
+   * name, for reads that must stay inside what the window may see — never a
+   * wider catalogue.
+   */
+  async listConnectedRepositories(windowId: WindowId): Promise<
+    ReadonlyArray<{
+      readonly projectId: ProjectId;
+      readonly repositoryOwner: string;
+      readonly repositoryName: string;
+    }>
+  > {
+    return (await this.#resolveProjects(windowId))
+      .filter(
+        (project): project is Extract<CodeProjectPullRequestConnection, { kind: "connected" }> =>
+          project.kind === "connected",
+      )
+      .map((project) => ({
+        projectId: project.projectId,
+        repositoryOwner: project.repositoryOwner,
+        repositoryName: project.repositoryName,
+      }));
+  }
+
   async #resolveProjects(
     windowId: WindowId,
   ): Promise<ReadonlyArray<CodeProjectPullRequestConnection>> {

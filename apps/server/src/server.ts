@@ -1074,6 +1074,8 @@ export function startOctantServer(
       codeWorkingDirectoryProbePath,
       extensionLifecycleService,
       extensionPackageStore,
+      githubCapabilityService,
+      projectPullRequestService,
       managedWorktreeReceipts,
       externalContentIngestionStore,
       options,
