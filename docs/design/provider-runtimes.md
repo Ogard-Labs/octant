@@ -92,12 +92,19 @@ on (OpenCode runs as itself) a 1.x launch links the person's global
 `AGENTS.md`, found where their own environment names that folder, into the
 private one, and OpenCode then prefers it over `CLAUDE.md` as it does on its
 own. With the setup off no `AGENTS.md` is linked and 1.x reads
-`~/.claude/CLAUDE.md`. Below Full access the 1.x launch's wall opens that
-one `AGENTS.md` for reading and nothing else in its folder (the person's
-`opencode.json`, plugins and agents stay out): a literal Seatbelt rule on
-macOS and a read-only bind on Linux, as for `CLAUDE.md`. A protected file, a
-link, or a file reached through a linked folder is not linked or opened. A
-2.x launch links nothing. Below Full access the 1.x
+`~/.claude/CLAUDE.md`. 2.x reads `<global config>/AGENTS.md` from the same
+folder, resolved the same way (`OPENCODE_CONFIG_DIR`, else
+`$XDG_CONFIG_HOME/opencode`; opencode 2.0.22 and 2.2.0,
+`core/src/config/plugin/instruction.ts` and `util/src/global.ts`), so it too
+found only the private folder's, which holds none. Outside Strict, with the
+person's own setup on, a 2.x launch links the person's global `AGENTS.md`
+into the private folder as a 1.x launch does, and reads it as it does on its
+own; under Strict a 2.x launch links nothing, as before. Below Full access
+the launch's wall opens that one `AGENTS.md` for reading and nothing else in
+its folder (the person's `opencode.json`, plugins and agents stay out): a
+literal Seatbelt rule on macOS and a read-only bind on Linux, as for
+`CLAUDE.md`. A protected file, a link, or a file reached through a linked
+folder is not linked or opened. Below Full access the 1.x
 launch's wall opens that one file for reading and nothing else in
 `~/.claude`: a literal Seatbelt rule on macOS, under the `~/.claude` denial
 that stays whole, and a read-only bind on Linux. The file is found at
@@ -1761,16 +1768,56 @@ Strict as on the level: a session asking for the other Strict value than the
 running process was started with is refused, as a wider level is, and the
 next start launches a fresh process.
 
-Not built yet: starting a thread from one of the person's own OpenCode
-sessions, and a native fork. OpenCode's server serves both (`GET /session`
-and `POST /session/{id}/fork` with a `messageID`), but three pieces are
-missing: listing or forking needs a running server for the folder outside
-any thread, and a short-lived Plan-posture launch is refused by OpenCode 2
-on a host whose Chat and Plan jail starts no process; Octant keeps no durable
-record of which Octant session holds which OpenCode session (the resume
-cursor is the only one), so a session another thread holds cannot be left
-out or refused; and OpenCode's completed turn reports no native anchor for
-a fork to end at.
+An empty Work or Code thread can start from one of the person's own
+OpenCode sessions in its folder (`openCodeNativeSessions.ts`), and a Code
+fork continues OpenCode's own fork of the source session. OpenCode keeps
+every session in one store, which a launch shares with the person's own use,
+so the sessions it lists for a folder are the person's and Octant's alike.
+Listing, taking up and forking run against a server for the folder started
+outside any thread: the readiness check's launch (Chat's posture, or Work's
+at Ask first where OpenCode 2's Chat and Plan jail starts no process), held
+as its own lease per folder so its confinement binds that folder. 1.x lists
+through `GET /session?directory=`, 2.x through `GET /api/session` with the
+folder as `directory` (opencode 2.0.22 and 2.2.0, `protocol/src/groups/session.ts`).
+
+Which OpenCode sessions an Octant thread holds is read from the host's own
+journal (`openCodeSessionHolds.ts`): every session an Octant thread starts,
+takes up or forks is journaled with its resume cursor (`driverKind:
+"opencode"`, the session id as its value, the instance in its binding), so
+any journaled cursor naming a session holds it for that instance, and a
+cursor older than its binding holds it for every instance. The record is the
+journal itself rather than a copy that could drift from it; it is read once
+and then from where the last read stopped, so a session a purged thread held
+stays held until the host restarts. The list offers the newest 50 sessions
+whose folder is the thread's exactly, leaving out every held session and
+every session OpenCode started inside another (a subagent's or a fork's,
+which carries a parent), with the title OpenCode keeps for each. Adopting
+refuses a held session, then reads the session from OpenCode and refuses one
+in another folder or one OpenCode does not have, and claims it for the
+thread; the cursor it answers names OpenCode's own session, which the
+thread's next turn resumes through the ordinary checks. The check and the
+claim are one step for each session, so two threads adopting one session at
+once take turns and the second is refused; the claim lasts until the host
+journals the adoption (which then holds it) or the driver's `release` gives
+it back. Without the journal record a driver offers no sessions to start
+from. The person's own OpenCode keeps working on the session, which Octant
+never copies; continuing it in both places writes one conversation from two
+sides, as with Claude Code.
+
+A completed OpenCode turn names its last assistant message as its native
+anchor: 1.x reports it on `message.updated` with the message's role, 2.x on
+each step and output event as `assistantMessageID`; a delegated session's
+messages are not counted. The driver's `forkSession` uses OpenCode's own
+fork, which copies a session's history before a message (1.x `POST
+/session/{id}/fork` with `messageID`, 2.x `POST /api/session/{id}/fork` with
+`before`) and leaves the source alone: it finds the message after the anchor
+(1.x reads the session's messages, 2.x reads them newest first a page at a
+time, at most 50 pages of 200) and forks before it, or forks the whole
+session when the anchor is the newest message. Only a session this instance
+opened for the fork's own folder and mode is forked; another folder or mode,
+an anchor OpenCode no longer holds, or a runtime without the routes goes
+back with the text handoff. A rewind still sends the text handoff: OpenCode
+reports `sessionRollback` unsupported, and changing that is its own step.
 
 ## Pi
 
@@ -1860,6 +1907,20 @@ ordinary checks. The person's file is never written, so their own Pi keeps
 working on it; the copy's `parentSession` is the record that a thread holds
 that session, which is then neither offered again nor adopted by a second
 thread. A `sessionDir` set in Pi's settings file is not read.
+
+A Code fork continues a copy of the source's Pi session, made as Pi's own
+fork makes one (`forkPiSession`). A completed Pi turn names the id of the
+last entry Pi wrote to the session as its native anchor, read from the
+session file's tail when the run settles. The driver's `forkSession` writes
+a new session file under the fork's session id whose header records the
+file it came from in `parentSession`, holding the source's entries up to and
+including the anchor, so Pi resumes it with the anchor as its leaf; the
+source is never written. Only a session this instance opened for the fork's
+own folder, mode and model is copied (Pi keeps the model a session was opened
+with and refuses a resume onto another); any other fork, an anchor the file
+no longer holds, a file over 64 MB, or a fork session that already has a
+history goes back with the text handoff. A rewind still sends the text
+handoff, since Pi reports `sessionRollback` unsupported.
 
 ## ACP agents
 

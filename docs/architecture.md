@@ -9410,7 +9410,8 @@ fork yet) carries the source's conversation through the fork point, never
 past it. When the fork's provider instance and model can take up the
 source's own session there (the Octant Harness, `seedCodeForkHarnessSession`,
 below; Claude Code when the fork works in the source's own folder, since its
-sessions are kept per folder, see [native session anchors](#native-session-anchors)),
+sessions are kept per folder, see [native session anchors](#native-session-anchors);
+OpenCode and Pi in the source's own folder and mode, through their own fork),
 the fork resumes that copy and is sent no text. Otherwise, including
 every fork onto a provider instance other than the one that wrote the fork
 point, it reads the source through the same selector (purpose `fork`,
@@ -9434,14 +9435,18 @@ fixed `false` native-session and hidden-reasoning values; or reason
 <a id="native-session-anchors"></a>**Native session anchors.** A runtime's
 `completed` event may name where the turn ends in its own session
 (`nativeAnchor`): Claude Code reports the transcript id of the turn's last
-assistant message, Codex its turn id. The host journals it on the turn's
+assistant message, Codex its turn id, OpenCode its last assistant message's
+id, and Pi the id of the last entry it wrote to the session file. The host journals it on the turn's
 completed `operation-state` (an additive field, absent from older turns).
 A driver that copies its own session offers `forkSession` in the provider
 SDK; the host asks it, for a fork's first session or a rewound thread's next
 one, with the kept turn's recorded session and anchor, and resumes the copy
 it returns. The driver returns nothing when the copy cannot be exact: Claude
 Code copies only for the source's own folder, mode and sign-in, because
-resume looks for a session under its folder in the account's directory. The
+resume looks for a session under its folder in the account's directory;
+OpenCode forks through its own fork route, and Pi copies the session file as
+its own fork does, each only for the source's own folder and mode (Pi also
+its model) ([detail](design/provider-runtimes.md#opencode-subagents-strict-and-sessions)). The
 copy is made before the prompt is sent, so any refusal or failure falls back
 to the text handoff, and the journal, file checkpoints and transcript are
 the same either way: the rewind's own record still removes the turns, and
@@ -11996,8 +12001,9 @@ that is not yet effective for the thread is refused and never reaches the model.
   confined launch reaches only the Project's skills. No launch sets
   `OPENCODE_DISABLE_CLAUDE_CODE` or `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT`, so
   OpenCode reads `CLAUDE.md` where it finds no `AGENTS.md`, as it does on its
-  own, and running as itself OpenCode 1.x also finds the person's global
-  `AGENTS.md`, linked into its private config folder: instruction files are
+  own, and running as itself OpenCode 1.x, and 2.x outside Strict, also
+  finds the person's global `AGENTS.md`, linked into its private config
+  folder: instruction files are
   text with no authority (built;
   [detail](design/provider-runtimes.md#key-providers)). Built for
   Mistral Vibe: the launch leaves `VIBE_SKILL_PATHS` and

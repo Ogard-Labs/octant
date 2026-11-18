@@ -79,6 +79,8 @@ export interface ProviderDriverFactoryOptions {
   readonly claudeServerAccess?: ProviderServerAccessPort;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
+  /** The OpenCode sessions the host's journal records an Octant thread holding, per instance. */
+  readonly openCodeHeldSessions?: (instanceId: ProviderInstanceId) => ReadonlySet<string>;
   /** The host's process authority clock, which Claude's pre-tool grants expire on. */
   readonly claudeAuthorityNow?: () => number;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
@@ -155,6 +157,7 @@ export function makeProviderDriver(
       : driver;
   }
   const readPlanMcpServers = options.planMcpServers;
+  const readOpenCodeHeldSessions = options.openCodeHeldSessions;
   switch (instance.driverKind) {
     case "opencode":
       // Route selection follows the version the process attests, not the
@@ -173,6 +176,9 @@ export function makeProviderDriver(
           ...(options.protectedPaths === undefined
             ? {}
             : { protectedPaths: options.protectedPaths }),
+          ...(readOpenCodeHeldSessions === undefined
+            ? {}
+            : { heldSessions: () => readOpenCodeHeldSessions(instance.id) }),
         }),
         // Plan windows come from the account behind the CLI's own sign-in,
         // not from the runtime, so both OpenCode lines report them alike.
