@@ -1,6 +1,6 @@
 # Custom grounds
 
-Status: Building (slice 2 of 3)
+Status: Building (slice 3 of 3)
 Size: Full — it changes a wire contract, the renderer, Settings, the theme file and the plugin seam
 Owner: maintainers · Started: 2026-11-18 · Approved: 2026-11-18, maintainers ("go with your recommendations")
 
