@@ -1203,7 +1203,57 @@ pending. The turn that asked then ends, and the next one launches at the
 new level. Entering Plan records the level the thread left as its
 `planReturnAccess` (Full access is recorded as Ask first), whether the
 agent asked or the person chose Plan from the mode picker, and an approved
-plan returns the thread there, never to Full access. Changing the level inside the running turn, through the runtime's `setPermissionMode` as Claude Code does on its own, is decided and not built yet (maintainer decision, 2026-11-14): the port exposes the control, but a session's launch profile and tool set would still be the old level's, so the turn ends until a session can change them in place.
+plan returns the thread there, never to Full access.
+
+**Changing the level inside the running turn** (maintainer decision,
+2026-11-14; resolved 2026-11-18; designed, not built). An approved change
+is applied without ending the turn only when two things hold: the provider
+can change the level inside its session, and Octant can hold that session
+to the new level's rules without launching it again. Otherwise the turn
+ends, as it does today.
+
+- _Entering Plan in place_ (Claude Code, in Work and Code). The host first
+  moves the thread's level. It then calls the runtime's
+  `setPermissionMode("plan")`, and only after that does the agent hear the
+  answer. From then on the session's gate applies Plan's refusals itself:
+  - every file write and edit tool;
+  - every `Bash` call, because the session's sandbox is the old level's and
+    can write, so a command cannot be judged by it;
+  - every command that would leave the sandbox;
+  - every MCP server the person did not mark read-only;
+  - every subagent or `Workflow` start.
+
+  Each refusal carries Plan's sentence. If `setPermissionMode` fails, the
+  turn ends as today, so the level never moves without its rules. The next
+  turn launches with Plan's read-only profile and tool set as usual.
+
+- _Leaving Plan always ends the turn._ A Plan session holds Plan's tool set
+  and a read-only sandbox. No runtime control adds a tool or widens a
+  sandbox in place, and Octant never applies inside a session a widening it
+  cannot hold to its rules.
+- _Codex_ sets its approval policy and sandbox on each `turn/start`, so it
+  has no change inside a session. Its approval ends the turn as today, and
+  the next turn starts at the new level.
+- _Every other provider_ keeps ending the turn until its driver reports an
+  in-place change it can enforce. The driver reports this capability
+  honestly (an in-place `enter-plan`, or nothing), and the host ends the
+  turn whenever it is absent.
+
+Rationale: Claude Code's own CLI switches modes inside a turn in both
+directions. Octant matches it in the narrowing direction. There, the gate
+can refuse what the old launch profile would still allow. In the widening
+direction the session has neither the tools nor the sandbox, and handing
+the agent a level its session cannot honour would be a silent mismatch.
+
+Building it needs four changes:
+
+- an in-place level change on the driver port;
+- the Claude gate reading the session's current level, not its launch
+  level, at each check (paths, `Bash`, sandbox escape, MCP servers,
+  subagents);
+- the Work and Code request runtimes choosing between applying in place
+  and ending the turn;
+- a journaled record of which of the two happened.
 
 #### Sessions started outside Octant
 
