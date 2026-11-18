@@ -9,7 +9,7 @@ import {
   type UtcTimestamp,
   type WindowId,
 } from "@octant/contracts";
-import type { GithubAuthenticationSnapshot } from "@octant/contracts";
+import type { GithubAuthenticationSnapshot, GithubCapabilityKind } from "@octant/contracts";
 import { decideGithubCatalogueRead } from "@octant/domain";
 import type { GhHomeActivityPort, GhHomeActivityRow } from "../github/ghHomeActivityPort";
 import type {
@@ -33,6 +33,16 @@ interface CachedRepositoryRead {
 type GateOutcome =
   | { readonly kind: "ready"; readonly account: string }
   | { readonly kind: "result"; readonly result: CodeHomeActivityForgeResult };
+
+type ForgeCard = "prs-merged" | "issues-closed" | "releases-published";
+
+/** The catalogue capability each card's read actually needs. */
+const capabilityOf = (card: ForgeCard): GithubCapabilityKind =>
+  card === "prs-merged"
+    ? "pull-requests-read"
+    : card === "issues-closed"
+      ? "issues-read"
+      : "repository-catalogue";
 
 export interface CodeHomeForgeReadPorts {
   /** The secure account and per-capability state `gh` would run under. */
@@ -73,7 +83,7 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
   const cache = new Map<string, CachedRepositoryRead>();
   let cacheAccount: string | undefined;
 
-  const gate = (snapshot: GithubAuthenticationSnapshot): GateOutcome => {
+  const gate = (snapshot: GithubAuthenticationSnapshot, card: ForgeCard): GateOutcome => {
     // A disconnected or insecure account is a labeled fallback; a live
     // account that cannot be observed is a read failure, never a connection
     // claim.
@@ -100,7 +110,7 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
       return { kind: "result", result: { status: "unavailable", reason: "not-connected" } };
     }
     const read = decideGithubCatalogueRead({
-      capability: "pull-requests-read",
+      capability: capabilityOf(card),
       snapshot: { state: snapshot.state, capabilities: snapshot.capabilities },
     });
     if (read.decision === "deny") {
@@ -119,9 +129,9 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
     return { kind: "ready", account };
   };
 
-  const forgeAccount = async (): Promise<string | undefined> => {
+  const forgeAccount = async (card: ForgeCard): Promise<string | undefined> => {
     try {
-      const gated = gate(await ports.capabilitySnapshot(new AbortController().signal));
+      const gated = gate(await ports.capabilitySnapshot(new AbortController().signal), card);
       return gated.kind === "ready" ? gated.account : undefined;
     } catch {
       return undefined;
@@ -145,7 +155,7 @@ export function createCodeHomeForgeRead(ports: CodeHomeForgeReadPorts): {
     } catch {
       return { status: "unavailable", reason: "read-failed" };
     }
-    const gated = gate(snapshot);
+    const gated = gate(snapshot, input.card);
     if (gated.kind === "result") return gated.result;
     const account = gated.account;
     if (cacheAccount !== account) {

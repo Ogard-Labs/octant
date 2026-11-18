@@ -103,7 +103,7 @@ export interface CodeHomeActivityServicePorts {
    * The normalized login the forge seam answers as, or undefined when no
    * secure account is connected; github snapshots recheck it on every page.
    */
-  readonly forgeAccount?: () => Promise<string | undefined>;
+  readonly forgeAccount?: (card: Exclude<ActivityKind, "runs">) => Promise<string | undefined>;
   readonly uuid: () => string;
   readonly now: () => number;
   readonly clock: () => UtcTimestamp;
@@ -148,6 +148,8 @@ interface ThreadWitness {
 interface ActivitySnapshot {
   readonly windowId: string;
   readonly source: ActivityCardSource;
+  readonly card: ActivityKind;
+  readonly checkedAt: UtcTimestamp;
   readonly admittedKey: string;
   /** The forge account a github view was read as; octant snapshots carry none. */
   readonly forgeKey: string | undefined;
@@ -319,6 +321,8 @@ export class CodeHomeActivityService {
     this.#snapshots.set(snapshotId, {
       windowId: String(windowId),
       source: "octant",
+      card: query.card,
+      checkedAt: this.#ports.clock(),
       forgeKey: undefined,
       admittedKey: admitted.slice().sort().join("|"),
       all: records,
@@ -418,6 +422,8 @@ export class CodeHomeActivityService {
     this.#snapshots.set(snapshotId, {
       windowId: String(windowId),
       source: "github",
+      card: query.card,
+      checkedAt: forge.checkedAt,
       forgeKey: forge.account,
       admittedKey: scope.slice().sort().join("|"),
       all: capped,
@@ -472,8 +478,8 @@ export class CodeHomeActivityService {
     // A github view also re-proves the secure account it was read as: a
     // logout or a different signed-in login ends the snapshot rather than
     // paging another account's history under this one.
-    if (snapshot.forgeKey !== undefined) {
-      const account = await this.#ports.forgeAccount?.();
+    if (snapshot.forgeKey !== undefined && snapshot.card !== "runs") {
+      const account = await this.#ports.forgeAccount?.(snapshot.card);
       if (account !== snapshot.forgeKey) {
         this.#snapshots.delete(query.snapshotId);
         return this.#unavailable(snapshot.source, "authorization-changed");
@@ -505,7 +511,7 @@ export class CodeHomeActivityService {
       status: snapshot.partial ? "partial" : "ready",
       source: snapshot.source,
       ...(snapshot.partial ? { reason: "incomplete" as const } : {}),
-      checkedAt: this.#ports.clock(),
+      checkedAt: snapshot.checkedAt,
       count: snapshot.count,
       ...(snapshot.comparisonCount === undefined
         ? {}

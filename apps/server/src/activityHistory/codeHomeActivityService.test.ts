@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeUtcTimestamp, type WindowId } from "@octant/contracts";
+import { decodeUtcTimestamp, type UtcTimestamp, type WindowId } from "@octant/contracts";
 import type { ActivityQuery } from "@octant/contracts/code-home-activity";
 import type { ActivityFact } from "../persistence/activityHistoryProjection";
 import {
@@ -60,6 +60,7 @@ function fixture(
     readonly forgeScope?: ReadonlyArray<string>;
     readonly forge?: () => Promise<CodeHomeActivityForgeResult>;
     readonly forgeAccount?: () => Promise<string | undefined>;
+    readonly clock?: () => UtcTimestamp;
   } = {},
 ) {
   const projects = options.projects ?? [project];
@@ -78,7 +79,7 @@ function fixture(
     ...(options.forgeAccount === undefined ? {} : { forgeAccount: options.forgeAccount }),
     uuid: () => `83000000-0000-4000-8000-${String(++uuidCounter).padStart(12, "0")}`,
     now: () => Date.now(),
-    clock: () => now,
+    clock: options.clock ?? (() => now),
   });
   const read = (query: ActivityQuery, id: WindowId = windowId) =>
     service.read(id, query, () => true);
@@ -528,6 +529,40 @@ describe("CodeHomeActivityService", () => {
     expect(view.status).toBe("ready");
     expect(view.count).toBe(1);
     expect(view.comparisonCount).toBe(1);
+  });
+
+  it("answers every page with the checkedAt the snapshot was read at", async () => {
+    let clockTime = now;
+    const { read } = fixture([], {
+      clock: () => clockTime,
+      forge: async () => ({
+        status: "ready",
+        account: "henrik",
+        checkedAt: "2026-08-20T09:00:00.000Z" as UtcTimestamp,
+        records: [
+          forgeRecord(),
+          ...Array.from({ length: 30 }, (_, index) =>
+            forgeRecord({ id: `octant-dev/octant#${index + 100}`, number: index + 100 }),
+          ),
+        ],
+      }),
+      forgeAccount: async () => "henrik",
+    });
+    const view = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "github",
+      current: { from: null, until },
+    });
+    expect(view.checkedAt).toBe("2026-08-20T09:00:00.000Z");
+    clockTime = "2026-08-20T10:30:00.000Z" as UtcTimestamp;
+    const page = await read({
+      kind: "page",
+      snapshotId: view.snapshotId!,
+      offset: 25,
+    });
+    expect(page.checkedAt).toBe("2026-08-20T09:00:00.000Z");
+    expect(page.records).toHaveLength(6);
   });
 
   it("withholds a comparison count on a partial forge view", async () => {

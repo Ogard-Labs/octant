@@ -23,7 +23,11 @@ const current: ActivityWindow = {
 const readySnapshot = (login = "henrik"): GithubAuthenticationSnapshot => ({
   state: "ready",
   account: { login, gitProtocol: "https", scopes: [] },
-  capabilities: [{ kind: "pull-requests-read", available: true }],
+  capabilities: [
+    { kind: "pull-requests-read", available: true },
+    { kind: "issues-read", available: true },
+    { kind: "repository-catalogue", available: true },
+  ],
 });
 
 const mergedRow: GhHomeActivityRow = {
@@ -476,12 +480,12 @@ describe("createCodeHomeForgeRead", () => {
 
   it("answers the normalized account only while the connection holds", async () => {
     const { forgeAccount } = fixture({});
-    expect(await forgeAccount()).toBe("henrik");
+    expect(await forgeAccount("prs-merged")).toBe("henrik");
   });
 
   it("answers no account when the integration or capability gate is not effective", async () => {
     const { forgeAccount } = fixture({ effective: false });
-    expect(await forgeAccount()).toBeUndefined();
+    expect(await forgeAccount("prs-merged")).toBeUndefined();
     const denied = fixture({
       snapshot: {
         state: "scope-limited",
@@ -489,6 +493,35 @@ describe("createCodeHomeForgeRead", () => {
         capabilities: [{ kind: "pull-requests-read", available: false }],
       },
     });
-    expect(await denied.forgeAccount()).toBeUndefined();
+    expect(await denied.forgeAccount("prs-merged")).toBeUndefined();
+  });
+
+  it("gates each card on its own catalogue capability", async () => {
+    const limited = {
+      state: "scope-limited" as const,
+      account: readySnapshot().account,
+      capabilities: [
+        { kind: "issues-read" as const, available: true },
+        { kind: "pull-requests-read" as const, available: false },
+      ],
+    };
+    const { forgeRead, observe } = fixture({ snapshot: limited });
+    const issues = await forgeRead({
+      windowId,
+      card: "issues-closed",
+      current,
+      refresh: false,
+    });
+    expect(issues.status).not.toBe("unavailable");
+    expect(observe).toHaveBeenCalledTimes(1);
+
+    const merged = await forgeRead({
+      windowId,
+      card: "prs-merged",
+      current,
+      refresh: false,
+    });
+    expect(merged).toMatchObject({ status: "unavailable", reason: "not-connected" });
+    expect(observe).toHaveBeenCalledTimes(1);
   });
 });
