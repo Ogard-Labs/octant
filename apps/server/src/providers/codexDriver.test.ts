@@ -3474,8 +3474,8 @@ describe("Codex execution authority and approvals", () => {
     await acquired.close();
   });
 
-  it("refuses a /review that carries an attachment before anything reaches Codex", async () => {
-    // A model that takes images, so only the review's own rule refuses it.
+  it("hands the images a /review turn carries to the session's own thread and still reviews", async () => {
+    // A model that takes images, so the turn's attachment passes validation.
     const f = fixture({
       modelPages: [{ data: [model("gpt-5.4", ["text", "image"])], nextCursor: null }],
     });
@@ -3491,35 +3491,33 @@ describe("Codex execution authority and approvals", () => {
         strict: false,
       }),
     );
-    const before = f.calls.length;
-    const refused = await Effect.runPromise(
-      Effect.either(
-        acquired.connection.send({
-          sessionId,
-          prompt: "/review",
-          context: [{ kind: "user-message", text: "pending message" }],
-          attachments: [
-            {
-              attachmentId: "attachment-1",
-              displayName: "diagram.png",
-              mediaType: "image/png",
-              bytes: new Uint8Array([1, 2, 3]),
-            },
-          ],
-          tools: [],
-        }),
-      ),
+    await Effect.runPromise(
+      acquired.connection.send({
+        sessionId,
+        prompt: "/review",
+        attachments: [
+          {
+            attachmentId: "attachment-1",
+            displayName: "diagram.png",
+            mediaType: "image/png",
+            bytes: new Uint8Array([1, 2, 3]),
+          },
+        ],
+        tools: [],
+      }),
     );
-    expect(refused._tag === "Left" ? refused.left.category : undefined).toBe("unsupported");
-    expect(refused._tag === "Left" ? refused.left.message : "").toContain("attachments");
-    // Nothing was sent, so the turn's pending messages stay pending.
-    expect(
-      f.calls
-        .slice(before)
-        .filter(({ method }) =>
-          ["thread/inject_items", "thread/start", "review/start"].includes(method),
-        ),
-    ).toEqual([]);
+    const methods = f.calls.map(({ method }) => method);
+    expect(methods.indexOf("thread/inject_items")).toBeLessThan(methods.indexOf("review/start"));
+    expect(f.calls.find(({ method }) => method === "thread/inject_items")?.input).toEqual({
+      threadId: "thread-1",
+      items: [
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_image", image_url: "data:image/png;base64,AQID" }],
+        },
+      ],
+    });
     await acquired.close();
   });
 
@@ -3555,7 +3553,7 @@ describe("Codex execution authority and approvals", () => {
     await acquired.close();
   });
 
-  it("fails the review turn with a sentence when its findings cannot reach the session's thread", async () => {
+  it("completes the review with a note when its findings cannot reach the session's thread", async () => {
     const f = fixture({
       threadInjectItems: async () => {
         throw new CodexRpcClientFailure("remote", "refused", { remoteCode: -32600 });
@@ -3565,11 +3563,74 @@ describe("Codex execution authority and approvals", () => {
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "/review", attachments: [], tools: [] }),
     );
-    const events = takeEvents(acquired.connection, 2);
+    const events = takeEvents(acquired.connection, 3);
     finishReview(f, "- a finding");
-    const [, ended] = await events;
-    expect(ended).toMatchObject({ kind: "failed", failure: { category: "provider-failed" } });
-    expect(ended?.kind === "failed" ? ended.failure.message : "").toContain("follow-up");
+    const [findings, note, ended] = await events;
+    expect(findings?.kind === "text-delta" ? findings.text : "").toContain("- a finding");
+    expect(note?.kind === "text-delta" ? note.text : "").toContain("follow-up turn will not see");
+    expect(ended).toMatchObject({ kind: "completed" });
+    // The note keeps the turn's events in order, the completion last.
+    expect(ended?.sequence).toBe((note?.sequence ?? 0) + 1);
+    await acquired.close();
+  });
+
+  it("still reviews on a release without thread/inject_items and sends what the turn carried with the next one", async () => {
+    const f = fixture({
+      threadInjectItems: async () => {
+        throw new CodexRpcClientFailure("remote", "unknown method", { remoteCode: -32601 });
+      },
+    });
+    const driver = makeCodexDriver(f.options());
+    const acquired = await acquireConnection(driver, "work");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({
+        sessionId,
+        prompt: "/review",
+        context: [{ kind: "user-message", text: "From the planner: check the parser too." }],
+        attachments: [],
+        tools: [],
+      }),
+    );
+    expect(f.calls.some(({ method }) => method === "review/start")).toBe(true);
+    const events = takeEvents(acquired.connection, 4);
+    finishReview(f, "- src/parser.ts: off by one");
+    const [carriedNote, , unrecordedNote, completed] = await events;
+    expect(carriedNote?.kind === "text-delta" ? carriedNote.text : "").toContain(
+      "go with your next message",
+    );
+    expect(unrecordedNote?.kind === "text-delta" ? unrecordedNote.text : "").toContain(
+      "follow-up turn will not see",
+    );
+    expect(completed).toMatchObject({ kind: "completed" });
+    // The thread's next turn, in a session of its own, carries the message.
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId: secondSessionId,
+        resumeCursor: { driverKind: "codex", value: "thread-1" },
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({
+        sessionId: secondSessionId,
+        prompt: "fix it",
+        attachments: [],
+        tools: [],
+      }),
+    );
+    const turn = f.calls.find(({ method }) => method === "turn/start");
+    expect(turn?.input).toMatchObject({ threadId: "thread-1" });
+    expect(JSON.stringify(turn?.input)).toContain("From the planner: check the parser too.");
     await acquired.close();
   });
 
@@ -3583,35 +3644,63 @@ describe("Codex execution authority and approvals", () => {
   });
 
   it.each([
-    ["under Strict", "code", "approval-gated", undefined, "Strict"],
-    ["at Full access that keeps the sandbox", "code", "full-access", false, "sandbox"],
-    ["in Plan", "code", "plan", false, "outside Plan"],
-    ["in Chat", "chat", "approval-gated", false, "outside Plan"],
+    ["in Plan", "plan", false, undefined],
+    ["under Strict", "approval-gated", undefined, undefined],
+    ["at Full access that keeps the sandbox", "full-access", false, true],
   ] as const)(
-    "refuses Codex's review %s rather than run it where it could write",
-    async (_name, mode, executionPolicy, strict, message) => {
+    "starts Codex's review %s, inside Octant's sandbox with no sandbox of Codex's own",
+    async (_name, executionPolicy, strict, fullAccessSandbox) => {
       const f = fixture();
-      const acquired = await acquireConnection(makeCodexDriver(f.options()), mode);
+      const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
       await Effect.runPromise(
         acquired.connection.start({
           sessionId,
           modelId: "gpt-5.4" as never,
           executionPolicy,
           ...(strict === undefined ? {} : { strict }),
-          ...(executionPolicy === "full-access" ? { fullAccessSandbox: true } : {}),
+          ...(fullAccessSandbox === undefined ? {} : { fullAccessSandbox }),
         }),
       );
-      const refused = await Effect.runPromise(
-        Effect.either(
-          acquired.connection.send({ sessionId, prompt: "/review", attachments: [], tools: [] }),
-        ),
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "/review", attachments: [], tools: [] }),
       );
-      expect(refused._tag === "Left" ? refused.left.category : undefined).toBe("unsupported");
-      expect(refused._tag === "Left" ? refused.left.message : "").toContain(message);
-      expect(f.calls.some(({ method }) => method === "review/start")).toBe(false);
+      const threadStarts = f.calls.filter(({ method }) => method === "thread/start");
+      // Codex's own sandbox cannot start inside Octant's profile, which holds
+      // the thread's level for the review: read-only in Plan.
+      expect(threadStarts[1]?.input).toMatchObject({
+        approvalPolicy: "never",
+        sandbox: "danger-full-access",
+        ephemeral: true,
+      });
+      expect(f.calls.find(({ method }) => method === "review/start")?.input).toEqual({
+        threadId: "thread-2",
+        target: { type: "uncommittedChanges" },
+        delivery: "inline",
+      });
       await acquired.close();
     },
   );
+
+  it("does not start Codex's review in Chat, which has no Project", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "chat");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    const refused = await Effect.runPromise(
+      Effect.either(
+        acquired.connection.send({ sessionId, prompt: "/review", attachments: [], tools: [] }),
+      ),
+    );
+    expect(refused._tag === "Left" ? refused.left.category : undefined).toBe("unsupported");
+    expect(f.calls.some(({ method }) => method === "review/start")).toBe(false);
+    await acquired.close();
+  });
 
   it("defaults approval persistence to the current session", async () => {
     const f = fixture();

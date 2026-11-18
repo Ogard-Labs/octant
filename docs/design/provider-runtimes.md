@@ -1443,41 +1443,60 @@ authorize a Strict launch.
   (Codex offers the form to the root thread only) is answered empty. The
   capability is reported `supported`.
 
-**Codex's own review** (maintainer decision, 2026-11-16; partly built).
-Codex's built-in `/review` works in Octant: in Work and Code, at the
-thread's level, Octant starts Codex's review run (`review/start` on the
-app-server) on the thread's checkout. The run is read-only whatever the
-level, as Codex's own review is, and its findings show in the thread as a
-review result, not as edits or a plan. Plan and Chat do not start one.
-Built: the probe lists `/review` among Codex's commands, and a turn whose
-prompt opens with it starts the review instead of a turn; text after the
-name becomes the review's instructions (`custom`), and none reviews the
-uncommitted changes, as Codex's own default. The review runs inline on an
-`ephemeral` thread of its own, started `read-only` with `approvalPolicy:
-"never"` and the session's config overrides, because the inline review takes
-the permission profile of the thread it runs on (codex-rs
-`session/review.rs`, rust-v0.169.0) and the session's thread may write. Its
-`exitedReviewMode` item becomes the reply's own paragraph under a **Codex
-review** heading, and the completed turn names the session's own thread in
-its resume cursor, with no native anchor. The review takes only a target,
-so what the turn carries reaches the session's own thread instead:
-Octant's context, pending Work agent messages and a provider-switch handoff
-are appended there with `thread/inject_items` (raw Responses messages that
-start no turn, codex-rs `ThreadInjectItemsParams`, rust-v0.169.0) before the
-review starts, Octant's rules as a developer message and the rest as a user
-message, so a send reports delivered only what Codex has. A `/review` with an
-attachment is refused before anything is sent, which leaves the turn's
-pending messages pending, and a runtime without `thread/inject_items` refuses
-the review the same way. When the review reports its findings, the request
-and the findings are appended to the session's thread as the user and
-assistant messages Codex records after an inline review (`exit_review_mode`
-in `core/src/tasks/review.rs`) before the turn reports completed, so a
-follow-up such as "fix those findings" sees them; if they cannot be appended
-the turn fails with a sentence saying so. Rationale for the refusals: Codex's
-read-only sandbox is real only where Codex's own Seatbelt can start, outside
-Octant's profile, so under Strict and at Full access that keeps the sandbox a
-review is refused with a sentence rather than run where its commands could
-write; a release without `review/start` is refused too.
+**Codex's own review** (maintainer decisions, 2026-11-16 and 2026-11-18;
+built). Codex's built-in `/review` works in Octant as it does in Codex on its
+own: in every Work and Code mode, Plan and Strict included, Octant starts
+Codex's review run (`review/start` on the app-server) on the thread's
+checkout and never refuses it there. Its findings show in the thread as a
+review result, not as edits or a plan. Chat, which has no Project, does not
+start one, and only a release without `review/start` reports it unsupported.
+The probe lists `/review` among Codex's commands, and a turn whose prompt
+opens with it starts the review instead of a turn; text after the name
+becomes the review's instructions (`custom`), and none reviews the
+uncommitted changes, as Codex's own default.
+
+The review runs inline on an `ephemeral` thread of its own, started with
+`approvalPolicy: "never"` and the session's config overrides, at the
+session's level. Codex's review agent always runs with no approvals and the
+sandbox of the thread it runs on (`AskForApproval::Never` in codex-rs
+`core/src/tasks/review.rs`). Outside Octant's profile (a Work or Code thread
+outside Strict below Full access, or Full access without the sandbox) the
+review thread starts `read-only`, Codex's own read-only sandbox. Inside it
+(Strict, Plan, Full access that keeps the sandbox) Codex's own sandbox
+cannot start, because macOS refuses a Seatbelt inside another, so the
+review thread starts `danger-full-access`, which inside Octant's profile
+means no sandbox of Codex's own, as every turn's external sandbox tells
+Codex (codex-rs matches `danger-full-access` against an external sandbox as
+the same mode, `collect_resume_override_mismatches`); Octant's profile holds
+the level, read-only in Plan and the Project at the guarded levels, and the
+review asks nothing, as Codex's own review asks nothing. Rationale for a
+thread of its own over running inline on the session's thread, as Codex's
+terminal client does: `thread/start` takes the level at once, whereas the
+session's thread holds whatever its last turn stated; a Strict thread before
+its first turn still holds the `read-only` it was started with, which names
+Codex's own sandbox and would fail inside Octant's, and a thread resumed into
+another level holds the previous one until its next turn.
+
+Its `exitedReviewMode` item becomes the reply's own paragraph under a
+**Codex review** heading, and the completed turn names the session's own
+thread in its resume cursor, with no native anchor. The review takes only a
+target, so what the turn carries reaches the session's own thread instead:
+Octant's context, pending Work agent messages, a provider-switch handoff and
+the images the person attached are appended there with `thread/inject_items`
+(raw Responses messages that start no turn, codex-rs
+`ThreadInjectItemsParams`, rust-v0.169.0) before the review starts, Octant's
+rules as a developer message, the rest as a user message, and the images as
+`input_image` items of one more user message. A release without
+`thread/inject_items` still reviews: the reply opens with a note that the
+message's context and attachments did not go with the review, and the driver
+holds them, by the session's thread, and sends them with that thread's next
+turn (held in memory, so a server restart in between loses them). When the
+review reports its findings, the request and the findings are appended to
+the session's thread as the user and assistant messages Codex records after
+an inline review (`exit_review_mode` in `core/src/tasks/review.rs`) before
+the turn reports completed, so a follow-up such as "fix those findings" sees
+them; where they cannot be appended the turn still completes, after a note
+that a follow-up turn will not see them.
 
 **Codex's own Project configuration** (maintainer decision, 2026-11-16;
 designed, not built). In a Project the person trusted for Codex, outside Plan
