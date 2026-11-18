@@ -77,16 +77,23 @@ export function subscribeFilesClosePrompt(listener: () => void): () => void {
   };
 }
 
+/** Whether a Files close decision is already asking the person in this window. */
+export function filesCloseAsking(): boolean {
+  return closing;
+}
+
 function emitPrompt(): void {
   for (const listener of [...promptListeners]) listener();
 }
 
 /**
  * Whether the close may proceed. A file tab asks with its scope and key, the
- * Files tool or the thread's pane asks with the scope alone, and a native
- * window close asks with neither. Every dirty document answers once, in
- * registration order, through one prompt at a time; a close attempted while
- * another is already asking refuses rather than sharing that consent.
+ * Files tool or the thread's pane asks with the scope alone — several scopes
+ * pass as one array so a document more than one closing view shows is asked
+ * about once — and a native window close asks with neither. Every dirty
+ * document answers once, in registration order, through one prompt at a
+ * time; a close attempted while another is already asking refuses rather
+ * than sharing that consent.
  *
  * The person may take any time to answer, and the registry keeps moving
  * meanwhile. An answer is only ever applied to the record the registry holds
@@ -99,7 +106,7 @@ function emitPrompt(): void {
  * window that is actually asking rather than every window it checked.
  */
 export async function confirmFilesClose(
-  scope?: string,
+  scope?: string | ReadonlyArray<string>,
   key?: string,
   signal?: AbortSignal,
   onPrompt?: () => void,
@@ -107,14 +114,20 @@ export async function confirmFilesClose(
   if (closing) return false;
   closing = true;
   let prompted = false;
+  const targets = scope === undefined ? undefined : typeof scope === "string" ? [scope] : scope;
   try {
     for (;;) {
       if (signal?.aborted) return false;
       let target: RegisteredEntry | undefined;
       for (const [id, record] of entries) {
-        if (scope !== undefined && record.entry.scope !== scope) continue;
+        if (targets !== undefined && !targets.includes(record.entry.scope)) continue;
         if (key !== undefined && record.entry.key !== key) continue;
         if (dirty(record.entry)) {
+          // The same buffer still shown live in a view outside this close's
+          // target stays open there, so closing this view loses nothing:
+          // the record is left unasked, unsaved and undiscarded. A retired
+          // record's view no longer shows it and cannot spare this one.
+          if (targets !== undefined && shownOutsideTarget(record, targets)) continue;
           target ??= record;
         } else if (record.retired && entries.get(id) === record) {
           entries.delete(id);
@@ -172,6 +185,20 @@ export async function confirmFilesClose(
   }
 }
 
+/** Another live view outside the close's target shows the same buffer. */
+function shownOutsideTarget(record: RegisteredEntry, targets: ReadonlyArray<string>): boolean {
+  for (const other of entries.values()) {
+    if (
+      other !== record &&
+      !other.retired &&
+      other.entry.key === record.entry.key &&
+      !targets.includes(other.entry.scope)
+    )
+      return true;
+  }
+  return false;
+}
+
 function dirty(entry: FilesCloseEntry): boolean {
   try {
     return entry.isDirty();
@@ -225,6 +252,19 @@ function ask(
  */
 export function filesCloseScope(hostId: string | undefined, threadId: string): string {
   return JSON.stringify([hostId ?? String(LOCAL_HOST_ID), threadId]);
+}
+
+/**
+ * The close scope of one main-area file tab, distinct from its thread's
+ * scope: closing the thread's pane must not ask about a file tab living in
+ * another pane that stays open.
+ */
+export function filesCloseTabScope(
+  hostId: string | undefined,
+  threadId: string,
+  tabId: string,
+): string {
+  return JSON.stringify([hostId ?? String(LOCAL_HOST_ID), threadId, tabId]);
 }
 
 /** The Monaco model URI for a checkout file: also its draft-store and close-registry key. */

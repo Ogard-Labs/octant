@@ -258,6 +258,27 @@ describe("desktopFilesClose", () => {
     window.emitClosed();
     expect(filesClose.holds(window)).toBe(false);
   });
+
+  it("brings forward the window already asking when Quit starts, and asks no other window", async () => {
+    const filesClose = createDesktopFilesClose();
+    const first = fakeWindow();
+    const second = fakeWindow();
+    // The second window's own close already has an unanswered check out.
+    const standing = filesClose.prepare(second);
+    const quit = filesClose.prepareAll(() => [first, second]);
+    expect(await quit).toBe(false);
+    // Quit raised the asking window instead of stacking a second question:
+    // the first window was sent nothing at all.
+    expect(second.focus).toHaveBeenCalled();
+    expect(first.focus).not.toHaveBeenCalled();
+    expect(sentChecks(first)).toHaveLength(0);
+    expect(sentChecks(second)).toHaveLength(1);
+    // The original question still stands to be answered.
+    const id = sentChecks(second)[0]?.requestId;
+    filesClose.reply(second, { requestId: id, answer: "checking" });
+    filesClose.reply(second, { requestId: id, answer: "allow" });
+    expect(await standing).toBe(true);
+  });
 });
 
 describe("the native quit preflight policy", () => {

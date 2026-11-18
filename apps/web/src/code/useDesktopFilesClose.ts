@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import type { OctantHostBridge } from "../shell/hostBridge";
-import { confirmFilesClose } from "./filesCloseGuard";
+import { confirmFilesClose, filesCloseAsking } from "./filesCloseGuard";
 
 /**
  * Answers the desktop's Files close checks for this window. A `check` first
@@ -51,6 +51,15 @@ export function useDesktopFilesClose(hostBridge: OctantHostBridge | undefined): 
           // the prompt it belongs to must never produce an allow.
           if (!(await reply(requestId, "checking"))) throw new Error("reply refused");
           if (!current()) return;
+          if (filesCloseAsking()) {
+            // This page is already asking the person: the new check steps
+            // back after raising this window, and the open question keeps
+            // its own consent. Nothing goes inert on this path.
+            void reply(requestId, "prompting").catch(() => undefined);
+            await reply(requestId, "cancel");
+            if (current()) finish();
+            return;
+          }
           const allowed = await confirmFilesClose(undefined, undefined, control.signal, () => {
             // The prompt is on screen in this window: the desktop raises it
             // now rather than focusing every window it only checked.

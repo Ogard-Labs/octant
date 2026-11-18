@@ -956,8 +956,10 @@ with the full-row selected fill, take a hover fill on the others, and end a chan
 success for added) read from the host's Git observation; the incomplete-tree
 note is one muted line.
 
-Closing a Files tab, the Files tool, or its Code thread asks about every
-affected unsaved file, even if Files is no longer visible. **Save** uses the
+Closing a Files tab, a file opened in the main area, the Files tool, or
+its Code thread asks about every affected unsaved file, even if Files is
+no longer visible. Closing one view of a file that is still open in
+another view does not ask: the buffer stays open there. **Save** uses the
 file's existing revision check; a failed save cannot close the file.
 **Don't save** drops that draft, and **Cancel** leaves the target open.
 Switching threads, hiding the dock and moving a tab do not ask. Desktop
@@ -3951,8 +3953,10 @@ reach the shell.
 - Explicit Quit — from the app menu, the macOS Dock menu, or the quit
   shortcut — checks unsaved edits in the Files tools of every open app
   window before closing any window or starting shutdown. Cancel in any
-  window stops Quit. A file already saved stays saved. System shutdown,
-  updater restarts and forced exits do not wait for these decisions.
+  window stops Quit. If a window is already asking about unsaved edits,
+  Quit brings it forward and stops there; the person answers it and quits
+  again. A file already saved stays saved. System shutdown, updater
+  restarts and forced exits do not wait for these decisions.
 - The macOS status menu always offers **Fully quit Octant**. Ordinary Quit and
   Fully quit share one guarded shutdown: refresh current host activity, ask for
   confirmation when provider sessions remain open or the desktop cannot confirm

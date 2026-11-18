@@ -34,6 +34,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   filesClosePromptSnapshot,
   filesCloseScope,
+  filesCloseTabScope,
   registerFilesCloseEntry,
 } from "../code/filesCloseGuard";
 import { useShellController } from "./useShellController";
@@ -2196,6 +2197,178 @@ describe("useShellController", () => {
       expect(filesClosePromptSnapshot()).toBeUndefined();
       expect(save).not.toHaveBeenCalled();
       expect(discard).not.toHaveBeenCalled();
+    } finally {
+      dirty = false;
+      release();
+    }
+  });
+
+  it("asks before a dirty main-area file tab closes, keeping it on Cancel", async () => {
+    const { result, threadId } = await readyBoundCodeShell();
+    const pane = firstPane(result.current.workspace!.layouts.code);
+    await act(async () =>
+      result.current.openCodeSurface({
+        kind: "code-file",
+        threadId,
+        title: "README.md",
+        relativePath: "README.md" as never,
+      }),
+    );
+    const file = result.current.contentTabs
+      .get(pane.paneId)!
+      .find((entry) => entry.kind === "code-file")!;
+
+    let dirty = true;
+    const discard = vi.fn(() => {
+      dirty = false;
+    });
+    const release = registerFilesCloseEntry({
+      scope: filesCloseTabScope(undefined, String(threadId), String(file.id)),
+      key: "own-doc",
+      name: "draft.ts",
+      isDirty: () => dirty,
+      save: vi.fn(async () => true),
+      discard,
+    });
+    try {
+      let closing!: Promise<void>;
+      await act(async () => {
+        closing = result.current.closeContentTab(pane.paneId, file.id);
+      });
+      await vi.waitFor(() => expect(filesClosePromptSnapshot()?.name).toBe("draft.ts"));
+      await act(async () => {
+        filesClosePromptSnapshot()?.answer("cancel");
+        await closing;
+      });
+      // Cancel kept the tab and the pane still shows it.
+      expect(
+        result.current.contentTabs.get(pane.paneId)?.some((entry) => entry.id === file.id),
+      ).toBe(true);
+      expect(firstPane(result.current.workspace!.layouts.code).surface.kind).toBe("code-file");
+
+      await act(async () => {
+        closing = result.current.closeContentTab(pane.paneId, file.id);
+      });
+      await vi.waitFor(() => expect(filesClosePromptSnapshot()?.name).toBe("draft.ts"));
+      await act(async () => {
+        filesClosePromptSnapshot()?.answer("discard");
+        await closing;
+      });
+      expect(discard).toHaveBeenCalledTimes(1);
+      expect(
+        result.current.contentTabs.get(pane.paneId)?.some((entry) => entry.id === file.id),
+      ).toBe(false);
+    } finally {
+      dirty = false;
+      release();
+    }
+  });
+
+  it("asks before a pane holding a dirty main-area file tab closes", async () => {
+    const { result, threadId } = await readyBoundCodeShell();
+    const pane = firstPane(result.current.workspace!.layouts.code);
+    await act(async () =>
+      result.current.openCodeSurface({
+        kind: "code-file",
+        threadId,
+        title: "README.md",
+        relativePath: "README.md" as never,
+      }),
+    );
+    const file = result.current.contentTabs
+      .get(pane.paneId)!
+      .find((entry) => entry.kind === "code-file")!;
+
+    let dirty = true;
+    const discard = vi.fn(() => {
+      dirty = false;
+    });
+    const release = registerFilesCloseEntry({
+      scope: filesCloseTabScope(undefined, String(threadId), String(file.id)),
+      key: "own-doc",
+      name: "draft.ts",
+      isDirty: () => dirty,
+      save: vi.fn(async () => true),
+      discard,
+    });
+    try {
+      let closing!: Promise<boolean>;
+      await act(async () => {
+        closing = result.current.closePane(pane.paneId);
+      });
+      await vi.waitFor(() => expect(filesClosePromptSnapshot()?.name).toBe("draft.ts"));
+      let closed!: boolean;
+      await act(async () => {
+        filesClosePromptSnapshot()?.answer("cancel");
+        closed = await closing;
+      });
+      expect(closed).toBe(false);
+      expect(firstPane(result.current.workspace!.layouts.code).surface.kind).toBe("code-file");
+
+      await act(async () => {
+        closing = result.current.closePane(pane.paneId);
+      });
+      await vi.waitFor(() => expect(filesClosePromptSnapshot()?.name).toBe("draft.ts"));
+      await act(async () => {
+        filesClosePromptSnapshot()?.answer("discard");
+        closed = await closing;
+      });
+      expect(closed).toBe(true);
+      expect(discard).toHaveBeenCalledTimes(1);
+    } finally {
+      dirty = false;
+      release();
+    }
+  });
+
+  it("does not ask the main-area file tab living in another pane when the thread's pane closes", async () => {
+    const { result, threadId } = await readyBoundCodeShell();
+    const overviewPane = firstPane(result.current.workspace!.layouts.code);
+    // The file tab lives in its own pane beside the thread's overview.
+    await act(async () => result.current.splitPane(overviewPane.paneId, "horizontal"));
+    await act(async () =>
+      result.current.openCodeSurface({
+        kind: "code-file",
+        threadId,
+        title: "README.md",
+        relativePath: "README.md" as never,
+      }),
+    );
+    const layout = result.current.workspace!.layouts.code;
+    const filePane = panes(layout).find((candidate) => candidate.surface.kind === "code-file")!;
+    const fileTab = filePane.surface;
+    const overviewPaneId = panes(layout).find(
+      (candidate) => candidate.surface.kind === "code-overview",
+    )!.paneId;
+    expect(String(overviewPaneId)).not.toBe(String(filePane.paneId));
+
+    let dirty = true;
+    const discard = vi.fn(() => {
+      dirty = false;
+    });
+    const release = registerFilesCloseEntry({
+      scope: filesCloseTabScope(undefined, String(threadId), String(fileTab.id)),
+      key: "own-doc",
+      name: "draft.ts",
+      isDirty: () => dirty,
+      save: vi.fn(async () => true),
+      discard,
+    });
+    try {
+      let closed!: boolean;
+      await act(async () => {
+        closed = await result.current.closePane(overviewPaneId);
+      });
+      // The file tab's own scope is outside the overview pane's target: its
+      // draft was never asked about and its pane stands.
+      expect(closed).toBe(true);
+      expect(filesClosePromptSnapshot()).toBeUndefined();
+      expect(discard).not.toHaveBeenCalled();
+      expect(
+        panes(result.current.workspace!.layouts.code).some(
+          (candidate) => candidate.surface.id === fileTab.id,
+        ),
+      ).toBe(true);
     } finally {
       dirty = false;
       release();

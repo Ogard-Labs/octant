@@ -296,4 +296,138 @@ describe("filesCloseGuard", () => {
     );
     expect(guard.filesCloseScope("host-1", "t")).toBe(JSON.stringify(["host-1", "t"]));
   });
+
+  // Two views of one buffer: the records differ in scope but share the key
+  // and the dirty state the store actually holds.
+  function sharedView(
+    scope: string,
+    shared: { dirty: boolean },
+    name = "shared.ts",
+    key = "shared-key",
+  ): Guard.FilesCloseEntry {
+    return entry({
+      scope,
+      key,
+      name,
+      isDirty: () => shared.dirty,
+      save: vi.fn(async () => {
+        shared.dirty = false;
+        return true;
+      }),
+      discard: vi.fn(() => {
+        shared.dirty = false;
+      }),
+    });
+  }
+
+  it("asks about a dirty file in a main-area tab's own scope", async () => {
+    const tabScope = guard.filesCloseTabScope(undefined, "thread", "tab-1");
+    const own = entry({ scope: tabScope, key: "k-1", name: "main.ts" });
+    const sibling = entry({
+      scope: guard.filesCloseScope(undefined, "thread"),
+      key: "k-2",
+      name: "files.ts",
+    });
+    const release = [guard.registerFilesCloseEntry(own), guard.registerFilesCloseEntry(sibling)];
+    try {
+      const confirmed = guard.confirmFilesClose(tabScope);
+      await vi.waitFor(() => expect(guard.filesClosePromptSnapshot()?.name).toBe("main.ts"));
+      answerPending("discard");
+      expect(await confirmed).toBe(true);
+      expect(own.discard).toHaveBeenCalledTimes(1);
+      expect(sibling.save).not.toHaveBeenCalled();
+      expect(sibling.discard).not.toHaveBeenCalled();
+    } finally {
+      for (const releaseEntry of release) releaseEntry();
+    }
+  });
+
+  it("does not ask about a file another live view outside the target still shows", async () => {
+    const tabScope = guard.filesCloseTabScope(undefined, "thread", "tab-1");
+    const threadScope = guard.filesCloseScope(undefined, "thread");
+    const shared = { dirty: true };
+    const inTab = sharedView(tabScope, shared);
+    const inFiles = sharedView(threadScope, shared);
+    const release = [guard.registerFilesCloseEntry(inTab), guard.registerFilesCloseEntry(inFiles)];
+    try {
+      // Closing only the tab's view loses nothing: Files still shows it.
+      expect(await guard.confirmFilesClose(tabScope)).toBe(true);
+      expect(guard.filesClosePromptSnapshot()).toBeUndefined();
+      expect(inTab.save).not.toHaveBeenCalled();
+      expect(inTab.discard).not.toHaveBeenCalled();
+      expect(inFiles.save).not.toHaveBeenCalled();
+      expect(inFiles.discard).not.toHaveBeenCalled();
+      expect(shared.dirty).toBe(true);
+    } finally {
+      shared.dirty = false;
+      for (const releaseEntry of release) releaseEntry();
+    }
+  });
+
+  it("asks about a file whose other view already unmounted", async () => {
+    const tabScope = guard.filesCloseTabScope(undefined, "thread", "tab-1");
+    const threadScope = guard.filesCloseScope(undefined, "thread");
+    const shared = { dirty: true };
+    const inTab = sharedView(tabScope, shared);
+    const inFiles = sharedView(threadScope, shared);
+    const releaseTab = guard.registerFilesCloseEntry(inTab);
+    const releaseFiles = guard.registerFilesCloseEntry(inFiles);
+    try {
+      // The Files view unmounted with the draft: it can no longer spare the tab.
+      releaseFiles();
+      const confirmed = guard.confirmFilesClose(tabScope);
+      await vi.waitFor(() => expect(guard.filesClosePromptSnapshot()?.name).toBe("shared.ts"));
+      answerPending("discard");
+      expect(await confirmed).toBe(true);
+      expect(inTab.discard).toHaveBeenCalledTimes(1);
+      expect(inFiles.save).not.toHaveBeenCalled();
+      expect(inFiles.discard).not.toHaveBeenCalled();
+    } finally {
+      shared.dirty = false;
+      releaseTab();
+      releaseFiles();
+    }
+  });
+
+  it("asks once for a file two closing views share, and one Save covers both", async () => {
+    const tabScope = guard.filesCloseTabScope(undefined, "thread", "tab-1");
+    const threadScope = guard.filesCloseScope(undefined, "thread");
+    const shared = { dirty: true };
+    const inTab = sharedView(tabScope, shared);
+    const inFiles = sharedView(threadScope, shared);
+    const release = [guard.registerFilesCloseEntry(inTab), guard.registerFilesCloseEntry(inFiles)];
+    try {
+      const confirmed = guard.confirmFilesClose([threadScope, tabScope]);
+      await vi.waitFor(() => expect(guard.filesClosePromptSnapshot()?.name).toBe("shared.ts"));
+      answerPending("save");
+      await vi.waitFor(() => expect(guard.filesClosePromptSnapshot()).toBeUndefined());
+      expect(await confirmed).toBe(true);
+      expect(inTab.save).toHaveBeenCalledTimes(1);
+      expect(inFiles.save).not.toHaveBeenCalled();
+      expect(inFiles.discard).not.toHaveBeenCalled();
+    } finally {
+      for (const releaseEntry of release) releaseEntry();
+    }
+  });
+
+  it("asks once for a file two views show when the whole window closes", async () => {
+    const tabScope = guard.filesCloseTabScope(undefined, "thread", "tab-1");
+    const threadScope = guard.filesCloseScope(undefined, "thread");
+    const shared = { dirty: true };
+    const inTab = sharedView(tabScope, shared);
+    const inFiles = sharedView(threadScope, shared);
+    const release = [guard.registerFilesCloseEntry(inTab), guard.registerFilesCloseEntry(inFiles)];
+    try {
+      const confirmed = guard.confirmFilesClose();
+      await vi.waitFor(() => expect(guard.filesClosePromptSnapshot()?.name).toBe("shared.ts"));
+      answerPending("save");
+      await vi.waitFor(() => expect(guard.filesClosePromptSnapshot()).toBeUndefined());
+      expect(await confirmed).toBe(true);
+      expect(inTab.save).toHaveBeenCalledTimes(1);
+      expect(inFiles.save).not.toHaveBeenCalled();
+      expect(inFiles.discard).not.toHaveBeenCalled();
+    } finally {
+      for (const releaseEntry of release) releaseEntry();
+    }
+  });
 });

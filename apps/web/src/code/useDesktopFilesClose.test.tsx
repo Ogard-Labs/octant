@@ -128,6 +128,26 @@ describe("useDesktopFilesClose", () => {
     expect(guard.filesClosePromptSnapshot()?.name).toBe("notes.md");
   });
 
+  it("answers a desktop check while this page is already asking with prompting then cancel", async () => {
+    const { host, send, replies } = bridge();
+    dirtyFile();
+    renderHook(() => useDesktopFilesClose(host));
+    // An in-page close — a pane or file tab — already holds a question open.
+    const inPage = guard.confirmFilesClose();
+    const question = await prompt();
+    act(() => send({ requestId: 4, kind: "check" }));
+    await waitFor(() =>
+      expect(replies.filter((reply) => reply.requestId === 4).map((reply) => reply.answer)).toEqual(
+        ["checking", "prompting", "cancel"],
+      ),
+    );
+    // The in-page question keeps its consent; the document never went inert.
+    expect(guard.filesClosePromptSnapshot()?.name).toBe("notes.md");
+    expect(document.body.inert).toBe(false);
+    await act(async () => question.answer("cancel"));
+    expect(await inPage).toBe(false);
+  });
+
   it("answers a released prompt cancel so nothing can allow or freeze afterward", async () => {
     const { host, send, replies } = bridge();
     dirtyFile();

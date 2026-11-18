@@ -50,7 +50,7 @@ import type {
   PreviewTargetKind,
 } from "@octant/contracts/previews";
 import { createShellClient, type ShellClient } from "@octant/client-runtime/shell-client";
-import { confirmFilesClose, filesCloseScope } from "../code/filesCloseGuard";
+import { confirmFilesClose, filesCloseScope, filesCloseTabScope } from "../code/filesCloseGuard";
 import type { OctantMode } from "@octant/contracts/modes";
 import {
   ShellPolicyRejected,
@@ -1125,10 +1125,13 @@ export function useShellController(options: ShellControllerOptions) {
       const now = paneFilesScopes(paneId, current.surface);
       return now.length === scopes.length && scopes.every((scope) => now.includes(scope));
     };
-    for (const scope of scopes) {
-      if (!(await confirmFilesClose(scope))) return false;
-      // The person took time to answer: the pane and the surfaces the next
-      // question — or the removal — would cover must still be the same.
+    // One close decision covers every scope the pane holds: asked per scope,
+    // each could let a document slip because another scope here still shows
+    // it — the shared-buffer spare must look outside the pane, not inside it.
+    if (scopes.length > 0) {
+      if (!(await confirmFilesClose(scopes))) return false;
+      // The person took time to answer: the pane and the surfaces the
+      // removal would cover must still be the same.
       if (!paneStillStands()) return false;
     }
     return removePaneUnchecked(paneId);
@@ -2519,11 +2522,20 @@ function surfaceTab(
 
 /**
  * The Files close scope of the thread a surface owns, or nothing when the
- * surface is not a Code thread's own tab. The host comes from the surface
- * itself — never the window's focus — so a close asks about the thread it is
- * actually destroying.
+ * surface is not a Code thread's own tab. An overview shares its thread's
+ * scope; a file tab keeps a scope of its own so closing the thread's pane
+ * leaves a file tab in another pane unasked. The host comes from the
+ * surface itself — never the window's focus — so a close asks about the
+ * thread it is actually destroying.
  */
 function filesCloseScopeOfSurface(surface: WorkspaceTab): string | undefined {
+  if (surface.kind === "code-file") {
+    return filesCloseTabScope(
+      surface.hostId === undefined ? undefined : String(surface.hostId),
+      String(surface.threadId),
+      String(surface.id),
+    );
+  }
   if (surface.kind !== "code-overview") return undefined;
   return filesCloseScope(
     surface.hostId === undefined ? undefined : String(surface.hostId),

@@ -200,6 +200,22 @@ export function createDesktopFilesClose(options?: {
     return requests.get(window)?.phase === "held";
   }
 
+  function pending(window: BrowserWindow): boolean {
+    const phase = requests.get(window)?.phase;
+    return phase === "sent" || phase === "acknowledged" || phase === "confirming-unavailable";
+  }
+
+  /** Raises the window that has a question for the person to answer. */
+  function reveal(window: BrowserWindow): void {
+    try {
+      if (window.isMinimized()) window.restore();
+      window.show();
+      window.focus();
+    } catch {
+      // A window leaving mid-raise fails its own request elsewhere.
+    }
+  }
+
   /**
    * A renderer that could not answer does not strand the window: the person
    * is asked natively instead, and only an explicit yes becomes a hold —
@@ -218,13 +234,7 @@ export function createDesktopFilesClose(options?: {
     // A surviving renderer may still hold this request's lock; releasing it
     // by id must not drop the request the native fallback now owns.
     send(window, { requestId: request.id, kind: "release" });
-    try {
-      if (window.isMinimized()) window.restore();
-      window.show();
-      window.focus();
-    } catch {
-      // A window leaving mid-raise is refused by the await below.
-    }
+    reveal(window);
     void Promise.resolve()
       .then(() => confirmUnavailable(window, confirmation.signal))
       .catch(() => false)
@@ -306,13 +316,7 @@ export function createDesktopFilesClose(options?: {
         // not yank focus back to it.
         if (!request.revealed) {
           request.revealed = true;
-          try {
-            if (window.isMinimized()) window.restore();
-            window.show();
-            window.focus();
-          } catch {
-            // A window leaving mid-raise fails its own request elsewhere.
-          }
+          reveal(window);
         }
         return true;
       case "allow":
@@ -336,6 +340,14 @@ export function createDesktopFilesClose(options?: {
     let succeeded = false;
     try {
       const asked = [...currentWindows()];
+      // A window already asking answers the quit by finishing its own
+      // question: bring it forward and stop, sending nothing to the others —
+      // the person answers it, then quits again.
+      const asking = asked.find((window) => pending(window));
+      if (asking !== undefined) {
+        reveal(asking);
+        return false;
+      }
       for (const window of asked) {
         if (window.isDestroyed()) return false;
         // Raising is the answering path's job: the renderer says `prompting`
@@ -388,10 +400,7 @@ export function createDesktopFilesClose(options?: {
     },
     prepare,
     holds,
-    pending: (window) => {
-      const phase = requests.get(window)?.phase;
-      return phase === "sent" || phase === "acknowledged" || phase === "confirming-unavailable";
-    },
+    pending,
     preflighting: () => preflight,
     reply,
     release,
