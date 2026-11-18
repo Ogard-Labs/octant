@@ -1665,7 +1665,10 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           options,
           clientFactory,
           CATALOG_AUTHORITY,
-          CODEX_SESSION_COPY_LEASE,
+          // One process per copy: a process shared by two copies closes only
+          // after the second, so the first copy would stay loaded there and
+          // its resume would meet the writer conflict.
+          `${CODEX_SESSION_COPY_LEASE}:${String(input.sessionId)}`,
           0,
         );
         const threadFork = runtime.client.threadFork;
@@ -1907,7 +1910,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
 }
 
 const CATALOG_AUTHORITY: CodexLaunchAuthority = { kind: "catalog" };
-/** The lease of the short-lived process a session copy is made on. */
+/** The lease prefix of the short-lived process each session copy is made on. */
 const CODEX_SESSION_COPY_LEASE = "codex-session-copy";
 /** The first release whose `thread/fork` cuts the copy at a turn (`lastTurnId`). */
 const CODEX_FORK_RELEASE = [0, 143, 0] as const;

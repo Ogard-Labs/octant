@@ -5740,6 +5740,59 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
     expect(older.calls.some((call) => call.method === "thread/fork")).toBe(false);
   });
 
+  it("makes each of two concurrent copies on its own process, so neither copy is still held when it is returned", async () => {
+    let releaseFirst: () => void = () => undefined;
+    const firstAsked = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let forks = 0;
+    const f = fixture({
+      version: "0.170.0",
+      threadFork: async (value) => {
+        forks += 1;
+        // The first copy waits until the second has started, so both are in flight at once.
+        if (forks === 1) await firstAsked;
+        else releaseFirst();
+        return {
+          thread: { id: `copy-for-${value.lastTurnId}` },
+          model: "gpt-5.4",
+          modelProvider: "openai",
+          serviceTier: null,
+          cwd: value.cwd,
+        };
+      },
+    });
+    const driver = makeCodexDriver(f.options({ heldThreadsFile: heldThreadsFile() }));
+    const source = {
+      driverKind: "codex" as const,
+      value: "thread-source",
+      binding: {
+        instanceId,
+        sessionId,
+        projectRoot,
+        mode: "code" as const,
+        modelId: decodeProviderModelId("gpt-5.4"),
+      },
+    };
+    const copy = (id: typeof sessionId, anchor: string) =>
+      Effect.runPromise(
+        driver.forkSession?.({
+          instanceId,
+          sessionId: id,
+          source,
+          anchor,
+          projectRoot,
+          mode: "code",
+          modelId: decodeProviderModelId("gpt-5.4"),
+        }) ?? Effect.succeed(undefined),
+      );
+    const third = decodeProviderSessionId("90000000-0000-4000-8000-000000000063");
+    const copies = await Promise.all([copy(secondSessionId, "turn-1"), copy(third, "turn-2")]);
+    expect(copies.map((copied) => copied?.value)).toEqual(["copy-for-turn-1", "copy-for-turn-2"]);
+    expect(f.startCount()).toBe(2);
+    expect(f.closeCount()).toBe(2);
+  });
+
   it("lists the account's own Codex skills and installed plugins for the composer's @ menu", async () => {
     const target = processFixture("sessions", "0.170.0");
     const result = await Effect.runPromise(
