@@ -116,7 +116,9 @@ const STARTER_SETS = [
   { id: "lines", label: "Lines", characters: "─│┼╱╲" },
 ] as const;
 
-const REFUSED_CHARACTERS = "Use letters, digits and symbols; emoji and spaces are left out.";
+const CHARACTERS_HINT = "Up to 64 characters. The field draws only these.";
+// Shorter than the hint, so swapping one for the other never wraps the row.
+const REFUSED_CHARACTERS = "Emoji and spaces are left out.";
 
 /** What the pixel ground can draw; a row saved before scenes existed shows Drift. */
 const SCENES = [
@@ -704,7 +706,10 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               variant="inline"
             >
               <SettingRow
-                description="Up to 64 characters. The field draws only these."
+                description={
+                  // The note takes the hint's place, so the row never grows as it comes and goes.
+                  <span role="status">{typedRefused ? REFUSED_CHARACTERS : CHARACTERS_HINT}</span>
+                }
                 label="Characters"
                 scope="app"
                 settingId="app-background-characters"
@@ -754,10 +759,6 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                   />
                 </span>
               </SettingRow>
-              {/* The line keeps its height when empty, so nothing moves as the note comes and goes. */}
-              <p className="settings-app-background__note" role="status">
-                {typedRefused ? REFUSED_CHARACTERS : "\u00a0"}
-              </p>
               <SettingRow
                 description="How much of the field shows."
                 label="Density"

@@ -719,7 +719,7 @@ describe("AppBackgroundSettings", () => {
       const field = screen.getByRole("textbox", { name: "Characters" });
       await user.type(field, "😀");
       expect(onChange).not.toHaveBeenCalled();
-      expect(screen.getByText(/emoji and spaces are left out/)).toBeInTheDocument();
+      expect(screen.getByText(/Emoji and spaces are left out/)).toBeInTheDocument();
     });
 
     it("moves density and speed on the ground", async () => {
@@ -789,9 +789,9 @@ describe("AppBackgroundSettings", () => {
       await openCustomize(user);
       const field = screen.getByRole("textbox", { name: "Characters" });
       await user.type(field, "😀");
-      expect(screen.getByText(/emoji and spaces are left out/)).toBeInTheDocument();
+      expect(screen.getByText(/Emoji and spaces are left out/)).toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: "Reset" }));
-      expect(screen.queryByText(/emoji and spaces are left out/)).toBeNull();
+      expect(screen.queryByText(/Emoji and spaces are left out/)).toBeNull();
       expect(field).toHaveValue(DEFAULT_CHARACTER_SET);
     });
   });

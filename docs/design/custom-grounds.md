@@ -270,9 +270,9 @@ row "Customize". Open, it shows Characters (a text field and a menu of starter
 sets: Letters and digits, Binary `01`, Dots `·•●`, Shades `░▒▓█`, Lines `─│┼╱╲`),
 Density and Speed sliders, and Reset. Edits preview in the theme draft, so the
 ground changes while typing or dragging, and are saved once on commit: slider
-release, the text field's blur or Enter, a starter-set pick, or Reset; a refused text keeps the last good set and shows one quiet
-line under the field ("Use letters, digits and symbols; emoji and spaces are left
-out."). Rows keep fixed heights, so nothing moves while editing.
+release, the text field's blur or Enter, a starter-set pick, or Reset; a refused text keeps the last good set, and the row's hint gives
+way to "Emoji and spaces are left out." (shorter than the hint, so the row
+never grows). Rows keep fixed heights, so nothing moves while editing.
 
 **Failure modes**: a refused text never reaches the server (the contract would
 refuse it anyway); a font without a glyph draws the system fallback, and the
