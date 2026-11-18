@@ -6,9 +6,18 @@ How a thread reads in Chat, Work, and Code: the turn header, the transcript, wha
 
 Every assistant reply in Chat, Work, and Code opens with the same line: who
 answered (provider and model as the picker names them), how the turn stands
-(Working…, Waiting for approval, Completed with how long it took, Failed with
+(Working, Waiting for approval, Completed with how long it took, Failed with
 the host's sanitized reason on the line below), and when it last changed at the
-right edge. It is set in the interface face at the detail size; only the status
+right edge. While a turn runs and has a start time, the line reads "Working ·
+12s · Read": the clock counts from the turn's own start (not from when the row
+mounted) once a second in tabular digits with a fixed minimum width, so a tick
+moves nothing; the step is the title of the newest running tool, left out when
+none runs (a reply that spoke before a tool ran still names it), and clips to an ellipsis. The live
+region holds the step alone, so a change of step is announced politely and the
+clock is never read; the timer stops when the turn settles and when the row
+unmounts. A finished turn's duration ("Worked for 1m 5s") is drawn once: at the
+head of the fold's summary line when the turn folds its tool calls, otherwise in
+the header. It is set in the interface face at the detail size; only the status
 word carries colour. `TurnHeader` in `apps/web/src/transcript/` is the one
 recipe; a mode maps its own lifecycle onto its vocabulary and adds nothing of
 its own.
@@ -100,7 +109,13 @@ Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn:
 - **Low** (default): "Thinking stays folded, and a finished turn's tool calls
   fold behind one line." Thinking is shut, tool rows are listed while the turn
   runs and fold behind "N tool calls" once it settles, and each row's detail is
-  shut. This is the transcript as it was before the setting.
+  shut. A run of two or more consecutive reads, searches, and folder listings
+  (recognised by tool name; a call carrying a published page, an automation, or
+  an outside-content tag stays its own row) is one row such as "Read 4 files,
+  searched 2 times", shut at Low and listed at Medium and High, in running and
+  settled turns; any other row ends the run, and a lone look stays a plain row.
+  The settled fold's line leads with the turn's duration: "Worked for 1m 5s · 12
+  tool calls · 4 files edited". This is the transcript as it was before the setting.
 - **Medium**: "Thinking stays folded with its first line showing, and tool
   calls stay listed." A shut Thinking row carries the reasoning's first line
   after its name, as plain words in the muted ink, clipped to the row with an
@@ -219,12 +234,22 @@ opens at High, and an open run past five rows shows its latest five behind
 
 ## Streaming and earlier messages
 
-The displayed partial answer coalesces updates on a fifty-millisecond beat, or
-one hundred milliseconds for long answers (at least sixteen thousand text
-units). The first content, a replacement and the finished answer appear
-immediately. Coalescing happens before parsing the whole answer, so Markdown
-references and code fences keep their document-wide meaning; it does not delay
-provider data, journal writes or copy/export.
+A streaming answer is revealed at an even pace, not as the bursts arrive. The
+view keeps a smoothed measure of how fast text arrives and how often, holds back
+about one arrival interval of it (between 50 and 400 milliseconds), and shows
+text from that buffer on each animation frame at the arrival rate. It speeds up
+gently when the backlog grows and never jumps, and it ends a step on a word
+boundary when the word finishes within twelve characters. When the reveal falls
+more than about 1.2 seconds behind (a reconnect or a large paste) it skips ahead
+to the buffer. Answers of at least sixteen thousand text units step at most every
+hundred milliseconds instead of every thirty-two, to bound the cost of parsing.
+The first content, a replacement or shrunk text, and text already present when a
+running thread opens appear immediately; only text that arrives afterwards is
+paced. The finished answer drains its remaining text within one hundred
+milliseconds. With reduced motion requested, text shows as it arrives. Pacing
+happens before parsing the whole answer, so Markdown references and code fences
+keep their document-wide meaning, and only the streaming message updates; it
+does not delay provider data, journal writes or copy/export.
 
 A thread opens on its newest messages. When earlier ones exist, one row above
 the oldest loaded message offers **Load earlier messages** as a ghost button;
@@ -630,7 +655,15 @@ counts visible while folded. An unfinished list after a settled turn says
 Incomplete; it does not claim that the agent is still running. The open list
 shows the recorded ordered steps in a bounded, scrollable list: the running
 step at Medium (500), finished steps struck through in secondary ink, and no
-fill on any row. Neither this list nor the journaled plan borrows progress,
+fill on any row. A provider that words a task for while it runs (Claude's
+`activeForm`: "Running the test suite" for "Run the test suite") has that
+wording shown for the running task, and in the header when nothing failed or
+waits, only while the turn is running; once the turn has stopped the task is
+named plainly, so a stopped turn never reads as still working. A provider
+without running wording (Codex) shows the plain wording throughout. The
+running wording is untrusted provider text, bounded and redacted like the
+plain one, optional in every journaled task so older journals replay
+unchanged, and task rows never count as tool calls or steps. Neither this list nor the journaled plan borrows progress,
 completion, or authority from the subagent group.
 
 ## Message queue and Stop

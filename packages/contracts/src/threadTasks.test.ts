@@ -18,6 +18,17 @@ describe("the thread task progress contract", () => {
     expect(decodeThreadTaskProgress(task)).toEqual(task);
   });
 
+  it("replays a task journaled before running wording existed, and accepts one with it", () => {
+    expect(decodeThreadTaskProgress(task)).not.toHaveProperty("runningSummary");
+    expect(decodeThreadTaskProgress({ ...task, runningSummary: "Watching CI" })).toEqual({
+      ...task,
+      runningSummary: "Watching CI",
+    });
+    expect(() =>
+      decodeThreadTaskProgress({ ...task, runningSummary: "x".repeat(2_049) }),
+    ).toThrow();
+  });
+
   it("refuses a summary longer than the turn record holds", () => {
     expect(() => decodeThreadTaskProgress({ ...task, summary: "x".repeat(2_049) })).toThrow();
   });

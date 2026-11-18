@@ -32,6 +32,37 @@ export const ContextHandoffMessages = Schema.Int.pipe(
 );
 
 /**
+ * Why a thread moved to another account of the same provider handed its
+ * conversation over as text instead of carrying the provider's own session to
+ * the new account: an account was no longer configured, the provider's
+ * session files are not ones Octant can copy (only Claude Code's are), the
+ * copy refused (a missing file, a link, a differing file already there), or
+ * the new account refused to take the copy up.
+ */
+export const AccountMoveTextHandoffCause = Schema.Literal(
+  "account-unavailable",
+  "provider-cannot-carry",
+  "session-not-copied",
+  "session-not-adopted",
+);
+export type AccountMoveTextHandoffCause = typeof AccountMoveTextHandoffCause.Type;
+
+/**
+ * What a Chat or Work turn started its session with after the person moved the
+ * thread to another account of the same provider and the provider's own
+ * session came with it: the session's files were copied into the new
+ * account's directory and the new account resumed it, so no text was handed
+ * over and the record keeps no counts.
+ */
+export const AccountMoveSessionHandoff = Schema.Struct({
+  reason: Schema.Literal("account-move"),
+  previousProviderInstanceId: ProviderInstanceId,
+  previousModelId: ProviderModelId,
+  nativeSessionTransferred: Schema.Literal(true),
+}).annotations(strict);
+export type AccountMoveSessionHandoff = typeof AccountMoveSessionHandoff.Type;
+
+/**
  * What a Chat or Work turn started its session with when its provider changed
  * and the new provider keeps its conversation in a session of its own: the
  * thread's earlier accepted prompts and completed replies as bounded,
@@ -57,6 +88,8 @@ export const ProviderSwitchConversationHandoff = Schema.Struct({
    * the earlier provider before it compacted the thread.
    */
   handoverSummary: Schema.optional(Schema.Literal(true)),
+  /** Present when the change was to another account of the same provider: why its session stayed behind. */
+  accountMoveTextCause: Schema.optional(AccountMoveTextHandoffCause),
   inputReceipt: Schema.optional(ConversationInputReceipt),
 }).annotations(strict);
 export type ProviderSwitchConversationHandoff = typeof ProviderSwitchConversationHandoff.Type;

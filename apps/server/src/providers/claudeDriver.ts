@@ -2,6 +2,7 @@ import { claudeSandboxToolchainReads } from "./claudeSandboxToolchain";
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import type { ManagedToolAnswer } from "./managedMcpTools";
 import { readClaudeInstructionFiles } from "./claudeInstructionFiles";
+import { copyClaudeAccountSession } from "./claudeAccountSessionCopy";
 import { providerApprovalCall } from "./providerApprovalCall";
 import { claudeGitIdentityEnvironment, type ClaudeGitIdentity } from "./claudeGitIdentity";
 import { randomUUID } from "node:crypto";
@@ -45,6 +46,8 @@ import type {
   ProviderWakeupSchedule,
   ProviderBackgroundWork,
   ProviderNativeSession,
+  ProviderNativeSessionCarry,
+  ProviderNativeSessions,
 } from "@octant/provider-sdk/driver";
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
@@ -1352,6 +1355,13 @@ export interface ClaudeDriverOptions {
   /** Claude-owned directory for this account. */
   readonly configDirectory?: string;
   /**
+   * The directory any Claude account of this host keeps its sessions in, by
+   * instance, as its launch resolves it; absent for an instance that is not a
+   * Claude account. Absent altogether, the driver carries no session between
+   * accounts.
+   */
+  readonly accountDirectory?: (instanceId: ProviderInstanceId) => string | undefined;
+  /**
    * The person's current "Deliver documents as Claude artifacts" switch for
    * this account, read when a session opens and again at every Artifact call
    * so turning it off holds for a session already running. Absent is off.
@@ -2640,6 +2650,7 @@ function makeClaudeNativeSessions(
   listSessions: NonNullable<ClaudeAgentSdkPort["listSessions"]>,
 ): NonNullable<ProviderDriver["nativeSessions"]> {
   const controller = () => new AbortController().signal;
+  const accountDirectory = options.accountDirectory;
   const configDirectory =
     options.configDirectory === undefined ? {} : { configDirectory: options.configDirectory };
   // Only these sentences reach the person; anything else thrown on the way
@@ -2720,7 +2731,51 @@ function makeClaudeNativeSessions(
               ),
             catch: () => failure("unavailable", "The Claude session could not be released."),
           }),
+    ...(accountDirectory === undefined
+      ? {}
+      : { carry: (input) => carryFromAccount(input, accountDirectory) }),
   };
+  /**
+   * Copies the one session from the other account's directory into this
+   * one's (maintainer decision, 2026-11-17); the copy's own checks decide
+   * what may come, and `adopt` then decides the resume as for any session.
+   */
+  function carryFromAccount(
+    input: Parameters<NonNullable<ProviderNativeSessions["carry"]>>[0],
+    accountDirectory: (instanceId: ProviderInstanceId) => string | undefined,
+  ): Effect.Effect<ProviderNativeSessionCarry, ProviderFailure> {
+    if (String(input.instanceId) !== String(options.instanceId))
+      return Effect.fail(
+        failure("invalid-configuration", "Provider instance does not match driver."),
+      );
+    const fromDirectory = accountDirectory(input.fromInstanceId);
+    const toDirectory = accountDirectory(input.instanceId);
+    if (fromDirectory === undefined || toDirectory === undefined)
+      return Effect.succeed({ status: "refused" });
+    return Effect.tryPromise({
+      try: () =>
+        copyClaudeAccountSession({
+          fromDirectory,
+          toDirectory,
+          projectRoot: input.projectRoot,
+          sessionId: input.nativeSessionId,
+        }),
+      catch: () => failure("unavailable", "The Claude session could not be copied."),
+    }).pipe(
+      Effect.map(
+        (copied): ProviderNativeSessionCarry =>
+          copied.status === "refused"
+            ? { status: "refused" }
+            : {
+                status: "carried",
+                discard: () =>
+                  Effect.promise(() => copied.discard()).pipe(
+                    Effect.catchAllDefect(() => Effect.void),
+                  ),
+              },
+      ),
+    );
+  }
   async function adoptOnce(
     input: Parameters<NonNullable<ProviderDriver["nativeSessions"]>["adopt"]>[0],
   ) {

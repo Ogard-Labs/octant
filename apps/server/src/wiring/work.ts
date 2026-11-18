@@ -135,7 +135,11 @@ import {
   stalledTurnLimitMs,
 } from "../providers/turnBudget";
 import { withRoutineBrowserProfiles } from "../browser/browserRoutineSessions";
-import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
+import {
+  makeConfiguredAccountSessionCarrier,
+  makeConfiguredProviderDriver,
+  type ProvidersWiring,
+} from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
@@ -1018,6 +1022,10 @@ export function wireWork(deps: WorkDependencies) {
         );
       },
       attachments: workAttachments,
+      accountSessionCarrier: makeConfiguredAccountSessionCarrier(
+        (instanceId) => persistence.readProviderInstance(instanceId),
+        configuredDriverOptions,
+      ),
       supportsModelSwitch: (providerInstanceId) =>
         providerRuntimeRegistry.observedState(providerInstanceId)?.capabilities.modelSwitch ===
         "supported",

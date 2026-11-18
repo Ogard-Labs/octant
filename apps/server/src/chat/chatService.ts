@@ -71,6 +71,8 @@ import {
   type ChatAttachment,
   type ChatAttachmentMediaType,
   type ChatAttempt,
+  type AccountMoveSessionHandoff,
+  type AccountMoveTextHandoffCause,
   type ChatAttemptHandoff,
   type ChatAttemptOutcome,
   type ChatBootstrap,
@@ -208,6 +210,7 @@ import {
 } from "@octant/domain";
 import { resolveChatMessageParts } from "@octant/domain/chat-message-parts";
 import { agentResultDeliveryBatchPrompt } from "../agentRun/agentResultDeliveryPrompt";
+import type { AccountSessionCarrier } from "../providers/accountSessionCarry";
 import {
   admittedChatConversationContext,
   type AgentRunParentContextSelection,
@@ -702,6 +705,11 @@ export interface ChatServiceOptions {
    */
   readonly awaitsHarnessApproval?: (threadId: string) => boolean;
   readonly conversationInputTransfer?: Pick<ConversationInputTransfer, "prepare">;
+  /**
+   * Carries a thread's session to another account of the same provider on the
+   * first turn after a move; absent, every such move hands over as text.
+   */
+  readonly accountSessionCarrier?: AccountSessionCarrier;
   readonly attachmentStore?: ChatAttachmentStore;
   readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly persistence: PersistenceService;
@@ -1189,6 +1197,7 @@ export class ChatService {
     ChatServiceOptions["gatherMultiModelRuntimeFacts"]
   >;
   readonly #conversationInputTransfer: ChatServiceOptions["conversationInputTransfer"];
+  readonly #accountSessionCarrier: ChatServiceOptions["accountSessionCarrier"];
   readonly #attachmentStore: ChatAttachmentStore;
   readonly #beforeAttachmentPurge: ChatServiceOptions["beforeAttachmentPurge"];
   readonly #scratchStore: ChatScratchStore;
@@ -1263,6 +1272,7 @@ export class ChatService {
     this.#attachmentStore =
       options.attachmentStore ?? new ChatAttachmentStore(options.dataDirectory);
     this.#conversationInputTransfer = options.conversationInputTransfer;
+    this.#accountSessionCarrier = options.accountSessionCarrier;
     this.#beforeAttachmentPurge = options.beforeAttachmentPurge;
     this.#scratchStore = new ChatScratchStore(options.dataDirectory);
     if (options.liveTurns !== undefined) this.#liveTurns = options.liveTurns;
@@ -3863,10 +3873,12 @@ export class ChatService {
           }
         | undefined;
       readonly excludeTurnId: ChatTurn["id"] | undefined;
+      /** Why a move to another account of the same provider did not carry its session. */
+      readonly accountMoveTextCause?: AccountMoveTextHandoffCause;
     },
   ): {
     readonly blocks: ReadonlyArray<ProviderContextBlock>;
-    readonly record: ChatAttemptHandoff;
+    readonly record: Exclude<ChatAttemptHandoff, AccountMoveSessionHandoff>;
     readonly selection: Extract<AgentRunParentContextSelection, { readonly status: "available" }>;
   } {
     const subject = { thread: "Chat", cause: reason === "branch" ? "branch" : "switch" } as const;
@@ -3905,10 +3917,14 @@ export class ChatService {
     if (owned !== "ok") return refuse(owned);
     if (reason === "provider-switch" && source.from !== undefined) {
       const switched = withHandoverSummary(selection, this.#handoverSummary(thread.id));
+      const record = providerSwitchHandoffRecord(switched, source.from);
       return {
         blocks: switched.blocks,
         selection: switched,
-        record: providerSwitchHandoffRecord(switched, source.from),
+        record:
+          source.accountMoveTextCause === undefined
+            ? record
+            : { ...record, accountMoveTextCause: source.accountMoveTextCause },
       };
     }
     return {
@@ -3918,6 +3934,66 @@ export class ChatService {
         reason === "rewind"
           ? restartHandoffRecord(selection, "rewind")
           : branchHandoffRecord(selection),
+    };
+  }
+
+  /**
+   * The previous attempt's session, carried to the account the person moved
+   * the thread to, when the provider's own session can come along (maintainer
+   * decision, 2026-11-17). Only a move between accounts of the same provider
+   * is tried, and only for a turn that would otherwise hand the conversation
+   * over because the account changed. A move that cannot carry it says why,
+   * and the turn hands over as text; a move to another provider is never
+   * tried.
+   */
+  async #carryMovedAccountSession(
+    thread: ChatThread,
+    previous: ChatAttempt | undefined,
+    options: { readonly eligible: boolean },
+  ): Promise<{
+    readonly session?: ChatAttempt;
+    readonly record?: AccountMoveSessionHandoff;
+    readonly textCause?: AccountMoveTextHandoffCause;
+  }> {
+    if (
+      !options.eligible ||
+      previous?.resumeCursor === undefined ||
+      // An attempt whose own text handoff may never have reached its session
+      // holds less than the conversation, so that handoff is made again.
+      (previous.handoff !== undefined &&
+        previous.outcome !== "completed" &&
+        previous.handoff.reason !== "account-move") ||
+      this.#accountSessionCarrier === undefined ||
+      !this.#accountSessionCarrier.sameProvider(
+        decodeProviderInstanceId(previous.providerInstanceId),
+        decodeProviderInstanceId(thread.providerInstanceId),
+      )
+    )
+      return {};
+    const carried = await this.#accountSessionCarrier
+      .carry({
+        fromInstanceId: decodeProviderInstanceId(previous.providerInstanceId),
+        toInstanceId: decodeProviderInstanceId(thread.providerInstanceId),
+        resumeCursor: previous.resumeCursor,
+        sessionId: previous.providerSessionId,
+        projectRoot: await this.#scratchStore.acquire(thread.id, { preserveContents: true }),
+        mode: "chat",
+        modelId: decodeProviderModelId(thread.modelId),
+      })
+      .catch(() => ({ status: "text", cause: "session-not-copied" }) as const);
+    if (carried.status === "text") return { textCause: carried.cause };
+    return {
+      session: {
+        ...previous,
+        providerInstanceId: thread.providerInstanceId,
+        resumeCursor: carried.resumeCursor,
+      },
+      record: {
+        reason: "account-move",
+        previousProviderInstanceId: decodeProviderInstanceId(previous.providerInstanceId),
+        previousModelId: decodeProviderModelId(previous.modelId),
+        nativeSessionTransferred: true,
+      },
     };
   }
 
@@ -4846,11 +4922,26 @@ export class ChatService {
     );
     let toolsPrepared = false;
     try {
+      const branchWithoutSession =
+        thread.branchedFrom !== undefined &&
+        previousTurn !== undefined &&
+        previousTurn.sequence <= thread.branchedFrom.carriedTurnCount;
+      const accountMove = await this.#carryMovedAccountSession(thread, previous, {
+        eligible:
+          nativeConversation &&
+          extensionPhase !== "resume" &&
+          !rewoundTail &&
+          !toolCatalogHandoff &&
+          !branchWithoutSession,
+      });
+      // The session the turn takes up: the moved one under the new account
+      // when it came along, otherwise the previous attempt's as it stands.
+      const sessionPrevious = accountMove.session ?? previous;
       const catalogChanged =
-        previous?.resumeCursor !== undefined &&
-        String(previous.providerInstanceId) === String(thread.providerInstanceId) &&
+        sessionPrevious?.resumeCursor !== undefined &&
+        String(sessionPrevious.providerInstanceId) === String(thread.providerInstanceId) &&
         driver.toolCatalogContinuation?.({
-          resumeCursor: previous.resumeCursor,
+          resumeCursor: sessionPrevious.resumeCursor,
           tools: tools?.definitions ?? [],
         }) === "handoff-required";
       if (catalogChanged && !toolCatalogHandoff) {
@@ -4865,7 +4956,7 @@ export class ChatService {
           providerInstanceId: String(thread.providerInstanceId),
           owner: nativeConversation ? "runtime" : resumableHost ? "host-resumable" : "host",
         },
-        ...(previous === undefined
+        ...(sessionPrevious === undefined
           ? {}
           : {
               previous: {
@@ -4873,32 +4964,37 @@ export class ChatService {
                   ? { toolCatalogHandoff: true }
                   : {}),
                 ...(rewoundTail ? { rewound: true } : {}),
-                providerInstanceId: String(previous.providerInstanceId),
+                providerInstanceId: String(sessionPrevious.providerInstanceId),
                 continuable: resumableHost
-                  ? this.#hostResumableSessionContinues(thread, previous, threadView?.turns ?? [])
-                  : previous.resumeCursor !== undefined &&
-                    (previous.modelId === thread.modelId ||
+                  ? this.#hostResumableSessionContinues(
+                      thread,
+                      sessionPrevious,
+                      threadView?.turns ?? [],
+                    )
+                  : sessionPrevious.resumeCursor !== undefined &&
+                    (sessionPrevious.modelId === thread.modelId ||
                       probe.capabilities.modelSwitch === "supported"),
                 // A same-provider model swap the provider cannot carry on starts
                 // a fresh session with a handoff instead of refusing the turn.
-                ...(previous.modelId !== thread.modelId &&
+                ...(sessionPrevious.modelId !== thread.modelId &&
                 probe.capabilities.modelSwitch !== "supported"
                   ? { modelSwitchHandoff: true }
                   : {}),
                 // The session cursor is recorded when the session starts, before
                 // the provider is sent anything, so an attempt that carried a
                 // handoff and did not complete may never have delivered it.
-                ...(previous.handoff === undefined || previous.outcome === "completed"
+                // A carried session holds the whole conversation, so an attempt
+                // that took one up and did not complete left nothing undelivered.
+                ...(sessionPrevious.handoff === undefined ||
+                sessionPrevious.outcome === "completed" ||
+                sessionPrevious.handoff.reason === "account-move"
                   ? {}
-                  : { undeliveredHandoff: previous.handoff.reason }),
+                  : { undeliveredHandoff: sessionPrevious.handoff.reason }),
               },
             }),
         // A branch copies message text, never the source's session, so until it
         // has run a turn of its own there is no session to resume.
-        branchWithoutSession:
-          thread.branchedFrom !== undefined &&
-          previousTurn !== undefined &&
-          previousTurn.sequence <= thread.branchedFrom.carriedTurnCount,
+        branchWithoutSession,
         // A resume continues a conversation that already has a session. A new
         // message may start a handed-over one, and so may a retry whose own
         // earlier session may never have received its handoff.
@@ -4911,10 +5007,13 @@ export class ChatService {
             "This Chat task's native session cannot be recovered under the selected provider and model. Its history has been preserved.",
         });
       }
-      let nativeSession = sessionDecision.kind === "continue-session" ? previous : undefined;
+      let nativeSession = sessionDecision.kind === "continue-session" ? sessionPrevious : undefined;
       let handoff =
         sessionDecision.kind === "new-session-with-handoff"
           ? this.#selectConversationHandoff(thread, threadView, sessionDecision.reason, {
+              ...(accountMove.textCause === undefined
+                ? {}
+                : { accountMoveTextCause: accountMove.textCause }),
               // A handoff that never completed is made again from the provider
               // the conversation came from, not the one that may not have got it.
               from:
@@ -5164,7 +5263,11 @@ export class ChatService {
               describedContents: described.contents,
             }),
         ...(nativeSession === undefined ? {} : { nativeSession }),
-        ...(handoff === undefined ? {} : { handoff: handoff.record }),
+        ...(handoff !== undefined
+          ? { handoff: handoff.record }
+          : accountMove.record !== undefined && nativeSession === accountMove.session
+            ? { handoff: accountMove.record }
+            : {}),
         context:
           resumableHost && nativeSession !== undefined
             ? withoutHeldConversation(maintained)

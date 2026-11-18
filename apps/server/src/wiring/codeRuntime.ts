@@ -114,7 +114,11 @@ import {
 } from "@octant/domain";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { type CodeWiring, stableCodeFileId } from "./code";
-import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
+import {
+  makeConfiguredAccountSessionCarrier,
+  makeConfiguredProviderDriver,
+  type ProvidersWiring,
+} from "./providers";
 import type { ServerStart } from "./serverShape";
 import type { HarnessWiring } from "./harness";
 import type { AuthorityWiring } from "./authority";
@@ -1206,6 +1210,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         supportsAcpClientCapabilities: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
             .acpClientCapabilities === "supported",
+        accountSessionCarrier: makeConfiguredAccountSessionCarrier(
+          (instanceId) => persistence.readProviderInstance(instanceId),
+          configuredDriverOptions,
+        ),
         supportsModelSwitch: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
             .modelSwitch === "supported",

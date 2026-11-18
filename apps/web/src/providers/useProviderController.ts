@@ -64,6 +64,8 @@ const BROWSER_CANNOT_SAVE_KEYS =
 
 export type ProviderControllerStatus = "loading" | "ready" | "disconnected";
 
+export type ProviderAuthenticationOutcome = "completed" | "pending" | "failed";
+
 export interface ProviderControllerOptions {
   readonly client?: ProviderClient;
   readonly hostBridge?: ProviderKeyHost;
@@ -1125,31 +1127,30 @@ export function useProviderController(options: ProviderControllerOptions) {
     [client],
   );
 
+  // Asked every few seconds while the person signs in, so it leaves `busy`
+  // alone: the card's other actions do not flicker on each check.
   const completeProviderAuthentication = useCallback(
     async (
       instanceId: ProviderInstanceId,
       attemptId: ProviderAuthenticationAttempt["attemptId"],
-    ): Promise<boolean> => {
-      if (client === undefined) return false;
-      if (mounted.current) {
-        setBusy(true);
-        setMessage(undefined);
-      }
+      code?: string,
+    ): Promise<ProviderAuthenticationOutcome> => {
+      if (client === undefined) return "failed";
       try {
         const result = await client.execute({
           kind: "complete-provider-authentication",
           instanceId,
           attemptId,
+          ...(code === undefined ? {} : { code }),
         });
+        if (result.kind === "provider-authentication-pending") return "pending";
         if (result.kind !== "provider-authentication-completed") {
           throw new Error("Provider returned an invalid authentication result.");
         }
-        return true;
+        return "completed";
       } catch (error) {
         if (mounted.current) setMessage(failureMessage(error, PROVIDER_UNAVAILABLE));
-        return false;
-      } finally {
-        if (mounted.current) setBusy(false);
+        return "failed";
       }
     },
     [client],

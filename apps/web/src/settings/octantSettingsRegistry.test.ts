@@ -447,6 +447,7 @@ describe("octantSettingsRegistry", () => {
  * Project's overview, not in Settings, so Settings search does not list them.
  */
 const UNLISTED_SETTING_ROWS = new Set([
+  "app-background-characters-reset",
   "agent-access-code",
   "agent-access-edit",
   "browser-hub-claim",

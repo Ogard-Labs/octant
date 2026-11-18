@@ -7125,9 +7125,18 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `~/.codex-accounts`, and
   deleting it is the person's step. An accent is presentation only:
   changing it alone neither stops a running session nor resets the
-  account's readiness. Sign-in is the unmodified CLI command in a
-  terminal for that account. Connection check uses what the CLI or
-  SDK reports. Two instances of the same driver cannot share one
+  account's readiness. Sign-in is the unmodified CLI command for that
+  account, run under its directory: by the person in their own
+  terminal (`octant account sign-in <account>` runs it there), or by
+  the host from the account's Settings card. There the host starts
+  the command with no terminal, the CLI opens the browser and keeps
+  its login as it always does, and Octant reads only the sign-in page
+  address the CLI prints and hands a code the person pastes on to the
+  CLI's input. One sign-in runs per account; it stops after ten
+  minutes, when another starts, and when the host exits. An extra
+  Claude account's sign-in gets the account's isolated environment,
+  so an inherited Claude credential cannot sign it in. Connection
+  check uses what the CLI or SDK reports. Two instances of the same driver cannot share one
   effective state directory after trailing-slash identity, including
   when a host overlay points two instances at the same existing
   directory. A relative inherited overlay refuses only that implicit
@@ -7146,9 +7155,38 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   A thread stays on its instance until the person moves it: the thread's
   **Move to account…** action (Chat's thread menu; the thread info panel in
   Work and Code) or the model picker moves it to another account, and the
-  next turn starts there with the disclosed handoff of
-  [Handoffs between providers](design/decisions.md#handoffs-between-providers-forks-and-branches),
-  whose marker names the new account. The host accepts the move only from the
+  next turn starts there. A move between two accounts of the same provider
+  keeps the provider's own session (maintainer decision, 2026-11-17, which
+  reversed the text-only rule for these moves: the person moving between
+  their own accounts expects the conversation to go on as it was, with its
+  tool activity and prompt cache). The first turn on the new account, before
+  the session decision, has the new account's driver copy, through the
+  provider-neutral `nativeSessions.carry` port of the provider SDK, exactly
+  that session's files from the old account's directory (`CLAUDE_CONFIG_DIR`, default `~/.claude`) into the new
+  one's: `projects/<folder>/<session>.jsonl`, the session's own folder beside
+  it and `file-history/<session>/` when present, the folder named after the
+  canonical working directory so it is the same for both accounts on one
+  host. The new account's driver then takes the copy up as it takes up any
+  session begun outside Octant (`nativeSessions.adopt`), and the turn resumes
+  it through the ordinary exact-resume checks; the handoff record is
+  `account-move` (Chat and Work) or `account-move-native-session` (Code),
+  with `nativeSessionTransferred: true` and the account it came from, so the
+  marker still names the change. The copy runs in the host process, never in
+  an agent's sandbox, so no sandbox profile grants one account's directory to
+  another's session. It refuses a session id that is not a UUID, a symbolic
+  link anywhere below either account directory, a file resolving outside its
+  account, account directories inside one another, and a differing file
+  already in the new account (an identical one is left alone, so a repeated
+  move does not refuse itself); it lists nothing but that session's three
+  paths, skips sign-in and settings file names, writes files `0600` and
+  folders `0700`, and removes what it wrote when it or the adoption fails.
+  Codex is not carried: its rollout file is not the whole of a thread's
+  record and its driver has no way to take a thread up in another account.
+  When the copy cannot be made (an account removed, a provider that cannot
+  carry, a refused copy or adoption), the turn carries the disclosed handoff of
+  [Handoffs between providers](design/decisions.md#handoffs-between-providers-forks-and-branches)
+  with the reason (`accountMoveTextCause`), and a move to another provider
+  always does. The host accepts the move only from the
   person, at a window or on a device they paired, and only while no turn runs
   and no model pool is on (the pool names the current account); a move from a
   routine, the host itself or an agent is refused. The person may also set,
@@ -9328,7 +9366,12 @@ filesystem, Project, execution or native-writer authority.
 **Provider-switch handoff (Code).** A Code turn whose last recorded session
 belongs to another provider instance on the same checkout starts a new session
 on the thread's current provider; it never resumes or names the previous
-session to the new provider. The turn carries a disclosed text handoff built by
+session to the new provider. The exception is a person's move to another
+account of the same provider whose session can be carried (see **Move to
+account** under [Providers](#providers)): the turn resumes the copied session
+under its new session id and journals `account-move-native-session` instead of
+the text below, and a recovered start that disclosed that and can no longer
+carry it refuses. The turn carries a disclosed text handoff built by
 the same selector that admits a child's parent context
 (`admittedParentCodeContext`, purpose `provider-switch`): the thread's own
 accepted prompts and completed replies, at most 24 blocks of 4,000 characters

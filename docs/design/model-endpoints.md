@@ -336,6 +336,16 @@ Providers page offers; HTTP model endpoints keep Octant Harness › Model
 endpoints, and image profiles keep Image generation. Cards for other drivers,
 and the single runtime card on a provider's own page, have no Add account.
 
+Every Claude subscription card and every Codex card also offers **Sign in**
+beside Check connection. The host runs the account's own sign-in command,
+which opens the browser; the card then says to finish signing in there, offers
+the sign-in page again, and checks every two seconds until the CLI is done,
+when it says Signed in and checks the connection. A Claude card also takes the
+code a Claude sign-in page shows when the browser could not reach the CLI. A
+failed sign-in shows the CLI's own last line. The same account steps work from
+the person's own terminal on the host with `octant account add`, `list`,
+`sign-in`, `status` and `remove`; Octant's own terminals do not carry them.
+
 ### Claude artifacts
 
 Every Claude Code card's details carry one host-scoped switch, **Enable

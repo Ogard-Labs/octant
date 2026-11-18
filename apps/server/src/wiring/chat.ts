@@ -92,7 +92,11 @@ import { modelLabelOf } from "./imageDescriber";
 import { supportsConversationInput } from "./conversationInputs";
 import { providerToolCallPauseLimitMs, stalledTurnLimitMs } from "../providers/turnBudget";
 import { requireJournalHydration } from "../persistence/journalHydration";
-import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
+import {
+  makeConfiguredAccountSessionCarrier,
+  makeConfiguredProviderDriver,
+  type ProvidersWiring,
+} from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
@@ -429,6 +433,10 @@ export function wireChat(deps: ChatDependencies) {
         ),
       verifyModelToolsOnFirstUse: deps.verifyModelToolsOnFirstUse,
       conversationInputTransfer,
+      accountSessionCarrier: makeConfiguredAccountSessionCarrier(
+        (instanceId) => persistence.readProviderInstance(instanceId),
+        configuredDriverOptions,
+      ),
       liveTurns,
       toolCallRecorders: threadToolCallRecorders({
         connection: persistence.connection,

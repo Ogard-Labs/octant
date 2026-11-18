@@ -411,6 +411,24 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "background colours colors tones shades dither bold",
         },
         {
+          id: settingId("app-background-characters"),
+          label: "Background characters",
+          scope: "app",
+          keywords: "background characters ascii letters glyphs symbols custom pattern",
+        },
+        {
+          id: settingId("app-background-character-density"),
+          label: "Character density",
+          scope: "app",
+          keywords: "background characters density amount how much ascii glyphs custom",
+        },
+        {
+          id: settingId("app-background-character-speed"),
+          label: "Character speed",
+          scope: "app",
+          keywords: "background characters speed motion drift still ascii glyphs custom",
+        },
+        {
           id: settingId("app-background-photo"),
           label: "Background photo",
           scope: "app",

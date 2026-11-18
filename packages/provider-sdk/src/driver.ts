@@ -396,7 +396,7 @@ export interface ProviderNativeSessions {
   readonly adopt: (input: {
     readonly instanceId: ProviderInstanceId;
     readonly projectRoot: string;
-    readonly mode: "work" | "code";
+    readonly mode: "chat" | "work" | "code";
     readonly sessionId: ProviderSessionId;
     readonly nativeSessionId: string;
     readonly modelId: ProviderModelId;
@@ -413,7 +413,25 @@ export interface ProviderNativeSessions {
     readonly nativeSessionId: string;
     readonly sessionId: ProviderSessionId;
   }) => Effect.Effect<void, ProviderFailure>;
+  /**
+   * Brings one of the runtime's own sessions over from another account of the
+   * same provider, so this instance can then `adopt` it: a thread moved
+   * between the two accounts keeps its session instead of a text handoff.
+   * `refused` means the session cannot come and the host hands over as text;
+   * `discard` takes back what was brought, for a move whose adoption then
+   * refuses. Absent, a driver carries none.
+   */
+  readonly carry?: (input: {
+    readonly instanceId: ProviderInstanceId;
+    readonly fromInstanceId: ProviderInstanceId;
+    readonly projectRoot: string;
+    readonly nativeSessionId: string;
+  }) => Effect.Effect<ProviderNativeSessionCarry, ProviderFailure>;
 }
+
+export type ProviderNativeSessionCarry =
+  | { readonly status: "carried"; readonly discard: () => Effect.Effect<void> }
+  | { readonly status: "refused" };
 
 export interface ProviderDriver {
   /** Starting a thread from the runtime's own sessions; absent, a driver offers none. */
@@ -482,10 +500,17 @@ export interface ProviderDriver {
   readonly beginAuthentication?: (
     input: ProviderProbeInput,
   ) => Effect.Effect<ProviderAuthenticationAttempt, ProviderFailure, Scope.Scope>;
+  /**
+   * Pending while the person has not finished signing in yet; the caller asks
+   * again. `code` is a code the sign-in page showed, passed to the provider's
+   * own sign-in.
+   */
   readonly completeAuthentication?: (
-    input: ProviderProbeInput & { readonly attemptId: string },
-  ) => Effect.Effect<void, ProviderFailure, Scope.Scope>;
+    input: ProviderProbeInput & { readonly attemptId: string; readonly code?: string },
+  ) => Effect.Effect<ProviderAuthenticationProgress, ProviderFailure, Scope.Scope>;
 }
+
+export type ProviderAuthenticationProgress = "completed" | "pending";
 
 export interface ProviderSessionForkRequest {
   readonly instanceId: ProviderInstanceId;

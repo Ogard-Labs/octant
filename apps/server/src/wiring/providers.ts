@@ -16,6 +16,10 @@ import { randomUUID } from "node:crypto";
 import { bindGeneratedMcpSignInPolicy } from "../extensions/generatedMcpSignInPolicy";
 import { lstatSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
+import {
+  makeAccountSessionCarrier,
+  type AccountSessionCarrier,
+} from "../providers/accountSessionCarry";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   decodeCodeCheckoutId,
@@ -308,6 +312,29 @@ export interface ConfiguredProviderDriverOptions {
   readonly localUsageHistorySourceForInstance?: (
     instance: ProviderInstance,
   ) => ProviderLocalUsageHistorySource | undefined;
+}
+
+/**
+ * What carries a thread's session between accounts of one provider, for every
+ * mode's turn path: the instances as configured now, a driver built from the
+ * same options the turn's own driver is, which does the carrying itself.
+ */
+export function makeConfiguredAccountSessionCarrier(
+  readProviderInstance: (instanceId: ProviderInstanceId) => ProviderInstance | undefined,
+  options: ConfiguredProviderDriverOptions,
+): AccountSessionCarrier {
+  return makeAccountSessionCarrier({
+    readInstance: readProviderInstance,
+    resolveDriver: (instanceId) => {
+      const instance = readProviderInstance(instanceId);
+      if (instance === undefined || !instance.enabled) return undefined;
+      try {
+        return makeConfiguredProviderDriver(instance, options);
+      } catch {
+        return undefined;
+      }
+    },
+  });
 }
 
 /**

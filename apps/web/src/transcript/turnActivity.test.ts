@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { ThreadToolStep } from "@octant/contracts";
 import {
   alwaysVisibleActivityRows,
+  groupActivityRows,
+  runningStepTitle,
   settledTurnActivitySummary,
+  settledTurnFoldsActivity,
   toolStepsActivity,
+  type TurnActivity,
 } from "./turnActivity";
 
 describe("turn activity", () => {
@@ -103,5 +107,83 @@ describe("turn activity", () => {
       { kind: "tool", id: "a", toolName: "Bash", state: "completed" },
       { kind: "review", id: "shield:approval-1", summary: "cat .env", decision },
     ]);
+  });
+});
+
+describe("looks grouped into one row", () => {
+  const tool = (id: string, toolName: string, state: "completed" | "running" = "completed") => ({
+    kind: "tool" as const,
+    id,
+    toolName,
+    state,
+  });
+
+  it("groups consecutive reads and searches and counts each kind", () => {
+    const items = groupActivityRows([
+      tool("1", "Read"),
+      tool("2", "Read"),
+      tool("3", "Grep"),
+      tool("4", "Glob"),
+      tool("5", "Read"),
+      tool("6", "Read"),
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: "group", label: "Read 4 files, searched 2 times" });
+  });
+
+  it("splits a group at an edit and leaves a single look as a plain row", () => {
+    const items = groupActivityRows([
+      tool("1", "Read"),
+      tool("2", "Grep"),
+      tool("3", "Edit"),
+      tool("4", "Read"),
+    ]);
+    expect(items.map((item) => item.kind)).toEqual(["group", "row", "row"]);
+  });
+
+  it("keeps a web read that brought outside content as its own row", () => {
+    const items = groupActivityRows([
+      tool("1", "Read"),
+      { ...tool("2", "WebFetch"), outsideContent: { labels: [] } },
+      tool("3", "Read"),
+    ]);
+    expect(items.every((item) => item.kind === "row")).toBe(true);
+  });
+});
+
+describe("the live step and the settled summary", () => {
+  it("names the newest running tool, and nothing when none runs", () => {
+    expect(
+      runningStepTitle({
+        reasoning: "",
+        rows: [
+          { kind: "tool", id: "1", toolName: "Read", state: "running" },
+          { kind: "tool", id: "2", toolName: "Grep", state: "running" },
+          { kind: "tool", id: "3", toolName: "Edit", state: "completed" },
+        ],
+      }),
+    ).toBe("Grep");
+    expect(
+      runningStepTitle({
+        reasoning: "",
+        rows: [{ kind: "tool", id: "1", toolName: "Read", state: "completed" }],
+      }),
+    ).toBeUndefined();
+  });
+
+  it("leads the fold summary with the duration once, and never folds on the duration alone", () => {
+    const activity: TurnActivity = {
+      reasoning: "",
+      rows: [
+        { kind: "tool", id: "1", toolName: "Bash", state: "completed" },
+        { kind: "tool", id: "2", toolName: "Edit", state: "completed" },
+      ],
+    };
+    expect(settledTurnActivitySummary(activity, "Worked for 1m 5s")).toBe(
+      "Worked for 1m 5s · 2 tool calls · 1 file edited",
+    );
+    expect(settledTurnActivitySummary({ reasoning: "", rows: [] }, "Worked for 5s")).toBe("");
+    expect(settledTurnFoldsActivity(activity)).toBe(true);
+    expect(settledTurnFoldsActivity({ reasoning: "", rows: [] })).toBe(false);
   });
 });

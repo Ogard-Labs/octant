@@ -11,7 +11,7 @@ import {
 } from "./gitHunks";
 import { personDecides } from "./hostAnswer";
 import { HarnessRetryEventFields } from "./harnessRetry";
-import { ContextHandoffOmissions } from "./contextHandoff";
+import { AccountMoveTextHandoffCause, ContextHandoffOmissions } from "./contextHandoff";
 import { ProviderChildActivityEvent } from "./providers";
 import { ProviderNativeSessionId } from "./providerNativeSession";
 import { ThreadPublishedPage } from "./threadToolSteps";
@@ -1960,6 +1960,8 @@ const TaskProgressEvent = Schema.Struct({
   taskId: boundedNonEmptyText(255),
   state: Schema.Literal("pending", "running", "waiting", "completed", "failed"),
   summary: boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES),
+  /** The provider's wording while the task runs; absent in journals written before it existed. */
+  runningSummary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
 }).annotations(strict);
 /**
  * The provider restated its plan: the turn's tasks are now exactly these ids,
@@ -2128,6 +2130,8 @@ const ProviderSwitchHandoff = Schema.Struct({
    * the earlier provider before it compacted the thread.
    */
   handoverSummary: Schema.optional(Schema.Literal(true)),
+  /** Present when the change was to another account of the same provider: why its session stayed behind. */
+  accountMoveTextCause: Schema.optional(AccountMoveTextHandoffCause),
 }).annotations(strict);
 
 /**
@@ -2168,6 +2172,20 @@ const RewindNativeSessionHandoff = Schema.Struct({
 }).annotations(strict);
 
 /**
+ * The first turn after the person moved the thread to another account of the
+ * same provider resumed the provider's own session there: its files were
+ * copied into the new account's directory, so the provider kept the
+ * conversation and its tool activity, and no text was handed over. The
+ * previous fields name the account and session it came from.
+ */
+const AccountMoveNativeSessionHandoff = Schema.Struct({
+  reason: Schema.Literal("account-move-native-session"),
+  previousProviderInstanceId: ProviderInstanceId,
+  previousModelId: ProviderModelId,
+  previousSessionId: ProviderSessionId,
+}).annotations(strict);
+
+/**
  * The most fork merges one turn carries; any later ones wait for the next
  * turn. Each merge is a full bounded handoff (up to 24 blocks of 4,000
  * characters), so a turn never takes an unbounded pile of them at once.
@@ -2200,6 +2218,7 @@ export const CodeConversationTurnHandoff = Schema.Union(
   ForkTextHandoff,
   ForkNativeSessionHandoff,
   RewindNativeSessionHandoff,
+  AccountMoveNativeSessionHandoff,
 );
 export type CodeConversationTurnHandoff = typeof CodeConversationTurnHandoff.Type;
 
@@ -2288,11 +2307,21 @@ const RewindNativeSessionHandoffAttachedEvent = Schema.Struct({
   nativeSessionTransferred: Schema.Literal(true),
 }).annotations(strict);
 
+/** A moved thread's first turn resumed its own session copied into the new account. */
+const AccountMoveNativeSessionHandoffAttachedEvent = Schema.Struct({
+  ...AccountMoveNativeSessionHandoff.fields,
+  kind: Schema.Literal("context-handoff-attached"),
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  nativeSessionTransferred: Schema.Literal(true),
+}).annotations(strict);
+
 const ContextHandoffAttachedEvent = Schema.Union(
   ProviderSwitchHandoffAttachedEvent,
   ForkTextHandoffAttachedEvent,
   ForkNativeSessionHandoffAttachedEvent,
   RewindNativeSessionHandoffAttachedEvent,
+  AccountMoveNativeSessionHandoffAttachedEvent,
 );
 
 export const CodeOperationEvent = Schema.Union(

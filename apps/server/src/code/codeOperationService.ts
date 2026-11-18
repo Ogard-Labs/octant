@@ -7207,7 +7207,9 @@ function evidenceReferences(event: CodeOperationEvent): readonly CodeEvidenceRef
     case "diff":
       return [event.content];
     case "context-handoff-attached":
-      return event.reason === "fork-native-session" || event.reason === "rewind-native-session"
+      return event.reason === "fork-native-session" ||
+        event.reason === "rewind-native-session" ||
+        event.reason === "account-move-native-session"
         ? []
         : [event.content];
     case "fork-context-merged":

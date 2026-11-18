@@ -643,7 +643,7 @@ function claudeLaunchSessionIds(args: ReadonlyArray<string>): ReadonlyArray<stri
  * Code 2.1.300 (Agent SDK 0.3.211), whose CLI and SDK share this rule; the
  * hash is the 32-bit `h * 31 + code unit` string hash both spell out.
  */
-function claudeProjectFolderName(workingDirectory: string): string {
+export function claudeProjectFolderName(workingDirectory: string): string {
   const sanitized = workingDirectory.replace(/[^a-zA-Z0-9]/g, "-");
   if (sanitized.length <= 200) return sanitized;
   let hash = 0;
