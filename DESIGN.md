@@ -1924,6 +1924,7 @@ but never repaint a shared control.
 | `ui/iconScaleContract.test.ts`, `ui/focusOwnershipContract.test.ts`                  | Icon sizes and stroke; focus ownership                                                                                                                                                                                                                                                                                                                    |
 | `theme/translucencyContract.test.ts`                                                 | One coat on the shell and clear panes under glass; dense float with no backdrop filter under host glass; no backdrop filter on a surface inside a translucent shell; opaque under reduced transparency and increased contrast; the coat floors computed from the role colours                                                                             |
 | `gallery/Gallery.test.tsx`                                                           | Every adapter appears in the component gallery or is listed with a reason                                                                                                                                                                                                                                                                                 |
+| `visualCheck/visualCheck.chromium.test.ts` (workflow `visual-check.yml`)             | The key screens still draw as their baselines in `apps/web/visual-baselines` (see Visual check below)                                                                                                                                                                                                                                                     |
 
 **Component gallery.** `apps/web/component-gallery.html` (source in
 `apps/web/src/gallery/`), served by the Vite dev server only, draws the type
@@ -1931,6 +1932,41 @@ roles, colours, spacing, radii, icons, every adapter in its states and a few
 composed patterns under the real stylesheet and theme provider, with switches
 for dark and light, window glass and the interface size. Read it before changing
 a shared control.
+
+**Visual check.** The `visual-check.yml` workflow draws the key screens in a
+pinned Chromium (the one that matches `playwright-core`, not the runner's Chrome)
+and compares each picture with its baseline in `apps/web/visual-baselines`. It
+draws on a pull request that touches `apps/web`, the theme packages, the theme
+contract or this file, so a later change cannot quietly spoil the look that
+landed. `Visual check` is a required check: on any other pull request, and in
+the merge queue, it reports passed without drawing, since the pull request's own
+run already compared the change. The scenes (`apps/web/visual-check.html`, source in
+`apps/web/src/visualCheck/`) are the start screen, the Code side panel, the
+Appearance and Usage Settings pages, the Agents, Artifacts and Automations
+tables, the Where, Project and approval menus open, and the icon rail with the
+account face. Each is drawn in light and dark at 1280 by 800, and the tables and
+the side panel again at 760 wide, from fixed data, a fixed clock, bundled fonts
+and no motion, with no host behind them. A picture fails when more than 50 of
+its pixels differ by more than 24 in any channel, or its size changes. The run
+then uploads the `visual-check` artifact with the actual, baseline and diff
+pictures (differences in red). It does not cover the packaged app, window glass,
+the transcript, other screens, or anything that moves.
+
+An intended change never blocks a pull request: add the `design change` label.
+The run then draws the new pictures in update mode, uploads them as the
+`visual-check` artifact, lists the changed ones in its job summary and passes. It
+pushes nothing: a person (or the agent running the pull request) runs
+`bun scripts/visual-baselines-from-ci.ts <run id>` with that run's id, which
+downloads the artifact and copies each new picture over its baseline, reviews
+the pictures, and commits and pushes `apps/web/visual-baselines`, so the changed
+PNGs appear in the pull request's files. A push to main only compares, so a
+failure there means a labelled change was merged without its pictures. Without
+the label a visible change fails, with the same script as the way out. Baselines
+come from CI because fonts and anti-aliasing differ on a Mac;
+`bun run --cwd apps/web visual:check` and `visual:update` exist for people who
+run the same pinned Chromium in a container, and a picture drawn on a Mac is
+never committed. A new scene is added to `sceneList.ts` and `scenes.tsx`, and its
+baselines arrive the same way.
 
 **Packaged verification.** A change to a fill, a coat, a float or the frame is
 judged in the packaged app under glass on the person's own theme as well as in

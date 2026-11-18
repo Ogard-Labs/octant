@@ -4367,3 +4367,14 @@ html[data-octant-increased-contrast="true"]
 .web-search-settings__save {
   padding-top: var(--oct-space-3);
 }
+
+.settings-app-background__characters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-app-background__characters > .settings-view__text-input {
+  width: 9ch;
+  flex: 0 0 auto;
+}

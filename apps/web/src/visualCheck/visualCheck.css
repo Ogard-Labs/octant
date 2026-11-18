@@ -1,0 +1,32 @@
+html,
+body,
+#root {
+  height: 100%;
+}
+
+.visual-check {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  background: var(--octant-workspace);
+  color: var(--foreground);
+}
+
+/* A scene that stands in one pane of the window. */
+.visual-check__pane {
+  height: 100%;
+  min-width: 0;
+  overflow: auto;
+}
+
+/* A scene that shows a small control and the menu it opens. */
+.visual-check__stage {
+  display: flex;
+  height: 100%;
+  align-items: flex-end;
+  padding: 0 48px 220px;
+}
+
+.visual-check__pane--padded {
+  padding-inline: 24px;
+}

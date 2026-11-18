@@ -1,0 +1,136 @@
+name: Visual check
+# Draws the key screens in a pinned Chromium and fails when one changed visibly.
+# A pull request with the `design change` label is an intended change: the run
+# draws the new pictures, uploads them as the `visual-check` artifact and
+# passes. It pushes nothing; a person commits the pictures with
+# scripts/visual-baselines-from-ci.ts.
+#
+# `Visual check` is a required check, so it must report on every pull request
+# and in the merge queue. A path filter on the trigger would leave it pending
+# forever on a pull request that does not touch the screens; the `scope` job
+# decides instead, and a skipped job counts as passed.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  merge_group:
+  push:
+    branches: [main]
+    paths:
+      - apps/web/**
+      - packages/theme/**
+      - packages/contracts/src/theme.ts
+      - DESIGN.md
+      - .github/workflows/visual-check.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: visual-check-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  scope:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      pull-requests: read
+    outputs:
+      draw: ${{ steps.scope.outputs.draw }}
+    steps:
+      - name: Decide whether the screens can have changed
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL: ${{ github.event.pull_request.number }}
+        run: |
+          case "${{ github.event_name }}" in
+            # The pull request's own run already compared this change, and a
+            # design change still waiting for its pictures must not stop the queue.
+            merge_group) draw=false ;;
+            pull_request)
+              # Read the list on its own line, so a failed request fails the
+              # step instead of reading as "no screen files changed".
+              files="$(gh api --paginate "repos/${{ github.repository }}/pulls/${PULL}/files" --jq '.[].filename')"
+              if grep -qE '^(apps/web/|packages/theme/|packages/contracts/src/theme\.ts$|DESIGN\.md$|\.github/workflows/visual-check\.yml$)' <<< "$files"; then
+                draw=true
+              else
+                draw=false
+              fi ;;
+            *) draw=true ;;
+          esac
+          echo "draw=${draw}" >> "$GITHUB_OUTPUT"
+          echo "Draw the key screens: ${draw}"
+  visual:
+    name: Visual check
+    needs: scope
+    if: needs.scope.outputs.draw == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      INTENDED: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'design change') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Read the pinned browser version
+        id: playwright
+        run: echo "version=$(bun -e 'console.log(require("playwright-core/package.json").version)')" >> "$GITHUB_OUTPUT"
+        working-directory: apps/web
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      # The Chromium that goes with playwright-core, not the runner's Chrome,
+      # so the baselines do not move when the runner image updates its browser.
+      - name: Install the pinned Chromium
+        run: bunx playwright-core install --with-deps chromium
+        working-directory: apps/web
+      - name: Draw and compare the key screens
+        env:
+          CI: "true"
+          OCTANT_VISUAL_CHECK: "1"
+          OCTANT_QA_ARTIFACTS: ${{ runner.temp }}/visual-check
+        run: |
+          # Set only when writing: an empty value is still "set" to some readers.
+          if [ "$INTENDED" = "true" ]; then export OCTANT_VISUAL_UPDATE=1; fi
+          bun run --cwd apps/web visual:check
+      - name: Explain how to accept the change
+        if: failure()
+        run: |
+          shopt -s nullglob
+          pictures=("${RUNNER_TEMP}"/visual-check/*.actual.png)
+          if [ ${#pictures[@]} -eq 0 ] || [ "$INTENDED" = "true" ]; then
+            # No screen differed, or update mode failed: the check itself broke.
+            echo "::error::The visual check could not run to the end. See the log of the step above and the visual-check artifact."
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            echo "::error::The key screens on main no longer match their baselines: a change with the design change label was merged without committing its pictures. Run scripts/visual-baselines-from-ci.ts ${{ github.run_id }}, review the diffs and commit them."
+          else
+            echo "::error::Intended? Add the \`design change\` label, then commit the new pictures with \`bun scripts/visual-baselines-from-ci.ts ${{ github.run_id }}\`."
+          fi
+      - name: List the new pictures
+        if: success() && env.INTENDED == 'true'
+        run: |
+          shopt -s nullglob
+          pictures=("${RUNNER_TEMP}"/visual-check/*.actual.png)
+          {
+            echo "## Visual check: design change"
+            if [ ${#pictures[@]} -eq 0 ]; then
+              echo "No screen changed visibly; there is nothing to commit."
+            else
+              echo "These pictures changed (or are new). Download them from the \`visual-check\` artifact, review them, then commit:"
+              echo
+              for picture in "${pictures[@]}"; do echo "- $(basename "$picture" .actual.png)"; done
+              echo
+              echo '```'
+              echo "bun scripts/visual-baselines-from-ci.ts ${{ github.run_id }}"
+              echo "# review the pictures, then commit apps/web/visual-baselines and push"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-check
+          path: ${{ runner.temp }}/visual-check
+          if-no-files-found: ignore
