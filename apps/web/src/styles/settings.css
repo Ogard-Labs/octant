@@ -4403,3 +4403,7 @@ html[data-octant-increased-contrast="true"]
   display: flex;
   margin-block-start: var(--oct-space-2);
 }
+
+.settings-theme-editor__import-note {
+  min-block-size: 2lh;
+}

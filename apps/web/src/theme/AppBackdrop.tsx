@@ -139,6 +139,7 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
           characterSet: resolved.characters.characterSet,
           density: resolved.characters.density,
           speed: resolved.characters.speed,
+          pattern: resolved.characters.pattern,
         };
   const asciiField = useRef<AsciiFieldStop | undefined>(undefined);
   useEffect(() => {
@@ -160,9 +161,10 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
   // what it draws changes; its glyphs are not rebuilt.
   const characterSet = resolved.characters?.characterSet;
   const characterDensity = resolved.characters?.density;
+  const characterPattern = resolved.characters?.pattern;
   useEffect(() => {
     asciiField.current?.redraw();
-  }, [characterSet, characterDensity]);
+  }, [characterSet, characterDensity, characterPattern]);
 
   const pixels = resolved.kind === "pixels";
   const scene = resolved.scene;
