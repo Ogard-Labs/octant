@@ -7,11 +7,17 @@ import type {
 } from "@octant/contracts/theme";
 import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
 import { ASCII_DEFAULT_CELL, ASCII_MIN_CELL, asciiCell } from "@octant/domain/ascii-print";
+import {
+  DEFAULT_CHARACTER_LEVEL,
+  DEFAULT_CHARACTER_SET,
+  cleanCharacterSet,
+} from "@octant/domain/theme-policy";
 import { Check, Image as ImageIcon, Images, Upload, X } from "../ui/icons";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { SettingRow } from "./primitives";
+import { SettingRow, SettingsDisclosure } from "./primitives";
 import { SliderField } from "./SliderField";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -35,6 +41,12 @@ export interface AppBackgroundSettingsProps {
   readonly focused?: boolean;
   readonly library?: BackgroundImageLibrary | undefined;
   readonly onChange: (next: AppBackground) => void;
+  /**
+   * Shows a change without saving it. The character controls preview each
+   * keystroke or slider tick through it and save once with `onChange` when the
+   * person lets go. Absent, they save each change as it happens.
+   */
+  readonly onPreview?: (next: AppBackground) => void;
 }
 
 type Choice = "builtin" | "photo" | "characters" | "pixels" | "flowing" | "none";
@@ -85,8 +97,26 @@ function carry(background: AppBackground) {
     effectTones: background.effectTones,
     ...(background.motion === undefined ? {} : { motion: background.motion }),
     ...(background.scene === undefined ? {} : { scene: background.scene }),
+    ...(background.characterSet === undefined ? {} : { characterSet: background.characterSet }),
+    ...(background.characterDensity === undefined
+      ? {}
+      : { characterDensity: background.characterDensity }),
+    ...(background.characterSpeed === undefined
+      ? {}
+      : { characterSpeed: background.characterSpeed }),
   };
 }
+
+/** Ready-made sets for the character field; the first is what it draws by default. */
+const STARTER_SETS = [
+  { id: "letters", label: "Letters and digits", characters: DEFAULT_CHARACTER_SET },
+  { id: "binary", label: "Binary", characters: "01" },
+  { id: "dots", label: "Dots", characters: "·•●" },
+  { id: "shades", label: "Shades", characters: "░▒▓█" },
+  { id: "lines", label: "Lines", characters: "─│┼╱╲" },
+] as const;
+
+const REFUSED_CHARACTERS = "Use letters, digits and symbols; emoji and spaces are left out.";
 
 /** What the pixel ground can draw; a row saved before scenes existed shows Drift. */
 const SCENES = [
@@ -153,6 +183,36 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   const fileInput = useRef<HTMLInputElement>(null);
   const library = props.library;
   const background = props.background;
+  const savedCharacters =
+    background.kind === "characters"
+      ? (background.characterSet ?? DEFAULT_CHARACTER_SET)
+      : DEFAULT_CHARACTER_SET;
+  // What the person is typing. A refused text stays in the box with its note
+  // while the ground keeps the last good set.
+  const [typed, setTyped] = useState(savedCharacters);
+  const [typedRefused, setTypedRefused] = useState(false);
+  const charactersBox = useRef<HTMLInputElement>(null);
+  // The ground the character controls are previewing and have not saved yet.
+  const unsaved = useRef<AppBackground | undefined>(undefined);
+  useEffect(() => {
+    // The box keeps what the person is typing; the saved value never overwrites it mid-edit.
+    if (charactersBox.current !== null && document.activeElement === charactersBox.current) return;
+    setTyped(savedCharacters);
+    setTypedRefused(false);
+  }, [savedCharacters]);
+  const previewCharacters = (next: AppBackground) => {
+    if (props.onPreview === undefined) {
+      props.onChange(next);
+      return;
+    }
+    unsaved.current = next;
+    props.onPreview(next);
+  };
+  const saveCharacters = (next?: AppBackground) => {
+    const pending = next ?? unsaved.current;
+    unsaved.current = undefined;
+    if (pending !== undefined) props.onChange(pending);
+  };
   const field = background.kind === "pixels";
   const scene: AppBackgroundScene = (field ? background.scene : undefined) ?? "drift";
   const selectedId =
@@ -636,6 +696,143 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                 value={printTones}
               />
             </SettingRow>
+          ) : null}
+          {background.kind === "characters" ? (
+            <SettingsDisclosure
+              className="settings-app-background__customize"
+              title="Customize"
+              variant="inline"
+            >
+              <SettingRow
+                description="Up to 64 characters. The field draws only these."
+                label="Characters"
+                scope="app"
+                settingId="app-background-characters"
+              >
+                <span className="settings-app-background__characters">
+                  <OctantInput
+                    aria-label="Characters"
+                    autoComplete="off"
+                    className="settings-view__text-input"
+                    onBlur={() => saveCharacters()}
+                    onChange={(event) => {
+                      const text = event.currentTarget.value;
+                      setTyped(text);
+                      const cleaned = cleanCharacterSet(text);
+                      setTypedRefused(cleaned.status === "refused");
+                      if (cleaned.status === "ok") {
+                        previewCharacters({ ...background, characterSet: cleaned.characterSet });
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") saveCharacters();
+                    }}
+                    ref={charactersBox}
+                    spellCheck={false}
+                    type="text"
+                    value={typed}
+                  />
+                  <OctantSelectField
+                    aria-label="Starter character set"
+                    className="settings-view__select"
+                    onValueChange={(next) => {
+                      const starter = STARTER_SETS.find((option) => option.id === next);
+                      if (starter !== undefined) {
+                        setTyped(starter.characters);
+                        setTypedRefused(false);
+                        saveCharacters({ ...background, characterSet: starter.characters });
+                      }
+                    }}
+                    options={[
+                      ...STARTER_SETS.map((option) => ({ id: option.id, label: option.label })),
+                      { id: "custom", label: "Custom", disabled: true },
+                    ]}
+                    value={
+                      STARTER_SETS.find((option) => option.characters === savedCharacters)?.id ??
+                      "custom"
+                    }
+                  />
+                </span>
+              </SettingRow>
+              {/* The line keeps its height when empty, so nothing moves as the note comes and goes. */}
+              <p className="settings-app-background__note" role="status">
+                {typedRefused ? REFUSED_CHARACTERS : "\u00a0"}
+              </p>
+              <SettingRow
+                description="How much of the field shows."
+                label="Density"
+                scope="app"
+                settingId="app-background-character-density"
+              >
+                <SliderField
+                  aria-label="Density"
+                  className="settings-view__range"
+                  format={(value) => `${String(value)}%`}
+                  max={100}
+                  min={0}
+                  onBlur={() => saveCharacters()}
+                  onChange={(event) =>
+                    previewCharacters({
+                      ...background,
+                      characterDensity: Number(event.currentTarget.value),
+                    })
+                  }
+                  onKeyUp={() => saveCharacters()}
+                  onPointerUp={() => saveCharacters()}
+                  step={1}
+                  value={background.characterDensity ?? DEFAULT_CHARACTER_LEVEL}
+                />
+              </SettingRow>
+              <SettingRow
+                description="How fast it drifts and the characters change. Zero holds one frame."
+                label="Speed"
+                scope="app"
+                settingId="app-background-character-speed"
+              >
+                <SliderField
+                  aria-label="Speed"
+                  className="settings-view__range"
+                  format={(value) => `${String(value)}%`}
+                  max={100}
+                  min={0}
+                  onBlur={() => saveCharacters()}
+                  onChange={(event) =>
+                    previewCharacters({
+                      ...background,
+                      characterSpeed: Number(event.currentTarget.value),
+                    })
+                  }
+                  onKeyUp={() => saveCharacters()}
+                  onPointerUp={() => saveCharacters()}
+                  step={1}
+                  value={background.characterSpeed ?? DEFAULT_CHARACTER_LEVEL}
+                />
+              </SettingRow>
+              <SettingRow
+                description="Back to the default letters and digits at the default density and speed."
+                label="Reset"
+                scope="app"
+                settingId="app-background-characters-reset"
+              >
+                <OctantButton
+                  onClick={() => {
+                    const {
+                      characterSet: _set,
+                      characterDensity: _density,
+                      characterSpeed: _speed,
+                      ...rest
+                    } = background;
+                    setTyped(DEFAULT_CHARACTER_SET);
+                    setTypedRefused(false);
+                    saveCharacters(rest);
+                  }}
+                  type="button"
+                  variant="outline"
+                >
+                  Reset
+                </OctantButton>
+              </SettingRow>
+            </SettingsDisclosure>
           ) : null}
           {moves ? (
             <SettingRow

@@ -3,7 +3,11 @@ import {
   CENTRE_SHARE,
   PEAK_ALPHA,
   fieldPixelRatio,
+  densityScale,
+  inkScale,
+  meanStrength,
   patchStrength,
+  patchThresholds,
   runAsciiField,
 } from "./appBackdropAscii";
 import {
@@ -26,17 +30,23 @@ interface MaskWrite {
 }
 
 function recordingCanvases() {
-  const writes = { frames: 0, masks: [] as MaskWrite[], ringMasks: [] as MaskWrite[] };
+  const writes = {
+    frames: 0,
+    glyphPaints: 0,
+    surfaces: 0,
+    masks: [] as MaskWrite[],
+    ringMasks: [] as MaskWrite[],
+  };
   const maskCanvases: HTMLCanvasElement[] = [];
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
     function (this: HTMLCanvasElement) {
       // Cell masks are one pixel per cell: the first is the field's, the second a ring's.
       if (this.width === 100 && !maskCanvases.includes(this)) maskCanvases.push(this);
       return {
-        createImageData: (width: number, height: number) => ({
-          width,
-          data: new Uint8ClampedArray(width * height * 4),
-        }),
+        createImageData: (width: number, height: number) => {
+          writes.surfaces += 1;
+          return { width, data: new Uint8ClampedArray(width * height * 4) };
+        },
         putImageData: (
           (owner: HTMLCanvasElement) => (image: { width: number; data: Uint8ClampedArray }) => {
             const alphas: number[] = [];
@@ -53,7 +63,9 @@ function recordingCanvases() {
         },
         drawImage: () => undefined,
         clearRect: () => undefined,
-        fillText: () => undefined,
+        fillText: () => {
+          writes.glyphPaints += 1;
+        },
       } as unknown as CanvasRenderingContext2D;
     },
   );
@@ -400,5 +412,82 @@ describe("character ground click rings", () => {
     vi.advanceTimersByTime(1000);
     expect(vi.getTimerCount()).toBe(0);
     expect(writes.ringMasks.length).toBeGreaterThan(0);
+  });
+
+  it("lights more cells at the highest density than at the default, and fewer at the lowest", () => {
+    const lit = (density: number) => {
+      const thresholds = patchThresholds(density);
+      let count = 0;
+      for (let row = 0; row < 40; row += 1) {
+        for (let column = 0; column < 120; column += 1) {
+          count += patchStrength(column, row, 7, thresholds);
+        }
+      }
+      return count;
+    };
+    expect(lit(100)).toBeGreaterThan(lit(50));
+    expect(lit(0)).toBeLessThan(lit(50));
+    expect(patchThresholds(50)).toEqual({ low: 0.52, high: 0.82 });
+  });
+
+  it("holds one frame at speed zero, however long it runs", () => {
+    const writes = recordingCanvases();
+    const stop = runAsciiField(sizedCanvas(), false, undefined, () => ({
+      characterSet: "01",
+      density: 50,
+      speed: 0,
+    }));
+    vi.advanceTimersByTime(3000);
+    expect(writes.frames).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+    stop();
+  });
+
+  it("draws a heavier set fainter than the default letters, and never boosts a lighter one", () => {
+    expect(inkScale(0.25, 1)).toBeCloseTo(0.25);
+    expect(inkScale(0.25, 0.25)).toBe(1);
+    expect(inkScale(0.25, 0.1)).toBe(1);
+    expect(PEAK_ALPHA * inkScale(0.25, 1)).toBeLessThan(PEAK_ALPHA);
+  });
+
+  it("keeps the field running when the set changes, repainting its glyphs once", () => {
+    const writes = recordingCanvases();
+    let options = { characterSet: "ab", density: 50, speed: 50 };
+    const stop = runAsciiField(sizedCanvas(), true, undefined, () => options);
+    vi.advanceTimersByTime(500);
+    const before = writes.frames;
+    options = { ...options, characterSet: "01" };
+    vi.advanceTimersByTime(500);
+    expect(writes.frames).toBeGreaterThan(before);
+    stop();
+  });
+
+  it("never inks more on average than the default field, at any density or set", () => {
+    const defaultInk = meanStrength(50) * 0.25;
+    for (const density of [0, 50, 100]) {
+      for (const coverage of [0.1, 0.25, 0.6, 1]) {
+        const ink =
+          meanStrength(density) * densityScale(density) * inkScale(0.25, coverage) * coverage;
+        expect(ink).toBeLessThanOrEqual(defaultInk + 1e-9);
+      }
+    }
+    expect(densityScale(100)).toBeLessThan(1);
+    expect(densityScale(0)).toBe(1);
+  });
+
+  it("redraws a still field in place when the density changes, without rebuilding or re-rolling it", () => {
+    const writes = recordingCanvases();
+    let options = { characterSet: "ab", density: 50, speed: 0 };
+    const stop = runAsciiField(sizedCanvas(), false, undefined, () => options);
+    vi.advanceTimersByTime(100);
+    const surfaces = writes.surfaces;
+    const paints = writes.glyphPaints;
+    const frames = writes.frames;
+    options = { ...options, density: 80 };
+    stop.redraw();
+    expect(writes.frames).toBe(frames + 1);
+    expect(writes.surfaces).toBe(surfaces);
+    expect(writes.glyphPaints).toBe(paints);
+    stop();
   });
 });

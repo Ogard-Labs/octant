@@ -7,6 +7,7 @@ import {
   type SidebarBackgroundMetadata,
 } from "@octant/contracts/theme";
 import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
+import { DEFAULT_CHARACTER_SET } from "@octant/domain/theme-policy";
 import { AppBackgroundSettings, type BackgroundImageLibrary } from "./AppBackgroundSettings";
 
 afterEach(cleanup);
@@ -671,5 +672,127 @@ describe("AppBackgroundSettings", () => {
 
     expect(await screen.findByText(/cannot be deleted/)).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "sunrise.png" })).toBeInTheDocument();
+  });
+
+  describe("character field customization", () => {
+    const characters = { ...DEFAULT_APP_BACKGROUND, kind: "characters" as const };
+
+    async function openCustomize(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(screen.getByText("Customize"));
+    }
+
+    it("offers Customize only while the character field is the ground", () => {
+      const { rerender } = render(
+        <AppBackgroundSettings
+          background={{ ...DEFAULT_APP_BACKGROUND, kind: "none" }}
+          onChange={vi.fn()}
+        />,
+      );
+      expect(screen.queryByText("Customize")).toBeNull();
+      rerender(<AppBackgroundSettings background={characters} onChange={vi.fn()} />);
+      expect(screen.getByText("Customize")).toBeInTheDocument();
+    });
+
+    it("updates the ground as a person types their own characters", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(<AppBackgroundSettings background={characters} onChange={onChange} />);
+      await openCustomize(user);
+      const field = screen.getByRole("textbox", { name: "Characters" });
+      await user.clear(field);
+      await user.type(field, "01");
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: "characters", characterSet: "01" }),
+      );
+    });
+
+    it("keeps the last good set and says why when an emoji is typed", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(
+        <AppBackgroundSettings
+          background={{ ...characters, characterSet: "01" }}
+          onChange={onChange}
+        />,
+      );
+      await openCustomize(user);
+      const field = screen.getByRole("textbox", { name: "Characters" });
+      await user.type(field, "😀");
+      expect(onChange).not.toHaveBeenCalled();
+      expect(screen.getByText(/emoji and spaces are left out/)).toBeInTheDocument();
+    });
+
+    it("moves density and speed on the ground", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(<AppBackgroundSettings background={characters} onChange={onChange} />);
+      await openCustomize(user);
+      fireEvent.change(screen.getByRole("slider", { name: "Density" }), {
+        target: { value: "80" },
+      });
+      expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ characterDensity: 80 }));
+      fireEvent.change(screen.getByRole("slider", { name: "Speed" }), { target: { value: "0" } });
+      expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ characterSpeed: 0 }));
+    });
+
+    it("resets the characters, density and speed to the default field", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(
+        <AppBackgroundSettings
+          background={{
+            ...characters,
+            characterSet: "01",
+            characterDensity: 80,
+            characterSpeed: 10,
+          }}
+          onChange={onChange}
+        />,
+      );
+      await openCustomize(user);
+      await user.click(screen.getByRole("button", { name: "Reset" }));
+      const next = onChange.mock.calls.at(-1)?.[0];
+      expect(next).toMatchObject({ kind: "characters" });
+      expect(next).not.toHaveProperty("characterSet");
+      expect(next).not.toHaveProperty("characterDensity");
+      expect(next).not.toHaveProperty("characterSpeed");
+    });
+
+    it("previews slider and typing changes and saves once when the person lets go", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      const onPreview = vi.fn();
+      render(
+        <AppBackgroundSettings background={characters} onChange={onChange} onPreview={onPreview} />,
+      );
+      await openCustomize(user);
+      const density = screen.getByRole("slider", { name: "Density" });
+      fireEvent.change(density, { target: { value: "60" } });
+      fireEvent.change(density, { target: { value: "70" } });
+      expect(onPreview).toHaveBeenCalledTimes(2);
+      expect(onChange).not.toHaveBeenCalled();
+      fireEvent.pointerUp(density);
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ characterDensity: 70 }));
+      const field = screen.getByRole("textbox", { name: "Characters" });
+      await user.clear(field);
+      await user.type(field, "01");
+      expect(onChange).toHaveBeenCalledTimes(1);
+      await user.keyboard("{Enter}");
+      expect(onChange).toHaveBeenCalledTimes(2);
+      expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ characterSet: "01" }));
+    });
+
+    it("clears the typed text and the note when Reset is pressed", async () => {
+      const user = userEvent.setup();
+      render(<AppBackgroundSettings background={characters} onChange={vi.fn()} />);
+      await openCustomize(user);
+      const field = screen.getByRole("textbox", { name: "Characters" });
+      await user.type(field, "😀");
+      expect(screen.getByText(/emoji and spaces are left out/)).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Reset" }));
+      expect(screen.queryByText(/emoji and spaces are left out/)).toBeNull();
+      expect(field).toHaveValue(DEFAULT_CHARACTER_SET);
+    });
   });
 });

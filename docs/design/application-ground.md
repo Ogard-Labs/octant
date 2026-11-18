@@ -111,7 +111,15 @@ shows on a fresh install: a canvas of small monospace letters and digits in the
 theme's primary ink, at most 15% opaque, that shows only inside slowly drifting
 patches and leaves the rest empty. Three patterns (round blotches, long
 horizontal currents, rings) take turns every twenty seconds and cross-fade over
-the last four. Behind the start screen's content column, across its full width and height, the field is dimmed to a third of its
+the last four. A person can set what the field draws (Settings › Appearance ›
+Background › Customize, shown while the ASCII field is the ground): its characters (one to 64, one
+code point per cell; whitespace and repeats are dropped, and controls, bidi and
+format characters, combining marks and emoji are refused, so a refused text keeps the last good set),
+its density (it moves both patch edges by 0.004 per point from the default 50: 100 shows more,
+0 less) and its speed (the patches' drift and the glyph swap share scale by speed ÷ 50; 0 holds
+one frame, as Motion Still does). Edits preview in the running ground at once and are saved when you let go of a slider or leave the field. Readability holds for any
+set and density: the average ink is no heavier than the default field at the default density, and the peak ink is never above 15%. The field measures each glyph's mean alpha in one 7 × 13 cell and scales the peak by min(1, coverage of the default letters and digits ÷ coverage of the chosen set), and by min(1, the default density's mean patch strength ÷ the chosen density's), so a block character or a dense field draws fainter; a set that inks less is not boosted. Increased
+contrast and reduced motion behave as before, and a row without these values draws the default field. Behind the start screen's content column, across its full width and height, the field is dimmed to a third of its
 strength (a quarter on a light page; and under the sidebar where it runs there), and comes back to full strength 140px past the column's
 edge, so the heading, the cards and the composer stay on a calm page. The glyphs are painted once into a layer (a few per cent swap each
 frame), and a frame only rewrites one alpha value per cell, so the cost does not
