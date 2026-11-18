@@ -441,6 +441,9 @@ export class WorkRequestService {
                   .catch(() => ({ status: "failed" as const }))
               : undefined;
           levelChangeApplied = inPlace?.status === "applied" ? "in-place" : "next-turn";
+          // The running turn's ceiling narrows before the agent hears yes.
+          if (levelChangeApplied === "in-place")
+            this.#levelChanges?.enteredPlanInPlace?.(entry.request.threadId);
         }
         if (command.resolution.kind === "approval") {
           await this.#providerSessions.answerApproval({
@@ -482,9 +485,8 @@ export class WorkRequestService {
         },
         answeredBy,
       );
-      if (levelChangeApplied === "in-place")
-        this.#levelChanges?.enteredPlanInPlace?.(entry.request.threadId);
-      else if (levelChange !== undefined) this.#levelChanges?.endTurn(entry.request.threadId);
+      if (levelChange !== undefined && levelChangeApplied !== "in-place")
+        this.#levelChanges?.endTurn(entry.request.threadId);
       return settled;
     } finally {
       this.#releaseActiveDelivery(prepared.request);

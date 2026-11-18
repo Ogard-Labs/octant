@@ -7462,7 +7462,7 @@ describe("Claude's own plan mode as level changes", () => {
   }
 
   it("enters Plan inside the running turn and refuses every write, command, unmarked server and subagent for the rest of it", async () => {
-    const { acquired, open, query, call, changed, decision, scope } = await enteredPlanInPlace();
+    const { acquired, query, call, changed, decision, scope } = await enteredPlanInPlace();
     try {
       expect(changed).toEqual({ status: "applied" });
       expect(query.setPermissionMode).toHaveBeenCalledWith("plan");
@@ -7536,6 +7536,35 @@ describe("Claude's own plan mode as level changes", () => {
           levelChanges: true,
         }),
       );
+      await expect(
+        Effect.runPromise(
+          acquired.connection.changeLevelInPlace!({ sessionId, change: "enter-plan" }),
+        ),
+      ).resolves.toMatchObject({ status: "refused" });
+      expect(f.queries[0]!.setPermissionMode).not.toHaveBeenCalled();
+    } finally {
+      await acquired.close();
+    }
+  });
+
+  it("refuses to enter Plan in place when the account directory sits inside the checkout", async () => {
+    const f = harness("subscription", "current-session", {
+      configDirectory: `${projectRoot}/.claude-accounts/work`,
+    });
+    const acquired = await acquire(f.driver, "code");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "full-access",
+          levelChanges: true,
+        }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "fix it", attachments: [], tools: [] }),
+      );
+      // Plan's task tools would write the account's task list inside the Project.
       await expect(
         Effect.runPromise(
           acquired.connection.changeLevelInPlace!({ sessionId, change: "enter-plan" }),

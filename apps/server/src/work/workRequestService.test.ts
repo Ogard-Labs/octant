@@ -1749,7 +1749,7 @@ describe("an agent's ask to plan first or to leave Plan", () => {
     });
 
     expect(result).toMatchObject({ status: "ok", request: { levelChangeApplied: "in-place" } });
-    expect(order).toEqual(["level:enter-plan", "in-place", "provider:true", "entered-plan"]);
+    expect(order).toEqual(["level:enter-plan", "in-place", "entered-plan", "provider:true"]);
   });
 
   it("ends the turn when the provider fails to enter Plan in place", async () => {

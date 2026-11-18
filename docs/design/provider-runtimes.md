@@ -1246,8 +1246,13 @@ ends as before.
   Each refusal carries Plan's sentence, and an approval the person answers
   afterwards for a call asked about before the change is refused too. If
   `setPermissionMode` fails, the gate stays at Plan and the turn ends as
-  before, so the level never moves without its rules. A Work turn's running
-  level reads Plan from then on. The next turn launches with Plan's
+  before, so the level never moves without its rules. A session whose
+  account directory overlaps the checkout, which a Plan launch refuses
+  because the task tools write there, is refused the change and its turn
+  ends. The running turn's own ceiling, a Code turn's and a Work turn's,
+  reads Plan from then on, before the agent hears the answer, so a level
+  the person raises again meanwhile applies only from the next turn and
+  Octant's own tools judge the rest of the turn at Plan. The next turn launches with Plan's
   read-only profile and tool set as usual.
 
 - _A journaled record._ The approval's answer records which way the change

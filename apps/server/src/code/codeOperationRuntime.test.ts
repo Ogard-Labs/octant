@@ -15159,6 +15159,113 @@ it("requests a preview through the actual app-managed terminal write composition
   }
 });
 
+it("keeps a turn that entered Plan in place at Plan when the person raises the level again before it ends", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const base = providerConnection(queue);
+  const provider: ProviderConnection = {
+    ...base,
+    changeLevelInPlace: () => Effect.succeed({ status: "applied" as const }),
+  };
+  let setThread: (next: CodeThread) => void = () => undefined;
+  const f = runtimeFixture({
+    terminalExit: { exitCode: 0 },
+    provider: providerDriver(provider),
+    supportsAppManagedTools: true,
+    changeThreadLevel: async (input: { readonly executionPolicy: ProviderExecutionPolicy }) => {
+      setThread(
+        decodeCodeThread({
+          ...thread(),
+          executionPolicy: input.executionPolicy,
+          planReturnPolicy: "approval-gated",
+        }),
+      );
+      return true;
+    },
+  });
+  setThread = (next) => f.setThread(next);
+  f.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+  const turn = operationId(1810);
+  try {
+    expect(
+      await f.runtime.execute(windowId, {
+        kind: "start-terminal",
+        operationId: operationId(1809),
+        terminalId: decodeCodeTerminalId(threadId),
+        threadId,
+        checkoutId,
+        columns: 80,
+        rows: 24,
+        credentialRefs: [],
+      }),
+    ).toMatchObject({ kind: "terminal-state", state: "running" });
+    await f.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: turn,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: f.prompt,
+    });
+    await vi.waitFor(() => expect(base.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "approval-request",
+          requestId: "plan-ask",
+          action: "EnterPlanMode",
+          description: "Claude asks to plan first.",
+          levelChange: { kind: "enter-plan" },
+        }),
+      ),
+    );
+    let approvalId: CodeApprovalId | undefined;
+    await vi.waitFor(async () => {
+      const asked = (await operationEvents(f.runtime, turn)).find(
+        (event) => event.kind === "approval-requested",
+      );
+      expect(asked?.kind).toBe("approval-requested");
+      if (asked?.kind === "approval-requested") approvalId = asked.approvalId;
+    });
+    expect(
+      await f.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(1811),
+        threadId,
+        checkoutId,
+        approvalId: approvalId!,
+        decision: "approved",
+      }),
+    ).toMatchObject({ state: "running" });
+    // The person puts the thread back at Full access while the turn runs.
+    f.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access", version: 3 }));
+    expect(
+      f.runtime.threadWithActiveTurnPosture?.(
+        decodeCodeThread({ ...thread(), executionPolicy: "full-access", version: 3 }),
+      )?.executionPolicy,
+    ).toBe("plan");
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "tool-request",
+          requestId: "terminal-write",
+          toolName: "octant_terminal",
+          inputJson: JSON.stringify({ operation: "write", command: "echo changed\n" }),
+        }),
+      ),
+    );
+    await vi.waitFor(() =>
+      expect(base.answerTool).toHaveBeenCalledWith(
+        expect.objectContaining({ requestId: "terminal-write", isError: true }),
+      ),
+    );
+  } finally {
+    await f.runtime.close();
+    f.close();
+  }
+});
+
 it("keeps real Git previews on the original start tree through other writers, then sends an exact older finding under ordinary Plan authority", async () => {
   const root = mkdtempSync(join(tmpdir(), "octant-live-review-git-"));
   directories.push(root);

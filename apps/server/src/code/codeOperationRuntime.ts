@@ -3195,7 +3195,12 @@ interface ActiveTurn {
     import("@octant/contracts/extensions").ExtensionSelection
   >;
   readonly windowId: WindowId;
-  readonly thread: CodeThread;
+  /**
+   * The thread as the turn started on it, and the ceiling of what the turn
+   * may do. It narrows to Plan when the turn enters Plan in place, so a level
+   * the person raises again meanwhile applies only from the next turn.
+   */
+  thread: CodeThread;
   /** The routine run this turn was started for, from the dispatcher only. */
   readonly routineRun?: AutomationRunReference;
   readonly operationId: CodeOperationId;
@@ -5518,7 +5523,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // can hold the running session to Plan applies it there and the turn goes
     // on; before the agent hears the answer, so it never acts as approved at
     // the old level. Leaving Plan, or a driver without that change, ends the
-    // turn and the next one launches at the new level.
+    // turn and the next one launches at the new level. The turn's own
+    // ceiling narrows to Plan first, so nothing the host runs for it, and no
+    // level raised again while it runs, acts above Plan for the rest of it.
+    if (change.to === "plan") active.thread = { ...active.thread, executionPolicy: "plan" };
     const inPlace =
       change.to === "plan" &&
       connection.changeLevelInPlace !== undefined &&

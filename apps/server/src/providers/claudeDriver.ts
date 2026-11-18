@@ -1634,6 +1634,11 @@ interface SessionState {
   readonly taskList: ClaudeTaskList;
   /** Whether the host answers this session's level-change asks. */
   readonly levelChanges: boolean;
+  /**
+   * The account directory overlaps the checkout, so the task tools Plan keeps
+   * would write inside the Project: the session cannot enter Plan in place.
+   */
+  readonly accountDirectoryBroadensPlan: boolean;
   /** The account MCP servers the person marked read-only, which Plan still starts. */
   readonly planMcpServers: readonly string[];
   /**
@@ -3845,6 +3850,16 @@ function makeConnection(
             "Claude Plan confinement cannot use an account directory that overlaps the checkout.",
           );
         }
+        // Plan refuses an account directory that overlaps the checkout, since
+        // the session's own task tools write there. A session launched at
+        // another level over such a folder cannot be held to Plan in place.
+        const accountDirectoryBroadensPlan =
+          options.configDirectory !== undefined &&
+          claudeAccountDirectoryBroadensPlan(
+            projectRoot,
+            options.configDirectory,
+            options.isProjectConfinedPath,
+          );
         scope = await runSetupEffect(Scope.make(), signal);
         const initialized = deferred<string>();
         // Startup no longer waits on this: the runtime initializes with the
@@ -4988,6 +5003,7 @@ function makeConnection(
           settledToolUseIds: new Set(),
           taskList,
           levelChanges,
+          accountDirectoryBroadensPlan,
           planMcpServers: inPlacePlanMcpServers,
           inPlacePlan: false,
           planModeSwitched: false,
@@ -5484,7 +5500,11 @@ function makeConnection(
               reason: "Claude session has no running turn.",
             });
           }
-          if (!state.levelChanges || state.executionPolicy === "plan") {
+          if (
+            !state.levelChanges ||
+            state.executionPolicy === "plan" ||
+            state.accountDirectoryBroadensPlan
+          ) {
             return Effect.succeed({
               status: "refused" as const,
               reason: "Claude session does not take a level change in place.",
