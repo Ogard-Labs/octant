@@ -86,7 +86,8 @@ interface Account {
   readonly binaryPath: string;
   /** The stored directory; undefined is the CLI's own default. */
   readonly directory: string | undefined;
-  readonly apiKey: boolean;
+  /** How the account signs in when not with its own CLI login: an API key or a gateway. */
+  readonly storedKey: "API key" | "gateway" | undefined;
 }
 
 /** Host credentials that would sign an extra account in as someone else. */
@@ -107,7 +108,12 @@ function accountOf(instance: ProviderInstance): Account | undefined {
       profile,
       binaryPath: instance.configuration.binaryPath,
       directory: instance.configuration.configDirectory,
-      apiKey: instance.configuration.authentication === "api-key",
+      storedKey:
+        instance.configuration.authentication === "api-key"
+          ? "API key"
+          : instance.configuration.authentication === "gateway"
+            ? "gateway"
+            : undefined,
     };
   }
   if (instance.driverKind === "codex") {
@@ -119,7 +125,7 @@ function accountOf(instance: ProviderInstance): Account | undefined {
       profile,
       binaryPath: instance.configuration.binaryPath,
       directory: instance.configuration.codexHome,
-      apiKey: false,
+      storedKey: undefined,
     };
   }
   return undefined;
@@ -195,9 +201,10 @@ export async function runAccountCliCommand(input: RunAccountCliCommandInput): Pr
       return 0;
     }
     for (const account of read.accounts) {
-      const kind = account.apiKey
-        ? `${AGENT_LABEL[account.agent]}, API key`
-        : AGENT_LABEL[account.agent];
+      const kind =
+        account.storedKey === undefined
+          ? AGENT_LABEL[account.agent]
+          : `${AGENT_LABEL[account.agent]}, ${account.storedKey}`;
       stdout.write(`${account.instance.displayName}  ${kind}  ${directoryLabel(account)}\n`);
     }
     return 0;

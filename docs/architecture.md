@@ -7060,7 +7060,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   snapshot stays. Claude Code 2.1.301 can also report
   `rate_limits_available: false` in that cold process. For a subscription
   account this means unavailable usage, not that a plan does not apply.
-  Only explicit API-key authentication establishes the no-plan state.
+  Only explicit API-key or gateway authentication establishes the no-plan state.
   For Claude and Codex, Octant never reads a token or credential file
   to fetch those numbers, and never calls a vendor usage endpoint
   itself. Each account keeps its own snapshot, keyed by
@@ -7116,7 +7116,12 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   two logins cannot share one profile without sharing credentials and
   session history. The implicit first subscription account keeps the
   host profile (`~/.claude`, or the inherited host overlay). Every
-  extra account, and every API-key account, uses its assigned leaf.
+  extra account, and every API-key or gateway account, uses its assigned leaf.
+  A gateway account (maintainer decision, 2026-11-18; built) launches with
+  `ANTHROPIC_BASE_URL` set to its own gateway address and
+  `ANTHROPIC_AUTH_TOKEN` set to its broker-resolved token, under Strict and
+  outside it, and no other account receives either
+  ([Claude gateway accounts](design/model-endpoints.md#claude-gateway-accounts)).
   A leftover custom directory keeps working until the person
   explicitly re-assigns it; Octant never silently points that login
   at another path. Removing an account leaves its assigned directory
@@ -15958,8 +15963,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   (`OCTANT_*`) and every other model provider's credential
   (`providerHostEnvironment`); the account's own sign-in still decides
   which account a turn runs as, so no host Anthropic key or token crosses,
-  Octant's account directory is applied, and an API-key account gets its
-  broker key. It sets only the self-update, auto-memory and built-in-agents
+  Octant's account directory is applied, an API-key account gets its
+  broker key, and a gateway account gets its own address and broker token
+  in place of any host `ANTHROPIC_BASE_URL`. It sets only the self-update, auto-memory and built-in-agents
   switches (`OPEN_CLAUDE_LAUNCH_GUARDS`); telemetry, error reports, `/bug`,
   `/feedback`, the survey and marketplace auto-install follow the person's
   own Claude Code settings, and the Claude artifacts switch below lifts
@@ -17747,9 +17753,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     `octant provider key remove <instance>`. `<instance>` is an instance id or
     an exact, unique display name; an ambiguous name is refused with the
     candidates. `set` and `status` need an existing instance that uses
-    API-key or bearer authentication, so no secret is written for an
-    instance that cannot use it. A browser may create a Claude API-key
-    instance without a key through the existing configuration command. The
+    API-key or bearer authentication (or a Claude gateway account, whose
+    token is kept the same way), so no secret is written for an
+    instance that cannot use it. A browser may create a Claude API-key or
+    gateway instance without a key through the existing configuration command. The
     host allocates its separate managed account directory; the host-local
     CLI fills the missing credential afterward. Browser secret entry stays
     unavailable.
