@@ -539,7 +539,7 @@ it is built.
 
 Recording is journaled: a confirmed pull-request merge, each issue closure
 it caused, and every finished run become one activity fact per linked
-thread. Facts dedupe by identity, so the same delivery witnessed by
+thread; an issue outside the pull request's own repository is not counted. Facts dedupe by identity, so the same delivery witnessed by
 several threads counts once, and a run's first terminal state wins — a
 later finish for the same run is ignored. A delivery title longer than the
 contract's 256 UTF-8 bytes is cut on a code-point boundary before the fact

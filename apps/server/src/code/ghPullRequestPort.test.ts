@@ -613,7 +613,7 @@ describe("GhPullRequestPort.observeReviewByIdentity", () => {
     );
   });
 
-  it("reads the issues a pull request closes from the exported array", async () => {
+  it("reads the issues a pull request closes in its own repository from the exported array", async () => {
     // `gh pr view --json closingIssuesReferences` answers a plain array of
     // {number,url,repository} items, not a GraphQL `nodes` connection.
     const { port } = fixture([
@@ -631,6 +631,11 @@ describe("GhPullRequestPort.observeReviewByIdentity", () => {
               number: 42,
               url: "https://github.com/octant/octant/issues/42",
               repository: { name: "octant", owner: { login: "octant" } },
+            },
+            {
+              number: 43,
+              url: "https://github.com/elsewhere/tracker/issues/43",
+              repository: { name: "tracker", owner: { login: "elsewhere" } },
             },
             { number: 0 },
           ],

@@ -1188,7 +1188,7 @@ function decodeReviewDetail(output: string): GhPullRequestReviewDetail | undefin
       ? value.mergedAt
       : undefined;
   const mergedBy = loginOf(value.mergedBy);
-  const closingIssues = decodeClosingIssueNumbers(value.closingIssuesReferences);
+  const closingIssues = decodeClosingIssueNumbers(value.closingIssuesReferences, url);
   if (url === "" || baseBranch === "" || headBranch === "" || state === undefined) {
     return undefined;
   }
@@ -1519,13 +1519,28 @@ function decodeIssueClosure(
   return undefined;
 }
 
-function decodeClosingIssueNumbers(value: unknown): readonly number[] {
+function decodeClosingIssueNumbers(value: unknown, pullRequestUrl: string): readonly number[] {
   // `gh pr view --json closingIssuesReferences` exports a plain array of
   // {number,url,repository} items, not a GraphQL connection.
   if (!Array.isArray(value)) return [];
+  // Only issues in the pull request's own repository count: a closure is
+  // confirmed against that repository, so an issue elsewhere is left out
+  // rather than checked under the wrong repository.
+  const own = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/\d+$/.exec(pullRequestUrl);
+  if (own === null) return [];
+  const [, owner = "", name = ""] = own;
   const numbers: number[] = [];
   for (const node of value) {
-    if (!isRecord(node)) continue;
+    if (!isRecord(node) || !isRecord(node.repository)) continue;
+    const repository = node.repository;
+    const repositoryOwner = isRecord(repository.owner) ? repository.owner.login : undefined;
+    if (
+      typeof repositoryOwner !== "string" ||
+      typeof repository.name !== "string" ||
+      repositoryOwner.toLowerCase() !== owner.toLowerCase() ||
+      repository.name.toLowerCase() !== name.toLowerCase()
+    )
+      continue;
     const number = node.number;
     if (typeof number === "number" && Number.isSafeInteger(number) && number > 0) {
       numbers.push(number);
