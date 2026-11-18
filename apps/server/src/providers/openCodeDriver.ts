@@ -4,6 +4,7 @@ import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
 import { readBoundedResponseBody } from "../extensions/boundedResponseBody";
 import { advertisedSlashCommands } from "./providerSlashCommands";
 import { OpenCodeChildSessions } from "./openCodeChildSessions";
+import { OpenCodeRetainedSessions, RememberedOpenCodeEdits } from "./openCodeRetainedSessions";
 import {
   openCodeOwnRulesAllow,
   readOpenCodeOwnSetup,
@@ -247,12 +248,14 @@ interface SessionState {
    */
   readonly unreportedEditGrants: string[];
   /**
-   * Files a 2.x approval answered `always` admits for good, shared by every
-   * session of this Project root while the host runs: OpenCode saves the
-   * grant in its own store and makes later matching edits without asking, so
-   * each such change is admitted without spending anything.
+   * Files a 2.x approval answered `always` admits for this native process's
+   * lifetime: OpenCode saves the grant in its own store and makes later
+   * matching edits without asking, so each such change is admitted without
+   * spending anything. The saved grant itself stays in OpenCode's store;
+   * what dies with the process is Octant's admission of it, so no new
+   * generation's sessions inherit it.
    */
-  readonly rememberedEdits: Set<string>;
+  readonly rememberedEdits: RememberedOpenCodeEdits;
   /** 2.x requests Octant itself answered, whose grants it already admitted. */
   readonly answeredRequests: Set<string>;
   readonly questions: Map<
@@ -1529,20 +1532,10 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
   const clientFactory = options.clientFactory ?? makeOfficialOpenCodeClient;
   const clock = options.clock ?? (() => new Date().toISOString());
   const makeCorrelation = options.correlationId ?? (() => crypto.randomUUID());
-  const resumeToolCatalogs = new Map<string, ReadonlyArray<ProviderToolDefinition>>();
-  // OpenCode sessions holding a turn's Octant context that no command ran;
-  // they outlive the connection whose turn failed, so they are kept here.
-  const sessionsHoldingStaleContext = new Set<string>();
-  // What OpenCode remembers from an `always` answer outlives the session and
-  // connection that gave it, so the admission is kept per Project root.
-  const rememberedEditGrants = new Map<string, Set<string>>();
-  const rememberedEditsFor = (projectRoot: string): Set<string> => {
-    const existing = rememberedEditGrants.get(projectRoot);
-    if (existing !== undefined) return existing;
-    const created = new Set<string>();
-    rememberedEditGrants.set(projectRoot, created);
-    return created;
-  };
+  // What outlives a connection or a turn is kept here, bounded: the tool
+  // catalogues a resume may reuse, and the sessions that must never be
+  // resumed because they hold a turn's context no command ran.
+  const retained = new OpenCodeRetainedSessions();
   return {
     kind: "opencode",
     conversationOwnership: "provider",
@@ -1714,9 +1707,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               mode ?? "code",
               clock,
               makeCorrelation,
-              resumeToolCatalogs,
-              rememberedEditsFor(projectRoot),
-              sessionsHoldingStaleContext,
+              retained,
               readOnlyFolders,
             );
           }),
@@ -1820,9 +1811,7 @@ function makeConnection(
   mode: "chat" | "work" | "code",
   clock: () => string,
   makeCorrelation: () => string,
-  resumeToolCatalogs: Map<string, ReadonlyArray<ProviderToolDefinition>>,
-  rememberedEdits: Set<string>,
-  sessionsHoldingStaleContext: Set<string>,
+  retained: OpenCodeRetainedSessions,
   /** The thread's attachments folder, read at every level and written at none. */
   readOnlyFolders: ReadonlyArray<string> = [],
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
@@ -1871,6 +1860,11 @@ function makeConnection(
     let subscriptionReady: Promise<void> | undefined;
     let streamFailure: ProviderFailure | undefined;
     let runtimeGeneration = 0;
+    // What OpenCode remembers from an `always` answer lives in its own store
+    // but is admitted here only for the native process that earned it: the
+    // ledger belongs to this connection's running generation, and is retired
+    // the moment that process ends so no later generation inherits a grant.
+    let rememberedEdits = new RememberedOpenCodeEdits();
     let sessionSetupInFlight = false;
     let closing = false;
     let client: OpenCodeClientPort | undefined;
@@ -2132,6 +2126,11 @@ function makeConnection(
       // the connection, or the next start on this connection is poisoned by
       // a failure that was never real. The next runtime subscribes fresh.
       runtimeGeneration += 1;
+      // The grant stays in OpenCode's own store; what retires with the
+      // closed process is Octant's ledger of it, replaced before the next
+      // generation's sessions get theirs.
+      rememberedEdits.retire();
+      rememberedEdits = new RememberedOpenCodeEdits();
       const outgoingSubscription = subscriptionAbort;
       subscriptionAbort = new AbortController();
       outgoingSubscription.abort();
@@ -2255,6 +2254,7 @@ function makeConnection(
             client = nextClient;
             void monitor.exited.then(() => {
               if (closing || generation !== runtimeGeneration) return;
+              rememberedEdits.retire();
               streamFailure = fail("provider-failed", "Provider runtime exited unexpectedly.");
               subscriptionAbort.abort();
               for (const state of sessionsBySource.values()) {
@@ -2286,6 +2286,7 @@ function makeConnection(
     const removeInvalidation = options.runtimeRegistry.onRuntimeInvalidated(
       options.instanceId,
       () => {
+        rememberedEdits.retire();
         for (const state of sessionsBySource.values()) {
           holdForRecovery(state);
         }
@@ -2309,6 +2310,7 @@ function makeConnection(
 
     const failStream = (generation: number) => {
       if (closing || generation !== runtimeGeneration || streamFailure !== undefined) return;
+      rememberedEdits.retire();
       streamFailure = fail("protocol", "Provider event stream ended unexpectedly.");
       for (const state of sessionsBySource.values()) {
         if (state.terminal) continue;
@@ -2398,6 +2400,15 @@ function makeConnection(
             void (async () => {
               try {
                 for await (const event of events) {
+                  if (closing || generation !== runtimeGeneration || subscriptionSignal.aborted)
+                    break;
+                  // A session OpenCode deleted is gone for good: drop its
+                  // remembered catalogue and any tombstone before the event
+                  // can be queued for a session state or routed to a child.
+                  if (event.type === "session.deleted") {
+                    const removed = removedSessionId(event);
+                    if (removed !== undefined) retained.sessionRemoved(removed);
+                  }
                   const sourceId = sourceSessionId(event);
                   if (sourceId === undefined) continue;
                   const child = childSessions.route(event, sourceId, (source) =>
@@ -2675,7 +2686,7 @@ function makeConnection(
               state.sourceId = session.id;
               sessionsBySource.set(session.id, state);
               sourceBySession.set(input.sessionId, session.id);
-              resumeToolCatalogs.set(session.id, input.tools ?? []);
+              retained.rememberCatalog(session.id, input.tools ?? []);
               activate(state);
               for (const event of pendingBySource.get(session.id) ?? []) {
                 mapAndOffer(
@@ -2738,7 +2749,7 @@ function makeConnection(
               // Its next run would read a turn's context that no command ran,
               // stale, beside the next turn's own; the thread starts again on
               // a new session instead.
-              if (sessionsHoldingStaleContext.has(input.resumeCursor.value)) {
+              if (retained.refusesResume(input.resumeCursor.value)) {
                 return Effect.fail(fail("stale-resume", OPENCODE_STALE_CONTEXT_MESSAGE));
               }
               if (
@@ -2750,7 +2761,7 @@ function makeConnection(
                 return Effect.fail(fail("protocol", "A provider session is already active."));
               }
               sessionSetupInFlight = true;
-              const tools = input.tools ?? resumeToolCatalogs.get(input.resumeCursor.value) ?? [];
+              const tools = input.tools ?? retained.catalog(input.resumeCursor.value) ?? [];
               const priorSource = sourceBySession.get(input.sessionId);
               const priorState =
                 priorSource === undefined ? undefined : sessionsBySource.get(priorSource);
@@ -2848,7 +2859,7 @@ function makeConnection(
                   state.sourceId = session.id;
                   sessionsBySource.set(session.id, state);
                   sourceBySession.set(input.sessionId, session.id);
-                  resumeToolCatalogs.set(session.id, tools);
+                  retained.rememberCatalog(session.id, tools);
                   activate(state);
                   for (const event of pendingBySource.get(session.id) ?? []) {
                     mapAndOffer(
@@ -2868,7 +2879,19 @@ function makeConnection(
                   });
                 }),
                 Effect.tap(observeSessionCommands),
-                Effect.tapError(() => Effect.promise(() => releaseManagedTools(state))),
+                Effect.tapError((failure) =>
+                  Effect.gen(function* () {
+                    // A stale-resume refusal means the native session is gone
+                    // or no longer what the cursor names, so its remembered
+                    // catalogue goes too. This runs only after the cursor's
+                    // binding was honored, never for a refusal that named
+                    // another task or Project's session.
+                    if (failure.category === "stale-resume") {
+                      retained.forgetCatalog(input.resumeCursor.value);
+                    }
+                    yield* Effect.promise(() => releaseManagedTools(state));
+                  }),
+                ),
                 Effect.ensuring(
                   Effect.sync(() => {
                     sessionSetupInFlight = false;
@@ -2995,7 +3018,7 @@ function makeConnection(
                                 // The context is queued with no run to read it. The
                                 // session is retired and never resumed, so the next
                                 // turn does not carry it stale.
-                                sessionsHoldingStaleContext.add(source);
+                                retained.markStale(source);
                                 retireState(state);
                                 return fail("stale-resume", OPENCODE_STALE_CONTEXT_MESSAGE);
                               },
@@ -3184,9 +3207,9 @@ function makeConnection(
                       // matching edits without asking and settles other
                       // pending requests it covers. It is answered only where
                       // the person let OpenCode run as itself, and its files
-                      // stay admitted for this Project root from then on.
+                      // stay admitted while this native process runs.
                       // A Plan answer approves that one call.
-                      const always =
+                      const wantsAlways =
                         input.approved &&
                         input.scope !== "once" &&
                         state.executionPolicy !== "plan" &&
@@ -3195,13 +3218,25 @@ function makeConnection(
                           runtimeKind,
                           options.permissionPersistence?.() ?? "current-session",
                         );
+                      // The grant is reserved before the reply is sent:
+                      // OpenCode runs the approved edit and announces the
+                      // request settled on its event stream, which can reach
+                      // here before this reply's response. The reservation is
+                      // atomic, so a ledger that cannot hold this request's
+                      // new names (full, or retired with its process) answers
+                      // `once` instead — the grant then covers this approved
+                      // call alone, never half a batch for good. A failed
+                      // reply releases only the names this reservation still
+                      // owns: a name another pending or saved grant shares
+                      // stays admitted.
+                      const settleRemembered =
+                        runtimeKind === "beta" && wantsAlways
+                          ? state.rememberedEdits.reserve(grant)
+                          : undefined;
+                      const always =
+                        wantsAlways && (runtimeKind !== "beta" || settleRemembered !== undefined);
                       state.answeredRequests.add(input.requestId);
                       state.unreportedEditGrants.push(...grant);
-                      const newlyRemembered =
-                        runtimeKind === "beta" && always
-                          ? grant.filter((file) => !state.rememberedEdits.has(file))
-                          : [];
-                      for (const file of newlyRemembered) state.rememberedEdits.add(file);
                       return request(() =>
                         activeClient.replyPermission(
                           state.requestSources.get(input.requestId) ?? source,
@@ -3212,12 +3247,13 @@ function makeConnection(
                         Effect.tapError(() =>
                           Effect.sync(() => {
                             for (const file of grant) spendEditGrant(state, file);
-                            for (const file of newlyRemembered) state.rememberedEdits.delete(file);
+                            settleRemembered?.(false);
                             state.answeredRequests.delete(input.requestId);
                           }),
                         ),
                         Effect.tap(() =>
                           Effect.sync(() => {
+                            settleRemembered?.(true);
                             state.pendingEditGrants.delete(input.requestId);
                             state.approvals.delete(input.requestId);
                             state.requestSources.delete(input.requestId);
@@ -3312,7 +3348,7 @@ function newSessionState(
   makeCorrelation: () => string,
   tools: ReadonlyArray<ProviderToolDefinition>,
   nativeSetup: ProviderNativeSetup | undefined,
-  rememberedEdits: Set<string>,
+  rememberedEdits: RememberedOpenCodeEdits,
   own: OwnPermissions,
   protectedPaths: OpenCodeProtectedPaths,
 ): SessionState {
@@ -3501,7 +3537,9 @@ function mapAndOffer(
     const reply = textProperty(event.properties, "reply");
     const grant = state.pendingEditGrants.get(settled);
     if (grant !== undefined && !state.answeredRequests.has(settled)) {
-      if (reply === "always") for (const file of grant) state.rememberedEdits.add(file);
+      // The grant is taken whole or not at all: a batch the ledger cannot
+      // hold stays unadmitted, and a change no grant names fails the turn.
+      if (reply === "always") state.rememberedEdits.add(grant);
       else if (reply === "once") state.unreportedEditGrants.push(...grant);
     }
     state.approvals.delete(settled);
@@ -4300,6 +4338,21 @@ export function openCodeQuestionForm(properties: unknown): OpenCodeQuestionEvent
     });
   }
   return { id, type: "question.v2.asked", properties: { id, sessionID, questions } };
+}
+
+/**
+ * The session a `session.deleted` names. The SDK event carries it as
+ * `properties.info.id`; the 2.0.22 wire shape also carries `sessionID`, read
+ * when the record is absent so either spelling resolves to the same id.
+ */
+function removedSessionId(event: OpenCodeEvent): string | undefined {
+  const properties = event.properties;
+  const info =
+    typeof properties === "object" && properties !== null
+      ? Reflect.get(properties, "info")
+      : undefined;
+  const removed = textProperty(info, "id") || textProperty(properties, "sessionID");
+  return removed === "" ? undefined : removed;
 }
 
 export function sourceSessionId(event: OpenCodeEvent): string | undefined {

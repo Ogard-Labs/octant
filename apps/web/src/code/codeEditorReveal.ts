@@ -10,6 +10,12 @@ import type { MonacoEditorRange } from "./MonacoEditorAdapter";
  */
 
 const PENDING_REVEAL_MS = 30_000;
+/**
+ * How many reveals may wait at once. The queue is swept on every request and
+ * take, and past the cap its oldest entry is dropped: a reveal is a
+ * convenience jump, never work that must not be lost.
+ */
+const MAX_PENDING_REVEALS = 128;
 
 const pending = new Map<string, { readonly range: MonacoEditorRange; readonly at: number }>();
 const listeners = new Map<string, (range: MonacoEditorRange) => void>();
@@ -18,15 +24,29 @@ export function codeEditorRevealKey(threadId: string, checkoutId: string, path: 
   return JSON.stringify([threadId, checkoutId, path]);
 }
 
+function sweepPending(now: number): void {
+  for (const [key, waiting] of pending) {
+    if (now - waiting.at > PENDING_REVEAL_MS) pending.delete(key);
+  }
+}
+
 export function requestCodeEditorReveal(
   key: string,
   range: MonacoEditorRange,
   now = Date.now(),
 ): void {
+  sweepPending(now);
   const listener = listeners.get(key);
   if (listener !== undefined) {
     listener(range);
     return;
+  }
+  // Reinsert under a known key so the newest request is also the newest
+  // entry; at the cap the oldest waiting reveal is the one dropped.
+  pending.delete(key);
+  if (pending.size >= MAX_PENDING_REVEALS) {
+    const oldest = pending.keys().next().value;
+    if (oldest !== undefined) pending.delete(oldest);
   }
   pending.set(key, { range, at: now });
 }
@@ -37,6 +57,7 @@ export function takeCodeEditorReveals(
   listener: (range: MonacoEditorRange) => void,
   now = Date.now(),
 ): () => void {
+  sweepPending(now);
   listeners.set(key, listener);
   const waiting = pending.get(key);
   pending.delete(key);

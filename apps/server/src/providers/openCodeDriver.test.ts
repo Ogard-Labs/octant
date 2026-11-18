@@ -2494,6 +2494,171 @@ describe("OpenCode driver", () => {
     expect(events.some((event) => event.kind === "failed")).toBe(false);
   });
 
+  it("does not admit an always-remembered edit on a fresh connection of the same Project", async () => {
+    const asked = (id: string, file: string) =>
+      ({
+        type: "permission.v2.asked",
+        properties: { id, sessionID: "provider-session", action: "edit", resources: [file] },
+      }) as unknown as Event;
+    const fixture = betaDriver({
+      permissionPersistence: "project-default",
+      events: [asked("perm-1", "/tmp/project/a.ts"), asked("perm-2", "/tmp/project/b.ts")],
+      eventsOnReply: (requestId) =>
+        requestId === "perm-2"
+          ? [
+              {
+                type: "file.edited",
+                properties: { sessionID: "provider-session", file: "/tmp/project/b.ts" },
+              } as unknown as Event,
+              // The first connection answered `always` for this file; on this
+              // connection's process generation nothing remembers it.
+              {
+                type: "file.edited",
+                properties: { sessionID: "provider-session", file: "/tmp/project/a.ts" },
+              } as unknown as Event,
+              {
+                type: "session.idle",
+                properties: { sessionID: "provider-session" },
+              } as unknown as Event,
+            ]
+          : [],
+    });
+    const resumeCursor = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const handle = yield* connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+                nativeSetup: {
+                  subagents: false,
+                  webTools: true,
+                  skills: true,
+                  toolServers: true,
+                  hooks: true,
+                  projectCode: false,
+                },
+              });
+              yield* Effect.sleep("20 millis");
+              yield* connection.answerApproval({
+                sessionId,
+                requestId: "perm-1",
+                approved: true,
+              });
+              return handle.resumeCursor;
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(fixture.calls).toContain("permission.reply:always");
+
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.resume({
+                sessionId,
+                resumeCursor: resumeCursor!,
+                executionPolicy: "approval-gated",
+              });
+              yield* Effect.sleep("20 millis");
+              yield* connection.answerApproval({
+                sessionId,
+                requestId: "perm-2",
+                approved: true,
+                scope: "once",
+              });
+              return yield* Fiber.join(collector);
+            }),
+          ),
+        ),
+      ),
+    );
+    const events = Array.from(output);
+    expect(fixture.calls).toContain("permission.reply:once");
+    // b.ts is admitted by this connection's own one-use answer; a.ts fails
+    // because the remembered grant stayed with the first generation.
+    expect(events.filter((event) => event.kind === "file-change")).toEqual([
+      expect.objectContaining({ path: "/tmp/project/b.ts" }),
+    ]);
+    const failed = events.find((event) => event.kind === "failed");
+    expect(failed && "failure" in failed ? failed.failure.message : "").toContain(
+      "no approval or setting allowed",
+    );
+  });
+
+  it("answers once an always approval whose files the process's ledger cannot hold", async () => {
+    const asked = (id: string, files: ReadonlyArray<string>) =>
+      ({
+        type: "permission.v2.asked",
+        properties: { id, sessionID: "provider-session", action: "edit", resources: files },
+      }) as unknown as Event;
+    const fixture = betaDriver({
+      permissionPersistence: "project-default",
+      events: [
+        asked(
+          "perm-fill",
+          Array.from({ length: 1024 }, (_, index) => `/tmp/project/f${index}.ts`),
+        ),
+        asked("perm-one", ["/tmp/project/extra.ts"]),
+      ],
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              yield* connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+                nativeSetup: {
+                  subagents: false,
+                  webTools: true,
+                  skills: true,
+                  toolServers: true,
+                  hooks: true,
+                  projectCode: false,
+                },
+              });
+              yield* Effect.sleep("20 millis");
+              yield* connection.answerApproval({
+                sessionId,
+                requestId: "perm-fill",
+                approved: true,
+              });
+              yield* connection.answerApproval({
+                sessionId,
+                requestId: "perm-one",
+                approved: true,
+              });
+            }),
+          ),
+        ),
+      ),
+    );
+    // The first batch fills the ledger, so the second's whole grant is refused
+    // rather than half-remembered: the answer degrades to a one-use grant.
+    expect(fixture.calls.filter((call) => call.startsWith("permission.reply:"))).toEqual([
+      "permission.reply:always",
+      "permission.reply:once",
+    ]);
+  });
+
   it("does not reply to an approval-gated 2.x write until the user approves it", async () => {
     const fixture = betaDriver({
       events: [

@@ -178,29 +178,36 @@ export function browserAvatarEnvironment(): AvatarImageEnvironment {
   return {
     decode: (blob) => createImageBitmap(blob),
     encode: async (source, pixels) => {
-      const canvas = document.createElement("canvas");
-      canvas.width = pixels;
-      canvas.height = pixels;
-      const context = canvas.getContext("2d");
-      if (context === null) return undefined;
       const bitmap = source as ImageBitmap;
-      // Cover, not stretch: the shortest side fills the square and the rest is
-      // cropped evenly, so a portrait photo keeps its proportions.
-      const side = Math.min(bitmap.width, bitmap.height);
-      context.drawImage(
-        bitmap,
-        (bitmap.width - side) / 2,
-        (bitmap.height - side) / 2,
-        side,
-        side,
-        0,
-        0,
-        pixels,
-        pixels,
-      );
-      const webp = canvas.toDataURL("image/webp", 0.85);
-      const dataUrl = webp.startsWith("data:image/webp") ? webp : canvas.toDataURL("image/png");
-      return { dataUrl };
+      // An ImageBitmap holds its decoded copy off the JS heap, so it is
+      // closed on every way out — a canvas this Mac cannot make and an
+      // encode that throws included.
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = pixels;
+        canvas.height = pixels;
+        const context = canvas.getContext("2d");
+        if (context === null) return undefined;
+        // Cover, not stretch: the shortest side fills the square and the rest is
+        // cropped evenly, so a portrait photo keeps its proportions.
+        const side = Math.min(bitmap.width, bitmap.height);
+        context.drawImage(
+          bitmap,
+          (bitmap.width - side) / 2,
+          (bitmap.height - side) / 2,
+          side,
+          side,
+          0,
+          0,
+          pixels,
+          pixels,
+        );
+        const webp = canvas.toDataURL("image/webp", 0.85);
+        const dataUrl = webp.startsWith("data:image/webp") ? webp : canvas.toDataURL("image/png");
+        return { dataUrl };
+      } finally {
+        bitmap.close();
+      }
     },
     fetch: (...args) => fetch(...args),
     digest: async (value) => {

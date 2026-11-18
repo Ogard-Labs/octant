@@ -1590,8 +1590,13 @@ OpenCode's own settings for the repository, where clearing it is the way to
 revoke it. OpenCode then makes later matching edits without asking and
 settles other pending requests the grant covers, so the files an `always`
 answer names, and those of a request OpenCode settled by itself, stay
-admitted by the file-change check for that Project root while the host runs;
-after a host restart such an edit fails the turn until it is approved again. Approval-gated on
+admitted by the file-change check while the native process that earned them
+runs; the admission is a ledger of that process's generation, retired with
+it, so a later connection of the same Project admits nothing the earlier
+process remembered, and after a host restart or process exit such an edit
+fails the turn until it is approved again. The ledger holds at most 1,024
+file names per process and fails closed: a request whose new names would not
+fit whole is answered `once` instead of being remembered by half. Approval-gated on
 2.x honours permission grants the person saved in OpenCode itself for the
 same repository: OpenCode keys them by the repository's root commit, keeps
 them in its own data store (shared with the person's own use because
@@ -1723,7 +1728,14 @@ reports through the same events as a prompt. A command route that fails
 after the context was admitted leaves that context queued in the session,
 where the next run would read it stale beside the next turn's own; the turn
 fails as `stale-resume` and the driver never resumes that session again (in
-this host process), so the thread starts on a new session. Such a turn runs
+this host process), so the thread starts on a new session. The denial is a
+tombstone the driver keeps for the host's whole life rather than a list it
+can evict, and a `session.deleted` the provider reports clears the session's
+own tombstone — a deletion is an ending, not a doubt. The tool catalogue a
+session's resume may reuse is bounded to 128 catalogues held for 30 minutes
+each, dropped oldest-first past that; a resume that misses simply installs
+no app tools rather than another session's, and a deleted or stale session's
+catalogue is dropped with it. Such a turn runs
 in every mode, Chat and Plan included (maintainer decision, 2026-11-16;
 built). A command may run a shell before the model sees it: a configured
 command's template expands `` !`…` `` through OpenCode's shell, which asks no
