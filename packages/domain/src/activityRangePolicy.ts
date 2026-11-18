@@ -1,3 +1,4 @@
+import type { ActivityKind, HomeActivityCustomization } from "@octant/contracts/code-home-activity";
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
 const OFFSET_SAMPLE_RADIUS_MS = 36 * HOUR_MS;
@@ -378,4 +379,22 @@ export function resolveActivityRange(input: {
   }
 
   return ready({ startMs: start, endMs: end }, comparison);
+}
+
+/** The choices an installation without any stored activity settings uses. */
+export const DEFAULT_HOME_ACTIVITY = {
+  sharedRange: { kind: "this-week" },
+  source: "github",
+  pins: [],
+} satisfies HomeActivityCustomization;
+
+/**
+ * The timeframe one card resolves: its own pin when the person set one,
+ * otherwise the shared range.
+ */
+export function activityRangeForCard(
+  settings: HomeActivityCustomization,
+  card: ActivityKind,
+): ActivityRange {
+  return settings.pins.find((pin) => pin.card === card)?.range ?? settings.sharedRange;
 }

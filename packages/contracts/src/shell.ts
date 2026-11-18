@@ -22,6 +22,7 @@ import {
   MAX_BROWSER_CAPTURES_PER_THREAD,
 } from "./browserCapture";
 import { StoredBrowserProfile } from "./browserProfiles";
+import { HomeActivityCustomization } from "./codeHomeActivity";
 import {
   CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS,
   CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_DAYS,
@@ -320,6 +321,15 @@ export const MAX_HOME_CARDS = 32;
 export const HomeCardCustomization = Schema.Struct({
   order: Schema.Array(HomeCardId).pipe(Schema.maxItems(MAX_HOME_CARDS)),
   visibility: Schema.Array(HomeCardPreference).pipe(Schema.maxItems(MAX_HOME_CARDS)),
+  /**
+   * The activity cards' own choices — shared timeframe, source and pinned
+   * ranges. Absent on stores written before the cards shipped; readers use
+   * the domain's effective defaults rather than rewriting the record. The
+   * four cards keep the home card ids `activity-prs-merged`,
+   * `activity-issues-closed`, `activity-releases-published` and
+   * `activity-runs` inside `order`/`visibility` like any other card.
+   */
+  activity: Schema.optional(HomeActivityCustomization),
 })
   .annotations(strict)
   .pipe(
