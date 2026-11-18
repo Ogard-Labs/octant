@@ -549,11 +549,17 @@ export function SettingsDisclosure(props: {
   readonly className?: string;
   /** Opens on mount, for a deep link that lands on a control inside. */
   readonly defaultOpen?: boolean;
+  readonly settingId?: string;
+  readonly focused?: boolean;
 }) {
+  const summary = useRef<HTMLElement>(null);
+  useRevealedFocus(summary, props.focused === true);
   const variant = props.variant ?? "section";
   return (
     <OctantCollapsible
       {...(props.defaultOpen === true ? { open: true } : {})}
+      data-setting-id={props.settingId}
+      summaryProps={{ ref: summary }}
       chevron={variant === "inline" ? "start" : "end"}
       chevronSize={variant === "inline" ? 12 : 14}
       className={[

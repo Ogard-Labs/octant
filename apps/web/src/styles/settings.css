@@ -4347,3 +4347,10 @@ html[data-octant-increased-contrast="true"]
 .web-search-settings__save {
   padding-top: var(--oct-space-3);
 }
+
+.settings-setup-command {
+  margin-block-start: var(--oct-space-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}

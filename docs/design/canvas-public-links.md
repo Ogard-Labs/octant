@@ -233,8 +233,9 @@ from a local window or a device the host's own person paired, against the versio
 ## The service
 
 The reference service is a Bun app at `apps/share` in this repository,
-deployable by anyone with `bun apps/share/src/main.ts` or the Dockerfile beside
-it (see its README). It reads the share document from this repository's
+deployable by anyone with `bun apps/share/src/main.ts` or Docker (see its README). Settings › Permissions › Public links includes a
+Compose setup guide for the two HTTPS origins, the viewer health check, and a
+test publish with embedded content. It reads the share document from this repository's
 `@octant/contracts` and draws blocks with the `@octant/domain` layout code
 through `apps/share/src/shareKit.ts`, which names exactly the modules the
 service uses — in-repo, so there is no pinned-bundle sync to redo. A host that

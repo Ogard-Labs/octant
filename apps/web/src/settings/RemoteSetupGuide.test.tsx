@@ -33,6 +33,27 @@ describe("remote setup", () => {
     expect(open).toHaveBeenCalledTimes(3);
   });
 
+  it.each([
+    ["tailscale-setup", "Get Tailscale"],
+    ["cloudflare-setup", "Open Cloudflare Zero Trust"],
+  ])("opens the provider instructions from a %s search result", async (focusedSetting, link) => {
+    const open = vi.fn();
+    const browser = vi.fn(async () => {});
+    render(
+      <RemoteSetupGuide
+        externalUrlHost={{ openBrowserExternal: browser }}
+        canConfigureHost
+        onContinue={open}
+        focusedSetting={focusedSetting}
+      />,
+    );
+    const action = screen.getByRole("link", { name: link });
+    expect(action).toBeVisible();
+    await userEvent.click(action);
+    expect(browser).toHaveBeenCalledWith(action.getAttribute("href"));
+    expect(open).not.toHaveBeenCalled();
+  });
+
   it("focuses the real journey choices from the searchable checks setting", () => {
     render(
       <RemoteSetupGuide

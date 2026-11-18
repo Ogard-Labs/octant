@@ -5,6 +5,25 @@ public links. Ogard Labs does not operate this service: you run it yourself, on
 a server you control, and point Octant at it. Anyone can also build their own
 service against the published wire contract (see below).
 
+## Run with automatic HTTPS
+
+On a server with Docker Compose and this repository, point two distinct DNS
+names at the server and make TCP ports 80 and 443 available to Caddy. From the
+repository root, replace the example names and run:
+
+```sh
+export SHARE_DOMAIN=share.example.com
+export CONTENT_DOMAIN=content.example.com
+docker compose -f apps/share/compose.yaml up -d --build
+curl --fail "https://$SHARE_DOMAIN/healthz"
+```
+
+Once HTTPS is ready the health check returns `ok`. Only the proxy publishes
+ports. Named volumes persist pages and TLS certificates across restarts.
+Enter `https://` followed by your viewer domain under **Settings › Permissions
+› Public links › Service address**. A Canvas with a design block exercises both
+origins. The same setup steps are available beside the address in Settings.
+
 ## Run it
 
 From a checkout of this repository:

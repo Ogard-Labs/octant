@@ -1406,6 +1406,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "public links service address url self-hosted publish share",
         },
         {
+          id: settingId("public-link-setup"),
+          label: "Set up the self-hosted Canvas share service",
+          scope: "host",
+          keywords:
+            "public links deploy deployment docker compose caddy https self hosted canvas sharing artifact hosting guide",
+        },
+        {
           id: settingId("browser-site-approvals"),
           label: "Remembered websites",
           scope: "host",
@@ -1877,6 +1884,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       keywords:
         "remote access private listener lan tailscale https certificate pairing pair link ticket code approve deny device devices paired inventory browser phone revoke rename origin port exposure",
       settings: [
+        {
+          id: settingId("tailscale-setup"),
+          label: "Connect with Tailscale",
+          scope: "host",
+          keywords:
+            "tailscale login sign in tailnet magicdns devbox hub private network remote device setup",
+        },
+        {
+          id: settingId("cloudflare-setup"),
+          label: "Set up Cloudflare private routing",
+          scope: "host",
+          keywords:
+            "cloudflare zero trust warp cloudflared tunnel private network routing split tunnels devbox setup",
+        },
         {
           id: settingId("remote-setup-checks"),
           label: "Remote setup checks",

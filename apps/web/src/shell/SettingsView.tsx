@@ -1459,6 +1459,7 @@ function ActiveSectionContent({
       );
       const setupGuide = (
         <RemoteSetupGuide
+          externalUrlHost={props.hostBridge}
           focusedSetting={focusedSetting}
           canConfigureHost={administration !== undefined}
           checks={props.serverProjectsClient}
@@ -1820,7 +1821,11 @@ function ActiveSectionContent({
           {props.canvasClient?.publicLinkSettings === undefined ? null : (
             <SettingsSection title="Public links">
               <div className="setgroup">
-                <PublicLinkSettings client={props.canvasClient} focusedSetting={focusedSetting} />
+                <PublicLinkSettings
+                  externalUrlHost={props.hostBridge}
+                  client={props.canvasClient}
+                  focusedSetting={focusedSetting}
+                />
               </div>
             </SettingsSection>
           )}
