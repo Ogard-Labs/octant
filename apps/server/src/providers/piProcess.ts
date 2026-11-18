@@ -187,6 +187,10 @@ function piWindowsLaunch(input: {
     executionPolicy: input.executionPolicy,
     fullAccessSandbox: input.fullAccessSandbox,
     strict: input.sandboxPolicy === undefined ? input.strict : true,
+    // A Chat launch starts Pi with no built-in tool, no extension and none of
+    // the person's resources (`piArguments`), so it has no folder or shell
+    // without Octant's sandbox.
+    chatWithoutFolderOrShell: true,
   });
 }
 

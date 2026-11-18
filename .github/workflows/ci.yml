@@ -171,9 +171,9 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run test --filter=@octant/domain --filter=@octant/contracts
 
-  # Full access Work and Code on Windows against real Windows processes: the
-  # process-tree stop, a Code terminal and the harness shell opening
-  # PowerShell, and a compiled fake Codex launched at Full access. Not a
+  # Work and Code on Windows against real Windows processes: the process-tree
+  # stop, a Code terminal and the harness shell opening PowerShell, and
+  # compiled fake Codex, Claude, OpenCode, Pi and Kilo ACP runtimes. Not a
   # required check (not in `checks` below) until it has been seen green on
   # the hosted runner.
   server-windows:
@@ -196,6 +196,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'The fake Claude did not compile' }
           bun build --compile apps/server/src/providers/fixtures/fakeOpenCodeCli.ts --outfile "$env:RUNNER_TEMP/fake-opencode/opencode.exe"
           if ($LASTEXITCODE -ne 0) { throw 'The fake OpenCode did not compile' }
+          bun build --compile apps/server/src/providers/fixtures/fakePiCli.ts --outfile "$env:RUNNER_TEMP/fake-pi/pi.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'The fake Pi did not compile' }
+          bun build --compile apps/server/src/providers/fixtures/fakeKiloAcpAgent.ts --outfile "$env:RUNNER_TEMP/fake-kilo/kilo.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'The fake Kilo ACP agent did not compile' }
       - name: Run provider launches, shells and terminals on Windows
         working-directory: apps/server
         shell: pwsh
@@ -203,6 +207,8 @@ jobs:
           $env:OCTANT_FAKE_CODEX_EXE = "$env:RUNNER_TEMP/fake-codex/codex.exe"
           $env:OCTANT_FAKE_CLAUDE_EXE = "$env:RUNNER_TEMP/fake-claude/claude.exe"
           $env:OCTANT_FAKE_OPENCODE_EXE = "$env:RUNNER_TEMP/fake-opencode/opencode.exe"
+          $env:OCTANT_FAKE_PI_EXE = "$env:RUNNER_TEMP/fake-pi/pi.exe"
+          $env:OCTANT_FAKE_ACP_EXE = "$env:RUNNER_TEMP/fake-kilo/kilo.exe"
           bun run test src/process/windowsProcessTree.test.ts src/code/terminalProcessPort.windows.test.ts src/code/terminalShell.test.ts src/harness/windowsFullAccessShell.test.ts src/providers/codexProcess.windows.test.ts src/providers/providerFamilies.windows.test.ts src/process/windowsProviderProgram.test.ts src/process/nodeOwnedProcessReceipt.windows.test.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

@@ -1,5 +1,6 @@
 import {
   ArtifactLibraryClientFailure,
+  copyClaudePageToCanvas,
   loadArtifactLibrary,
   loadClaudePageSnapshot,
 } from "@octant/client-runtime/artifact-library-client";
@@ -180,6 +181,17 @@ export default function ArtifactsModule(props: Props) {
                   loadClaudePageSnapshot(
                     { baseUrl: serverUrl, fetch, windowCapability },
                     { mode: entry.mode, threadId: entry.threadId, toolCallId: entry.toolCallId },
+                  )
+                }
+                onCopyToCanvas={(entry, title) =>
+                  copyClaudePageToCanvas(
+                    { baseUrl: serverUrl, fetch, windowCapability },
+                    {
+                      mode: entry.mode,
+                      threadId: entry.threadId,
+                      toolCallId: entry.toolCallId,
+                      title,
+                    },
                   )
                 }
               />

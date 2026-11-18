@@ -74,27 +74,58 @@ function confinementThatMustNotRun() {
 }
 
 describe("a Code terminal on a Windows host", () => {
-  it("refuses below Full access, naming the missing sandbox, before any shell starts", () => {
+  it("refuses under Strict, or a launch that does not say, naming the missing sandbox, before any shell starts", () => {
     const spawn = vi.fn(() => fakePty());
     const port = new TerminalProcessPort({
       platform: "win32",
       spawn,
       confinement: confinementThatMustNotRun(),
     });
-    for (const executionPolicy of ["approval-gated", "auto-accept-edits", undefined] as const) {
-      expect(() =>
-        port.start({
-          shell: POWERSHELL,
-          cwd: "C:\\fixture\\project",
-          stateScope: "repository",
-          environment: {},
-          columns: 80,
-          rows: 24,
-          ...(executionPolicy === undefined ? {} : { executionPolicy }),
-        }),
-      ).toThrow(new ProcessConfinementError("incompatible", WINDOWS_SANDBOX_MISSING_REASON));
+    for (const executionPolicy of ["full-access", "approval-gated", "auto-accept-edits"] as const) {
+      for (const strict of [true, undefined]) {
+        expect(() =>
+          port.start({
+            shell: POWERSHELL,
+            cwd: "C:\\fixture\\project",
+            stateScope: "repository",
+            environment: {},
+            columns: 80,
+            rows: 24,
+            executionPolicy,
+            ...(strict === undefined ? {} : { strict }),
+          }),
+        ).toThrow(new ProcessConfinementError("incompatible", WINDOWS_SANDBOX_MISSING_REASON));
+      }
     }
     expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("opens the named shell unconfined below Full access outside Strict", async () => {
+    for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
+      const pty = fakePty();
+      const spawn = vi.fn(() => pty);
+      const port = new TerminalProcessPort({
+        platform: "win32",
+        spawn,
+        stopWindowsTree: async () => "stopped" as const,
+        processGroupExists: () => false,
+        processIdentity: async () => "fixture",
+        confinement: confinementThatMustNotRun(),
+      });
+      const handle = port.start({
+        shell: POWERSHELL,
+        cwd: "C:\\fixture\\project",
+        stateScope: "repository",
+        environment: {},
+        columns: 80,
+        rows: 24,
+        executionPolicy,
+        strict: false,
+      });
+      expect(spawn).toHaveBeenCalledWith(POWERSHELL, ["-NoLogo"], expect.anything());
+      pty.exit();
+      await handle.close();
+    }
   });
 
   it("opens the named PowerShell at Full access in the folder and ends its whole tree on close", async () => {
@@ -122,6 +153,7 @@ describe("a Code terminal on a Windows host", () => {
       columns: 80,
       rows: 24,
       executionPolicy: "full-access",
+      strict: false,
     });
     expect(spawn).toHaveBeenCalledWith(
       POWERSHELL,
@@ -155,6 +187,7 @@ describe("a Code terminal on a Windows host", () => {
       columns: 80,
       rows: 24,
       executionPolicy: "full-access",
+      strict: false,
     });
     pty.exit();
     await handle.close();
@@ -261,12 +294,13 @@ describe("a Code terminal on a Windows host", () => {
         columns: 80,
         rows: 24,
         executionPolicy: "full-access",
+        strict: false,
       }),
     ).toThrow(ProcessConfinementError);
   });
 
   it.runIf(process.platform === "win32")(
-    "runs a PowerShell command at Full access that writes a file in the folder and exits",
+    "runs a PowerShell command below Full access outside Strict that writes a file in the folder and exits",
     async () => {
       logSurvivingShells();
       const directory = mkdtempSync(join(tmpdir(), "octant-windows-terminal-"));
@@ -285,7 +319,8 @@ describe("a Code terminal on a Windows host", () => {
         },
         columns: 80,
         rows: 24,
-        executionPolicy: "full-access",
+        executionPolicy: "approval-gated",
+        strict: false,
       });
       let exitCode: number | undefined;
       handle.onExit((event) => {
@@ -326,6 +361,7 @@ describe("a Code terminal on a Windows host", () => {
         columns: 80,
         rows: 24,
         executionPolicy: "full-access",
+        strict: false,
       });
       let exited = false;
       handle.onExit(() => {

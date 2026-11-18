@@ -1554,8 +1554,8 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
             // Probe the app-owned transport with an empty, private catalogue.
             // This is a non-generating declaration check: it does not send a
             // model prompt and its bridge is closed before the probe scope
-            // returns. It runs wherever the launch can reach the bridge (macOS
-            // and Linux).
+            // returns. It runs wherever the launch can reach the bridge (macOS,
+            // Linux, and Windows, whose launches have no Octant sandbox).
             const bridge = appToolBridgeReachesLaunchOn(process.platform)
               ? yield* Effect.acquireRelease(
                   Effect.tryPromise({

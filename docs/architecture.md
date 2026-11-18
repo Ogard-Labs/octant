@@ -7642,8 +7642,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   renewal, the way the AWS CLI reads it (`AWS_CONFIG_FILE` and
   `AWS_SHARED_CREDENTIALS_FILE` honoured): shared-file keys, the single
   sign-on token `aws sso login` cached under `~/.aws/sso/cache`, then
-  `credential_process` run through the platform shell; a profile that only
-  assumes a role is refused as unsupported (not built yet). A key pair goes
+  `credential_process` run through the platform shell. A profile with a
+  `role_arn` first assumes that role at the token service (built): from its
+  `source_profile`'s credentials (chained up to five roles), from the
+  broker's environment for `credential_source = Environment`, or with its
+  `web_identity_token_file`, honouring `role_session_name`, `external_id`,
+  `duration_seconds` and `region`; the broker signs `AssumeRole` itself, and
+  a role asking for an MFA code is refused, as Connect has no place to type
+  one. A key pair goes
   to the broker's `/v1/cloud-iam/connect` route once and is kept there; the
   card warns that long-lived keys work until revoked. Either grant is cloud
   material the raw resolve refuses, and the server stores only the pointer
@@ -19740,12 +19746,45 @@ launch that does not carry its Strict value is Strict. Codex below Full access
 is told to keep its own sandbox (`workspace-write`, `read-only` in Plan) with
 its own approvals rather than an external one; a Codex or OpenCode process
 started outside Strict is never reused by a Strict session at the same level.
-A Chat provider launch stays refused on Windows: Chat's no-folder, no-shell
-rule is held by Octant's sandbox, which a provider's own approvals do not
-replace. Project actions run there in the terminal shell Settings › Code
-names. Octant's own terminals, tests and harness shell commands on a thread
-below Full access still refuse on Windows, since they run in Octant's sandbox
-elsewhere and no provider's approvals hold them.
+Project actions run there in the terminal shell Settings › Code names.
+
+Built (2026-11-18, maintainer request: providers and Octant's tools on
+Windows work as on macOS and Linux, restricted no more than in other agent
+workspaces there):
+
+- **Chat.** A Chat thread keeps no folder and no shell. On Windows it starts
+  outside Strict on a provider that is told so natively
+  (`windowsProviderLaunch` with `chatWithoutFolderOrShell`): Codex, whose
+  Chat threads get no execution environment and start with the shell, image,
+  plugin and app features off on every platform; Pi, which starts in Chat
+  with no built-in tool, no extension and none of the person's resources; and
+  Claude, whose Chat session on Windows holds no file or shell tool at all
+  (`Read`, `Grep`, `Glob`, `LS`, `Edit`, `Write`, `NotebookEdit`, `Bash`
+  and its task tools are left out of the session's tool list), where
+  elsewhere those tools ask and are declined inside Octant's sandbox.
+  OpenCode and the ACP agents keep their own file and shell tools whatever
+  they are told, so a Chat thread on them stays refused on Windows with the
+  reason ("This provider keeps Chat without a folder or shell only inside
+  Octant's sandbox, which Windows doesn't have yet."). Chat under Strict is
+  refused like every Strict launch there.
+- **Octant's own terminals and harness shell.** Outside Strict they run on
+  Windows unconfined at every level: a thread or Project terminal, which the
+  person types into, opens the configured shell at every level but Plan, and
+  the harness shell runs each command in that shell, still asking the person
+  below Full access as it does elsewhere (`resolveThreadElevation`). Under Strict, or with the sandbox kept at Full
+  access, they refuse before anything is journaled or started
+  (`hostSandboxRefusal`, read with the thread's resolved Strict value; work
+  that names no thread counts as Strict), and a harness command is refused
+  at the moment it runs, so Strict turned on mid-turn holds the next one. A
+  Windows command has no Octant egress rules or registered-server relays,
+  having no sandbox to hold them to, and a child run without network
+  authority runs no command there. The Code thread terminal elsewhere keeps
+  the confinement it has at every setting.
+- **App-managed tools for OpenCode and the ACP agents.** A Windows launch
+  has no Octant sandbox, so it reaches the host's loopback tool bridge (an
+  HTTP endpoint opened only with its per-bridge bearer token) directly, and
+  the tools are reported and offered there as on macOS and Linux
+  (`appToolBridgeReachesLaunchOn`); no named pipe or relay is needed.
 
 Also in scope, each design-first (build it only once its owning specification
 documents its authority, privacy, and release boundaries):
@@ -19865,8 +19904,8 @@ no Octant sandbox claimed
 ([Windows below Full access](#current-release-boundary), partly built); the
 confinement port still refuses Windows unless its caller opts into the dormant
 launcher, which no production caller does, so every launch that would need
-Octant's sandbox (Strict at every level, a kept sandbox, Octant's own
-terminals and commands below Full access) fails closed there. Simulator, the Apple workbench, and vibrancy stay
+Octant's sandbox (Strict at every level, including Octant's own terminals and
+commands, and a kept sandbox) fails closed there. Simulator, the Apple workbench, and vibrancy stay
 macOS-only.
 
 **Windows sequence** (maintainer decision, 2026-11-14). Each step is its own
@@ -19889,15 +19928,17 @@ deliverable and keeps every gate above:
 3. Work and Code at Full access on Windows. Partly built (maintainer request,
    2026-11-15: build it now, without waiting for the launcher):
    - **The level gate.** A Work turn, a Code turn and every Code operation on
-     a thread (terminal, tests, and the rest) on a Windows host run only at
-     Full access with the sandbox off. A provider turn below Full access runs
+     a thread (terminal, tests, and the rest) on a Windows host run outside
+     Strict, at Full access with the sandbox off and, since 2026-11-18, at
+     every level below it. A provider turn below Full access runs
      outside Strict with the provider's own approvals
      (`hostProviderTurnRefusal`, under
      [Windows below Full access](#current-release-boundary)); Octant's own
-     operations below Full access are refused on the server before they are
-     journaled or start a process, with the reason that Windows
-     has no Octant process sandbox yet (`hostSandboxRefusal` in the domain's
-     `guardrailPolicy.ts`). The gate reads the level the work runs at: a Work
+     operations under Strict or with the sandbox kept are refused on the
+     server before they are journaled or start a process, with the reason
+     that Windows has no Octant sandbox yet (`hostSandboxRefusal` in the
+     domain's `guardrailPolicy.ts`, read with the thread's resolved Strict
+     value). The gate reads the level the work runs at: a Work
      turn's level clamped to its caller's ceiling, a Code turn's composer
      level, recorded start or coordinator Plan clamped to the thread, and a
      live turn's narrower posture, never only the thread's stored level. A
@@ -19914,7 +19955,9 @@ deliverable and keeps every gate above:
      PowerShell 7 (`%ProgramFiles%\PowerShell\7\pwsh.exe`) or Command Prompt,
      each by absolute path with its own arguments (`-NoLogo`, `-Command`;
      `/D /S /C`), never a guessed POSIX shell and never POSIX `-l`. It runs
-     unconfined, only at Full access, through node-pty's ConPTY, with the
+     unconfined outside Strict at every level but Plan, and is refused under
+     Strict or a protection policy (a launch that does not carry its Strict
+     value counts as Strict), through node-pty's ConPTY, with the
      inherited environment names a Windows shell needs (`SYSTEMROOT`,
      `USERPROFILE`, `PSMODULEPATH` and their kin) added to the terminal's
      allowlist. A Project action runs in that shell, written in its own words
@@ -19985,8 +20028,11 @@ deliverable and keeps every gate above:
      Octant cannot read a program from, or a script with no `node.exe`, is
      refused with the reason, naming the `.exe` to point Settings at (for
      Codex, the `codex.exe` its package carries).
-   - **Harness shell.** The Octant Harness's shell tool at Full access on
-     Windows runs each command in the terminal shell Settings › Code names
+   - **Harness shell.** The Octant Harness's shell tool on Windows runs each
+     command, at Full access and, outside Strict, below it (since 2026-11-18;
+     before then the composition still routed a Windows lead's commands to
+     the POSIX sandboxed shell, which refused every one), in the terminal
+     shell Settings › Code names
      (Windows PowerShell by default) from a `.ps1` (`-NoProfile
 -NonInteractive -ExecutionPolicy Bypass -File`) or `.cmd` script in its
      own script folder, with the Windows names a shell needs in its
@@ -20004,20 +20050,25 @@ deliverable and keeps every gate above:
      receipt cannot be kept is stopped and reported unavailable. The tool
      keeps its name, and a Work or Code lead on a Windows host is told
      which shell runs its commands (Windows PowerShell 5.1, PowerShell 7 or a
-     Command Prompt batch script), read from the same setting. The levels below Full access refuse on Windows
-     before a command is planned.
+     Command Prompt batch script), read from the same setting. Under Strict
+     or with the sandbox kept a command is refused when it runs, with the
+     reason, and nothing starts.
    - **Not yet on Windows.** These run on macOS and Linux and are
-     unavailable on Windows: the
-     [agent debug tool](design/language-services.md#agent-debug-tool-rules);
-     a Project's [own toolchain copy](design/language-services.md#user-added-servers);
-     Octant's own terminals, tests and harness shell commands on a thread
-     below Full access; a Chat thread on a provider runtime; app-managed
-     tools for the ACP agents, which reach their bridge only through a
-     loopback rule in Octant's sandbox; and every launch under Strict at
-     any level or with the sandbox kept.
+     unavailable on Windows: language servers, a Project's
+     [own toolchain copy](design/language-services.md#user-added-servers) among them, and the
+     [agent debug tool](design/language-services.md#agent-debug-tool-rules),
+     whose launch policies admit only a Seatbelt or Bubblewrap capsule
+     (`unsupported-platform`) and whose capsule ports have no unconfined
+     Windows form yet; repository tests and scaffolds, whose runner starts
+     every command through the confinement port and owned process groups,
+     neither of which has a Windows form, so a run reports unavailable; a
+     Chat thread on OpenCode or an ACP agent (above); and every launch under
+     Strict at any level or with the sandbox kept, until the confinement
+     launcher has run a real provider on a person's Windows machine.
      A provider that starts no local process before its
-     turn (an Octant Harness model over an endpoint) runs Full access turns
-     there with Octant's own file tools and the harness shell.
+     turn (an Octant Harness model over an endpoint) runs turns there
+     outside Strict, at Full access and below it, with Octant's own file
+     tools and the harness shell.
    - **Evidence.** The level gate, the picker, the settings and the launch
      rules are tested on Linux CI with the host's platform set to Windows.
      The `server-windows` CI job runs against real processes on
@@ -20027,7 +20078,7 @@ deliverable and keeps every gate above:
      the terminal port starts again, a long harness command a "crashed" port
      left running stopped from its receipt by a fresh port, the production Codex driver reading its
      catalog through a runtime registry that keeps receipts, a failed native
-     program, cmdlet and Command Prompt command each reported as a failure, a Full access PowerShell terminal that writes a file
+     program, cmdlet and Command Prompt command each reported as a failure, a PowerShell terminal below Full access outside Strict that writes a file
      and a live one that close ends, the harness shell running a turn's
      PowerShell command that writes a file in the checkout and returns its
      output and ending a timed-out command's tree, and a fake Codex app-server
@@ -20037,10 +20088,15 @@ deliverable and keeps every gate above:
      under Strict and with a kept sandbox, and its catalog read only for a host
      whose new threads run unconfined; fake Claude and OpenCode runtimes
      compiled the same way read their version, and OpenCode starts at Full
-     access and outside Strict and is stopped with its tree. Pi and the ACP
-     agents have no compiled fake runtime and are tested on Linux CI with the
-     host's platform set to Windows. A whole Work or Code turn through a real
-     provider on a person's Windows machine has not run.
+     access and outside Strict and is stopped with its tree; fake Pi and Kilo
+     ACP runtimes compiled the same way start at Full access and below it
+     outside Strict (Pi in Chat too) with an unconfined version read, the
+     Kilo agent answering ACP's `initialize`, are stopped with their tree, and
+     are refused under Strict, a Kilo Chat thread by Chat's reason. Chat on
+     Codex and Claude, the harness shell's level routing and app-managed tools
+     on Windows are tested on Linux CI with the host's platform set to
+     Windows. A whole Work, Code or Chat turn through a real provider on a
+     person's Windows machine has not run.
 4. The `octant` CLI on Windows: native host paths, a browser opener that runs
    no shell, and a service manager equivalent. Partly built (maintainer
    request, 2026-11-15); detail in the next paragraph. It has run only on a

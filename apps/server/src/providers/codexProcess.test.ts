@@ -1008,6 +1008,37 @@ describe("Codex launch confinement", () => {
     expect(prepare).not.toHaveBeenCalled();
   });
 
+  it("launches a Windows Chat thread outside Strict unwrapped, since Codex there has no execution environment, and refuses it under Strict", () => {
+    const prepare = vi.fn(() => {
+      throw Error("No confinement may be prepared.");
+    });
+    const launch = (strict: boolean | undefined) =>
+      prepareCodexLaunch({
+        binaryPath: "C:\\fixture\\codex.exe",
+        args: ["app-server"],
+        authority: {
+          kind: "thread",
+          root: "C:\\fixture\\scratch",
+          mode: "chat",
+          executionPolicy: "approval-gated",
+          ...(strict === undefined ? {} : { strict }),
+        },
+        environment: {},
+        confinement: { prepare },
+        platform: "win32",
+      });
+    expect(launch(false)).toMatchObject({
+      status: "prepared",
+      launch: { command: "C:\\fixture\\codex.exe", cwd: "C:\\fixture\\scratch" },
+    });
+    for (const strict of [true, undefined])
+      expect(launch(strict)).toMatchObject({
+        status: "refused",
+        failure: { message: WINDOWS_STRICT_REFUSAL },
+      });
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
   it("reads the Windows catalog unconfined only for a host whose new threads run with no Octant sandbox", () => {
     const prepare = vi.fn(() => {
       throw Error("No confinement may be prepared.");

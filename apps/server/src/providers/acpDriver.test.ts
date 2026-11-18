@@ -1179,7 +1179,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     expect(supported.capabilities.appManagedTools).toBe("supported");
   });
 
-  it("reports app-managed tools on Linux as on macOS, and not on Windows", async () => {
+  it("reports app-managed tools on Linux and Windows as on macOS, and not on a host whose launches cannot reach the bridge", async () => {
     const probed = (platform: NodeJS.Platform) =>
       withProcessPlatform(platform, () =>
         Effect.runPromise(
@@ -1187,7 +1187,8 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         ),
       );
     expect((await probed("linux")).capabilities.appManagedTools).toBe("supported");
-    expect((await probed("win32")).capabilities.appManagedTools).toBe("unsupported");
+    expect((await probed("win32")).capabilities.appManagedTools).toBe("supported");
+    expect((await probed("freebsd")).capabilities.appManagedTools).toBe("unsupported");
   });
 
   it("registers the exact app tool catalogue before an HTTP-capable ACP session starts", async () => {
@@ -1226,8 +1227,9 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     ] as const;
 
     // Linux carries the bridge as macOS does: the launch reaches its port
-    // on the shared host network or through the forwarder's relay.
-    for (const platform of ["darwin", "linux"] as const) {
+    // on the shared host network or through the forwarder's relay. A Windows
+    // launch runs with no Octant sandbox and reaches loopback directly.
+    for (const platform of ["darwin", "linux", "win32"] as const) {
       await withProcessPlatform(platform, () =>
         Effect.runPromise(
           Effect.scoped(
@@ -1248,8 +1250,8 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         ),
       );
     }
-    expect(bridgeFactory).toHaveBeenCalledTimes(2);
-    expect(bridgeClose).toHaveBeenCalledTimes(2);
+    expect(bridgeFactory).toHaveBeenCalledTimes(3);
+    expect(bridgeClose).toHaveBeenCalledTimes(3);
   });
 
   it("refuses app tools before session creation on a host whose confinement cannot carry the bridge", async () => {
@@ -1270,7 +1272,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     const tools = [
       { name: "octant_browser", inputSchema: { type: "object", properties: {} } },
     ] as const;
-    const refusal = await withProcessPlatform("win32", () =>
+    const refusal = await withProcessPlatform("freebsd", () =>
       Effect.runPromise(
         Effect.scoped(
           Effect.flip(
