@@ -19763,8 +19763,12 @@ workspaces there):
   (`Read`, `Grep`, `Glob`, `LS`, `Edit`, `Write`, `NotebookEdit`, `Bash`
   and its task tools are left out of the session's tool list), where
   elsewhere those tools ask and are declined inside Octant's sandbox.
-  OpenCode and the ACP agents keep their own file and shell tools whatever
-  they are told, so a Chat thread on them stays refused on Windows with the
+  OpenCode's permission rules can deny its file and shell tools, but its
+  command templates run shell substitutions and its plugins run code in its
+  own process outside those rules; an ACP agent's client capabilities decide
+  only whether it may use Octant's file and terminal methods, and no
+  reviewed agent profile can be told to drop its own built-in file and shell
+  tools. So a Chat thread on them stays refused on Windows with the
   reason ("This provider keeps Chat without a folder or shell only inside
   Octant's sandbox, which Windows doesn't have yet."). Chat under Strict is
   refused like every Strict launch there.
@@ -19988,7 +19992,8 @@ deliverable and keeps every gate above:
    - **Process-tree stop.** Windows has no process groups, and
      `ChildProcess.kill` there ends only the root. Every stop that signals a
      process group elsewhere (each provider family's runtime, owned-process
-     receipts, agent runs, terminals) ends the whole tree on Windows with
+     receipts, agent runs, terminals, repository tests and scaffolds,
+     language servers and debug sessions) ends the whole tree on Windows with
      `System32\taskkill.exe /PID <pid> /T /F`, run by absolute path through no
      shell (`process/windowsProcessTree.ts`). Rationale: the launcher's
      `--full-access` job object would end a tree that re-parented itself too,
@@ -20054,18 +20059,31 @@ deliverable and keeps every gate above:
      Command Prompt batch script), read from the same setting. Under Strict
      or with the sandbox kept a command is refused when it runs, with the
      reason, and nothing starts.
-   - **Not yet on Windows.** These run on macOS and Linux and are
-     unavailable on Windows: language servers, a Project's
-     [own toolchain copy](design/language-services.md#user-added-servers) among them, and the
-     [agent debug tool](design/language-services.md#agent-debug-tool-rules),
-     whose launch policies admit only a Seatbelt or Bubblewrap capsule
-     (`unsupported-platform`) and whose capsule ports have no unconfined
-     Windows form yet; repository tests and scaffolds, whose runner starts
-     every command through the confinement port and owned process groups,
-     neither of which has a Windows form, so a run reports unavailable; a
-     Chat thread on OpenCode or an ACP agent (above); and every launch under
-     Strict at any level or with the sandbox kept, until the confinement
-     launcher has run a real provider on a person's Windows machine.
+   - **Tests, scaffolds, language servers and debug sessions** (since
+     2026-11-18; before then each was refused on Windows, its runner or
+     launch policy admitting only a Seatbelt or Bubblewrap capsule and owned
+     process groups) run unconfined outside Strict, as a thread terminal
+     does, and are refused under Strict with the reason. A repository test
+     or scaffold starts the program it names with no shell, a bare name
+     found on `Path` with `PATHEXT`'s extensions and an npm `.cmd` shim
+     read for the program it starts (as above), with the Windows names a
+     program needs in its environment, and ends its whole tree on timeout
+     or cancellation. A
+     [language server](design/language-services.md#launch-classes), a
+     Project's own toolchain copy among them, starts for a thread outside
+     Strict (`decideLanguageServerLaunch` answers confinement `none`);
+     `repo-tooling` still needs the person's start and approval and gets no
+     egress proxy, having no wall to hold it to, and a crash restart is
+     held to the watched thread's Strict value as it is then. A
+     [debug session](design/language-services.md#approval-and-starting),
+     the agent's `octant_debug` tool included, starts after the level's
+     confirmation on the open network, its child connecting on loopback,
+     and ends when Strict turns on. Each keeps its receipt, private cache
+     or state folder, and the tree stop.
+   - **Not yet on Windows.** A Chat thread on OpenCode or an ACP agent
+     (above), and every launch under Strict at any level or with the
+     sandbox kept, until the confinement launcher has run a real provider
+     on a person's Windows machine.
      A provider that starts no local process before its
      turn (an Octant Harness model over an endpoint) runs turns there
      outside Strict, at Full access and below it, with Octant's own file
@@ -20093,9 +20111,14 @@ deliverable and keeps every gate above:
      ACP runtimes compiled the same way start at Full access and below it
      outside Strict (Pi in Chat too) with an unconfined version read, the
      Kilo agent answering ACP's `initialize`, are stopped with their tree, and
-     are refused under Strict, a Kilo Chat thread by Chat's reason. Chat on
+     are refused under Strict, a Kilo Chat thread by Chat's reason; a
+     repository test outside Strict runs a real program and returns its output
+     and exit code, and a timed-out one is ended with the program it started;
+     and a language server and a debug adapter start unconfined, answer on
+     their pipes and are stopped. Chat on
      Codex and Claude, the harness shell's level routing and app-managed tools
-     on Windows are tested on Linux CI with the host's platform set to
+     on Windows, and the language server, debug and test launch policies under
+     Strict, are tested on Linux CI with the host's platform set to
      Windows. A whole Work, Code or Chat turn through a real provider on a
      person's Windows machine has not run.
 4. The `octant` CLI on Windows: native host paths, a browser opener that runs

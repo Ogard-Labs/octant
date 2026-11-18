@@ -321,6 +321,12 @@ export interface CodeLanguageServiceOptions {
     readonly launch: (input: LanguageServerLaunchInput) => Promise<LanguageServerLaunchOutcome>;
   };
   readonly platform: LanguageServerHostPlatform;
+  /**
+   * A thread's resolved Strict value. On Windows a server runs unconfined for
+   * a thread outside Strict and is refused under it. Absent, or a read that
+   * throws, counts as Strict.
+   */
+  readonly threadStrict?: (threadId: CodeThreadId) => boolean;
   /** Parent directory of every server's private cache. */
   readonly cacheRoot: string;
   /** Confines every path, and reads the saved file an agent's read names. */
@@ -421,6 +427,7 @@ export class CodeLanguageService {
   readonly #usesProjectToolchain: (projectId: ProjectId) => boolean;
   readonly #processes: CodeLanguageServiceOptions["processes"];
   readonly #platform: LanguageServerHostPlatform;
+  readonly #threadStrict: (threadId: CodeThreadId) => boolean;
   readonly #cacheRoot: string;
   readonly #files: CodeTestSourcePort;
   readonly #watcher: CodeLanguageServiceOptions["watcher"];
@@ -443,6 +450,7 @@ export class CodeLanguageService {
     this.#usesProjectToolchain = options.usesProjectToolchain ?? (() => false);
     this.#processes = options.processes;
     this.#platform = options.platform;
+    this.#threadStrict = options.threadStrict ?? (() => true);
     this.#cacheRoot = options.cacheRoot;
     this.#files = options.files ?? liveCodeTestSourcePort;
     this.#watcher = options.watcher;
@@ -531,6 +539,7 @@ export class CodeLanguageService {
         launchClass: chosen.component.launchClass,
         posture: fresh.thread.executionPolicy,
         platform: this.#platform,
+        strict: this.#strictOf(fresh.thread.id),
         startedBy: caller.principal,
         shellCommandApproval: this.#approvalHolds(
           fresh.thread.projectId,
@@ -686,6 +695,7 @@ export class CodeLanguageService {
         launchClass: chosen.component.launchClass,
         posture: fresh.thread.executionPolicy,
         platform: this.#platform,
+        strict: this.#strictOf(fresh.thread.id),
         startedBy: caller.principal,
         shellCommandApproval: this.#approvalHolds(
           fresh.thread.projectId,
@@ -929,6 +939,7 @@ export class CodeLanguageService {
         launchClass: component.component.launchClass,
         posture: final.thread.executionPolicy,
         platform: this.#platform,
+        strict: this.#strictOf(final.thread.id),
         startedBy: caller.principal,
         shellCommandApproval: this.#approvalHolds(
           final.thread.projectId,
@@ -1016,9 +1027,19 @@ export class CodeLanguageService {
    */
   servesAgentsIn(
     folders: ReadonlyArray<string>,
-    turn?: { readonly projectId: ProjectId; readonly posture: ProviderExecutionPolicy },
+    turn?: {
+      readonly projectId: ProjectId;
+      readonly posture: ProviderExecutionPolicy;
+      /** The turn's thread, whose Strict value decides on Windows. */
+      readonly threadId?: CodeThreadId;
+    },
   ): boolean {
-    if (this.#platform !== "macos" && this.#platform !== "linux") return false;
+    const windowsOutsideStrict =
+      this.#platform === "windows" &&
+      turn?.threadId !== undefined &&
+      !this.#strictOf(turn.threadId);
+    if (this.#platform !== "macos" && this.#platform !== "linux" && !windowsOutsideStrict)
+      return false;
     if (turn !== undefined && turn.posture !== "plan") {
       for (const record of this.#servers.values()) {
         if (
@@ -1358,6 +1379,7 @@ export class CodeLanguageService {
       launchClass: component.launchClass,
       posture: authorized.thread.executionPolicy,
       platform: this.#platform,
+      strict: this.#strictOf(authorized.thread.id),
       startedBy: caller.principal,
       shellCommandApproval: "granted",
     });
@@ -1553,6 +1575,7 @@ export class CodeLanguageService {
       const read = decideAgentReadThroughRepositoryTooling({
         posture: authorized.thread.executionPolicy,
         platform: this.#platform,
+        strict: this.#strictOf(authorized.thread.id),
         server: usable ? "running" : "not-running",
         shellCommandApproval: this.#approvalHolds(
           authorized.thread.projectId,
@@ -1574,6 +1597,7 @@ export class CodeLanguageService {
       launchClass: component.launchClass,
       posture: authorized.thread.executionPolicy,
       platform: this.#platform,
+      strict: this.#strictOf(authorized.thread.id),
       startedBy: caller.principal,
       shellCommandApproval:
         component.launchClass === "repo-tooling" &&
@@ -1643,6 +1667,15 @@ export class CodeLanguageService {
     }
     if (outcome === "crashed") return { status: "unavailable", reason: "crashed" };
     return { status: "served", record };
+  }
+
+  /** A thread's resolved Strict value; a read that throws counts as Strict. */
+  #strictOf(threadId: CodeThreadId): boolean {
+    try {
+      return this.#threadStrict(threadId);
+    } catch {
+      return true;
+    }
   }
 
   /**
@@ -1788,6 +1821,13 @@ export class CodeLanguageService {
       record.state = "stopped";
       return "crashed";
     }
+    // On Windows a server runs only unconfined, so a restart is held to the
+    // Strict value of the thread it watches as it is now: Strict turned on
+    // since the first start keeps it stopped.
+    if (this.#platform === "windows" && this.#strictOf(record.watchThreadId)) {
+      record.state = "stopped";
+      return "confinement-unavailable";
+    }
     const executable = await record.component.executable(record.rootPath).catch(() => undefined);
     if (record.generation !== generation) return "crashed";
     if (executable === undefined) return this.#crash(record, generation);
@@ -1800,6 +1840,7 @@ export class CodeLanguageService {
       ...(record.sandboxPolicy === undefined ? {} : { sandboxPolicy: record.sandboxPolicy }),
       ownerId: record.key,
       launchClass: record.component.launchClass,
+      ...(this.#platform === "windows" ? { unconfined: true as const } : {}),
       ...(record.component.launchClass === "repo-tooling"
         ? {
             egress: {
