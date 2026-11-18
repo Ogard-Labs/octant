@@ -672,6 +672,63 @@ describe("the records drill-down", () => {
     expect(await within(reopened).findByText("Fresh merge")).toBeInTheDocument();
   });
 
+  it("re-reads once when a page finds access changed, and reopening shows the new view", async () => {
+    const user = userEvent.setup();
+    const oldView = view();
+    const newView = view({
+      count: 1,
+      nextOffset: undefined,
+      records: [
+        {
+          kind: "prs-merged",
+          occurredAt: "2026-11-04T08:00:00.000Z",
+          id: "octant/octant#78",
+          label: "Reauthorized merge",
+          repositoryOwner: "octant",
+          repositoryName: "octant",
+          number: 78,
+          mergedBy: "henrik",
+        },
+      ],
+      snapshotId: "20000000-0000-4000-8000-000000000003",
+    });
+    let first = true;
+    const source = reads((query) => {
+      if (query.kind === "page") {
+        return decodeActivityView({
+          status: "unavailable",
+          source: "octant",
+          reason: "authorization-changed",
+          records: [],
+        });
+      }
+      const answer = first ? oldView : newView;
+      first = false;
+      return answer;
+    });
+    render(<Harness read={source.read} />);
+    const card = await screen.findByRole("region", { name: "Pull requests merged" });
+    await user.click(
+      within(card).getByRole("button", { name: "Pull requests merged: 2. Show records" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: /Pull requests merged/ });
+    await user.click(within(dialog).getByRole("button", { name: "Load more" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Access changed — open it again to retry.",
+    );
+    const cardReads = () =>
+      source.calls().filter((query) => query.kind === "read" && query.card === "prs-merged");
+    await waitFor(() => expect(cardReads()).toHaveLength(2));
+
+    await user.click(within(dialog).getByRole("button", { name: "Close records" }));
+    await user.click(
+      within(card).getByRole("button", { name: "Pull requests merged: 1. Show records" }),
+    );
+    const reopened = await screen.findByRole("dialog", { name: /Pull requests merged/ });
+    expect(await within(reopened).findByText("Reauthorized merge")).toBeInTheDocument();
+    expect(within(reopened).queryByText("Ship the panel")).toBeNull();
+  });
+
   it("opens the thread a run belongs to", async () => {
     const user = userEvent.setup();
     const onOpenThread = vi.fn();

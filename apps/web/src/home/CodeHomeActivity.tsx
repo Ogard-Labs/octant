@@ -399,8 +399,8 @@ interface ActivityCardView {
   readonly drill: { readonly view: ActivityView } | undefined;
   readonly openRecords: (view: ActivityView) => void;
   readonly closeRecords: () => void;
-  /** A records page found the snapshot expired: re-read so reopening retries. */
-  readonly renewAfterExpired: () => void;
+  /** A records page found the snapshot stale: re-read so reopening retries. */
+  readonly renewAfterStale: () => void;
 }
 
 /**
@@ -428,7 +428,7 @@ function useActivityCardContent(input: ActivityCardInput, epoch: number): Activi
     consumedReader.current = input.read;
     const refresh = epoch > consumedEpoch.current;
     consumedEpoch.current = Math.max(consumedEpoch.current, epoch);
-    // A renew after an expired page is a quiet re-read of the same question:
+    // A renew after a stale page is a quiet re-read of the same question:
     // not a refresh, so the server cache decides, and the open dialog keeps
     // its frozen view and its alert rather than closing under the warning.
     const renew = renewed > consumedRenew.current;
@@ -474,7 +474,7 @@ function useActivityCardContent(input: ActivityCardInput, epoch: number): Activi
     drill,
     openRecords: (view) => setDrill({ view }),
     closeRecords: () => setDrill(undefined),
-    renewAfterExpired: () => setRenewed((count) => count + 1),
+    renewAfterStale: () => setRenewed((count) => count + 1),
   };
 }
 
@@ -492,7 +492,7 @@ function ActivityCard(props: {
 }) {
   const { definition } = props;
   const input = definition.input;
-  const { read, drill, openRecords, closeRecords, renewAfterExpired } = useActivityCardContent(
+  const { read, drill, openRecords, closeRecords, renewAfterStale } = useActivityCardContent(
     input,
     props.epoch,
   );
@@ -628,7 +628,7 @@ function ActivityCard(props: {
           <ActivityRecordsDialog
             input={input}
             onClose={closeRecords}
-            onExpired={renewAfterExpired}
+            onStale={renewAfterStale}
             onOpenExternal={props.onOpenExternal}
             onOpenThread={props.onOpenThread}
             view={drill.view}
@@ -664,8 +664,8 @@ function ActivityRecordsDialog(props: {
   readonly onClose: () => void;
   readonly onOpenThread: CodeHomeActivityProps["onOpenThread"];
   readonly onOpenExternal: CodeHomeActivityProps["onOpenExternal"];
-  /** A page answered `expired`: the card re-reads so the next open retries. */
-  readonly onExpired: () => void;
+  /** A page answered `expired` or `authorization-changed`: the card re-reads so the next open retries. */
+  readonly onStale: () => void;
 }) {
   const titleId = useId();
   const [records, setRecords] = useState<ReadonlyArray<ActivityRecord>>(props.view.records);
@@ -703,8 +703,8 @@ function ActivityRecordsDialog(props: {
               // A dead snapshot's rows must not stay navigable.
               setRecords([]);
               setNextOffset(undefined);
+              props.onStale();
             }
-            if (page.reason === "expired") props.onExpired();
             setPageError(reasonLabel(page));
             return;
           }
