@@ -1,4 +1,5 @@
 import type { PreparedProductFeedbackTurn } from "../browser/productFeedbackTurnPort";
+import { strictKeptForLaunch } from "../strictResolution";
 import {
   attachedFilesMessage,
   partitionAttachedFiles,
@@ -3015,6 +3016,20 @@ export class WorkTurnService {
       fullAccess: input.access === "full-access",
       settings: this.#toolStepSettings(),
     });
+    // Read as the turn launches, never carried from an earlier one: the
+    // session starts with it, and the turn records what it kept.
+    const launchStrict = this.#resolveStrict?.(String(input.command.threadId)) ?? true;
+    const strictKept = strictKeptForLaunch({
+      strict: launchStrict,
+      driverKind: input.driver.kind,
+      executionPolicy: input.access === "full-access" ? "full-access" : "approval-gated",
+      fullAccessSandbox: input.fullAccessSandbox,
+    });
+    if (strictKept !== undefined) {
+      const launching = this.#projection.lookup(input.command.requestId);
+      if (launching !== undefined)
+        this.#persistUpdate(launching, { status: "running", strictKept });
+    }
     try {
       if (input.access !== undefined) {
         this.#runningAccess.set(String(input.command.threadId), {
@@ -3049,8 +3064,7 @@ export class WorkTurnService {
             }),
         ...(input.access === undefined ? {} : { access: input.access }),
         ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
-        // Read as the turn launches, never carried from an earlier one.
-        strict: this.#resolveStrict?.(String(input.command.threadId)) ?? true,
+        strict: launchStrict,
         ...(artifactToolName === undefined ? {} : { nativeArtifacts: true }),
         ...nativeSetupOption(
           sessionNativeSetup(
@@ -3861,6 +3875,7 @@ export class WorkTurnService {
       readonly tasks?: ThreadTaskProgressList;
       readonly toolSteps?: ThreadToolSteps;
       readonly childObservations?: WorkTurnState["childObservations"];
+      readonly strictKept?: WorkTurnState["strictKept"];
     },
   ): void {
     const latest = this.#projection.lookup(turn.requestId) ?? turn;
@@ -3904,6 +3919,7 @@ export class WorkTurnService {
               toolSteps: toolSteps.steps,
               ...(toolSteps.truncated ? { toolStepsTruncated: true } : {}),
             }),
+        ...(update.strictKept === undefined ? {} : { strictKept: update.strictKept }),
         ...(update.childObservations === undefined
           ? {}
           : { childObservations: update.childObservations }),

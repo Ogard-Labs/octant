@@ -866,6 +866,7 @@ function makeConnection(
       readonly fullAccessSandbox?: boolean;
       readonly strict?: boolean;
       readonly tools: ReadonlyArray<ProviderToolDefinition>;
+      readonly blockedTools?: ReadonlyArray<string>;
     }) =>
       request(() => {
         const pending = (async () => {
@@ -903,6 +904,9 @@ function makeConnection(
             // files, so a warm runtime never crosses a change of it.
             input.strict,
             tools,
+            // The blocked tools are written into the bridge and the tool list
+            // when the process starts, so a warm runtime never crosses a change.
+            input.blockedTools ?? [],
           ]);
           let runtime =
             input.resume === true
@@ -982,6 +986,9 @@ function makeConnection(
                     modelProvider: selection.provider,
                     ...(tools.length === 0 ? {} : { tools }),
                     ...(managedTools === undefined ? {} : { toolBridge: managedTools.config }),
+                    ...(input.blockedTools === undefined || input.blockedTools.length === 0
+                      ? {}
+                      : { blockedTools: input.blockedTools }),
                     onProcessStarted: async (process) => {
                       receipt = await options.runtimeRegistry.trackProcess(
                         options.instanceId,
@@ -1198,6 +1205,7 @@ function makeConnection(
           executionPolicy: input.executionPolicy,
           ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
           ...(input.strict === false ? { strict: false } : {}),
+          ...(input.blockedTools === undefined ? {} : { blockedTools: input.blockedTools }),
           // A Plan resume with no caller-supplied set fails closed to no tools,
           // not the full catalogue the session was first opened with.
           tools: input.tools ?? (input.executionPolicy === "plan" ? [] : identity.tools),

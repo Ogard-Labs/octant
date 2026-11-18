@@ -23,6 +23,7 @@ import {
   adaptBetaOpenCodeEvent,
   betaAgentPermissionRules,
   betaSessionPermissionRules,
+  openCodeBlockedToolNames,
   betaPermissionEffect,
   makeOpenCodeDriver,
   normalizeOpenCodeProbe,
@@ -3368,6 +3369,34 @@ describe("OpenCode driver", () => {
       evaluateV2Permission(
         betaSessionPermissionRules("plan", "code", undefined, [], false, on),
         "websearch",
+      ),
+    ).toBe("allow");
+  });
+
+  it("denies a tool the person blocked at every level, after every allow, on both runtimes", () => {
+    const blockedTools = openCodeBlockedToolNames(["webfetch", "docs__search"]);
+    expect(blockedTools).toEqual(["webfetch", "docs_search"]);
+    // Web tools and tool servers on, so only the block stands in the way.
+    const own = { rules: [], toolServers: true, webTools: true, blockedTools } as const;
+    for (const policy of ["plan", "approval-gated", "auto-accept-edits", "full-access"] as const) {
+      for (const action of blockedTools) {
+        expect(
+          evaluatePermission(permissionRules(policy, "code", "octant", [], false, own), action),
+        ).toBe("deny");
+        expect(
+          evaluateV2Permission(
+            betaSessionPermissionRules(policy, "code", "octant", [], false, own),
+            action,
+          ),
+        ).toBe("deny");
+      }
+    }
+    // Without the block, Full access runs the same tools.
+    const unblocked = { rules: [], toolServers: true, webTools: true } as const;
+    expect(
+      evaluatePermission(
+        permissionRules("full-access", "code", undefined, [], false, unblocked),
+        "webfetch",
       ),
     ).toBe("allow");
   });

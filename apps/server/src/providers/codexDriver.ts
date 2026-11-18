@@ -1,7 +1,12 @@
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { planReadOnlyToolServers, providerOwnMemoryLaunches } from "@octant/domain";
+import {
+  CODEX_BLOCKABLE_TOOLS,
+  mcpServerTool,
+  planReadOnlyToolServers,
+  providerOwnMemoryLaunches,
+} from "@octant/domain";
 import {
   decodeProviderFailure,
   decodeProviderProbeResult,
@@ -188,7 +193,9 @@ export interface CodexThreadConfig {
    * config, never written to the account's `config.toml`.
    */
   readonly model_auto_compact_token_limit?: number;
-  readonly mcp_servers?: Readonly<Record<string, { readonly enabled: false }>>;
+  readonly mcp_servers?: Readonly<
+    Record<string, { readonly enabled: false } | { readonly disabled_tools: ReadonlyArray<string> }>
+  >;
   /** Codex's own web search, switched off unless the session's native setup has it on. */
   readonly web_search?: "disabled";
   readonly skills?: {
@@ -334,6 +341,59 @@ function codexPlanThreadConfig(
               withheld.map((name) => [name, { enabled: false } as const]),
             ),
           };
+    }),
+  );
+}
+
+/**
+ * The person's blocked tools laid over a thread's overrides. Codex's shell,
+ * image view and web search each have a switch of their own; a blocked tool
+ * of one of the person's MCP servers goes in that server's `disabled_tools`,
+ * named only for a server the effective config at `cwd` has, because a
+ * partial entry for a server it lacks would be read as a new, broken server.
+ * A server already switched off stays off. Any other name is refused rather
+ * than run: Settings refuses it when added, so only an older list reaches
+ * here with one.
+ */
+function codexBlockedToolsConfig(
+  client: CodexClientPort,
+  cwd: string,
+  config: CodexThreadConfig,
+  blocked: ReadonlyArray<string>,
+): Effect.Effect<CodexThreadConfig, ProviderFailure> {
+  if (blocked.length === 0) return Effect.succeed(config);
+  let next: CodexThreadConfig = config;
+  const serverTools = new Map<string, Array<string>>();
+  for (const tool of blocked) {
+    if (tool === "shell") next = { ...next, ...CODEX_SHELL_OFF_CONFIG };
+    else if (tool === "view_image") next = { ...next, "features.view_image": false };
+    else if (tool === "web_search") next = { ...next, ...CODEX_WEB_SEARCH_OFF_CONFIG };
+    else {
+      const named = mcpServerTool(tool);
+      if (named === undefined) {
+        return Effect.fail(
+          failure(
+            "unsupported",
+            `Codex cannot block ${tool}; it blocks ${CODEX_BLOCKABLE_TOOLS.join(", ")} and MCP server tools. Remove it in Settings › Permissions › Blocked tools.`,
+          ),
+        );
+      }
+      serverTools.set(named.server, [...(serverTools.get(named.server) ?? []), named.tool]);
+    }
+  }
+  if (serverTools.size === 0) return Effect.succeed(next);
+  const settled = next;
+  return request(() => client.configRead({ cwd })).pipe(
+    Effect.map((result) => {
+      const configured = new Set(Object.keys(result.config.mcp_servers ?? {}));
+      const servers = { ...settled.mcp_servers };
+      for (const [server, tools] of serverTools) {
+        if (!configured.has(server)) continue;
+        const current = servers[server];
+        if (current !== undefined && "enabled" in current) continue;
+        servers[server] = { disabled_tools: tools };
+      }
+      return Object.keys(servers).length === 0 ? settled : { ...settled, mcp_servers: servers };
     }),
   );
 }
@@ -2088,6 +2148,7 @@ function makeConnection(
     const modeThreadConfig = (
       nativeSetup: ProviderNativeSetup | undefined,
       executionPolicy: ProviderExecutionPolicy,
+      blockedTools: ReadonlyArray<string> = [],
     ): Effect.Effect<CodexThreadConfig, ProviderFailure> =>
       Effect.gen(function* () {
         // The person's own Project skills load as Codex loads them, so none
@@ -2116,7 +2177,8 @@ function makeConnection(
           nativeSetup?.webTools === true
             ? modeConfig
             : { ...modeConfig, ...CODEX_WEB_SEARCH_OFF_CONFIG };
-        return skills === undefined ? webConfig : { ...webConfig, skills };
+        const withSkills = skills === undefined ? webConfig : { ...webConfig, skills };
+        return yield* codexBlockedToolsConfig(client, projectRoot, withSkills, blockedTools);
       });
 
     // Windows has no Octant profile to hold Plan read-only, so a Plan session
@@ -2949,7 +3011,11 @@ function makeConnection(
               optionSettings = codexModelOptionSettings(observedModel, requestedOptions);
             }
             const dynamicTools = codexDynamicTools(input.tools);
-            const modeConfig = yield* modeThreadConfig(input.nativeSetup, input.executionPolicy);
+            const modeConfig = yield* modeThreadConfig(
+              input.nativeSetup,
+              input.executionPolicy,
+              input.blockedTools,
+            );
             const config = {
               ...optionSettings.config,
               ...modeConfig,
@@ -3038,7 +3104,11 @@ function makeConnection(
           Effect.gen(function* () {
             yield* ensureRuntime(codexLeasePosture(input));
             ensureSubscribed();
-            const modeConfig = yield* modeThreadConfig(input.nativeSetup, input.executionPolicy);
+            const modeConfig = yield* modeThreadConfig(
+              input.nativeSetup,
+              input.executionPolicy,
+              input.blockedTools,
+            );
             const resumeRequest = () =>
               Effect.tryPromise({
                 try: () =>

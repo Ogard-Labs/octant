@@ -96,6 +96,7 @@ import {
 } from "./claudeEventMapper";
 import { CLAUDE_TASK_TOOLS, ClaudeTaskList, readClaudeStoredTaskList } from "./claudeTaskList";
 import {
+  mcpServerTool,
   planReadOnlyToolServers,
   providerOwnMemoryLaunches,
   windowsProviderLaunch,
@@ -564,6 +565,22 @@ function claudeNativeToolAnswer(
 }
 
 /** Claude's answer to a Plan call of an account MCP server the person did not mark. */
+export const CLAUDE_BLOCKED_TOOL_REFUSAL =
+  "This tool is blocked in Octant Settings › Permissions › Blocked tools.";
+
+/**
+ * The person's blocked tools as Claude Code names them: a built-in by its own
+ * name, and an MCP server's tool given as `server__tool` under Claude Code's
+ * `mcp__server__tool`.
+ */
+export function claudeBlockedToolNames(
+  blocked: ReadonlyArray<string> | undefined,
+): ReadonlyArray<string> {
+  return (blocked ?? []).map((tool) =>
+    tool.startsWith("mcp__") || mcpServerTool(tool) === undefined ? tool : `mcp__${tool}`,
+  );
+}
+
 export const CLAUDE_PLAN_MCP_SERVER_REFUSAL =
   'This MCP server is not allowed in Plan. Mark it "Read-only — allowed in Plan" in Settings to use it here.';
 
@@ -3646,6 +3663,7 @@ function makeConnection(
         readonly wakeups?: ProviderWakeupSchedule;
         readonly outlivesTurn?: boolean;
         readonly levelChanges?: boolean;
+        readonly blockedTools?: ReadonlyArray<string>;
       },
       signal: AbortSignal,
       resumeSessionId?: string,
@@ -3934,6 +3952,9 @@ function makeConnection(
         // less what Octant withholds, so the gate below sees every tool.
         // A single-use session starts no later turn, so it schedules none.
         const wakeups = input.singleUse === true ? undefined : input.wakeups;
+        // The person's blocked tools, refused by Claude Code's own
+        // `disallowedTools` and again at the gate below.
+        const blockedTools = claudeBlockedToolNames(input.blockedTools);
         const withheldTools = executionOptions.fullToolSet
           ? claudeWithheldTools(
               nativeSetup,
@@ -4037,6 +4058,7 @@ function makeConnection(
             return deny("Claude tool authority state was exhausted.");
           }
           expireClaudePreToolGrants(activeState, factories.authorityNow());
+          if (blockedTools.includes(request.toolName)) return deny(CLAUDE_BLOCKED_TOOL_REFUSAL);
           const digest = claudeAuthorityInputDigest(request.input);
           const grant = activeState?.preToolRequests.get(request.toolUseId);
           if (
@@ -4276,6 +4298,7 @@ function makeConnection(
             return deny("Claude tool authority state was exhausted.");
           }
           expireClaudePreToolGrants(activeState, factories.authorityNow());
+          if (blockedTools.includes(request.toolName)) return deny(CLAUDE_BLOCKED_TOOL_REFUSAL);
           // In Plan only the account's servers the person marked start. A call
           // to any other is refused with what to do about it.
           const planServer = claudeAccountMcpServer(request.toolName);
@@ -4781,6 +4804,7 @@ function makeConnection(
               ...(input.singleUse === true ? { persistSession: false as const } : {}),
               tools: executionOptions.tools,
               ...(withheldTools === undefined ? {} : { withheldTools }),
+              ...(blockedTools.length === 0 ? {} : { blockedTools }),
               ...(nativeSetup === undefined ? {} : { nativeSetup }),
               ...(instructions === undefined ? {} : { instructions }),
               ...claudeAutoCompactWindow(input.compactionPoint),
@@ -5058,6 +5082,7 @@ function makeConnection(
               ...(input.wakeups === undefined ? {} : { wakeups: input.wakeups }),
               ...(input.outlivesTurn === true ? { outlivesTurn: true } : {}),
               ...(input.levelChanges === true ? { levelChanges: true } : {}),
+              ...(input.blockedTools === undefined ? {} : { blockedTools: input.blockedTools }),
             },
             signal,
             input.resumeCursor.value,

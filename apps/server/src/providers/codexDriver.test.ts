@@ -1910,6 +1910,62 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
+  it("switches off the tools the person blocked through Codex's own config on start and every resume, at Full access too", async () => {
+    const f = fixture({
+      configRead: async () => ({ config: { mcp_servers: { docs: { command: "docs" } } } }),
+    });
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
+    // `ghost__read` names a server the person's config lacks, so no partial
+    // entry is written for it.
+    const blockedTools = ["shell", "view_image", "docs__search", "ghost__read"];
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+        blockedTools,
+        nativeSetup: { webTools: true } as never,
+      }),
+    );
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId: "session-resumed" as never,
+        resumeCursor: { driverKind: "codex", value: "thread-existing" },
+        executionPolicy: "full-access",
+        blockedTools,
+      }),
+    );
+    for (const method of ["thread/start", "thread/resume"]) {
+      const input = f.calls.find((call) => call.method === method)?.input;
+      expect(input).toMatchObject({
+        config: {
+          "features.shell_tool": false,
+          "features.unified_exec": false,
+          "features.view_image": false,
+          mcp_servers: { docs: { disabled_tools: ["search"] } },
+        },
+      });
+      expect(input).not.toHaveProperty(["config", "mcp_servers", "ghost"]);
+    }
+    await acquired.close();
+  });
+
+  it("refuses to start a session with a blocked Codex tool its config cannot switch off", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
+    const exit = await Effect.runPromiseExit(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+        blockedTools: ["apply_patch"],
+      }),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(f.calls.some(({ method }) => method === "thread/start")).toBe(false);
+    await acquired.close();
+  });
+
   it("lets a Work thread read the Project's AGENTS.md and keep Codex's shell, as Code does, on start and every resume", async () => {
     const workOff = {
       web_search: "disabled",

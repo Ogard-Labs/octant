@@ -1091,6 +1091,21 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 8_192,
   },
+  // Settings › Permissions › Blocked tools, which a device the host's own
+  // person paired reads and changes as a window does.
+  {
+    kind: "exact" as const,
+    path: "/api/blocked-tools",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/blocked-tools/commands",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 4_096,
+  },
   // The host's shell settings, for a device the host's own person paired: it
   // has no window here to bootstrap, so this is where it reads them and
   // replaces them (a thread's Reply detail, for one).
