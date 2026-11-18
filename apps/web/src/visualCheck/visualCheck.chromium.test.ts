@@ -277,7 +277,7 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
       ];
       if (problems.length > 0) {
         throw new Error(
-          `${problems.join("\n")}\nThe actual, baseline and diff pictures are in ${artifacts}.\nIntended? Add the \`design change\` label to this PR.`,
+          `${problems.join("\n")}\nThe actual, baseline and diff pictures are in ${artifacts}.\nIntended? Add the \`design change\` label, then commit the new pictures with \`bun scripts/visual-baselines-from-ci.ts <run id>\`.`,
         );
       }
     } finally {

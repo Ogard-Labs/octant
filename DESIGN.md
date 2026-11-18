@@ -1951,16 +1951,20 @@ pictures (differences in red). It does not cover the packaged app, window glass,
 the transcript, other screens, or anything that moves.
 
 An intended change never blocks a pull request: add the `design change` label.
-The run then writes the new baselines to the pull request's own branch as an
-"Update visual baselines" commit and passes, so the changed pictures appear in
-the pull request's files for the reviewer. A pull request from a fork cannot be
-written to; a maintainer runs `bun scripts/visual-baselines-from-ci.ts <run-id>`
-with the failing run's id, reviews the diff pictures and commits. The same
-script is the manual route for any run. Baselines come from CI because fonts and
-anti-aliasing differ on a Mac; `bun run --cwd apps/web visual:check` and
-`visual:update` exist for people who run the same pinned Chromium in a container,
-and a picture drawn on a Mac is never committed. A new scene is added to
-`sceneList.ts` and `scenes.tsx`, and its baselines arrive through the label.
+The run then draws the new pictures in update mode, uploads them as the
+`visual-check` artifact, lists the changed ones in its job summary and passes. It
+pushes nothing: a person (or the agent running the pull request) runs
+`bun scripts/visual-baselines-from-ci.ts <run id>` with that run's id, which
+downloads the artifact and copies each new picture over its baseline, reviews
+the pictures, and commits and pushes `apps/web/visual-baselines`, so the changed
+PNGs appear in the pull request's files. A push to main only compares, so a
+failure there means a labelled change was merged without its pictures. Without
+the label a visible change fails, with the same script as the way out. Baselines
+come from CI because fonts and anti-aliasing differ on a Mac;
+`bun run --cwd apps/web visual:check` and `visual:update` exist for people who
+run the same pinned Chromium in a container, and a picture drawn on a Mac is
+never committed. A new scene is added to `sceneList.ts` and `scenes.tsx`, and its
+baselines arrive the same way.
 
 **Packaged verification.** A change to a fill, a coat, a float or the frame is
 judged in the packaged app under glass on the person's own theme as well as in

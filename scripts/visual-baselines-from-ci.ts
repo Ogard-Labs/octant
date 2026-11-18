@@ -1,15 +1,21 @@
 #!/usr/bin/env bun
 /**
- * Approves an intended visual change by hand: downloads the `visual-check`
- * artifact of a failed CI run and copies every `*.actual.png` over its
- * baseline in `apps/web/visual-baselines`. The normal route is the
- * `design change` label on the pull request, which does the same in CI; use
- * this when the label cannot (a pull request from a fork, or a run you want to
- * review first). Review the `*.diff.png` pictures before you commit.
+ * Commits an intended visual change's pictures: downloads the `visual-check`
+ * artifact of a CI run (a failed run, or a run of a pull request that carries
+ * the `design change` label) and copies every `*.actual.png` over its baseline
+ * in `apps/web/visual-baselines`. CI never pushes pictures itself. Review the
+ * pictures (and the `*.diff.png` of a failed run), then commit and push.
  *
  *   bun scripts/visual-baselines-from-ci.ts <run-id>
  */
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,13 +52,14 @@ let count = 0;
 for (const actual of actuals(download)) {
   const name = actual.slice(actual.lastIndexOf("/") + 1).replace(/\.actual\.png$/, ".png");
   const target = join(baselines, name);
-  const verb = existsSync(target) ? "updated" : "added";
+  const existed = existsSync(target);
+  if (existed && readFileSync(target).equals(readFileSync(actual))) continue;
   copyFileSync(actual, target);
-  console.log(`${verb} ${name}`);
+  console.log(`${existed ? "updated" : "added"} ${name}`);
   count += 1;
 }
 console.log(
   count === 0
-    ? "The run left no actual pictures: nothing changed visibly."
+    ? "Nothing to change: the run left no picture that differs from its baseline."
     : `${String(count)} baselines written to apps/web/visual-baselines. Review the diff pictures, then commit them.`,
 );
