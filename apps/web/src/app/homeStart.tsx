@@ -404,7 +404,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
           ...(activeMode === "code" && readHomeActivity !== undefined
             ? {
                 codeActivity: {
-                  read: (query) => readHomeActivity(query),
+                  read: readHomeActivity,
                   openThread: (mode, threadId) => {
                     actions.closeWorkspaceReaders();
                     if (mode === "chat") actions.selectChatThread(threadId);
