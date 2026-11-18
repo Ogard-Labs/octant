@@ -14917,7 +14917,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   device as the actor. The paired browser offers the Project terminal and
   Private page under **Project tools** in Work and Code, through the start
   screen's quick tools, and **Import HTML…** alone in a Chat thread's Canvas
-  tools. Not built yet: the Browser's Take over and Hand back, `sign-in`,
+  tools. The phone offers the same three from a thread's Views and panes
+  (the terminal as plain lines of output and a line to run), and answers
+  every Work request a window can: the Plan block, a provider's tool
+  approval, its questions and questionnaires, each with the version read and
+  a tool or plan approval behind the phone's own confirmation. Not built yet: the Browser's Take over and Hand back, `sign-in`,
   profile pages and saved flows, which drive the desktop's native Browser in
   the person's signed-in profiles and need a remote input stream and a rule
   for what a device sees of a signed-in page, neither designed; finishing a

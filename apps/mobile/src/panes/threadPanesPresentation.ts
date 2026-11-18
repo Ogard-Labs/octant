@@ -28,6 +28,23 @@ export function listMobileThreadPanes(
   return [{ id: "environment", label: "Env" }, { id: "review", label: "Review" }, ...every];
 }
 
+/**
+ * The device's own tools a thread's sheet offers, as the paired browser does:
+ * a Work or Code thread's Project terminal and Private page once its Project
+ * is known, a Chat thread's Import HTML. The host takes them only from a
+ * device its own person paired, so no other session is offered them; the
+ * host still decides each one and says why when it refuses.
+ */
+export function listMobileThreadTools(input: {
+  readonly mode: MobileInboxMode;
+  readonly actsAsHostPerson: boolean;
+  readonly projectId: string | undefined;
+}): ReadonlyArray<"terminal" | "page" | "import-html"> {
+  if (!input.actsAsHostPerson) return [];
+  if (input.mode === "chat") return ["import-html"];
+  return input.projectId === undefined ? [] : ["terminal", "page"];
+}
+
 /** `+42 −12`, the desktop's diffstat, with a true minus sign. */
 export function diffstatText(additions: number, deletions: number): string {
   return `+${formatExactCount(additions)} −${formatExactCount(deletions)}`;
