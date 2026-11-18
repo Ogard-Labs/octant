@@ -314,7 +314,7 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Provider runtime
 
 ### Server SSH profiles
 
-- Built: Settings › Remote access distinguishes host control, registered-server commands and server-folder work, shows where each runs and routes to the existing setup without starting work. Read-only connection checks distinguish host readiness, fresh SSH trust/authentication, directory access and supported server runtime, without accepting keys or restarting uncertain commands. Saved server actions remain a separate outcome. Detail: [Server Projects: Setup entry](server-projects.md#setup-entry).
+- Built: Settings › Remote access distinguishes host control, registered-server commands and server-folder work, shows where each runs and routes to the existing setup without starting work. Searchable Tailscale and Cloudflare private-routing guides beside it explain the provider-side setup and grant nothing. Read-only connection checks distinguish host readiness, fresh SSH trust/authentication, directory access and supported server runtime, without accepting keys or restarting uncertain commands. Saved server actions remain a separate outcome. Detail: [Server Projects: Setup entry](server-projects.md#setup-entry).
 
 The person registers their own servers with an action profile, and SSH to a registered server is judged by that profile in Work and Code alike.
 
@@ -3213,7 +3213,7 @@ A public Canvas link is off by default and exists only through the person's expl
 - The service has no accounts. A per-share owner secret lives in the credential broker, separate from provider credentials, and never in the journal.
 - A first-party create commits that secret and a non-secret ownership intent before uploading a document. Owned-create binds a random id, owner and exact approved terms; identical retries do not mutate, conflicting retries refuse, and uncertain publication is withdrawn through durable restart/listing recovery. A host never falls back to legacy create. Key-bound ids and durable authenticated cancellation tombstones fence delayed creates; unauthorized/not-found responses never settle ownership.
 - The service logs no IP address and serves design frames from a separate user-content origin.
-- The reference service lives at `apps/share` in this repository and is self-hosted by each user (Bun or Docker); no service address is set by default, and Ogard Labs operates no instance.
+- The reference service lives at `apps/share` in this repository and is self-hosted by each user (Bun or Docker), with a Compose setup guide in Public links Settings; no service address is set by default, and Ogard Labs operates no instance.
 
 Status: Partly built. Since: 2026-10-20. Detail: [Canvas public links](canvas-public-links.md#off-until-the-person-turns-it-on) and [Publishing is the person's act](canvas-public-links.md#publishing-is-the-persons-act).
 
