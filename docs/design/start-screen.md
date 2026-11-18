@@ -530,6 +530,26 @@ the background. A host whose last read has not answered is not asked again, a
 read that takes longer than five seconds is abandoned and leaves that host
 without figures, and leaving the start screen cancels the reads in flight.
 
+### Activity timeframes
+
+A planned Code Home activity panel compares work over a named timeframe to
+the matching previous stretch; the panel itself is not built yet — today
+only the range calculation exists. A timeframe resolves to a half-open
+`[start, end)` instant window plus an optional comparison window in the
+person's own time zone and week start (Sunday = 0 through Saturday = 6).
+**Today**, **This week**, **This month** and **This year** run from the
+local period start to now and compare the same wall-clock position already
+elapsed in the previous period — Wednesday to last Wednesday at the same
+wall time, even across a daylight-saving shift — capped at the previous
+period's end and omitted while the current period has just begun.
+**Yesterday** and **Last month** take the whole civil period against the
+whole previous one, so a skipped or repeated hour reads as a 23- or 25-hour
+day. **Last 24 hours** counts exact elapsed milliseconds against the
+preceding exact 24; **Total** runs unbounded to now with no comparison. A
+custom pair of strict `YYYY-MM-DD` dates covers both whole local days,
+refuses impossible or reversed dates, and compares the equally many civil
+days before it.
+
 ## Needs you across surfaces
 
 **Needs you** surfaces (a start-screen card, answering from Board cards, the
