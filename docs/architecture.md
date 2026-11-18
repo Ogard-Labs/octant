@@ -14873,13 +14873,20 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   paired browser and phone, as the coordinator asked for it; Canvas HTML
   import, whose request names its Project in its workspace scope; and Full
   access and extension install, built earlier. Each is journaled with the
-  device as the actor. Not built yet: the Browser's Take over and Hand back,
-  `sign-in`, profile pages and saved flows, which drive the desktop's native
-  Browser and have no remote input path; finishing a connector sign-in,
-  whose redirect returns to this host's loopback; provider cloud sessions,
-  whose submission policy and job records know only a local window; and
-  server Projects beyond reading, whose journaled records name only a local
-  window. Each owning section keeps its own "not built yet" line until it is
+  device as the actor. The paired browser offers the Project terminal and
+  Private page under **Project tools** in Work and Code, through the start
+  screen's quick tools, and **Import HTML…** alone in a Chat thread's Canvas
+  tools. Not built yet: the Browser's Take over and Hand back, `sign-in`,
+  profile pages and saved flows, which drive the desktop's native Browser in
+  the person's signed-in profiles and need a remote input stream and a rule
+  for what a device sees of a signed-in page, neither designed; finishing a
+  connector sign-in, whose redirect returns to this host's loopback and needs
+  a device-completable flow; provider cloud sessions, whose submission policy
+  and job records know only a local window; and server Projects beyond
+  reading, whose journaled records name only a local window. Each reason is
+  recorded in full in
+  [Decisions and requirements](design/decisions.md#paired-devices-act-as-the-person).
+  Each owning section keeps its own "not built yet" line until it is
   built. A device the host knows only through the hub's roster is unchanged.
 
   **Provider reach Octant no longer narrows** (maintainer decision,
