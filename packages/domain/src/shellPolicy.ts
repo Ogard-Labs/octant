@@ -171,6 +171,22 @@ export function workspaceWelcomeSurface(mode: OctantMode, id: WorkspaceTabId): W
   return { kind: "welcome", id, mode, title: MODE_TITLES[mode] };
 }
 
+/**
+ * Whether replies in this mode predict the person's next message. Absent
+ * settings mean on everywhere, so an install that never opened the setting
+ * keeps the composer's Tab suggestion in every mode.
+ */
+export function nextMessageSuggestionsOn(
+  settings:
+    | { readonly nextMessageSuggestions?: ShellSettings["nextMessageSuggestions"] | undefined }
+    | undefined,
+  mode: OctantMode,
+): boolean {
+  const setting = settings?.nextMessageSuggestions;
+  if (setting === undefined) return true;
+  return setting.enabled && setting.modes.includes(mode);
+}
+
 export function defaultShellSettings(): ShellSettings {
   return {
     chatEnabled: true,

@@ -2381,6 +2381,7 @@ describe("SettingsView", () => {
     expect(links.map((link) => link.textContent)).toEqual([
       "Your identity",
       "Available modes",
+      "Composer",
       "Updates",
       "Files",
       "Threads",

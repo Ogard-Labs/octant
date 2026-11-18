@@ -49,6 +49,10 @@ opens on Your identity (the profile), followed by Your instructions (a
 multi-line field with its count, limit, a likely-secret warning, and Save,
 read-only where the window cannot change it) and Orchestration, the same field
 for coordinator threads ([Octant instructions](octant-instructions.md#settings)),
+has a Composer group after Available modes with **Suggest my next message** (on
+by default) and one switch each for Chat, Work, and Code (all on by default;
+greyed while the main switch is off, keeping their choice for when it comes
+back), which control the composer's Tab suggestion ([Thread view](thread-view.md)),
 and ends on Notifications (what Octant sends while a person is away); Permissions holds the files no agent may touch, then the provider tools the person blocked,
 then the network places and servers agents may reach (Network limits, Safe
 networks, Servers), then what a person has already allowed (remembered

@@ -28,6 +28,7 @@ import {
   NewTaskDraftsContext,
 } from "./composer/useNewTaskPrompt";
 import { StreamRepliesContext } from "./transcript/AssistantMessageBody";
+import { NextMessageSuggestionsContext } from "./followUps/FollowUpSuggestionChips";
 import {
   REPLY_DETAIL_DESCRIPTIONS,
   REPLY_DETAIL_LABELS,
@@ -9332,69 +9333,76 @@ function LaunchedShell(
                                       <StreamRepliesContext.Provider
                                         value={controller.settings?.streamReplies !== false}
                                       >
-                                        <ReplyDetailSourceContext.Provider
-                                          value={replyDetailSource}
+                                        <NextMessageSuggestionsContext.Provider
+                                          value={controller.settings?.nextMessageSuggestions}
                                         >
-                                          <ReplyDetailContext.Provider
-                                            value={replyDetailSource.reading.defaultLevel}
+                                          <ReplyDetailSourceContext.Provider
+                                            value={replyDetailSource}
                                           >
-                                            {/* The floor for every rendered link: panes that can host a
+                                            <ReplyDetailContext.Provider
+                                              value={replyDetailSource.reading.defaultLevel}
+                                            >
+                                              {/* The floor for every rendered link: panes that can host a
                     Browser layer their in-app open over this, and surfaces that
                     never can — dock tools, dialogs, Chat — still get the
                     external open and copy rather than a dead anchor. */}
-                                            <MarkdownLinkActionsContext.Provider
-                                              value={rootLinkActions}
-                                            >
-                                              <WorkKindChoiceContext.Provider
-                                                value={workKindChoice}
+                                              <MarkdownLinkActionsContext.Provider
+                                                value={rootLinkActions}
                                               >
-                                                <ModelToolVerificationContext.Provider
-                                                  value={providerController.verifyModelTools}
+                                                <WorkKindChoiceContext.Provider
+                                                  value={workKindChoice}
                                                 >
-                                                  <HostFederationStackContext.Provider
-                                                    value={federation}
+                                                  <ModelToolVerificationContext.Provider
+                                                    value={providerController.verifyModelTools}
                                                   >
-                                                    <PlanUsageProvider
-                                                      barStyle={
-                                                        controller.settings?.usageBars ?? "smooth"
-                                                      }
-                                                      client={
-                                                        launchedClients.providerUsageLimitsClient
-                                                      }
-                                                      instances={providerController.instances}
+                                                    <HostFederationStackContext.Provider
+                                                      value={federation}
                                                     >
-                                                      <HostPlatformContext.Provider
-                                                        value={hostPlatform}
+                                                      <PlanUsageProvider
+                                                        barStyle={
+                                                          controller.settings?.usageBars ?? "smooth"
+                                                        }
+                                                        client={
+                                                          launchedClients.providerUsageLimitsClient
+                                                        }
+                                                        instances={providerController.instances}
                                                       >
-                                                        <ServerCodeProjectsContext.Provider
-                                                          value={serverCodeProjects}
+                                                        <HostPlatformContext.Provider
+                                                          value={hostPlatform}
                                                         >
-                                                          <CodeDebugWindowProvider
-                                                            origin={
-                                                              new URL(props.launch.serverUrl).origin
-                                                            }
-                                                            windowId={String(props.launch.windowId)}
+                                                          <ServerCodeProjectsContext.Provider
+                                                            value={serverCodeProjects}
                                                           >
-                                                            <QuestionnaireDraftsProvider
-                                                              serverUrl={props.launch.serverUrl}
-                                                              windowId={props.launch.windowId}
+                                                            <CodeDebugWindowProvider
+                                                              origin={
+                                                                new URL(props.launch.serverUrl)
+                                                                  .origin
+                                                              }
+                                                              windowId={String(
+                                                                props.launch.windowId,
+                                                              )}
                                                             >
-                                                              <PaneDockToolsContext.Provider
-                                                                value={paneDockTools}
+                                                              <QuestionnaireDraftsProvider
+                                                                serverUrl={props.launch.serverUrl}
+                                                                windowId={props.launch.windowId}
                                                               >
-                                                                {shell}
-                                                              </PaneDockToolsContext.Provider>
-                                                            </QuestionnaireDraftsProvider>
-                                                          </CodeDebugWindowProvider>
-                                                        </ServerCodeProjectsContext.Provider>
-                                                      </HostPlatformContext.Provider>
-                                                    </PlanUsageProvider>
-                                                  </HostFederationStackContext.Provider>
-                                                </ModelToolVerificationContext.Provider>
-                                              </WorkKindChoiceContext.Provider>
-                                            </MarkdownLinkActionsContext.Provider>
-                                          </ReplyDetailContext.Provider>
-                                        </ReplyDetailSourceContext.Provider>
+                                                                <PaneDockToolsContext.Provider
+                                                                  value={paneDockTools}
+                                                                >
+                                                                  {shell}
+                                                                </PaneDockToolsContext.Provider>
+                                                              </QuestionnaireDraftsProvider>
+                                                            </CodeDebugWindowProvider>
+                                                          </ServerCodeProjectsContext.Provider>
+                                                        </HostPlatformContext.Provider>
+                                                      </PlanUsageProvider>
+                                                    </HostFederationStackContext.Provider>
+                                                  </ModelToolVerificationContext.Provider>
+                                                </WorkKindChoiceContext.Provider>
+                                              </MarkdownLinkActionsContext.Provider>
+                                            </ReplyDetailContext.Provider>
+                                          </ReplyDetailSourceContext.Provider>
+                                        </NextMessageSuggestionsContext.Provider>
                                       </StreamRepliesContext.Provider>
                                     </NewTaskDraftsContext.Provider>
                                   </StableProjectThreadsProvider>
