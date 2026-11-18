@@ -11651,7 +11651,7 @@ launch's tool bridge through the loopback relay.
 (`skill-instructions`, `mcp-server`, `mcp-tool`, `mcp-prompt`, `mcp-resource`,
 `hook`, `app`, `agent`, `apple-development-adapter`, `board`, `integration`,
 `ui-surface`, `appearance-pack`, `preview-viewer`, `provider-driver`, `replica-store`,
-`desktop-provider`, `theme`, `language-server` and `debug-adapter` (Code only)), composer addressing
+`desktop-provider`, `theme`, `ground`, `language-server` and `debug-adapter` (Code only)), composer addressing
 (`@plugin`, `@plugin/component`, `$skill`), and the activation ladder. The
 manifest and component schemas themselves (`ExtensionPackageManifest`,
 component kinds, declared capabilities, and renderer contribution points)
@@ -13671,6 +13671,25 @@ the default. The stored choice is kept, as disabling a plugin preserves its
 selections, so turning the plugin back on restores the theme. _Rationale:_ rewriting the setting on disable
 would lose the person's choice to a reversible switch, and the default is
 already what a missing preset draws.
+
+**Character grounds as plugin contributions** (maintainer request, 2026-11-18;
+built). A plugin may also offer character grounds as data only: a component of
+kind `ground` whose `ground` field holds `characterSet` and optionally
+`characterDensity`, `characterSpeed` and `characterPattern`, validated by the
+same schemas as the person's stored ground (`@octant/contracts/theme`). Like a
+theme, the component declares no capability, entry point, configuration or
+content reference; a `ground` field on any other kind, a missing one on this
+kind, a colour, an image, an emoji set, a speed past 100, or any other field is
+refused at decode. `@octant/plugin-host/grounds` lists the grounds of
+effective components only (installed, trusted and enabled at the plugin and
+the component), under a host-assigned id. The renderer reads them from the
+same extension snapshot as the themes and shows them in the Customize fold's
+starter menu under "From plugins". Picking one copies its values into the
+person's own ground and saves once, so the saved ground never refers to the
+plugin: switching the plugin off or removing it takes its grounds out of the
+menu and leaves a copy already picked as it is. _Rationale:_ a saved reference
+would dangle, and a theme declaration that also carried a ground would tie a
+field to a set of colours.
 
 The first-party manifests have one definition,
 `@octant/plugin-host/first-party-plugins`, which the server and the renderer

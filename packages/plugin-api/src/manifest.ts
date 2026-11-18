@@ -21,6 +21,7 @@ export {
   ExtensionDebugImportType,
   ExtensionDebugLaunchArguments,
   ExtensionDebugRuntimeId,
+  ExtensionGroundDeclaration,
   ExtensionLanguageId,
   ExtensionLanguageServerClass,
   ExtensionLanguageServerDeclaration,

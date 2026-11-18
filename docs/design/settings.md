@@ -85,7 +85,7 @@ background, and a thread-row grid of detail by list). A page names its scope onc
 its own only when it differs. Settings folds long choices it does not need
 open: the built-in background pictures sit behind the current one and a
 Change action, and the pattern dials appear only while the pattern is drawn.
-The ASCII field's pattern, characters, density and speed sit in one folded Customize row. Importing a theme file whose photo is not on this computer leaves the photo out and says so in one quiet line under the import buttons, whose two lines are kept from the first paint, so nothing moves when it fills in. A Pixels ground showing another scene drops the dead photo quietly, since it draws no photo.
+The ASCII field's pattern, characters, density and speed sit in one folded Customize row. The starter set menu gains a "From plugins" group, each entry named with its plugin, while installed, trusted and enabled plugins offer grounds; a pick is copied and saved once. Importing a theme file whose photo is not on this computer leaves the photo out and says so in one quiet line under the import buttons, whose two lines are kept from the first paint, so nothing moves when it fills in. A Pixels ground showing another scene drops the dead photo quietly, since it draws no photo.
 Rows in Settings are `SettingRow`; rows everywhere else are `surface-row`. Both
 draw the same hairline.
 
