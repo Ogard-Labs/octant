@@ -85,6 +85,7 @@ background, and a thread-row grid of detail by list). A page names its scope onc
 its own only when it differs. Settings folds long choices it does not need
 open: the built-in background pictures sit behind the current one and a
 Change action, and the pattern dials appear only while the pattern is drawn.
+The ASCII field's characters, density and speed sit in one folded Customize row.
 Rows in Settings are `SettingRow`; rows everywhere else are `surface-row`. Both
 draw the same hairline.
 

@@ -1506,6 +1506,33 @@ describe("SettingsView", () => {
     expect(screen.getByRole("combobox", { name: "Application background" })).toHaveFocus();
   });
 
+  it("previews character ground edits in the draft and saves once when the slider is released", () => {
+    const applyPatch = vi.fn(async () => true);
+    const updateDraft = vi.fn();
+    renderSettings({
+      initialDeepLink: { section: "appearance", setting: "app-background" },
+      themeController: {
+        draft: {
+          ...DEFAULT_THEME_SETTINGS,
+          appBackground: { ...DEFAULT_THEME_SETTINGS.appBackground, kind: "characters" },
+        },
+        applyPatch,
+        updateDraft,
+      } as never,
+    });
+    fireEvent.click(screen.getByText("Customize"));
+    const density = screen.getByRole("slider", { name: "Density" });
+    fireEvent.change(density, { target: { value: "70" } });
+    fireEvent.change(density, { target: { value: "80" } });
+    expect(updateDraft).toHaveBeenCalledTimes(2);
+    expect(applyPatch).not.toHaveBeenCalled();
+    fireEvent.pointerUp(density);
+    expect(applyPatch).toHaveBeenCalledTimes(1);
+    expect(applyPatch).toHaveBeenCalledWith({
+      appBackground: expect.objectContaining({ characterDensity: 80 }),
+    });
+  });
+
   it("applies a pending deep link from another app surface and reports it consumed", () => {
     const onDeepLinkApplied = vi.fn();
     const { rerender } = renderSettings({ onDeepLinkApplied });
