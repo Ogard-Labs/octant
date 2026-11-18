@@ -35,6 +35,7 @@ import { DEFAULT_FOLDER_ARTIFACTS_SUBFOLDER, effectiveDefaultFolder } from "../d
 import { createArtifactLibraryRouteHandler } from "../artifactLibraryRoutes";
 import { createArtifactMirrorRouteHandler } from "../artifactMirrorRoutes";
 import { ArtifactLibraryService } from "../canvas/artifactLibraryService";
+import { copyClaudePageToCanvas } from "../canvas/claudePageCanvasCopy";
 import { createCanvasRouteHandler, resolveCanvasActiveContext } from "../canvasRoutes";
 import { CanvasEventStore } from "../canvas/canvasEventStore";
 import { markCanvasReader } from "../canvas/canvasOutsideContentMark";
@@ -1252,13 +1253,35 @@ export function wireCanvas(deps: CanvasDependencies) {
       ),
     clock: () => new Date().toISOString() as never,
   });
+  const findPublishedSnapshot = deps.findPublishedSnapshot;
   const artifactLibraryRoutes = createArtifactLibraryRouteHandler({
     library: artifactLibraryService,
     windowAuthorityStore,
     tags: canvasTagService,
-    ...(deps.findPublishedSnapshot === undefined
+    ...(findPublishedSnapshot === undefined
       ? {}
-      : { findPublishedSnapshot: deps.findPublishedSnapshot }),
+      : {
+          findPublishedSnapshot,
+          copyClaudePage: (windowId, request) =>
+            copyClaudePageToCanvas(
+              {
+                hostId: LOCAL_HOST_ID,
+                findPublishedSnapshot,
+                resolveThreadWorkspace: resolveCanvasWorkspace,
+                readProject: (projectId) => {
+                  const project = persistence.readProject(decodeProjectId(projectId));
+                  return project === undefined
+                    ? undefined
+                    : { id: String(project.id), type: project.type, lifecycle: project.lifecycle };
+                },
+                importHtml: (request, context, project) =>
+                  canvasService.importHtml(request, context, project),
+                requestId: randomUUID,
+              },
+              windowId,
+              request,
+            ),
+        }),
   });
   const artifactMirrorRoutes = createArtifactMirrorRouteHandler({
     mirror: artifactMirrorService,
