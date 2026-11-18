@@ -1,6 +1,7 @@
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { createHash } from "node:crypto";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { planReadOnlyToolServers, providerOwnMemoryLaunches } from "@octant/domain";
 import {
   decodeProviderFailure,
@@ -135,7 +136,10 @@ export interface CodexThreadStartInput {
   readonly cwd: string;
   readonly model: string;
   readonly approvalPolicy: "never" | "on-request" | "untrusted";
-  readonly sandbox: "danger-full-access" | "workspace-write" | "read-only";
+  /** Codex's built-in sandbox mode; absent when `permissions` names a profile instead. */
+  readonly sandbox?: "danger-full-access" | "workspace-write" | "read-only";
+  /** A permissions profile the thread's `config` defines, in place of `sandbox`. */
+  readonly permissions?: string;
   /**
    * Who answers approval requests: the host (`user`) or the harness's own
    * reviewer (`auto_review`). Always sent, never omitted — Codex
@@ -205,11 +209,24 @@ export interface CodexThreadConfig {
   readonly skills?: {
     readonly config: ReadonlyArray<{ readonly path: string; readonly enabled: false }>;
   };
+  /** Codex's permissions profiles, by name; see {@link codexNativePermissionProfile}. */
+  readonly permissions?: Readonly<Record<string, CodexPermissionProfile>>;
+  /** Codex's own trust record for a Project folder; see {@link codexProjectTrustConfig}. */
+  readonly projects?: Readonly<Record<string, { readonly trust_level: "trusted" }>>;
+}
+
+/** A Codex permissions profile (`[permissions.<name>]` in codex-rs `permissions_toml.rs`). */
+export interface CodexPermissionProfile {
+  readonly extends: ":workspace";
+  readonly filesystem: Readonly<Record<string, "write" | "deny">>;
+  readonly network?: { readonly enabled: true };
 }
 
 export interface CodexThreadResumeInput {
   readonly threadId: string;
   readonly config?: CodexThreadConfig;
+  /** The permissions profile the resumed thread runs under, which its `config` defines. */
+  readonly permissions?: string;
 }
 
 /**
@@ -470,6 +487,8 @@ export interface CodexTurnStartInput {
       }
     | { readonly type: "readOnly"; readonly networkAccess?: boolean }
     | { readonly type: "externalSandbox"; readonly networkAccess: "restricted" | "enabled" };
+  /** A permissions profile the thread's config defines, in place of `sandboxPolicy`. */
+  readonly permissions?: string;
   readonly approvalsReviewer: "auto_review" | "user";
   /**
    * The thread's current model and reasoning effort, restated per turn once a
@@ -645,6 +664,12 @@ export interface CodexDriverOptions {
   readonly toolCallId?: () => string;
   readonly jitter?: (baseDelayMs: number) => number;
   readonly sleep?: (milliseconds: number) => Promise<void>;
+  /**
+   * The protected paths that stay refused at every level on this host (the
+   * provider sign-ins), resolved by the host and read at each start and
+   * resume. Absent, Codex's own sandbox carries no deny rules.
+   */
+  readonly protectedSignIns?: () => ReadonlyArray<string>;
 }
 
 interface SessionState {
@@ -657,6 +682,8 @@ interface SessionState {
   readonly strict: boolean | undefined;
   /** The sandbox this session's commands run in; see {@link CodexSessionSandbox}. */
   readonly sandbox: CodexSessionSandbox;
+  /** Whether Codex's own sandbox runs under Octant's permissions profile. */
+  readonly permissionProfile: boolean;
   readonly threadId: string;
   readonly correlationId: CorrelationId;
   readonly turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">;
@@ -754,9 +781,9 @@ const capabilities = {
     // The account home's hooks load as Codex loads them; Octant never
     // switched them off.
     hooks: "supported",
-    // Octant has no switch of its own for a Project's Codex config; Codex's
-    // own folder trust decides.
-    projectCode: "unsupported",
+    // A Project the person trusted for Codex loads its `.codex/config.toml`
+    // outside Plan and Strict (`codexProjectTrustConfig`).
+    projectCode: "supported",
   },
 } as const;
 
@@ -1190,7 +1217,9 @@ export function codexExecutionSettings(
   autoApprove?: boolean,
   fullAccessSandbox?: boolean,
   sessionSandbox: CodexSessionSandbox = OCTANT_SANDBOX,
-): Pick<CodexThreadStartInput, "approvalPolicy" | "sandbox" | "approvalsReviewer"> {
+): Pick<CodexThreadStartInput, "approvalPolicy" | "approvalsReviewer"> & {
+  readonly sandbox: NonNullable<CodexThreadStartInput["sandbox"]>;
+} {
   if (
     sessionSandbox.kind === "native" &&
     fullAccessSandbox !== true &&
@@ -1369,6 +1398,124 @@ export function codexTurnExecutionSettings(
           networkAccess: networkOpen === true ? "enabled" : "restricted",
         } as const);
   return { ...rest, sandboxPolicy };
+}
+
+/**
+ * A turn's settings under Octant's permissions profile: the profile restated
+ * by name in place of the built-in `sandboxPolicy`, which would replace it for
+ * this turn and those after it.
+ */
+export function codexTurnPermissions(
+  settings: ReturnType<typeof codexTurnExecutionSettings>,
+  profile: boolean,
+): Pick<
+  CodexTurnStartInput,
+  "approvalPolicy" | "sandboxPolicy" | "approvalsReviewer" | "permissions"
+> {
+  if (!profile) return settings;
+  const { sandboxPolicy: _replaced, ...rest } = settings;
+  return { ...rest, permissions: CODEX_OCTANT_PROFILE };
+}
+
+/** The permissions profile Octant names for Codex's own sandbox outside Strict. */
+export const CODEX_OCTANT_PROFILE = "octant-workspace";
+
+/**
+ * The first release measured to take a named permissions profile from a
+ * thread's `config` with `permissions` selecting it, and to refuse a profile's
+ * `deny` paths inside its own sandbox (codex-cli 0.169.0 on Linux: a `cat` of
+ * a denied file failed with `Permission denied` while the workspace stayed
+ * writable).
+ */
+const CODEX_PERMISSION_PROFILES_RELEASE = [0, 169, 0] as const;
+
+/**
+ * Codex's own workspace sandbox as a named permissions profile, so it can
+ * carry what Octant keeps out of reach outside Strict: other providers'
+ * sign-ins, as `deny` paths Codex's own sandbox refuses to read or write.
+ * Codex's built-in `workspace-write` (thread `sandbox`, turn `sandboxPolicy`)
+ * has no deny field (`SandboxWorkspaceWrite` in codex-rs `config/src/types.rs`
+ * holds writable roots, network and temp exclusions only), so the profile
+ * replaces it: `:workspace` with the session's folders writable, and the
+ * network open only where Octant's egress proxy is not in the way. Each
+ * `allowed` path, the account's own Codex home, is writable again inside a
+ * denied folder; a more specific path wins in Codex's policy (measured on
+ * 0.169.0: a denied folder with one account home re-allowed read that home
+ * and refused its sibling). `undefined` where the session does not run Codex's
+ * own workspace sandbox, on Windows, or on a release before profiles.
+ */
+export function codexNativePermissionProfile(input: {
+  readonly sessionSandbox: CodexSessionSandbox;
+  readonly policy: ProviderExecutionPolicy;
+  readonly fullAccessSandbox: boolean | undefined;
+  readonly platform: NodeJS.Platform;
+  readonly version: string;
+  readonly networkOpen: boolean;
+  readonly denied: ReadonlyArray<string>;
+  readonly allowed: ReadonlyArray<string>;
+}): CodexPermissionProfile | undefined {
+  if (
+    input.sessionSandbox.kind !== "native" ||
+    input.fullAccessSandbox === true ||
+    (input.policy !== "approval-gated" && input.policy !== "auto-accept-edits") ||
+    input.platform === "win32" ||
+    !isAtLeastRelease(input.version, CODEX_PERMISSION_PROFILES_RELEASE)
+  ) {
+    return undefined;
+  }
+  const filesystem: Record<string, "write" | "deny"> = {};
+  for (const root of input.sessionSandbox.writableRoots) filesystem[root] = "write";
+  for (const path of input.denied) filesystem[path] = "deny";
+  for (const path of input.allowed) filesystem[path] = "write";
+  return {
+    extends: ":workspace",
+    filesystem,
+    ...(input.networkOpen ? { network: { enabled: true } as const } : {}),
+  };
+}
+
+/**
+ * The provider sign-ins Codex's own sandbox refuses outside Strict, as Octant's
+ * profile refuses them (the host's Full access list, which is the sign-ins
+ * alone), less the account's own Codex home and what lies in it; that home is
+ * returned as `allowed` when it sits inside a denied folder (an Octant-managed
+ * account home inside Octant's own provider folder).
+ */
+export function codexProtectedSignIns(
+  signIns: ReadonlyArray<string>,
+  codexHome: string,
+): { readonly denied: ReadonlyArray<string>; readonly allowed: ReadonlyArray<string> } {
+  const home = resolve(codexHome);
+  const inside = (path: string, folder: string) =>
+    path === folder || path.startsWith(`${folder}${sep}`);
+  const paths = signIns.map((path) => resolve(path));
+  const denied = [...new Set(paths.filter((path) => !inside(path, home)))];
+  return { denied, allowed: denied.some((path) => inside(home, path)) ? [home] : [] };
+}
+
+/**
+ * A thread's override that makes Codex load its own Project configuration
+ * (`.codex/config.toml` at the Project): the folder recorded as trusted in
+ * the thread's own config, which Codex reads before it loads Project layers
+ * (`project_trust_context` in codex-rs `config/src/loader/mod.rs`). Measured on
+ * 0.169.0: a `read-only` thread loaded the Project's `model` with this
+ * override and not without it, and nothing was written to `config.toml`.
+ * Only for a Work or Code thread whose Project the person trusted for Codex,
+ * outside Plan and Strict.
+ */
+export function codexProjectTrustConfig(input: {
+  readonly projectRoot: string;
+  readonly mode: "chat" | "work" | "code";
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly strict: boolean | undefined;
+  readonly nativeSetup: ProviderNativeSetup | undefined;
+}): Pick<CodexThreadConfig, "projects"> {
+  return input.mode !== "chat" &&
+    input.executionPolicy !== "plan" &&
+    input.strict === false &&
+    input.nativeSetup?.projectCode === true
+    ? { projects: { [input.projectRoot]: { trust_level: "trusted" } } }
+    : {};
 }
 
 /**
@@ -2429,6 +2576,53 @@ function makeConnection(
       codexPlanRunsNativeSandbox(input)
         ? { kind: "native", writableRoots: [projectRoot, ...extraFolders] }
         : OCTANT_SANDBOX;
+    /**
+     * The profile a session of this posture runs Codex's own sandbox under,
+     * read once its process is leased (the network claim follows the lease).
+     */
+    const hostPlatform = options.platform ?? process.platform;
+    const nativeProfile = (input: {
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly fullAccessSandbox?: boolean;
+      readonly strict?: boolean;
+    }): CodexPermissionProfile | undefined => {
+      const launchEnvironment =
+        input.strict === false
+          ? (options.openEnvironment ?? options.environment)
+          : options.environment;
+      const signIns = codexProtectedSignIns(
+        options.protectedSignIns?.() ?? [],
+        launchEnvironment?.CODEX_HOME ?? join(homedir(), ".codex"),
+      );
+      return codexNativePermissionProfile({
+        sessionSandbox: sessionSandbox(input),
+        policy: input.executionPolicy,
+        fullAccessSandbox: input.fullAccessSandbox,
+        platform: hostPlatform,
+        version,
+        networkOpen: leasedNetworkOpen,
+        ...signIns,
+      });
+    };
+    /** A posture's thread config, less what each request adds. */
+    const postureConfig = (input: {
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly fullAccessSandbox?: boolean;
+      readonly strict?: boolean;
+      readonly nativeSetup?: ProviderNativeSetup;
+    }): Pick<CodexThreadConfig, "permissions" | "projects"> => {
+      const profile = nativeProfile(input);
+      return {
+        ...codexProjectTrustConfig({
+          projectRoot,
+          mode: mode ?? "code",
+          executionPolicy: input.executionPolicy,
+          strict: input.strict,
+          nativeSetup: input.nativeSetup,
+        }),
+        ...(profile === undefined ? {} : { permissions: { [CODEX_OCTANT_PROFILE]: profile } }),
+      };
+    };
     const offer = (event: ProviderRuntimeEvent) => Effect.runFork(Queue.offer(queue, event));
     /** Forgets the thread a review ran on once its run ends, so nothing more is read from it. */
     const endReview = (state: SessionState) => {
@@ -3180,6 +3374,7 @@ function makeConnection(
         fullAccessSandbox: input.fullAccessSandbox,
         strict: input.strict,
         sandbox: sessionSandbox(input),
+        permissionProfile: nativeProfile(input) !== undefined,
         threadId: thread.thread.id,
         ...(turnOverrides === undefined ? {} : { turnOverrides }),
         ...(collaborationMode === undefined ? {} : { collaborationMode }),
@@ -3236,16 +3431,23 @@ function makeConnection(
             }
             const dynamicTools = codexDynamicTools(input.tools);
             const modeConfig = yield* modeThreadConfig(input.nativeSetup, input.executionPolicy);
+            const posture = postureConfig(input);
             const config = {
               ...optionSettings.config,
               ...modeConfig,
               ...codexCompactionLimit(input.compactionPoint),
+              ...posture,
             };
+            // A profile replaces Codex's built-in sandbox mode, which codex-rs
+            // refuses alongside it.
+            const { sandbox, ...unsandboxed } = settings;
             const thread = yield* request(() =>
               client.threadStart({
                 cwd: projectRoot,
                 model: input.modelId,
-                ...settings,
+                ...(posture.permissions === undefined
+                  ? { ...unsandboxed, sandbox }
+                  : { ...unsandboxed, permissions: CODEX_OCTANT_PROFILE }),
                 ...optionSettings,
                 config,
                 ...(mode === "chat" ? { environments: [] as const } : {}),
@@ -3325,6 +3527,7 @@ function makeConnection(
             yield* ensureRuntime(codexLeasePosture(input));
             ensureSubscribed();
             const modeConfig = yield* modeThreadConfig(input.nativeSetup, input.executionPolicy);
+            const posture = postureConfig(input);
             const resumeRequest = () =>
               Effect.tryPromise({
                 try: () =>
@@ -3339,7 +3542,14 @@ function makeConnection(
                   // the same overrides, so they are stated on every resume.
                   client.threadResume({
                     threadId: input.resumeCursor.value,
-                    config: { ...modeConfig, ...codexCompactionLimit(input.compactionPoint) },
+                    config: {
+                      ...modeConfig,
+                      ...codexCompactionLimit(input.compactionPoint),
+                      ...posture,
+                    },
+                    ...(posture.permissions === undefined
+                      ? {}
+                      : { permissions: CODEX_OCTANT_PROFILE }),
                   }),
                 catch: (error) =>
                   error instanceof CodexRpcClientFailure ? error : providerFailure(error),
@@ -3458,12 +3668,15 @@ function makeConnection(
                       ...(mentions.length === 0
                         ? {}
                         : { input: [...turnRequest.input, ...mentions] }),
-                      ...codexTurnExecutionSettings(
-                        state.executionPolicy,
-                        state.autoApprove,
-                        state.fullAccessSandbox,
-                        leasedNetworkOpen,
-                        state.sandbox,
+                      ...codexTurnPermissions(
+                        codexTurnExecutionSettings(
+                          state.executionPolicy,
+                          state.autoApprove,
+                          state.fullAccessSandbox,
+                          leasedNetworkOpen,
+                          state.sandbox,
+                        ),
+                        state.permissionProfile,
                       ),
                       ...state.turnOverrides,
                       ...(state.collaborationMode === undefined
