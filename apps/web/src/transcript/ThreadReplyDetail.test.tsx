@@ -138,7 +138,15 @@ describe("Reply detail while a reply streams", () => {
   }
 
   it("at high, shows streaming thinking open and updates it as it arrives", () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({
+      toFake: [
+        "setTimeout",
+        "clearTimeout",
+        "performance",
+        "requestAnimationFrame",
+        "cancelAnimationFrame",
+      ],
+    });
     try {
       const view = render(atHigh(<AssistantMessageBody body="<think>Read the" streaming />));
       expect(inlinePart("Thinking").open).toBe(true);
@@ -148,7 +156,7 @@ describe("Reply detail while a reply streams", () => {
           atHigh(<AssistantMessageBody body="<think>Read the failing log" streaming />),
         );
       });
-      act(() => vi.advanceTimersByTime(60));
+      act(() => vi.advanceTimersByTime(500));
       expect(screen.getByText(/Read the failing log/)).toBeVisible();
       expect(inlinePart("Thinking").open).toBe(true);
     } finally {

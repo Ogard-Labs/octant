@@ -219,12 +219,22 @@ opens at High, and an open run past five rows shows its latest five behind
 
 ## Streaming and earlier messages
 
-The displayed partial answer coalesces updates on a fifty-millisecond beat, or
-one hundred milliseconds for long answers (at least sixteen thousand text
-units). The first content, a replacement and the finished answer appear
-immediately. Coalescing happens before parsing the whole answer, so Markdown
-references and code fences keep their document-wide meaning; it does not delay
-provider data, journal writes or copy/export.
+A streaming answer is revealed at an even pace, not as the bursts arrive. The
+view keeps a smoothed measure of how fast text arrives and how often, holds back
+about one arrival interval of it (between 50 and 400 milliseconds), and shows
+text from that buffer on each animation frame at the arrival rate. It speeds up
+gently when the backlog grows and never jumps, and it ends a step on a word
+boundary when the word finishes within twelve characters. When the reveal falls
+more than about 1.2 seconds behind (a reconnect or a large paste) it skips ahead
+to the buffer. Answers of at least sixteen thousand text units step at most every
+hundred milliseconds instead of every thirty-two, to bound the cost of parsing.
+The first content, a replacement or shrunk text, and text already present when a
+running thread opens appear immediately; only text that arrives afterwards is
+paced. The finished answer drains its remaining text within one hundred
+milliseconds. With reduced motion requested, text shows as it arrives. Pacing
+happens before parsing the whole answer, so Markdown references and code fences
+keep their document-wide meaning, and only the streaming message updates; it
+does not delay provider data, journal writes or copy/export.
 
 A thread opens on its newest messages. When earlier ones exist, one row above
 the oldest loaded message offers **Load earlier messages** as a ghost button;
