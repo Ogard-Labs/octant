@@ -317,8 +317,7 @@ export interface ConfiguredProviderDriverOptions {
 /**
  * What carries a thread's session between accounts of one provider, for every
  * mode's turn path: the instances as configured now, a driver built from the
- * same options the turn's own driver is, and the host's home and environment
- * that name each account's directory.
+ * same options the turn's own driver is, which does the carrying itself.
  */
 export function makeConfiguredAccountSessionCarrier(
   readProviderInstance: (instanceId: ProviderInstanceId) => ProviderInstance | undefined,
@@ -335,8 +334,6 @@ export function makeConfiguredAccountSessionCarrier(
         return undefined;
       }
     },
-    hostEnvironment: process.env,
-    homeDirectory: homedir(),
   });
 }
 

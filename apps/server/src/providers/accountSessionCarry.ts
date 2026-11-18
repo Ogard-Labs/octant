@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import type {
   AccountMoveTextHandoffCause,
   ProviderInstance,
@@ -9,8 +8,6 @@ import type {
 } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk";
 import { Effect } from "effect";
-import { copyClaudeAccountSession } from "./claudeAccountSessionCopy";
-import { resolveProviderToolingAccount } from "./providerToolingAccount";
 
 /**
  * A thread moved to another account of the same provider keeps the provider's
@@ -53,8 +50,6 @@ export function makeAccountSessionCarrier(dependencies: {
   readonly resolveDriver: (
     id: ProviderInstanceId,
   ) => Pick<ProviderDriver, "nativeSessions"> | undefined;
-  readonly hostEnvironment: NodeJS.ProcessEnv;
-  readonly homeDirectory: string;
 }): AccountSessionCarrier {
   const sameProvider = (from: ProviderInstanceId, to: ProviderInstanceId) => {
     if (String(from) === String(to)) return false;
@@ -67,31 +62,28 @@ export function makeAccountSessionCarrier(dependencies: {
     const to = dependencies.readInstance(request.toInstanceId);
     if (from === undefined || to === undefined)
       return { status: "text", cause: "account-unavailable" };
-    // Only Claude Code's session files are known well enough to copy. Codex
-    // keeps a thread's record beyond its rollout file, and a cursor of any
-    // other kind names nothing in an account directory.
-    if (
-      from.driverKind !== "claude" ||
-      to.driverKind !== "claude" ||
-      request.resumeCursor.driverKind !== "claude"
-    )
+    // The new account's driver does the copying, since only it knows where
+    // its runtime keeps a session; a driver that cannot carry one, or a
+    // cursor from another runtime, keeps the text handoff.
+    if (from.driverKind !== to.driverKind || request.resumeCursor.driverKind !== to.driverKind)
       return { status: "text", cause: "provider-cannot-carry" };
-    const driver = dependencies.resolveDriver(request.toInstanceId);
-    const nativeSessions = driver?.nativeSessions;
-    if (nativeSessions === undefined) return { status: "text", cause: "provider-cannot-carry" };
-    const directory = (instance: ProviderInstance) =>
-      resolveProviderToolingAccount(
-        instance,
-        dependencies.hostEnvironment,
-        dependencies.homeDirectory,
-      )?.directory ?? join(dependencies.homeDirectory, ".claude");
-    const copied = await copyClaudeAccountSession({
-      fromDirectory: directory(from),
-      toDirectory: directory(to),
-      projectRoot: request.projectRoot,
-      sessionId: request.resumeCursor.value,
-    });
-    if (copied.status === "refused") return { status: "text", cause: "session-not-copied" };
+    const nativeSessions = dependencies.resolveDriver(request.toInstanceId)?.nativeSessions;
+    const carrySession = nativeSessions?.carry;
+    if (nativeSessions === undefined || carrySession === undefined)
+      return { status: "text", cause: "provider-cannot-carry" };
+    const copied = await Effect.runPromise(
+      Effect.either(
+        carrySession({
+          instanceId: request.toInstanceId,
+          fromInstanceId: request.fromInstanceId,
+          projectRoot: request.projectRoot,
+          nativeSessionId: request.resumeCursor.value,
+        }),
+      ),
+    ).catch(() => undefined);
+    if (copied === undefined || copied._tag === "Left" || copied.right.status === "refused")
+      return { status: "text", cause: "session-not-copied" };
+    const discard = copied.right.discard;
     // A turn prepared earlier and never started may already have claimed the
     // copy for this same Octant session; giving that claim back first makes
     // the move repeatable. A claim another session holds is left alone, and
@@ -118,7 +110,7 @@ export function makeAccountSessionCarrier(dependencies: {
       ),
     ).catch(() => undefined);
     if (adopted === undefined || adopted._tag === "Left") {
-      await copied.discard();
+      await Effect.runPromise(discard()).catch(() => undefined);
       return { status: "text", cause: "session-not-adopted" };
     }
     return { status: "carried", resumeCursor: adopted.right };

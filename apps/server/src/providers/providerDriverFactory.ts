@@ -304,6 +304,21 @@ export function makeProviderDriver(
         binaryPath: instance.configuration.binaryPath,
         authentication: instance.configuration.authentication,
         ...(configDirectory === undefined ? {} : { configDirectory }),
+        // Every Claude account's directory by the rule its launch uses, so a
+        // thread moved between two of them can carry its session across.
+        accountDirectory: (instanceId) => {
+          const peer = options.claudeInstances?.find(
+            (candidate) => String(candidate.id) === String(instanceId),
+          );
+          if (peer === undefined || peer.driverKind !== "claude") return undefined;
+          const hostDirectory = hostEnvironment.CLAUDE_CONFIG_DIR?.trim();
+          return (
+            effectiveClaudeAccountConfigDirectory(peer, homedir()) ??
+            (hostDirectory !== undefined && isAbsolute(hostDirectory)
+              ? hostDirectory
+              : join(homedir(), ".claude"))
+          );
+        },
         process: options.claudeProcess,
         sdk: options.claudeSdk,
         ...(options.claudeRuntimeNetwork === undefined

@@ -73,6 +73,7 @@ import {
 import {
   claudeLoginKeychainPath,
   claudePlanRunsCommands,
+  claudeProjectFolderName,
   type ClaudeProcessPort,
 } from "./claudeProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
@@ -253,6 +254,7 @@ function harness(
     readonly autoCompactThreshold?: number;
     readonly compactAnnounced?: boolean;
     readonly configDirectory?: string;
+    readonly accountDirectory?: (instanceId: string) => string | undefined;
     readonly runtimeVersion?: string;
     readonly artifactDelivery?: () => boolean;
     readonly ownMemory?: () => boolean;
@@ -408,6 +410,9 @@ function harness(
       ...(options.configDirectory === undefined
         ? {}
         : { configDirectory: options.configDirectory }),
+      ...(options.accountDirectory === undefined
+        ? {}
+        : { accountDirectory: options.accountDirectory }),
       ...(options.artifactDelivery === undefined
         ? {}
         : { artifactDelivery: options.artifactDelivery }),
@@ -7526,6 +7531,58 @@ describe("Claude sessions started outside Octant", () => {
       f.driver.nativeSessions!.list({ instanceId, projectRoot }),
     );
     expect(listed.map((session) => session.nativeSessionId)).toEqual([outside]);
+  });
+
+  it("carries a session over from another account's directory and takes the copy back on discard", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "octant-claude-carry-")));
+    try {
+      const project = join(root, "project");
+      const nativeSessionId = "6f1c2e2a-3b4d-4c5e-8f90-0a1b2c3d4e5f";
+      const folder = claudeProjectFolderName(project);
+      await mkdir(project);
+      await mkdir(join(root, "a", "projects", folder), { recursive: true });
+      await mkdir(join(root, "b"));
+      await writeFile(join(root, "a", "projects", folder, `${nativeSessionId}.jsonl`), "t\n");
+      const directories = new Map([
+        [String(otherInstanceId), join(root, "a")],
+        [String(instanceId), join(root, "b")],
+      ]);
+      const f = harness("subscription", "current-session", {
+        accountDirectory: (id) => directories.get(String(id)),
+      });
+      const copy = join(root, "b", "projects", folder, `${nativeSessionId}.jsonl`);
+
+      const carried = await Effect.runPromise(
+        f.driver.nativeSessions!.carry!({
+          instanceId,
+          fromInstanceId: otherInstanceId,
+          projectRoot: project,
+          nativeSessionId,
+        }),
+      );
+      expect(carried.status).toBe("carried");
+      expect(existsSync(copy)).toBe(true);
+      if (carried.status === "carried") await Effect.runPromise(carried.discard());
+      expect(existsSync(copy)).toBe(false);
+
+      directories.delete(String(otherInstanceId));
+      await expect(
+        Effect.runPromise(
+          f.driver.nativeSessions!.carry!({
+            instanceId,
+            fromInstanceId: otherInstanceId,
+            projectRoot: project,
+            nativeSessionId,
+          }),
+        ),
+      ).resolves.toEqual({ status: "refused" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("offers no carrying without a way to find each account's directory", () => {
+    expect(harness().driver.nativeSessions?.carry).toBeUndefined();
   });
 });
 

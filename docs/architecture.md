@@ -7151,8 +7151,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   reversed the text-only rule for these moves: the person moving between
   their own accounts expects the conversation to go on as it was, with its
   tool activity and prompt cache). The first turn on the new account, before
-  the session decision, copies exactly that session's files from the old
-  account's directory (`CLAUDE_CONFIG_DIR`, default `~/.claude`) into the new
+  the session decision, has the new account's driver copy, through the
+  provider-neutral `nativeSessions.carry` port of the provider SDK, exactly
+  that session's files from the old account's directory (`CLAUDE_CONFIG_DIR`, default `~/.claude`) into the new
   one's: `projects/<folder>/<session>.jsonl`, the session's own folder beside
   it and `file-history/<session>/` when present, the folder named after the
   canonical working directory so it is the same for both accounts on one

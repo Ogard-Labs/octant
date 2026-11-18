@@ -1,6 +1,3 @@
-import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import {
   decodeProviderInstance,
   decodeProviderInstanceId,
@@ -8,11 +5,10 @@ import {
   decodeProviderSessionId,
   type ProviderInstance,
 } from "@octant/contracts";
-import type { ProviderDriver } from "@octant/provider-sdk";
+import type { ProviderNativeSessions } from "@octant/provider-sdk";
 import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { makeAccountSessionCarrier } from "./accountSessionCarry";
-import { claudeProjectFolderName } from "./claudeProcess";
 
 const first = decodeProviderInstanceId("80000000-0000-4000-8000-000000000931");
 const second = decodeProviderInstanceId("80000000-0000-4000-8000-000000000932");
@@ -41,24 +37,16 @@ function claude(id: typeof first, configDirectory: string): ProviderInstance {
 }
 
 describe("carrying a session to another account of the same provider", () => {
-  let root: string;
-  let projectRoot: string;
   let instances: Map<string, ProviderInstance>;
+  let carried: Array<{ instanceId: string; fromInstanceId: string; nativeSessionId: string }>;
+  let discarded: number;
 
-  beforeEach(async () => {
-    root = await realpath(await mkdtemp(join(tmpdir(), "octant-account-carry-")));
-    projectRoot = join(root, "project");
-    await Promise.all([mkdir(projectRoot), mkdir(join(root, "a")), mkdir(join(root, "b"))]);
-    await mkdir(join(root, "a", "projects", claudeProjectFolderName(projectRoot)), {
-      recursive: true,
-    });
-    await writeFile(
-      join(root, "a", "projects", claudeProjectFolderName(projectRoot), `${nativeSessionId}.jsonl`),
-      "t\n",
-    );
+  beforeEach(() => {
+    carried = [];
+    discarded = 0;
     instances = new Map([
-      [String(first), claude(first, join(root, "a"))],
-      [String(second), claude(second, join(root, "b"))],
+      [String(first), claude(first, "/accounts/a")],
+      [String(second), claude(second, "/accounts/b")],
       [
         String(codex),
         decodeProviderInstance({
@@ -76,32 +64,46 @@ describe("carrying a session to another account of the same provider", () => {
     ]);
   });
 
-  afterEach(async () => {
-    await rm(root, { recursive: true, force: true });
-  });
-
   const request = (to = second) => ({
     fromInstanceId: first,
     toInstanceId: to,
     resumeCursor: { driverKind: "claude" as const, value: nativeSessionId },
     sessionId,
-    projectRoot,
+    projectRoot: "/projects/one",
     mode: "chat" as const,
     modelId: decodeProviderModelId("model-a"),
   });
 
-  const carrier = (adopt: NonNullable<ProviderDriver["nativeSessions"]>["adopt"]) =>
+  const carrier = (
+    adopt: ProviderNativeSessions["adopt"],
+    // `null` builds a driver that carries nothing.
+    carry: ProviderNativeSessions["carry"] | null = (input) => {
+      carried.push({
+        instanceId: String(input.instanceId),
+        fromInstanceId: String(input.fromInstanceId),
+        nativeSessionId: input.nativeSessionId,
+      });
+      return Effect.succeed({
+        status: "carried",
+        discard: () =>
+          Effect.sync(() => {
+            discarded += 1;
+          }),
+      });
+    },
+  ) =>
     makeAccountSessionCarrier({
       readInstance: (id) => instances.get(String(id)),
-      resolveDriver: () => ({ nativeSessions: { list: () => Effect.succeed([]), adopt } }),
-      hostEnvironment: {},
-      homeDirectory: root,
+      resolveDriver: () => ({
+        nativeSessions: {
+          list: () => Effect.succeed([]),
+          adopt,
+          ...(carry === null || carry === undefined ? {} : { carry }),
+        },
+      }),
     });
 
-  const copied = () =>
-    join(root, "b", "projects", claudeProjectFolderName(projectRoot), `${nativeSessionId}.jsonl`);
-
-  it("copies the session into the new account and answers the cursor its driver took it up with", async () => {
+  it("has the new account's driver bring the session over and answers the cursor it took it up with", async () => {
     const adopted: Array<{ instanceId: string; nativeSessionId: string; sessionId: string }> = [];
     const carry = carrier((input) => {
       adopted.push({
@@ -116,22 +118,34 @@ describe("carrying a session to another account of the same provider", () => {
       status: "carried",
       resumeCursor: { driverKind: "claude", value: nativeSessionId },
     });
+    expect(carried).toEqual([
+      { instanceId: String(second), fromInstanceId: String(first), nativeSessionId },
+    ]);
     expect(adopted).toEqual([
       { instanceId: String(second), nativeSessionId, sessionId: String(sessionId) },
     ]);
-    expect((await stat(copied())).isFile()).toBe(true);
+    expect(discarded).toBe(0);
   });
 
-  it("removes the copy when the new account refuses to take it up", async () => {
+  it("takes the copy back when the new account refuses to take it up", async () => {
     const carry = carrier(() =>
       Effect.fail({ category: "unavailable" as const, message: "Already held." }),
     );
 
     expect(await carry.carry(request())).toEqual({ status: "text", cause: "session-not-adopted" });
-    await expect(stat(copied())).rejects.toThrow();
+    expect(discarded).toBe(1);
   });
 
-  it("keeps another provider's move on the text handoff", async () => {
+  it("hands over as text when the driver refuses to bring the session", async () => {
+    const carry = carrier(
+      () => Effect.die("never adopted"),
+      () => Effect.succeed({ status: "refused" }),
+    );
+
+    expect(await carry.carry(request())).toEqual({ status: "text", cause: "session-not-copied" });
+  });
+
+  it("keeps the text handoff for another provider's move and for a driver that carries nothing", async () => {
     const carry = carrier(() => Effect.die("never adopted"));
 
     expect(carry.sameProvider(first, codex)).toBe(false);
@@ -141,6 +155,11 @@ describe("carrying a session to another account of the same provider", () => {
       status: "text",
       cause: "provider-cannot-carry",
     });
+    expect(await carrier(() => Effect.die("never adopted"), null).carry(request())).toEqual({
+      status: "text",
+      cause: "provider-cannot-carry",
+    });
+    expect(carried).toEqual([]);
   });
 
   it("hands over as text when an account is no longer set up", async () => {
