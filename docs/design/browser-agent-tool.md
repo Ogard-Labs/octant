@@ -752,7 +752,7 @@ runs, not when it was recorded.
   Project's flows with step count and first address and deletes one after a
   confirmation, from a local window or a paired device (`/api/browser/flows`;
   maintainer decision, 2026-11-12; not built yet: today a paired device is
-  refused). A person may also select an existing active, idle Work or Code task,
+  refused; designed in [A paired device holds the page](#a-paired-device-holds-the-page)). A person may also select an existing active, idle Work or Code task,
   review its fixed steps and run-specific text, and start through that task's
   current model and authority. Settings supplies no authority of its own.
 - **Reviewed run.** The server binds the local window, flow version, task/model,
@@ -1037,7 +1037,8 @@ needed.
   CLI in a thread terminal (`sign-in-needs-a-person`): nobody there can sign
   in. A paired device's turn is offered the sign-in, and the person signs in
   from that device or at the computer (maintainer decision, 2026-11-12; not built
-  yet: today it is refused, `sign-in-needs-this-computer`).
+  yet: today it is refused, `sign-in-needs-this-computer`; designed in
+  [A paired device holds the page](#a-paired-device-holds-the-page)).
 - While a native page is held for sign-in or take-over, **Login permission**
   lets the person review one 1Password account/vault/item by immutable IDs.
   The review names the exact HTTPS origin and port, top frame, profile and
@@ -1205,7 +1206,7 @@ packaged, personal-account or cross-platform acceptance evidence.
   an operation of the agent tool. A paired device takes over and hands back
   as a local window does (maintainer decision, 2026-11-12). Not built yet:
   today a paired device may not, and the gateway does not admit the paths for
-  it.
+  it; the design is [A paired device holds the page](#a-paired-device-holds-the-page).
 - Rationale for what is built today: a paired device may tap, press, and
   scroll a Private page (`remoteBrowserActionReach`) but cannot type, choose,
   or navigate, so holding the agent out of a page was worth nothing to it. Once
@@ -1282,6 +1283,202 @@ frames are not recovered after host restart.
   the person's, so every agent path (Work, Code, a batch's steps, an action
   that waited on an approval) already checks it. The refusal names a different
   reason because "waiting for the person to sign in" would be false.
+
+### A paired device holds the page
+
+Designed, not built (maintainer request, 2026-11-18). A device the host's own
+person paired takes over a page of the desktop's native Browser, drives it,
+and hands it back as a window of this computer does; it answers a `sign-in`
+card from that device; it opens and acts on profile pages
+([Browser profiles: what a device sees](browser-profiles.md#what-a-paired-device-sees-of-a-signed-in-page));
+and it saves, reviews and runs flows. Until it is built, the refusals named
+in [Take over and Hand back](#take-over-and-hand-back) and the owner control
+path above stay as they are.
+
+- **Who.** Only a principal the gateway marks `person-paired-device` (the
+  device's registration says `user-approved`; `GET /api/remote/auth/device`
+  answers `actsAsHostPerson`). A device the hub's roster introduced, an owner
+  device on a roster-only host, an agent grant's session (a grant never
+  carries the host Browser; [Agent access](agent-access.md)), a routine, a
+  subagent, a terminal CLI and a caller with no session are refused
+  `remote-control-not-person` (403) before any page is touched. The route,
+  not the client, decides.
+- **One page, one lease.** Take over from a device opens a lease bound to the
+  thread, the Browser context, the tab, the top document, the profile, the
+  page's origin policy version and the device's id, session and credential
+  generation. It is the same sign-in hold (`waitingForPerson` is `take-over`),
+  not a second mechanism. One controller holds a page at a time: a second
+  device's take-over is refused `browser-page-held-elsewhere`, and the device
+  that holds it may hold no other page on the host. At most four leases are
+  live on a host at once. A lease never reaches another tab, another thread's
+  page, a headless page or a dedicated page; a tab the page opens is offered
+  to the device as a new take-over, not added to the lease.
+- **Local input wins.** A key, click or scroll at this computer ends the
+  device's lease at the native boundary (**Reclaim locally**, as for the owner
+  path), and the hold stays the person's at the window. The toolbar there
+  names the device holding the page ("Held from" and the device's name).
+- **The agent stays paused while the lease is live.** The agent tool's next
+  call does not take the page back from a live lease, unlike a window's
+  take-over (2026-11-17 rule); it is refused `browser-person-took-over`, as
+  for a page a paired owner device controls. When the lease ends without
+  Hand back (the device went away, below), the hold becomes an ordinary
+  take-over, which the agent's next call takes back as it would from a
+  window. Hand back from the device answers the agent's next acting call with
+  a fresh snapshot and the hand-back note, exactly as at a window.
+- **Input path.** The device sends a closed set of input events and the host
+  dispatches them through the debugger input path the agent's own input uses
+  (`Input.dispatchMouseEvent`, `Input.dispatchKeyEvent`, `Input.insertText`,
+  `Input.imeSetComposition`, `Input.dispatchTouchEvent`), never through native
+  input injection. Local input therefore still reclaims, and the host
+  attributes the dispatch to the lease, not to the agent.
+  - Pointer: `down`, `move`, `up` (button, click count, modifiers) and
+    `wheel` (deltas), with coordinates in the frame the device was shown;
+    touch `tap` and `drag` for phones. Hover follows pointer moves.
+  - Keys: `down` and `up` with the DOM `key` and `code` and modifiers, the
+    host's own shortcuts (quit, close window, devtools, the address bar) never
+    included.
+  - Text: a committed string of at most 256 characters, and IME composition
+    `start`, `update` (at most 256 characters) and `commit`, so a phone's
+    keyboard, dictation and CJK input work.
+  - No URL, selector, script, protocol, clipboard read, file path, profile or
+    credential-broker operation travels on this path. Navigating by address
+    keeps its own route and its navigation guards, which refuse a redirect to
+    an unapproved site for a device.
+- **Coordinates never land on the wrong page.** Every pointer event names the
+  frame it was aimed at. An event aimed at a frame older than the page's last
+  navigation, tab change or viewport change is dropped and answered
+  `stale-frame`, so a tap meant for one page never lands on the next.
+- **Frames back.** The host sends JPEG screencast frames of that one tab, at
+  most 1920 by 1200 and 4 MiB each, at most ten a second, fewer when the
+  device reads them slowly (a frame the device has not read is replaced, never
+  queued). Frames are person-only and volatile: they never enter agent
+  observations, captures, artifacts, the journal, an export or a log, and a
+  client keeps none beyond the one it shows. The phone hides the frame when
+  it goes to the background, so the app switcher's snapshot holds none.
+  Frames are withheld (a `withheld` status with a reason, the last frame
+  blanked) while brokered fill or a bounded page script holds the page's
+  private custody, while a native permission or authentication prompt is
+  over the page, and while the tab shows a page outside the lease's document.
+- **Clipboard.** The host's clipboard is the person's at this computer and
+  never reaches a device: a copy in the page stays on the host, and no device
+  request reads it. A paste on the device is the device's own clipboard,
+  read by the client only on the person's paste gesture and sent as a `text`
+  event. Rejected: synchronizing the two clipboards, which would hand
+  whatever the person at the Mac last copied (often a password) to every
+  holder of a lease.
+- **File choosers.** A file input the page opens during a lease is
+  intercepted (`Page.setInterceptFileChooserDialog`); the device chooses a
+  file of its own, sent in a bounded upload (the 10 MiB attachment budget),
+  staged in host-private temporary storage and handed to that one chooser,
+  then deleted. The host's native picker never opens for a device and no host
+  path is accepted. The page's ordinary upload permission still applies;
+  downloads follow the existing download permission, which a lease does not
+  change.
+- **Typed secrets stay out of reach.** Input events are never journaled,
+  logged or kept: the gateway records the route and body size only, and the
+  host drops each event once dispatched. The agent cannot read them: it is
+  paused for the whole lease, its fixed readers never return a password or
+  one-time-code value afterwards, and a screenshot of a frame holding one is
+  still withheld from it. The page's own code may keep or reflect what was
+  typed; that residual is the same as at a window.
+- **Credentials.** Octant's Browser offers no saved-password autofill of its
+  own, so nothing autofills into a frame. Brokered 1Password fill is the
+  person's act and a device may start it as a window does, through **Login
+  permission**, **Review login form**, **Fill selected fields** and **Submit
+  sign-in form** on the device: the reviews show item names and the exact
+  sites, and values stay in the broker; frames are withheld from the start of
+  private custody until it is released, so a filled value is never captured
+  in a frame before the page masks it. Linking a secret store stays an act at
+  the machine.
+- **Private pages.** A Private page takes the same lease under the same
+  navigation guards as a window; its sign-in lasts as long as the page.
+- **`sign-in` from a device.** A device's turn may ask for a sign-in: the card
+  waits in the thread for any window or device that can see it, and
+  **Sign in here** on the device opens a lease on the held page. **Continue**
+  and **Cancel** answer the card from the device as from a window. The
+  `sign-in-needs-this-computer` refusal is retired for a person-paired device;
+  a roster device's turn keeps it.
+- **Flows.** Saving, reviewing, running and deleting a flow work from a
+  device through `/api/browser/flows`: the host-issued review id binds the
+  device's id, session and credential generation in place of the window, and
+  a changed session or a revoked device ends the review. A flow's steps never
+  run while a lease holds the page.
+- **End on disconnect.** The lease lives only while the device's frame stream
+  is open. It ends when the stream closes and does not reopen within 30
+  seconds, when no input or frame read arrives for 60 seconds, when the
+  device is revoked or its session ends (at once, before another event is
+  dispatched), when the thread is archived or the page stops, and at host
+  restart, which restores no lease. An event already sent may have acted and
+  is never retried.
+- **Rate limits.** At most 60 events a request and 240 events a second per
+  lease, text at most 4,096 characters a minute per lease, and one frame
+  stream per lease; past a limit the request is answered 429 with
+  `Retry-After` and nothing in it is dispatched. A lease's requests share the
+  device's ordinary request budget.
+- **Journal.** Taking over from a device is journaled, unlike at a window,
+  because every remote change names its principal: `browser.remote-hold-started@1`
+  and `browser.remote-hold-ended@1` on the thread's Browser aggregate, with the
+  envelope actor `remote-device` and the device id, and a payload of the
+  context, tab, profile kind, the origin at start, the end reason (`handed-back`,
+  `reclaimed-locally`, `disconnected`, `revoked`, `page-ended`, `agent-sign-in`)
+  and counts of events and frames. No typed value, key, coordinate, frame or
+  address after the first is recorded. Thread purge removes them.
+
+**Wire contract.** A schema-only module `@octant/contracts/paired-browser-control`
+generalizes today's owner control contract (`ownerBrowser.ts`) instead of
+adding a parallel one:
+
+- `PairedBrowserTarget`: thread, context, tab, document version and profile
+  kind, taken from what the device's Browser pane already lists.
+- `PairedBrowserRequest`: `take-over` (target), `hand-back` and `release`
+  (lease id), `input` (lease id, a strictly increasing sequence number, and
+  1 to 60 `PairedBrowserInput` events), and `file-choice` (lease id, chooser
+  id, upload id).
+- `PairedBrowserInput`: the closed pointer, wheel, touch, key, text and
+  composition union above, each pointer event carrying its frame id.
+- `PairedBrowserStreamEvent`, one NDJSON line each: `frame` (frame id,
+  document version, viewport, device pixel ratio, JPEG as base64), `withheld`
+  (reason), `file-chooser` (chooser id, accepted types, multiple),
+  `reclaimed-locally`, and `ended` (reason).
+- `PairedBrowserResponse`: `held` (lease id, expiry), `input` (last accepted
+  sequence, effect `none`, `possible` or `completed`), `released`, and
+  `refused` with a closed reason list (`remote-control-not-person`,
+  `browser-page-held-elsewhere`, `stale-frame`, `lease-ended`,
+  `rate-limited`, `page-not-here`, `authority-ended`).
+
+**Transport.** The private listener's existing signed device session carries
+it, with no new listener and no WebSocket: the phone uses no upgraded
+connection and the listener upgrades only its relay route. Take over and
+Hand back reuse `/api/browser/contexts/take-over` and `/hand-back`, which the
+gateway then admits for a person-paired device; input is `POST
+/api/browser/remote-control/input`; frames and status are one long-lived NDJSON
+response from `POST /api/browser/remote-control/stream`, the shape the phone's
+Chat subscription already streams over its pinned connection; a chooser's
+file goes through `POST /api/browser/remote-control/file`. A duplicate or
+out-of-order sequence number is refused, so a retried request never types
+twice.
+
+- Rationale: the debugger input path is chosen because the supported Electron
+  runtime reports injected native mouse input exactly as it reports the person
+  at the Mac, so native injection would either reclaim the page from the
+  device on its own taps or stop recognizing the person's. Ending a lease
+  without handing back keeps the hold the person's, because a lost
+  connection is not a decision to give the agent the page; turning it into an
+  ordinary take-over then keeps the 2026-11-17 rule that the agent takes the
+  page back, so a phone left in a pocket cannot stall a thread for longer than
+  the page's idle window. Journaling a device's hold, where a window's is not,
+  costs two events and gives the person a record of which device drove a
+  signed-in page.
+- Rejected: streaming the page's DOM or accessibility tree to the device and
+  replaying it there, which would ship the page's scripts' data and hidden
+  fields to the device and diverge from what the page shows; a remote desktop
+  of the whole window, which would show other tabs and the host's chrome; a
+  WebSocket channel, which the phone does not use and the listener does not
+  upgrade; and widening the owner path's 60-second, per-input unlock to
+  person-paired devices, which the 2026-11-13 decision removed from the
+  product routes.
+- Once this is built, the owner control path above gates nothing and is
+  removed with it.
 
 ## Diagnostics
 
