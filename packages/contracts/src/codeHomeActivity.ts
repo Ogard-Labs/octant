@@ -149,6 +149,7 @@ export const ActivityRecord = Schema.Union(
     number: PositiveInt,
     mergedBy: GithubRepositoryOwner,
     threadId: CodeThreadId,
+    projectId: Schema.optional(ProjectId),
   }),
   Schema.Struct({
     kind: Schema.Literal("issues-closed"),
@@ -160,6 +161,7 @@ export const ActivityRecord = Schema.Union(
     number: PositiveInt,
     closingPullRequest: ActivityClosingPullRequest,
     threadId: CodeThreadId,
+    projectId: Schema.optional(ProjectId),
   }),
   Schema.Struct({
     kind: Schema.Literal("releases-published"),
@@ -179,6 +181,7 @@ export const ActivityRecord = Schema.Union(
     mode: OctantMode,
     threadId: Schema.NonEmptyTrimmedString,
     runId: Schema.NonEmptyTrimmedString,
+    projectId: Schema.optional(ProjectId),
   }),
 ).annotations(strict);
 export type ActivityRecord = typeof ActivityRecord.Type;

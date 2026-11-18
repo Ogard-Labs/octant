@@ -1,5 +1,11 @@
 import { Schema } from "effect";
-import { CodeThreadId, type OctantMode, type WindowId, type UtcTimestamp } from "@octant/contracts";
+import {
+  CodeThreadId,
+  decodeProjectId,
+  type OctantMode,
+  type WindowId,
+  type UtcTimestamp,
+} from "@octant/contracts";
 import {
   type ActivityCardSource,
   type ActivityFinishedCounts,
@@ -192,12 +198,17 @@ export class CodeHomeActivityService {
           from: query.comparison.from,
           until: query.comparison.until,
         });
-        comparisonCount =
-          query.card === "runs"
-            ? this.#countFinishes(comparison.records).successful
-            : comparison.records.length;
-        for (const [identity, witness] of comparison.authorityOf) {
-          authorityOf.set(identity, witness);
+        // A comparison that hit the selection cap answers nothing: neither a
+        // truncated count nor witnesses from a partial window enter the
+        // snapshot.
+        if (!comparison.partial) {
+          comparisonCount =
+            query.card === "runs"
+              ? this.#countFinishes(comparison.records).successful
+              : comparison.records.length;
+          for (const [identity, witness] of comparison.authorityOf) {
+            authorityOf.set(identity, witness);
+          }
         }
       }
     }
@@ -330,14 +341,21 @@ export class CodeHomeActivityService {
         partial = true;
         break;
       }
-      if (byId.has(fact.identity)) continue;
       const witness = this.#witness(fact);
       if (witness === undefined) continue;
       if (!(await this.#mayRead(windowId, admittedSet, witness, threadReads))) continue;
+      // Every accessible witness proves the answer, not only the one whose
+      // row survives first-wins dedupe: the key is the identity plus the
+      // witness so the same delivery seen through another thread keeps both
+      // authorities instead of overwriting the first.
+      authorityOf.set(
+        `${fact.identity}|${witness.mode}|${witness.threadId}|${witness.projectId ?? ""}`,
+        witness,
+      );
+      if (byId.has(fact.identity)) continue;
       const record = this.#decodeRecord(fact, witness);
       if (record === undefined) continue;
       byId.set(fact.identity, record);
-      authorityOf.set(fact.identity, witness);
     }
     return { records: [...byId.values()], authorityOf, partial };
   }
@@ -379,6 +397,7 @@ export class CodeHomeActivityService {
       if (!RUN_IDENTITY.test(fact.identity)) {
         const metadata = decodeDeliveryFactMetadata(JSON.parse(fact.metadataJson));
         const threadId = decodeFactThreadId(fact.threadId);
+        const projectId = fact.projectId === null ? undefined : decodeProjectId(fact.projectId);
         const label =
           metadata.title ??
           `${metadata.repositoryOwner}/${metadata.repositoryName}#${metadata.number}`;
@@ -393,6 +412,7 @@ export class CodeHomeActivityService {
             number: metadata.number,
             mergedBy: metadata.mergedBy,
             threadId,
+            ...(projectId === undefined ? {} : { projectId }),
           };
         }
         return {
@@ -405,9 +425,11 @@ export class CodeHomeActivityService {
           number: metadata.number,
           closingPullRequest: metadata.closingPullRequest,
           threadId,
+          ...(projectId === undefined ? {} : { projectId }),
         };
       }
       const metadata = decodeRunFactMetadata(JSON.parse(fact.metadataJson));
+      const projectId = fact.projectId === null ? undefined : decodeProjectId(fact.projectId);
       const modeName = witness.mode === "chat" ? "Chat" : witness.mode === "work" ? "Work" : "Code";
       return {
         kind: "runs",
@@ -419,6 +441,7 @@ export class CodeHomeActivityService {
         mode: metadata.mode,
         threadId: fact.threadId,
         runId: metadata.runId,
+        ...(projectId === undefined ? {} : { projectId }),
       };
     } catch {
       // A fact that fails its own metadata contract cannot be shown; it is
