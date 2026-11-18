@@ -1326,14 +1326,25 @@ path above stay as they are.
   window. Hand back from the device answers the agent's next acting call with
   a fresh snapshot and the hand-back note, exactly as at a window.
 - **Input path.** The device sends a closed set of input events and the host
-  dispatches them through the debugger input path the agent's own input uses
-  (`Input.dispatchMouseEvent`, `Input.dispatchKeyEvent`, `Input.insertText`,
-  `Input.imeSetComposition`, `Input.dispatchTouchEvent`), never through native
-  input injection. Local input therefore still reclaims, and the host
-  attributes the dispatch to the lease, not to the agent.
-  - Pointer: `down`, `move`, `up` (button, click count, modifiers) and
-    `wheel` (deltas), with coordinates in the frame the device was shown;
-    touch `tap` and `drag` for phones. Hover follows pointer moves.
+  dispatches them through the debugger, attributed to the lease, never to the
+  agent, using only debugger commands that do not pass through the desktop's
+  local input gate (`before-mouse-event` and `before-input-event`, which
+  reclaim the page): `Input.dispatchTouchEvent`,
+  `Input.synthesizeScrollGesture` with a touch source,
+  `Input.dispatchKeyEvent`, `Input.insertText` and `Input.imeSetComposition`,
+  the set the owner path already uses. No device event is dispatched as a
+  mouse event, by the debugger (`Input.dispatchMouseEvent`, which the
+  supported Electron runtime also reports through `before-mouse-event`) or by
+  native injection. Every event that reaches the local gate during a lease is
+  therefore the person at the Mac, and reclaims.
+  - Pointer: touch `tap`, `long-press`, and `drag` (start, moves, end), with
+    coordinates in the frame the device was shown; a paired browser with a
+    mouse sends its clicks and drags as these. `scroll` carries deltas and is
+    dispatched as a touch scroll gesture.
+  - Not offered: hover, a right or middle button and mouse-precise text
+    selection, which only mouse events produce. A page that needs one shows
+    "Finish this on the computer" on the device rather than falling back to
+    mouse dispatch.
   - Keys: `down` and `up` with the DOM `key` and `code` and modifiers, the
     host's own shortcuts (quit, close window, devtools, the address bar) never
     included.
@@ -1434,8 +1445,8 @@ adding a parallel one:
   (lease id), `input` (lease id, a strictly increasing sequence number, and
   1 to 60 `PairedBrowserInput` events), and `file-choice` (lease id, chooser
   id, upload id).
-- `PairedBrowserInput`: the closed pointer, wheel, touch, key, text and
-  composition union above, each pointer event carrying its frame id.
+- `PairedBrowserInput`: the closed touch, scroll, key, text and composition
+  union above, each touch and scroll event carrying its frame id.
 - `PairedBrowserStreamEvent`, one NDJSON line each: `frame` (frame id,
   document version, viewport, device pixel ratio, JPEG as base64), `withheld`
   (reason), `file-chooser` (chooser id, accepted types, multiple),
@@ -1458,10 +1469,19 @@ file goes through `POST /api/browser/remote-control/file`. A duplicate or
 out-of-order sequence number is refused, so a retried request never types
 twice.
 
-- Rationale: the debugger input path is chosen because the supported Electron
-  runtime reports injected native mouse input exactly as it reports the person
-  at the Mac, so native injection would either reclaim the page from the
-  device on its own taps or stop recognizing the person's. Ending a lease
+- Rationale: the supported Electron runtime reports a debugger mouse event
+  through `before-mouse-event` exactly as it reports the person's own mouse,
+  and the desktop reclaims the page on that event, so mouse dispatch would end
+  the device's lease on its own first click. Touch, scroll-gesture, key and
+  text dispatch do not reach that gate (the owner path relies on this and its
+  tests model it), so restricting the device to them keeps the gate's rule
+  simple: anything it sees during a lease is local. Verification for the build
+  includes a desktop test that each dispatched device event leaves the lease
+  live and that a local mouse or key event still reclaims. Rejected: tagging
+  or suppressing the gate for mouse events Octant dispatched itself, because
+  Electron's event carries no origin marker, and suppressing the gate while a
+  dispatch is in flight would also swallow a genuine local click landing in
+  that window, losing the reclaim that protects the person at the Mac. Ending a lease
   without handing back keeps the hold the person's, because a lost
   connection is not a decision to give the agent the page; turning it into an
   ordinary take-over then keeps the 2026-11-17 rule that the agent takes the
