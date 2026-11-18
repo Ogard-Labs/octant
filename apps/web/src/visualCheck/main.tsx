@@ -42,15 +42,19 @@ function Scene(props: { readonly id: string; readonly scheme: "light" | "dark" }
     const finish = async () => {
       // The bundled faces, asked for by name: a face nothing has used yet is
       // not loaded, and `ready` would not wait for it.
-      await Promise.all([
-        document.fonts.load("400 14px 'Geist Variable'"),
-        document.fonts.load("500 14px 'Geist Variable'"),
-        document.fonts.load("600 14px 'Geist Variable'"),
-        document.fonts.load("400 13px 'Geist Mono Variable'"),
-      ]);
+      // `load` of a family nobody declared resolves to no faces, and `check`
+      // then says true, so a broken font import must be caught here.
+      for (const font of [
+        "400 14px 'Geist Variable'",
+        "500 14px 'Geist Variable'",
+        "600 14px 'Geist Variable'",
+        "400 13px 'Geist Mono Variable'",
+      ]) {
+        const faces = await document.fonts.load(font);
+        if (faces.length === 0 || faces.some((face) => face.status !== "loaded"))
+          throw new Error(`The bundled face for ${font} did not load.`);
+      }
       await document.fonts.ready;
-      if (!document.fonts.check("400 14px 'Geist Variable'"))
-        throw new Error("The bundled Geist face did not load.");
       // Let effects, popups and polled fixtures settle before the picture.
       for (let frame = 0; frame < 3; frame += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));

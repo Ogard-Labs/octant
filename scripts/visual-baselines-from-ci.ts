@@ -30,12 +30,37 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const baselines = join(root, "apps/web/visual-baselines");
 const download = mkdtempSync(join(tmpdir(), "visual-check-"));
 
-const result = Bun.spawnSync(
-  ["gh", "run", "download", runId, "--name", "visual-check", "--dir", download],
-  { stdout: "inherit", stderr: "inherit" },
-);
-if (result.exitCode !== 0) {
-  console.error(`gh could not download the visual-check artifact of run ${runId}.`);
+let exitCode: number;
+let output = "";
+try {
+  const result = Bun.spawnSync(
+    [
+      "gh",
+      "run",
+      "download",
+      runId,
+      "--repo",
+      "Ogard-Labs/octant",
+      "--name",
+      "visual-check",
+      "--dir",
+      download,
+    ],
+    { stdout: "inherit", stderr: "pipe" },
+  );
+  exitCode = result.exitCode;
+  output = result.stderr.toString();
+} catch {
+  console.error("Install the GitHub CLI and run gh auth login, then try again.");
+  process.exit(1);
+}
+if (exitCode !== 0) {
+  console.error(output);
+  console.error(
+    /no artifact|not found|no valid artifacts/i.test(output)
+      ? `Run ${runId} has no visual-check artifact: it may have expired, or the run never drew the screens.`
+      : `gh could not download the visual-check artifact of run ${runId}. Check gh auth status and the run id.`,
+  );
   process.exit(1);
 }
 

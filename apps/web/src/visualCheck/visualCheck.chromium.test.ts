@@ -23,8 +23,12 @@ import { NARROW, SCENE_LIST, updateMode, WIDE } from "./sceneList";
 
 /** A pixel differs when any colour channel is off by more than this. */
 const CHANNEL_TOLERANCE = 24;
-/** The share of pixels that may differ before the picture counts as changed. */
-const PIXEL_BUDGET = 0.001;
+/**
+ * How many pixels may differ before the picture counts as changed. A one-word
+ * or one-icon change moves far more; the logged noise of an unchanged screen
+ * shows how much room this leaves.
+ */
+const PIXEL_LIMIT = 50;
 /** The clock every scene sees. */
 const FIXED_TIME = new Date("2026-08-18T09:00:00.000Z");
 
@@ -182,6 +186,8 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
     const changed: string[] = [];
     const missing: string[] = [];
     const written: string[] = [];
+    // Pixels that differed on a screen that still passed, for tuning the limit.
+    const noise: string[] = [];
     try {
       await server.listen();
       const address = server.httpServer?.address();
@@ -198,6 +204,19 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
       });
       browser.once("disconnected", stop);
       const comparer = await browser.newPage();
+      // One visit first: Vite's first load of a dependency can reload the page,
+      // and that must not land in the middle of a shot.
+      const warm = await browser.newContext({ viewport: WIDE });
+      try {
+        await warm.route("**/*", (route) =>
+          new URL(route.request().url()).origin === origin ? route.continue() : route.abort(),
+        );
+        const warmPage = await warm.newPage();
+        await warmPage.goto(`${origin}/visual-check.html?scene=home&scheme=dark`);
+        await warmPage.waitForSelector("html[data-visual-ready='true']", { timeout: 60_000 });
+      } finally {
+        await warm.close();
+      }
       const failures: string[] = [];
       for (const shot of shots()) {
         const context = await browser.newContext({
@@ -241,8 +260,10 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
           }
           if (actual.equals(baseline)) continue;
           const result = await compare(comparer, actual, baseline);
-          const share = result.total === 0 ? 1 : result.differing / result.total;
-          if (result.sizesMatch && share <= PIXEL_BUDGET) continue;
+          if (result.sizesMatch && result.differing <= PIXEL_LIMIT) {
+            noise.push(`${shot.name}=${String(result.differing)}`);
+            continue;
+          }
           await writeFile(actualPath, actual);
           if (update) {
             await writeFile(baselinePath, actual);
@@ -257,13 +278,16 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
             );
           changed.push(
             result.sizesMatch
-              ? `${shot.name} (${(share * 100).toFixed(2)}% of pixels differ)`
+              ? `${shot.name} (${String(result.differing)} pixels differ)`
               : `${shot.name} (size ${result.actualSize}, baseline ${result.baselineSize})`,
           );
         } finally {
           await context.close();
         }
       }
+      console.log(
+        `Noise on passing screens (pixels, limit ${String(PIXEL_LIMIT)}): ${noise.length === 0 ? "none" : noise.join(", ")}`,
+      );
       if (written.length > 0)
         console.log(`Wrote ${String(written.length)} baselines: ${written.join(", ")}`);
       expect(failures).toEqual([]);

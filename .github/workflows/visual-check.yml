@@ -64,7 +64,12 @@ jobs:
       - name: Explain how to accept the change
         if: failure()
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
+          shopt -s nullglob
+          pictures=("${RUNNER_TEMP}"/visual-check/*.actual.png)
+          if [ ${#pictures[@]} -eq 0 ] || [ "$INTENDED" = "true" ]; then
+            # No screen differed, or update mode failed: the check itself broke.
+            echo "::error::The visual check could not run to the end. See the log of the step above and the visual-check artifact."
+          elif [ "${{ github.event_name }}" = "push" ]; then
             echo "::error::The key screens on main no longer match their baselines: a change with the design change label was merged without committing its pictures. Run scripts/visual-baselines-from-ci.ts ${{ github.run_id }}, review the diffs and commit them."
           else
             echo "::error::Intended? Add the \`design change\` label, then commit the new pictures with \`bun scripts/visual-baselines-from-ci.ts ${{ github.run_id }}\`."
