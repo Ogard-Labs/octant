@@ -284,6 +284,68 @@ describe("themes plugins contribute", () => {
   });
 });
 
+describe("importing a theme file whose photo is not on this computer", () => {
+  const PHOTO = "11111111-1111-4111-8111-111111111111";
+  const photoLibrary = (ids: ReadonlyArray<string>) =>
+    ({
+      list: vi.fn(async () => ids.map((id) => ({ id }))),
+      upload: vi.fn(),
+      fetch: vi.fn(),
+    }) as never;
+
+  it("reads the library, hands its ids to the import and says the background is plain", async () => {
+    const { fireEvent, render, screen, waitFor } = await import("@testing-library/react");
+    const importJson = vi.fn(() => ({
+      status: "imported" as const,
+      missing: ["background-photo" as const],
+    }));
+    render(
+      <ThemeAppearanceEditor
+        controller={{ ...controller(), importJson }}
+        photoLibrary={photoLibrary([])}
+      />,
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Theme JSON" }), {
+      target: { value: "{}" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Import theme JSON" }));
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "The theme's photo is not on this computer, so the background is plain.",
+      ),
+    );
+    expect(importJson).toHaveBeenCalledWith("{}", { photoIds: new Set<string>() });
+  });
+
+  it("says nothing when every photo is there, and imports as it is when the library cannot be read", async () => {
+    const { fireEvent, render, screen, waitFor } = await import("@testing-library/react");
+    const importJson = vi.fn(() => ({ status: "imported" as const, missing: [] }));
+    const failing = {
+      list: vi.fn(async () => {
+        throw new Error("offline");
+      }),
+      upload: vi.fn(),
+      fetch: vi.fn(),
+    } as never;
+    const { rerender } = render(
+      <ThemeAppearanceEditor
+        controller={{ ...controller(), importJson }}
+        photoLibrary={photoLibrary([PHOTO])}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Import theme JSON" }));
+    await waitFor(() => expect(importJson).toHaveBeenCalledTimes(1));
+    expect(importJson).toHaveBeenLastCalledWith("", { photoIds: new Set([PHOTO]) });
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
+    rerender(
+      <ThemeAppearanceEditor controller={{ ...controller(), importJson }} photoLibrary={failing} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Import theme JSON" }));
+    await waitFor(() => expect(importJson).toHaveBeenCalledTimes(2));
+    expect(importJson).toHaveBeenLastCalledWith("", undefined);
+  });
+});
+
 describe("handing the theme to a project outside Octant", () => {
   it("fills the transfer box with design tokens and names the overrides it left out", async () => {
     const { fireEvent, render, screen } = await import("@testing-library/react");

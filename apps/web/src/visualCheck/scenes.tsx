@@ -83,7 +83,7 @@ function themeController(settings: ThemeSettings = DEFAULT_THEME_SETTINGS): Them
     apply: async () => true,
     cancel: noop,
     reset: noop,
-    importJson: async () => undefined,
+    importJson: () => ({ status: "refused" }),
     exportJson: () => undefined,
     exportTokens: () => undefined,
   };

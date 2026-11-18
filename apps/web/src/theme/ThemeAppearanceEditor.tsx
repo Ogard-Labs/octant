@@ -10,6 +10,7 @@ import {
 import { customThemeTokens } from "@octant/theme/custom-preset";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { THEME_PRESETS } from "@octant/theme";
+import type { BackgroundImageLibrary } from "../settings/AppBackgroundSettings";
 import type { ThemeController } from "./useThemeController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -46,6 +47,8 @@ export function ThemeAppearanceEditor(props: {
    */
   readonly afterScheme?: ReactNode;
   readonly afterTypography?: ReactNode;
+  /** The host's photo library; an imported theme's photo that is not in it is left out. */
+  readonly photoLibrary?: BackgroundImageLibrary | undefined;
 }) {
   const focusedSetting = props.focusedSetting;
   const theme = props.controller;
@@ -429,6 +432,7 @@ export function ThemeAppearanceEditor(props: {
           <ThemeTransfer
             controller={theme}
             focused={focusedSetting === "appearance.theme-import-export"}
+            photoLibrary={props.photoLibrary}
           />
         </div>
       </OctantCollapsible>
@@ -637,8 +641,19 @@ function TypographyControl(props: {
   );
 }
 
-function ThemeTransfer(props: { readonly controller: ThemeController; readonly focused: boolean }) {
+const MISSING_PHOTO_NOTES = {
+  "background-photo": "The theme's photo is not on this computer, so the background is plain.",
+  "sidebar-photo":
+    "The theme's sidebar photo is not on this computer, so the sidebar keeps its own look.",
+} as const;
+
+function ThemeTransfer(props: {
+  readonly controller: ThemeController;
+  readonly focused: boolean;
+  readonly photoLibrary: BackgroundImageLibrary | undefined;
+}) {
   const [value, setValue] = useState("");
+  const [note, setNote] = useState("");
   const [dropped, setDropped] = useState<ReadonlyArray<string>>([]);
   const pluginThemes = usePluginThemes();
   return (
@@ -663,7 +678,24 @@ function ThemeTransfer(props: { readonly controller: ThemeController; readonly f
       </SettingRow>
       <div className="settings-view__actions">
         <OctantButton
-          onClick={() => props.controller.importJson(value)}
+          onClick={() => {
+            setNote("");
+            // The library listing the Background settings already read. When it
+            // cannot be read the theme is imported as it is.
+            const listed = props.photoLibrary?.list().then(
+              (photos) => new Set(photos.map((photo) => String(photo.id))),
+              () => undefined,
+            );
+            void Promise.resolve(listed).then((photoIds) => {
+              const outcome = props.controller.importJson(
+                value,
+                photoIds === undefined ? undefined : { photoIds },
+              );
+              if (outcome.status === "imported" && outcome.missing.length > 0) {
+                setNote(outcome.missing.map((missing) => MISSING_PHOTO_NOTES[missing]).join(" "));
+              }
+            });
+          }}
           size="sm"
           type="button"
           variant="ghost"
@@ -711,6 +743,15 @@ function ThemeTransfer(props: { readonly controller: ThemeController; readonly f
           Export design tokens (JSON)
         </OctantButton>
       </div>
+      {/* The note's two lines are kept from the first paint, so filling it in
+        after an import moves nothing below it either. */}
+      <p
+        aria-live="polite"
+        className="settings-view__preview-note settings-theme-editor__import-note"
+        role="status"
+      >
+        {note}
+      </p>
     </div>
   );
 }
