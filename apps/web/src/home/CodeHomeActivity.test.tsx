@@ -180,6 +180,36 @@ describe("the Code Home activity panel", () => {
     render(<Harness read={source.read} />);
     const card = await screen.findByRole("region", { name: "Pull requests merged" });
     expect(within(card).getByText(/Only part of this history could be read\./)).toBeInTheDocument();
+    // A partial read never claims the previous window's honest count.
+    expect(within(card).queryByText(/vs last week/)).toBeNull();
+    expect(within(card).getByText("This week")).toBeInTheDocument();
+  });
+
+  it("names the card's source even when the count is zero", async () => {
+    const source = reads(() => view({ count: 0, records: [], nextOffset: undefined }));
+    render(<Harness read={source.read} />);
+    const card = await screen.findByRole("region", { name: "Pull requests merged" });
+    expect(within(card).getByText("0")).toBeInTheDocument();
+    expect(within(card).getByText("None this week.")).toBeInTheDocument();
+    expect(within(card).getByText("Your GitHub account")).toBeInTheDocument();
+  });
+
+  it("shows a dash, the reason and the source when a card cannot be read", async () => {
+    const source = reads(() =>
+      view({ status: "unavailable", reason: "rate-limited", records: [] }),
+    );
+    render(<Harness read={source.read} />);
+    const card = await screen.findByRole("region", { name: "Pull requests merged" });
+    expect(within(card).getByText("—")).toBeInTheDocument();
+    expect(within(card).getByText("The source's rate limit was reached.")).toBeInTheDocument();
+    expect(within(card).getByText("Your GitHub account")).toBeInTheDocument();
+  });
+
+  it("reads the same count as the last window without a delta", async () => {
+    const source = reads(() => view({ count: 3, comparisonCount: 3 }));
+    render(<Harness read={source.read} />);
+    const card = await screen.findByRole("region", { name: "Pull requests merged" });
+    expect(within(card).getByText("Same as last week")).toBeInTheDocument();
   });
 
   it("shows the comparison only when the read returns one", async () => {
@@ -328,7 +358,9 @@ describe("the records drill-down", () => {
     );
     render(<Harness read={source.read} />);
     const card = await screen.findByRole("region", { name: "Pull requests merged" });
-    await user.click(within(card).getByRole("button", { name: "See all 27" }));
+    await user.click(
+      within(card).getByRole("button", { name: "Pull requests merged: 27. Show records" }),
+    );
     const dialog = await screen.findByRole("dialog", { name: /Pull requests merged/ });
     expect(within(dialog).getByText("Ship the panel")).toBeInTheDocument();
     expect(within(dialog).getByText(/Your GitHub account/)).toBeInTheDocument();
@@ -396,7 +428,9 @@ describe("the records drill-down", () => {
     );
     render(<Harness read={source.read} />);
     const card = await screen.findByRole("region", { name: "Successful runs" });
-    await user.click(within(card).getByRole("button", { name: "See all 1" }));
+    await user.click(
+      within(card).getByRole("button", { name: "Successful runs: 1. Show records" }),
+    );
     const dialog = await screen.findByRole("dialog", { name: /Successful runs/ });
     expect(within(dialog).getByText("1 successful · 2 failed · 1 canceled")).toBeInTheDocument();
     expect(within(dialog).getByText("Fix the flaky test")).toBeInTheDocument();
@@ -488,7 +522,9 @@ describe("the records drill-down", () => {
     };
     render(<Harness read={read} />);
     const card = await screen.findByRole("region", { name: "Successful runs" });
-    await user.click(within(card).getByRole("button", { name: "See all 1" }));
+    await user.click(
+      within(card).getByRole("button", { name: "Successful runs: 1. Show records" }),
+    );
     const dialog = await screen.findByRole("dialog", { name: /Successful runs/ });
     await user.click(within(dialog).getByRole("button", { name: "Load more" }));
     await user.click(within(dialog).getByRole("switch", { name: "All finished" }));
@@ -513,7 +549,9 @@ describe("the records drill-down", () => {
     );
     render(<Harness read={source.read} />);
     const card = await screen.findByRole("region", { name: "Pull requests merged" });
-    await user.click(within(card).getByRole("button", { name: "See all 2" }));
+    await user.click(
+      within(card).getByRole("button", { name: "Pull requests merged: 2. Show records" }),
+    );
     const dialog = await screen.findByRole("dialog", { name: /Pull requests merged/ });
     expect(within(dialog).getByText("Ship the panel")).toBeInTheDocument();
 
@@ -535,7 +573,9 @@ describe("the records drill-down", () => {
     render(<Harness read={read} />);
     const card = await screen.findByRole("region", { name: "Pull requests merged" });
     await user.click(screen.getByRole("button", { name: "Refresh activity" }));
-    await user.click(within(card).getByRole("button", { name: "See all 2" }));
+    await user.click(
+      within(card).getByRole("button", { name: "Pull requests merged: 2. Show records" }),
+    );
     await screen.findByRole("dialog", { name: /Pull requests merged/ });
 
     act(() => {
@@ -576,7 +616,9 @@ describe("the records drill-down", () => {
     const source = reads(() => runsView);
     render(<Harness onOpenThread={onOpenThread} read={source.read} />);
     const card = await screen.findByRole("region", { name: "Successful runs" });
-    await user.click(within(card).getByRole("button", { name: "See all 1" }));
+    await user.click(
+      within(card).getByRole("button", { name: "Successful runs: 1. Show records" }),
+    );
     const dialog = await screen.findByRole("dialog", { name: /Successful runs/ });
     await user.click(within(dialog).getByRole("button", { name: "Open thread" }));
     expect(onOpenThread).toHaveBeenCalledWith("work", "10000000-0000-4000-8000-0000000000bb");

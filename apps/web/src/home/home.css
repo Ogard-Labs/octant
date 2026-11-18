@@ -704,16 +704,39 @@
   padding-inline: var(--oct-space-1);
 }
 
-.code-home-activity-card__pin {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-1);
-  margin: 0;
-  padding-inline: var(--oct-space-1);
+/* The pinned timeframe sits at the header's end, beside the card title. */
+.code-home-activity-card__range {
+  flex: 0 0 auto;
 }
 
-.code-home-activity-card__comparison,
-.code-home-activity-card__source {
+/* The count is the card's figure; when it opens the records it is a bare
+   button wearing the same type. */
+.code-home-activity-card__figure {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  justify-self: start;
+  margin: 0;
+  padding-inline: var(--oct-space-1);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-2xl);
+  font-weight: var(--oct-weight-strong);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--oct-leading-tight);
+}
+
+.code-home-activity-card__figure--muted {
+  color: var(--oct-meta);
+}
+
+.code-home-activity-card__figure-chevron {
+  color: var(--oct-meta);
+}
+
+.code-home-activity-card__context,
+.code-home-activity-card__source,
+.code-home-activity-card__note {
   margin: 0;
   padding-inline: var(--oct-space-1);
 }
@@ -722,11 +745,6 @@
   margin: 0;
   padding-inline: var(--oct-space-1);
   color: var(--octant-warning-text);
-}
-
-.code-home-activity-card__more.code-home-activity-card__more {
-  justify-self: start;
-  margin-inline: var(--oct-space-1);
 }
 
 /* The timeframe control in the header and in each pinned row. */

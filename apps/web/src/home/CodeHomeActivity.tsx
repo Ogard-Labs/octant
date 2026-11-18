@@ -21,6 +21,7 @@ import {
 import {
   Activity,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   CircleDot,
   Ellipsis,
@@ -36,21 +37,19 @@ import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { IconButton } from "../shell/IconButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
+import { OctantCard, OctantCardContent, OctantCardHeader } from "../ui/base/OctantCard";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { ActivityRangeField, activityRangeLabel } from "./ActivityRangeField";
-import { HomeCard } from "./HomeCard";
 import "./home.css";
 import {
   arrangeHomeCards,
-  isGridCard,
   moveHomeCard,
   setHomeCardVisible,
-  type HomeCardContent,
+  type HomeCardIdentity,
   type HomeCardPlacement,
-  type HomeGridCardDefinition,
 } from "./homeCards";
 
 export interface CodeHomeActivityProps {
@@ -95,7 +94,7 @@ const ACTIVITY_CARDS: ReadonlyArray<ActivityCardMeta> = [
     card: "releases-published",
     title: "Releases published",
     icon: Rocket,
-    explanation: "Releases you published; GitHub keeps recent release events only.",
+    explanation: "Releases your GitHub account created and published.",
     emptyLabel: "No published releases.",
   },
   {
@@ -118,6 +117,15 @@ interface ActivityCardInput {
   readonly query: ActivityQuery | undefined;
   /** "Mar 9, 9:30 AM – Mar 16, 9:30 AM", or "Everything recorded" for Total. */
   readonly windowText: string;
+}
+
+/**
+ * Activity cards carry no `useContent`: they are not drawn by the shared
+ * `HomeCard` frame but by `ActivityCard`, so the definition only needs the
+ * registry identity plus the input its own component reads.
+ */
+interface ActivityCardDefinition extends HomeCardIdentity {
+  readonly input: ActivityCardInput;
 }
 
 function clientTimeZone(): string {
@@ -183,8 +191,12 @@ function previousPeriodLabel(range: ActivityRangeChoice): string {
   }
 }
 
+function sourceName(source: ActivityCardSource): string {
+  return source === "github" ? "Your GitHub account" : "Recorded by Octant";
+}
+
 function sourceLabel(view: ActivityView): string {
-  return view.source === "github" ? "Your GitHub account" : "Recorded by Octant";
+  return sourceName(view.source);
 }
 
 function fallbackLabel(view: ActivityView): string | undefined {
@@ -287,22 +299,18 @@ export function CodeHomeActivity(props: CodeHomeActivityProps) {
       }),
     [activity, resolve, props.read],
   );
-  const definitions: ReadonlyArray<HomeGridCardDefinition> = cardInputs.map((input) => ({
+  const definitions: ReadonlyArray<ActivityCardDefinition> = cardInputs.map((input) => ({
     id: input.meta.id,
     title: input.meta.title,
     icon: input.meta.icon,
     defaultOn: true,
     available: true,
-    emptyLabel: input.meta.emptyLabel,
-    useContent: () =>
-      useActivityCardContent(input, epoch, props.onOpenThread, props.onOpenExternal),
+    input,
   }));
   const placements = arrangeHomeCards(definitions, props.customization);
   const writeActivity = (next: HomeActivityCustomization) =>
     props.onCustomizationChange({ ...props.customization, activity: next });
-  const grid = placements.flatMap((placement) =>
-    placement.visible && isGridCard(placement.definition) ? [placement.definition] : [],
-  );
+  const grid = placements.filter((placement) => placement.visible);
   const titleId = useId();
   return (
     <section aria-label="Activity" className="code-home-activity">
@@ -333,8 +341,14 @@ export function CodeHomeActivity(props: CodeHomeActivityProps) {
         </p>
       ) : (
         <div className="home-dashboard__grid code-home-activity__grid">
-          {grid.map((definition) => (
-            <HomeCard definition={definition} key={definition.id} />
+          {grid.map((placement) => (
+            <ActivityCard
+              definition={placement.definition}
+              epoch={epoch}
+              key={placement.definition.id}
+              onOpenExternal={props.onOpenExternal}
+              onOpenThread={props.onOpenThread}
+            />
           ))}
         </div>
       )}
@@ -370,18 +384,21 @@ function activityScopeKey(input: ActivityCardInput): string {
   });
 }
 
+/** What `ActivityCard` needs from one card's read: the answer plus the drill-down it opened. */
+interface ActivityCardView {
+  readonly read: CardRead;
+  readonly drill: { readonly view: ActivityView } | undefined;
+  readonly openRecords: (view: ActivityView) => void;
+  readonly closeRecords: () => void;
+}
+
 /**
- * One card's read plus the body HomeCard draws under its count. The read is
- * keyed on the query alone: a reorder, a sibling card's change or a repaint
- * never re-reads, an explicit Refresh does (keeping the last answer on
- * screen), and a changed timeframe or source clears the drill-down with it.
+ * One card's read. The read is keyed on the query alone: a reorder, a
+ * sibling card's change or a repaint never re-reads, an explicit Refresh
+ * does (keeping the last answer on screen), and a changed timeframe or
+ * source clears the drill-down with it.
  */
-function useActivityCardContent(
-  input: ActivityCardInput,
-  epoch: number,
-  onOpenThread: CodeHomeActivityProps["onOpenThread"],
-  onOpenExternal: CodeHomeActivityProps["onOpenExternal"],
-): HomeCardContent {
+function useActivityCardContent(input: ActivityCardInput, epoch: number): ActivityCardView {
   const [read, setRead] = useState<CardRead>({ phase: "loading" });
   const [drill, setDrill] = useState<{ view: ActivityView } | undefined>(undefined);
   const consumedEpoch = useRef(0);
@@ -434,115 +451,172 @@ function useActivityCardContent(
       active = false;
     };
   }, [input, epoch]);
-  if (read.view === undefined) {
-    if (read.phase === "loading") return { status: "loading" };
-    return {
-      status: "ready",
-      count: 0,
-      body: null,
-      emptyLabel:
-        input.query === undefined
-          ? "This timeframe could not be resolved."
-          : "Octant could not read this activity.",
-    };
-  }
-  const view = read.view;
-  if (view.status === "unavailable") {
-    const fallback = fallbackLabel(view);
-    return {
-      status: "ready",
-      count: 0,
-      body: null,
-      emptyLabel: fallback ?? reasonLabel(view),
-    };
-  }
-  const count = view.count ?? view.records.length;
-  const finished = view.finished;
-  const otherFinished = finished === undefined ? 0 : finished.failed + finished.canceled;
-  const lines: ReactNode[] = [];
-  if (input.pinned) {
-    lines.push(
-      <p className="code-home-activity-card__pin oct-meta" key="pin">
-        {activityRangeLabel(input.range)}
-      </p>,
-    );
-  }
-  if (view.comparisonCount !== undefined) {
-    const delta = count - view.comparisonCount;
-    lines.push(
-      <p className="oct-row-detail code-home-activity-card__comparison" key="comparison">
-        {delta === 0 ? "±0" : delta > 0 ? `+${delta}` : `−${-delta}`} vs{" "}
-        {previousPeriodLabel(input.range)}
-      </p>,
-    );
-  }
-  if (otherFinished > 0 && finished !== undefined) {
-    lines.push(
-      <p className="oct-row-detail" key="finished">
-        {finished.failed} failed · {finished.canceled} canceled
-      </p>,
-    );
-  }
-  lines.push(
-    <p className="oct-meta code-home-activity-card__source" key="source">
-      {sourceLabel(view)}
-    </p>,
-  );
-  const fallback = fallbackLabel(view);
-  if (fallback !== undefined) {
-    lines.push(
-      <p className="oct-row-detail code-home-activity-card__caveat" key="fallback">
-        {fallback}
-      </p>,
-    );
-  } else if (read.stale === true) {
-    lines.push(
-      <p className="oct-row-detail code-home-activity-card__caveat" key="stale">
-        {view.checkedAt === undefined
-          ? "The last refresh failed."
-          : `Checked ${relativeTimeLabel(view.checkedAt)} — the last refresh failed.`}
-      </p>,
-    );
-  } else if (view.status === "partial") {
-    lines.push(
-      <p className="oct-row-detail code-home-activity-card__caveat" key="partial">
-        {view.checkedAt === undefined
-          ? reasonLabel(view)
-          : `${reasonLabel(view)} Checked ${relativeTimeLabel(view.checkedAt)}.`}
-      </p>,
-    );
-  }
   return {
-    status: "ready",
-    count,
-    ...(count === 0 ? { emptyLabel: emptyLabelFor(view, input.range) } : {}),
-    body:
-      count === 0 ? null : (
-        <>
-          {lines}
-          <OctantButton
-            className="code-home-activity-card__more window-no-drag"
-            onClick={() => setDrill({ view })}
-            size="sm"
-            type="button"
-            variant="link"
-          >
-            See all {count}
-          </OctantButton>
-          <OctantDialogPresence>
-            {drill === undefined ? null : (
-              <ActivityRecordsDialog
-                input={input}
-                onClose={() => setDrill(undefined)}
-                onOpenExternal={onOpenExternal}
-                onOpenThread={onOpenThread}
-                view={drill.view}
-              />
-            )}
-          </OctantDialogPresence>
-        </>
-      ),
+    read,
+    drill,
+    openRecords: (view) => setDrill({ view }),
+    closeRecords: () => setDrill(undefined),
   };
+}
+
+/**
+ * One activity card: the icon and title, then its count as the control that
+ * opens the records, one context line, and its source — every row always
+ * rendered, so a card reads the same shape loading, empty, unavailable or
+ * ready.
+ */
+function ActivityCard(props: {
+  readonly definition: ActivityCardDefinition;
+  readonly epoch: number;
+  readonly onOpenThread: CodeHomeActivityProps["onOpenThread"];
+  readonly onOpenExternal: CodeHomeActivityProps["onOpenExternal"];
+}) {
+  const { definition } = props;
+  const input = definition.input;
+  const { read, drill, openRecords, closeRecords } = useActivityCardContent(input, props.epoch);
+  const titleId = useId();
+  const Icon = definition.icon;
+  const view = read.view;
+  const loading = view === undefined && read.phase === "loading";
+  const failed = view === undefined && !loading;
+  const unavailable = view !== undefined && view.status === "unavailable";
+  const count = view === undefined || unavailable ? 0 : (view.count ?? view.records.length);
+  const state = loading
+    ? "loading"
+    : failed || unavailable
+      ? "unavailable"
+      : count === 0
+        ? "empty"
+        : "ready";
+
+  const figure =
+    loading || failed || unavailable ? (
+      <p className="code-home-activity-card__figure code-home-activity-card__figure--muted">—</p>
+    ) : count === 0 ? (
+      <p className="code-home-activity-card__figure">0</p>
+    ) : view !== undefined && view.snapshotId !== undefined ? (
+      <OctantButton
+        aria-label={`${definition.title}: ${count}. Show records`}
+        className="code-home-activity-card__figure"
+        onClick={() => openRecords(view)}
+        type="button"
+        variant="bare"
+      >
+        {count}
+        <ChevronRight
+          aria-hidden="true"
+          className="code-home-activity-card__figure-chevron"
+          size={16}
+        />
+      </OctantButton>
+    ) : (
+      <p className="code-home-activity-card__figure">{count}</p>
+    );
+
+  let context: string;
+  if (loading) {
+    context = "Looking…";
+  } else if (view === undefined) {
+    context =
+      input.query === undefined
+        ? "This timeframe could not be resolved."
+        : "Octant could not read this activity.";
+  } else if (view.status === "unavailable") {
+    context = reasonLabel(view);
+  } else if (count === 0) {
+    context = emptyLabelFor(view, input.range);
+  } else if (view.status === "ready" && view.comparisonCount !== undefined) {
+    context = comparisonText(count - view.comparisonCount, input.range);
+  } else {
+    context = activityRangeLabel(input.range);
+  }
+
+  const finished = view?.finished;
+  const runsLine =
+    finished !== undefined && finished.failed + finished.canceled > 0 ? (
+      <p className="oct-row-detail code-home-activity-card__context">
+        {finished.failed} failed · {finished.canceled} canceled
+      </p>
+    ) : null;
+
+  let caveat: string | undefined;
+  let caveatNeutral = false;
+  if (view !== undefined) {
+    const fallback = fallbackLabel(view);
+    if (fallback !== undefined) {
+      caveat = fallback;
+      caveatNeutral = true;
+    } else if (read.stale === true) {
+      caveat =
+        view.checkedAt === undefined
+          ? "The last refresh failed."
+          : `Checked ${relativeTimeLabel(view.checkedAt)} — the last refresh failed.`;
+    } else if (view.status === "partial") {
+      caveat =
+        view.checkedAt === undefined
+          ? reasonLabel(view)
+          : `${reasonLabel(view)} Checked ${relativeTimeLabel(view.checkedAt)}.`;
+    }
+  }
+
+  return (
+    <OctantCard
+      aria-busy={loading}
+      aria-labelledby={titleId}
+      className="home-card code-home-activity-card outline-0"
+      data-card={definition.id}
+      data-state={state}
+      variant="glass"
+    >
+      <OctantCardHeader className="home-card__header">
+        <Icon aria-hidden="true" className="home-card__icon" size={16} />
+        <h2 className="oct-section-label home-card__title" id={titleId}>
+          {definition.title}
+        </h2>
+        {input.pinned ? (
+          <span className="oct-meta code-home-activity-card__range">
+            {activityRangeLabel(input.range)}
+          </span>
+        ) : null}
+      </OctantCardHeader>
+      <OctantCardContent className="home-card__body code-home-activity-card__body">
+        {figure}
+        <p className="oct-row-detail code-home-activity-card__context">{context}</p>
+        {runsLine}
+        <p className="oct-meta code-home-activity-card__source">
+          {view === undefined ? sourceName(input.source) : sourceName(view.source)}
+        </p>
+        {caveat === undefined ? null : (
+          <p
+            className={
+              caveatNeutral
+                ? "oct-meta code-home-activity-card__note"
+                : "oct-row-detail code-home-activity-card__caveat"
+            }
+          >
+            {caveat}
+          </p>
+        )}
+      </OctantCardContent>
+      <OctantDialogPresence>
+        {drill === undefined ? null : (
+          <ActivityRecordsDialog
+            input={input}
+            onClose={closeRecords}
+            onOpenExternal={props.onOpenExternal}
+            onOpenThread={props.onOpenThread}
+            view={drill.view}
+          />
+        )}
+      </OctantDialogPresence>
+    </OctantCard>
+  );
+}
+
+/** "+7 vs last week", "−2 vs last week" or "Same as last week". */
+function comparisonText(delta: number, range: ActivityRangeChoice): string {
+  if (delta === 0) return `Same as ${previousPeriodLabel(range)}`;
+  return `${delta > 0 ? `+${delta}` : `−${-delta}`} vs ${previousPeriodLabel(range)}`;
 }
 
 function emptyLabelFor(view: ActivityView, range: ActivityRangeChoice): string {
@@ -849,8 +923,8 @@ function recordNav(
 function ActivityCustomizeDialog(props: {
   readonly settings: HomeActivityCustomization;
   readonly customization: HomeCardCustomization;
-  readonly definitions: ReadonlyArray<HomeGridCardDefinition>;
-  readonly placements: ReadonlyArray<HomeCardPlacement>;
+  readonly definitions: ReadonlyArray<ActivityCardDefinition>;
+  readonly placements: ReadonlyArray<HomeCardPlacement<ActivityCardDefinition>>;
   readonly resolve: (range: ActivityRangeChoice) => ActivityRangeResult;
   readonly onChange: (next: HomeCardCustomization) => void;
   readonly onActivityChange: (next: HomeActivityCustomization) => void;

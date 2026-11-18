@@ -1918,6 +1918,15 @@ function draftRecentThreads(
   return [];
 }
 
+type StrippedHomeStart = Omit<NonNullable<WorkspaceViewProps["homeStart"]>, "codeActivity">;
+
+// Memoized per source object so a re-render hands the draft and welcome
+// surfaces the same stripped homeStart identity instead of a fresh copy.
+const strippedHomeStarts = new WeakMap<
+  NonNullable<WorkspaceViewProps["homeStart"]>,
+  StrippedHomeStart
+>();
+
 /**
  * Drops the Code Home activity source from a start model handed to any
  * surface that is not the Code Home welcome: a new-task draft, a Work draft
@@ -1927,7 +1936,10 @@ function withoutCodeActivity(
   homeStart: NonNullable<WorkspaceViewProps["homeStart"]>,
 ): NonNullable<WorkspaceViewProps["homeStart"]> {
   if (homeStart.codeActivity === undefined) return homeStart;
+  const stripped = strippedHomeStarts.get(homeStart);
+  if (stripped !== undefined) return stripped;
   const { codeActivity: _codeActivity, ...rest } = homeStart;
+  strippedHomeStarts.set(homeStart, rest);
   return rest;
 }
 

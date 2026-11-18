@@ -535,28 +535,35 @@ without figures, and leaving the start screen cancels the reads in flight.
 Code Home's start screen carries an **Activity** section below the card
 area; the New task draft and the other modes' starts share the card
 registry but never the panel. The section holds four cards — **Pull
-requests merged**, **Issues closed**, **Releases published** and **Runs
-finished** — each counting work over a named timeframe against the
-matching previous stretch. Its header holds one shared timeframe control,
-a **Refresh activity** button and a **Customize activity** dialog with the
-history source, a show/hide and reorder for each card, and a per-card
-timeframe pin. Each card compares its count to the previous stretch, names
-where its answer came from — **Your GitHub account** or **Recorded by
-Octant** — and opens a drill-down dialog listing its records (at most 25 a
-page against the frozen snapshot); a run opens its thread, a pull request
-or issue opens its GitHub page. Runs always read Octant's journal; the
-source choice applies to the three delivery cards.
+requests merged**, **Issues closed**, **Releases published** and
+**Successful runs** — each counting work over a named timeframe against
+the matching previous stretch. Its header holds one shared timeframe
+control, a **Refresh activity** button and a **Customize activity** dialog
+with the history source, a show/hide and reorder for each card, and a
+per-card timeframe pin shown at the card's header end. Every card draws
+the same rows — its count as the figure, one context line, and the source
+it read — so loading, empty, unavailable and ready cards keep one shape.
+The count itself opens a drill-down dialog listing the records (at most 25
+a page against the frozen snapshot); a run opens its thread, a pull
+request or issue opens its GitHub page. The context line compares the
+count to the previous stretch only when the read is complete, and every
+card always names where its answer came from — **Your GitHub account** or
+**Recorded by Octant**. Runs always read Octant's journal; the source
+choice applies to the three delivery cards.
 
 The server records delivery and run facts from the journal and answers an
 authorized read over them — merged pull requests, closed issues and run
 finishes witnessed by a thread the window may read, counted and paged
 exactly against a frozen snapshot. A GitHub source answers through the
 connected account's `gh` and counts only that account's own merges,
-closures and releases; release history only reaches what GitHub's event
-history exposes — roughly the last 30 days or 300 events per repository —
-so release coverage is always reported as partial rather than presented as
-complete. A card says so when its read is partial, stale or unavailable
-instead of implying completeness. The choices are per device and travel
+closures and releases: each card is a date-bounded read per connected
+repository — merges and closures through GitHub's issue search, releases
+through the repository's own list — and a release counts when that account
+created it and it was published inside the range. A card reads partial
+only when a repository could not be read or a range outgrows its bounded
+walk — 200 matches per repository for each card — rather than presenting a truncated set as complete. A card says
+so when its read is partial, stale or unavailable instead of implying
+completeness. The choices are per device and travel
 inside the existing card order/visibility store: every card follows one
 shared timeframe — **This week** by default — reading the signed-in GitHub
 account by default, and up to four cards may be pinned to their own
