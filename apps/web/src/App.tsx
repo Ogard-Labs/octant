@@ -437,7 +437,8 @@ import type { ThreadSearchScope } from "./shell/threadSearchViewModel";
 import { createChatReadCursorStore, useChatController } from "./chat/useChatController";
 import { autoConfigureChatDefaults } from "./chat/autoConfigureChatDefaults";
 import { ShellFrame } from "./shell/ShellFrame";
-import { PluginThemesContext, useHostPluginThemes } from "./theme/pluginThemes";
+import { PluginContributionsProvider, useHostPluginGrounds } from "./theme/pluginGrounds";
+import { useHostPluginThemes } from "./theme/pluginThemes";
 import { useRepositoryPullRequests } from "./environment/useRepositoryPullRequests";
 import { composerThreadDrafts } from "./composer/composerThreadDraftStore";
 import type { AgentRunViewRequest } from "./agents/AgentRunHierarchy";
@@ -1907,6 +1908,8 @@ function LaunchedShell(
   );
   // Themes the person's installed, trusted and enabled plugins contribute.
   const pluginThemes = useHostPluginThemes(extensionClient, machineChanges.extensions);
+  // Character grounds the same plugins offer, as data to copy.
+  const pluginGrounds = useHostPluginGrounds(extensionClient, machineChanges.extensions);
   const zenSwitchedOn = firstPartyPluginsEffective.get("zen") === true;
   useEffect(() => setZenPluginEffective(zenSwitchedOn), [zenSwitchedOn]);
   // Switching the Board plugin off hides the board layers and every opener;
@@ -9325,7 +9328,7 @@ function LaunchedShell(
       >
         <GuardrailDefaultsContext.Provider value={guardrailDefaults}>
           <FirstPartyPluginsEffectiveContext.Provider value={firstPartyPluginsEffective}>
-            <PluginThemesContext.Provider value={pluginThemes}>
+            <PluginContributionsProvider grounds={pluginGrounds} themes={pluginThemes}>
               <ImageJobChangeRevisionContext.Provider value={machineChanges.imageJobs}>
                 <ThreadActivityRevisionsContext.Provider value={threadActivityRevisions}>
                   <SpeechCapabilityProvider
@@ -9550,7 +9553,7 @@ function LaunchedShell(
                   </SpeechCapabilityProvider>
                 </ThreadActivityRevisionsContext.Provider>
               </ImageJobChangeRevisionContext.Provider>
-            </PluginThemesContext.Provider>
+            </PluginContributionsProvider>
           </FirstPartyPluginsEffectiveContext.Provider>
         </GuardrailDefaultsContext.Provider>
       </SubagentProvidersProvider>

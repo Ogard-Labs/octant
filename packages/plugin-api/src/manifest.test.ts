@@ -323,6 +323,90 @@ describe("plugin-api manifest re-exports", () => {
     });
   });
 
+  describe("a ground component", () => {
+    const ground = { characterSet: "·•●", characterDensity: 60 };
+    const groundManifest = (component: Record<string, unknown>) =>
+      manifest({
+        slug: "night-dots",
+        compatibility: {
+          platforms: ["macos", "linux"],
+          modes: ["chat", "work", "code"],
+          providerFamilies: [],
+        },
+        components: [
+          {
+            id: "dots",
+            kind: "ground",
+            displayName: "Night dots",
+            declaredCapabilities: [],
+            ground,
+            ...component,
+          },
+        ],
+      });
+
+    it("accepts character values as data and nothing that runs", () => {
+      const decoded = decodeExtensionPackageManifest(
+        groundManifest({ ground: { ...ground, characterPattern: "rings", characterSpeed: 0 } }),
+      );
+      expect(decoded.components[0]?.ground?.characterSet).toBe("·•●");
+      expect(decoded.components[0]?.ground?.characterPattern).toBe("rings");
+    });
+
+    it("refuses a ground that runs code, reads content or asks for a capability", () => {
+      expect(() =>
+        decodeExtensionPackageManifest(groundManifest({ entryPoint: "ground.js" })),
+      ).toThrow();
+      expect(() =>
+        decodeExtensionPackageManifest(groundManifest({ contentReference: "ground.md" })),
+      ).toThrow();
+      expect(() =>
+        decodeExtensionPackageManifest(groundManifest({ configurationReference: "ground.json" })),
+      ).toThrow();
+      expect(() =>
+        decodeExtensionPackageManifest(
+          manifest({
+            ...groundManifest({ declaredCapabilities: ["network"] }),
+            declaredCapabilities: ["network"],
+          }),
+        ),
+      ).toThrow();
+    });
+
+    it("refuses colours, images and any field the ground does not name", () => {
+      for (const extra of [
+        { color: "#ff0000" },
+        { image: "dots.png" },
+        { motion: "wave" },
+        { script: "ground.js" },
+      ]) {
+        expect(() =>
+          decodeExtensionPackageManifest(groundManifest({ ground: { ...ground, ...extra } })),
+        ).toThrow();
+      }
+    });
+
+    it("refuses an emoji set, an empty set, a speed past 100 and an unknown pattern", () => {
+      for (const bad of [
+        { characterSet: "🙂" },
+        { characterSet: "" },
+        { characterSpeed: 101 },
+        { characterPattern: "spiral" },
+      ]) {
+        expect(() =>
+          decodeExtensionPackageManifest(groundManifest({ ground: { ...ground, ...bad } })),
+        ).toThrow();
+      }
+    });
+
+    it("refuses a ground component without its values, and values on another kind", () => {
+      expect(() => decodeExtensionPackageManifest(groundManifest({ ground: undefined }))).toThrow();
+      expect(() =>
+        decodeExtensionPackageManifest(groundManifest({ kind: "ui-surface" })),
+      ).toThrow();
+    });
+  });
+
   it("rejects an unknown contribution point through the public package", () => {
     expect(() =>
       decodeExtensionPackageManifest(
