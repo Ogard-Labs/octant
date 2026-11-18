@@ -513,7 +513,7 @@
   align-items: stretch;
   justify-content: flex-start;
   min-height: 100%;
-  padding-block: min(8vh, 64px) 12px;
+  padding-block: min(8vh, 64px) 40px;
   margin: 0 auto;
   gap: var(--oct-space-4);
 }
