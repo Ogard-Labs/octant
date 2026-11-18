@@ -962,7 +962,9 @@ file's existing revision check; a failed save cannot close the file.
 **Don't save** drops that draft, and **Cancel** leaves the target open.
 Switching threads, hiding the dock and moving a tab do not ask. Desktop
 window close uses the same check for that window. See [Quitting](#quitting)
-for a quit across windows.
+for a quit across windows. If a window does not respond to the check, a
+native confirmation offers Cancel or Close anyway; a missing reply never
+approves a close on its own.
 
 Unsaved text is kept locally on the client, separately from pane references,
 messages and the host journal. Code recovery keys include the endpoint, checkout
@@ -3944,7 +3946,8 @@ reach the shell.
 
 ### Quitting
 
-- Explicit Quit checks unsaved edits in the Files tools of every open app
+- Explicit Quit — from the app menu, the macOS Dock menu, or the quit
+  shortcut — checks unsaved edits in the Files tools of every open app
   window before closing any window or starting shutdown. Cancel in any
   window stops Quit. A file already saved stays saved. System shutdown,
   updater restarts and forced exits do not wait for these decisions.

@@ -451,7 +451,7 @@ export interface OctantHostBridge {
    */
   readonly replyFilesClose: (
     requestId: number,
-    answer: "checking" | "allow" | "cancel",
+    answer: "checking" | "prompting" | "allow" | "cancel",
   ) => Promise<boolean>;
   /** Reports the person's setting: whether the quit shortcut needs a second press. */
   readonly setQuitShortcutSecondPress: (needed: boolean) => void;
@@ -1251,11 +1251,17 @@ export function createHostBridge(
       ipc.on(IPC_CHANNELS.filesCloseRequest, receive);
       return () => ipc.removeListener(IPC_CHANNELS.filesCloseRequest, receive);
     },
-    replyFilesClose: async (requestId: number, answer: "checking" | "allow" | "cancel") => {
+    replyFilesClose: async (
+      requestId: number,
+      answer: "checking" | "prompting" | "allow" | "cancel",
+    ) => {
       if (
         !Number.isSafeInteger(requestId) ||
         requestId < 1 ||
-        (answer !== "checking" && answer !== "allow" && answer !== "cancel")
+        (answer !== "checking" &&
+          answer !== "prompting" &&
+          answer !== "allow" &&
+          answer !== "cancel")
       )
         throw new TypeError("Invalid Files close reply.");
       return (await ipc.invoke(IPC_CHANNELS.filesCloseReply, { requestId, answer })) === true;

@@ -91,6 +91,15 @@ const fixture = {
   menus: [] as unknown[],
   openExternal: vi.fn(async (_url: string) => {}),
   powerMonitor: Object.assign(new EventEmitter(), { getCurrentThermalState: () => "nominal" }),
+  dialog: {
+    showErrorBox: vi.fn(),
+    showMessageBox: vi.fn(
+      async (_window: unknown, _options: { buttons?: string[]; defaultId?: number }) => ({
+        response: 0,
+        checkboxChecked: false,
+      }),
+    ),
+  },
   dataId: randomUUID(),
   updater: new EventEmitter(),
   handlers: new Map<string, (event: unknown, ...values: unknown[]) => unknown>(),
@@ -105,7 +114,7 @@ vi.mock("electron", () => ({
   app: fixture.app,
   autoUpdater: fixture.updater,
   BrowserWindow: Window,
-  dialog: { showErrorBox: vi.fn() },
+  dialog: fixture.dialog,
   Menu: {
     buildFromTemplate: (template: unknown) => template,
     setApplicationMenu: (menu: unknown) => fixture.menus.push(menu),
@@ -204,6 +213,7 @@ beforeEach(() => {
   fixture.windows.length = 0;
   fixture.app.removeAllListeners();
   fixture.updater.removeAllListeners();
+  fixture.powerMonitor.removeAllListeners();
   fixture.dataId = randomUUID();
   fixture.popup.mockReset().mockResolvedValue({ kind: "selected", id: "0" });
   fixture.editing.mockClear();
@@ -469,3 +479,29 @@ it("lets a system shutdown close without asking about Files", async () => {
     ),
   ).toBe(false);
 });
+
+it("asks natively when a window cannot answer its Files check on quit", async () => {
+  const f = await open("darwin");
+  fixture.app.quit.mockClear();
+  fixture.dialog.showMessageBox.mockClear();
+  fixture.app.emit("before-quit", { preventDefault: vi.fn() });
+  await vi.waitFor(() =>
+    expect(
+      f.window.webContents.sent.some(
+        ([channel]) => channel === DESKTOP_IPC_CHANNELS.filesCloseRequest,
+      ),
+    ).toBe(true),
+  );
+  // The renderer never answers: after the acknowledgement deadline the
+  // native fallback asks the person instead of silently stalling.
+  await vi.waitFor(() => expect(fixture.dialog.showMessageBox).toHaveBeenCalled(), {
+    timeout: 10_000,
+  });
+  const options = fixture.dialog.showMessageBox.mock.calls[0]?.[1];
+  expect(options?.buttons).toEqual(["Cancel", "Close anyway"]);
+  expect(options?.defaultId).toBe(0);
+  // Cancel: no quit proceeds, and the window stands.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(fixture.app.quit).not.toHaveBeenCalled();
+  expect(f.window.isDestroyed()).toBe(false);
+}, 15_000);

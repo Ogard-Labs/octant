@@ -1,4 +1,4 @@
-import type { BrowserWindow } from "electron";
+import type { BrowserWindow, MessageBoxOptions, MessageBoxReturnValue } from "electron";
 import {
   DESKTOP_IPC_CHANNELS,
   decodeFilesCloseReply,
@@ -10,11 +10,13 @@ import {
  *
  * One request per window is in flight at a time: `sent` waits for the
  * renderer's `checking` acknowledgement, `acknowledged` waits for the
- * person's `allow` or `cancel` with no deadline, and `held` is an `allow`
- * still locking the window until the close consumes it or `release` frees
- * it. A reply only ever affects the request the registry holds for that
- * same window and request id — a late, malformed, or out-of-order one
- * changes nothing — and an absent acknowledgement never means allowed.
+ * person's `allow` or `cancel` with no deadline, `confirming-unavailable`
+ * is a native dialog asking the person directly because the renderer could
+ * not answer, and `held` is an `allow` still locking the window until the
+ * close consumes it or `release` frees it. A reply only ever affects the
+ * request the registry holds for that same window and request id — a late,
+ * malformed, or out-of-order one changes nothing — and an absent
+ * acknowledgement never means allowed.
  *
  * The module holds no Electron state of its own: callers `install` each
  * window at registration so a cross-document main-frame navigation, a gone
@@ -24,13 +26,17 @@ import {
 
 const FILES_CLOSE_ACK_TIMEOUT_MS = 5_000;
 
-type CloseRequestPhase = "sent" | "acknowledged" | "held";
+type CloseRequestPhase = "sent" | "acknowledged" | "confirming-unavailable" | "held";
 
 interface CloseRequest {
   readonly id: number;
   phase: CloseRequestPhase;
   readonly resolve: (allowed: boolean) => void;
   ackHandle: ReturnType<typeof setTimeout> | undefined;
+  /** Cancels the unavailable-renderer dialog when the request leaves it. */
+  confirmation?: AbortController | undefined;
+  /** The renderer already announced its prompt once; retries do not refocus. */
+  revealed?: boolean;
 }
 
 interface DeliveryTimer {
@@ -88,12 +94,34 @@ export interface DesktopFilesClose {
 }
 
 /**
- * Whether an unmarked native quit — the Dock's Quit on macOS arrives through
- * `before-quit` with nothing that names it — should run the Files preflight
- * like the app's own Quit. Updater restarts, data relaunches and OS shutdowns
- * are the caller's internal quits and bypass it; platforms without the
- * ambiguous route keep theirs, and a quit with no windows has nobody to ask.
+ * The native fallback for a window whose renderer never answered the Files
+ * check: the person decides in a plain dialog whether closing may proceed
+ * unchecked.
  */
+export async function confirmUnresponsiveFilesClose(options: {
+  readonly window: BrowserWindow;
+  readonly signal: AbortSignal;
+  readonly showMessageBox: (
+    window: BrowserWindow,
+    options: MessageBoxOptions,
+  ) => Promise<MessageBoxReturnValue>;
+  readonly log: (message: string) => void;
+}): Promise<boolean> {
+  options.log("Octant could not check unsaved Files edits before closing a window.");
+  const { response } = await options.showMessageBox(options.window, {
+    type: "warning",
+    message: "Close this window without checking for unsaved edits?",
+    detail: "Octant could not check this window. Closing it may lose unsaved Files edits.",
+    buttons: ["Cancel", "Close anyway"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    signal: options.signal,
+  });
+  return response === 1;
+}
+
+/** Treat an unmarked macOS quit with open windows like the app menu's Quit. */
 export function shouldPreflightNativeQuit(options: {
   readonly platform: NodeJS.Platform | string;
   readonly hasWindows: boolean;
@@ -111,9 +139,17 @@ export function shouldPreflightNativeQuit(options: {
 export function createDesktopFilesClose(options?: {
   readonly timer?: DeliveryTimer;
   readonly ackTimeoutMs?: number;
+  /**
+   * Asks the person natively when the renderer cannot answer — an absent
+   * acknowledgement, a send that could not reach it, or a render process
+   * that died with the check unanswered. When unset, an unavailable
+   * renderer simply refuses, as it always did.
+   */
+  readonly confirmUnavailable?: (window: BrowserWindow, signal: AbortSignal) => Promise<boolean>;
 }): DesktopFilesClose {
   const timer = options?.timer ?? realTimer;
   const ackTimeoutMs = options?.ackTimeoutMs ?? FILES_CLOSE_ACK_TIMEOUT_MS;
+  const confirmUnavailable = options?.confirmUnavailable;
   const requests = new Map<BrowserWindow, CloseRequest>();
   let nextRequestId = 1;
   let preflight = false;
@@ -123,6 +159,7 @@ export function createDesktopFilesClose(options?: {
     if (request === undefined) return;
     requests.delete(window);
     timer.clear(request.ackHandle);
+    request.confirmation?.abort();
     // A held request's prepare already resolved; only a pending one is answered.
     if (request.phase !== "held") request.resolve(false);
   }
@@ -152,6 +189,51 @@ export function createDesktopFilesClose(options?: {
     return requests.get(window)?.phase === "held";
   }
 
+  /**
+   * A renderer that could not answer does not strand the window: the person
+   * is asked natively instead, and only an explicit yes becomes a hold —
+   * every other outcome keeps the close refused.
+   */
+  function askUnavailable(window: BrowserWindow, request: CloseRequest): void {
+    if (requests.get(window) !== request || request.phase !== "sent") return;
+    if (confirmUnavailable === undefined || window.isDestroyed()) {
+      release(window);
+      return;
+    }
+    request.phase = "confirming-unavailable";
+    timer.clear(request.ackHandle);
+    const confirmation = new AbortController();
+    request.confirmation = confirmation;
+    // A surviving renderer may still hold this request's lock; releasing it
+    // by id must not drop the request the native fallback now owns.
+    send(window, { requestId: request.id, kind: "release" });
+    try {
+      if (window.isMinimized()) window.restore();
+      window.show();
+      window.focus();
+    } catch {
+      // A window leaving mid-raise is refused by the await below.
+    }
+    void Promise.resolve()
+      .then(() => confirmUnavailable(window, confirmation.signal))
+      .catch(() => false)
+      .then((allowed) => {
+        if (
+          requests.get(window) !== request ||
+          request.phase !== "confirming-unavailable" ||
+          confirmation.signal.aborted
+        )
+          return;
+        request.confirmation = undefined;
+        if (allowed) {
+          request.phase = "held";
+          request.resolve(true);
+        } else {
+          dropRequest(window);
+        }
+      });
+  }
+
   function prepare(window: BrowserWindow): Promise<boolean> {
     if (window.isDestroyed()) return Promise.resolve(false);
     if (requests.has(window)) return Promise.resolve(false);
@@ -162,16 +244,17 @@ export function createDesktopFilesClose(options?: {
       requests.set(window, request);
       // Only the acknowledgement is timed: the person's answer may take as
       // long as it takes, and an acknowledgement that never arrives never
-      // approves. Timing out releases, so a renderer holding a stale request
-      // unlocks instead of freezing behind an id the registry dropped.
-      request.ackHandle = timer.set(() => release(window), ackTimeoutMs);
+      // approves. Timing out asks natively, so a renderer holding a stale
+      // request unlocks instead of freezing behind an id the registry
+      // dropped — and a missing answer still never means allowed.
+      request.ackHandle = timer.set(() => askUnavailable(window, request), ackTimeoutMs);
       try {
         window.webContents.send(DESKTOP_IPC_CHANNELS.filesCloseRequest, {
           requestId: id,
           kind: "check",
         } satisfies FilesCloseRequestPayload);
       } catch {
-        release(window);
+        askUnavailable(window, request);
       }
     });
   }
@@ -181,11 +264,30 @@ export function createDesktopFilesClose(options?: {
     if (decoded === undefined) return false;
     const request = requests.get(window);
     if (request === undefined || request.id !== decoded.requestId) return false;
+    // The native fallback owns the question now: nothing a late renderer
+    // says — including a cancel — may answer for it.
+    if (request.phase === "confirming-unavailable") return false;
     switch (decoded.answer) {
       case "checking":
         if (request.phase !== "sent") return false;
         request.phase = "acknowledged";
         timer.clear(request.ackHandle);
+        return true;
+      case "prompting":
+        if (request.phase !== "acknowledged") return false;
+        // The renderer is showing the question: the window holding it must
+        // be visible to answer. Once per request — a retried prompt must
+        // not yank focus back to it.
+        if (!request.revealed) {
+          request.revealed = true;
+          try {
+            if (window.isMinimized()) window.restore();
+            window.show();
+            window.focus();
+          } catch {
+            // A window leaving mid-raise fails its own request elsewhere.
+          }
+        }
         return true;
       case "allow":
         // An allow only counts after the renderer acknowledged it is asking.
@@ -210,10 +312,10 @@ export function createDesktopFilesClose(options?: {
       const asked = [...currentWindows()];
       for (const window of asked) {
         if (window.isDestroyed()) return false;
-        // A window the person can answer is one they can see.
-        if (window.isMinimized()) window.restore();
-        window.show();
-        window.focus();
+        // Raising is the answering path's job: the renderer says `prompting`
+        // when the question is on screen, and the native fallback raises the
+        // window it asks about itself. No window is focused for a prompt
+        // that never appears.
         if (!(await prepare(window))) return false;
         accepted.push(window);
       }
@@ -245,14 +347,24 @@ export function createDesktopFilesClose(options?: {
           if (isMainFrame && !isInPlace) release(window);
         },
       );
-      contents.on("render-process-gone", () => invalidate(window));
+      contents.on("render-process-gone", () => {
+        const request = requests.get(window);
+        // A render process that died with a check unanswered is just an
+        // unavailable renderer: the fallback asks the person. Once the
+        // fallback owns the question, the gone renderer has nothing to say.
+        if (request !== undefined && request.phase === "sent") {
+          askUnavailable(window, request);
+        } else if (request === undefined || request.phase !== "confirming-unavailable") {
+          invalidate(window);
+        }
+      });
       window.once("closed", () => invalidate(window));
     },
     prepare,
     holds,
     pending: (window) => {
       const phase = requests.get(window)?.phase;
-      return phase === "sent" || phase === "acknowledged";
+      return phase === "sent" || phase === "acknowledged" || phase === "confirming-unavailable";
     },
     preflighting: () => preflight,
     reply,

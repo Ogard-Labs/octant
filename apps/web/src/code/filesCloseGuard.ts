@@ -94,15 +94,19 @@ function emitPrompt(): void {
  * registration — and the whole target set is scanned again after each
  * document, so a file that went dirty during the wait is asked about too.
  * `signal` is the native close's release: aborting answers the current
- * prompt Cancel for this close only.
+ * prompt Cancel for this close only. `onPrompt` fires once, just before the
+ * first question reaches the screen — the desktop uses it to raise the
+ * window that is actually asking rather than every window it checked.
  */
 export async function confirmFilesClose(
   scope?: string,
   key?: string,
   signal?: AbortSignal,
+  onPrompt?: () => void,
 ): Promise<boolean> {
   if (closing) return false;
   closing = true;
+  let prompted = false;
   try {
     for (;;) {
       if (signal?.aborted) return false;
@@ -122,6 +126,10 @@ export async function confirmFilesClose(
       for (;;) {
         if (signal?.aborted) return false;
         if (!dirty(target.entry)) break;
+        if (!prompted) {
+          prompted = true;
+          onPrompt?.();
+        }
         const choice = await ask(target.entry.name, failure, signal);
         if (choice === "cancel") return false;
         // The prompt took time: the record the question was asked about may

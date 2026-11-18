@@ -403,9 +403,14 @@ describe("desktop preload bridge", () => {
       requestId: 3,
       answer: "allow",
     });
+    await bridge.replyFilesClose(3, "prompting");
+    expect(invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.filesCloseReply, {
+      requestId: 3,
+      answer: "prompting",
+    });
     await expect(bridge.replyFilesClose(0, "allow")).rejects.toThrow(TypeError);
     await expect(bridge.replyFilesClose(3.5, "allow")).rejects.toThrow(TypeError);
-    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledTimes(2);
   });
 
   it("gives Octant the Nightly row's requests with no arguments and gives Nightly none", async () => {

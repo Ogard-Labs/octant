@@ -28,10 +28,12 @@ function bridge() {
         listener = undefined;
       };
     },
-    replyFilesClose: vi.fn(async (requestId: number, answer: "checking" | "allow" | "cancel") => {
-      replies.push({ requestId, answer });
-      return true;
-    }),
+    replyFilesClose: vi.fn(
+      async (requestId: number, answer: "checking" | "prompting" | "allow" | "cancel") => {
+        replies.push({ requestId, answer });
+        return true;
+      },
+    ),
   };
   return {
     host: host as unknown as OctantHostBridge,
@@ -76,6 +78,30 @@ describe("useDesktopFilesClose", () => {
     expect(document.body.inert).toBe(true);
     act(() => send({ requestId: 7, kind: "release" }));
     expect(document.body.inert).toBe(false);
+  });
+
+  it("announces prompting only when its question actually reaches the screen", async () => {
+    const { host, send, replies } = bridge();
+    dirtyFile();
+    renderHook(() => useDesktopFilesClose(host));
+    act(() => send({ requestId: 7, kind: "check" }));
+    const question = await prompt();
+    // The acknowledgement went first; the prompt announcement follows it
+    // once the question is visible — the desktop raises the window then.
+    await waitFor(() => expect(replies).toContainEqual({ requestId: 7, answer: "prompting" }));
+    const order = replies.map((reply) => reply.answer);
+    expect(order.indexOf("checking")).toBe(0);
+    expect(order.indexOf("prompting")).toBeGreaterThan(order.indexOf("checking"));
+    await act(async () => question.answer("discard"));
+    await waitFor(() => expect(replies).toContainEqual({ requestId: 7, answer: "allow" }));
+  });
+
+  it("never announces prompting when the window has nothing to ask", async () => {
+    const { host, send, replies } = bridge();
+    renderHook(() => useDesktopFilesClose(host));
+    act(() => send({ requestId: 3, kind: "check" }));
+    await waitFor(() => expect(replies).toContainEqual({ requestId: 3, answer: "allow" }));
+    expect(replies.some((reply) => reply.answer === "prompting")).toBe(false);
   });
 
   it("answers a refused prompt with cancel and never locks the document", async () => {

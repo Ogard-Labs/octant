@@ -165,7 +165,7 @@ export interface FilesCloseRequestPayload {
 
 export interface FilesCloseReplyPayload {
   readonly requestId: number;
-  readonly answer: "checking" | "allow" | "cancel";
+  readonly answer: "checking" | "prompting" | "allow" | "cancel";
 }
 
 /** Decodes the Files close request at the boundary it enters; anything else is refused. */
@@ -190,7 +190,7 @@ export function decodeFilesCloseReply(value: unknown): FilesCloseReplyPayload | 
     typeof requestId !== "number" ||
     !Number.isSafeInteger(requestId) ||
     requestId < 1 ||
-    (answer !== "checking" && answer !== "allow" && answer !== "cancel")
+    (answer !== "checking" && answer !== "prompting" && answer !== "allow" && answer !== "cancel")
   )
     return undefined;
   return { requestId, answer };

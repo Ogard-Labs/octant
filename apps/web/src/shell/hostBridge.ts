@@ -758,7 +758,7 @@ export interface OctantHostBridge
    */
   readonly replyFilesClose?: (
     requestId: number,
-    answer: "checking" | "allow" | "cancel",
+    answer: "checking" | "prompting" | "allow" | "cancel",
   ) => Promise<boolean>;
   /** The first ⌘Q press: the window shows "press again to quit". */
   readonly subscribeQuitShortcutHint?: (listener: () => void) => () => void;

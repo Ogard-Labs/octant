@@ -21,7 +21,11 @@ import { clearSecretServiceTestData, type DesktopIdentity } from "@octant/host-r
 import { decodeAppVersion } from "@octant/contracts/app-updates";
 import type { NightlyWindowBootstrap } from "@octant/contracts/nightly-browser";
 import { createNativeMainAuthority } from "./nightlyNativeMainAuthority";
-import { createDesktopFilesClose, shouldPreflightNativeQuit } from "./desktopFilesClose";
+import {
+  confirmUnresponsiveFilesClose,
+  createDesktopFilesClose,
+  shouldPreflightNativeQuit,
+} from "./desktopFilesClose";
 import { watchSystemShutdown } from "./personQuitReport";
 import { installNightlyBrokeredFlows } from "./nightlyBrokeredFlows";
 import { installNightlyProviderCredentials } from "./nightlyProviderCredentials";
@@ -142,7 +146,17 @@ export async function runNightlyClient(
   };
   // Each window's renderer answers for its unsaved Files drafts before an
   // ordinary close or an explicit Quit may go through.
-  const filesClose = createDesktopFilesClose();
+  const filesClose = createDesktopFilesClose({
+    // A renderer that cannot answer still has a person in front of the
+    // window: the native fallback asks whether closing may proceed unchecked.
+    confirmUnavailable: (window, signal) =>
+      confirmUnresponsiveFilesClose({
+        window,
+        signal,
+        showMessageBox: (target, options) => dialog.showMessageBox(target, options),
+        log: writeDiagnostic,
+      }),
+  });
   const liveWindows = () => [...windows.values()].filter((window) => !window.isDestroyed());
   // Only an approved Files preflight sets this flag before calling app.quit().
   let filesQuitApproved = false;

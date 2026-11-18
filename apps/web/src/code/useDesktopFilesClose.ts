@@ -51,7 +51,11 @@ export function useDesktopFilesClose(hostBridge: OctantHostBridge | undefined): 
           // the prompt it belongs to must never produce an allow.
           if (!(await reply(requestId, "checking"))) throw new Error("reply refused");
           if (!current()) return;
-          const allowed = await confirmFilesClose(undefined, undefined, control.signal);
+          const allowed = await confirmFilesClose(undefined, undefined, control.signal, () => {
+            // The prompt is on screen in this window: the desktop raises it
+            // now rather than focusing every window it only checked.
+            void reply(requestId, "prompting").catch(() => undefined);
+          });
           if (!current()) return;
           if (!allowed) {
             await reply(requestId, "cancel");

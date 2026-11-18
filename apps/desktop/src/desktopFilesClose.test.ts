@@ -19,6 +19,7 @@ function fakeWindow() {
     send: vi.fn(),
     on: vi.fn((channel: string, listener: NavigationListener) => {
       if (channel === "did-start-navigation") navigation.push(listener);
+      else onceHandlers.set(channel, listener as () => void);
     }),
     once: vi.fn((channel: string, listener: () => void) => {
       onceHandlers.set(channel, listener);
@@ -315,4 +316,223 @@ describe("the native quit preflight policy", () => {
   ];
   for (const [title, input, expected] of cases)
     it(title, () => expect(shouldPreflightNativeQuit(input)).toBe(expected));
+});
+
+describe("the prompting reply", () => {
+  it("raises only the window whose renderer is actually prompting", async () => {
+    const filesClose = createDesktopFilesClose();
+    const first = fakeWindow();
+    const second = fakeWindow();
+    const windows = [first, second];
+    const outcome = filesClose.prepareAll(() => windows);
+    const firstId = sentChecks(first)[0]?.requestId;
+    filesClose.reply(first, { requestId: firstId, answer: "checking" });
+    filesClose.reply(first, { requestId: firstId, answer: "allow" });
+    await vi.waitFor(() => expect(sentChecks(second)).toHaveLength(1));
+    const secondId = sentChecks(second)[0]?.requestId;
+    filesClose.reply(second, { requestId: secondId, answer: "checking" });
+    expect(filesClose.reply(second, { requestId: secondId, answer: "prompting" })).toBe(true);
+    expect(second.show).toHaveBeenCalledOnce();
+    expect(second.focus).toHaveBeenCalledOnce();
+    // The clean window's renderer never prompted, so it never rose.
+    expect(first.show).not.toHaveBeenCalled();
+    expect(first.focus).not.toHaveBeenCalled();
+    filesClose.reply(second, { requestId: secondId, answer: "allow" });
+    expect(await outcome).toBe(true);
+  });
+
+  it("does not focus again when the renderer announces its prompt twice", async () => {
+    const filesClose = createDesktopFilesClose();
+    const window = fakeWindow();
+    const outcome = filesClose.prepare(window);
+    const id = sentChecks(window)[0]?.requestId;
+    filesClose.reply(window, { requestId: id, answer: "checking" });
+    expect(filesClose.reply(window, { requestId: id, answer: "prompting" })).toBe(true);
+    expect(filesClose.reply(window, { requestId: id, answer: "prompting" })).toBe(true);
+    expect(window.show).toHaveBeenCalledOnce();
+    expect(window.focus).toHaveBeenCalledOnce();
+    filesClose.reply(window, { requestId: id, answer: "allow" });
+    expect(await outcome).toBe(true);
+  });
+
+  it("refuses a prompting that arrives before the acknowledgement or after allow", async () => {
+    const filesClose = createDesktopFilesClose();
+    const window = fakeWindow();
+    const outcome = filesClose.prepare(window);
+    const id = sentChecks(window)[0]?.requestId;
+    expect(filesClose.reply(window, { requestId: id, answer: "prompting" })).toBe(false);
+    filesClose.reply(window, { requestId: id, answer: "checking" });
+    filesClose.reply(window, { requestId: id, answer: "allow" });
+    expect(filesClose.reply(window, { requestId: id, answer: "prompting" })).toBe(false);
+    expect(await outcome).toBe(true);
+    expect(window.show).not.toHaveBeenCalled();
+  });
+});
+
+describe("the unavailable-renderer fallback", () => {
+  const pendingConfirmation = () => {
+    let answer: ((allowed: boolean) => void) | undefined;
+    let signal: AbortSignal | undefined;
+    const confirm = (_window: BrowserWindow, itsSignal: AbortSignal) => {
+      signal = itsSignal;
+      return new Promise<boolean>((resolve) => {
+        answer = resolve;
+      });
+    };
+    return {
+      confirm,
+      respond: (allowed: boolean) => answer?.(allowed),
+      signal: () => signal,
+    };
+  };
+
+  it("asks natively when the acknowledgement times out, and Cancel keeps the window", async () => {
+    const timers: Array<() => void> = [];
+    const pending = pendingConfirmation();
+    const filesClose = createDesktopFilesClose({
+      confirmUnavailable: pending.confirm,
+      timer: {
+        set: (callback) => {
+          timers.push(callback);
+          return 0 as never;
+        },
+        clear: () => undefined,
+      },
+    });
+    const window = fakeWindow();
+    const outcome = filesClose.prepare(window);
+    const id = sentChecks(window)[0]?.requestId;
+    timers.forEach((fire) => fire());
+    await vi.waitFor(() => expect(pending.signal()).toBeDefined());
+    // The fallback raised the window it is asking about, and the renderer
+    // was released by id so a stale prompt cannot hold it inert.
+    expect(window.focus).toHaveBeenCalled();
+    expect(window.webContents.send).toHaveBeenLastCalledWith(
+      DESKTOP_IPC_CHANNELS.filesCloseRequest,
+      { requestId: id, kind: "release" },
+    );
+    pending.respond(false);
+    expect(await outcome).toBe(false);
+    expect(filesClose.holds(window)).toBe(false);
+  });
+
+  it("turns an explicit native approval into the same hold a renderer's would be", async () => {
+    const timers: Array<() => void> = [];
+    const pending = pendingConfirmation();
+    const filesClose = createDesktopFilesClose({
+      confirmUnavailable: pending.confirm,
+      timer: {
+        set: (callback) => {
+          timers.push(callback);
+          return 0 as never;
+        },
+        clear: () => undefined,
+      },
+    });
+    const window = fakeWindow();
+    const outcome = filesClose.prepare(window);
+    timers.forEach((fire) => fire());
+    await vi.waitFor(() => expect(pending.signal()).toBeDefined());
+    pending.respond(true);
+    expect(await outcome).toBe(true);
+    expect(filesClose.holds(window)).toBe(true);
+  });
+
+  it("ignores every renderer reply while the native fallback owns the question", async () => {
+    const timers: Array<() => void> = [];
+    const pending = pendingConfirmation();
+    const filesClose = createDesktopFilesClose({
+      confirmUnavailable: pending.confirm,
+      timer: {
+        set: (callback) => {
+          timers.push(callback);
+          return 0 as never;
+        },
+        clear: () => undefined,
+      },
+    });
+    const window = fakeWindow();
+    const outcome = filesClose.prepare(window);
+    const id = sentChecks(window)[0]?.requestId;
+    timers.forEach((fire) => fire());
+    await vi.waitFor(() => expect(pending.signal()).toBeDefined());
+    // A late renderer answer — even a cancel — cannot take over the fallback.
+    expect(filesClose.reply(window, { requestId: id, answer: "checking" })).toBe(false);
+    expect(filesClose.reply(window, { requestId: id, answer: "prompting" })).toBe(false);
+    expect(filesClose.reply(window, { requestId: id, answer: "cancel" })).toBe(false);
+    expect(filesClose.reply(window, { requestId: id, answer: "allow" })).toBe(false);
+    pending.respond(false);
+    expect(await outcome).toBe(false);
+  });
+
+  it("cannot hold a window whose fallback was released before the answer arrived", async () => {
+    const timers: Array<() => void> = [];
+    const pending = pendingConfirmation();
+    const filesClose = createDesktopFilesClose({
+      confirmUnavailable: pending.confirm,
+      timer: {
+        set: (callback) => {
+          timers.push(callback);
+          return 0 as never;
+        },
+        clear: () => undefined,
+      },
+    });
+    const window = fakeWindow();
+    const outcome = filesClose.prepare(window);
+    timers.forEach((fire) => fire());
+    await vi.waitFor(() => expect(pending.signal()).toBeDefined());
+    filesClose.release(window);
+    expect(pending.signal()?.aborted).toBe(true);
+    // The release already answered this request: a late yes holds nothing.
+    pending.respond(true);
+    expect(await outcome).toBe(false);
+    expect(filesClose.holds(window)).toBe(false);
+  });
+
+  it("rolls back a renderer-approved window when a later window's fallback cancels", async () => {
+    const timers: Array<() => void> = [];
+    const pending = pendingConfirmation();
+    const filesClose = createDesktopFilesClose({
+      confirmUnavailable: pending.confirm,
+      timer: {
+        set: (callback) => {
+          timers.push(callback);
+          return 0 as never;
+        },
+        clear: () => undefined,
+      },
+    });
+    const first = fakeWindow();
+    const second = fakeWindow();
+    const windows = [first, second];
+    const outcome = filesClose.prepareAll(() => windows);
+    const firstId = sentChecks(first)[0]?.requestId;
+    filesClose.reply(first, { requestId: firstId, answer: "checking" });
+    filesClose.reply(first, { requestId: firstId, answer: "allow" });
+    await vi.waitFor(() => expect(sentChecks(second)).toHaveLength(1));
+    // The second window's renderer never answers; its fallback cancels.
+    timers.forEach((fire) => fire());
+    await vi.waitFor(() => expect(pending.signal()).toBeDefined());
+    pending.respond(false);
+    expect(await outcome).toBe(false);
+    expect(filesClose.holds(first)).toBe(false);
+    expect(first.webContents.send).toHaveBeenLastCalledWith(
+      DESKTOP_IPC_CHANNELS.filesCloseRequest,
+      { requestId: firstId, kind: "release" },
+    );
+  });
+
+  it("treats a renderer dying with an unanswered check as unavailable", async () => {
+    const pending = pendingConfirmation();
+    const filesClose = createDesktopFilesClose({ confirmUnavailable: pending.confirm });
+    const window = fakeWindow();
+    filesClose.install(window);
+    const outcome = filesClose.prepare(window);
+    window.emitRendererGone();
+    await vi.waitFor(() => expect(pending.signal()).toBeDefined());
+    pending.respond(true);
+    expect(await outcome).toBe(true);
+    expect(filesClose.holds(window)).toBe(true);
+  });
 });

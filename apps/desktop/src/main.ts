@@ -1,7 +1,11 @@
 import { storedBrowserProfileOfPartitionFolder } from "@octant/domain";
 import { createDesktopBrowserCredentialFill } from "./desktopBrowserCredentialFill";
 import { createDesktopClientLifetime } from "./desktopClientLifetime";
-import { createDesktopFilesClose, shouldPreflightNativeQuit } from "./desktopFilesClose";
+import {
+  confirmUnresponsiveFilesClose,
+  createDesktopFilesClose,
+  shouldPreflightNativeQuit,
+} from "./desktopFilesClose";
 import { readHostStartupRefusal } from "./hostRecovery";
 import { showHostRecovery } from "./hostRecoveryWindow";
 import {
@@ -1524,12 +1528,37 @@ const desktopWindows = createDesktopWindowContextRegistry<BrowserWindow, Desktop
  * closes ask the window's own renderer; an interactive Quit asks every window
  * before the quit may continue.
  */
-const filesClose = createDesktopFilesClose();
+const filesClose = createDesktopFilesClose({
+  // A renderer that cannot answer still has a person in front of the window:
+  // the native fallback asks whether closing may proceed unchecked.
+  confirmUnavailable: (window, signal) =>
+    confirmUnresponsiveFilesClose({
+      window,
+      signal,
+      showMessageBox: (target, options) => dialog.showMessageBox(target, options),
+      log: writeDiagnostic,
+    }),
+});
 /** The window set an interactive Quit's Files preflight approved. */
 let interactiveQuitWindows: ReadonlyArray<BrowserWindow> | undefined;
-// A retained-host window close must keep its old direct path: it cannot open
-// a dialog, and a held renderer answers it through `holds` anyway.
-let closingWindowsForRetainedHost = false;
+// A retained-host window close keeps its old direct path — no dialog — but
+// only for the windows the close decision just validated, and for an
+// interactive quit only while each one's Files approval is still held.
+let retainedHostWindows:
+  | {
+      readonly windows: ReadonlyArray<BrowserWindow>;
+      readonly requireHold: boolean;
+    }
+  | undefined;
+
+function retainedHostMayClose(window: BrowserWindow): boolean {
+  const closing = retainedHostWindows;
+  return (
+    closing !== undefined &&
+    closing.windows.includes(window) &&
+    (!closing.requireHold || filesClose.holds(window))
+  );
+}
 let codeOperationApprovalViews:
   | ReturnType<typeof createCodeOperationApprovalViewController<BrowserWindow>>
   | undefined;
@@ -2775,7 +2804,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
             if (
               filesClose.holds(window) ||
               quitPrepared ||
-              closingWindowsForRetainedHost ||
+              retainedHostMayClose(window) ||
               bypassFiles ||
               (preparingQuit && (interactiveQuitWindows === undefined || quitAccepted))
             )
@@ -2792,11 +2821,11 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
           (filesClose.preflighting() ||
             (interactiveQuitWindows !== undefined &&
               !quitAccepted &&
-              !closingWindowsForRetainedHost))
+              !retainedHostMayClose(window)))
         )
           return;
         // Noninteractive shutdown never waits on a Files answer.
-        if (bypassFiles || preparingQuit || closingWindowsForRetainedHost) {
+        if (bypassFiles || preparingQuit || retainedHostMayClose(window)) {
           closeDirectly();
           return;
         }
@@ -3120,14 +3149,14 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
             (filesClose.preflighting() ||
               (interactiveQuitWindows !== undefined &&
                 !quitAccepted &&
-                !closingWindowsForRetainedHost))
+                !retainedHostMayClose(window)))
           ) {
             event.preventDefault();
             return;
           }
           // Shutdown closes the window the way it always did; only the
           // person's own close asks about unsaved Files first.
-          if (bypassFiles || preparingQuit || closingWindowsForRetainedHost) return;
+          if (bypassFiles || preparingQuit || retainedHostMayClose(window)) return;
           if (filesClose.holds(window)) return;
           event.preventDefault();
           void filesClose.prepare(window).then((allowed) => {
@@ -4951,31 +4980,34 @@ async function closeLocalWindowsForRetainedHost(): Promise<"closed" | "failed"> 
   const stillHeld =
     interactiveQuitWindows === undefined || expected.every((window) => filesClose.holds(window));
   if (!unchanged || !stillHeld) return "failed";
-  closingWindowsForRetainedHost = true;
-  const pending = live.map(
-    (window) =>
-      new Promise<boolean>((resolveClosed) => {
-        let settled = false;
-        const finish = (didClose: boolean) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          window.removeListener("closed", closed);
-          resolveClosed(didClose);
-        };
-        const closed = () => finish(true);
-        const timer = setTimeout(() => finish(window.isDestroyed()), WINDOW_CLOSE_GRACE_MS);
-        window.once("closed", closed);
-        try {
-          window.close();
-        } catch {
-          finish(false);
-        }
-      }),
-  );
-  closingWindowsForRetainedHost = false;
-  const outcomes = await Promise.all(pending);
-  return outcomes.every(Boolean) ? "closed" : "failed";
+  retainedHostWindows = { windows: live, requireHold: interactiveQuitWindows !== undefined };
+  try {
+    const pending = live.map(
+      (window) =>
+        new Promise<boolean>((resolveClosed) => {
+          let settled = false;
+          const finish = (didClose: boolean) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            window.removeListener("closed", closed);
+            resolveClosed(didClose);
+          };
+          const closed = () => finish(true);
+          const timer = setTimeout(() => finish(window.isDestroyed()), WINDOW_CLOSE_GRACE_MS);
+          window.once("closed", closed);
+          try {
+            window.close();
+          } catch {
+            finish(false);
+          }
+        }),
+    );
+    const outcomes = await Promise.all(pending);
+    return outcomes.every(Boolean) ? "closed" : "failed";
+  } finally {
+    retainedHostWindows = undefined;
+  }
 }
 
 async function shutdownSecondaryProjectWindows(): Promise<void> {
