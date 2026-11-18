@@ -22,6 +22,7 @@ import type {
   ProviderConnection,
   ProviderDriver,
   ProviderAcquireInput,
+  ProviderInPlaceLevelChange,
 } from "@octant/provider-sdk/driver";
 import { Effect, Stream } from "effect";
 import type { ShieldReviewPort } from "../shield/octantShield";
@@ -29,7 +30,12 @@ import type { WorkRequestService, WorkRequestServiceResult } from "./workRequest
 
 type RequestConnection = Pick<
   ProviderConnection,
-  "subscribe" | "answerApproval" | "answerUserInput" | "interrupt" | "approvalCall"
+  | "subscribe"
+  | "answerApproval"
+  | "answerUserInput"
+  | "interrupt"
+  | "approvalCall"
+  | "changeLevelInPlace"
 >;
 
 export interface WorkRequestRuntimeOptions {
@@ -323,6 +329,23 @@ export class WorkRequestRuntime {
               return Effect.die(new Error("Owner approval target changed before delivery."));
             return answer();
           }),
+    );
+  }
+
+  /**
+   * Moves the session's running turn to Plan in place, where its driver can
+   * hold the session to Plan; `applied` only when it did. A session this
+   * runtime no longer holds, or a driver without the change, is refused.
+   */
+  async changeLevelInPlace(input: {
+    readonly sessionId: ProviderSessionId;
+  }): Promise<ProviderInPlaceLevelChange> {
+    const connection = this.#connections.get(String(input.sessionId));
+    if (connection?.changeLevelInPlace === undefined) {
+      return { status: "refused", reason: "This provider cannot change the level in place." };
+    }
+    return Effect.runPromise(
+      connection.changeLevelInPlace({ sessionId: input.sessionId, change: "enter-plan" }),
     );
   }
 

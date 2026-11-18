@@ -1874,6 +1874,13 @@ const ApprovalAnsweredEvent = Schema.Struct({
   kind: Schema.Literal("approval-answered"),
   approvalId: CodeApprovalId,
   decision: Schema.Literal("approved", "denied"),
+  /**
+   * On an approved `level-change`: whether the new level applied inside the
+   * running turn (`in-place`, entering Plan on a provider that can hold its
+   * session to it) or from the next turn, the asking turn ending
+   * (`next-turn`). Absent on every other answer and in older journals.
+   */
+  levelChangeApplied: Schema.optional(Schema.Literal("in-place", "next-turn")),
 }).annotations(strict);
 
 const ApprovalEvent = Schema.Struct({
@@ -1894,8 +1901,8 @@ const ApprovalEvent = Schema.Struct({
   /**
    * With `level-change`: the level the agent asks the thread to move to, and
    * the plan it asks the person to approve when it asks to leave Plan. An
-   * approval changes the thread's level from its next turn; the turn that
-   * asked ends. Absent on every other approval.
+   * approval changes the thread's level, inside the running turn or from its
+   * next turn (see `approval-answered`). Absent on every other approval.
    */
   levelChange: Schema.optional(
     Schema.Struct({
