@@ -1115,7 +1115,12 @@ function prepareWindowsCodexLaunch(input: {
       args: program.args,
       cwd: scratch,
       environment: input.environment,
-      release: () => rmSync(scratch, { recursive: true, force: true }),
+      // Windows refuses to remove a folder that is still a process's working
+      // directory (EBUSY), and a tree just stopped can hold it for a moment
+      // after its exit is seen: a CI catalog read failed its cleanup that
+      // way. Node retries those errors on Windows for the delays given.
+      release: () =>
+        rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }),
     },
   };
 }

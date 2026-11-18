@@ -1912,7 +1912,9 @@ describe("Codex thread and turn lifecycle", () => {
 
   it("switches off the tools the person blocked through Codex's own config on start and every resume, at Full access too", async () => {
     const f = fixture({
-      configRead: async () => ({ config: { mcp_servers: { docs: { command: "docs" } } } }),
+      configRead: async () => ({
+        config: { mcp_servers: { docs: { command: "docs", disabled_tools: ["delete"] } } },
+      }),
     });
     const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
     // `ghost__read` names a server the person's config lacks, so no partial
@@ -1942,7 +1944,8 @@ describe("Codex thread and turn lifecycle", () => {
           "features.shell_tool": false,
           "features.unified_exec": false,
           "features.view_image": false,
-          mcp_servers: { docs: { disabled_tools: ["search"] } },
+          // The person's own `delete` stays off beside Octant's block.
+          mcp_servers: { docs: { disabled_tools: ["delete", "search"] } },
         },
       });
       expect(input).not.toHaveProperty(["config", "mcp_servers", "ghost"]);

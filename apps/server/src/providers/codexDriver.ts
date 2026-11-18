@@ -385,17 +385,30 @@ function codexBlockedToolsConfig(
   const settled = next;
   return request(() => client.configRead({ cwd })).pipe(
     Effect.map((result) => {
-      const configured = new Set(Object.keys(result.config.mcp_servers ?? {}));
+      const configured = result.config.mcp_servers ?? {};
       const servers = { ...settled.mcp_servers };
       for (const [server, tools] of serverTools) {
-        if (!configured.has(server)) continue;
+        if (!Object.hasOwn(configured, server)) continue;
         const current = servers[server];
         if (current !== undefined && "enabled" in current) continue;
-        servers[server] = { disabled_tools: tools };
+        // The override replaces the server's `disabled_tools`, so the
+        // person's own list is kept beside Octant's blocks; a tool they
+        // switched off in Codex never comes back on.
+        const own = ownDisabledTools(configured[server]);
+        servers[server] = { disabled_tools: [...new Set([...own, ...tools])] };
       }
       return Object.keys(servers).length === 0 ? settled : { ...settled, mcp_servers: servers };
     }),
   );
+}
+
+/** The tools a server's own Codex config switches off, read as untrusted input. */
+function ownDisabledTools(server: unknown): ReadonlyArray<string> {
+  if (typeof server !== "object" || server === null) return [];
+  const listed: unknown = Reflect.get(server, "disabled_tools");
+  return Array.isArray(listed)
+    ? listed.filter((tool): tool is string => typeof tool === "string")
+    : [];
 }
 
 /**
