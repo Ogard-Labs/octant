@@ -241,6 +241,16 @@ export type AppBackgroundScene = typeof AppBackgroundScene.Type;
 export const AppBackgroundEffectCell = Schema.Int.pipe(Schema.between(2, 16));
 export const AppBackgroundEffectTones = Schema.Int.pipe(Schema.between(2, 16));
 
+/**
+ * The characters the character field draws, one code point per cell. No
+ * controls, format or bidi characters, separators, whitespace, combining marks
+ * or emoji, so every stored cell is one plain glyph the field can measure.
+ */
+export const AppBackgroundCharacterSet = Schema.String.pipe(
+  Schema.pattern(/^[^\p{C}\p{Z}\p{M}\s\p{Extended_Pictographic}]{1,64}$/u),
+);
+export type AppBackgroundCharacterSet = typeof AppBackgroundCharacterSet.Type;
+
 const AppBackgroundTuning = {
   // Retired with the drawn dot pattern: rows written while it existed carry
   // these, so they still decode, and nothing reads them.
@@ -261,6 +271,10 @@ const AppBackgroundTuning = {
   motion: Schema.optional(AppBackgroundMotion),
   /** What the pixel ground draws; read by no other kind. */
   scene: Schema.optional(AppBackgroundScene),
+  /** What the character field draws, how much of it shows, and how fast it moves; absent means the default field. */
+  characterSet: Schema.optional(AppBackgroundCharacterSet),
+  characterDensity: Schema.optional(AppBackgroundPercent),
+  characterSpeed: Schema.optional(AppBackgroundPercent),
 };
 
 /** Retired: the drawn dot pattern. It decodes and resolves to the plain page. */
