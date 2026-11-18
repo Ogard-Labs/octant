@@ -47,20 +47,6 @@ function codeOperationFrameKind(payload: unknown): string | undefined {
 }
 
 /**
- * The oldest fact a card recorded, for coverage gates: a card that first
- * recorded after a comparison window ended has no coverage to compare.
- */
-export function activityCoverageFrom(
-  connection: SqliteConnection,
-  kind: Exclude<ActivityKind, "releases-published">,
-): string | null {
-  const row = connection
-    .prepare("SELECT MIN(occurred_at) AS earliest FROM code_home_activity_fact WHERE kind = ?")
-    .get(kind) as { readonly earliest: string | null } | undefined;
-  return row?.earliest ?? null;
-}
-
-/**
  * A derived projection whose apply once failed is held by `event_quarantine`:
  * it skips every later append, so its rows silently lag the journal. A read
  * must report that as unavailable rather than present stale facts as a true

@@ -77,8 +77,6 @@ export interface CodeHomeActivityServicePorts {
     readonly from: UtcTimestamp | null;
     readonly until: UtcTimestamp;
   }) => ReadonlyArray<ActivityFact>;
-  /** The oldest fact the card holds, or null when nothing was ever recorded. */
-  readonly coverageFrom: (kind: Exclude<ActivityKind, "releases-published">) => string | null;
   /** The derived projection is held after a failed apply: its rows lag. */
   readonly projectionHeld: () => boolean;
   /**
@@ -182,36 +180,56 @@ export class CodeHomeActivityService {
         : records;
     const count = query.card === "runs" ? (finished?.successful ?? 0) : records.length;
 
-    const coverageFrom = this.#ports.coverageFrom(query.card);
     let comparisonCount: number | undefined;
     // A comparison-only witness still proved the answer: it must sit in the
     // snapshot's authority set so losing it expires the snapshot instead of
     // letting a later page keep answering `comparisonCount`.
     const authorityOf = new Map(selected.authorityOf);
-    if (query.comparison !== undefined) {
-      // A comparison counts only over coverage the source actually has: a
-      // card that first recorded after the comparison window ends would read
-      // a fabricated zero, so it stays unanswered instead.
-      if (coverageFrom !== null && coverageFrom < query.comparison.until) {
-        const comparison = await this.#select(windowId, admitted, {
+    if (query.comparison !== undefined && !selected.partial) {
+      // A comparison counts only over coverage the window can actually
+      // read: an inaccessible fact must neither prove coverage nor become a
+      // fabricated zero.
+      const comparison = await this.#select(windowId, admitted, {
+        kind: query.card,
+        from: query.comparison.from,
+        until: query.comparison.until,
+      });
+      let covered = comparison.oldestAuthorized !== undefined;
+      if (!covered && query.comparison.from !== null) {
+        // Facts older than the comparison window still prove the source
+        // reached it; only then is a real zero honest.
+        const reach = await this.#select(windowId, admitted, {
           kind: query.card,
-          from: query.comparison.from,
+          from: null,
           until: query.comparison.until,
         });
-        // A comparison that hit the selection cap answers nothing: neither a
-        // truncated count nor witnesses from a partial window enter the
-        // snapshot.
-        if (!comparison.partial) {
-          comparisonCount =
-            query.card === "runs"
-              ? this.#countFinishes(comparison.records).successful
-              : comparison.records.length;
-          for (const [identity, witness] of comparison.authorityOf) {
-            authorityOf.set(identity, witness);
-          }
+        covered = reach.oldestAuthorized !== undefined;
+        // Reach's oldest witness alone is the proof the answer rested on:
+        // retaining it — never reach's whole authority set — expires the
+        // snapshot when that one thread is lost.
+        if (covered && reach.oldestWitness !== undefined) {
+          authorityOf.set(
+            `reach|${reach.oldestWitness.mode}|${reach.oldestWitness.threadId}|${reach.oldestWitness.projectId ?? ""}`,
+            reach.oldestWitness,
+          );
+        }
+      }
+      // A comparison that hit the selection cap answers nothing: neither a
+      // truncated count nor witnesses from a partial window enter the
+      // snapshot.
+      if (covered && !comparison.partial) {
+        comparisonCount =
+          query.card === "runs"
+            ? this.#countFinishes(comparison.records).successful
+            : comparison.records.length;
+        for (const [identity, witness] of comparison.authorityOf) {
+          authorityOf.set(identity, witness);
         }
       }
     }
+    // The view's coverage is only as old as facts this window may read — a
+    // bounded window cannot claim coverage it never scanned.
+    const coverageFrom = query.current.from === null ? selected.oldestAuthorized : undefined;
 
     this.#evictSnapshots();
     const snapshotId = this.#ports.uuid();
@@ -241,7 +259,7 @@ export class CodeHomeActivityService {
       ...(fallback === undefined ? {} : { fallback }),
       ...(selected.partial ? { reason: "incomplete" as const } : {}),
       checkedAt: this.#ports.clock(),
-      ...(coverageFrom === null ? {} : { coverageFrom: coverageFrom as UtcTimestamp }),
+      ...(coverageFrom === undefined ? {} : { coverageFrom }),
       count,
       ...(comparisonCount === undefined ? {} : { comparisonCount }),
       ...(finished === undefined ? {} : { finished }),
@@ -329,6 +347,8 @@ export class CodeHomeActivityService {
     readonly records: ReadonlyArray<ActivityRecord>;
     readonly authorityOf: ReadonlyMap<string, ThreadWitness>;
     readonly partial: boolean;
+    readonly oldestAuthorized: UtcTimestamp | undefined;
+    readonly oldestWitness: ThreadWitness | undefined;
   }> {
     const threadReads = new Map<string, Promise<boolean>>();
     const admittedSet = new Set(admitted);
@@ -336,6 +356,8 @@ export class CodeHomeActivityService {
     const byId = new Map<string, ActivityRecord>();
     const authorityOf = new Map<string, ThreadWitness>();
     let partial = false;
+    let oldestAuthorized: UtcTimestamp | undefined;
+    let oldestWitness: ThreadWitness | undefined;
     for (const fact of rows) {
       if (byId.size >= MAX_SELECTED_RECORDS) {
         partial = true;
@@ -352,12 +374,22 @@ export class CodeHomeActivityService {
         `${fact.identity}|${witness.mode}|${witness.threadId}|${witness.projectId ?? ""}`,
         witness,
       );
+      if (oldestAuthorized === undefined || fact.occurredAt < oldestAuthorized) {
+        oldestAuthorized = fact.occurredAt as UtcTimestamp;
+        oldestWitness = witness;
+      }
       if (byId.has(fact.identity)) continue;
       const record = this.#decodeRecord(fact, witness);
       if (record === undefined) continue;
       byId.set(fact.identity, record);
     }
-    return { records: [...byId.values()], authorityOf, partial };
+    return {
+      records: [...byId.values()],
+      authorityOf,
+      partial,
+      oldestAuthorized,
+      oldestWitness,
+    };
   }
 
   /** The thread a fact witnessed, for authority. Malformed facts read nothing. */

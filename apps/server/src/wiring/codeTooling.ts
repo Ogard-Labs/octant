@@ -45,11 +45,7 @@ import {
 } from "@octant/plugin-host/language-servers";
 import { createCodeRouteHandler, MAX_CODE_FILE_BODY_SIZE } from "../codeRoutes";
 import { CodeHomeActivityService } from "../activityHistory/codeHomeActivityService";
-import {
-  activityCoverageFrom,
-  activityHistoryHeld,
-  readActivityFacts,
-} from "../persistence/activityHistoryProjection";
+import { activityHistoryHeld, readActivityFacts } from "../persistence/activityHistoryProjection";
 import { createPairedMergeUnlockSlot } from "../hub/pairedMergeUnlock";
 import { createCodeLanguageAgentTools } from "../code/codeLanguageAgentTools";
 import {
@@ -905,7 +901,6 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         );
       },
       readFacts: (input) => readActivityFacts(persistence.connection, input),
-      coverageFrom: (kind) => activityCoverageFrom(persistence.connection, kind),
       projectionHeld: () => activityHistoryHeld(persistence.connection),
       uuid: randomUUID,
       now: Date.now,

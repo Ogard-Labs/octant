@@ -1990,7 +1990,8 @@ describe("CodeProjectPullRequestService", () => {
             ...observedDetail.pullRequest,
             state: "merged",
             title: longTitle,
-            mergedAt: "2026-08-22T08:00:00.000Z",
+            // gh's real export drops the milliseconds the contract expects.
+            mergedAt: "2026-08-22T08:00:00Z",
             mergedBy: "octocat",
           },
         }) satisfies GhPullRequestReviewResult,
@@ -2002,6 +2003,7 @@ describe("CodeProjectPullRequestService", () => {
     expect(recordDelivery.mock.calls[0]?.[0]).toMatchObject({
       kind: "prs-merged",
       number: 12,
+      occurredAt: "2026-08-22T08:00:00.000Z",
       title: "\u754C".repeat(85),
       mergedBy: "octocat",
     });

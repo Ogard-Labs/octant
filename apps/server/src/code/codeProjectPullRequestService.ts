@@ -1613,6 +1613,10 @@ export class CodeProjectPullRequestService {
       pullRequest.mergedBy === undefined
     )
       return;
+    // `gh` exports `…:00Z` without the milliseconds UtcTimestamp requires;
+    // an unparseable stamp skips the observation rather than sinking it.
+    const mergedAt = deliveryOccurredAt(pullRequest.mergedAt);
+    if (mergedAt === undefined) return;
     for (const thread of linkedThreads) {
       try {
         this.#recordDelivery(
@@ -1624,7 +1628,7 @@ export class CodeProjectPullRequestService {
             repositoryName: repository.repositoryName,
             number: pullRequest.number,
             ...(pullRequest.title === "" ? {} : { title: deliveryTitleBytes(pullRequest.title) }),
-            occurredAt: pullRequest.mergedAt,
+            occurredAt: mergedAt,
             mergedBy: pullRequest.mergedBy,
           }),
         );
@@ -1660,6 +1664,8 @@ export class CodeProjectPullRequestService {
       // Only a ClosedEvent naming this pull request in this repository earns
       // the fact; a mere reference or a differently-closed issue stays out.
       if (closure === undefined) return;
+      const closedAt = deliveryOccurredAt(closure.closedAt);
+      if (closedAt === undefined) return;
       this.#recordDelivery(
         decodeActivityDeliveryObserved({
           kind: "issues-closed",
@@ -1669,7 +1675,7 @@ export class CodeProjectPullRequestService {
           repositoryName: repository.repositoryName,
           number: issueNumber,
           ...(closure.title === "" ? {} : { title: deliveryTitleBytes(closure.title) }),
-          occurredAt: closure.closedAt,
+          occurredAt: closedAt,
           closingPullRequest: {
             repositoryOwner: repository.repositoryOwner,
             repositoryName: repository.repositoryName,
@@ -1756,6 +1762,12 @@ function deliveryTitleBytes(title: string): string {
     .subarray(0, 256)
     .toString("utf8")
     .replace(/\uFFFD+/u, "");
+}
+
+/** `gh` timestamps arrive without milliseconds; normalize to the contract's ISO form. */
+function deliveryOccurredAt(value: string): string | undefined {
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? undefined : new Date(parsed).toISOString();
 }
 
 function projectFreshnessKey(

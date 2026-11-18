@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decodeUtcTimestamp, type WindowId } from "@octant/contracts";
-import type { ActivityQuery, ActivityView } from "@octant/contracts/code-home-activity";
+import type { ActivityQuery } from "@octant/contracts/code-home-activity";
 import type { ActivityFact } from "../persistence/activityHistoryProjection";
 import { CodeHomeActivityService } from "./codeHomeActivityService";
 
@@ -53,7 +53,6 @@ function fixture(
     readonly projects?: ReadonlyArray<string>;
     readonly deniedThreads?: ReadonlySet<string>;
     readonly held?: boolean;
-    readonly coverage?: string | null;
   } = {},
 ) {
   const projects = options.projects ?? [project];
@@ -61,9 +60,11 @@ function fixture(
   const service = new CodeHomeActivityService({
     listProjects: async () => projects,
     canReadThread: async ({ threadId }) => !denied.has(threadId),
-    readFacts: () => facts,
-    coverageFrom: () =>
-      options.coverage === undefined ? (facts[0]?.occurredAt ?? null) : options.coverage,
+    readFacts: (input) =>
+      facts.filter(
+        (fact) =>
+          (input.from === null || fact.occurredAt >= input.from) && fact.occurredAt < input.until,
+      ),
     projectionHeld: () => options.held === true,
     uuid: () => `83000000-0000-4000-8000-${String(++uuidCounter).padStart(12, "0")}`,
     now: () => Date.now(),
@@ -169,7 +170,6 @@ describe("CodeHomeActivityService", () => {
       listProjects: async () => projects,
       canReadThread: async () => true,
       readFacts: () => [mergeFact()],
-      coverageFrom: () => now,
       projectionHeld: () => false,
       uuid: () => `83000000-0000-4000-8000-${String(++uuidCounter).padStart(12, "0")}`,
       now: () => Date.now(),
@@ -215,7 +215,6 @@ describe("CodeHomeActivityService", () => {
           (fact) =>
             (input.from === null || fact.occurredAt >= input.from) && fact.occurredAt < input.until,
         ),
-      coverageFrom: () => "2026-08-14T10:00:00.000Z",
       projectionHeld: () => false,
       uuid: () => `83000000-0000-4000-8000-${String(++uuidCounter).padStart(12, "0")}`,
       now: () => Date.now(),
@@ -274,7 +273,6 @@ describe("CodeHomeActivityService", () => {
           (fact) =>
             (input.from === null || fact.occurredAt >= input.from) && fact.occurredAt < input.until,
         ),
-      coverageFrom: () => "2026-08-14T10:00:00.000Z",
       projectionHeld: () => false,
       uuid: () => `83000000-0000-4000-8000-${String(++uuidCounter).padStart(12, "0")}`,
       now: () => Date.now(),
@@ -331,7 +329,6 @@ describe("CodeHomeActivityService", () => {
           (fact) =>
             (input.from === null || fact.occurredAt >= input.from) && fact.occurredAt < input.until,
         ),
-      coverageFrom: () => "2026-08-14T10:00:00.000Z",
       projectionHeld: () => false,
       uuid: () => `83000000-0000-4000-8000-${String(++uuidCounter).padStart(12, "0")}`,
       now: () => Date.now(),
@@ -373,8 +370,8 @@ describe("CodeHomeActivityService", () => {
     expect(view.records).toHaveLength(0);
   });
 
-  it("withholds a comparison count when the source has no coverage before it", async () => {
-    const { read } = fixture([mergeFact()], { coverage: now });
+  it("withholds a comparison count when no authorized fact reaches the window", async () => {
+    const { read } = fixture([mergeFact()]);
     const view = await read({
       kind: "read",
       card: "prs-merged",
@@ -383,5 +380,116 @@ describe("CodeHomeActivityService", () => {
       comparison: { from: null, until: decodeUtcTimestamp("2026-01-01T00:00:00.000Z") },
     });
     expect(view.comparisonCount).toBeUndefined();
+  });
+
+  it("counts a comparison window only when an authorized fact covers it", async () => {
+    const { read } = fixture([
+      mergeFact({ identity: "octant-dev/octant#1", occurredAt: "2025-12-15T00:00:00.000Z" }),
+      mergeFact(),
+    ]);
+    const view = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "octant",
+      current: { from: decodeUtcTimestamp("2026-08-01T00:00:00.000Z"), until },
+      comparison: { from: null, until: decodeUtcTimestamp("2026-01-01T00:00:00.000Z") },
+    });
+    expect(view.comparisonCount).toBe(1);
+  });
+
+  it("reads an honest zero for a covered but empty comparison window", async () => {
+    const { read } = fixture([
+      mergeFact({ identity: "octant-dev/octant#1", occurredAt: "2025-11-01T00:00:00.000Z" }),
+      mergeFact(),
+    ]);
+    const view = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "octant",
+      current: { from: null, until },
+      comparison: {
+        from: decodeUtcTimestamp("2025-12-01T00:00:00.000Z"),
+        until: decodeUtcTimestamp("2026-01-01T00:00:00.000Z"),
+      },
+    });
+    expect(view.comparisonCount).toBe(0);
+  });
+
+  it("never proves comparison coverage from a fact the window cannot read", async () => {
+    const { read } = fixture(
+      [
+        mergeFact({
+          identity: "octant-dev/octant#1",
+          occurredAt: "2025-12-15T00:00:00.000Z",
+          threadId: otherThread,
+        }),
+      ],
+      { deniedThreads: new Set([otherThread]) },
+    );
+    const view = await read({
+      kind: "read",
+      card: "prs-merged",
+      source: "octant",
+      current: { from: null, until },
+      comparison: { from: null, until: decodeUtcTimestamp("2026-01-01T00:00:00.000Z") },
+    });
+    expect(view.comparisonCount).toBeUndefined();
+    expect(view.coverageFrom).toBeUndefined();
+  });
+
+  it("expires a snapshot when the reach witness proving coverage loses access", async () => {
+    const denied = new Set<string>();
+    // Coverage reaches the comparison window only through an older fact
+    // witnessed by T2 — outside the bounded current window, so its witness
+    // is the sole proof the zero rests on and losing T2 must expire the
+    // snapshot.
+    const facts = [
+      mergeFact({
+        identity: "octant-dev/octant#7",
+        threadId: otherThread,
+        occurredAt: "2025-11-01T00:00:00.000Z",
+      }),
+      mergeFact({ occurredAt: "2026-08-19T10:00:00.000Z" }),
+    ];
+    const service = new CodeHomeActivityService({
+      listProjects: async () => [project],
+      canReadThread: async ({ threadId }) => !denied.has(threadId),
+      readFacts: (input) =>
+        facts.filter(
+          (fact) =>
+            (input.from === null || fact.occurredAt >= input.from) && fact.occurredAt < input.until,
+        ),
+      projectionHeld: () => false,
+      uuid: () => `83000000-0000-4000-8000-${String(++uuidCounter).padStart(12, "0")}`,
+      now: () => Date.now(),
+      clock: () => now,
+    });
+    const view = await service.read(
+      windowId,
+      {
+        kind: "read",
+        card: "prs-merged",
+        source: "octant",
+        current: {
+          from: decodeUtcTimestamp("2026-08-18T00:00:00.000Z"),
+          until: decodeUtcTimestamp("2026-08-25T00:00:00.000Z"),
+        },
+        comparison: {
+          from: decodeUtcTimestamp("2025-12-01T00:00:00.000Z"),
+          until: decodeUtcTimestamp("2026-01-01T00:00:00.000Z"),
+        },
+      },
+      () => true,
+    );
+    expect(view.comparisonCount).toBe(0);
+
+    denied.add(otherThread);
+    const page = await service.read(
+      windowId,
+      { kind: "page", snapshotId: view.snapshotId!, offset: 0 },
+      () => true,
+    );
+    expect(page).toMatchObject({ status: "unavailable", reason: "authorization-changed" });
+    expect(page.records).toHaveLength(0);
   });
 });
