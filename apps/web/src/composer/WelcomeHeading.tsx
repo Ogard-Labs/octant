@@ -47,7 +47,7 @@ export function WelcomeHeading(props: {
       {props.hint === false ? null : (
         <p className="oct-row-detail welcome__status">
           {props.projectChosen === true
-            ? "Just start writing"
+            ? "Just start typing"
             : "Pick a Project, or just start typing"}
         </p>
       )}
