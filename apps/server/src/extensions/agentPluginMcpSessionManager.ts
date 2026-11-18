@@ -1315,47 +1315,33 @@ async function createMcpSchemaCompiler(dialect: McpSchemaDialect) {
 /**
  * One compiler per dialect for a whole catalogue: schema compilation is the
  * hot cost of listing a server, and a pool pays it once per dialect instead
- * of once per tool. A repeated `$id` cannot register twice in one Ajv
- * instance, so a schema that names one again compiles on a throwaway
- * instance instead of being refused. After each compile the shared instance
- * `removeSchema()`s the tool's registrations — the compiled validator keeps
- * working, but its ids, aliases, and any invalid partial registrations can
+ * of once per tool. Compiles run one after another inside a catalogue, and
+ * after each one `removeSchema()` drops the tool's untrusted registrations —
+ * non-meta schemas, `$id`s, aliases and the compile cache — without
+ * invalidating the validator it just returned, so a repeated `$id` cannot
+ * collide with one a previous tool already released and a nested alias can
  * no longer resolve into the next tool's schema even where the input
- * inspector missed a nested alias. The pool is one catalogue's own; nothing
- * is shared across sessions.
+ * inspector missed it. The pool is one catalogue's own; nothing is shared
+ * across sessions.
  */
 function mcpCatalogueCompiler() {
   const compilers = new Map<McpSchemaDialect, ReturnType<typeof createMcpSchemaCompiler>>();
-  const ids = new Map<McpSchemaDialect, Set<string>>();
   return async (
     schema: Readonly<Record<string, unknown>>,
   ): Promise<ValidateFunction<unknown> | undefined> => {
     const dialect = mcpInputSchemaDialect(schema);
     if (dialect === undefined) return undefined;
-    const id = typeof schema.$id === "string" ? schema.$id.replace(/#\/?$/, "") : undefined;
-    let seen = ids.get(dialect);
-    if (seen === undefined) {
-      seen = new Set();
-      ids.set(dialect, seen);
+    let pending = compilers.get(dialect);
+    if (pending === undefined) {
+      pending = createMcpSchemaCompiler(dialect);
+      compilers.set(dialect, pending);
     }
-    const repeated = id !== undefined && id !== "" && seen.has(id);
-    if (id !== undefined && id !== "") seen.add(id);
-    let compiler;
-    if (repeated) {
-      compiler = await createMcpSchemaCompiler(dialect);
-    } else {
-      let pending = compilers.get(dialect);
-      if (pending === undefined) {
-        pending = createMcpSchemaCompiler(dialect);
-        compilers.set(dialect, pending);
-      }
-      compiler = await pending;
-    }
+    const compiler = await pending;
     try {
       const validator = compiler.compile<unknown>(schema as AnySchema);
       return "$async" in validator ? undefined : validator;
     } finally {
-      if (!repeated) compiler.removeSchema();
+      compiler.removeSchema();
     }
   };
 }
