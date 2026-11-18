@@ -1,4 +1,4 @@
-import { LayoutPanelLeft, X } from "lucide-react";
+import { PictureInPicture2, X } from "../ui/icons";
 import {
   useEffect,
   useLayoutEffect,
@@ -10,10 +10,28 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import { signalNativeSurfaceLayoutChange } from "../browser/useNativeBrowserSurface";
-import { DockBarRow, TILE_CONTROLS, useFoldedControls } from "./DockBarRow";
+import { createPortal } from "react-dom";
+import {
+  setNativeSurfaceResizeGuard,
+  signalNativeSurfaceLayoutChange,
+} from "../browser/useNativeBrowserSurface";
+import { DockBarRow, TILE_CONTROLS, TILE_MINIMISE_CONTROL, useFoldedControls } from "./DockBarRow";
 import { DockBarContext, useDockBarSlot } from "./dockBarControls";
+import {
+  cancelDockToolDrag,
+  pressDockToolDrag,
+  registerDockDropTarget,
+  useDraggedDockTool,
+  type DockDragPoint,
+} from "./dockToolDrag";
 import { IconButton } from "./IconButton";
+import {
+  OctantContextMenuContent,
+  OctantContextMenuItem,
+  OctantContextMenuRoot,
+  OctantContextMenuSeparator,
+  OctantContextMenuTrigger,
+} from "../ui/base/OctantContextMenu";
 import {
   OctantMenuItem,
   OctantMenuPopup,
@@ -25,10 +43,11 @@ import {
 } from "../ui/base/OctantMenu";
 import {
   MIN_DOCK_TILE_SHARE,
+  type DockTileEdge,
   type DockTileLayout,
   type DockTileMove,
 } from "./rightUtilityDockSelection";
-import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
+import { DOCK_COLUMN_MIN_WIDTH, type RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 
 /** A tile is never shorter than this while the dock has the room. */
 const MIN_TILE_HEIGHT = 140;
@@ -37,7 +56,19 @@ const MIN_TILE_HEIGHT = 140;
  * own minimum is 280px, and tools are built for that: Review's header
  * overlapped and its History tab clipped at 243px.
  */
-const MIN_COLUMN_WIDTH = 280;
+const MIN_COLUMN_WIDTH = DOCK_COLUMN_MIN_WIDTH;
+/**
+ * Columns stand side by side when the tile area holds each at its floor (less
+ * a pixel or two of rounding and the tile area's own edge); narrower, their
+ * tiles stack. A second column exists only where a person placed a tool
+ * beside another, so the floor is the test, not the roomier width the dock
+ * asks for when the window has it. A place beside is offered from a little
+ * more room than this (`TILED_DOCK_MIN_WIDTH`), so an offered place never
+ * lands under this line.
+ */
+const SIDE_BY_SIDE_WIDTH = 2 * MIN_COLUMN_WIDTH - 2;
+/** How much of the thread's foot takes a pane dragged to the bottom panel. */
+const BOTTOM_ZONE_HEIGHT = 160;
 const KEY_STEP = 0.02;
 const KEY_STEP_LARGE = 0.08;
 
@@ -76,10 +107,33 @@ export interface DockTilesProps {
   /** Closes the tool, as its button's Close does. */
   readonly onCloseTile: (tabId: string) => void;
   readonly onMoveTile: (tabId: string, direction: DockTileMove) => void;
+  /** Takes a tile to an edge of another tile, from a drag or from the menu. */
+  readonly onPlaceTile: (tabId: string, targetTabId: string, edge: DockTileEdge) => void;
+  /** Whether that placement is allowed; a drop zone shows no indicator where it is not. */
+  readonly canPlaceTile?: (tabId: string, targetTabId: string, edge: DockTileEdge) => boolean;
+  /**
+   * Whether the window holds two columns of tools side by side beside the
+   * thread's minimum and Environment. Where it does not, a pane is offered no
+   * place left or right of another: the result would stack, not stand beside.
+   */
+  readonly columnsFit?: boolean;
+  /**
+   * Takes a dragged pane to the bottom panel. Absent, or refusing the pane,
+   * no bottom zone is offered for it.
+   */
+  readonly bottomPanel?: {
+    readonly accepts: (tabId: string) => boolean;
+    readonly onMove: (tabId: string) => void;
+  };
   readonly onShowTileAlone: (tabId: string) => void;
   readonly onResizeColumns: (shares: ReadonlyArray<number>) => void;
   readonly onResizeColumn: (columnIndex: number, shares: ReadonlyArray<number>) => void;
 }
+
+/** Where a dragged pane lands. */
+type Landing =
+  | { readonly kind: "edge"; readonly tabId: string; readonly edge: DockTileEdge }
+  | { readonly kind: "bottom" };
 
 type Preview =
   | { readonly kind: "columns"; readonly shares: ReadonlyArray<number> }
@@ -223,6 +277,36 @@ function arrange(
 
 const percent = (fraction: number) => `${fraction * 100}%`;
 
+const EDGE_PHRASE: Readonly<Record<DockTileEdge, string>> = {
+  left: "Left of",
+  right: "Right of",
+  top: "Above",
+  bottom: "Below",
+};
+
+/**
+ * The edge of a rectangle the pointer is nearest to. Without room for columns
+ * side by side only the upper and lower halves are places.
+ */
+function edgeAt(
+  rect: {
+    readonly left: number;
+    readonly top: number;
+    readonly width: number;
+    readonly height: number;
+  },
+  point: { readonly clientX: number; readonly clientY: number },
+  sideways: boolean,
+): DockTileEdge {
+  const x = rect.width > 0 ? (point.clientX - rect.left) / rect.width : 0.5;
+  const y = rect.height > 0 ? (point.clientY - rect.top) / rect.height : 0.5;
+  if (!sideways) return y < 0.5 ? "top" : "bottom";
+  const nearest = Math.min(x, 1 - x, y, 1 - y);
+  if (nearest === x) return "left";
+  if (nearest === 1 - x) return "right";
+  return nearest === y ? "top" : "bottom";
+}
+
 /**
  * The width of a divider's hit area, centred on the edge between two tiles.
  * Each edge a tile shares with a neighbour is pulled in by half a gap
@@ -257,6 +341,10 @@ export function DockTiles(props: DockTilesProps) {
   const area = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<Preview>();
   const [dragging, setDragging] = useState(false);
+  // The tile whose bar is being dragged, and the edge it is over.
+  const drag = useDraggedDockTool();
+  const moving = drag?.source === "bar" ? drag.tabId : undefined;
+  const [over, setOver] = useState<{ readonly tabId: string; readonly edge: DockTileEdge }>();
   const [stacked, setStacked] = useState(false);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const columnCount = props.layout.columns.length;
@@ -279,7 +367,7 @@ export function DockTiles(props: DockTilesProps) {
           : { width: rect.width, height: rect.height },
       );
       const width = node.clientWidth;
-      setStacked(columnCount > 1 && width > 0 && width < MIN_COLUMN_WIDTH * columnCount);
+      setStacked(columnCount > 1 && width > 0 && width < SIDE_BY_SIDE_WIDTH);
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
@@ -291,10 +379,84 @@ export function DockTiles(props: DockTilesProps) {
   // A drag whose divider has gone, or whose tiles changed under it, must not
   // leave the shield up (the native page stays out of the window) or a preview
   // drawn that no commit will ever replace.
+  const movingNow = useRef(moving);
+  movingNow.current = moving;
   useEffect(() => {
     setDragging(false);
     setPreview(undefined);
+    if (movingNow.current !== undefined) cancelDockToolDrag();
+    setOver(undefined);
   }, [shape]);
+  const sideways = props.columnsFit !== false;
+  const allowed = (tabId: string, targetTabId: string, edge: DockTileEdge) =>
+    (sideways || edge === "top" || edge === "bottom") &&
+    (props.canPlaceTile?.(tabId, targetTabId, edge) ?? true);
+  // The bottom panel's zone lies over the thread's foot, outside the dock, for
+  // as long as a pane it can hold is being dragged.
+  const [overBottom, setOverBottom] = useState(false);
+  const bottomZone =
+    moving !== undefined && props.bottomPanel?.accepts(moving) === true
+      ? bottomZoneBox()
+      : undefined;
+  useEffect(() => {
+    if (moving !== undefined) return;
+    setOver(undefined);
+    setOverBottom(false);
+  }, [moving]);
+  // Where a dragged pane would land for a pointer position: an edge of another
+  // tile, or the bottom panel. The zones are hit by their rectangles, since the
+  // dragged bar holds the pointer for the length of the drag.
+  const placeAt = useRef<(tabId: string, point: DockDragPoint) => Landing | undefined>(
+    () => undefined,
+  );
+  placeAt.current = (tabId, point) => {
+    const inside = (rect: DOMRect) =>
+      point.clientX >= rect.left &&
+      point.clientX <= rect.right &&
+      point.clientY >= rect.top &&
+      point.clientY <= rect.bottom;
+    const bottom = document.querySelector("[data-dock-bottom-zone]");
+    if (bottom !== null && inside(bottom.getBoundingClientRect())) return { kind: "bottom" };
+    const zones = area.current?.querySelectorAll<HTMLElement>("[data-dock-place-zone]") ?? [];
+    for (const zone of Array.from(zones)) {
+      const rect = zone.getBoundingClientRect();
+      const target = zone.dataset.dockPlaceZone;
+      if (target === undefined || !inside(rect)) continue;
+      const edge = edgeAt(rect, point, sideways);
+      return allowed(tabId, target, edge) ? { kind: "edge", tabId: target, edge } : undefined;
+    }
+    return undefined;
+  };
+  const land = useRef<(tabId: string, landing: Landing) => void>(() => undefined);
+  land.current = (tabId, landing) => {
+    if (landing.kind === "bottom") props.bottomPanel?.onMove(tabId);
+    else props.onPlaceTile(tabId, landing.tabId, landing.edge);
+  };
+  useEffect(
+    () =>
+      registerDockDropTarget({
+        over: (dragged, point) => {
+          if (dragged.source !== "bar") return;
+          const landing = point === undefined ? undefined : placeAt.current(dragged.tabId, point);
+          setOverBottom(landing?.kind === "bottom");
+          setOver((current) =>
+            landing?.kind !== "edge"
+              ? undefined
+              : current?.tabId === landing.tabId && current.edge === landing.edge
+                ? current
+                : { tabId: landing.tabId, edge: landing.edge },
+          );
+        },
+        drop: (dragged, point) => {
+          if (dragged.source !== "bar") return false;
+          const landing = placeAt.current(dragged.tabId, point);
+          if (landing === undefined) return false;
+          land.current(dragged.tabId, landing);
+          return true;
+        },
+      }),
+    [],
+  );
 
   const placed = arrange(props.layout, preview, stacked, size);
   const labelOf = (tabId: string | undefined) =>
@@ -325,6 +487,7 @@ export function DockTiles(props: DockTilesProps) {
           if (content === undefined) return null;
           return (
             <Tile
+              tabId={tabId}
               box={box}
               content={content}
               focused={tabId === props.focusedTabId}
@@ -337,10 +500,28 @@ export function DockTiles(props: DockTilesProps) {
               {...(props.onMinimiseTile === undefined || content.minimisable !== true
                 ? {}
                 : { onMinimise: () => props.onMinimiseTile?.(tabId) })}
+              moving={tabId === moving}
               onMove={(direction) => props.onMoveTile(tabId, direction)}
+              sideways={sideways}
+              places={placed.tiles.flatMap(({ tabId: otherId }) =>
+                otherId === tabId
+                  ? []
+                  : (["left", "right", "top", "bottom"] as const).flatMap((edge) =>
+                      allowed(tabId, otherId, edge)
+                        ? [
+                            {
+                              edge,
+                              label: `${EDGE_PHRASE[edge]} ${labelOf(otherId)}`,
+                              place: () => props.onPlaceTile(tabId, otherId, edge),
+                            },
+                          ]
+                        : [],
+                    ),
+              )}
               onShowAlone={() => props.onShowTileAlone(tabId)}
               panelRef={tabId === props.focusedTabId ? props.panelRef : undefined}
               single={tileCount === 1}
+              draggable={tileCount > 1 || props.bottomPanel?.accepts(tabId) === true}
             />
           );
         })}
@@ -400,13 +581,77 @@ export function DockTiles(props: DockTilesProps) {
             it, so a divider dragged across the Browser tile stopped following
             the pointer. This shield is in the renderer's overlay selector, which
             takes the native page out of the window for the length of the drag. */}
-        {dragging ? <div aria-hidden="true" className="dock-tiles__drag-shield" /> : null}
+        {dragging ? <div aria-hidden="true" className="dock-tiles__resize-shield" /> : null}
+        {moving === undefined ? null : (
+          // A native page is a window-level view over the document: nothing
+          // drawn here shows through it. This shield (in the overlay selector)
+          // takes the page out of the window for the length of the drag, so
+          // the places a pane can land are seen on every tile.
+          <div aria-hidden="true" className="dock-tiles__drag-shield">
+            {placed.tiles.map(({ tabId, box }) => {
+              if (tabId === moving) return null;
+              const across = along(box.left, box.width);
+              const down = along(box.top, box.height);
+              const edge = over?.tabId === tabId ? over.edge : undefined;
+              return (
+                <div
+                  className="dock-tiles__place-zone"
+                  data-dock-place-zone={tabId}
+                  key={tabId}
+                  style={{
+                    left: across.start,
+                    top: down.start,
+                    width: across.size,
+                    height: down.size,
+                  }}
+                >
+                  {edge === undefined ? null : (
+                    <div className="workspace-drop-overlay dock-tiles__place" data-drop-edge={edge}>
+                      <span>{EDGE_PHRASE[edge]}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {moving === undefined || bottomZone === undefined
+          ? null
+          : createPortal(
+              <div
+                className="dock-tiles__bottom-zone"
+                data-dock-bottom-zone="true"
+                style={bottomZone}
+              >
+                {/* The zone lies over the thread, away from the panes, so it is
+                    marked for the whole drag and lit while the pointer is in it. */}
+                <div
+                  className="workspace-drop-overlay dock-tiles__place"
+                  data-drop-edge="panel"
+                  data-over={overBottom ? "true" : undefined}
+                >
+                  <span>Bottom panel</span>
+                </div>
+              </div>,
+              document.body,
+            )}
       </div>
     </div>
   );
 }
 
+/** Where the bottom panel would open: the foot of the thread's own column. */
+function bottomZoneBox(): CSSProperties | undefined {
+  const workspace = document.querySelector(".primary-workspace-layer");
+  if (workspace === null) return undefined;
+  const rect = workspace.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return undefined;
+  const height = Math.min(BOTTOM_ZONE_HEIGHT, rect.height / 2);
+  return { left: rect.left, top: rect.bottom - height, width: rect.width, height };
+}
+
 function Tile(props: {
+  readonly tabId: string;
   readonly box: Box;
   readonly content: DockTileContent;
   readonly focused: boolean;
@@ -414,10 +659,22 @@ function Tile(props: {
   readonly onFocusTile: () => void;
   readonly onHide: () => void;
   readonly onMinimise?: () => void;
+  /** This pane is the one being dragged: it reads lifted until the drop. */
+  readonly moving: boolean;
+  /** Places left and right of another pane exist in this window. */
+  readonly sideways: boolean;
   readonly onMove: (direction: DockTileMove) => void;
+  /** Every placement among the other tiles the menu may offer. */
+  readonly places: ReadonlyArray<{
+    readonly edge: DockTileEdge;
+    readonly label: string;
+    readonly place: () => void;
+  }>;
   readonly onShowAlone: () => void;
   readonly panelRef: Ref<HTMLElement> | undefined;
   readonly single: boolean;
+  /** There is somewhere to take this pane: another tile, or the bottom panel. */
+  readonly draggable: boolean;
 }) {
   const element = useRef<HTMLElement | null>(null);
   const onFocusTile = useRef(props.onFocusTile);
@@ -436,17 +693,18 @@ function Tile(props: {
       node.removeEventListener("focusin", focus, true);
     };
   }, []);
-  const { host: barHost, items: barItems } = useDockBarSlot(props.single ? "alone" : "tiled");
+  const { host: barHost, items: barItems, leadRef } = useDockBarSlot("tiled");
   const bar = useRef<HTMLDivElement>(null);
-  const row = useRef<HTMLDivElement>(null);
-  // A tool alone has no tile bar: the title band already names it. Its
-  // controls, if it has any, stand in one slim row of the same height, insets
-  // and hairline, holding only them.
+  // Every pane has the one bar, alone or among tiles: the same height, insets
+  // and controls, so nothing in a pane moves when a neighbour opens or closes.
   const folded = useFoldedControls(
-    props.single ? row : bar,
+    bar,
     barItems ?? [],
-    props.single ? 0 : TILE_CONTROLS,
+    TILE_CONTROLS + (props.onMinimise === undefined ? 0 : TILE_MINIMISE_CONTROL),
   );
+  // Alone there is nothing to arrange, and only the Browser and Terminal can
+  // become a card; the control keeps its slot either way.
+  const arrangeable = !props.single || props.onMinimise !== undefined;
   const { content, box } = props;
   const across = along(box.left, box.width);
   const down = along(box.top, box.height);
@@ -461,7 +719,13 @@ function Tile(props: {
       aria-label={content.label}
       className="dock-tile"
       data-dock-tile={content.surface}
+      data-dock-tile-edge={box.top === 0 ? "top" : undefined}
+      // The last column's top pane ends under the window's own toggles.
+      data-dock-tile-corner={
+        box.top === 0 && box.left + box.width > 1 - EDGE ? "trailing" : undefined
+      }
       data-focused={props.focused ? "true" : undefined}
+      data-moving={props.moving ? "true" : undefined}
       ref={(node) => {
         element.current = node;
         const forward = props.panelRef;
@@ -471,87 +735,152 @@ function Tile(props: {
       style={style}
       tabIndex={-1}
     >
-      {props.single ? null : (
-        // One bar per tile, the tool's own header: its name (or the Browser's
-        // pages) leads, the tool's own controls follow, the tile's controls
-        // trail, and every bar is one height so neighbouring tiles line up.
-        <div
+      {/* One bar per pane, the tool's own header: its name (or its tabs: the
+          Browser's pages, a shell's sessions, Files' open files) leads, the
+          tool's own controls follow, Minimise (a Browser, a Terminal) and
+          Close trail. A pane is arranged by dragging its bar; the same moves
+          are the bar's context menu, and the keyboard's route to them is the
+          bar itself (a Tab stop; Enter, Space, the menu key or Shift+F10) and
+          the tool's button in the thread's header where it has one. */}
+      <OctantContextMenuRoot>
+        <OctantContextMenuTrigger
           className="dock-tile__bar"
           data-fold={folded}
           data-has-controls={barItems !== undefined && barItems.length > 0 ? "true" : undefined}
+          // The whole bar picks the pane up: its name, a tab's label or its
+          // empty run. A press that began on a control (an action, Close, a
+          // tab's close, a field) is that control's, never a drag.
+          data-pane-drag={props.draggable ? "true" : undefined}
+          onPointerDown={(event: ReactPointerEvent<HTMLDivElement>) => {
+            if (!props.draggable || event.button !== 0) return;
+            const from = event.target instanceof Element ? event.target : null;
+            if (
+              from?.closest('button:not([role="tab"]), input, select, textarea, [role="menu"]') !==
+              null
+            )
+              return;
+            pressDockToolDrag(event, {
+              tabId: props.tabId,
+              source: "bar",
+              label: content.label,
+            });
+          }}
+          // The menu key is the only keyboard route the browser turns into a
+          // context menu, and a Mac has none: Shift+F10 on any control of the
+          // bar asks for the pane's menu too. The bar is a Tab stop of its own
+          // where there is something to arrange, and Enter or Space on it
+          // opens the menu: a tool opened from More tools has no button in the
+          // thread's header to arrange it from.
+          onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+            const onBar = event.target === event.currentTarget;
+            const asks =
+              (event.key === "F10" && event.shiftKey) ||
+              (onBar && (event.key === "Enter" || event.key === " "));
+            if (!asks || !arrangeable) return;
+            event.preventDefault();
+            const from = event.target instanceof Element ? event.target : event.currentTarget;
+            const bounds = from.getBoundingClientRect();
+            event.currentTarget.dispatchEvent(
+              new MouseEvent("contextmenu", {
+                bubbles: true,
+                cancelable: true,
+                clientX: bounds.left,
+                clientY: bounds.bottom,
+              }),
+            );
+          }}
           ref={bar}
+          render={<div />}
+          {...(arrangeable
+            ? {
+                "aria-description": "Enter opens the Arrange menu",
+                "aria-haspopup": "menu" as const,
+                "aria-label": `${content.label} bar`,
+                role: "group",
+                tabIndex: 0,
+              }
+            : {})}
         >
-          <div className="dock-tile__lead">{content.barLeading}</div>
+          <div className="dock-tile__lead">
+            <div className="dock-tile__title">{content.barLeading}</div>
+            <div className="dock-tile__lead-slot" ref={leadRef} />
+          </div>
           <DockBarRow fold={folded} items={barItems ?? []} toolLabel={content.label} />
-          <>
-            <OctantMenuRoot>
-              <OctantMenuTrigger
-                aria-label={`Arrange ${content.label}`}
-                className="shell-icon-button dock-tile__control window-no-drag"
-                title={`Arrange ${content.label}`}
-              >
-                <LayoutPanelLeft aria-hidden="true" size={14} />
-              </OctantMenuTrigger>
-              <OctantMenuPortal>
-                <OctantMenuPositioner>
-                  <OctantMenuPopup aria-label={`Arrange ${content.label}`}>
-                    {(
-                      [
-                        ["left", "Move left"],
-                        ["right", "Move right"],
-                        ["up", "Move up"],
-                        ["down", "Move down"],
-                      ] as const
-                    ).map(([direction, label]) =>
-                      content.moves[direction] ? (
-                        <OctantMenuItem
-                          className="workspace-disclosure__action window-no-drag"
-                          key={direction}
-                          onClick={() => props.onMove(direction)}
-                        >
-                          <span>{label}</span>
-                        </OctantMenuItem>
-                      ) : null,
-                    )}
-                    <OctantMenuSeparator />
-                    <OctantMenuItem
-                      className="workspace-disclosure__action window-no-drag"
-                      onClick={props.onShowAlone}
-                    >
-                      <span>Show alone</span>
-                    </OctantMenuItem>
-                    <OctantMenuItem
-                      className="workspace-disclosure__action window-no-drag"
-                      onClick={props.onHide}
-                    >
-                      <span>Hide from view</span>
-                    </OctantMenuItem>
-                    {props.onMinimise === undefined ? null : (
-                      <OctantMenuItem
-                        className="workspace-disclosure__action window-no-drag"
-                        onClick={props.onMinimise}
-                      >
-                        <span>Minimise to card</span>
-                      </OctantMenuItem>
-                    )}
-                  </OctantMenuPopup>
-                </OctantMenuPositioner>
-              </OctantMenuPortal>
-            </OctantMenuRoot>
+          {/* One press turns a Browser or a Terminal into its card in the
+              Environment section; the card's Show brings it back where it was.
+              It stands before Close, which every pane ends with. */}
+          {props.onMinimise === undefined ? null : (
             <IconButton
               className="dock-tile__control text-muted-foreground"
-              icon={X}
-              label={`Close ${content.label}`}
-              onClick={props.onClose}
+              icon={PictureInPicture2}
+              label={`Minimise ${content.label}`}
+              onClick={props.onMinimise}
             />
-          </>
-        </div>
-      )}
-      {props.single && barItems !== undefined && barItems.length > 0 ? (
-        <div className="dock-tile__row" data-fold={folded} ref={row}>
-          <DockBarRow fold={folded} items={barItems} toolLabel={content.label} />
-        </div>
-      ) : null}
+          )}
+          <IconButton
+            className="dock-tile__control text-muted-foreground"
+            icon={X}
+            label={`Close ${content.label}`}
+            onClick={props.onClose}
+          />
+        </OctantContextMenuTrigger>
+        {arrangeable ? (
+          <OctantContextMenuContent aria-label={`Arrange ${content.label}`}>
+            {(
+              [
+                ["left", "Move left"],
+                ["right", "Move right"],
+                ["up", "Move up"],
+                ["down", "Move down"],
+              ] as const
+            ).map(([direction, label]) =>
+              content.moves[direction] &&
+              (props.sideways || direction === "up" || direction === "down") ? (
+                <OctantContextMenuItem
+                  key={direction}
+                  label={label}
+                  onClick={() => props.onMove(direction)}
+                >
+                  {label}
+                </OctantContextMenuItem>
+              ) : null,
+            )}
+            {props.places.length === 0 ? null : (
+              <>
+                <OctantContextMenuSeparator />
+                {props.places.map((place) => {
+                  const label = `Move ${place.label.charAt(0).toLowerCase()}${place.label.slice(1)}`;
+                  return (
+                    <OctantContextMenuItem
+                      key={`${place.edge}:${place.label}`}
+                      label={label}
+                      onClick={place.place}
+                    >
+                      {label}
+                    </OctantContextMenuItem>
+                  );
+                })}
+              </>
+            )}
+            {props.single ? null : (
+              <>
+                <OctantContextMenuSeparator />
+                <OctantContextMenuItem label="Show alone" onClick={props.onShowAlone}>
+                  Show alone
+                </OctantContextMenuItem>
+                <OctantContextMenuItem label="Hide from view" onClick={props.onHide}>
+                  Hide from view
+                </OctantContextMenuItem>
+              </>
+            )}
+            {props.onMinimise === undefined ? null : (
+              <OctantContextMenuItem label="Minimise to card" onClick={props.onMinimise}>
+                Minimise to card
+              </OctantContextMenuItem>
+            )}
+          </OctantContextMenuContent>
+        ) : null}
+      </OctantContextMenuRoot>
       <DockBarContext.Provider value={barHost}>
         <div className={content.bodyClassName} data-dock-inset={content.inset ? "true" : undefined}>
           {content.children}
@@ -612,6 +941,7 @@ function TileDivider(props: {
       // The pointer was already released.
     }
     latest.current.onDraggingChange(false);
+    setNativeSurfaceResizeGuard(undefined);
     latest.current.onCancel();
   });
   useEffect(
@@ -620,6 +950,7 @@ function TileDivider(props: {
       if (drag.current === undefined) return;
       drag.current = undefined;
       latest.current.onDraggingChange(false);
+      setNativeSurfaceResizeGuard(undefined);
       latest.current.onCancel();
     },
     [],
@@ -659,6 +990,10 @@ function TileDivider(props: {
     window.addEventListener("keydown", escape.current);
     event.currentTarget.setPointerCapture?.(event.pointerId);
     props.onDraggingChange(true);
+    setNativeSurfaceResizeGuard({
+      axis: vertical ? "x" : "y",
+      at: vertical ? event.clientX : event.clientY,
+    });
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
@@ -670,6 +1005,10 @@ function TileDivider(props: {
     const delta = ((vertical ? event.clientX : event.clientY) - current.start) / current.size;
     const next = resized(current.first + delta, current.size);
     current.last = next;
+    setNativeSurfaceResizeGuard({
+      axis: vertical ? "x" : "y",
+      at: vertical ? event.clientX : event.clientY,
+    });
     props.onPreview(next);
   }
 
@@ -679,6 +1018,7 @@ function TileDivider(props: {
     drag.current = undefined;
     window.removeEventListener("keydown", escape.current);
     props.onDraggingChange(false);
+    setNativeSurfaceResizeGuard(undefined);
     if (commit && current.last !== undefined) props.onCommit(current.last);
     else props.onCancel();
   }
@@ -722,6 +1062,11 @@ function TileDivider(props: {
       aria-valuetext={`${Math.round(first * 100)} percent`}
       className="dock-tiles__divider"
       data-orientation={props.orientation}
+      onDoubleClick={() => {
+        // Back to an even split of the pair, the one size that needs no memory.
+        const next = resized(pair / 2, props.sizeOf());
+        if (next[props.index] !== first) props.onCommit(next);
+      }}
       onKeyDown={onKeyDown}
       onLostPointerCapture={(event) => finish(event, false)}
       onPointerCancel={(event) => finish(event, false)}

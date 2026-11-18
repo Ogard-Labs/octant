@@ -1,4 +1,4 @@
-import { CircleCheck, CirclePlay, Eye, Inbox, type LucideIcon } from "lucide-react";
+import { CircleCheck, CirclePlay, Eye, Inbox, type IconComponent } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { useNarrowViewport } from "./useShellPresentation";
 
@@ -24,7 +24,7 @@ const TILE_LABELS: Readonly<Record<SidebarTileId, string>> = {
  * other glyphs (a spinner arc for Running, a clipboard, a double tick), so the
  * same place had two symbols depending on the window's width.
  */
-export const TILE_ICONS: Readonly<Record<SidebarTileId, LucideIcon>> = {
+export const TILE_ICONS: Readonly<Record<SidebarTileId, IconComponent>> = {
   inbox: Inbox,
   running: CirclePlay,
   review: Eye,

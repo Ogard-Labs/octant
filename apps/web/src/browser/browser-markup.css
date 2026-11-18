@@ -140,6 +140,9 @@
 .browser-markup__button:hover:not(:disabled) {
   background: var(--octant-float-hover);
 }
+.browser-markup__button:active:not(:disabled) {
+  background: var(--octant-float-pressed);
+}
 
 .browser-markup__button[aria-pressed="true"] {
   background: var(--octant-float-pressed);

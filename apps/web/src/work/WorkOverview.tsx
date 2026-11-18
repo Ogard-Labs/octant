@@ -15,7 +15,7 @@ import type {
 } from "@octant/contracts";
 import type { WorkProjectStatus, WorkStatusDatedItem } from "@octant/contracts/work-project-status";
 import type { CreateHostViewScope, PickerGroup, ModelPickerSelection } from "@octant/domain";
-import { CalendarClock, FolderOpen, ShieldCheck } from "lucide-react";
+import { CalendarClock, FolderOpen, ShieldCheck } from "../ui/icons";
 import { useContext, useState, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
 import { clipboardHasImage } from "../chat/composerImagePaste";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
@@ -283,9 +283,7 @@ export function WorkOverview(props: WorkOverviewProps) {
               if (!clipboardHasImage(event.clipboardData)) return;
               event.preventDefault();
               if (imageSupport === false) {
-                images.refuse(
-                  "The selected model does not accept images. Choose an image-capable model.",
-                );
+                images.refuse("This model cannot read images. Pick one that can.");
                 return;
               }
               images.consumePaste(event.clipboardData);
@@ -303,7 +301,7 @@ export function WorkOverview(props: WorkOverviewProps) {
                 imageSupport,
                 images.attach,
                 images.refuse,
-                "The selected model does not accept images. Choose an image-capable model.",
+                "This model cannot read images. Pick one that can.",
               )
             }
           />

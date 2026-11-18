@@ -97,6 +97,32 @@ describe("ThemeService", () => {
     );
   });
 
+  it("reads the former 13px interface size as the current default until a person saves again", () => {
+    const test = fixture();
+    const { fontSmoothing: _smoothing, ...beforeSmoothing } = DEFAULT_THEME_SETTINGS;
+    const at13 = {
+      ...DEFAULT_THEME_SETTINGS.typography,
+      ui: { ...DEFAULT_THEME_SETTINGS.typography.ui, size: 13 },
+    };
+
+    // A row saved before the smoothing choice existed holds 13 because it was
+    // the default, not because anyone picked it.
+    test.setProjected({ settings: { ...beforeSmoothing, typography: at13 }, aggregateVersion: 2 });
+    expect(test.service.bootstrap().settings.typography.ui.size).toBe(
+      DEFAULT_THEME_SETTINGS.typography.ui.size,
+    );
+
+    // Every save carries the smoothing choice, so a 13 saved now is theirs.
+    const saved = test.service.execute({
+      kind: "update-theme-settings",
+      settings: { ...beforeSmoothing, typography: at13 },
+      expectedVersion: 2,
+    });
+    expect(saved.settings.fontSmoothing).toBe("on");
+    test.setProjected({ settings: saved.settings, aggregateVersion: 3 });
+    expect(test.service.bootstrap().settings.typography.ui.size).toBe(13);
+  });
+
   it("carries a saved profile from the former Inter default onto the current interface face", () => {
     const test = fixture();
     const withUi = (family: string) => ({

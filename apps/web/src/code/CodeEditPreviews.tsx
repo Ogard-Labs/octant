@@ -1,4 +1,4 @@
-import { useRef, useState, useLayoutEffect } from "react";
+import { useEffect, useRef, useState, useLayoutEffect } from "react";
 import type { CodeLanguageEditPreview } from "@octant/contracts/code-language";
 import type { CodeLanguageEditOutcome } from "./useCodeLanguageServices";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -7,7 +7,9 @@ import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 /** Explicit preparation never writes; the existing editor save route owns each reviewed write. */
 export function CodeEditPreviews(props: {
-  readonly checkout: string;
+  /** Which preparation the person asked for in the editor's menu. */
+  readonly intent: "rename" | "quick-fixes";
+  readonly onDismiss: () => void;
   readonly text: string;
   readonly writable: boolean;
   readonly prepare: (
@@ -44,6 +46,11 @@ export function CodeEditPreviews(props: {
       setBusy(false);
     }
   };
+  useEffect(() => {
+    if (props.intent === "quick-fixes") void prepare({ kind: "quick-fixes" });
+    else nameField.current?.focus();
+    // Asked once, when the menu item opens this panel.
+  }, []);
   const apply = async (preview: CodeLanguageEditPreview) => {
     if (active.current) return;
     active.current = true;
@@ -70,50 +77,38 @@ export function CodeEditPreviews(props: {
           event.stopPropagation();
           setResult(undefined);
           nameField.current?.focus();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          props.onDismiss();
         }
       }}
     >
-      <p className="oct-meta">Checkout: {props.checkout}</p>
       <div className="code-editor-pane__reference-actions">
-        <OctantInput
-          ref={nameField}
-          aria-label="New symbol name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          disabled={busy}
-        />
-        <OctantButton
-          type="button"
-          size="sm"
-          variant="ghost"
-          disabled={busy || name.trim().length === 0 || name.length > 256}
-          onClick={() => void prepare({ kind: "rename", newName: name.trim() })}
-        >
-          Preview rename
-        </OctantButton>
-        <OctantButton
-          type="button"
-          size="sm"
-          variant="ghost"
-          disabled={busy}
-          onClick={() => void prepare({ kind: "quick-fixes" })}
-        >
-          Find quick fixes
-        </OctantButton>
-      </div>
-      {result === undefined ? null : (
-        <OctantButton
-          type="button"
-          size="sm"
-          variant="ghost"
-          onClick={() => {
-            setResult(undefined);
-            nameField.current?.focus();
-          }}
-        >
+        {props.intent === "rename" ? (
+          <>
+            <OctantInput
+              ref={nameField}
+              aria-label="New symbol name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              disabled={busy}
+            />
+            <OctantButton
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={busy || name.trim().length === 0 || name.length > 256}
+              onClick={() => void prepare({ kind: "rename", newName: name.trim() })}
+            >
+              Preview rename
+            </OctantButton>
+          </>
+        ) : null}
+        <OctantButton type="button" size="sm" variant="ghost" onClick={props.onDismiss}>
           Close changes
         </OctantButton>
-      )}
+      </div>
       {busy ? <p role="status">Checking changes…</p> : null}
       {notice === undefined ? null : <p role="status">{notice}</p>}
       {result?.status === "edit-previews" ? (

@@ -268,6 +268,20 @@ describe("listAssignedWork", () => {
     for (const query of queries) expect(query).toContain("%40me");
   });
 
+  it("marks a draft pull request and leaves the flag off everything else", async () => {
+    const { port } = portReturning([
+      [searchItem({ number: 40, draft: true })],
+      [searchItem({ number: 41, draft: false })],
+      [],
+      [searchItem({ number: 42, draft: true, pull_request: undefined })],
+    ]);
+    const result = await port.listAssignedWork(new AbortController().signal);
+    if (result.kind !== "ok") throw new Error("expected rows");
+    const byNumber = new Map(result.value.map((item) => [item.number, item]));
+    expect(byNumber.get(40)?.draft).toBe(true);
+    expect(byNumber.get(41)).not.toHaveProperty("draft");
+  });
+
   it("returns unavailable rather than rows it cannot attribute to a repository", async () => {
     const { port } = portReturning([
       [searchItem({ repository_url: "https://evil.example.com/repos/octant/octant" })],

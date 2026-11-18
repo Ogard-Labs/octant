@@ -1,4 +1,4 @@
-import { Network } from "lucide-react";
+import { Network } from "../ui/icons";
 
 /**
  * The coordinator mark and the worker mark, drawn as a pair

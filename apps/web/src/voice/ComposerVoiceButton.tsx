@@ -1,5 +1,5 @@
 import { SpeechClientFailure } from "@octant/client-runtime/speech-client";
-import { LoaderCircle, Mic, Square } from "lucide-react";
+import { LoaderCircle, Mic, Square } from "../ui/icons";
 import { useEffect, useRef, useState } from "react";
 import { useComposerNoticeSink } from "../composer/ComposerNotice";
 import { OctantButton } from "../ui/base/OctantButton";

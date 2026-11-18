@@ -15,10 +15,26 @@
   /* ── Surfaces: the page, cards, floating surfaces, controls and the chosen row ── */
   --oct-bg: var(--octant-workspace);
   --oct-fg-soft: color-mix(in oklab, var(--octant-text-primary) 7%, transparent);
-  --oct-fill-1: color-mix(in oklab, var(--octant-text-primary) 14%, transparent);
-  --oct-fill-2: color-mix(in oklab, var(--octant-text-primary) 8%, transparent);
-  --oct-fill-3: color-mix(in oklab, var(--octant-text-primary) 6%, transparent);
-  --oct-fill-4: color-mix(in oklab, var(--octant-text-primary) 4%, transparent);
+  --oct-fill-1: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(14% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
+  --oct-fill-2: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(8% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
+  --oct-fill-3: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(6% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
+  --oct-fill-4: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(4% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
   --oct-selection: var(--octant-selection);
   --oct-surface: var(--octant-card);
   --oct-surface-warm: var(--octant-control);
@@ -52,7 +68,7 @@
   --oct-meta: var(--octant-text-muted);
   --oct-muted: var(--octant-text-secondary);
   --octant-primary-foreground: #141414;
-  --octant-text-muted: #949494;
+  --octant-text-muted: #a8a8ad;
   --octant-text-muted-high-contrast: #a5a4a0;
   --octant-text-primary: #f5f5f7;
   --octant-text-primary-high-contrast: #ffffff;
@@ -61,8 +77,16 @@
   /* ── Borders and hairlines ── */
   --oct-border: var(--octant-border);
   --oct-border-soft: color-mix(in oklab, var(--octant-border) 55%, var(--octant-workspace));
-  --oct-hairline: color-mix(in oklab, var(--octant-text-primary) 10%, transparent);
-  --oct-hairline-strong: color-mix(in oklab, var(--octant-text-primary) 14%, transparent);
+  --oct-hairline: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(10% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
+  --oct-hairline-strong: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(14% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
   --octant-border: #303030;
   --octant-border-soft: color-mix(in srgb, var(--octant-border) 60%, var(--octant-workspace));
   --octant-border-strong: #4d4d4d;
@@ -76,13 +100,8 @@
   --oct-accent-on: var(--octant-accent-foreground);
   --oct-accent-soft: color-mix(in oklab, var(--oct-accent) 16%, transparent);
   --octant-accent: #5b9cf5;
-  --octant-accent-away: oklch(from var(--octant-primary-foreground) calc((0.5 - l) * 1000) 0 0);
   --octant-accent-foreground: #141414;
-  --octant-accent-sheen: linear-gradient(
-    180deg,
-    oklch(from var(--octant-accent-away) l c h / calc(0.04 + 0.14 * l)),
-    oklch(from var(--octant-accent-away) l c h / calc(0.18 - 0.14 * l))
-  );
+  --octant-accent-sheen: none;
   --octant-accent-text: #5b9cf5;
   /* ── Status: success, warning, danger and diff colours ── */
   --oct-danger: var(--octant-danger-text);
@@ -147,13 +166,13 @@
   --oct-text-detail: calc(13 * var(--oct-text-step));
   --oct-text-lg: calc(17 * var(--oct-text-step));
   --oct-text-sm: calc(14 * var(--oct-text-step));
-  --oct-text-step: calc(var(--octant-ui-font-size, 13px) / 13);
+  --oct-text-step: calc(var(--octant-ui-font-size, 14px) / 13);
   --oct-text-xl: calc(20 * var(--oct-text-step));
   --oct-text-xs: calc(12 * var(--oct-text-step));
   --oct-transcript-font-size: 13px;
   --octant-editor-font-size: 13px;
   --octant-terminal-font-size: 12px;
-  --octant-ui-font-size: 13px;
+  --octant-ui-font-size: 14px;
   /* ── Type: weights ── */
   --oct-weight-medium: 500;
   --oct-weight-regular: 400;
@@ -187,20 +206,22 @@
   --oct-role-meta-mono-family: var(--oct-font-mono);
   --oct-role-meta-mono-tracking: 0;
   --oct-role-meta-size: var(--oct-text-xs);
+  --oct-role-meta-tracking: var(--oct-tracking-sf-12);
   --oct-role-page-title-family: var(--oct-font-display);
-  --oct-role-page-title-leading: var(--oct-leading-label);
-  --oct-role-page-title-size: var(--oct-text-sm);
-  --oct-role-page-title-tracking: var(--oct-tracking-snug);
+  --oct-role-page-title-leading: 1.15;
+  --oct-role-page-title-size: var(--oct-text-2xl);
+  --oct-role-page-title-tracking: var(--oct-tracking-sf-26);
   --oct-role-page-title-weight: var(--oct-weight-strong);
   --oct-role-row-detail-leading: var(--oct-leading-detail);
   --oct-role-row-detail-size: var(--oct-text-detail);
-  --oct-role-row-label-leading: var(--oct-leading-label);
+  --oct-role-row-label-leading: var(--oct-line-chrome);
   --oct-role-row-label-size: var(--oct-text-sm);
+  --oct-role-row-label-tracking: var(--oct-tracking-sf-14);
   --oct-role-row-label-weight: var(--oct-weight-medium);
   --oct-role-section-label-family: var(--oct-font-display);
-  --oct-role-section-label-leading: var(--oct-leading-snug);
+  --oct-role-section-label-leading: var(--oct-line-chrome);
   --oct-role-section-label-size: var(--oct-text-sm);
-  --oct-role-section-label-tracking: var(--oct-tracking-snug);
+  --oct-role-section-label-tracking: var(--oct-tracking-sf-14);
   --oct-role-section-label-weight: var(--oct-weight-strong);
   --oct-role-title-family: var(--oct-font-display);
   --oct-role-title-hero-leading: 1.1;
@@ -237,16 +258,19 @@
   --oct-touch-min: 44px;
   /* ── Opacity ── */
   --oct-disabled-opacity: 0.75;
+  --oct-window-inactive-opacity: 0.55;
   /* ── Radii ── */
   --oct-radius-bubble: 22px;
   --oct-radius-bubble-tail: 8px;
   --oct-radius-card-m: 26px;
   --oct-radius-device: 44px;
   --oct-radius-inset: 8px;
+  --oct-radius-lg: 16px;
   --oct-radius-md: 12px;
   --oct-radius-pill: 9999px;
   --oct-radius-sheet: 30px;
-  --oct-radius-sm: 4px;
+  --oct-radius-sm: 8px;
+  --oct-radius-xl: 20px;
   /* ── Icon sizes ── */
   --oct-icon-lg: 20px;
   --oct-icon-mark: 32px;
@@ -257,50 +281,20 @@
   --oct-elev-flat: none;
   --oct-elev-raised: var(--octant-shadow-overlay);
   --oct-elev-ring: var(--octant-shadow-hairline);
-  --oct-elev-subtle: var(--octant-shadow-sm);
-  --octant-shadow-control:
-    inset 0 1px 0 var(--octant-control-top), inset 0 -1px 0 var(--octant-control-low),
-    inset 0 0 0 1px var(--octant-control-rim), var(--octant-control-lift),
-    var(--octant-control-drop);
-  --octant-shadow-control-pressed:
-    inset 0 1px 2px rgb(0 0 0 / 55%), inset 0 0 0 1px var(--octant-control-rim);
+  --oct-elev-subtle: none;
+  --octant-shadow-control: none;
+  --octant-shadow-control-pressed: none;
   --octant-shadow-hairline: 0 0 0 1px var(--octant-border);
-  --octant-shadow-lg:
-    inset 0 1px 0 var(--octant-rim-top), inset 0 -1px 0 var(--octant-rim-low),
-    inset 0 0 0 1px var(--octant-rim), 0 10px 18px -8px rgb(0 0 0 / 54%),
-    0 24px 48px -16px rgb(0 0 0 / 70%);
-  --octant-shadow-md:
-    inset 0 1px 0 var(--octant-control-top), inset 0 -1px 0 var(--octant-control-low),
-    inset 0 0 0 1px var(--octant-control-rim), var(--octant-control-lift),
-    0 1px 2px rgb(0 0 0 / 40%), 0 14px 30px -14px rgb(0 0 0 / 70%);
-  --octant-shadow-overlay:
-    inset 0 1px 0 var(--octant-rim-float), inset 0 -1px 0 var(--octant-rim-low),
-    inset 0 0 0 1px var(--octant-rim-top), 0 0 0 0.5px rgb(0 0 0 / 90%),
-    0 6px 14px -4px rgb(0 0 0 / 60%), 0 30px 60px -18px rgb(0 0 0 / 80%);
-  --octant-shadow-panel: var(--octant-shadow-panel-rim), var(--octant-shadow-panel-seat);
-  --octant-shadow-panel-rim:
-    inset 0 1px 0 var(--octant-rim-top), inset 0 -1px 0 var(--octant-rim-low),
-    inset 0 0 0 1px var(--octant-rim);
-  --octant-shadow-panel-seat: 0 0 0 0.5px #000, 0 1px 1px rgb(0 0 0 / 60%), 0 5px 8px -7px #000;
-  --octant-shadow-pop:
-    inset 0 1px 0 var(--octant-rim-float), inset 0 -1px 0 var(--octant-rim-low),
-    inset 0 0 0 1px var(--octant-rim-top), 0 0 0 0.5px rgb(0 0 0 / 90%),
-    0 12px 24px -8px rgb(0 0 0 / 60%), 0 40px 96px -24px rgb(0 0 0 / 80%);
-  --octant-shadow-primary:
-    inset 0 1px 0 rgb(255 255 255 / 45%), inset 0 -1px 0 rgb(0 0 0 / 22%),
-    inset 0 0 0 1px rgb(0 0 0 / 12%), 0 1px 2px rgb(0 0 0 / 45%),
-    0 6px 16px -6px color-mix(in srgb, var(--octant-accent) 75%, transparent);
-  --octant-shadow-raised-glass: var(--octant-shadow-sm);
-  --octant-shadow-selected: var(--octant-shadow-control);
-  --octant-shadow-sm:
-    inset 0 1px 0 var(--octant-rim-top), inset 0 -1px 0 var(--octant-rim-low),
-    inset 0 0 0 1px var(--octant-rim), var(--octant-card-lift), var(--octant-card-drop);
-  --octant-shadow-well:
-    inset 0 1px 2px rgb(0 0 0 / 70%), inset 0 0 0 1px rgb(0 0 0 / 40%),
-    0 1px 0 rgb(255 255 255 / 7%);
-  --octant-shadow-xs:
-    inset 0 1px 0 var(--octant-rim-top), inset 0 -1px 0 var(--octant-rim-low),
-    inset 0 0 0 1px var(--octant-rim), 0 1px 2px rgb(0 0 0 / 30%);
+  --octant-shadow-lg: none;
+  --octant-shadow-md: none;
+  --octant-shadow-overlay: 0 0 0 1px rgb(255 255 255 / 10%), 0 12px 32px -12px rgb(0 0 0 / 70%);
+  --octant-shadow-pop: 0 0 0 1px rgb(255 255 255 / 10%), 0 16px 40px -14px rgb(0 0 0 / 70%);
+  --octant-shadow-primary: none;
+  --octant-shadow-raised-glass: none;
+  --octant-shadow-selected: none;
+  --octant-shadow-sm: none;
+  --octant-shadow-well: none;
+  --octant-shadow-xs: none;
   /* ── Material: bevels, glass and the wash behind a dialog ── */
   --oct-glass-blur-chrome: 40px;
   --oct-glass-blur-regular: 48px;
@@ -320,7 +314,6 @@
   --octant-bevel-strong: rgb(255 255 255 / 13%);
   --octant-float-blur: blur(40px) saturate(180%) brightness(0.45);
   --octant-float-glass: color-mix(in srgb, var(--octant-float) 66%, transparent);
-  --octant-float-sheen: linear-gradient(180deg, rgb(255 255 255 / 14%), transparent 8px);
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 72%, transparent);
   --octant-glass-blur: 24px;
   --octant-glass-border: rgb(255 255 255 / 13%);
@@ -331,10 +324,12 @@
   --oct-dur-fast: 0.1s;
   --oct-ease-color: cubic-bezier(0.4, 0, 0.2, 1);
   --oct-ease-motion: cubic-bezier(0.22, 1, 0.36, 1);
+  --oct-ease-panel: cubic-bezier(0.32, 0.72, 0, 1);
   --oct-ease-standard: ease;
   --oct-motion-base: 200ms;
   --oct-motion-fast: 150ms;
   --oct-motion-flowing: 36s;
+  --oct-motion-panel: 300ms;
   --oct-motion-pulse: 1.6s;
   --oct-motion-spin: 900ms;
   /* ── Page layout: containers, gutters, measures, breakpoints and layers ── */
@@ -357,18 +352,11 @@
   --oct-z-sticky: 20;
   --oct-z-toast: 55;
   /* ── Support: tokens an exported value reads ── */
-  --octant-card-drop: 0 1px 2px rgb(0 0 0 / 28%), 0 10px 22px -14px rgb(0 0 0 / 55%);
-  --octant-card-lift: inset 0 16px 14px -12px var(--octant-sheen);
-  --octant-control-drop: 0 1px 2px rgb(0 0 0 / 65%), 0 3px 8px -3px rgb(0 0 0 / 60%);
-  --octant-control-lift: inset 0 12px 10px -8px rgb(255 255 255 / 13%);
-  --octant-control-low: rgb(0 0 0 / 36%);
-  --octant-control-rim: rgb(255 255 255 / 8%);
-  --octant-control-top: rgb(255 255 255 / 32%);
-  --octant-rim: rgb(255 255 255 / 10%);
-  --octant-rim-float: rgb(255 255 255 / 44%);
-  --octant-rim-low: rgb(255 255 255 / 7%);
-  --octant-rim-top: rgb(255 255 255 / 30%);
-  --octant-sheen: rgb(255 255 255 / 4.5%);
+  --oct-contrast-scale: 1;
+  --oct-line-chrome: round(calc(1.23 * 1em), 1px);
+  --oct-tracking-sf-12: 0em;
+  --oct-tracking-sf-14: -0.011em;
+  --oct-tracking-sf-26: 0.008em;
 }
 
 :root[data-theme="light"] {
@@ -395,7 +383,7 @@
   --octant-surface-muted: #f0f0ef;
   --octant-surface-raised: #fdfdfc;
   --octant-surface-selected: #ebebea;
-  --octant-well: rgb(16 24 40 / 5%);
+  --octant-well: color-mix(in srgb, var(--octant-text-primary) 5%, transparent);
   --octant-workspace: #ffffff;
   --octant-primary-foreground: #ffffff;
   --octant-text-muted: #666666;
@@ -439,33 +427,8 @@
   --octant-palette-yellow: #8a6218;
   --octant-focus: #1f6f96;
   --octant-focus-ring: #1f6f96;
-  --octant-shadow-control-pressed:
-    inset 0 1px 2px rgb(16 24 40 / 22%), inset 0 0 0 1px var(--octant-control-rim);
-  --octant-shadow-lg:
-    inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim),
-    0 10px 18px -6px rgb(16 24 40 / 14%), 0 24px 48px -14px rgb(16 24 40 / 18%);
-  --octant-shadow-md:
-    inset 0 1px 0 #ffffff, inset 0 0 0 1px var(--octant-control-rim), var(--octant-control-lift),
-    0 1px 2px rgb(16 24 40 / 10%), 0 14px 28px -16px rgb(16 24 40 / 36%);
-  --octant-shadow-overlay:
-    inset 0 1px 0 var(--octant-rim-float), inset 0 0 0 1px var(--octant-control-rim),
-    0 0 0 0.5px rgb(16 24 40 / 20%), 0 6px 14px -4px rgb(16 24 40 / 16%),
-    0 30px 60px -18px rgb(16 24 40 / 40%);
-  --octant-shadow-panel-seat:
-    0 0 0 0.5px rgb(16 24 40 / 14%), 0 1px 2px rgb(16 24 40 / 9%),
-    0 6px 10px -8px rgb(16 24 40 / 34%);
-  --octant-shadow-pop:
-    inset 0 1px 0 var(--octant-rim-float), inset 0 0 0 1px var(--octant-control-rim),
-    0 0 0 0.5px rgb(16 24 40 / 20%), 0 12px 24px -8px rgb(16 24 40 / 16%),
-    0 40px 96px -24px rgb(16 24 40 / 40%);
-  --octant-shadow-sm:
-    inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim), var(--octant-card-lift),
-    var(--octant-card-drop);
-  --octant-shadow-well:
-    inset 0 1px 2px rgb(16 24 40 / 16%), inset 0 0 0 1px rgb(16 24 40 / 6%), 0 1px 0 #ffffff;
-  --octant-shadow-xs:
-    inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim),
-    0 1px 2px rgb(16 24 40 / 8%);
+  --octant-shadow-overlay: 0 0 0 1px rgb(16 24 40 / 10%), 0 12px 32px -12px rgb(16 24 40 / 28%);
+  --octant-shadow-pop: 0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%);
   --oct-glass-highlight: rgba(255, 255, 255, 0.85);
   --oct-glass-regular: rgba(255, 255, 255, 0.42);
   --oct-glass-stroke: rgba(27, 27, 27, 0.1);
@@ -477,22 +440,9 @@
   --octant-bevel-strong: rgb(255 255 255 / 90%);
   --octant-float-blur: blur(40px) saturate(180%) contrast(0.5) brightness(1.5);
   --octant-float-glass: color-mix(in srgb, var(--octant-float) 78%, transparent);
-  --octant-float-sheen: linear-gradient(180deg, rgb(255 255 255 / 60%), transparent 8px);
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 60%, transparent);
   --octant-glass-border: color-mix(in srgb, var(--octant-border-strong) 72%, transparent);
   --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 65%);
-  --octant-card-drop: 0 1px 2px rgb(16 24 40 / 8%), 0 10px 20px -14px rgb(16 24 40 / 26%);
-  --octant-card-lift: inset 0 14px 12px -12px #ffffff;
-  --octant-control-drop: 0 1px 1.5px rgb(16 24 40 / 14%), 0 3px 8px -4px rgb(16 24 40 / 20%);
-  --octant-control-lift: inset 0 10px 8px -8px #ffffff;
-  --octant-control-low: rgb(16 24 40 / 10%);
-  --octant-control-rim: rgb(16 24 40 / 13%);
-  --octant-control-top: #ffffff;
-  --octant-rim: rgb(16 24 40 / 8%);
-  --octant-rim-float: #ffffff;
-  --octant-rim-low: transparent;
-  --octant-rim-top: #ffffff;
-  --octant-sheen: rgb(255 255 255 / 0%);
 }
 
 @media (prefers-color-scheme: light) {
@@ -520,7 +470,7 @@
     --octant-surface-muted: #f0f0ef;
     --octant-surface-raised: #fdfdfc;
     --octant-surface-selected: #ebebea;
-    --octant-well: rgb(16 24 40 / 5%);
+    --octant-well: color-mix(in srgb, var(--octant-text-primary) 5%, transparent);
     --octant-workspace: #ffffff;
     --octant-primary-foreground: #ffffff;
     --octant-text-muted: #666666;
@@ -564,33 +514,8 @@
     --octant-palette-yellow: #8a6218;
     --octant-focus: #1f6f96;
     --octant-focus-ring: #1f6f96;
-    --octant-shadow-control-pressed:
-      inset 0 1px 2px rgb(16 24 40 / 22%), inset 0 0 0 1px var(--octant-control-rim);
-    --octant-shadow-lg:
-      inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim),
-      0 10px 18px -6px rgb(16 24 40 / 14%), 0 24px 48px -14px rgb(16 24 40 / 18%);
-    --octant-shadow-md:
-      inset 0 1px 0 #ffffff, inset 0 0 0 1px var(--octant-control-rim), var(--octant-control-lift),
-      0 1px 2px rgb(16 24 40 / 10%), 0 14px 28px -16px rgb(16 24 40 / 36%);
-    --octant-shadow-overlay:
-      inset 0 1px 0 var(--octant-rim-float), inset 0 0 0 1px var(--octant-control-rim),
-      0 0 0 0.5px rgb(16 24 40 / 20%), 0 6px 14px -4px rgb(16 24 40 / 16%),
-      0 30px 60px -18px rgb(16 24 40 / 40%);
-    --octant-shadow-panel-seat:
-      0 0 0 0.5px rgb(16 24 40 / 14%), 0 1px 2px rgb(16 24 40 / 9%),
-      0 6px 10px -8px rgb(16 24 40 / 34%);
-    --octant-shadow-pop:
-      inset 0 1px 0 var(--octant-rim-float), inset 0 0 0 1px var(--octant-control-rim),
-      0 0 0 0.5px rgb(16 24 40 / 20%), 0 12px 24px -8px rgb(16 24 40 / 16%),
-      0 40px 96px -24px rgb(16 24 40 / 40%);
-    --octant-shadow-sm:
-      inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim),
-      var(--octant-card-lift), var(--octant-card-drop);
-    --octant-shadow-well:
-      inset 0 1px 2px rgb(16 24 40 / 16%), inset 0 0 0 1px rgb(16 24 40 / 6%), 0 1px 0 #ffffff;
-    --octant-shadow-xs:
-      inset 0 1px 0 var(--octant-rim-top), inset 0 0 0 1px var(--octant-rim),
-      0 1px 2px rgb(16 24 40 / 8%);
+    --octant-shadow-overlay: 0 0 0 1px rgb(16 24 40 / 10%), 0 12px 32px -12px rgb(16 24 40 / 28%);
+    --octant-shadow-pop: 0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%);
     --oct-glass-highlight: rgba(255, 255, 255, 0.85);
     --oct-glass-regular: rgba(255, 255, 255, 0.42);
     --oct-glass-stroke: rgba(27, 27, 27, 0.1);
@@ -602,21 +527,8 @@
     --octant-bevel-strong: rgb(255 255 255 / 90%);
     --octant-float-blur: blur(40px) saturate(180%) contrast(0.5) brightness(1.5);
     --octant-float-glass: color-mix(in srgb, var(--octant-float) 78%, transparent);
-    --octant-float-sheen: linear-gradient(180deg, rgb(255 255 255 / 60%), transparent 8px);
     --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 60%, transparent);
     --octant-glass-border: color-mix(in srgb, var(--octant-border-strong) 72%, transparent);
     --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 65%);
-    --octant-card-drop: 0 1px 2px rgb(16 24 40 / 8%), 0 10px 20px -14px rgb(16 24 40 / 26%);
-    --octant-card-lift: inset 0 14px 12px -12px #ffffff;
-    --octant-control-drop: 0 1px 1.5px rgb(16 24 40 / 14%), 0 3px 8px -4px rgb(16 24 40 / 20%);
-    --octant-control-lift: inset 0 10px 8px -8px #ffffff;
-    --octant-control-low: rgb(16 24 40 / 10%);
-    --octant-control-rim: rgb(16 24 40 / 13%);
-    --octant-control-top: #ffffff;
-    --octant-rim: rgb(16 24 40 / 8%);
-    --octant-rim-float: #ffffff;
-    --octant-rim-low: transparent;
-    --octant-rim-top: #ffffff;
-    --octant-sheen: rgb(255 255 255 / 0%);
   }
 }

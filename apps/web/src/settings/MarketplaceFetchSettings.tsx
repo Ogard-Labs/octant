@@ -38,9 +38,7 @@ export function MarketplaceFetchDisclosure() {
       </p>
       <ul className="marketplace-fetch-settings__list">
         <li>User-Agent is a fixed string with no app or runtime version.</li>
-        <li>
-          Local skills under .agents/skills/ and local plugin folders never contact a registry.
-        </li>
+        <li>Local skills and plugin folders never contact a registry.</li>
       </ul>
     </SettingsDisclosure>
   );

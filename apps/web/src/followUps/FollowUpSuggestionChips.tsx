@@ -8,7 +8,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { X } from "lucide-react";
+import { X } from "../ui/icons";
 import type {
   NativeHarnessFollowUpCreation,
   NativeHarnessFollowUpPreview,

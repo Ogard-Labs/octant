@@ -1,5 +1,5 @@
 import type { ThreadGoalCriterion, ThreadGoalEvidenceRef } from "@octant/contracts";
-import { Check, Circle } from "lucide-react";
+import { Check, Circle } from "../ui/icons";
 
 export interface GoalCriteriaProps {
   readonly criteria: ReadonlyArray<ThreadGoalCriterion>;

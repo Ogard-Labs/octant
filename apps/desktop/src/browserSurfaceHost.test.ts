@@ -388,6 +388,83 @@ describe("BrowserSurfaceHost", () => {
     },
   );
 
+  describe("a page's favicon", () => {
+    const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+    async function withIcon(icon: string) {
+      const created = view();
+      const fetch = vi.fn(async () => ({
+        ok: true,
+        headers: { get: () => "image/png" },
+        body: {
+          getReader: () => {
+            let sent = false;
+            return {
+              read: async () =>
+                sent ? { done: true } : ((sent = true), { done: false, value: PNG }),
+              cancel: async () => undefined,
+            };
+          },
+        },
+      }));
+      (created.webContents.session as { fetch?: unknown }).fetch = fetch;
+      const host = createBrowserSurfaceHost({ createView: () => created });
+      await host.createContext({
+        contextId,
+        owner: { windowId: "window-a", threadId },
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      for (const [name, listener] of vi.mocked(created.webContents.on).mock.calls)
+        if (name === "page-favicon-updated") listener({}, [icon]);
+      await vi.waitFor(() => expect(fetch.mock.calls.length).toBeLessThanOrEqual(1));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return { created, fetch, host };
+    }
+
+    it("shows the declared icon of an admitted site in the preview read, fetched once", async () => {
+      const { fetch, host } = await withIcon("https://example.com/favicon.png");
+      try {
+        expect(fetch).toHaveBeenCalledTimes(1);
+        const peeked = await host.peek(contextId);
+        expect(peeked.faviconDataUrl).toBe(
+          `data:image/png;base64,${Buffer.from(PNG).toString("base64")}`,
+        );
+      } finally {
+        await host.closeAll();
+      }
+    });
+
+    it("starts one fetch when a page rewrites its icon's address in a loop", async () => {
+      const { created, fetch, host } = await withIcon("https://example.com/favicon.png?n=0");
+      try {
+        for (let n = 1; n <= 5; n += 1) {
+          for (const [name, listener] of vi.mocked(created.webContents.on).mock.calls)
+            if (name === "page-favicon-updated")
+              listener({}, [`https://example.com/favicon.png?n=${String(n)}`]);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(fetch).toHaveBeenCalledTimes(1);
+      } finally {
+        await host.closeAll();
+      }
+    });
+
+    it("does not fetch an icon from a site the context does not admit", async () => {
+      const { fetch, host } = await withIcon("https://tracker.example.net/favicon.png");
+      try {
+        expect(fetch).not.toHaveBeenCalled();
+        expect((await host.peek(contextId)).faviconDataUrl).toBeUndefined();
+      } finally {
+        await host.closeAll();
+      }
+    });
+  });
+
   it("opens inside the native selection-start rectangle without moving a selected range", async () => {
     const f = await keyboardMenuSurface(0, 20);
     try {
@@ -2572,6 +2649,263 @@ describe("BrowserSurfaceHost", () => {
     await expect(host.peek(contextId)).resolves.toEqual({});
     expect(created.webContents.executeJavaScriptInIsolatedWorld).not.toHaveBeenCalled();
     expect(created.webContents.capturePage).not.toHaveBeenCalled();
+  });
+
+  describe("the minimised Browser card's picture", () => {
+    const owner = { windowId: "window-a", threadId };
+    const previewHost = async (created: BrowserSurfaceViewPort) => {
+      const host = createBrowserSurfaceHost({ createView: () => created });
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      return host;
+    };
+
+    it("gives the owning window a picture scaled to the card, without reading the page's fields", async () => {
+      const created = view();
+      const resize = vi.fn(() => ({
+        isEmpty: () => false,
+        toJPEG: () => Uint8Array.from([1, 2, 3]),
+        getSize: () => ({ width: 640, height: 400 }),
+      }));
+      vi.mocked(created.webContents.capturePage).mockResolvedValue({
+        isEmpty: () => false,
+        toJPEG: () => Uint8Array.from([9]),
+        getSize: () => ({ width: 2_560, height: 1_600 }),
+        resize,
+      });
+      const host = await previewHost(created);
+
+      await expect(host.previewPicture(contextId, owner)).resolves.toBe(
+        "data:image/jpeg;base64,AQID",
+      );
+      expect(resize).toHaveBeenCalledWith({ width: 640 });
+      // The credential-field check is what withheld every picture on a busy
+      // page; the card's picture never enters an observation, so it skips it.
+      expect(created.webContents.executeJavaScriptInIsolatedWorld).not.toHaveBeenCalled();
+    });
+
+    it("refuses a picture to a window or thread that does not own the context", async () => {
+      const created = view();
+      const host = await previewHost(created);
+
+      await expect(
+        host.previewPicture(contextId, { windowId: "window-b", threadId }),
+      ).rejects.toThrow(/does not own this context/);
+      await expect(
+        host.previewPicture(contextId, {
+          windowId: "window-a",
+          threadId: "10000000-0000-4000-8000-000000000002",
+        }),
+      ).rejects.toThrow(/does not own this context/);
+      expect(created.webContents.capturePage).not.toHaveBeenCalled();
+    });
+
+    it("takes at most one picture of a context every two seconds", async () => {
+      const created = view();
+      const host = await previewHost(created);
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+      try {
+        await expect(host.previewPicture(contextId, owner)).resolves.toBeDefined();
+        now.mockReturnValue(1_001_500);
+        await expect(host.previewPicture(contextId, owner)).resolves.toBeUndefined();
+        expect(created.webContents.capturePage).toHaveBeenCalledOnce();
+        now.mockReturnValue(1_002_000);
+        await expect(host.previewPicture(contextId, owner)).resolves.toBeDefined();
+        expect(created.webContents.capturePage).toHaveBeenCalledTimes(2);
+      } finally {
+        now.mockRestore();
+      }
+    });
+
+    it("returns no picture for a context whose page has not committed a document", async () => {
+      const created = view();
+      vi.mocked(created.webContents.getURL).mockReturnValue("");
+      const host = await previewHost(created);
+
+      await expect(host.previewPicture(contextId, owner)).resolves.toBeUndefined();
+      expect(created.webContents.capturePage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("a page with a frame sandboxed without scripts", () => {
+    // Ad frames on news pages are sandboxed without scripts, so the probe's
+    // script never runs there; the page is checked through the debugger's DOM.
+    const sandboxedPage = (frameDocument: unknown) => {
+      const created = view();
+      Object.assign(created.webContents.mainFrame, {
+        framesInSubtree: [
+          { executeJavaScript: vi.fn(async () => false) },
+          { executeJavaScript: vi.fn(async () => Promise.reject(new Error("Script not run"))) },
+        ],
+      });
+      vi.mocked(created.webContents.debugger.sendCommand).mockImplementation(async (method) =>
+        method === "DOM.getDocument"
+          ? {
+              root: {
+                nodeName: "#document",
+                children: [
+                  {
+                    nodeName: "IFRAME",
+                    frameId: "ad",
+                    attributes: ["sandbox", ""],
+                    contentDocument: frameDocument,
+                  },
+                ],
+              },
+            }
+          : undefined,
+      );
+      return created;
+    };
+    const peekOf = async (created: BrowserSurfaceViewPort) => {
+      const host = createBrowserSurfaceHost({ createView: () => created });
+      await host.createContext({
+        contextId,
+        owner: { windowId: "window-a", threadId },
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      return host.peek(contextId);
+    };
+
+    it("still gives the page's picture when no document holds a credential field", async () => {
+      const created = sandboxedPage({
+        nodeName: "#document",
+        children: [{ nodeName: "INPUT", attributes: ["type", "search", "name", "q"] }],
+      });
+
+      await expect(peekOf(created)).resolves.toMatchObject({
+        screenshotDataUrl: "data:image/jpeg;base64,AQID",
+      });
+      expect(created.webContents.debugger.isAttached()).toBe(false);
+    });
+
+    it("withholds the picture when the sandboxed frame holds a credential field", async () => {
+      const created = sandboxedPage({
+        nodeName: "#document",
+        children: [{ nodeName: "INPUT", attributes: ["type", "password"] }],
+      });
+
+      const peeked = await peekOf(created);
+
+      expect(peeked.screenshotDataUrl).toBeUndefined();
+    });
+
+    it("fails closed without touching a debugger another session already holds", async () => {
+      const created = sandboxedPage({ nodeName: "#document", children: [] });
+      created.webContents.debugger.attach("1.3");
+      vi.mocked(created.webContents.debugger.attach).mockClear();
+
+      const peeked = await peekOf(created);
+
+      expect(peeked.screenshotDataUrl).toBeUndefined();
+      expect(created.webContents.debugger.attach).not.toHaveBeenCalled();
+      expect(created.webContents.debugger.detach).not.toHaveBeenCalled();
+      expect(created.webContents.debugger.sendCommand).not.toHaveBeenCalledWith(
+        "DOM.getDocument",
+        expect.anything(),
+      );
+    });
+
+    it("reads the DOM only after the agent's queued action has finished", async () => {
+      const created = sandboxedPage({ nodeName: "#document", children: [] });
+      let finishAction!: () => void;
+      vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishAction = () => resolve("text");
+          }),
+      );
+      const host = createBrowserSurfaceHost({ createView: () => created });
+      await host.createContext({
+        contextId,
+        owner: { windowId: "window-a", threadId },
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      const acting = host.act(contextId, { kind: "screenshot" });
+      await vi.waitFor(() => expect(finishAction).toBeTypeOf("function"));
+
+      const peeking = host.peek(contextId);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(created.webContents.debugger.attach).not.toHaveBeenCalled();
+
+      finishAction();
+      await acting.catch(() => undefined);
+      await expect(peeking).resolves.toMatchObject({
+        screenshotDataUrl: "data:image/jpeg;base64,AQID",
+      });
+      expect(created.webContents.debugger.isAttached()).toBe(false);
+    });
+
+    it("leaves no protocol listener behind when the debugger refuses to attach", async () => {
+      const created = sandboxedPage({ nodeName: "#document", children: [] });
+      const on = vi.fn();
+      Object.assign(created.webContents.debugger, { on, removeListener: vi.fn() });
+      vi.mocked(created.webContents.debugger.attach).mockImplementation(() => {
+        throw new Error("Another debugger is attached.");
+      });
+
+      const peeked = await peekOf(created);
+
+      expect(peeked.screenshotDataUrl).toBeUndefined();
+      expect(on).not.toHaveBeenCalled();
+    });
+
+    it("fails closed on a frame owner of any tag whose frame it cannot reach", async () => {
+      const created = sandboxedPage({ nodeName: "#document", children: [] });
+      const answer = vi.mocked(created.webContents.debugger.sendCommand);
+      const original = answer.getMockImplementation();
+      answer.mockImplementation(async (method, parameters, sessionId) =>
+        method === "DOM.getDocument"
+          ? {
+              root: {
+                nodeName: "#document",
+                nodeType: 9,
+                children: [{ nodeName: "FENCEDFRAME", nodeType: 1, frameId: "elsewhere" }],
+              },
+            }
+          : original?.(method, parameters, sessionId),
+      );
+
+      const peeked = await peekOf(created);
+
+      expect(peeked.screenshotDataUrl).toBeUndefined();
+      expect(created.webContents.debugger.isAttached()).toBe(false);
+    });
+
+    it("fails closed when the page's DOM never answers", async () => {
+      const created = sandboxedPage({ nodeName: "#document", children: [] });
+      vi.mocked(created.webContents.debugger.sendCommand).mockImplementation((method) =>
+        method === "DOM.getDocument" ? new Promise(() => undefined) : Promise.resolve(undefined),
+      );
+
+      const started = Date.now();
+      const peeked = await peekOf(created);
+
+      expect(peeked.screenshotDataUrl).toBeUndefined();
+      expect(Date.now() - started).toBeLessThan(4_000);
+      expect(created.webContents.debugger.isAttached()).toBe(false);
+    }, 10_000);
   });
 
   it("keeps the native context reusable after an agent closes its current tab", async () => {

@@ -1863,6 +1863,17 @@ const OwnerApprovalSettledEvent = Schema.Struct({
   outcome: Schema.Literal("approved", "denied", "uncertain"),
   actingPrincipal: OwnerUnlockPrincipal,
 }).annotations(strict);
+/**
+ * A person's answer to one approval reached the provider or the tool that
+ * asked. Without it a re-read of the turn's stream (a reopened thread, another
+ * window) offered every ask again, and an Approve on one already answered was
+ * refused because nothing was waiting for it any more.
+ */
+const ApprovalAnsweredEvent = Schema.Struct({
+  kind: Schema.Literal("approval-answered"),
+  approvalId: CodeApprovalId,
+  decision: Schema.Literal("approved", "denied"),
+}).annotations(strict);
 
 const ApprovalEvent = Schema.Struct({
   kind: Schema.Literal("approval-requested"),
@@ -2299,6 +2310,7 @@ export const CodeOperationEvent = Schema.Union(
   ToolEvent,
   ApprovalEvent,
   OwnerApprovalSettledEvent,
+  ApprovalAnsweredEvent,
   ApprovalReviewedEvent,
   QuestionEvent,
   FileChangeEvent,

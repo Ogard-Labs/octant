@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { Plus, X } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 

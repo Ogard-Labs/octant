@@ -4,13 +4,20 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type { GitHistoryReader } from "@octant/plugin-api/git-history";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
 import type { GitHistoryPage, GitHistoryQuery } from "@octant/contracts/git-history";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
+import { RefreshCw, Search, X } from "../ui/icons";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { CommitDetail } from "./CommitDetail";
 import { layoutCommitGraph } from "./commitGraph";
 import "./git-history.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
+
+/**
+ * The first lane's centre: its 4px dot starts on the pane's 12px inset, where
+ * the toolbar and the status line start.
+ */
+const GRAPH_INSET = 16;
 
 export interface GitHistoryPanelProps {
   readonly reader: GitHistoryReader;
@@ -114,8 +121,8 @@ function BoundHistory(props: GitHistoryPanelProps) {
   const commits = page?.commits ?? [];
   const graph = useMemo(() => layoutCommitGraph(commits), [commits]);
   const lanes = Math.max(1, ...graph.map((row) => row.width));
-  const graphWidth = search === "" ? Math.min(160, Math.max(48, lanes * 14 + 20)) : 48;
-  const spacing = Math.min(14, (graphWidth - 20) / Math.max(1, lanes - 1));
+  const graphWidth = search === "" ? Math.min(160, Math.max(40, lanes * 14 + GRAPH_INSET + 8)) : 40;
+  const spacing = Math.min(14, (graphWidth - GRAPH_INSET - 8) / Math.max(1, lanes - 1));
   const virtual = useVirtualizer({
     count: commits.length,
     getScrollElement: () => scroller.current,
@@ -148,52 +155,61 @@ function BoundHistory(props: GitHistoryPanelProps) {
   return (
     <section className="git-history" aria-label="Git history">
       <div className="git-history__list" hidden={selected !== undefined}>
-        <div className="git-history__toolbar">
-          <OctantSelectField
-            aria-label="History branch"
-            value={revision}
-            onValueChange={setRevision}
-            options={options}
-          />
-          <OctantButton
-            size="sm"
-            variant="ghost"
-            disabled={busy}
-            onClick={() => setRefresh((value) => value + 1)}
-          >
-            Refresh
-          </OctantButton>
-        </div>
+        {/* One toolbar row: search takes the width, then the branch and
+            Refresh. Three rows (a full-width select, a Refresh word, a field
+            with a Search button) took 150px before the first commit. */}
         <form
-          className="git-history__search"
+          className="git-history__toolbar git-history__search"
           noValidate
           onSubmit={(event) => {
             event.preventDefault();
             setSearch(searchInput.trim());
           }}
         >
-          <OctantInput
-            aria-label="Search commit history"
-            placeholder="Message, author, or SHA"
-            value={searchInput}
-            maxLength={200}
-            onChange={(event) => setSearchInput(event.target.value)}
-          />
-          <OctantButton type="submit" size="sm" variant="outline" disabled={busy}>
-            Search
-          </OctantButton>
-          {search === "" ? null : (
-            <OctantButton
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                setSearch("");
-                setSearchInput("");
+          <label className="git-history__search-field">
+            <Search aria-hidden="true" size={14} />
+            <OctantInput
+              aria-label="Search commit history"
+              placeholder="Search message, author or SHA"
+              type="search"
+              value={searchInput}
+              maxLength={200}
+              onChange={(event) => {
+                setSearchInput(event.target.value);
+                // Emptying the field returns the whole history.
+                if (event.target.value === "" && search !== "") setSearch("");
               }}
-            >
-              Clear
-            </OctantButton>
-          )}
+            />
+            {search === "" && searchInput === "" ? null : (
+              <OctantIconButton
+                className="git-history__search-clear"
+                label="Clear search"
+                onClick={() => {
+                  setSearch("");
+                  setSearchInput("");
+                }}
+                size="icon-sm"
+              >
+                <X aria-hidden="true" size={14} />
+              </OctantIconButton>
+            )}
+          </label>
+          <div className="git-history__branch">
+            <OctantSelectField
+              aria-label="History branch"
+              value={revision}
+              onValueChange={setRevision}
+              options={options}
+            />
+          </div>
+          <OctantIconButton
+            disabled={busy}
+            label="Refresh history"
+            onClick={() => setRefresh((value) => value + 1)}
+            size="icon-sm"
+          >
+            <RefreshCw aria-hidden="true" size={16} />
+          </OctantIconButton>
         </form>
         <div className="git-history__status" role="status">
           {busy
@@ -236,7 +252,7 @@ function BoundHistory(props: GitHistoryPanelProps) {
         ) : null}
         <div className="git-history__scroller" ref={scroller}>
           <table className="git-history__table" aria-label="Commits">
-            <thead>
+            <thead className="sr-only">
               <tr>
                 <th
                   className="git-history__graph-column"
@@ -246,17 +262,12 @@ function BoundHistory(props: GitHistoryPanelProps) {
                   Graph
                 </th>
                 <th scope="col">Commit</th>
-                <th scope="col" className="git-history__author">
-                  Author
-                </th>
-                <th scope="col" className="git-history__date">
-                  Date
-                </th>
-                <th scope="col" className="git-history__sha">
-                  SHA
-                </th>
               </tr>
             </thead>
+            <colgroup>
+              <col style={{ width: graphWidth }} />
+              <col />
+            </colgroup>
             <tbody>
               {rows[0] && rows[0].start > 0 ? (
                 <tr aria-hidden="true">
@@ -281,13 +292,13 @@ function BoundHistory(props: GitHistoryPanelProps) {
                               <path
                                 key={index}
                                 data-lane={edge.toLane % 4}
-                                d={`M ${10 + edge.fromLane * spacing} ${edge.from * 40} L ${10 + edge.toLane * spacing} ${edge.to * 40}`}
+                                d={`M ${GRAPH_INSET + edge.fromLane * spacing} ${edge.from * 40} L ${GRAPH_INSET + edge.toLane * spacing} ${edge.to * 40}`}
                               />
                             ))
                           : null}
                         <circle
                           data-lane={drawing.lane % 4}
-                          cx={search === "" ? 10 + drawing.lane * spacing : 10}
+                          cx={search === "" ? GRAPH_INSET + drawing.lane * spacing : GRAPH_INSET}
                           cy={20}
                           r={commit.oid === page?.head ? 4 : 3}
                         />
@@ -296,7 +307,7 @@ function BoundHistory(props: GitHistoryPanelProps) {
                     <td className="git-history__subject">
                       <OctantButton
                         className="git-history__commit"
-                        variant="ghost"
+                        variant="bare"
                         data-commit={commit.oid}
                         onClick={() => {
                           selection.current = commit.oid;
@@ -305,30 +316,32 @@ function BoundHistory(props: GitHistoryPanelProps) {
                         title={commit.subject}
                         aria-label={`Open commit ${commit.oid.slice(0, 7)}: ${commit.subject}`}
                       >
-                        {commit.subject}
+                        <span className="git-history__commit-subject">{commit.subject}</span>
+                        <span className="git-history__meta">
+                          {(page?.refs ?? [])
+                            .filter((ref) => ref.oid === commit.oid)
+                            .map((ref) => (
+                              <span className="git-history__ref" key={ref.name} title={ref.name}>
+                                {ref.name.replace(/^refs\/(heads|remotes|tags)\//, "")}
+                              </span>
+                            ))}
+                          <span className="git-history__author" title={commit.author}>
+                            {commit.author}
+                          </span>
+                          <time
+                            className="git-history__date"
+                            dateTime={commit.authoredAt}
+                            title={commit.authoredAt}
+                          >
+                            {new Date(commit.authoredAt).toLocaleDateString(undefined, {
+                              month: "short",
+                              day: "numeric",
+                            })}
+                          </time>
+                          <span className="git-history__sha">{commit.oid.slice(0, 7)}</span>
+                        </span>
                       </OctantButton>
-                      <span className="git-history__refs">
-                        {(page?.refs ?? [])
-                          .filter((ref) => ref.oid === commit.oid)
-                          .map((ref) => (
-                            <span key={ref.name} title={ref.name}>
-                              {ref.name.replace(/^refs\/(heads|remotes|tags)\//, "")}
-                            </span>
-                          ))}
-                      </span>
                     </td>
-                    <td className="git-history__author" title={commit.author}>
-                      {commit.author}
-                    </td>
-                    <td className="git-history__date">
-                      <time dateTime={commit.authoredAt} title={commit.authoredAt}>
-                        {new Date(commit.authoredAt).toLocaleDateString(undefined, {
-                          month: "short",
-                          day: "numeric",
-                        })}
-                      </time>
-                    </td>
-                    <td className="git-history__sha">{commit.oid.slice(0, 7)}</td>
                   </tr>
                 );
               })}

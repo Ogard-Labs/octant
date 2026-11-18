@@ -554,6 +554,7 @@ describe("GhPullRequestPort.observeReviewByIdentity", () => {
         author: "octocat",
         mergeability: "mergeable",
         matchesDeliveryBranch: false,
+        checkCounts: { passed: 1, total: 2 },
       },
       description: "Verified implementation.",
       diff: diffText,
@@ -572,6 +573,44 @@ describe("GhPullRequestPort.observeReviewByIdentity", () => {
       .mocked(command.run)
       .mock.calls.map(([arguments_]) => `${arguments_[0]} ${arguments_[1]}`);
     expect(subcommands).toEqual(["pr view", "pr diff"]);
+  });
+
+  it("reads line counts and auto-merge of one pull request by identity, and records them only for an open one", async () => {
+    const open = fixture([
+      {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          ...JSON.parse(detailJson),
+          additions: 40,
+          deletions: 8,
+          autoMergeRequest: { enabledAt: "2026-08-22T07:00:00Z" },
+        }),
+      },
+      { exitCode: 0, stdout: diffText },
+    ]);
+    const merged = fixture([
+      {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          ...JSON.parse(detailJson),
+          state: "MERGED",
+          additions: 40,
+          deletions: 8,
+          autoMergeRequest: { enabledAt: "2026-08-22T07:00:00Z" },
+        }),
+      },
+      { exitCode: 0, stdout: diffText },
+    ]);
+    const signal = new AbortController().signal;
+    expect(await open.port.observeReviewByIdentity(identityRequest, signal)).toMatchObject({
+      pullRequest: { additions: 40, deletions: 8, merging: "auto-merge" },
+    });
+    const settled = await merged.port.observeReviewByIdentity(identityRequest, signal);
+    expect(settled).toMatchObject({ pullRequest: { additions: 40, deletions: 8 } });
+    if (settled.status === "observed") expect("merging" in settled.pullRequest).toBe(false);
+    expect(vi.mocked(open.command.run).mock.calls[0]?.[0]?.at(-1)).toContain(
+      "additions,deletions,autoMergeRequest",
+    );
   });
 
   it("returns unavailable when both gh pr view and gh pr diff fail", async () => {
@@ -699,6 +738,7 @@ describe("GhPullRequestPort active list", () => {
           reviewRequestedFrom: [],
           failingChecks: [],
           crossRepository: false,
+          checkCounts: { passed: 1, total: 1 },
         },
         {
           number: 13,
@@ -716,6 +756,7 @@ describe("GhPullRequestPort active list", () => {
           reviewRequestedFrom: [],
           failingChecks: [],
           crossRepository: false,
+          checkCounts: { passed: 1, total: 1 },
         },
       ],
     });
@@ -729,10 +770,170 @@ describe("GhPullRequestPort active list", () => {
       "--limit",
       "100",
       "--json",
-      "number,title,isDraft,state,mergeable,author,updatedAt,url,baseRefName,headRefName,isCrossRepository,statusCheckRollup,reviewDecision,reviewRequests",
+      "number,title,isDraft,state,mergeable,author,updatedAt,url,baseRefName,headRefName,isCrossRepository,statusCheckRollup,reviewDecision,reviewRequests,additions,deletions,autoMergeRequest",
     ]);
     expect(vi.mocked(command.run).mock.calls.some(([args]) => args.includes("merge"))).toBe(false);
   });
+
+  it("reads line counts, passed-of-counted checks and auto-merge from the list", async () => {
+    const { port } = fixture([
+      {
+        exitCode: 0,
+        stdout: JSON.stringify([
+          {
+            ...activeRow,
+            additions: 2173,
+            deletions: 296,
+            autoMergeRequest: { enabledAt: "2026-08-22T07:00:00Z" },
+            statusCheckRollup: [
+              { name: "a", conclusion: "SUCCESS", status: "COMPLETED" },
+              { name: "b", conclusion: "SKIPPED", status: "COMPLETED" },
+              { name: "c", conclusion: "FAILURE", status: "COMPLETED" },
+              { name: "d", status: "IN_PROGRESS", conclusion: "" },
+              { context: "legacy", state: "SUCCESS" },
+            ],
+          },
+        ]),
+      },
+    ]);
+    const result = await port.listActive(
+      { owner: "octant", name: "octant", limit: 100 },
+      new AbortController().signal,
+    );
+    expect(result).toMatchObject({
+      status: "ok",
+      rows: [
+        {
+          checks: "failing",
+          additions: 2173,
+          deletions: 296,
+          // The skipped check is neither passed nor held back, so it is not counted.
+          checkCounts: { passed: 2, total: 4 },
+          merging: "auto-merge",
+        },
+      ],
+    });
+  });
+
+  it("counts every check as passed when the rollup reads passing", async () => {
+    const { port } = fixture([
+      {
+        exitCode: 0,
+        stdout: JSON.stringify([
+          {
+            ...activeRow,
+            statusCheckRollup: [
+              { name: "a", conclusion: "SUCCESS", status: "COMPLETED" },
+              { name: "b", conclusion: "NEUTRAL", status: "COMPLETED" },
+              { name: "c", conclusion: "SUCCESS", status: "COMPLETED" },
+            ],
+          },
+        ]),
+      },
+    ]);
+    const result = await port.listActive(
+      { owner: "octant", name: "octant", limit: 100 },
+      new AbortController().signal,
+    );
+    expect(result).toMatchObject({
+      rows: [{ checks: "passing", checkCounts: { passed: 2, total: 2 } }],
+    });
+  });
+
+  it("records none of the three facts when the payload carries none of them", async () => {
+    const { port } = fixture([
+      { exitCode: 0, stdout: JSON.stringify([{ ...activeRow, statusCheckRollup: [] }]) },
+    ]);
+    const result = await port.listActive(
+      { owner: "octant", name: "octant", limit: 100 },
+      new AbortController().signal,
+    );
+    if (result.status !== "ok") throw new Error("expected an ok list");
+    const row = result.rows[0] ?? {};
+    for (const key of ["additions", "deletions", "checkCounts", "merging"]) {
+      expect(key in row).toBe(false);
+    }
+  });
+
+  it("marks a pull request in the merge queue as queued, ahead of auto-merge, with one read-only query", async () => {
+    const { command, port } = fixture([
+      {
+        exitCode: 0,
+        stdout: JSON.stringify([
+          { ...activeRow, autoMergeRequest: { enabledAt: "2026-08-22T07:00:00Z" } },
+          { ...activeRow, number: 13 },
+        ]),
+      },
+      {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequests: {
+                nodes: [
+                  { number: 12, isInMergeQueue: true },
+                  { number: 13, isInMergeQueue: false },
+                ],
+              },
+            },
+          },
+        }),
+      },
+    ]);
+    const result = await port.listActive(
+      { owner: "octant", name: "octant", limit: 100 },
+      new AbortController().signal,
+    );
+    expect(result).toMatchObject({
+      status: "ok",
+      rows: [{ number: 12, merging: "queued" }, { number: 13 }],
+    });
+    if (result.status === "ok") expect("merging" in (result.rows[1] ?? {})).toBe(false);
+    const calls = vi.mocked(command.run).mock.calls.map(([args]) => args);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.slice(0, 2)).toEqual(["api", "graphql"]);
+    expect(calls[1]?.some((argument) => argument.startsWith("query=query"))).toBe(true);
+    expect(calls[1]?.some((argument) => /mutation/i.test(argument))).toBe(false);
+  });
+
+  it("keeps the list when the merge-queue read fails", async () => {
+    const { port } = fixture([
+      { exitCode: 0, stdout: JSON.stringify([activeRow]) },
+      { exitCode: 1, stdout: "", stderr: "HTTP 502" },
+    ]);
+    const result = await port.listActive(
+      { owner: "octant", name: "octant", limit: 100 },
+      new AbortController().signal,
+    );
+    expect(result).toMatchObject({ status: "ok", rows: [{ number: 12 }] });
+    if (result.status === "ok") expect("merging" in (result.rows[0] ?? {})).toBe(false);
+  });
+
+  it.each([
+    ["no data", { data: null }],
+    ["a list that is not a list", { data: { repository: { pullRequests: { nodes: "none" } } } }],
+    [
+      "a number that is not a number",
+      {
+        data: { repository: { pullRequests: { nodes: [{ number: "12", isInMergeQueue: true }] } } },
+      },
+    ],
+    ["text that is not JSON", "<html>"],
+  ])(
+    "keeps the list and marks nothing queued when the merge-queue read answers with %s",
+    async (_, answer) => {
+      const { port } = fixture([
+        { exitCode: 0, stdout: JSON.stringify([activeRow]) },
+        { exitCode: 0, stdout: typeof answer === "string" ? answer : JSON.stringify(answer) },
+      ]);
+      const result = await port.listActive(
+        { owner: "octant", name: "octant", limit: 100 },
+        new AbortController().signal,
+      );
+      expect(result).toMatchObject({ status: "ok", rows: [{ number: 12 }] });
+      if (result.status === "ok") expect("merging" in (result.rows[0] ?? {})).toBe(false);
+    },
+  );
 
   it("marks a pull request whose head branch lives in a fork", async () => {
     const { port } = fixture([
@@ -839,8 +1040,10 @@ describe("GhPullRequestPort active list", () => {
         },
       ],
     });
-    expect(vi.mocked(command.run)).toHaveBeenCalledOnce();
-    expect(vi.mocked(command.run).mock.calls[0]?.[0]).not.toContain("run");
+    // The list, then the one merge-queue read; neither asks for run logs.
+    for (const [arguments_] of vi.mocked(command.run).mock.calls) {
+      expect(arguments_).not.toContain("run");
+    }
   });
 
   it("normalizes the active list state and mergeability", async () => {

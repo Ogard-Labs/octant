@@ -1,18 +1,29 @@
 import type { ThreadToolCallRecord } from "@octant/contracts";
+import { TurnSubagentRows, type TurnSubagentWindow } from "../agents/threadSubagents";
 import type { ToolOutsideContentMark } from "@octant/contracts/shield";
 import { SHIELD_WATCHER_LABEL_WORDS } from "@octant/domain/shield-watcher-policy";
 import { ChatRichText } from "../chat/ChatRichText";
 import {
+  Bot,
+  Brain,
   Check,
   ChevronRight,
   Circle,
-  CircleX,
   Clock3,
+  FileText,
+  Globe,
   LoaderCircle,
+  Pencil,
+  Plug,
+  Search,
   ShieldAlert,
   ShieldCheck,
   ShieldX,
-} from "lucide-react";
+  Terminal,
+  Wrench,
+  X,
+} from "../ui/icons";
+import type { IconComponent } from "../ui/icons";
 import {
   useCallback,
   useEffect,
@@ -23,6 +34,16 @@ import {
   type ToggleEvent,
 } from "react";
 import { thinkingPreviewLine, useReplyDisclosures } from "./replyDetail";
+import {
+  callDurationLabel,
+  countToolKinds,
+  thinkingDurationLabel,
+  toolCallsAccessibleName,
+  toolDisplayName,
+  toolKind,
+  toolPreview,
+  type ToolKind,
+} from "./toolKinds";
 import { OctantButton } from "../ui/base/OctantButton";
 import { PublishedPageCard } from "./PublishedPageCard";
 import { RoutineReceiptCard } from "./RoutineReceiptCard";
@@ -55,6 +76,11 @@ export interface TurnActivityRowsProps {
    * tool row is first opened, never before.
    */
   readonly toolCallRecords?: ToolCallRecordsReader;
+  /**
+   * The span of the thread this turn owns, so the subagents it started are
+   * listed under its activity. Absent lists none.
+   */
+  readonly subagents?: TurnSubagentWindow;
 }
 
 /** Rejects when the records cannot be read from this window. */
@@ -120,8 +146,27 @@ function outcomeIcon(row: DisclosureRow, settled: boolean) {
     case "completed":
       return Check;
     case "failed":
-      return CircleX;
+      return X;
   }
+}
+
+/** The leading mark of a tool row: what kind of work it was, in the muted ink. */
+const KIND_ICONS: Readonly<Record<ToolKind, IconComponent>> = {
+  command: Terminal,
+  read: FileText,
+  edit: Pencil,
+  search: Search,
+  web: Globe,
+  mcp: Plug,
+  agent: Bot,
+  other: Wrench,
+};
+
+/** The kinds a collapsed group names before it says "+n" for the rest. */
+const GROUP_KINDS_SHOWN = 4;
+
+function rowKindIcon(row: DisclosureRow): IconComponent {
+  return row.kind === "tool" ? KIND_ICONS[toolKind(row.toolName)] : Bot;
 }
 
 type PublishedToolRow = Extract<TurnActivityRow, { kind: "tool" }> & {
@@ -146,11 +191,12 @@ function boundAccessibleSummary(text: string): string {
 }
 
 function collapsedName(row: DisclosureRow): string {
-  return row.kind === "tool" ? row.toolName : row.summary;
+  return row.kind === "tool" ? toolDisplayName(row.toolName) : row.summary;
 }
 
 function disclosureName(row: DisclosureRow, settled: boolean): string {
-  const name = row.kind === "tool" ? row.toolName : boundAccessibleSummary(row.summary);
+  const name =
+    row.kind === "tool" ? toolDisplayName(row.toolName) : boundAccessibleSummary(row.summary);
   const outside =
     row.kind === "tool" && row.outsideContent !== undefined
       ? `, ${outsideContentText(row.outsideContent)}`
@@ -219,12 +265,19 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   const settled = props.settled === true;
   const hasRows = activity.rows.length > 0;
   const hasReasoning = activity.reasoning.trim().length > 0;
-  if (!hasRows && !hasReasoning) return null;
+  // A turn whose subagents left no tool row (a provider's own child seen only
+  // through its observations) still lists them.
+  if (!hasRows && !hasReasoning) {
+    return props.subagents === undefined ? null : <TurnSubagentRows window={props.subagents} />;
+  }
 
   const pinnedRows = alwaysVisibleActivityRows(activity);
   const pinnedIds = new Set(pinnedRows.map(rowKey));
   const foldableRows = activity.rows.filter((row) => !pinnedIds.has(rowKey(row)));
   const summary = settledTurnActivitySummary(activity);
+  const toolNames = activity.rows.flatMap((row) => (row.kind === "tool" ? [row.toolName] : []));
+  const kindCounts = countToolKinds(toolNames);
+  const groupName = toolNames.length > 0 ? toolCallsAccessibleName(toolNames) : summary;
   const foldSettledToolchain = settled && !running && summary.length > 0 && foldableRows.length > 0;
   // A published page is what the turn delivered, so it stays in view below the
   // rows even when the settled toolchain folds away.
@@ -277,6 +330,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   };
 
   const thinkingOpen = isOpen(THINKING_ID);
+  const thinkingLabel = thinkingDurationLabel(activity.reasoningMs);
   const thinkingPreview =
     opening.thinkingPreview && !thinkingOpen ? thinkingPreviewLine(activity.reasoning) : "";
   const thinkingDisclosure = hasReasoning ? (
@@ -287,12 +341,13 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
     >
       <summary
         aria-expanded={thinkingOpen}
-        aria-label="Thinking"
+        aria-label={thinkingLabel}
         onKeyDown={onSummaryKeyDown(THINKING_ID)}
         role="button"
       >
         <ChevronRight aria-hidden="true" className="turn-activity__chevron" size={14} />
-        <span className="turn-activity__name">Thinking</span>
+        <Brain aria-hidden="true" className="turn-activity__kind-icon" size={14} />
+        <span className="turn-activity__name">{thinkingLabel}</span>
         {/* Hidden from assistive technology: the button's name stays
             "Thinking", and the same words are read from the body once it
             opens. */}
@@ -330,12 +385,33 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
           >
             <summary
               aria-expanded={isOpen(TOOL_CALLS_ID)}
-              aria-label={summary}
+              aria-label={groupName}
               onKeyDown={onSummaryKeyDown(TOOL_CALLS_ID)}
               role="button"
             >
               <ChevronRight aria-hidden="true" className="turn-activity__chevron" size={14} />
-              <span className="turn-activity__name">{summary}</span>
+              <Wrench aria-hidden="true" className="turn-activity__kind-icon" size={14} />
+              {kindCounts.length === 0 ? (
+                <span className="turn-activity__name">{summary}</span>
+              ) : (
+                <span aria-hidden="true" className="turn-activity__name turn-activity__kinds">
+                  {kindCounts.slice(0, GROUP_KINDS_SHOWN).map(({ kind, count }) => {
+                    const Icon = KIND_ICONS[kind];
+                    return (
+                      <span className="turn-activity__kind-count" key={kind}>
+                        <Icon className="turn-activity__kind-icon" size={14} />
+                        {count}
+                      </span>
+                    );
+                  })}
+                  {kindCounts.length > GROUP_KINDS_SHOWN ? (
+                    <span className="turn-activity__kind-count">
+                      +{kindCounts.length - GROUP_KINDS_SHOWN}
+                    </span>
+                  ) : null}
+                </span>
+              )}
+              <span className="turn-activity__status" />
             </summary>
             <div className="turn-activity__toolchain">{foldableRows.map(renderDisclosure)}</div>
           </details>
@@ -343,6 +419,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
       ) : (
         <>{activity.rows.map(renderDisclosure)}</>
       )}
+      {props.subagents === undefined ? null : <TurnSubagentRows window={props.subagents} />}
       {routineRows.length === 0 ? null : (
         <ul aria-label="Created automations" className="turn-activity__routines">
           {routineRows.map((row) => (
@@ -461,6 +538,9 @@ function ActivityDisclosure(props: {
 }) {
   const { row } = props;
   const StateIcon = outcomeIcon(row, props.settled);
+  const KindIcon = rowKindIcon(row);
+  const preview =
+    row.kind === "tool" ? toolPreview(toolKind(row.toolName), row.summary) : undefined;
   const { onLoadRecords, open } = props;
   const state = row.state;
   useEffect(() => {
@@ -481,12 +561,31 @@ function ActivityDisclosure(props: {
         role="button"
       >
         <ChevronRight aria-hidden="true" className="turn-activity__chevron" size={14} />
+        <KindIcon aria-hidden="true" className="turn-activity__kind-icon" size={14} />
         <span className="turn-activity__name">{collapsedName(row)}</span>
+        {row.kind !== "tool" ? null : (
+          // The words are drawn from the attribute, so the row's text stays its
+          // name and the detail below stays the one place the summary is read.
+          <span
+            aria-hidden="true"
+            className="turn-activity__preview turn-activity__preview--call"
+            {...(preview === undefined ? {} : { "data-preview": preview, title: preview })}
+          />
+        )}
         {row.kind === "tool" && row.outsideContent !== undefined ? (
           <OutsideContentTag mark={row.outsideContent} />
         ) : null}
-        <span className="turn-activity__outcome">{outcomeLabel(row, props.settled)}</span>
-        <StateIcon aria-hidden="true" className="turn-activity__status-icon" size={12} />
+        {row.kind === "tool" && row.durationMs !== undefined ? (
+          <span className="turn-activity__duration">{callDurationLabel(row.durationMs)}</span>
+        ) : null}
+        {/* One reserved slot, so a row that finishes changes its mark and
+            nothing beside it moves. The word is for assistive technology. */}
+        <span className="turn-activity__status">
+          <span className="visually-hidden turn-activity__outcome">
+            {outcomeLabel(row, props.settled)}
+          </span>
+          <StateIcon aria-hidden="true" className="turn-activity__status-icon" size={14} />
+        </span>
       </summary>
       <div className="turn-activity__body">
         {activityDetail(row, props)}

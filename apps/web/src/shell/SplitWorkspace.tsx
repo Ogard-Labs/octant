@@ -1,6 +1,7 @@
 import { useAgentThreadName } from "../agentAccess/agentThreadAttribution";
+import { ProjectMark } from "../projects/ProjectMark";
 import type { ReactNode } from "react";
-import { useMemo } from "react";
+import { useContext, useMemo } from "react";
 import type { WorkspaceContentTabs } from "./workspaceContentTabs";
 import { WorkspaceContentViewContext } from "./WorkspaceContentView";
 import { OctantTabs, OctantTabsList, OctantTabsTab } from "../ui/base/OctantTabs";
@@ -15,7 +16,7 @@ import type {
   ThreadBoardPullRequestIdentity,
   ThreadBoardPullRequestSummary,
 } from "@octant/contracts";
-import { GripVertical, X } from "lucide-react";
+import { GripVertical, X } from "../ui/icons";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { OctantIconButton } from "../ui/base/OctantButton";
 import { OctantMenuIconSlot } from "../ui/base/OctantMenuIconSlot";
@@ -38,7 +39,31 @@ import { workspaceSurfaceTitle } from "./workspaceTabLifecycle";
 import { PullRequestChip } from "../code/PullRequestChip";
 import type { ThreadProviderIdentity } from "./navigationModel";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import type { OctantMode } from "@octant/contracts/modes";
 import { EnvironmentMark, type EnvironmentMarkProps } from "./EnvironmentMark";
+import { PaneDockToolGroup, PaneDockToolsContext } from "./PaneDockTools";
+
+/** The surfaces that show a thread itself: what a resting pane's tool buttons open their tools for. */
+const TOOL_OWNER_SURFACE_KINDS: ReadonlySet<string> = new Set([
+  "chat-thread",
+  "work-thread",
+  "code-overview",
+]);
+
+const TOOL_OWNER_MODES: Readonly<Record<string, OctantMode>> = {
+  "chat-thread": "chat",
+  "work-thread": "work",
+  "code-overview": "code",
+};
+
+/** The thread a pane's tools open for, and the mode that decides which it has. */
+function toolOwnerThread(
+  surface: WorkspaceTab,
+): { readonly mode: OctantMode; readonly threadId: string } | undefined {
+  const mode = TOOL_OWNER_MODES[surface.kind];
+  if (mode === undefined || !("threadId" in surface) || surface.threadId == null) return undefined;
+  return { mode, threadId: String(surface.threadId) };
+}
 
 const splitContainerStyle = { height: "100%", minHeight: 0, minWidth: 0, width: "100%" };
 
@@ -65,7 +90,7 @@ export interface SplitWorkspaceProps {
   readonly contentTabs?: WorkspaceContentTabs;
   readonly onActivateContentTab?: (paneId: PaneId, tabId: WorkspaceTab["id"]) => void;
   readonly onCloseContentTab?: (paneId: PaneId, tabId: WorkspaceTab["id"]) => void;
-  /** A double click on a thread's tab keeps it when another thread opens. */
+  /** A double click on a thread's tab stops it being the single-click preview. */
   readonly onKeepContentTab?: (threadId: string) => void;
   /** Lays two to four tabs out in the pane, in tab order. */
   readonly onArrangeSideBySide?: (paneId: PaneId, surfaces: ReadonlyArray<WorkspaceTab>) => void;
@@ -103,6 +128,8 @@ export interface SplitWorkspaceProps {
   readonly showProviderIcons?: boolean;
   /** The Project a thread pane names in its context chip when it has no facts of its own. */
   readonly contextLabel?: string;
+  /** The Project the pane's mode is in; names the mark when a thread has no facts of its own. */
+  readonly contextProjectId?: string;
   /**
    * Project names by id, for a pane that holds another Project than the
    * layout's lead. Such a pane never borrows the lead's name.
@@ -141,6 +168,8 @@ export interface PaneFacts {
   readonly pullRequest?: ThreadBoardPullRequestSummary;
   /** The Project the thread works in, as its own chip. */
   readonly projectName?: string;
+  /** The Project's id, so the breadcrumb can draw its mark. */
+  readonly projectId?: string;
 }
 
 interface WorkspaceNodeProps extends SplitWorkspaceProps {
@@ -580,6 +609,18 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
       : mixedProjects && surface.kind !== "welcome"
         ? paneProjectName
         : undefined;
+  const paneProjectId =
+    pane.context === undefined
+      ? props.contextProjectId
+      : pane.context.projectId === null
+        ? undefined
+        : String(pane.context.projectId);
+  const projectId =
+    projectName === undefined
+      ? undefined
+      : "threadId" in surface && facts?.projectName !== undefined
+        ? facts.projectId
+        : paneProjectId;
   const running =
     environment !== undefined &&
     "threadId" in surface &&
@@ -591,6 +632,15 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     surface.threadId !== undefined &&
     props.waitingThreadIds?.has(String(surface.threadId)) === true;
   const showHeader = props.layout.kind !== "pane" || props.showSinglePaneHeader !== false;
+  // The pane's tool buttons stand at the right end of its header. The focused
+  // pane draws the dock's own row, whatever it shows (a start screen included,
+  // whose header is then that row alone); another pane of a split draws them
+  // only for a thread, the thing a tool opens for.
+  const paneTools = useContext(PaneDockToolsContext);
+  const showTools =
+    paneTools !== undefined &&
+    paneTools.model.buttons.length + paneTools.model.more.length > 0 &&
+    (active || TOOL_OWNER_SURFACE_KINDS.has(surface.kind));
   const title = workspaceSurfaceTitle(surface, props.liveThreadTitles);
   const startedBy = useAgentThreadName(
     "threadId" in surface && surface.threadId !== undefined ? String(surface.threadId) : undefined,
@@ -645,210 +695,229 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
         onKeyDownCapture={(event) => activateUnlessClosing(event.target)}
         onPointerDownCapture={(event) => activateUnlessClosing(event.target)}
       >
-        {showHeader || showTabs ? (
+        {showHeader || showTabs || showTools ? (
           <OctantContextMenuRoot onOpenChange={setMenuOpen}>
             <OctantContextMenuTrigger
               aria-expanded={menuOpen}
               className="workspace-pane__header"
-              data-header-kind={showTabs ? "tabs" : "title"}
+              data-header-kind={showTabs ? "tabs" : showHeader ? "title" : "tools"}
               data-mixed-projects={mixedProjects ? "true" : undefined}
               render={<div />}
             >
-              <span
-                className="workspace-pane__grip window-no-drag"
-                onPointerCancel={props.drag.onPointerCancel}
-                onPointerDown={(event) =>
-                  props.drag.onPointerDown(event, {
-                    dragKey,
-                    paneId: pane.paneId,
-                    surface,
-                    title,
-                  })
-                }
-                onPointerMove={props.drag.onPointerMove}
-                onPointerUp={props.drag.onPointerUp}
-                // With tabs open the bar holds only tabs; the Project the pane
-                // runs in moves to this tooltip (the composer strip names it too).
-                title={
-                  showTabs && projectName !== undefined
-                    ? `${projectName} · Drag to move or split`
-                    : "Drag to move or split"
-                }
-              >
-                {showTabs ? (
-                  <>
-                    {gripMark}
-                    {pullRequestChip}
-                  </>
-                ) : null}
-                {/* A breadcrumb: the Project the pane runs in, then what it
+              {/* The lead ends where the thread box ends at its narrowest, so
+                  the tool buttons at its end stay put whatever opens beside
+                  the thread (styles.css, .workspace-pane__lead). */}
+              <div className="workspace-pane__lead">
+                {showHeader || showTabs ? (
+                  <span
+                    className="workspace-pane__grip window-no-drag"
+                    onPointerCancel={props.drag.onPointerCancel}
+                    onPointerDown={(event) =>
+                      props.drag.onPointerDown(event, {
+                        dragKey,
+                        paneId: pane.paneId,
+                        surface,
+                        title,
+                      })
+                    }
+                    onPointerMove={props.drag.onPointerMove}
+                    onPointerUp={props.drag.onPointerUp}
+                    // With tabs open the bar holds only tabs; the Project the pane
+                    // runs in moves to this tooltip (the composer strip names it too).
+                    title={
+                      showTabs && projectName !== undefined
+                        ? `${projectName} · Drag to move or split`
+                        : "Drag to move or split"
+                    }
+                  >
+                    {showTabs ? (
+                      <>
+                        {gripMark}
+                        {pullRequestChip}
+                      </>
+                    ) : null}
+                    {/* A breadcrumb: the Project the pane runs in, then what it
                     shows. With tabs open the bar is tabs alone: a Project name
                     ahead of them read as a tab of its own, so it moves to the
                     handle's tooltip. The branch lives in the composer's strip,
                     beside the thread it runs. */}
-                {(showTabs && !mixedProjects) || projectName === undefined ? null : (
-                  <span className="workspace-pane__context" title={projectName}>
-                    {projectName}
-                  </span>
-                )}
-                {showTabs ? null : (
-                  <>
-                    {projectName === undefined ? null : (
-                      <span aria-hidden="true" className="workspace-pane__crumb">
-                        /
+                    {(showTabs && !mixedProjects) || projectName === undefined ? null : (
+                      <span className="workspace-pane__context" title={projectName}>
+                        <ProjectMark
+                          name={projectName}
+                          {...(projectId === undefined ? {} : { projectId })}
+                        />
+                        <span className="workspace-pane__context-name">{projectName}</span>
                       </span>
                     )}
-                    <span
-                      className="oct-nav-name workspace-pane__title"
-                      title={projectName === undefined ? title : `${projectName} / ${title}`}
-                    >
-                      {title}
-                    </span>
-                    {startedBy === undefined ? null : (
-                      <span
-                        className="workspace-pane__started-by"
-                        title={`Started by ${startedBy}`}
-                      >
-                        {`Started by ${startedBy}`}
-                      </span>
+                    {showTabs ? null : (
+                      <>
+                        {projectName === undefined ? null : (
+                          <span aria-hidden="true" className="workspace-pane__crumb">
+                            /
+                          </span>
+                        )}
+                        <span
+                          className="oct-nav-name workspace-pane__title"
+                          title={projectName === undefined ? title : `${projectName} / ${title}`}
+                        >
+                          {title}
+                        </span>
+                        {startedBy === undefined ? null : (
+                          <span
+                            className="workspace-pane__started-by"
+                            title={`Started by ${startedBy}`}
+                          >
+                            {`Started by ${startedBy}`}
+                          </span>
+                        )}
+                        {gripMark}
+                        {pullRequestChip}
+                      </>
                     )}
-                    {gripMark}
-                    {pullRequestChip}
-                  </>
-                )}
-                {showTabs ? null : running ? (
-                  // The host reports that a turn is executing, not when it
-                  // began, so the chip names the state and no elapsed time.
-                  // With tabs open, each tab carries its own thread's state.
-                  <span className="workspace-pane__status">
-                    <span aria-hidden="true" className="spinner spinner-sm" />
-                    Running
+                    {showTabs ? null : running ? (
+                      // The host reports that a turn is executing, not when it
+                      // began, so the chip names the state and no elapsed time.
+                      // With tabs open, each tab carries its own thread's state.
+                      <span className="workspace-pane__status">
+                        <span aria-hidden="true" className="spinner spinner-sm" />
+                        Running
+                      </span>
+                    ) : waiting ? (
+                      <span className="workspace-pane__status">Needs you</span>
+                    ) : null}
                   </span>
-                ) : waiting ? (
-                  <span className="workspace-pane__status">Needs you</span>
                 ) : null}
-              </span>
-              {showTabs ? (
-                <OctantTabs
-                  className="workspace-content-tabs"
-                  value={activeLocalView ?? surface.id}
-                  onValueChange={(value) => {
-                    if (typeof value !== "string") return;
-                    if (localViews.some((view) => view.key === value)) {
-                      setActiveLocalView(value);
-                      return;
-                    }
-                    const entry = navigation.find((tab) => tab.id === value);
-                    if (entry === undefined) return;
-                    setActiveLocalView(undefined);
-                    if (entry.id !== surface.id)
-                      props.onActivateContentTab?.(pane.paneId, entry.id);
-                  }}
-                >
-                  <OctantTabsList
-                    aria-label="Open content"
-                    className="workspace-content-tabs__list"
+                {showTabs ? (
+                  <OctantTabs
+                    className="workspace-content-tabs"
+                    value={activeLocalView ?? surface.id}
+                    onValueChange={(value) => {
+                      if (typeof value !== "string") return;
+                      if (localViews.some((view) => view.key === value)) {
+                        setActiveLocalView(value);
+                        return;
+                      }
+                      const entry = navigation.find((tab) => tab.id === value);
+                      if (entry === undefined) return;
+                      setActiveLocalView(undefined);
+                      if (entry.id !== surface.id)
+                        props.onActivateContentTab?.(pane.paneId, entry.id);
+                    }}
                   >
-                    {navigation.map((entry) => (
-                      <div
-                        className="workspace-content-tabs__entry content-tab"
-                        data-selected={selectedTabIds.has(String(entry.id)) ? "true" : undefined}
-                        key={entry.id}
-                        onContextMenu={() => setMenuTabId(String(entry.id))}
-                        role="presentation"
-                      >
-                        <OctantTabsTab
-                          className="content-tab__select rounded-lg border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent data-active:bg-transparent data-active:text-inherit"
-                          onClickCapture={(event) => {
-                            const source = tabDragSource(entry);
-                            // A completed drag ends in a click; it must not
-                            // also open the tab or change the selection.
-                            if (
-                              props.drag.consumeSuppressedClick(source.dragKey) ||
-                              pickTab(event, entry)
-                            ) {
-                              event.preventDefault();
-                              event.stopPropagation();
-                            }
-                          }}
-                          onDoubleClick={() => {
-                            if ("threadId" in entry && entry.threadId !== null) {
-                              props.onKeepContentTab?.(String(entry.threadId));
-                            }
-                          }}
-                          onPointerCancel={props.drag.onPointerCancel}
-                          onPointerDown={(event) => {
-                            if (event.metaKey || event.ctrlKey || event.shiftKey) return;
-                            props.drag.onPointerDown(event, tabDragSource(entry));
-                          }}
-                          onPointerMove={props.drag.onPointerMove}
-                          onPointerUp={props.drag.onPointerUp}
-                          value={entry.id}
-                          title={workspaceSurfaceTitle(entry, props.liveThreadTitles)}
+                    <OctantTabsList
+                      aria-label="Open content"
+                      className="workspace-content-tabs__list"
+                    >
+                      {navigation.map((entry) => (
+                        <div
+                          className="workspace-content-tabs__entry content-tab"
+                          data-selected={selectedTabIds.has(String(entry.id)) ? "true" : undefined}
+                          key={entry.id}
+                          onContextMenu={() => setMenuTabId(String(entry.id))}
+                          role="presentation"
                         >
-                          {tabState(entry, props) === "running" ? (
-                            <span aria-hidden="true" className="spinner spinner-sm" />
-                          ) : props.showProviderIcons === false ||
-                            !["chat-thread", "work-thread", "code-overview"].includes(entry.kind) ||
-                            !("threadId" in entry) ? null : (
-                            <PaneProviderMark
-                              provider={props.providerByThreadId?.get(String(entry.threadId))}
-                            />
-                          )}
-                          <span>{workspaceSurfaceTitle(entry, props.liveThreadTitles)}</span>
-                          {tabState(entry, props) === "waiting" ? (
-                            <span aria-hidden="true" className="content-tab__attention" />
-                          ) : null}
-                          {tabState(entry, props) === undefined ? null : (
-                            <span className="sr-only">
-                              {tabState(entry, props) === "running" ? ", running" : ", needs you"}
-                            </span>
-                          )}
-                          {selectedTabIds.has(String(entry.id)) ? (
-                            <span className="sr-only">, selected</span>
-                          ) : null}
-                        </OctantTabsTab>
-                        <OctantIconButton
-                          className="content-tab__close text-muted-foreground"
-                          label={`Close ${workspaceSurfaceTitle(entry, props.liveThreadTitles)}`}
-                          onClick={() => props.onCloseContentTab?.(pane.paneId, entry.id)}
+                          <OctantTabsTab
+                            className="content-tab__select rounded-lg border-0 bg-transparent text-inherit hover:bg-transparent active:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent data-active:bg-transparent data-active:text-inherit"
+                            onClickCapture={(event) => {
+                              const source = tabDragSource(entry);
+                              // A completed drag ends in a click; it must not
+                              // also open the tab or change the selection.
+                              if (
+                                props.drag.consumeSuppressedClick(source.dragKey) ||
+                                pickTab(event, entry)
+                              ) {
+                                event.preventDefault();
+                                event.stopPropagation();
+                              }
+                            }}
+                            onDoubleClick={() => {
+                              if ("threadId" in entry && entry.threadId !== null) {
+                                props.onKeepContentTab?.(String(entry.threadId));
+                              }
+                            }}
+                            onPointerCancel={props.drag.onPointerCancel}
+                            onPointerDown={(event) => {
+                              if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+                              props.drag.onPointerDown(event, tabDragSource(entry));
+                            }}
+                            onPointerMove={props.drag.onPointerMove}
+                            onPointerUp={props.drag.onPointerUp}
+                            value={entry.id}
+                            title={workspaceSurfaceTitle(entry, props.liveThreadTitles)}
+                          >
+                            {tabState(entry, props) === "running" ? (
+                              <span aria-hidden="true" className="spinner spinner-sm" />
+                            ) : props.showProviderIcons === false ||
+                              !["chat-thread", "work-thread", "code-overview"].includes(
+                                entry.kind,
+                              ) ||
+                              !("threadId" in entry) ? null : (
+                              <PaneProviderMark
+                                provider={props.providerByThreadId?.get(String(entry.threadId))}
+                              />
+                            )}
+                            <span>{workspaceSurfaceTitle(entry, props.liveThreadTitles)}</span>
+                            {tabState(entry, props) === "waiting" ? (
+                              <span aria-hidden="true" className="content-tab__attention" />
+                            ) : null}
+                            {tabState(entry, props) === undefined ? null : (
+                              <span className="sr-only">
+                                {tabState(entry, props) === "running" ? ", running" : ", needs you"}
+                              </span>
+                            )}
+                            {selectedTabIds.has(String(entry.id)) ? (
+                              <span className="sr-only">, selected</span>
+                            ) : null}
+                          </OctantTabsTab>
+                          <OctantIconButton
+                            className="content-tab__close text-muted-foreground"
+                            label={`Close ${workspaceSurfaceTitle(entry, props.liveThreadTitles)}`}
+                            onClick={() => props.onCloseContentTab?.(pane.paneId, entry.id)}
+                          >
+                            <X aria-hidden="true" size={12} />
+                          </OctantIconButton>
+                        </div>
+                      ))}
+                      {localViews.map((view) => (
+                        <div
+                          className="workspace-content-tabs__entry content-tab"
+                          key={view.key}
+                          role="presentation"
                         >
-                          <X aria-hidden="true" size={12} />
-                        </OctantIconButton>
-                      </div>
-                    ))}
-                    {localViews.map((view) => (
-                      <div
-                        className="workspace-content-tabs__entry content-tab"
-                        key={view.key}
-                        role="presentation"
-                      >
-                        <OctantTabsTab
-                          className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent data-active:bg-transparent data-active:text-inherit"
-                          value={view.key}
-                        >
-                          <span>{view.title}</span>
-                        </OctantTabsTab>
-                        <OctantIconButton
-                          className="content-tab__close text-muted-foreground"
-                          label={`Close ${view.title}`}
-                          onClick={() => {
-                            setLocalViews((views) => views.filter((item) => item.key !== view.key));
-                            setActiveLocalView((key) => (key === view.key ? undefined : key));
-                          }}
-                        >
-                          <X aria-hidden="true" size={12} />
-                        </OctantIconButton>
-                      </div>
-                    ))}
-                  </OctantTabsList>
-                </OctantTabs>
-              ) : null}
-              {props.threadHeader?.(surface)}
-              <span
-                aria-hidden="true"
-                className="workspace-pane__window-drag-space window-drag-region"
-              />
+                          <OctantTabsTab
+                            className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent active:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent data-active:bg-transparent data-active:text-inherit"
+                            value={view.key}
+                          >
+                            <span>{view.title}</span>
+                          </OctantTabsTab>
+                          <OctantIconButton
+                            className="content-tab__close text-muted-foreground"
+                            label={`Close ${view.title}`}
+                            onClick={() => {
+                              setLocalViews((views) =>
+                                views.filter((item) => item.key !== view.key),
+                              );
+                              setActiveLocalView((key) => (key === view.key ? undefined : key));
+                            }}
+                          >
+                            <X aria-hidden="true" size={12} />
+                          </OctantIconButton>
+                        </div>
+                      ))}
+                    </OctantTabsList>
+                  </OctantTabs>
+                ) : null}
+                {props.threadHeader?.(surface)}
+                <span aria-hidden="true" className="workspace-pane__window-drag-space" />
+                {showTools ? (
+                  <PaneDockToolGroup
+                    active={active}
+                    paneId={pane.paneId}
+                    thread={toolOwnerThread(surface)}
+                  />
+                ) : null}
+              </div>
               {/* Alone in the window there is nothing to close into; the × is a
                 split's control, for giving one pane's room back to the other. */}
               {props.layout.kind === "pane" ? null : (

@@ -357,7 +357,7 @@ describe("SubagentsTray", () => {
     await user.click(screen.getByRole("button", { name: "Stop all" }));
     const confirm = screen.getByRole("group", { name: "Confirm stopping subagents" });
     expect(confirm).toHaveTextContent("Stop all 2 managed subagents on this thread?");
-    expect(confirm).toHaveTextContent("Only this thread's managed subagents are affected.");
+    expect(confirm).toHaveTextContent("Only this thread's helpers are affected.");
     expect(onStopAll).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Keep running" }));

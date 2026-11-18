@@ -855,6 +855,20 @@ export const BrowserCaptureOutcome = Schema.Union(
 );
 export type BrowserCaptureOutcome = typeof BrowserCaptureOutcome.Type;
 
+/**
+ * A page's declared icon as the host fetched it: one bounded image held in
+ * memory for the person's tab strip. The host reads at most 64 KB, which is
+ * under 90,000 characters as base64, and accepts only the image types a tab can
+ * show. It never reaches an agent's tool result.
+ */
+export const MAX_BROWSER_FAVICON_DATA_URL_CHARACTERS = 90_000;
+export const BrowserFaviconDataUrl = Schema.String.pipe(
+  Schema.maxLength(MAX_BROWSER_FAVICON_DATA_URL_CHARACTERS),
+  Schema.pattern(
+    /^data:image\/(?:png|x-icon|vnd\.microsoft\.icon|jpeg|gif|webp|svg\+xml);base64,[A-Za-z0-9+/]+=*$/,
+  ),
+);
+
 export const BrowserObservation = Schema.Struct({
   contextId: BrowserContextId,
   actionId: ToolActionId,
@@ -912,6 +926,8 @@ export const BrowserObservation = Schema.Struct({
       Schema.pattern(/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+=*$/),
     ),
   ),
+  /** Set only by the person's preview read; see the schema. */
+  faviconDataUrl: Schema.optional(BrowserFaviconDataUrl),
   viewport: Schema.optional(BrowserViewportSize),
   /** Only a `resize` fills this: what the page reports about its device now. */
   emulation: Schema.optional(BrowserEmulationReport),
@@ -1004,5 +1020,6 @@ export const decodeBrowserContextRecord = Schema.decodeUnknownSync(BrowserContex
 export const decodeBrowserActionKind = Schema.decodeUnknownSync(BrowserActionKind);
 export const decodeBrowserActionRequest = Schema.decodeUnknownSync(BrowserActionRequest);
 export const decodeBrowserWaitFor = Schema.decodeUnknownSync(BrowserWaitFor);
+export const isBrowserFaviconDataUrl = Schema.is(BrowserFaviconDataUrl);
 export const decodeBrowserObservation = Schema.decodeUnknownSync(BrowserObservation);
 export const decodeBrowserAutomationFailure = Schema.decodeUnknownSync(BrowserAutomationFailure);

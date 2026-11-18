@@ -299,6 +299,25 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "color colour scheme system light dark theme mode preset octant palette",
         },
         {
+          id: settingId("appearance.custom"),
+          label: "Custom theme",
+          scope: "app",
+          keywords:
+            "custom theme preset ground ink accent contrast soft standard firm colours seeds",
+        },
+        {
+          id: settingId("appearance.density"),
+          label: "Density",
+          scope: "app",
+          keywords: "density compact comfortable rows spacing room tight",
+        },
+        {
+          id: settingId("appearance.typography.smoothing"),
+          label: "Smooth text",
+          scope: "app",
+          keywords: "smooth text smoothing antialiasing grayscale font rendering mac",
+        },
+        {
           id: settingId("appearance.scheme.style"),
           label: "Style",
           scope: "app",
@@ -379,6 +398,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "background pixel size square cell dither",
         },
         {
+          id: settingId("app-background-scene"),
+          label: "Background scene",
+          scope: "app",
+          keywords:
+            "background pixel ground scene ridges mountains burst rays drift streaks dither",
+        },
+        {
           id: settingId("app-background-effect-tones"),
           label: "Background colours",
           scope: "app",
@@ -401,12 +427,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Show the background behind",
           scope: "app",
           keywords: "background show behind start screens every page everywhere",
-        },
-        {
-          id: settingId("app-background-sidebar"),
-          label: "Background under the sidebar",
-          scope: "app",
-          keywords: "background cover sidebar under",
         },
         {
           id: settingId("appearance.typography.ui.size"),
@@ -2083,7 +2103,15 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       scope: "host",
       keywords:
         "usage operational dashboard provider model host mode project thread request shape attribution filters totals daily weekly cumulative top consumers measurement quality exact estimated reconciled stale unavailable export reset retention purge spend ceiling token budget",
-      settings: [],
+      settings: [
+        {
+          id: settingId("spend-ceiling-shown"),
+          label: "Show spend ceiling",
+          scope: "app",
+          keywords:
+            "usage spend ceiling limit budget tokens turns money row thread project hide show",
+        },
+      ],
     },
   ],
 });

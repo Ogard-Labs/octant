@@ -235,7 +235,7 @@ export function OwnerApprovalAnswerUnlockSwitch(props: {
   return (
     <div className="setgroup">
       <SettingRow
-        description="An owner device answers a waiting file or Shell approval here after one unlock, which covers its answers for five minutes. Turn this on to ask for a fresh unlock before every Allow once or Deny. Off by default."
+        description="An owner device can answer a waiting file or Shell approval here after one unlock, good for five minutes. Turn this on to ask for a fresh unlock before every Allow once or Deny. Off by default."
         label="Owner unlock for each approval answer"
         scope="host"
         settingId="hub-owner-approval-answer-unlock"

@@ -57,6 +57,12 @@ const ledgerCriteria = [
   },
 ];
 
+/** The budget is one row; its three limits open from it in a card. */
+async function openBudget(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: /^Budget, / }));
+  await screen.findByLabelText("Turns");
+}
+
 describe("ThreadGoalPanel", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -112,7 +118,7 @@ describe("ThreadGoalPanel", () => {
     expect(client.read).toHaveBeenCalledOnce();
   });
 
-  it("mounts the Goal card for the thread and states host retention honestly", async () => {
+  it("mounts the Goal card for the thread and without a retention note", async () => {
     const client: GoalClient = {
       read: vi.fn().mockResolvedValue({
         goal: goalWith(),
@@ -133,9 +139,7 @@ describe("ThreadGoalPanel", () => {
     expect(await screen.findByTestId("goal-objective")).toHaveTextContent("Ship the Goal surface");
     expect(screen.getByTestId("goal-status")).toHaveTextContent("active");
     expect(screen.getByText("1 recorded revision.")).toBeVisible();
-    expect(
-      screen.getByText("The host records this Goal in its journal, so it survives a restart."),
-    ).toBeVisible();
+    expect(screen.queryByText(/survives a restart/)).not.toBeInTheDocument();
   });
 
   it("lists the criteria the model set, with their checks and evidence, beside the objective", async () => {
@@ -260,8 +264,11 @@ describe("ThreadGoalPanel", () => {
     render(<ThreadGoalPanel client={client} threadId={threadId} />);
     await screen.findByTestId("goal-objective");
     await user.click(screen.getByRole("button", { name: "Revise" }));
+    await openBudget(user);
     await user.type(screen.getByLabelText("Turns"), "20");
     await user.type(screen.getByLabelText("Minutes"), "30");
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Budget, 20 turns · 30 min" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Save revision" }));
 
     expect(client.execute).toHaveBeenCalledWith(
@@ -272,6 +279,27 @@ describe("ThreadGoalPanel", () => {
       }),
     );
     await waitFor(() => expect(screen.queryByLabelText("Turns")).not.toBeInTheDocument());
+  });
+
+  it("shows the budget as one row, None when no limit is set, and opens its fields and the at-least-one hint from it", async () => {
+    const user = userEvent.setup();
+    const client: GoalClient = {
+      read: vi.fn().mockResolvedValue({ goal: goalWith(), history: [] }),
+      execute: vi.fn(),
+    };
+
+    render(<ThreadGoalPanel client={client} threadId={threadId} />);
+    await screen.findByTestId("goal-objective");
+    await user.click(screen.getByRole("button", { name: "Revise" }));
+
+    expect(screen.getByRole("button", { name: "Budget, None" })).toBeVisible();
+    expect(screen.queryByLabelText("Turns")).not.toBeInTheDocument();
+    await openBudget(user);
+    expect(
+      screen.getByText("Leave a field empty for no limit. At least one is required."),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Minutes")).toBeVisible();
+    expect(screen.getByLabelText("Tokens")).toBeVisible();
   });
 
   it("leaves the budget to the host when a revision changes only the objective", async () => {
@@ -312,6 +340,7 @@ describe("ThreadGoalPanel", () => {
     render(<ThreadGoalPanel client={client} threadId={threadId} />);
     await screen.findByTestId("goal-objective");
     await user.click(screen.getByRole("button", { name: "Revise" }));
+    await openBudget(user);
     expect(screen.getByLabelText("Tokens")).toHaveValue("50000");
     await user.type(screen.getByLabelText("Turns"), "0");
 

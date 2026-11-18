@@ -1,4 +1,4 @@
-import { CircleCheck, CircleX, Star } from "lucide-react";
+import { CircleCheck, CircleX, Star } from "../../ui/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   decodeChatThreadId,

@@ -62,6 +62,8 @@ describe("CodeTestPane", () => {
       />,
     );
 
+    // The test's name stands once, as the card's title; the button says Run.
+    expect(screen.getByRole("button", { name: "Run Web tests" })).toHaveTextContent(/^Run$/);
     fireEvent.click(screen.getByRole("button", { name: "Run Web tests" }));
 
     expect(screen.getByText(/Running Web tests/)).toBeVisible();

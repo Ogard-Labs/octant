@@ -1,48 +1,43 @@
 /*
- * The mark that a thread read outside content is a chip in the row under the
- * box, after the access control it is a fact about: a globe and the words in
- * the warning ink, with no fill or edge at rest like the row's other chips. It
- * is shown for as long as the fact applies; pressing it opens the full
- * sentence and Review. In a narrow row it keeps the globe and drops the words
- * (the name and the tooltip keep them).
+ * The mark that a thread read outside content is a row in the Environment
+ * panel and, while it asks something of the person (below Full access), a
+ * globe in the composer's row before the access control. The row is meta ink;
+ * its globe takes the warning ink only while the mark has effect. The icon in
+ * the composer's row has no words: its name and tooltip carry them.
  */
-.outside-content-chip {
-  display: inline-flex;
-  flex: 0 0 auto;
+.outside-content-row {
+  display: flex;
   min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: 0 var(--oct-space-1) 0 var(--oct-space-3);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
-.composer-row .outside-content-chip__trigger {
-  gap: var(--oct-space-1);
-  padding-inline: var(--oct-space-2);
+.outside-content-row__icon {
+  flex: none;
+}
+
+.outside-content-row[data-effective="true"] .outside-content-row__icon {
   color: var(--oct-warn-fg);
 }
 
-.outside-content-chip__label {
-  white-space: nowrap;
+.outside-content-row__text {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-@container composer-under (max-width: 560px) {
-  .outside-content-chip__label {
-    display: none;
-  }
-  .composer-row .outside-content-chip__trigger {
-    padding-inline: var(--oct-space-1);
-  }
+.outside-content-row__action {
+  flex: none;
 }
 
-.outside-content-popover {
-  display: grid;
-  max-width: 280px;
-  gap: var(--oct-space-2);
-  justify-items: start;
-  padding: var(--oct-space-3);
+.composer-row .outside-content-mark {
+  flex: none;
 }
 
-.outside-content-popover__text {
-  margin: 0;
-  color: var(--oct-fg-2);
-  font-size: var(--oct-text-sm);
+.composer-row .outside-content-mark > svg {
+  color: var(--oct-warn-fg);
 }
 
 /* The review dialog's message stays compact: its mark, sentence, and action

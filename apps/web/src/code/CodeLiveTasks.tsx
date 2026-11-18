@@ -1,4 +1,4 @@
-import { Activity } from "lucide-react";
+import { Activity } from "../ui/icons";
 import type { CodeLiveTask } from "@octant/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {

@@ -24,7 +24,7 @@ import type {
   CanvasShareSnapshotRevokeRequest,
   CanvasShareSnapshotSummary,
 } from "@octant/contracts/canvas-share-snapshot";
-import { Ban, Check, Eye, Share2, TriangleAlert } from "lucide-react";
+import { Ban, Check, Eye, Share2, TriangleAlert } from "../ui/icons";
 import { useMemo, useState, type ReactNode } from "react";
 import { thisComputerName, useHostPlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";

@@ -99,3 +99,22 @@ describe("SettingsNavigation", () => {
     expect(container).toBeEmptyDOMElement();
   });
 });
+
+describe("the Settings frame", () => {
+  it("cannot be scrolled by a section jump, so the rail and title stay put while the page moves", () => {
+    // `overflow: hidden` still lets scrollIntoView slide a box; a chip click
+    // pushed the whole sheet up, rail and title with it. `clip` cannot scroll.
+    const dock = readFileSync(resolve(process.cwd(), "src/styles/dock.css"), "utf8");
+    const rule = (css: string, selector: string) =>
+      new RegExp(`(?:^|\\n)${selector.replaceAll(".", "\\.")} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+    expect(rule(dock, ".octant-sheet__popup")).toContain("overflow: clip;");
+    for (const frame of [
+      ".settings-view",
+      ".settings-view__sidebar",
+      ".settings-view__sidebar-content",
+      ".settings-view__workspace",
+    ]) {
+      expect(rule(settingsStyles, frame), frame).toContain("overflow: clip;");
+    }
+  });
+});

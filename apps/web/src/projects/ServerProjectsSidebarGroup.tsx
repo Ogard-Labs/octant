@@ -1,4 +1,4 @@
-import { Network, SquarePen } from "lucide-react";
+import { Network, SquarePen } from "../ui/icons";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { OctantButton } from "../ui/base/OctantButton";

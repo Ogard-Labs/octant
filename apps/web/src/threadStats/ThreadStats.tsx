@@ -1,11 +1,9 @@
 import { threadStats, threadStatsInputOf } from "@octant/domain";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "../ui/icons";
 import { useMemo } from "react";
 import { useComposerContextMeterScope } from "../context/composerContextMeterScope";
-import { composerLimitWindows, type ComposerLimitWindow } from "../context/composerLimitWindows";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
-import { PlanUsageMeters } from "../usage/PlanUsageMeters";
 import { useThreadStatsScope } from "./threadStatsScope";
 import "./threadStats.css";
 
@@ -66,36 +64,4 @@ export function ThreadStatsBlock() {
       )}
     </div>
   );
-}
-
-/**
- * The provider's remaining plan usage for a thread, right-aligned in the strip
- * above its box, as the start screen shows it beside where a new thread runs.
- * The start screen offers no way to hide them either. Active pane only, for the
- * same reason as the line.
- */
-export function ThreadPlanWindows() {
-  const meter = useComposerContextMeterScope();
-  if (!meter.visible) return null;
-  const limits = currentLimitWindows(meter);
-  if (limits.length === 0) return null;
-  return (
-    <div className="thread-plan-windows">
-      <PlanUsageMeters compact windows={limits} />
-    </div>
-  );
-}
-
-/**
- * Read on every render, not memoized: a window whose reset passes must drop
- * out when the next render comes, not stay until the figures change.
- */
-function currentLimitWindows(
-  meter: ReturnType<typeof useComposerContextMeterScope>,
-): ReadonlyArray<ComposerLimitWindow> {
-  return composerLimitWindows({
-    now: Date.now(),
-    snapshot: meter.snapshot,
-    fallback: meter.fallback,
-  });
 }

@@ -33,6 +33,27 @@ export function writeCodeDiffLayout(
   }
 }
 
+/**
+ * Forgets the thread's choice, so it follows the Settings default again.
+ * Storing the default instead would pin the thread to today's default.
+ */
+export function clearCodeDiffLayout(
+  threadId: CodeThreadId,
+  storage: Pick<Storage, "getItem" | "setItem"> | undefined = defaultStorage(),
+): void {
+  if (storage === undefined) return;
+  try {
+    const current = readStoredLayouts(storage);
+    if (current === undefined || !(String(threadId) in current)) return;
+    const rest = Object.fromEntries(
+      Object.entries(current).filter(([id]) => id !== String(threadId)),
+    );
+    storage.setItem(CODE_DIFF_LAYOUT_STORAGE_KEY, JSON.stringify(rest));
+  } catch {
+    // Best-effort, as writing is.
+  }
+}
+
 function readStoredLayouts(
   storage: Pick<Storage, "getItem"> | undefined,
 ): Readonly<Record<string, unknown>> | undefined {

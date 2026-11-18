@@ -17,7 +17,7 @@ import {
   RotateCw,
   ShieldCheck,
   X,
-} from "lucide-react";
+} from "../ui/icons";
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";

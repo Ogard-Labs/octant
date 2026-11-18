@@ -1,46 +1,35 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { MoreHorizontal, PanelBottom, PanelLeftOpen, PanelRight, SquarePen } from "lucide-react";
+import { MoreHorizontal, PanelLeftOpen, SquarePen } from "../ui/icons";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { useActionShortcut } from "../keybindings/useActionShortcut";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { IconButton } from "./IconButton";
-import { DockToolButtons } from "./DockToolButtons";
-import type { DockUtilityLauncherReference } from "./DockUtilityLauncher";
-import type { DockToolButtonsModel } from "./dockToolButtonsModel";
-import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
+import { TitleBandChanges, type TitleBandChangesFacts } from "./TitleBandChanges";
 import { ApplicationIdentity } from "./ApplicationIdentity";
 import type { WindowHistory } from "./windowHistory";
 import { WindowHistoryButtons } from "./WindowHistoryButtons";
+import { setPaneToolsHost } from "./paneToolsHost";
 
 export interface WindowChromeProps {
   readonly activeSurface: string;
-  /**
-   * The agent's Browser is live and the dock, closed, holds its card: the
-   * toggle carries one quiet dot, so a page being driven is not silent.
-   */
-  readonly dockBrowserActive?: boolean;
   readonly dockAvailable: boolean;
   readonly dockExpanded: boolean;
   readonly dockLabel: string;
-  readonly bottomPanelAvailable?: boolean;
-  readonly bottomPanelExpanded?: boolean;
   readonly hostBridge?: OctantHostBridge;
   readonly isNarrow: boolean;
   readonly material: ResolvedSidebarMaterial;
   readonly nativeTitlebarInset?: boolean;
   readonly onRecoverZen?: () => void;
   readonly onToggleDock: (opener: HTMLElement) => void;
-  /** One button per tool before the two toggles; absent at narrow widths. */
-  readonly dockTools?: DockToolButtonsModel;
-  readonly dockReferences?: ReadonlyArray<DockUtilityLauncherReference>;
-  readonly onDockToolMenuAction?: (surface: RightUtilityDockSurfaceId, value: string) => void;
-  readonly onToggleDockTool?: (surface: RightUtilityDockSurfaceId, opener: HTMLElement) => void;
-  readonly onToggleBottomPanel?: (opener: HTMLElement) => void;
   /** Present only while the sidebar is hidden: the chrome takes over the leading edge. */
   readonly onExpandSidebar?: () => void;
   /** Keeps the primary creation action reachable while navigation is collapsed. */
   readonly onNewThread?: () => void;
   readonly newThreadLabel?: string;
   readonly zenRecoveryNeeded?: boolean;
+  /** The open Code thread's uncommitted changes; absent when it has no checkout to measure. */
+  readonly changes?: TitleBandChangesFacts;
   /** Back and forward, shown beside Show sidebar while the sidebar is hidden. */
   readonly history?: WindowHistory;
 }
@@ -84,6 +73,7 @@ function useMeasuredClusterWidth(property: string): (node: HTMLDivElement | null
 }
 
 export function WindowChrome(props: WindowChromeProps) {
+  const newThreadShortcut = useActionShortcut("new-thread");
   const recoverZen = props.onRecoverZen;
   const trailing = useMeasuredClusterWidth("--octant-window-chrome-reserved-width");
   const leading = useMeasuredClusterWidth("--octant-window-chrome-leading-width");
@@ -115,12 +105,16 @@ export function WindowChrome(props: WindowChromeProps) {
             <WindowHistoryButtons className="window-chrome__button" history={props.history} />
           )}
           {props.onNewThread === undefined ? null : (
-            <IconButton
-              className="window-chrome__button window-chrome__new-thread"
-              icon={SquarePen}
-              label={props.newThreadLabel ?? "New task"}
-              onClick={props.onNewThread}
-            />
+            <OctantTooltip label={props.newThreadLabel ?? "New task"} shortcut={newThreadShortcut}>
+              <IconButton
+                className="window-chrome__button window-chrome__new-thread"
+                icon={SquarePen}
+                label={props.newThreadLabel ?? "New task"}
+                onClick={props.onNewThread}
+                // The tooltip names the button; a native title would say it twice.
+                title=""
+              />
+            </OctantTooltip>
           )}
         </div>
       )}
@@ -148,76 +142,32 @@ export function WindowChrome(props: WindowChromeProps) {
             dockAvailable={props.dockAvailable}
             dockExpanded={props.dockExpanded}
             dockLabel={props.dockLabel}
-            bottomPanelAvailable={props.bottomPanelAvailable === true}
-            bottomPanelExpanded={props.bottomPanelExpanded === true}
-            {...(props.onToggleBottomPanel === undefined
-              ? {}
-              : { onToggleBottomPanel: props.onToggleBottomPanel })}
             onToggleDock={props.onToggleDock}
             {...(recoverZen === undefined || !props.zenRecoveryNeeded
               ? {}
               : { onRecoverZen: recoverZen })}
           />
-        ) : (
-          <>
-            {props.dockTools === undefined || props.onToggleDockTool === undefined ? null : (
-              <DockToolButtons
-                {...(props.dockReferences === undefined
-                  ? {}
-                  : { references: props.dockReferences })}
-                model={props.dockTools}
-                {...(props.onDockToolMenuAction === undefined
-                  ? {}
-                  : { onMenuAction: props.onDockToolMenuAction })}
-                onPress={props.onToggleDockTool}
-              />
-            )}
-            {props.bottomPanelAvailable !== true ||
-            props.onToggleBottomPanel === undefined ? null : (
-              <IconButton
-                aria-controls="bottom-utility-panel"
-                aria-expanded={props.bottomPanelExpanded === true}
-                className="window-chrome__button"
-                data-bottom-panel-opener="true"
-                icon={PanelBottom}
-                label={`${props.bottomPanelExpanded === true ? "Close" : "Open"} bottom panel`}
-                onClick={(event) => props.onToggleBottomPanel?.(event.currentTarget)}
-              />
-            )}
-            {props.dockAvailable ? (
-              <IconButton
-                aria-controls="right-utility-dock"
-                aria-expanded={props.dockExpanded}
-                {...dockActivityAttributes(props.dockBrowserActive === true)}
-                className="window-chrome__button"
-                data-dock-opener="true"
-                icon={PanelRight}
-                label={`${props.dockExpanded ? "Close" : "Open"} ${props.dockLabel}`}
-                onClick={(event) => props.onToggleDock(event.currentTarget)}
-              />
-            ) : null}
-          </>
+        ) : props.changes === undefined ? null : (
+          <TitleBandChanges changes={props.changes} />
+        )}
+        {/* The focused pane's tool buttons, outermost at the bar's end in a
+            wide window: the pane draws them into this slot. Last, so a change
+            count or a Project action that comes and goes beside them never
+            moves them. A narrow window keeps them in the pane's own header,
+            so it has no slot. */}
+        {props.isNarrow ? null : (
+          <span className="window-chrome__pane-tools" ref={setPaneToolsHost} />
         )}
       </div>
     </header>
   );
 }
 
-/** The mark and its words, for the toggle that holds the dock's closed card. */
-function dockActivityAttributes(active: boolean) {
-  return active
-    ? ({ "aria-description": "Browser is active", "data-activity": "browser" } as const)
-    : {};
-}
-
 function NarrowOverflow(props: {
-  readonly bottomPanelAvailable: boolean;
-  readonly bottomPanelExpanded: boolean;
   readonly dockAvailable: boolean;
   readonly dockExpanded: boolean;
   readonly dockLabel: string;
   readonly onRecoverZen?: () => void;
-  readonly onToggleBottomPanel?: (opener: HTMLElement) => void;
   readonly onToggleDock: (opener: HTMLElement) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -269,19 +219,6 @@ function NarrowOverflow(props: {
           {recoverZen === undefined ? null : (
             <DisclosureAction label="Recover Zen" onClick={() => select(recoverZen)} />
           )}
-          {props.bottomPanelAvailable && props.onToggleBottomPanel !== undefined ? (
-            <DisclosureAction
-              ariaControls="bottom-utility-panel"
-              expanded={props.bottomPanelExpanded}
-              label={`${props.bottomPanelExpanded ? "Close" : "Open"} bottom panel`}
-              logicalTarget="bottom-panel"
-              onClick={() =>
-                select(() => {
-                  if (trigger.current !== null) props.onToggleBottomPanel?.(trigger.current);
-                })
-              }
-            />
-          ) : null}
           {props.dockAvailable ? (
             <DisclosureAction
               ariaControls="right-utility-dock"
@@ -305,7 +242,7 @@ function DisclosureAction(props: {
   readonly ariaControls?: string;
   readonly expanded?: boolean;
   readonly label: string;
-  readonly logicalTarget?: "bottom-panel" | "dock";
+  readonly logicalTarget?: "dock";
   readonly onClick: () => Promise<void> | void;
 }) {
   return (
@@ -313,7 +250,6 @@ function DisclosureAction(props: {
       {...(props.ariaControls === undefined ? {} : { "aria-controls": props.ariaControls })}
       {...(props.expanded === undefined ? {} : { "aria-expanded": props.expanded })}
       className="window-chrome__disclosure-action"
-      data-bottom-panel-opener={props.logicalTarget === "bottom-panel" ? "true" : undefined}
       data-dock-opener={props.logicalTarget === "dock" ? "true" : undefined}
       onClick={props.onClick}
       type="button"

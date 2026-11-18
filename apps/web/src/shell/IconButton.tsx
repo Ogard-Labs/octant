@@ -1,9 +1,9 @@
-import type { LucideIcon } from "lucide-react";
+import type { IconComponent } from "../ui/icons";
 import { forwardRef } from "react";
 import { OctantIconButton, type OctantIconButtonProps } from "../ui/base/OctantButton";
 
 export interface IconButtonProps extends Omit<OctantIconButtonProps, "children" | "label"> {
-  readonly icon: LucideIcon;
+  readonly icon: IconComponent;
   readonly label: string;
 }
 

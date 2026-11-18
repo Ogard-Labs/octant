@@ -26,6 +26,30 @@ describe("SidebarRail", () => {
     expect(await screen.findByRole("tooltip")).toHaveTextContent("octant");
   });
 
+  it("shows the new thread key beside its name on the collapsed rail", async () => {
+    const user = userEvent.setup();
+    render(
+      <SidebarRail
+        activeMode="code"
+        destinations={[]}
+        modes={["chat", "work", "code"]}
+        newThread={{ label: "New task", onSelect: vi.fn() }}
+        nativeHost={false}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projects={[]}
+        tiles={[]}
+      />,
+    );
+
+    await user.hover(screen.getByRole("button", { name: "New task" }));
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("New task");
+    expect(tooltip.querySelector("kbd")).toHaveTextContent(/^(⌘N|Ctrl\+N)$/);
+    // The key cap is a hint; the button keeps its plain name.
+    expect(screen.getByRole("button", { name: "New task" })).toBeInTheDocument();
+  });
+
   it("marks only the four count icons with the count they stand for", () => {
     render(
       <SidebarRail
@@ -87,8 +111,8 @@ describe("SidebarRail", () => {
     );
 
     const work = screen.getByRole("button", { name: "Work" });
-    expect(work.querySelector("svg.lucide-message-square")).not.toBeNull();
-    expect(work.querySelector("svg.lucide-folder-open")).toBeNull();
+    expect(work.querySelector("svg.octant-icon-message-square")).not.toBeNull();
+    expect(work.querySelector("svg.octant-icon-folder-open")).toBeNull();
   });
 
   describe("pinned Projects", () => {

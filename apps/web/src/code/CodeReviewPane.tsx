@@ -21,7 +21,7 @@ import {
 import { Schema } from "effect";
 const decodeCodeDigest = Schema.decodeUnknownSync(CodeDigest);
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
-import { ClipboardCheck, MessageCircle } from "lucide-react";
+import { ClipboardCheck, MessageCircle } from "../ui/icons";
 import { Markdown } from "../markdown/Markdown";
 import "./project-pull-request-review.css";
 import { useState } from "react";
@@ -244,16 +244,13 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
 
   return (
     <section aria-label="Local review" className="code-delivery-pane code-review-pane">
-      <header className="code-delivery-pane__toolbar">
-        <div>
-          <span>Review</span>
-          <h1>Local findings</h1>
-        </div>
-        <p>Local only · GitHub review mutation unavailable</p>
-      </header>
-      {findings.length === 0 ? (
-        <p role="status">No local findings.</p>
-      ) : (
+      {findings.length === 0 ? null : (
+        <header className="code-review-pane__header">
+          <h2>Findings</h2>
+          <span>{findings.length}</span>
+        </header>
+      )}
+      {findings.length === 0 ? null : (
         <ul className="code-review-pane__findings">
           {findings.map((finding) => (
             <li key={finding.id}>
@@ -318,7 +315,7 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
           ))}
         </ul>
       )}
-      {props.onPrepareCorrection === undefined ? null : (
+      {props.onPrepareCorrection === undefined || findings.length === 0 ? null : (
         <OctantButton
           type="button"
           size="sm"
@@ -338,15 +335,13 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
           Prepare correction draft
         </OctantButton>
       )}
-      <p>
-        Findings stay open until you review the resulting changes and resolve or dismiss them
-        yourself.
-      </p>
-      {props.target === undefined ? (
-        <p className="code-delivery-pane__notice">
-          Select an exact file and line to add a finding.
+      {findings.length === 0 ? null : (
+        <p>
+          Findings stay open until you review the resulting changes and resolve or dismiss them
+          yourself.
         </p>
-      ) : (
+      )}
+      {props.target === undefined ? null : (
         <div className="code-review-pane__form">
           <p>
             {props.target.path} · {props.target.anchor?.side ?? "file"} line {props.target.line}
@@ -376,7 +371,11 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
           </OctantButton>
         </div>
       )}
-      {failure === undefined ? null : <OctantAlert tone="warning">{failure}</OctantAlert>}
+      {failure === undefined ? null : (
+        <OctantAlert layout="row" tone="warning">
+          {failure}
+        </OctantAlert>
+      )}
     </section>
   );
 }

@@ -77,10 +77,10 @@ export function MemoryEntryDialog(props: MemoryEntryDialogProps) {
       </div>
       <p id={descriptionId}>
         {props.mode.kind === "create"
-          ? "Choose exactly what this Project may remember. Nothing is inferred from conversations."
+          ? "Choose exactly what this Project may remember. Nothing is guessed from conversations."
           : props.mode.kind === "supersede"
-            ? "The original entry stays in audited history and the replacement receives a new identity."
-            : "Retraction keeps the original content and records your reason in audited history."}
+            ? "The original entry stays in the audit history. The replacement is a new entry."
+            : "Retracting keeps the original text and records your reason in the audit history."}
       </p>
       {props.mode.kind === "create" ? (
         <label>

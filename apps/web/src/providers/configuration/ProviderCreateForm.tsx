@@ -8,7 +8,7 @@ import {
   type ClaudeAccountAccent,
   type ClaudeAuthentication,
 } from "@octant/contracts";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from "../../ui/icons";
 import { useRef, useState } from "react";
 import { hostCredentialStore, useHostPlatform } from "../../platform";
 import { OctantButton } from "../../ui/base/OctantButton";
@@ -394,8 +394,8 @@ export function ProviderCreateForm(
                 disabled={props.busy || creating}
                 onValueChange={(value) => setProviderType(value as typeof providerType)}
                 options={[
-                  { id: "opencode", group: "Coding agents", label: "OpenCode CLI" },
-                  { id: "codex", group: "Coding agents", label: "Codex CLI" },
+                  { id: "opencode", group: "Coding agents", label: "OpenCode" },
+                  { id: "codex", group: "Coding agents", label: "Codex" },
                   { id: "claude", group: "Coding agents", label: "Claude Agent SDK" },
                   { id: "pi", group: "Coding agents", label: "Pi RPC" },
                   { id: "oh-my-pi", group: "Coding agents", label: "Oh My Pi" },

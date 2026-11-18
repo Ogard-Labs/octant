@@ -8,11 +8,13 @@ const shell = read("shell.css");
 const dock = read("dock.css");
 const settings = read("settings.css");
 const octant = read("octant.css");
+const surface = read("surface.css");
 const chat = read("chat.css");
-const usage = read("usage.css");
 const projectThreads = read("project-threads.css");
 const components = read("components.css");
 const code = read("code.css");
+const inbox = read("inbox.css");
+const todos = read("todos.css");
 const root = readFileSync(resolve(import.meta.dirname, "../styles.css"), "utf8");
 const source = (file: string) => readFileSync(resolve(import.meta.dirname, "..", file), "utf8");
 const toggleGroup = source("ui/shadcn/toggle-group.tsx");
@@ -62,18 +64,17 @@ describe("the shell's edges and gaps", () => {
     // on a half pixel.
     expect(bar).not.toMatch(/border-bottom/);
     expect(bar).toMatch(/box-shadow:\s*inset 0 -1px 0/);
-    expect(rule(dock, ".dock-tile__control > svg")).toContain("var(--oct-icon-sm)");
+    expect(rule(dock, ".dock-tile__control > svg")).toContain("var(--oct-icon-md)");
   });
 
-  it("makes each rail button its 32px face, and centres the first face on the title rail", () => {
+  it("makes each rail button its 36px face, and centres the first face on the title rail", () => {
     // The rail variant of the button draws no border, so the button is its
     // face and no negative margin gives a border back.
     expect(rule(shell, ".sidebar-rail__button")).not.toMatch(/margin/);
-    expect(rule(usage, ".rail-usage__ring")).not.toMatch(/margin/);
     expect(source("ui/shadcn/button.tsx")).toMatch(/rail:\s*"[^"]*border-0/);
     const scroll = rule(shell, ".sidebar-rail__scroll");
     expect(scroll).toMatch(
-      /--sidebar-rail-top:\s*calc\(\(var\(--oct-title-rail-h\) - 32px\) \/ 2\)/,
+      /--sidebar-rail-top:\s*calc\(\(var\(--oct-title-rail-h\) - 36px\) \/ 2\)/,
     );
     expect(scroll).toMatch(/padding:\s*var\(--sidebar-rail-top\) 0/);
   });
@@ -106,7 +107,7 @@ describe("the shell's edges and gaps", () => {
     );
     const body = card.slice(0, card.indexOf("}"));
     expect(body).toMatch(/border:\s*0;/);
-    expect(body).toMatch(/outline:\s*1px solid transparent;/);
+    expect(body).toMatch(/outline:\s*1px solid var\(--oct-hairline\);/);
     expect(body).toMatch(/outline-offset:\s*-1px;/);
   });
 
@@ -116,9 +117,31 @@ describe("the shell's edges and gaps", () => {
     );
     expect(rule(settings, ".setrow-label")).toContain("var(--oct-line-label)");
     expect(rule(settings, ".setrow-hint")).toContain("var(--oct-line-detail)");
-    expect(rule(shell, ".sidebar-navigation__thread-title")).toContain("var(--oct-line-label)");
-    expect(rule(shell, ".sidebar-navigation__thread-facts")).toContain("var(--oct-line-meta)");
+    // A thread row is three whole-pixel lines: the top line (16, 14 compact),
+    // the title (20, 18 compact) and the detail line, plus 4px above and below.
+    expect(rule(shell, ".sidebar-navigation__thread-title")).toContain(
+      "line-height: var(--thread-line-title);",
+    );
+    expect(
+      rule(shell, ".sidebar-navigation__thread-context,\n.sidebar-navigation__thread-detail"),
+    ).toContain("line-height: var(--thread-line-context);");
     expect(rule(projectThreads, ".move-thread__title")).toContain("var(--oct-line-label)");
+  });
+
+  it("gives a two-line thread row 48px (44 compact) with 6px above and below, and a heading 8px of clearance", () => {
+    // 6 + 16 + 20 + 6 = 48; compact lines of 14 and 18 make 6 + 14 + 18 + 6 = 44.
+    expect(rule(shell, ".sidebar-navigation__thread")).toContain(
+      "padding-block: calc(var(--oct-space-1) * 1.5);",
+    );
+    expect(rule(shell, ".sidebar-navigation__thread")).toContain("--thread-line-context: 16px;");
+    expect(rule(shell, ".sidebar-navigation__thread")).toContain("--thread-line-title: 20px;");
+    expect(
+      rule(shell, 'html[data-octant-density="compact"] .sidebar-navigation__thread'),
+    ).toContain("--thread-line-title: 18px;");
+    // The heading's clearance is the list's own 8px gap; a margin on top of it
+    // made 16px between groups.
+    expect(root).not.toMatch(/\.activity-nav__group:not\(:first-child\) > h2 \{/);
+    expect(rule(root, ".activity-nav")).toContain("gap: 8px;");
   });
 
   it("gives the Move to Project list one icon box, whether the Project has a picture or not", () => {
@@ -152,7 +175,7 @@ describe("the shell's edges and gaps", () => {
     // Two pixels of padding around a 24px segment make every tray 28px tall.
     expect(rule(octant, ".modeswitch__tray")).toMatch(/padding:\s*2px;/);
     expect(toggleGroup).toContain("p-[2px]");
-    expect(toggleGroup).toContain("h-[round(1.846rem,2px)]");
+    expect(toggleGroup).toContain("h-[round(1.714rem,2px)]");
     expect(toggleGroup).not.toContain("h-[round(1.75rem,2px)]");
   });
 
@@ -201,23 +224,29 @@ describe("the shell's edges and gaps", () => {
     expect(rule(octant, ".thread-column")).toContain("var(--oct-thread-column)");
   });
 
-  it("starts a thread's title text on the edge of the thread's column, with the mark and the request chip after it", () => {
+  it("starts a thread's title text 20px after the stage's edge, on the transcript's left edge, with the mark and the request chip after it", () => {
     const header = rule(root, '.workspace-pane__header[data-header-kind="title"]');
+    // The title's edge no longer reads the thread column, so it cannot move
+    // when a thread opens or the dock narrows the pane.
+    expect(header).not.toContain("thread-column");
     expect(header).toMatch(
-      /--pane-title-edge:\s*max\(var\(--oct-space-5\), calc\(\(100% - var\(--oct-thread-column\)\) \/ 2\)\);/,
+      /--pane-title-start:\s*calc\(var\(--oct-space-5\) - var\(--oct-space-1\) - 1px\);/,
     );
-    expect(header).toMatch(
-      /--pane-title-start:\s*calc\(var\(--pane-title-edge\) - var\(--oct-space-1\) - 1px\);/,
-    );
-    expect(header).toMatch(/padding-left:\s*var\(--pane-title-start\);/);
+    expect(header).toMatch(/--pane-header-start:\s*var\(--pane-title-start\);/);
     // A header with content tabs keeps the insets it had: the tabs lead it.
-    expect(rule(root, ".workspace-pane__header")).toMatch(/padding:\s*2px 0 2px 4px;/);
-    expect(splitWorkspace).toContain('data-header-kind={showTabs ? "tabs" : "title"}');
-    expect(root).toMatch(
-      /\.shell--sidebar-collapsed \.workspace-pane__header\[data-header-kind="title"\] \{\s*padding-left: max\(var\(--octant-window-chrome-leading-width, 148px\), var\(--pane-title-start\)\);/,
+    // The start is a variable so the lead can take it off its own width.
+    expect(rule(root, ".workspace-pane__header")).toMatch(/--pane-header-start:\s*4px;/);
+    expect(rule(root, ".workspace-pane__header")).toMatch(
+      /padding:\s*2px 0 2px var\(--pane-header-start\);/,
+    );
+    expect(splitWorkspace).toContain(
+      'data-header-kind={showTabs ? "tabs" : showHeader ? "title" : "tools"}',
     );
     expect(root).toMatch(
-      /\.shell--sidebar-collapsed \.workspace-pane__header \{\s*padding-left: var\(--octant-window-chrome-leading-width, 148px\);/,
+      /\.shell--sidebar-collapsed \.workspace-pane__header\[data-header-kind="title"\] \{\s*--pane-header-start: calc\(\s*var\(--octant-window-chrome-leading-width, 148px\) \+ var\(--pane-title-start\)\s*\);/,
+    );
+    expect(root).toMatch(
+      /\.shell--sidebar-collapsed \.workspace-pane__header \{\s*--pane-header-start: var\(--octant-window-chrome-leading-width, 148px\);/,
     );
     const title = splitWorkspace.indexOf('className="oct-nav-name workspace-pane__title"');
     const afterTitle = splitWorkspace.indexOf("{gripMark}", title);
@@ -312,5 +341,37 @@ describe("the shell's edges and gaps", () => {
     expect(rule(octant, ".composer-field__attach,\n.composer-field__actions")).toContain(
       "var(--oct-composer-line)",
     );
+  });
+
+  it("keeps the start screen's composer where the arrived list leaves it, so late rows and cards move nothing", () => {
+    expect(rule(surface, ".welcome:has(> .home-start) > .welcome__heading")).toMatch(
+      /flex:\s*0 0 auto/,
+    );
+  });
+  it("stands an Inbox card's rows, group heads and notes on the 16px its label and filters stand on", () => {
+    // The card's body takes 8px and each row 8px more; a row at 12px put its
+    // glyph and text 4px right of the label above it.
+    expect(rule(inbox, ".inbox-card__body")).toMatch(/padding:\s*0 var\(--oct-space-2\)/);
+    expect(rule(inbox, ".inbox-card__head")).toMatch(/padding:\s*0 var\(--oct-space-4\)/);
+    expect(rule(inbox, ".inbox-view__row")).toMatch(/padding:\s*var\(--oct-space-2\);/);
+    expect(rule(inbox, ".inbox-card .inbox-row:has(> :not(.inbox-view__row))")).toMatch(
+      /padding:\s*var\(--oct-space-2\);/,
+    );
+    expect(rule(inbox, ".inbox-group__head")).toMatch(/padding:\s*0 var\(--oct-space-2\)/);
+  });
+
+  it("ends the To-dos card on the edge the Inbox's cards end on, at every window width", () => {
+    const measure = (sheet: string, selector: string) =>
+      [
+        ...sheet.matchAll(new RegExp(`${selector} \\{\\s*--oct-surface-measure:\\s*(\\d+)px`, "g")),
+      ].map((match) => match[1]);
+    expect(measure(todos, "\\.todos-page")).toEqual(measure(inbox, "\\.inbox-page"));
+    expect(measure(inbox, "\\.inbox-page")).toEqual(["980", "1240"]);
+  });
+
+  it("keeps a Review tile's findings blocks 12px apart, as the list keeps its own blocks", () => {
+    expect(
+      rule(dock, ".right-utility-dock__tool .git-history__list--changes .code-local-review"),
+    ).toMatch(/gap:\s*var\(--oct-space-3\)/);
   });
 });

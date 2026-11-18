@@ -4,7 +4,16 @@ import {
   BrowserAutomationClientFailure,
   type BrowserAutomationClient,
 } from "@octant/client-runtime/browser-automation-client";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -12,6 +21,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { threadImageOffers } from "../composer/threadImageOffers";
 import { BrowserWorkspace, RENDERER_OVERLAY_SELECTOR } from "./BrowserWorkspace";
 import { boundsInsideViewport } from "./useNativeBrowserSurface";
+import {
+  browserTabPageOf,
+  publishBrowserTabPage,
+  resetBrowserTabPages,
+  useBrowserTabPages,
+} from "./browserTabPages";
 
 /** The toolbar's trailing more menu holds the actions that have no button of their own. */
 async function openMore(): Promise<void> {
@@ -210,6 +225,32 @@ function stubNativeSurfaceDom(): () => void {
 }
 
 describe("BrowserWorkspace", () => {
+  it("keeps the dock's name for a tab while its pane is still loading", () => {
+    resetBrowserTabPages();
+    const browser = client();
+    browser.inspectThread = vi.fn(() => new Promise<never>(() => undefined)) as never;
+    const tab = {
+      kind: "browser",
+      id: "90000000-0000-4000-8000-000000000010",
+      mode: "work",
+      title: "Browser",
+      threadId,
+    } as const;
+    publishBrowserTabPage(String(threadId), "dock-tab", {
+      title: "Earned",
+      url: "https://www.example.org/",
+    });
+    const view = render(
+      <BrowserWorkspace client={browser} dockTabId="dock-tab" tab={tab as never} />,
+    );
+    const stored = renderHook(() => useBrowserTabPages());
+    expect(browserTabPageOf(stored.result.current, String(threadId), "dock-tab")?.title).toBe(
+      "Earned",
+    );
+    view.unmount();
+    resetBrowserTabPages();
+  });
+
   // Opening a page records it as recent; a later test must not start from it.
   afterEach(() => globalThis.localStorage.clear());
 
@@ -271,6 +312,30 @@ describe("BrowserWorkspace", () => {
     expect(styles.indexOf(".browser-workspace__chrome")).toBeGreaterThan(-1);
     expect(styles.indexOf(".browser-workspace__chrome")).toBeLessThan(
       styles.indexOf(".browser-workspace__native"),
+    );
+  });
+
+  it("lays the notes and the tool band under the page at their own heights, outranking the workspace's grid", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    // The workspace's grid is declared at one class's weight in a later sheet,
+    // so the notes layout needs two: while the grid won, the row's 45% cap
+    // measured its own row and cut its text in half.
+    const band = styles.match(/\n\.browser-annotate \{([^}]*)\}/)?.[1] ?? "";
+    // One height whatever is armed or said, so a live page never resizes for a tool.
+    expect(band).toMatch(/height:\s*44px/);
+    expect(band).toMatch(/flex:\s*0 0 auto/);
+    expect(styles).toMatch(
+      /\.browser-workspace\.browser-workspace--feedback \{\s*display: flex;\s*flex-direction: column;/,
+    );
+    const row = styles.match(/\n\.product-feedback \{([^}]*)\}/)?.[1] ?? "";
+    expect(row).toMatch(/flex:\s*0 0 auto/);
+    expect(row).toMatch(/max-height:\s*min\(45%, 420px\)/);
+  });
+
+  it("stands a thread's recovery state in the middle of the pane", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    expect(styles).toMatch(
+      /:is\(\.code-thread-workspace, \.work-thread-workspace, \.chat-workspace\)\s*> \.shell-state:not\(\.shell-state--page, \[data-state="loading"\]\) \{\s*margin: auto;/,
     );
   });
 
@@ -718,7 +783,14 @@ describe("BrowserWorkspace", () => {
         }}
       />,
     );
-    expect(screen.getByText("Browser unavailable")).toBeInTheDocument();
+    // One line and one muted line, with no eyebrow over them.
+    expect(screen.getByText("Browser needs a thread")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Open it from a Work or Code thread. A page is isolated to the thread that owns it.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Browser unavailable")).not.toBeInTheDocument();
   });
 
   it("creates a server-owned context and navigates through the normalized client", async () => {
@@ -1169,6 +1241,34 @@ describe("BrowserWorkspace", () => {
           { timeout: DRAWING_OPENS_WITHIN_MS },
         );
       }
+
+      it("opens the drawing on the tool chosen in the page's toolbar, and ends it from there", async () => {
+        render(<BrowserWorkspace canDrawOnPage client={drawable()} tab={tab} />);
+        const tools = await screen.findByRole(
+          "toolbar",
+          { name: "Page tools" },
+          { timeout: DRAWING_OPENS_WITHIN_MS },
+        );
+        // Nothing is armed, so there is nothing to cancel.
+        expect(within(tools).getByRole("button", { name: "Cancel" })).toBeDisabled();
+        await act(async () => {});
+        fireEvent.click(within(tools).getByRole("button", { name: "Box on page" }));
+        const drawing = await screen.findByRole(
+          "toolbar",
+          { name: "Drawing tools" },
+          { timeout: DRAWING_OPENS_WITHIN_MS },
+        );
+        expect(within(drawing).getByRole("button", { name: "Box" })).toHaveAttribute(
+          "aria-pressed",
+          "true",
+        );
+        // One drawing at a time: the band's drawing tools wait for this one.
+        expect(within(tools).getByRole("button", { name: "Draw on page" })).toBeDisabled();
+        fireEvent.click(within(tools).getByRole("button", { name: "Discard the drawing" }));
+        await waitFor(() =>
+          expect(screen.queryByRole("toolbar", { name: "Drawing tools" })).toBeNull(),
+        );
+      });
 
       function drag(layer: Element, from: [number, number], to: [number, number]) {
         vi.spyOn(layer, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 400, 200));
@@ -1665,6 +1765,47 @@ describe("BrowserWorkspace", () => {
     expect(screen.getByText("Browser unavailable")).toBeVisible();
   });
 
+  it("tells the person an expired page in their words and opens it again from the last address", async () => {
+    const browser = client();
+    vi.mocked(browser.create).mockRejectedValueOnce(
+      new BrowserAutomationClientFailure(
+        "context-expired",
+        "The Browser page expired. It used the Private profile. Call navigate with the intended URL to open a new Private page.",
+      ),
+    );
+    render(
+      <BrowserWorkspace
+        client={browser}
+        tab={{
+          kind: "browser",
+          id: "90000000-0000-4000-8000-000000000014" as any,
+          mode: "work",
+          title: "Browser",
+          threadId: threadId as any,
+        }}
+      />,
+    );
+
+    enterAddress("https://example.com");
+    fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("This Private page expired.");
+    expect(screen.queryByText(/Call navigate/)).not.toBeInTheDocument();
+    expect(vi.mocked(browser.create)).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole("button", { name: "Open again" }));
+    await waitFor(() => expect(vi.mocked(browser.create)).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(browser.create).mock.calls[1]?.[0].policy.allowedOrigins).toEqual(
+      vi.mocked(browser.create).mock.calls[0]?.[0].policy.allowedOrigins,
+    );
+    expect(screen.queryByText("This Private page expired.")).not.toBeInTheDocument();
+  });
+
+  it("lays a Browser notice out as a quiet row with no tinted box", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
+    const rule = styles.slice(styles.indexOf(".browser-workspace__message {"));
+    const body = rule.slice(0, rule.indexOf("}"));
+    expect(body).not.toMatch(/background|border/);
+  });
+
   it("clears a local failure when an agent advances the authoritative Browser context", async () => {
     const browser = client();
     vi.mocked(browser.inspectThread)
@@ -1759,12 +1900,14 @@ describe("BrowserWorkspace", () => {
           }}
         />,
       );
-      expect(
-        await screen.findByText(
-          "Element selection is not available in this embedded Browser presentation yet.",
-        ),
-      ).toBeVisible();
-      expect(screen.getByRole("button", { name: "Point at something" })).toBeDisabled();
+      // The reason is the tool's own tooltip: a line of its own under the page
+      // would resize the page.
+      const point = await screen.findByRole("button", { name: "Point at something" });
+      await waitFor(() => expect(point).toBeDisabled());
+      expect(point).toHaveAttribute(
+        "title",
+        "Point at something. Element selection is not available in this embedded Browser presentation yet.",
+      );
     } finally {
       restoreDom();
     }

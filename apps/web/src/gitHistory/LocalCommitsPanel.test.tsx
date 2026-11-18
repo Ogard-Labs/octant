@@ -94,6 +94,9 @@ describe("Local commits panel", () => {
     expect(
       await screen.findByText("Every commit on this branch is already on origin/main."),
     ).toBeVisible();
+    // One state says it once: no "0 local commits · not on origin/main" over it.
+    expect(screen.getByText("No local commits")).toBeVisible();
+    expect(screen.queryByText(/0 local commits/)).toBeNull();
     await user.click(screen.getByRole("button", { name: "Refresh" }));
     expect(
       await screen.findByText("There is no upstream or base branch to compare against."),

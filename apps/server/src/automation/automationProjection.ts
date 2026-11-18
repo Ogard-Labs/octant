@@ -104,6 +104,23 @@ export interface ListAutomationSummariesInput {
   readonly cursor?: string | undefined;
 }
 
+export interface AutomationTotalsInput {
+  readonly hostId: HostId;
+  readonly mode: "all" | "chat" | "work" | "code";
+  readonly projectId?: ProjectId | undefined;
+  /** Project ids the caller may see, with their mode: the route's item filter. */
+  readonly accessible: ReadonlyMap<string, "chat" | "work" | "code">;
+  /** Runs created at or after this instant count toward `runs` and `succeeded`. */
+  readonly since: UtcTimestamp;
+}
+
+export interface AutomationTotals {
+  readonly automations: number;
+  readonly enabled: number;
+  readonly runs: number;
+  readonly succeeded: number;
+}
+
 export interface AutomationSummaryPage {
   readonly items: ReadonlyArray<AutomationSummary>;
   readonly nextCursor?: string;
@@ -392,6 +409,37 @@ export class AutomationProjection implements Projection {
     };
   }
 
+  /**
+   * Counts over every definition the caller may see, not one page, so a list
+   * header stays true while the list pages. Applies the same host, mode,
+   * Project and accessibility filters as the list route's items.
+   */
+  totals(input: AutomationTotalsInput): AutomationTotals {
+    let automations = 0;
+    let enabled = 0;
+    let runs = 0;
+    let succeeded = 0;
+    for (const definition of this.#definitions.values()) {
+      if (String(definition.hostId) !== String(input.hostId)) continue;
+      if (input.mode !== "all" && definition.mode !== input.mode) continue;
+      if (
+        input.projectId !== undefined &&
+        String(definition.projectId) !== String(input.projectId)
+      ) {
+        continue;
+      }
+      if (input.accessible.get(String(definition.projectId)) !== definition.mode) continue;
+      automations += 1;
+      if (definition.lifecycle === "enabled") enabled += 1;
+      for (const run of this.#runsNewestFirst(definition.id)) {
+        if (run.createdAt < input.since) continue;
+        runs += 1;
+        if (run.lifecycle === "completed") succeeded += 1;
+      }
+    }
+    return { automations, enabled, runs, succeeded };
+  }
+
   listRuns(input: ListAutomationRunsInput): AutomationRunPage {
     const limit = clampLimit(input.limit, MAX_AUTOMATION_HISTORY_ENTRIES);
     const page = paginate(
@@ -473,6 +521,10 @@ export class AutomationProjection implements Projection {
             },
           }),
       ...(latest === undefined ? {} : { latestRunLifecycle: latest.lifecycle }),
+      recentRuns: this.#runsNewestFirst(definition.id)
+        .slice(0, 7)
+        .reverse()
+        .map((run) => ({ lifecycle: run.lifecycle, at: run.createdAt })),
       ...(definition.originThreadId === undefined
         ? {}
         : { originThreadId: definition.originThreadId }),

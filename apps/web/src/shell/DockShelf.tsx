@@ -1,8 +1,16 @@
-import { Maximize2, X } from "lucide-react";
+import { Check, ChevronDown, Maximize2, X } from "../ui/icons";
 import { useRef, type ReactNode } from "react";
 import { DockToolIcon } from "./dockToolIcons";
 import { IconButton } from "./IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
+import {
+  OctantMenuItem,
+  OctantMenuPopup,
+  OctantMenuPortal,
+  OctantMenuPositioner,
+  OctantMenuRoot,
+  OctantMenuTrigger,
+} from "../ui/base/OctantMenu";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 import type { ThreadUtilityDockState } from "./rightUtilityDockSelection";
 
@@ -64,6 +72,20 @@ export function DockShelf(props: {
   );
 }
 
+/** The pages or sessions of a card's tool, for the menu in the card's head. */
+export interface DockCardPages {
+  /** Names the menu: "Browser pages", "Terminal sessions". */
+  readonly label: string;
+  readonly items: ReadonlyArray<{
+    readonly id: string;
+    readonly label: string;
+    readonly icon?: ReactNode;
+    /** The one the card shows. */
+    readonly current: boolean;
+  }>;
+  readonly onChoose: (id: string) => void;
+}
+
 /**
  * One card's anatomy, for any tool: its icon, a title, expand and close, and
  * a live preview that is itself the expand control. The preview is drawn
@@ -76,14 +98,28 @@ export function DockMiniCard(props: {
   readonly detail?: string | undefined;
   /** Output arrived while nobody was looking; a quiet dot says so to every reader. */
   readonly newOutput?: boolean;
+  /**
+   * Closes what the card stands for. When given, the card's X is a close
+   * (named "Close <tool>") and the card has no separate hide; without it the
+   * X only takes the card away.
+   */
+  readonly onClose?: () => void;
   /** Takes the card away; the tool stays open, its button in the row, and nothing is closed or stopped. */
   readonly onHide: () => void;
+  /** What stands before the title: the page's own mark. Defaults to the tool's icon. */
+  readonly icon?: ReactNode;
   /**
    * Whether the pointer or the keyboard is on the card, so what it shows is
    * being seen. Told when either arrives and when both have left.
    */
   readonly onEngagementChange?: (engaged: boolean) => void;
   readonly onExpand: () => void;
+  /**
+   * The tool's pages or sessions, behind a small chevron after the title. The
+   * chevron is drawn whenever the tool has any, one included, so the head is
+   * the same for one page and for five.
+   */
+  readonly pages?: DockCardPages | undefined;
   readonly previewLabel: string;
   readonly surface: DockShelfEntry["surface"];
   readonly title: string;
@@ -118,11 +154,45 @@ export function DockMiniCard(props: {
     >
       <div className="dock-mini-card__head">
         <span className="dock-card__icon">
-          <DockToolIcon surface={props.surface} />
+          {props.icon ?? <DockToolIcon surface={props.surface} />}
         </span>
         <span className="dock-card__title dock-mini-card__title" title={props.title}>
           {props.title}
         </span>
+        {props.pages === undefined || props.pages.items.length === 0 ? null : (
+          <OctantMenuRoot>
+            <OctantMenuTrigger
+              aria-label={props.pages.label}
+              className="shell-icon-button dock-mini-card__pages text-muted-foreground"
+              title={props.pages.label}
+            >
+              <ChevronDown aria-hidden="true" size={12} />
+            </OctantMenuTrigger>
+            <OctantMenuPortal>
+              <OctantMenuPositioner align="start">
+                <OctantMenuPopup aria-label={props.pages.label}>
+                  {props.pages.items.map((page) => (
+                    <OctantMenuItem
+                      aria-current={page.current ? "true" : undefined}
+                      className="workspace-disclosure__action dock-mini-card__page"
+                      key={page.id}
+                      onClick={() => props.pages?.onChoose(page.id)}
+                    >
+                      {page.icon === undefined ? null : (
+                        <span aria-hidden="true" className="dock-mini-card__page-icon">
+                          {page.icon}
+                        </span>
+                      )}
+                      <span className="dock-mini-card__page-label">{page.label}</span>
+                      {page.current ? <Check aria-hidden="true" size={14} /> : null}
+                    </OctantMenuItem>
+                  ))}
+                </OctantMenuPopup>
+              </OctantMenuPositioner>
+            </OctantMenuPortal>
+          </OctantMenuRoot>
+        )}
+        <span className="dock-mini-card__head-space" />
         {props.detail === undefined ? null : (
           <span className="dock-mini-card__detail">{props.detail}</span>
         )}
@@ -138,8 +208,12 @@ export function DockMiniCard(props: {
         <IconButton
           className="dock-mini-card__action text-muted-foreground"
           icon={X}
-          label={`Hide ${props.toolLabel} card`}
-          onClick={props.onHide}
+          label={
+            props.onClose === undefined
+              ? `Hide ${props.toolLabel} card`
+              : `Close ${props.toolLabel}`
+          }
+          onClick={props.onClose ?? props.onHide}
         />
       </div>
       <div className="dock-mini-card__preview">

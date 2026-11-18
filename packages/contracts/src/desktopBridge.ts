@@ -23,6 +23,12 @@ export interface MenuBarOpenThread {
 }
 
 export type ResolvedSidebarMaterial = "opaque" | "translucent";
+/** Why the host will not draw Glass; absent (null) when nothing stands in the way. */
+export type GlassRefusalReason =
+  | "unsupported-platform"
+  | "reduced-transparency"
+  | "increased-contrast"
+  | "thermal-pressure";
 export type SidebarMaterialPreference = "opaque" | "system";
 export type SidebarVibrancyMode = "off" | "subtle" | "strong";
 

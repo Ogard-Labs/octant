@@ -4,7 +4,7 @@ import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-se
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
 import { type ComputerUseSettings } from "@octant/contracts/computer-use-plugin";
 import type { AgentRunCreationPosture, SettingsDeepLink } from "@octant/contracts";
-import { Brain, ChevronDown, Globe2, Monitor, Users } from "lucide-react";
+import { Brain, ChevronDown, Globe2, Monitor, Users } from "../ui/icons";
 import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import {

@@ -96,6 +96,12 @@ import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import { isPrivateAddress } from "./privateAddress";
 import { DesktopDownloadHold, type DesktopDownloadItemPort } from "./browserDownloadHold";
 import {
+  FAVICON_MIN_INTERVAL_MS,
+  fetchFaviconDataUrl,
+  firstHttpIcon,
+  type FaviconSession,
+} from "./browserFavicon";
+import {
   autoAttachSurfaceFrames,
   scriptString,
   surfaceFrames,
@@ -226,6 +232,8 @@ export function appShortcutOf(
 }
 
 interface BrowserSurfaceSessionPort {
+  /** Electron's session fetch: the page's own network rules, used for its icon. */
+  readonly fetch?: FaviconSession["fetch"];
   /**
    * Electron reports the download item and the page that started it. A
    * download is held only for a context's agent action; see `DesktopDownloadHold`.
@@ -423,6 +431,21 @@ interface HibernatedTab {
 /** One page of a context. Tabs share the context's session and its guards. */
 interface OwnedTab {
   readonly tabId: string;
+  /**
+   * The page's declared icon and the address it came from, in memory only. An
+   * address already fetched is not fetched again; a failed fetch keeps the
+   * address with no image, so the globe stands and the page is not asked twice.
+   */
+  favicon?:
+    | { readonly url: string; readonly pageOrigin: string; readonly dataUrl: string | undefined }
+    | undefined;
+  /**
+   * The icon fetch in flight and when it began. A page chooses its icon's
+   * address, so it could ask for a new one in a loop: one fetch runs per tab,
+   * a newer declaration ends the older fetch, and a declaration that arrives
+   * inside the minimum interval is not fetched.
+   */
+  faviconFetch?: { readonly controller: AbortController; readonly startedAt: number } | undefined;
   readonly view: BrowserSurfaceViewPort;
   documentRevision: number;
   /** Electron may remove the view getter before the WebContents destroyed callback. */
@@ -516,6 +539,9 @@ interface OwnedSurface {
    */
   extensionLoads: number;
   actionTail: Promise<void>;
+  /** When the owning window's card last asked for a picture, and whether one is being taken. */
+  previewTakenAt: number;
+  previewPending: boolean;
   /**
    * The person's embedded input in arrival order. It is separate from the
    * agent's action queue so the person's keys and releases never wait behind
@@ -735,6 +761,8 @@ export interface BrowserSurfaceRuntimeObservation {
     readonly active: boolean;
   }>;
   readonly screenshotDataUrl?: string;
+  /** Only a peek fills this: the page's icon, for the person's tab strip, never an agent. */
+  readonly faviconDataUrl?: string;
   readonly viewport?: { readonly width: number; readonly height: number };
   /** Only a resize fills this: what the page reports about its device now. */
   readonly emulation?: BrowserEmulationReport;
@@ -1617,6 +1645,59 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         publish(contextId, owned);
       });
     }
+    // The page's declared icon, fetched once through its own session and only
+    // from a site the context admits for the page itself.
+    view.webContents.on("page-favicon-updated", (...args: readonly unknown[]) => {
+      const declared = args.find(Array.isArray) as readonly unknown[] | undefined;
+      const iconUrl = firstHttpIcon(declared ?? []);
+      if (iconUrl === undefined) {
+        tab.faviconFetch?.controller.abort();
+        tab.faviconFetch = undefined;
+        if (tab.favicon !== undefined) {
+          tab.favicon = undefined;
+          publish(contextId, owned);
+        }
+        return;
+      }
+      if (view.webContents.isDestroyed()) return;
+      const pageOrigin = originOf(view.webContents.getURL()) ?? "";
+      // The same address declared by the same site is not fetched again. A
+      // different site declaring it is a new page: its icon is fetched for it,
+      // so the earlier site's image is never kept for the tab's next page.
+      if (tab.favicon?.url === iconUrl && tab.favicon.pageOrigin === pageOrigin) return;
+      const session = view.webContents.session;
+      if (session.fetch === undefined || !originAllowed(iconUrl, owned.policy.allowedOrigins)) {
+        tab.faviconFetch?.controller.abort();
+        tab.faviconFetch = undefined;
+        tab.favicon = undefined;
+        return;
+      }
+      const now = Date.now();
+      if (
+        tab.faviconFetch !== undefined &&
+        now - tab.faviconFetch.startedAt < FAVICON_MIN_INTERVAL_MS
+      ) {
+        return;
+      }
+      tab.faviconFetch?.controller.abort();
+      const controller = new AbortController();
+      tab.faviconFetch = { controller, startedAt: now };
+      tab.favicon = { url: iconUrl, pageOrigin, dataUrl: undefined };
+      void fetchFaviconDataUrl({ fetch: session.fetch.bind(session) }, iconUrl, {
+        signal: controller.signal,
+      }).then((dataUrl) => {
+        if (
+          controller.signal.aborted ||
+          tab.favicon?.url !== iconUrl ||
+          tab.favicon.pageOrigin !== pageOrigin ||
+          dataUrl === undefined
+        ) {
+          return;
+        }
+        tab.favicon = { url: iconUrl, pageOrigin, dataUrl };
+        publish(contextId, owned);
+      });
+    });
     const guardNavigation =
       (knownMainFrame: boolean) =>
       (event: unknown, ...details: readonly unknown[]) => {
@@ -3473,19 +3554,60 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         const sensitiveDocument = await hasSensitiveDocument(
           contentsView(owned),
           owned.policy.credentialFieldProtection,
+          (read) => queueSurfaceAction(owned, read),
         );
         const screenshotDataUrl = sensitiveDocument
           ? undefined
           : await captureScreenshot(contentsView(owned));
         checkObservation();
+        const favicon = activeFavicon(owned);
         return {
           ...(contents.getURL() === ""
             ? {}
             : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
           ...(contents.getTitle() === "" ? {} : { title: contents.getTitle().slice(0, 1_024) }),
           ...(screenshotDataUrl === undefined ? {} : { screenshotDataUrl }),
+          ...(favicon === undefined ? {} : { faviconDataUrl: favicon }),
         };
       });
+    },
+    /**
+     * A small picture of the page for the owning window's own minimised
+     * Browser card, or nothing when the page has not committed a document or
+     * a picture was taken too recently.
+     *
+     * Unlike `peek`, this skips the credential-field check: on a news front
+     * page that check almost always withholds the picture (hidden token inputs,
+     * dozens of ad frames it cannot read), which left the card an empty box.
+     * The picture is display-only: it goes to the window that already shows
+     * this page to this person and is never part of an observation.
+     */
+    previewPicture: async (
+      contextId: BrowserContextId | string,
+      owner: BrowserSurfaceOwner,
+    ): Promise<string | undefined> => {
+      const owned = surface(contextId);
+      if (owned.owner.windowId !== owner.windowId || owned.owner.threadId !== owner.threadId) {
+        throw new Error("Octant Browser preview does not own this context.");
+      }
+      const now = Date.now();
+      if (owned.previewPending || now - owned.previewTakenAt < PREVIEW_INTERVAL_MS)
+        return undefined;
+      owned.previewPending = true;
+      owned.previewTakenAt = now;
+      try {
+        // Queued: a detached view is captured through the debugger, which
+        // must not attach in the middle of an agent action or another read.
+        return await queueSurfaceAction(owned, () =>
+          awake(contextId, owned, async () => {
+            const view = contentsView(owned);
+            if (view.webContents.getURL() === "") return undefined;
+            return captureScreenshot(view, PREVIEW_PICTURE);
+          }),
+        );
+      } finally {
+        owned.previewPending = false;
+      }
     },
     command: async (
       contextId: BrowserContextId | string,
@@ -3860,6 +3982,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       lastUsedAt: Date.now(),
       hibernated: undefined,
       waking: undefined,
+      previewTakenAt: 0,
+      previewPending: false,
     };
     openTabView(input.contextId, owned, firstTabId);
     surfaces.set(input.contextId, owned);
@@ -4070,6 +4194,15 @@ function originOf(target: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** The active page's icon, only while the page is still on the site that declared it. */
+function activeFavicon(owned: OwnedSurface): string | undefined {
+  const tab = owned.tabs.find((candidate) => candidate.tabId === owned.activeTabId);
+  if (tab === undefined || tab.favicon === undefined) return undefined;
+  return originOf(tab.contents.getURL()) === tab.favicon.pageOrigin
+    ? tab.favicon.dataUrl
+    : undefined;
 }
 
 function readState(contextId: string, owned: OwnedSurface): BrowserSurfaceState {
@@ -5592,6 +5725,12 @@ async function waitForPageSettled(view: BrowserSurfaceViewPort): Promise<void> {
 async function hasSensitiveDocument(
   view: BrowserSurfaceViewPort,
   protectCredentials: boolean,
+  /**
+   * Where the debugger's DOM read runs when a frame refuses the probe. A caller
+   * outside the surface's queue passes the queue, so no agent action can adopt
+   * the read's attachment and lose it when the read detaches.
+   */
+  domRead: (read: () => Promise<boolean>) => Promise<boolean> = (read) => read(),
 ): Promise<boolean> {
   if (!protectCredentials) return false;
   // No committed document means no credential fields and no frame whose
@@ -5619,10 +5758,144 @@ async function hasSensitiveDocument(
     }
     return false;
   } catch {
-    // If any frame cannot be inspected, screenshot and extracted evidence
-    // fail closed instead of risking credential disclosure.
-    return true;
+    // A frame its page sandboxed without scripts refuses the probe ("Script
+    // not run"), and news and shopping pages carry such frames for their ads:
+    // failing closed on them withheld every picture of those pages. The
+    // debugger reads the DOM whatever a frame's script settings, so the page
+    // is checked there, and any frame it cannot read still fails closed.
+    return await domRead(() => domHoldsCredentialField(view)).catch(() => true);
   }
+}
+
+/** Frame sessions the DOM check follows before it gives up and fails closed. */
+const MAX_CREDENTIAL_CHECK_FRAME_SESSIONS = 64;
+/** How long one protocol answer of the DOM check may take; a busy frame fails closed. */
+const CREDENTIAL_CHECK_SEND_MS = 2_000;
+/** How long the whole DOM check may hold its attachment. */
+const CREDENTIAL_CHECK_MS = 5_000;
+
+/**
+ * Whether any document of the page, read from the debugger's DOM, holds a
+ * credential field. A frame on another site is its own target and is read
+ * through its own session; a frame element whose document it cannot reach
+ * counts as holding one.
+ *
+ * The read uses only an attachment it makes itself: reading through one an
+ * agent's recording, emulation, or popup watch holds would leave the DOM
+ * domain on for the rest of it. A debugger already attached fails closed, as
+ * every such page did before this read existed.
+ */
+async function domHoldsCredentialField(view: BrowserSurfaceViewPort): Promise<boolean> {
+  checkExecutionView(view);
+  const client = view.webContents.debugger;
+  if (client.isAttached()) return true;
+  client.attach("1.3");
+  // Marked as Octant's own, so a popup watch or point selection that starts
+  // meanwhile shares it instead of taking it for someone else's.
+  agentDebuggers.add(client);
+  try {
+    const targets = frameTargetsOf(client);
+    const deadline = Date.now() + CREDENTIAL_CHECK_MS;
+    const send = (
+      method: string,
+      parameters?: Record<string, unknown>,
+      sessionId?: string,
+    ): Promise<unknown> => {
+      checkExecutionView(view);
+      const answer =
+        sessionId === undefined
+          ? client.sendCommand(method, parameters)
+          : client.sendCommand(method, parameters, sessionId);
+      // A busy frame can leave a command unanswered; the check fails closed
+      // at the bound instead of holding the peek and the surface's queue.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const bound = Math.max(0, Math.min(CREDENTIAL_CHECK_SEND_MS, deadline - Date.now()));
+      return Promise.race([
+        answer,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("Browser frame did not answer.")), bound);
+        }),
+      ]).finally(() => clearTimeout(timer));
+    };
+    const pending: Array<string | undefined> = [undefined];
+    const read = new Set<string>();
+    while (pending.length > 0) {
+      const sessionId = pending.pop();
+      const document = await send("DOM.getDocument", { depth: -1, pierce: true }, sessionId);
+      const scan = credentialFieldScan(document);
+      if (scan.status !== "clear") return true;
+      if (scan.remoteFrameIds.length === 0) continue;
+      const attached = await autoAttachSurfaceFrames(send, targets, sessionId);
+      for (const frameId of scan.remoteFrameIds) {
+        const remote = attached.get(frameId);
+        if (remote === undefined) return true;
+        if (read.has(remote.sessionId)) continue;
+        if (read.size >= MAX_CREDENTIAL_CHECK_FRAME_SESSIONS) return true;
+        read.add(remote.sessionId);
+        pending.push(remote.sessionId);
+      }
+    }
+    return false;
+  } finally {
+    // A recording or emulation that adopted the attachment keeps it.
+    if (!attachmentHeld(client)) detachAgentDebugger(client);
+  }
+}
+
+/**
+ * One session's DOM, as `DOM.getDocument` with `pierce` returns it: its
+ * shadow roots and the documents of frames in its own process are inside it,
+ * and a frame on another site appears only as a frame element with an id.
+ */
+function credentialFieldScan(
+  value: unknown,
+):
+  | { readonly status: "clear"; readonly remoteFrameIds: ReadonlyArray<string> }
+  | { readonly status: "holds" | "unreadable" } {
+  if (!scriptRecord(value) || !scriptRecord(value.root)) return { status: "unreadable" };
+  const pending: unknown[] = [value.root];
+  const remoteFrameIds: string[] = [];
+  let count = 0;
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (++count > 50_000 || !scriptRecord(node) || typeof node.nodeName !== "string")
+      return { status: "unreadable" };
+    const name = node.nodeName.toUpperCase();
+    const attributes = Array.isArray(node.attributes) ? node.attributes : [];
+    const attribute = (wanted: string): string | undefined => {
+      for (let index = 0; index + 1 < attributes.length; index += 2) {
+        const key: unknown = attributes[index];
+        const text: unknown = attributes[index + 1];
+        if (typeof key === "string" && key.toLowerCase() === wanted && typeof text === "string")
+          return text;
+      }
+      return undefined;
+    };
+    const editable = attribute("contenteditable") === "true";
+    if (name === "INPUT" || name === "TEXTAREA" || editable) {
+      const hint = ["type", "autocomplete", "name", "id", "aria-label"]
+        .map((key) => attribute(key) ?? "")
+        .join(" ")
+        .toLowerCase();
+      if (
+        /(?:password|passcode|one-time-code|otp|webauthn|cc-|credit|card|ssn|secret|token|api.?key)/.test(
+          hint,
+        )
+      )
+        return { status: "holds" };
+    }
+    // Any element that owns a frame, whatever its tag, is followed into it.
+    if (scriptRecord(node.contentDocument)) pending.push(node.contentDocument);
+    else if (node.nodeType === 1 && typeof node.frameId === "string")
+      remoteFrameIds.push(node.frameId);
+    for (const field of ["children", "shadowRoots"]) {
+      const children = node[field];
+      if (children === undefined) continue;
+      if (!Array.isArray(children)) return { status: "unreadable" };
+      pending.push(...children);
+    }
+  }
+  return { status: "clear", remoteFrameIds };
 }
 
 function boundedText(value: string, limit: number): string {
@@ -5795,6 +6068,11 @@ async function waitForSelector(
 
 /** What the observation contract carries for a picture, data URL included. */
 const MAX_SCREENSHOT_DATA_URL = 54 * 1_024;
+/** The widths a picture steps down through, unscaled when absent, and its size limit. */
+interface PictureSize {
+  readonly widths: ReadonlyArray<number | undefined>;
+  readonly maxDataUrl: number;
+}
 /**
  * The steps a picture is shrunk through to fit. A full Retina frame of a busy
  * page (a news front page) was several times the limit at quality 70, and the
@@ -5802,38 +6080,53 @@ const MAX_SCREENSHOT_DATA_URL = 54 * 1_024;
  * title over an empty frame. A preview needs a recognisable page, not every
  * pixel, so the frame steps down in width and quality until it fits.
  */
-const SCREENSHOT_WIDTHS = [undefined, 1_280, 960, 720, 480] as const;
 const SCREENSHOT_QUALITIES = [70, 55] as const;
+const OBSERVATION_PICTURE: PictureSize = {
+  widths: [undefined, 1_280, 960, 720, 480],
+  maxDataUrl: MAX_SCREENSHOT_DATA_URL,
+};
+
+/**
+ * The minimised Browser card's picture. The card is under 300px wide, so a
+ * 640px frame stays sharp on a Retina screen without sending a full page.
+ */
+const PREVIEW_PICTURE: PictureSize = { widths: [640, 480, 320], maxDataUrl: 96 * 1_024 };
+/** The card polls; a picture more often than this would cost the page for nothing. */
+const PREVIEW_INTERVAL_MS = 2_000;
 
 function jpegDataUrl(bytes: Uint8Array | string): string {
   const base64 = typeof bytes === "string" ? bytes : Buffer.from(bytes).toString("base64");
   return `data:image/jpeg;base64,${base64}`;
 }
 
-function fitImage(image: BrowserSurfaceImage): string | undefined {
+function fitImage(image: BrowserSurfaceImage, size: PictureSize): string | undefined {
   const width = image.getSize?.().width;
-  for (const target of SCREENSHOT_WIDTHS) {
-    if (
-      target !== undefined &&
-      (image.resize === undefined || width === undefined || width <= target)
-    ) {
-      continue;
+  // A frame already no wider than a step is encoded unscaled, once.
+  let triedUnscaled = false;
+  for (const target of size.widths) {
+    const shrinks =
+      target !== undefined && image.resize !== undefined && width !== undefined && width > target;
+    if (!shrinks) {
+      if (triedUnscaled) continue;
+      triedUnscaled = true;
     }
-    const sized =
-      target === undefined || image.resize === undefined ? image : image.resize({ width: target });
+    const sized = shrinks && image.resize !== undefined ? image.resize({ width: target }) : image;
     for (const quality of SCREENSHOT_QUALITIES) {
       const dataUrl = jpegDataUrl(sized.toJPEG(quality));
-      if (dataUrl.length <= MAX_SCREENSHOT_DATA_URL) return dataUrl;
+      if (dataUrl.length <= size.maxDataUrl) return dataUrl;
     }
   }
   return undefined;
 }
 
-async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string | undefined> {
+async function captureScreenshot(
+  view: BrowserSurfaceViewPort,
+  size: PictureSize = OBSERVATION_PICTURE,
+): Promise<string | undefined> {
   const image = await view.webContents.capturePage();
   // A detached surface paints nothing, and Chromium reports that as an empty
   // image rather than an error; an empty JPEG is not a page snapshot.
-  if (!image.isEmpty()) return fitImage(image);
+  if (!image.isEmpty()) return fitImage(image, size);
   // A surface that is not in a window still has a live renderer: the debugger
   // captures its view directly instead of a compositor surface it does not
   // have.
@@ -5852,12 +6145,16 @@ async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string |
       | undefined;
     const viewportWidth = metrics?.cssLayoutViewport?.clientWidth;
     const viewportHeight = metrics?.cssLayoutViewport?.clientHeight;
-    for (const target of SCREENSHOT_WIDTHS) {
+    let triedUnscaled = false;
+    for (const target of size.widths) {
       const scale =
         target === undefined || viewportWidth === undefined || viewportWidth <= target
           ? undefined
           : target / viewportWidth;
-      if (target !== undefined && scale === undefined) continue;
+      if (scale === undefined) {
+        if (triedUnscaled) continue;
+        triedUnscaled = true;
+      }
       for (const quality of SCREENSHOT_QUALITIES) {
         const result = (await client.sendCommand("Page.captureScreenshot", {
           format: "jpeg",
@@ -5870,7 +6167,7 @@ async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string |
         const data = typeof result.data === "string" ? result.data : "";
         if (data === "") return undefined;
         const dataUrl = jpegDataUrl(data);
-        if (dataUrl.length <= MAX_SCREENSHOT_DATA_URL) return dataUrl;
+        if (dataUrl.length <= size.maxDataUrl) return dataUrl;
       }
     }
     return undefined;

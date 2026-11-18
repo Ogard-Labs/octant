@@ -58,8 +58,8 @@ export function MemoryTransferDialog(props: MemoryTransferDialogProps) {
         </OctantButton>
       </div>
       <p id={descriptionId}>
-        The destination receives the selected content with immutable source provenance. Later source
-        changes do not alter it.
+        The destination gets the selected content and a fixed record of where it came from. Later
+        source changes do not alter it.
       </p>
       <blockquote className="memory-entry-dialog__original">{props.entry.content}</blockquote>
       <form noValidate onSubmit={(event) => void submit(event)}>

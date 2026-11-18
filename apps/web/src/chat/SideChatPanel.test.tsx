@@ -27,8 +27,11 @@ function stubClient(overrides: Partial<ThreadMentionClient> = {}): ThreadMention
 }
 
 function renderPanel(overrides: Partial<Parameters<typeof SideChatPanel>[0]> = {}) {
-  const renderSidecar = vi.fn((sidecarThreadId: unknown) => (
-    <p>sidecar surface {String(sidecarThreadId)}</p>
+  const renderSidecar = vi.fn((sidecarThreadId: unknown, _sidecar: unknown, notice: unknown) => (
+    <>
+      <p>sidecar surface {String(sidecarThreadId)}</p>
+      {notice as never}
+    </>
   ));
   render(
     <SideChatPanel
@@ -61,19 +64,20 @@ describe("SideChatPanel", () => {
       ).toBeVisible(),
     );
     expect(client.openSideChat).toHaveBeenCalledWith(requestId, sourceThreadId);
-    expect(renderSidecar).toHaveBeenCalledWith(sidecar.sidecarThreadId, sidecar);
+    expect(renderSidecar).toHaveBeenCalledWith(sidecar.sidecarThreadId, sidecar, expect.anything());
   });
 
   it("titles itself as being about the source thread and states its read-only posture", async () => {
-    renderPanel();
+    const { renderSidecar } = renderPanel();
 
     const panel = screen.getByRole("region", { name: "Side Chat" });
     expect(panel).toHaveTextContent("Side Chat about Release notes");
-    expect(panel).toHaveTextContent(
-      "Ask about this thread. It can read it but can’t change, steer, or approve anything.",
-    );
+    // Nothing is said about what it can read before the host answers.
+    expect(panel).not.toHaveTextContent("Ask about this thread");
     await waitFor(() => expect(screen.getByText(/sidecar surface/)).toBeVisible());
-    // Once the host names the source, the notice says what that source offers.
+    // Once the host names the source, the notice it hands the caller says what
+    // that source offers.
+    expect(renderSidecar).toHaveBeenCalled();
     expect(panel).toHaveTextContent(
       "Ask about this thread: its conversation, folder, files, and subagent results. It can read them but can’t change, steer, or approve anything.",
     );

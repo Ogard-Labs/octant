@@ -1,6 +1,6 @@
 import type { ArtifactLibraryEntry } from "@octant/contracts/artifact-library";
 import { artifactEditedAgo } from "@octant/domain";
-import { Link2, Lock } from "lucide-react";
+import { Link2, Lock } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ArtifactSyncStatus } from "./ArtifactSyncStatus";
 import { ArtifactTags } from "./ArtifactTags";

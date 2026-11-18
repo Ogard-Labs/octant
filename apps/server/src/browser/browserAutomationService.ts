@@ -13,6 +13,7 @@ import {
   type OwnerBrowserTarget,
 } from "@octant/contracts/owner-browser";
 import type { EventActor, HubMemberId, UtcTimestamp } from "@octant/contracts";
+import { isBrowserFaviconDataUrl } from "@octant/contracts/browser-automation";
 import type { PersistentBrowserLeaseBinding } from "@octant/contracts/persistent-browser-owner";
 import type { OwnerBrowserHost } from "./ownerBrowserControl";
 import type {
@@ -2929,15 +2930,19 @@ export class BrowserAutomationService {
     threadId: BrowserThreadId,
     contextId: BrowserContextId,
     signal?: AbortSignal,
+    options: { readonly freshPicture?: boolean } = {},
   ): Promise<BrowserAutomationSnapshot> {
     const owned = this.#contexts.get(contextId);
     if (
       owned !== undefined &&
       owned.windowId === windowId &&
       String(owned.threadId) === String(threadId) &&
-      // A native page is on the person's screen already; only a headless one
-      // is seen as a picture.
-      owned.record.presentation !== "native-live" &&
+      // A native page is on screen while its pane shows it, and that pane's
+      // poll spends no capture. Minimised, its surface is detached and the
+      // dock's card is the only place it is seen, so the card asks for one.
+      (owned.record.presentation === "native-live"
+        ? options.freshPicture === true
+        : options.freshPicture !== false) &&
       this.#authorityIsActive(owned)
     ) {
       await this.#refreshPicture(owned, signal);
@@ -3006,6 +3011,10 @@ export class BrowserAutomationService {
           ...(observed.screenshotDataUrl === undefined
             ? {}
             : { screenshotDataUrl: observed.screenshotDataUrl }),
+          ...(observed.faviconDataUrl === undefined ||
+          !isBrowserFaviconDataUrl(observed.faviconDataUrl)
+            ? {}
+            : { faviconDataUrl: observed.faviconDataUrl }),
           ...(observed.viewport === undefined ? {} : { viewport: observed.viewport }),
           revision: samePage ? owned.observationRevision : ++owned.observationRevision,
           observedAt: this.#clock() as BrowserObservation["observedAt"],

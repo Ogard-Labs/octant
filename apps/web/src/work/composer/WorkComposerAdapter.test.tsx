@@ -1,7 +1,7 @@
 import { nativeFolderTransfer } from "../../composer/folderDrop.test-fixture";
 import { decodeHostId, LOCAL_HOST_ID } from "@octant/contracts/host";
 import { decodeProviderInstanceId, decodeProviderModelId } from "@octant/contracts/providers";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -87,8 +87,8 @@ describe("WorkComposerAdapter", () => {
     );
     const { rerender } = render(composer);
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    const level = screen.getByRole("slider", { name: "Effort level" });
-    fireEvent.change(level, { target: { value: level.getAttribute("max") } });
+    const level = screen.getByRole("group", { name: "Effort level" });
+    await user.click(within(level).getByRole("button", { name: "High" }));
     await user.keyboard("{Escape}");
     await user.type(screen.getByLabelText("First message"), "Draft the brief");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
@@ -106,10 +106,7 @@ describe("WorkComposerAdapter", () => {
     rerender(composer);
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
     // Returning to this model restores its last supported effort choice.
-    expect(screen.getByRole("slider", { name: "Effort level" })).toHaveAttribute(
-      "aria-valuetext",
-      "High",
-    );
+    expect(screen.getByRole("button", { name: "High" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("renders with project folder context", () => {
@@ -121,11 +118,22 @@ describe("WorkComposerAdapter", () => {
         projectRoot="/home/user/docs"
       />,
     );
-    expect(html).toMatch(/What are we building today\?/);
+    expect(html).toContain("What should we work on in ");
     expect(html).not.toContain("What are we working on?");
     expect(html).toContain("My Docs");
     expect(html).not.toContain("Octant Work");
     expect(html).not.toContain("confined folder");
+  });
+
+  it("puts the question, the composer and the list in one column", () => {
+    const { container } = render(
+      <WorkComposerAdapter {...baseProps} homeStart={<div className="home-start">List</div>} />,
+    );
+    const children = Array.from(container.querySelector(".welcome")?.children ?? []);
+    expect(children[0]).toHaveClass("welcome__heading");
+    expect(children[1]).toHaveClass("composer-stack");
+    expect(children[1]).toContainElement(screen.getByRole("textbox", { name: "First message" }));
+    expect(children[2]).toHaveClass("home-start");
   });
 
   it("renders the no-Project state with an attach folder action", () => {
@@ -327,9 +335,7 @@ describe("WorkComposerAdapter interactions", () => {
 
     pasteImage(screen.getByLabelText("First message"));
     // The refusal is a card above the box, not a line among the chips.
-    const refusal = await screen.findByText(
-      "The selected model does not accept images. Choose an image-capable model.",
-    );
+    const refusal = await screen.findByText("This model cannot read images. Pick one that can.");
     expect(refusal.closest(".composer-notices")).not.toBeNull();
     expect(screen.queryByLabelText("Attached images")).toBeNull();
     expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
@@ -346,7 +352,7 @@ describe("WorkComposerAdapter interactions", () => {
 
     expect(onCreateThread).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Choose a Project to work in before sending. Work needs a confined folder.",
+      "Pick a Project before sending. Work stays inside its Project folder.",
     );
 
     rerender(
@@ -487,5 +493,5 @@ it("refuses a native folder as an attachment when the desktop extraction bridge 
   render(<WorkComposerAdapter {...baseProps} />);
   const input = screen.getByRole("textbox", { name: "First message" });
   fireEvent.drop(input, { dataTransfer: nativeFolderTransfer() });
-  expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
+  expect(await screen.findByText(/Folder drops need the desktop app/)).toBeVisible();
 });

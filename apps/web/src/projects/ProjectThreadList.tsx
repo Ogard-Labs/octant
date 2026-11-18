@@ -30,8 +30,8 @@ import {
   Pin,
   PinOff,
   RotateCcw,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+} from "../ui/icons";
+import type { IconComponent } from "../ui/icons";
 import { resolveSnoozePresets } from "@octant/domain";
 import {
   sidebarThreadStatusInput,
@@ -60,8 +60,13 @@ import {
   type CoordinatorThreadGroup,
 } from "./projectThreadGrouping";
 import { readFoldedCoordinators, writeFoldedCoordinators } from "../shell/activityViewModel";
+import { useMinuteClock } from "./minuteClock";
 import { FollowUpLineageContext } from "../followUps/followUpLineage";
-import { SidebarThreadRowContent } from "./SidebarThreadRowContent";
+import {
+  SidebarThreadRowContent,
+  sidebarThreadRowLabel,
+  type SidebarThreadRowState,
+} from "./SidebarThreadRowContent";
 import { ThreadRenameField } from "./ThreadRenameField";
 import { type ThreadRowActions, ThreadRowMenu, threadRowMenuIsEmpty } from "./ThreadRowMenu";
 import {
@@ -121,7 +126,7 @@ export function ProjectThreadStatus(props: ProjectThreadStatusProps) {
  * draws unread as a dot and idle as nothing at all, so an icon here would be a
  * second, louder reading of the same state.
  */
-export function sidebarThreadStatusIcon(status: SidebarThreadStatus): LucideIcon | undefined {
+export function sidebarThreadStatusIcon(status: SidebarThreadStatus): IconComponent | undefined {
   switch (status) {
     case "working":
       return LoaderCircle;
@@ -134,38 +139,55 @@ export function sidebarThreadStatusIcon(status: SidebarThreadStatus): LucideIcon
   }
 }
 
-/** One trailing position carries the strongest state; its label retains the others. */
-export function ThreadStatusMark(props: {
+export interface ThreadRowStateReading {
+  readonly state?: SidebarThreadRowState;
+  readonly unread: boolean;
+  /** Every state the thread is in, for the row's one accessible name. */
+  readonly label?: string;
+}
+
+/** A row that hides its status says nothing of it. */
+export const NO_THREAD_ROW_STATE: ThreadRowStateReading = { unread: false };
+
+/**
+ * What a row says of its thread's state, in words: how long a turn has run
+ * ("Working 14m"), that the thread waits on the person ("Needs you"), or that a
+ * snooze ended. A thread with none of those has no state to say, and its row
+ * ends with how long ago it moved; new activity alone is a dot beside that
+ * time. One state is shown, the strongest, as in the status policy.
+ */
+export function threadRowState(props: {
   readonly activity: ThreadRowActivity;
   readonly unread: boolean;
   readonly woke: boolean;
   readonly followUp?: boolean;
-}) {
+  readonly startedAt?: string | undefined;
+}): ThreadRowStateReading {
   const facts = sidebarThreadStatusInput(props);
-  const state = resolveSidebarThreadStatus(facts);
-  if (state === undefined) {
-    return (
-      <span aria-hidden="true" className="sidebar-navigation__thread-status" data-activity="idle" />
-    );
-  }
+  const status = resolveSidebarThreadStatus(facts);
+  if (status === undefined) return { unread: false };
   const label = [
-    ...sidebarThreadStatuses(facts).map((status) => SIDEBAR_THREAD_STATUS_LABEL[status]),
+    ...sidebarThreadStatuses(facts).map((each) => SIDEBAR_THREAD_STATUS_LABEL[each]),
     ...(props.followUp === true ? ["Follow-up"] : []),
-  ].join(" · ");
-  const Icon = sidebarThreadStatusIcon(state);
-  return (
-    <span
-      aria-label={label}
-      className="sidebar-navigation__thread-status"
-      data-activity={state}
-      role="img"
-      title={label}
-    >
-      {Icon === undefined ? null : (
-        <Icon aria-hidden="true" className="size-(--oct-icon-xs)" size={12} />
-      )}
-    </span>
-  );
+  ].join(", ");
+  if (status === "unread") return { unread: true, label };
+  const elapsed =
+    status === "working" && props.startedAt !== undefined
+      ? threadRowShortAge(props.startedAt)
+      : undefined;
+  const text =
+    status === "working"
+      ? elapsed === undefined || elapsed === "now"
+        ? "Working"
+        : `Working ${elapsed}`
+      : status === "attention"
+        ? "Needs you"
+        : "Snooze ended";
+  return {
+    state: { status, text, icon: sidebarThreadStatusIcon(status) },
+    unread: false,
+    label,
+  };
 }
 
 /**
@@ -191,20 +213,28 @@ function threadRowStates(thread: ChatThreadNavigationItem): ReadonlyArray<string
  */
 /**
  * The row's own age: the shortest true reading, because the row has one word
- * of room at its edge and the card beside it spells the rest out.
+ * of room at its edge and the card beside it spells the rest out. Minutes,
+ * hours, days, weeks and years floor, so "59m" never rounds up to a false
+ * "60m". It never runs past three characters ("52w", "2y"), because the age
+ * sits in a slot of fixed width and a date would not fit; the tooltip carries
+ * the full moment.
  */
-export function threadRowShortAge(updatedAt: string | undefined): string | undefined {
+export function threadRowShortAge(
+  updatedAt: string | undefined,
+  now: number = Date.now(),
+): string | undefined {
   if (updatedAt === undefined) return undefined;
   const date = new Date(updatedAt);
   if (Number.isNaN(date.getTime())) return undefined;
-  const minutes = Math.round((Date.now() - date.getTime()) / 60000);
+  const minutes = Math.max(0, Math.floor((now - date.getTime()) / 60000));
   if (minutes < 1) return "now";
   if (minutes < 60) return `${minutes}m`;
-  const hours = Math.round(minutes / 60);
+  const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h`;
-  const days = Math.round(hours / 24);
-  if (days < 365) return `${days}d`;
-  return date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  if (days < 365) return `${Math.floor(days / 7)}w`;
+  return `${Math.floor(days / 365)}y`;
 }
 
 /**
@@ -218,6 +248,7 @@ export function threadRowAgeFact(
     readonly updatedAt?: string;
   },
   showsLastUpdated: boolean,
+  now: number = Date.now(),
 ): { readonly label: string; readonly title?: string } | undefined {
   if (thread.wakeLabel !== undefined) {
     return {
@@ -228,10 +259,12 @@ export function threadRowAgeFact(
     };
   }
   if (!showsLastUpdated) return undefined;
-  const label = threadRowShortAge(thread.updatedAt);
-  if (label === undefined) return undefined;
-  const title = threadRowAge(thread.updatedAt);
-  return { label, ...(title === undefined ? {} : { title }) };
+  const label = threadRowShortAge(thread.updatedAt, now);
+  if (label === undefined || thread.updatedAt === undefined) return undefined;
+  // The tooltip and the spoken label carry the full moment, which the one
+  // short word at the row's edge cannot.
+  const title = `Updated ${new Date(thread.updatedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
+  return { label, title };
 }
 
 export function threadRowAge(updatedAt: string | undefined): string | undefined {
@@ -250,7 +283,7 @@ export function threadRowAge(updatedAt: string | undefined): string | undefined 
 
 /** One icon-and-label line of the info card. */
 interface ThreadRowFact {
-  readonly icon: LucideIcon;
+  readonly icon: IconComponent;
   readonly key: string;
   readonly label: string;
 }
@@ -445,6 +478,8 @@ export function ThreadRowInfoPopup(props: {
   return (
     <OctantPreviewCard
       align="start"
+      besideSidebar
+      delay={400}
       content={
         <ThreadRowInfoCard
           actions={props.actions}
@@ -500,6 +535,7 @@ export function ThreadRowActionsGutter(props: {
       ? []
       : [
           {
+            destructive: true,
             icon: <Archive aria-hidden="true" size={14} />,
             label: "Archive thread",
             value: "archive",
@@ -788,6 +824,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
     followUpParent !== undefined &&
     props.lineageThreads.some((thread) => thread.threadId === followUpParent);
   const shows = useSidebarRowProperties();
+  const now = useMinuteClock();
   const rowId = props.thread.navigationId ?? props.thread.threadId;
   const projectName = props.projectNameForThread?.(props.thread);
   const hasMenu = !threadRowMenuIsEmpty(props.actions);
@@ -844,10 +881,26 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
   // it was rather than at the top. Hiding Last updated hides the timestamp,
   // never the wake time: a rested thread that never says when it returns reads
   // as one that is simply gone.
-  const rowAge = threadRowAgeFact(props.thread, shows.lastUpdated);
+  const rowAge = threadRowAgeFact(props.thread, shows.lastUpdated, now);
+  const rowState = shows.status
+    ? threadRowState({
+        activity,
+        unread,
+        woke: props.thread.woke === true,
+        followUp: props.thread.followUp === true,
+        startedAt: props.thread.turnStartedAt,
+      })
+    : NO_THREAD_ROW_STATE;
   const row = (
     <OctantButton
       aria-current={props.activeThreadId === rowId ? "page" : undefined}
+      aria-label={sidebarThreadRowLabel({
+        title: props.thread.title,
+        ...(rowCheckout === undefined ? {} : { branch: rowCheckout.label }),
+        ...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest }),
+        ...(rowState.label === undefined ? {} : { state: rowState.label }),
+        ...(rowAge === undefined ? {} : { age: rowAge.title ?? rowAge.label }),
+      })}
       className="sidebar-navigation__thread project-threads__thread justify-start"
       /* Open is not the same as focused. With several panes showing several
          threads, marking only the focused row misstates what the window
@@ -880,7 +933,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
       variant="bare"
     >
       <SidebarThreadRowContent
-        {...(rowAge === undefined ? {} : { age: rowAge })}
+        {...(rowAge === undefined || rowState.state !== undefined ? {} : { age: rowAge })}
         {...(rowCheckout === undefined ? {} : { checkout: rowCheckout })}
         {...(props.thread.coordinator === true ? { coordinator: true } : {})}
         {...(props.thread.coordinatorTitle === undefined
@@ -888,17 +941,9 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
           : { workerOf: props.thread.coordinatorTitle })}
         {...(props.thread.provider === undefined ? {} : { provider: props.thread.provider })}
         {...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest })}
+        {...(rowState.state === undefined ? {} : { state: rowState.state })}
         threadId={props.thread.threadId}
-        status={
-          shows.status ? (
-            <ThreadStatusMark
-              activity={activity}
-              unread={unread}
-              woke={props.thread.woke === true}
-              followUp={props.thread.followUp === true}
-            />
-          ) : null
-        }
+        unread={rowState.unread}
         title={props.thread.title}
       />
     </OctantButton>

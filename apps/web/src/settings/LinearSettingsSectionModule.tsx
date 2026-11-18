@@ -15,8 +15,8 @@ export default function LinearSettingsSectionModule(props: LinearSettingsSection
     return (
       <section aria-label="Linear" id="settings-linear">
         <p>
-          The Linear connection is managed on the owning host. Open Settings on that host to set it
-          up or inspect the workspace.
+          Linear is set up on the computer that owns it. Open Settings there to set it up or inspect
+          the workspace.
         </p>
       </section>
     );

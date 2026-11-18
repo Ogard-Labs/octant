@@ -10,23 +10,21 @@ import {
   type TodoThreadLink,
 } from "@octant/contracts/todos";
 import type { OctantMode } from "@octant/contracts";
-import { Check, Ellipsis, Folder, Hash } from "lucide-react";
+import { Check, Ellipsis, Folder, Hash, SquareCheck } from "../ui/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
-import { WorkListMenuTrigger } from "../surface/WorkList";
+import { FilterMenu } from "../surface/FilterMenu";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
-import { OctantCard } from "../ui/base/OctantCard";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { OctantInput } from "../ui/base/OctantInput";
 import {
   OctantMenu,
   OctantMenuCheckboxItem,
-  OctantMenuPopup,
-  OctantMenuPortal,
-  OctantMenuPositioner,
-  OctantMenuRoot,
+  OctantMenuGroup,
+  OctantMenuGroupLabel,
   OctantMenuSeparator,
 } from "../ui/base/OctantMenu";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -183,15 +181,32 @@ export function TodosView(props: TodosPageProps) {
     );
   }
 
+  // A list that holds nothing has nothing to switch or filter and no state to
+  // sum up: its toolbar and header sentence stay away and the empty state
+  // speaks. That holds for the last list read before a failure too, and while
+  // the first read is still out, so no toolbar shows only to leave again.
+  const pageIsEmpty = view !== undefined && todos.length === 0;
+  const hasTodos = view !== undefined && todos.length > 0;
+  const stateSentence = hasTodos ? todoStateSentence(counts) : undefined;
+  // State is the visible switch, so only the menu's own choices count.
+  const filterCount = filter.projects.size + filter.tags.size + (filter.showDropped ? 1 : 0);
+  const resetFilters = () =>
+    setFilter({ ...filter, showDropped: false, projects: new Set(), tags: new Set() });
+  const toggleProject = (key: string, on: boolean) => {
+    const projects = new Set(filter.projects);
+    if (on) projects.add(key);
+    else projects.delete(key);
+    setFilter({ ...filter, projects });
+  };
+
   return (
     <Surface ariaLabel="To-dos" className="todos-page">
       <SurfaceHeader
-        detail={todoStateSentence(counts)}
-        display
         onBack={props.onClose}
         title="To-dos"
+        {...(stateSentence === undefined ? {} : { detail: stateSentence })}
       />
-      <OctantCard className="todos-card">
+      <>
         <TodoQuickAdd
           onChange={async (command) => {
             if (!readOnly) return change(command);
@@ -239,58 +254,115 @@ export function TodosView(props: TodosPageProps) {
             </ul>
           </section>
         )}
-        <div className="todos-card__filters">
-          <OctantToggleGroup<TodoStateFilter>
-            aria-label="Show to-dos"
-            className="inbox-card__filters"
-            onValueChange={(value) => {
-              const next = STATE_FILTERS.find((entry) => entry.id === value[0]);
-              if (next !== undefined) setFilter({ ...filter, state: next.id });
-            }}
-            value={[filter.state]}
-          >
-            {STATE_FILTERS.map((entry) => (
-              <OctantToggleGroupItem key={entry.id} value={entry.id}>
-                {entry.label}
-                <span className="oct-meta">{stateCounts[entry.id]}</span>
-              </OctantToggleGroupItem>
-            ))}
-          </OctantToggleGroup>
-          <span className="todos-card__pickers">
-            <ProjectPicker choices={choices} filter={filter} onChange={setFilter} />
-            {tags.length === 0 ? null : (
-              <TagPicker filter={filter} onChange={setFilter} tags={tags} />
-            )}
-            <label className="todos-card__dropped oct-row-detail">
-              <OctantCheckbox
+        {!hasTodos ? null : (
+          <div aria-label="To-do controls" className="surface-toolbar todos-toolbar" role="group">
+            <OctantToggleGroup<TodoStateFilter>
+              aria-label="Show to-dos"
+              onValueChange={(value) => {
+                const next = STATE_FILTERS.find((entry) => entry.id === value[0]);
+                if (next !== undefined) setFilter({ ...filter, state: next.id });
+              }}
+              value={[filter.state]}
+            >
+              {STATE_FILTERS.map((entry) => (
+                <OctantToggleGroupItem
+                  aria-label={`${entry.label}, ${String(stateCounts[entry.id])}`}
+                  key={entry.id}
+                  value={entry.id}
+                >
+                  {/* The count is said in the name only. Drawn, it widened or
+                      narrowed the switch each time a to-do was ticked off, and
+                      the title's sentence already gives the open ones. */}
+                  {entry.label}
+                </OctantToggleGroupItem>
+              ))}
+            </OctantToggleGroup>
+            <FilterMenu count={filterCount} onReset={resetFilters}>
+              <OctantMenuGroup>
+                <OctantMenuGroupLabel>Project</OctantMenuGroupLabel>
+                {choices.map((choice) => {
+                  const key = projectKey(choice.link);
+                  return (
+                    <OctantMenuCheckboxItem
+                      checked={filter.projects.has(key)}
+                      closeOnClick={false}
+                      key={key}
+                      label={choice.link.name}
+                      onCheckedChange={(on) => toggleProject(key, on)}
+                    >
+                      {choice.link.name}
+                    </OctantMenuCheckboxItem>
+                  );
+                })}
+                <OctantMenuCheckboxItem
+                  checked={filter.projects.has(NO_PROJECT)}
+                  closeOnClick={false}
+                  label="No Project"
+                  onCheckedChange={(on) => toggleProject(NO_PROJECT, on)}
+                >
+                  No Project
+                </OctantMenuCheckboxItem>
+              </OctantMenuGroup>
+              {tags.length === 0 ? null : (
+                <>
+                  <OctantMenuSeparator />
+                  <OctantMenuGroup>
+                    <OctantMenuGroupLabel>Tag</OctantMenuGroupLabel>
+                    {tags.map((tag) => (
+                      <OctantMenuCheckboxItem
+                        checked={filter.tags.has(tag)}
+                        closeOnClick={false}
+                        key={tag}
+                        label={tag}
+                        onCheckedChange={(on) => {
+                          const next = new Set(filter.tags);
+                          if (on) next.add(tag);
+                          else next.delete(tag);
+                          setFilter({ ...filter, tags: next });
+                        }}
+                      >
+                        {tag}
+                      </OctantMenuCheckboxItem>
+                    ))}
+                  </OctantMenuGroup>
+                </>
+              )}
+              <OctantMenuSeparator />
+              <OctantMenuCheckboxItem
                 checked={filter.showDropped}
-                onChange={(event) => setFilter({ ...filter, showDropped: event.target.checked })}
-              />
-              Show dropped
-            </label>
-          </span>
-        </div>
+                closeOnClick={false}
+                label="Show dropped"
+                onCheckedChange={(on) => setFilter({ ...filter, showDropped: on })}
+              >
+                Show dropped
+              </OctantMenuCheckboxItem>
+            </FilterMenu>
+          </div>
+        )}
         {problem === undefined ? null : (
-          <OctantAlert className="todos-card__problem" tone="warning">
+          <OctantAlert className="todos-page__problem" tone="warning">
             {problem}
           </OctantAlert>
         )}
         {read.status === "failed" ? (
-          <p className="oct-row-detail todos-card__note" role="status">
-            {read.view === undefined
-              ? read.message
-              : `${read.message} The list below is the last one read.`}
+          <p className="oct-row-detail todos-page__note" role="status">
+            {hasTodos ? `${read.message} The list below is the last one read.` : read.message}
           </p>
         ) : null}
         {read.status === "loading" ? (
-          <p className="oct-row-detail todos-card__note" role="status">
+          <p className="oct-row-detail todos-page__note" role="status">
             Reading your to-dos…
           </p>
-        ) : view === undefined ? null : shown.length === 0 ? (
-          <p className="oct-row-detail todos-card__note" role="status">
-            {todos.length === 0
-              ? "Write down what you mean to do; when you are ready, a to-do can be handed to an agent as a thread."
-              : "No to-do matches these filters."}
+        ) : view === undefined ? null : pageIsEmpty ? (
+          <OctantEmpty
+            detail="Write down what you want to do. Hand a to-do to an agent when you are ready."
+            icon={<SquareCheck size={20} />}
+            layout="line"
+            title="No to-dos yet"
+          />
+        ) : shown.length === 0 ? (
+          <p className="oct-row-detail todos-page__note" role="status">
+            No to-do matches these filters.
           </p>
         ) : (
           <ul aria-label="To-dos" className="todo-list">
@@ -336,7 +408,7 @@ export function TodosView(props: TodosPageProps) {
             ))}
           </ul>
         )}
-      </OctantCard>
+      </>
       {deleting === undefined ? null : (
         <OctantConfirmDialog
           confirmLabel="Delete"
@@ -355,101 +427,6 @@ export function TodosView(props: TodosPageProps) {
         </OctantConfirmDialog>
       )}
     </Surface>
-  );
-}
-
-function ProjectPicker(props: {
-  readonly choices: ReadonlyArray<TodoProjectChoice>;
-  readonly filter: TodoFilter;
-  readonly onChange: (filter: TodoFilter) => void;
-}) {
-  const toggle = (key: string, on: boolean) => {
-    const projects = new Set(props.filter.projects);
-    if (on) projects.add(key);
-    else projects.delete(key);
-    props.onChange({ ...props.filter, projects });
-  };
-  const count = props.filter.projects.size;
-  return (
-    <OctantMenuRoot>
-      <WorkListMenuTrigger
-        active={count > 0}
-        label={count === 0 ? "Filter by Project" : `Filter by Project, ${String(count)} chosen`}
-        tooltip="Projects"
-      >
-        <Folder aria-hidden="true" size={16} />
-      </WorkListMenuTrigger>
-      <OctantMenuPortal>
-        <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
-          <OctantMenuPopup aria-label="Filter by Project" className="min-w-[14rem]">
-            {props.choices.map((choice) => {
-              const key = projectKey(choice.link);
-              return (
-                <OctantMenuCheckboxItem
-                  checked={props.filter.projects.has(key)}
-                  closeOnClick={false}
-                  key={key}
-                  label={choice.link.name}
-                  onCheckedChange={(on) => toggle(key, on)}
-                >
-                  {choice.link.name}
-                </OctantMenuCheckboxItem>
-              );
-            })}
-            {props.choices.length === 0 ? null : <OctantMenuSeparator />}
-            <OctantMenuCheckboxItem
-              checked={props.filter.projects.has(NO_PROJECT)}
-              closeOnClick={false}
-              label="No Project"
-              onCheckedChange={(on) => toggle(NO_PROJECT, on)}
-            >
-              No Project
-            </OctantMenuCheckboxItem>
-          </OctantMenuPopup>
-        </OctantMenuPositioner>
-      </OctantMenuPortal>
-    </OctantMenuRoot>
-  );
-}
-
-function TagPicker(props: {
-  readonly tags: ReadonlyArray<string>;
-  readonly filter: TodoFilter;
-  readonly onChange: (filter: TodoFilter) => void;
-}) {
-  const count = props.filter.tags.size;
-  return (
-    <OctantMenuRoot>
-      <WorkListMenuTrigger
-        active={count > 0}
-        label={count === 0 ? "Filter by tag" : `Filter by tag, ${String(count)} chosen`}
-        tooltip="Tags"
-      >
-        <Hash aria-hidden="true" size={16} />
-      </WorkListMenuTrigger>
-      <OctantMenuPortal>
-        <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
-          <OctantMenuPopup aria-label="Filter by tag" className="min-w-[12rem]">
-            {props.tags.map((tag) => (
-              <OctantMenuCheckboxItem
-                checked={props.filter.tags.has(tag)}
-                closeOnClick={false}
-                key={tag}
-                label={tag}
-                onCheckedChange={(on) => {
-                  const tags = new Set(props.filter.tags);
-                  if (on) tags.add(tag);
-                  else tags.delete(tag);
-                  props.onChange({ ...props.filter, tags });
-                }}
-              >
-                {tag}
-              </OctantMenuCheckboxItem>
-            ))}
-          </OctantMenuPopup>
-        </OctantMenuPositioner>
-      </OctantMenuPortal>
-    </OctantMenuRoot>
   );
 }
 
@@ -495,7 +472,7 @@ function TodoRow(props: TodoRowProps) {
     todo.state === "dropped"
       ? { label: "Bring back", value: "restore" }
       : { label: "Drop", value: "drop" },
-    { label: "Delete…", value: "delete" },
+    { destructive: true, label: "Delete…", value: "delete" },
   ];
   return (
     <li

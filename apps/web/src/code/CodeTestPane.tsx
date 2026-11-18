@@ -235,8 +235,16 @@ export function CodeTestPane(props: CodeTestPaneProps) {
               Starting…
             </OctantButton>
           ) : activeRun === undefined ? (
-            <OctantButton onClick={() => void run()} size="sm" type="button" variant="secondary">
-              Run {selected.name}
+            // The card's title already names the test, so the button says "Run"
+            // and carries the name only in its accessible name.
+            <OctantButton
+              aria-label={`Run ${selected.name}`}
+              onClick={() => void run()}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Run
             </OctantButton>
           ) : (
             <OctantButton
@@ -262,11 +270,15 @@ export function CodeTestPane(props: CodeTestPaneProps) {
         <p className="code-delivery-pane__status">{outcomeCopy(result)}</p>
       ) : null}
       {activeRun === undefined && result !== undefined && result.concerns.length > 0 ? (
-        <OctantAlert className="code-delivery-pane__warning" tone="warning">
+        <OctantAlert layout="row" className="code-delivery-pane__warning" tone="warning">
           {result.concerns.map(concernLabel).join(" · ")}
         </OctantAlert>
       ) : null}
-      {failure === undefined ? null : <OctantAlert tone="warning">{failure}</OctantAlert>}
+      {failure === undefined ? null : (
+        <OctantAlert layout="row" tone="warning">
+          {failure}
+        </OctantAlert>
+      )}
       {activeRun !== undefined || evidence === undefined ? null : (
         <pre className="code-delivery-pane__evidence">{evidence}</pre>
       )}

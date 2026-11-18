@@ -4,7 +4,7 @@ import type { PermissionMode } from "@octant/contracts/providers";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
-import { Check } from "lucide-react";
+import { Check } from "../ui/icons";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useHostPlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";

@@ -92,8 +92,7 @@ const blockReasonLabels: Record<AutomationBlockReason, string> = {
   "authority-mismatch": "The authority profile no longer matches. Edit and resume to revalidate.",
   "delivery-target-invalid":
     "The confirmed delivery target is no longer valid. Edit and confirm a new target.",
-  "full-access-ineligible":
-    "Full access authority is not eligible for automations. Choose an approval-gated profile.",
+  "full-access-ineligible": "Automations cannot use Full access. Pick a profile that asks first.",
   "unsupported-mode": "This mode is not supported for automations.",
   "automation-recursion": "Automation-created work cannot manage automations.",
   "thread-unavailable":
@@ -321,8 +320,7 @@ export const MAX_AUTOMATION_NAME_LENGTH = 255;
 export const MAX_AUTOMATION_PROMPT_LENGTH = 8_192;
 export const MAX_AUTOMATION_TARGET_LENGTH = 2_048;
 
-const FULL_ACCESS_ISSUE =
-  "Full access profiles are not eligible for automations. Choose an approval-gated profile.";
+const FULL_ACCESS_ISSUE = "Automations cannot use Full access. Pick a profile that asks first.";
 const CONTRACT_ISSUE =
   "The selection does not satisfy the automation contract. Match host, mode, and Project across every choice.";
 

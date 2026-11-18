@@ -1,5 +1,5 @@
 import type { OpenInApplicationId } from "@octant/contracts/shell";
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowUp } from "../ui/icons";
 import { useEffect, useMemo, useState } from "react";
 import type { OctantHostBridge, OpenInApplicationDescriptor } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -55,7 +55,7 @@ export function OpenInApplicationSettings(props: OpenInApplicationSettingsProps)
   return (
     <SettingsSection
       className="open-in-settings"
-      description="Enabled applications appear in this order. Applications that are not installed stay hidden."
+      description="Enabled apps show in this order. Apps that are not installed stay hidden."
       title="Open in applications"
     >
       {error !== undefined ? (

@@ -66,7 +66,7 @@ export function MoveToProjectDialog(props: MoveToProjectDialogProps) {
         <h1 id={titleId}>Move to Project</h1>
       </div>
       <p id={descriptionId}>
-        This conversation stays a Chat. It keeps its history and gains no folder access; the
+        This conversation stays a Chat. It keeps its history and gets no folder access; the
         Project&rsquo;s memory applies to its next messages.
       </p>
       {props.projects.length === 0 ? null : (
@@ -113,7 +113,7 @@ export function MoveToProjectDialog(props: MoveToProjectDialogProps) {
       )}
       {failed ? (
         <OctantAlert tone="danger">
-          The conversation could not be moved. Nothing changed; try again.
+          Could not move the conversation. Nothing changed. Try again.
         </OctantAlert>
       ) : null}
     </OctantDialog>

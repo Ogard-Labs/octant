@@ -1,4 +1,5 @@
 import type { ShipClient } from "@octant/client-runtime/ship-client";
+import { InfoTip, PaneBar } from "../shell/PaneBar";
 import type { ShipPlan, ShipTarget } from "@octant/contracts";
 import { useCallback, useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -85,10 +86,9 @@ export function ShipPanel(props: ShipPanelProps) {
 
   return (
     <section aria-label="Delivery" className="ship-panel">
-      <p className="ship-panel__note">
-        Octant delivers to a target you already own and runs none of its own. Nothing is routed
-        through Octant, and each delivery is approved on its own.
-      </p>
+      <PaneBar title="Delivery">
+        <InfoTip text="Octant delivers to a target you already own and runs none of its own. Nothing is routed through Octant, and each delivery is approved on its own." />
+      </PaneBar>
 
       {enabled.length === 0 ? null : (
         <ul className="ship-panel__targets">

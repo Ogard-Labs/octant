@@ -780,7 +780,7 @@ describe("Chat host queue", () => {
     );
     expect(screen.getByRole("button", { name: "Queue message" })).toBeDisabled();
     expect(screen.getByLabelText("Message")).toHaveValue("Keep this");
-    expect(screen.getByText(/host message queue is unavailable.*draft/i)).toBeVisible();
+    expect(screen.getByText(/message queue is unavailable.*draft/i)).toBeVisible();
   });
 });
 
@@ -811,7 +811,7 @@ describe("ChatWorkspace", () => {
     const row = await screen.findByRole("group", { name: "Browser origin approval" });
     await user.click(within(row).getByRole("button", { name: "Approve once" }));
     expect(await within(row).findByRole("alert")).toHaveTextContent(
-      "Browser approval could not be sent. Keep this request open and retry.",
+      "Could not send the browser approval. Keep this open and try again.",
     );
     expect(screen.getByRole("group", { name: "Browser origin approval" })).toBeInTheDocument();
   });
@@ -2853,7 +2853,7 @@ describe("ChatWorkspace", () => {
     );
     await user.click(await screen.findByRole("button", { name: "Rewind" }));
 
-    expect(await screen.findByText(/The conversation changed while this was open/)).toBeVisible();
+    expect(await screen.findByText(/The conversation changed\. Close this/)).toBeVisible();
     expect(execute).not.toHaveBeenCalled();
   });
 

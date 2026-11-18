@@ -398,6 +398,26 @@ export function minimiseUtilityTool(
 }
 
 /**
+ * Whether every Browser session an offer announces is already a page of this
+ * dock's Browser: each one is the context some Browser tab is bound to. A page
+ * the person opens from a Browser tab is announced like an agent's session,
+ * about two seconds later, and opening the thread's shared Browser tab for it
+ * left an empty "New tab" beside the page it had just been used to open.
+ */
+export function announcedBrowserSessionsHeld(
+  state: ThreadUtilityDockState,
+  sessionIds: ReadonlyArray<string> | undefined,
+): boolean {
+  if (sessionIds === undefined || sessionIds.length === 0) return false;
+  const bound = new Set(
+    state.tabs.flatMap((tab) =>
+      tab.surface === "browser" && tab.browserContextId !== undefined ? [tab.browserContextId] : [],
+    ),
+  );
+  return sessionIds.every((id) => bound.has(id));
+}
+
+/**
  * Whether an agent's new Browser session leaves a minimised Browser as it is:
  * only where the shelf is drawn, since its card or the dock toggle's dot is the
  * sign that the session is live. The modal dock draws neither, so there the
@@ -432,6 +452,23 @@ export function hideUtilityCard(
   const tab = state.tabs.find((candidate) => candidate.id === tabId);
   if (tab === undefined || state.minimised?.includes(tabId) !== true) return state;
   return withMinimised(state, withoutMinimisedTool(state, tab.surface));
+}
+
+/**
+ * Makes another page of the minimised Browser the one its card stands for and
+ * shows, and the one showing the Browser returns to. Nothing is shown, closed
+ * or moved: the Browser stays a card. A page that is not the minimised
+ * Browser's changes nothing.
+ */
+export function previewUtilityCardPage(
+  state: ThreadUtilityDockState,
+  tabId: string,
+): ThreadUtilityDockState {
+  const tab = state.tabs.find((candidate) => candidate.id === tabId);
+  if (tab === undefined || tab.surface !== "browser") return state;
+  if (shownUtilityTabIds(state).some((id) => id === tabId)) return state;
+  if (state.lastBrowser === tabId) return state;
+  return { ...state, lastBrowser: tabId };
 }
 
 /**
@@ -602,6 +639,81 @@ export function moveUtilityTile(
   return rebuilt(columns);
 }
 
+export type DockTileEdge = "left" | "right" | "top" | "bottom";
+
+/**
+ * Takes a shown tile to an edge of another shown tile: above or below puts it
+ * in the target's column, left or right puts it in the column on that side
+ * (a new one while there is room for one), at the target's row. Only the two
+ * columns that lose or gain a tile change; every other share stays. A drop on
+ * itself, or one the caps (two columns of three tiles) refuse, returns the
+ * same state. The tool stays mounted: only its tile's place changes.
+ */
+export function placeUtilityTile(
+  state: ThreadUtilityDockState,
+  tabId: string,
+  targetTabId: string,
+  edge: DockTileEdge,
+): ThreadUtilityDockState {
+  const layout = state.layout;
+  if (layout === undefined || tabId === targetTabId) return state;
+  const shown = layoutTabIds(layout);
+  if (!shown.includes(tabId) || !shown.includes(targetTabId)) return state;
+  const columns = withoutTile(layout, tabId).columns.filter((column) => column.tiles.length > 0);
+  const targetColumn = columns.findIndex((column) =>
+    column.tiles.some((tile) => tile.tabId === targetTabId),
+  );
+  const target = columns[targetColumn];
+  if (target === undefined) return state;
+  const targetRow = target.tiles.findIndex((tile) => tile.tabId === targetTabId);
+  const joinedColumn = (column: DockTileColumn, row: number): DockTileColumn | undefined => {
+    const count = column.tiles.length;
+    if (count >= MAX_DOCK_TILES_PER_COLUMN) return undefined;
+    // The tiles that stay keep their ratio out of a whole column: a pane moved
+    // within its own column left the others the share they had beside it, so
+    // one moved above one came out two thirds tall.
+    const held = column.tiles.reduce((sum, tile) => sum + tile.share, 0) || 1;
+    const scaled = column.tiles.map((tile) => ({
+      ...tile,
+      share: ((tile.share / held) * count) / (count + 1),
+    }));
+    const at = Math.min(Math.max(row, 0), count);
+    return {
+      ...column,
+      tiles: [...scaled.slice(0, at), { tabId, share: 1 / (count + 1) }, ...scaled.slice(at)],
+    };
+  };
+  let next: ReadonlyArray<DockTileColumn> | undefined;
+  if (edge === "top" || edge === "bottom") {
+    const joined = joinedColumn(target, edge === "top" ? targetRow : targetRow + 1);
+    next =
+      joined === undefined
+        ? undefined
+        : columns.map((column, index) => (index === targetColumn ? joined : column));
+  } else {
+    const sideIndex = targetColumn + (edge === "left" ? -1 : 1);
+    const side = columns[sideIndex];
+    if (side !== undefined) {
+      const joined = joinedColumn(side, targetRow);
+      next =
+        joined === undefined
+          ? undefined
+          : columns.map((column, index) => (index === sideIndex ? joined : column));
+    } else if (columns.length < MAX_DOCK_TILE_COLUMNS) {
+      // An even split, as `place()` makes: the kept columns keep their ratio.
+      const count = columns.length;
+      const added: DockTileColumn = { share: 1 / (count + 1), tiles: [{ tabId, share: 1 }] };
+      const kept = columns.map((column) => ({
+        ...column,
+        share: (column.share * count) / (count + 1),
+      }));
+      next = edge === "left" ? [added, ...kept] : [...kept, added];
+    }
+  }
+  if (next === undefined) return state;
+  return settle(state.tabs, { columns: next }, tabId, carried(state));
+}
+
 /** Sets the columns' fractions of the width, in column order. */
 export function resizeUtilityTileColumns(
   state: ThreadUtilityDockState,
@@ -659,6 +771,7 @@ export function openUtilityTabBesideState(
   state: ThreadUtilityDockState,
   surface: RightUtilityDockSurfaceId,
   instanceId: string,
+  direction: "beside" | "stacked" = "beside",
 ): ThreadUtilityDockState {
   const repeatable = surface === "browser" || surface === "terminal";
   const existing = repeatable ? undefined : state.tabs.find((tab) => tab.id === surface);
@@ -672,7 +785,25 @@ export function openUtilityTabBesideState(
     { ...state, tabs },
     repeatable ? withoutMinimisedTool({ ...state, tabs }, surface) : state.minimised,
   );
-  return place(base, tab.id, "beside");
+  return direction === "stacked" ? placeStacked(base, tab.id) : place(base, tab.id, "beside");
+}
+
+/**
+ * Shows an open tab under the focused tile, in its column. Tools stack: a
+ * press never makes a second column, which is the person's own arrangement
+ * (Move right, or a drop on the dock's right third). Only a column already at
+ * its cap sends the tool beside.
+ */
+export function showUtilityTabStacked(
+  state: ThreadUtilityDockState,
+  tabId: string,
+): ThreadUtilityDockState {
+  return placeStacked(state, tabId);
+}
+
+function placeStacked(state: ThreadUtilityDockState, tabId: string): ThreadUtilityDockState {
+  const below = place(state, tabId, "below");
+  return below === state ? place(state, tabId, "beside") : below;
 }
 
 /** Columns of tiles a state shows: one for the single-tool view. */

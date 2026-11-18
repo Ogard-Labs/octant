@@ -58,7 +58,7 @@ export function ComputerUseSetup(
   return (
     <SettingsSection
       title="macOS permissions"
-      description="Set up Computer use to see and interact with approved apps. Octant manages its own driver; an existing CuaDriver installation is left untouched."
+      description="Set up Computer use to see and use approved apps. Octant manages its own driver and leaves an existing one alone."
     >
       <div className="setgroup">
         <SettingRow
@@ -171,7 +171,7 @@ export function ComputerUseSetup(
         <SettingRow
           settingId="computer-use-test"
           label="Working test"
-          description="After you approve, Octant captures and clicks a temporary test window, then closes it. Each app used by a task still needs approval."
+          description="After you approve, Octant captures and clicks a temporary test window, then closes it. Each app a task uses still needs approval."
           scope="host"
         >
           <div className="settings-view__actions">

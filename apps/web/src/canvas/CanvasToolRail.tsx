@@ -5,8 +5,8 @@ import {
   Pen,
   SquareDashed,
   Type,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "../ui/icons";
 import { Fragment } from "react";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
@@ -15,7 +15,7 @@ import type { CanvasTool } from "./canvasTools";
 interface RailTool {
   readonly id: CanvasTool;
   readonly label: string;
-  readonly icon: LucideIcon;
+  readonly icon: IconComponent;
   /** The first tool of a group draws a divider before it. */
   readonly startsGroup?: boolean;
 }

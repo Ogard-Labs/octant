@@ -36,7 +36,7 @@ describe("provider discovery descriptors", () => {
     expect(descriptor).toBeDefined();
     expect(descriptor?.executableNames).toContain("opencode2");
     expect(descriptor?.displayNameForExecutable?.("opencode2")).toBe("OpenCode 2 preview");
-    expect(descriptor?.displayNameForExecutable?.("opencode")).toBe("OpenCode CLI");
+    expect(descriptor?.displayNameForExecutable?.("opencode")).toBe("OpenCode");
   });
 
   it("marks direct HTTP endpoints correctly", () => {

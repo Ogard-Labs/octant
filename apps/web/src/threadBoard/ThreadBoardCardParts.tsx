@@ -1,4 +1,4 @@
-import { Check, GitBranch, LoaderCircle } from "lucide-react";
+import { Check, GitBranch, LoaderCircle } from "../ui/icons";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 
 /**

@@ -38,6 +38,23 @@ describe("UnifiedDiffList", () => {
     });
   });
 
+  it("keeps a line number's button from setting the row's height", () => {
+    const files = parseUnifiedDiff(
+      [
+        "diff --git a/a.ts b/a.ts",
+        "--- a/a.ts",
+        "+++ b/a.ts",
+        "@@ -1,1 +1,1 @@",
+        "-a",
+        "+b",
+        "",
+      ].join("\n"),
+    );
+    render(<UnifiedDiffList files={files} onSelectLine={vi.fn()} />);
+    const number = screen.getByRole("button", { name: "Comment on a.ts modified line 1" });
+    expect(number).toHaveClass("h-auto");
+  });
+
   it("virtualizes large single-file diffs to bounded DOM rows while scrolling", () => {
     const lines = Array.from(
       { length: 600 },

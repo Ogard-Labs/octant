@@ -62,6 +62,7 @@ import type {
   RemoteMintedPairingTicket,
   RemotePendingPairingRequest,
   RemotePairingTicketSourceClass,
+  GlassRefusalReason,
   ResolvedSidebarMaterial,
   SettlePairedComputerOutcome,
 } from "@octant/contracts/desktop-bridge";
@@ -110,6 +111,7 @@ export type {
   RemoteMintedPairingTicket,
   RemotePendingPairingRequest,
   RemotePairingTicketSourceClass,
+  GlassRefusalReason,
   ResolvedSidebarMaterial,
   SettlePairedComputerOutcome,
 } from "@octant/contracts/desktop-bridge";
@@ -485,6 +487,15 @@ export interface OctantHostBridge
   readonly attachBrowserSurface?: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
   readonly updateBrowserSurfaceBounds?: (request: BrowserSurfaceRequest) => Promise<void>;
   readonly detachBrowserSurface?: (request: Omit<BrowserSurfaceRequest, "bounds">) => Promise<void>;
+  /**
+   * A small picture of this window's own Browser page for its minimised card,
+   * or nothing when there is no page yet or one was taken moments ago. It is
+   * for display only and never passes through the server. Absent outside the
+   * desktop app.
+   */
+  readonly captureBrowserSurfacePreview?: (
+    request: Omit<BrowserSurfaceRequest, "bounds">,
+  ) => Promise<string | undefined>;
   /** Shows an extension's popup or options page beside the Browser toolbar's extensions button. */
   readonly openBrowserExtensionPopup?: (request: {
     readonly profile:
@@ -692,6 +703,8 @@ export interface OctantHostBridge
    * screen macOS hides the traffic lights, so no titlebar inset is reserved.
    */
   readonly subscribeWindowFullScreen?: (listener: (fullScreen: boolean) => void) => () => void;
+  /** Whether this window is the one in front; false while another window or app is. */
+  readonly subscribeWindowActive?: (listener: (active: boolean) => void) => () => void;
   /**
    * The host's word that native window vibrancy is actually applied. The
    * renderer keeps its near-opaque native sidebar wash until this reports
@@ -701,6 +714,14 @@ export interface OctantHostBridge
    */
   readonly subscribeResolvedSidebarVibrancy?: (
     listener: (vibrancy: "sidebar" | null) => void,
+  ) => () => void;
+  /**
+   * Why the host will not draw Glass right now, or null when nothing stands in
+   * the way. Settings says so beside the Glass control. Absent on hosts that
+   * never report it.
+   */
+  readonly subscribeResolvedGlassRefusal?: (
+    listener: (refusal: GlassRefusalReason | null) => void,
   ) => () => void;
   readonly subscribeCodeDeepLinks?: (listener: (target: CodeDeepLink) => void) => () => void;
   readonly subscribeOpenSettings?: (listener: () => void) => () => void;

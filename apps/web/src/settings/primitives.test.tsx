@@ -10,6 +10,8 @@ import {
   SettingsDisclosure,
   SettingsFactList,
   SettingsOutlineRegistration,
+  SettingsOutputWell,
+  SettingsSkeletonRows,
   SettingsPanel,
   SettingsSection,
   SettingsState,
@@ -360,5 +362,23 @@ describe("SettingsDisclosure", () => {
         within(screen.getByRole("group", { name: "Forget setting" })).getByRole("button"),
       ).toHaveFocus(),
     );
+  });
+});
+
+describe("SettingsOutputWell", () => {
+  it("keeps a command's raw output collapsed until it is asked for", () => {
+    const { container } = render(
+      <SettingsOutputWell summary="Show the output">line one{"\n"}line two</SettingsOutputWell>,
+    );
+    expect(container.querySelector("details")).not.toHaveAttribute("open");
+    expect(screen.getByText("Show the output")).toBeInTheDocument();
+  });
+});
+
+describe("SettingsSkeletonRows", () => {
+  it("names the wait for a screen reader and draws the requested rows", () => {
+    const { container } = render(<SettingsSkeletonRows label="Reading things…" rows={4} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Reading things…");
+    expect(container.querySelectorAll(".settings-skeleton__row")).toHaveLength(4);
   });
 });

@@ -1,9 +1,9 @@
-import { MAX_CONTEXT_SIDEBAR_WIDTH, MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
+import { MAX_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { RIGHT_UTILITY_DOCK_SURFACES } from "./rightUtilityDockModel";
+import { FLEXIBLE_DOCK_MIN_WIDTH, RIGHT_UTILITY_DOCK_SURFACES } from "./rightUtilityDockModel";
 import { RightUtilityDock, type RightUtilityDockProps } from "./RightUtilityDock";
 
 function dockSurface(
@@ -39,20 +39,29 @@ function props(overrides: Partial<RightUtilityDockProps> = {}): RightUtilityDock
 }
 
 describe("RightUtilityDock", () => {
+  it("does not mark the whole dock no-drag, so the band's drag layer reaches over its header", () => {
+    render(<RightUtilityDock {...props()} />);
+    const dock = screen.getByRole("complementary", { name: "Right Utility Dock" });
+    // A no-drag ancestor overrides every drag region inside it.
+    expect(dock).not.toHaveClass("window-no-drag");
+    // The band's one drag layer reaches over the dock; no drag region of its own.
+    expect(dock.querySelector(".window-drag-region")).toBeNull();
+  });
+
   it("renders one opaque docked landmark with bounded pointer and keyboard resize", () => {
-    const handlers = props();
+    const handlers = props({ width: 600 });
     render(<RightUtilityDock {...handlers} />);
 
     expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
     expect(screen.queryByRole("dialog")).toBeNull();
     const splitter = screen.getByRole("separator", { name: "Resize utility dock" });
-    expect(splitter).toHaveAttribute("aria-valuemin", String(MIN_CONTEXT_SIDEBAR_WIDTH));
+    expect(splitter).toHaveAttribute("aria-valuemin", String(FLEXIBLE_DOCK_MIN_WIDTH));
     expect(splitter).toHaveAttribute("aria-valuemax", String(MAX_CONTEXT_SIDEBAR_WIDTH));
-    expect(splitter).toHaveAttribute("aria-valuetext", "360 px");
+    expect(splitter).toHaveAttribute("aria-valuetext", "600 px");
 
     fireEvent.keyDown(splitter, { key: "ArrowLeft", shiftKey: true });
-    expect(handlers.onPreviewWidth).toHaveBeenCalledWith(392);
-    expect(handlers.onCommitWidth).toHaveBeenCalledWith(392);
+    expect(handlers.onPreviewWidth).toHaveBeenCalledWith(632);
+    expect(handlers.onCommitWidth).toHaveBeenCalledWith(632);
 
     Object.assign(splitter, {
       hasPointerCapture: vi.fn(() => true),
@@ -64,6 +73,25 @@ describe("RightUtilityDock", () => {
     fireEvent.pointerUp(splitter, { clientX: -500, pointerId: 1 });
     expect(handlers.onPreviewWidth).toHaveBeenLastCalledWith(MAX_CONTEXT_SIDEBAR_WIDTH);
     expect(handlers.onCommitWidth).toHaveBeenLastCalledWith(MAX_CONTEXT_SIDEBAR_WIDTH);
+  });
+
+  it("draws no resize handle for a column of fixed tools, whatever width was stored", () => {
+    const vitals = dockSurface("vitals");
+    render(
+      <RightUtilityDock
+        {...props({
+          resolution: { kind: "surface", surface: vitals },
+          tabs: [vitals],
+        })}
+      />,
+    );
+    expect(screen.queryByRole("separator", { name: "Resize utility dock" })).toBeNull();
+  });
+
+  it("keeps the resize handle when a flexible tool is open beside a fixed one", () => {
+    const vitals = dockSurface("vitals");
+    render(<RightUtilityDock {...props({ tabs: [vitals, browser] })} />);
+    expect(screen.getByRole("separator", { name: "Resize utility dock" })).toBeVisible();
   });
 
   it("cancels dock preview on lost capture without changing the committed width", () => {
@@ -194,6 +222,7 @@ describe("RightUtilityDock", () => {
                 onHideTile: vi.fn(),
                 onMinimise: vi.fn(),
                 onMove: vi.fn(),
+                onPlace: vi.fn(),
                 onResizeColumn: vi.fn(),
                 onResizeColumns: vi.fn(),
                 onShowAlone: vi.fn(),
@@ -207,12 +236,60 @@ describe("RightUtilityDock", () => {
         </div>,
       );
       splitter = screen.getByRole("separator", { name: "Resize utility dock" });
-      // The thread keeps 440px beside two columns, so the handle may go further.
-      expect(splitter).toHaveAttribute("aria-valuemax", "740");
+      // The thread keeps its 560px beside two columns too; only the half-of-the-
+      // workspace stop is lifted for them.
+      expect(splitter).toHaveAttribute("aria-valuemax", "620");
     } finally {
       client.mockRestore();
       bounds.mockRestore();
       if (innerWidth !== undefined) Object.defineProperty(window, "innerWidth", innerWidth);
     }
+  });
+});
+
+describe("RightUtilityDock beside the Environment strip", () => {
+  const environment = dockSurface("environment");
+  const tiles: NonNullable<RightUtilityDockProps["tiles"]> = {
+    narrow: false,
+    resolveSurface: (id) => ({ kind: "surface", surface: dockSurface(id) }),
+    onHideTile: vi.fn(),
+    onMinimise: vi.fn(),
+    onMove: vi.fn(),
+    onPlace: vi.fn(),
+    onResizeColumn: vi.fn(),
+    onResizeColumns: vi.fn(),
+    onShowAlone: vi.fn(),
+    onShowBelow: vi.fn(),
+    onShowBeside: vi.fn(),
+  };
+
+  it("offers no resize handle while only Environment is open", () => {
+    render(
+      <RightUtilityDock
+        {...props({
+          activeTabId: "environment",
+          resolution: { kind: "surface", surface: environment },
+          tabs: [environment],
+          tiles,
+        })}
+      />,
+    );
+    expect(screen.queryByRole("separator", { name: "Resize utility dock" })).toBeNull();
+  });
+
+  it("puts the resize handle on the tool column's edge, so a drag never moves the strip", () => {
+    render(
+      <RightUtilityDock
+        {...props({
+          activeTabId: "browser",
+          resolution: { kind: "surface", surface: browser },
+          tabs: [environment, browser],
+          tiles,
+        })}
+      />,
+    );
+    const splitter = screen.getByRole("separator", { name: "Resize utility dock" });
+    expect(splitter.parentElement).toHaveClass("dock-tool-column");
+    expect(screen.getByRole("region", { name: "Environment" }).contains(splitter)).toBe(false);
   });
 });

@@ -1120,6 +1120,55 @@ describe("BrowserAutomationService", () => {
     expect(runtime.peek).toHaveBeenCalledTimes(1);
   });
 
+  it("passes a page's icon to the person's preview and drops one that is not a bounded image", async () => {
+    const { advance, runtime, service } = harness();
+    await service.create({ windowId, threadId: threadOne, action: action(), policy });
+    advance(2_000);
+    const icon = "data:image/png;base64,iVBORw0KGgo=";
+    vi.mocked(runtime.peek!).mockResolvedValueOnce({
+      url: "https://example.com/driven",
+      faviconDataUrl: icon,
+    });
+    expect((await service.peekThread(windowId, threadOne)).observation?.faviconDataUrl).toBe(icon);
+    advance(2_000);
+    vi.mocked(runtime.peek!).mockResolvedValueOnce({
+      url: "https://example.com/driven",
+      faviconDataUrl: "data:text/html;base64,PGh0bWw+",
+    });
+    expect(
+      (await service.peekThread(windowId, threadOne)).observation?.faviconDataUrl,
+    ).toBeUndefined();
+  });
+
+  it("takes a picture of a native page only when its minimised card asks, never for the pane that shows it", async () => {
+    const { advance, contexts, runtime, service } = harness();
+    vi.mocked(runtime.createContext).mockImplementationOnce(async (contextId) => {
+      contexts.add(contextId);
+      return "native-live";
+    });
+    const created = await service.create({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      policy,
+    });
+    const contextId = created.context!.contextId;
+    advance(2_000);
+
+    // The Browser pane that shows the page polls without asking for a picture:
+    // the page is on screen, so no capture is spent on it.
+    await service.peekContext(windowId, threadOne, contextId);
+    expect(runtime.peek).not.toHaveBeenCalled();
+
+    const peeked = await service.peekContext(windowId, threadOne, contextId, undefined, {
+      freshPicture: true,
+    });
+
+    expect(runtime.peek).toHaveBeenCalledTimes(1);
+    expect(peeked.observation?.screenshotDataUrl).toBe("data:image/jpeg;base64,AAAA");
+    expect(peeked.observation?.stale).toBe(false);
+  });
+
   it("reattaches one current context per window and thread and releases only that scope", async () => {
     const { contexts, runtime, service } = harness();
     const first = await service.create({ windowId, threadId: threadOne, action: action(), policy });

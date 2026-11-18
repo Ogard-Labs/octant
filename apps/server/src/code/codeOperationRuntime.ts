@@ -145,7 +145,11 @@ import {
   type CodeRuntimeWorkRecordOutcome,
 } from "./codeRuntimeWorkRecorder";
 import {
+  APPROVAL_NOT_WAITING_MESSAGE,
   APPROVAL_POSTURE_CHANGED_MESSAGE,
+  APPROVAL_REFUSED_IN_PLAN_MESSAGE,
+  APPROVAL_SESSION_GONE_MESSAGE,
+  QUESTION_NOT_WAITING_MESSAGE,
   approvalAnswerUnderPosture,
   approvalPostureOf,
   clampTurnAccessPosture,
@@ -4621,7 +4625,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       active.harnessQuestions.delete(input.requestId);
       return answeredTurnState(active.state);
     }
-    if (active.connection === undefined) return turnState("failed");
+    if (active.connection === undefined) {
+      return turnState("failed", { category: "failed", message: APPROVAL_SESSION_GONE_MESSAGE });
+    }
     const questionnaire = active.providerQuestionnaires.get(input.requestId);
     if (
       questionnaire !== undefined &&
@@ -5241,7 +5247,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     input: Parameters<CodeOperationTurnPort["answerApproval"]>[0],
     ownerCurrent?: () => boolean,
   ) {
-    if (ownerCurrent !== undefined && !ownerCurrent()) return turnState("failed");
+    if (ownerCurrent !== undefined && !ownerCurrent())
+      return turnState("failed", { category: "failed", message: APPROVAL_NOT_WAITING_MESSAGE });
     const active = this.#owned(input.thread, input.checkoutRoot);
     const providerRequestId = active?.approvals.get(input.approvalId);
     const turnPosture =
@@ -5278,26 +5285,32 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         });
       }
     }
+    // Plan never approves. A grant persistence changed mid-turn is no reason
+    // to refuse: the running turn keeps the persistence it started with, and an
+    // app-managed ask remembers nothing, so its allow covers this one call.
+    const refusedInPlan = turnState("failed", {
+      category: "failed",
+      message: APPROVAL_REFUSED_IN_PLAN_MESSAGE,
+    });
     if (active !== undefined && toolApproval !== undefined) {
-      if (
-        input.decision === "approved" &&
-        (turnPosture === "plan" ||
-          active.thread.permissionPersistence !== input.thread.permissionPersistence)
-      )
-        return turnState("failed");
+      if (input.decision === "approved" && turnPosture === "plan") return refusedInPlan;
       toolApproval.finish(input.decision === "approved" ? "approved" : "denied");
+      if (ownerCurrent === undefined)
+        this.#recordApprovalAnswered(active, input.approvalId, input.decision);
       return answeredTurnState(active.state);
     }
     if (active === undefined || providerRequestId === undefined)
       return this.#settleDeadTurnRequest(input.thread, "approval", String(input.approvalId));
-    if (
-      active.connection === undefined ||
-      (input.decision === "approved" &&
-        (turnPosture === "plan" ||
-          active.thread.permissionPersistence !== input.thread.permissionPersistence))
-    )
-      return turnState("failed");
+    if (active.connection === undefined)
+      return turnState("failed", { category: "failed", message: APPROVAL_SESSION_GONE_MESSAGE });
+    if (input.decision === "approved" && turnPosture === "plan") return refusedInPlan;
     const connection = active.connection;
+    // The provider session was opened with the persistence the turn started
+    // with. After the person changed it, an allow is delivered for this one
+    // call, so nothing is remembered beyond what either setting allows.
+    const once =
+      ownerCurrent !== undefined ||
+      active.thread.permissionPersistence !== input.thread.permissionPersistence;
     if (ownerCurrent === undefined) {
       active.approvals.delete(input.approvalId);
       active.approvalPostures.delete(input.approvalId);
@@ -5314,14 +5327,42 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           sessionId: active.sessionId as never,
           requestId: providerRequestId,
           approved: input.decision === "approved",
-          ...(ownerCurrent === undefined ? {} : { scope: "once" as const }),
+          ...(once ? { scope: "once" as const } : {}),
         });
       }),
     );
+    // An owner's answer journals `owner-approval-settled` instead.
+    if (ownerCurrent === undefined)
+      this.#recordApprovalAnswered(active, input.approvalId, input.decision);
     // A denial goes back to the model, which adjusts, as on the provider's
     // own: no count of denials ends the turn (Architecture: "Octant adds no
     // restrictions of its own unless Strict is on", in Strict too).
     return answeredTurnState(active.state);
+  }
+
+  /**
+   * Journals that a person's answer reached the asker, on the turn that asked.
+   * A re-read of the turn's stream otherwise offers the ask again, and its
+   * Approve is refused because nothing waits for it. The answer was already
+   * delivered, so a journal that refuses the row leaves the result as it is.
+   */
+  #recordApprovalAnswered(
+    active: ActiveTurn,
+    approvalId: string,
+    decision: "approved" | "denied",
+  ): void {
+    try {
+      const frame = this.#appendTurnEvent(active, {
+        event: {
+          kind: "approval-answered",
+          approvalId: CodeApprovalId.make(approvalId),
+          decision,
+        },
+      });
+      active.cursor = frame.cursor;
+    } catch {
+      // The provider already has the answer; the stream keeps the ask.
+    }
   }
 
   /**
@@ -5415,8 +5456,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     kind: "approval" | "input",
     requestId: string,
   ): ReturnType<typeof turnState> {
+    // Every refusal here names its reason: a bare failure reads in the
+    // renderer as "the turn changed", which said nothing about why.
+    const notWaiting = turnState("failed", {
+      category: "failed",
+      message: kind === "approval" ? APPROVAL_NOT_WAITING_MESSAGE : QUESTION_NOT_WAITING_MESSAGE,
+    });
     const history = this.#events.historyForThread(thread.id);
-    if (history.status !== "ok") return turnState("failed");
+    if (history.status !== "ok") return notWaiting;
     const liveOperationId = this.#active.get(String(thread.id))?.operationId;
     let owner:
       | {
@@ -5447,7 +5494,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         owner.unsettled = event.result.state === "running" || event.result.state === "waiting";
       }
     }
-    if (owner === undefined || !owner.unsettled) return turnState("failed");
+    if (owner === undefined || !owner.unsettled) return notWaiting;
     const failure = {
       category: "failed",
       message:
@@ -5455,7 +5502,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     } as const;
     return this.#interruptOwner(thread.id, owner, failure)
       ? turnState("interrupted", failure)
-      : turnState("failed");
+      : notWaiting;
   }
 
   /**
@@ -6518,7 +6565,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    */
   #approvalPosture(active: ActiveTurn): string | undefined {
     const thread = this.#effectiveThread(active.windowId, active.thread.id);
-    return thread === undefined ? undefined : approvalPostureOf(thread);
+    // The running turn keeps the grant persistence it started with, and an
+    // allow answered after a change is delivered once, so a persistence change
+    // alone does not ask again.
+    return thread === undefined
+      ? undefined
+      : approvalPostureOf({
+          ...thread,
+          permissionPersistence: active.thread.permissionPersistence,
+        });
   }
 
   #effectiveThread(windowId: WindowId, threadId: CodeThreadId): CodeThread | undefined {

@@ -168,9 +168,16 @@ export const BrowserContextCreateCommand = Schema.Struct({
 }).annotations(strict);
 export type BrowserContextCreateCommand = typeof BrowserContextCreateCommand.Type;
 
+/**
+ * A read of one context. A headless page gets a fresh picture unless
+ * `freshPicture` is `false`; a page shown in the window gets one only when
+ * `freshPicture` is `true`, which the minimised Browser card asks for because
+ * that page is then off screen. The pane that shows the page never asks.
+ */
 export const BrowserContextInspectCommand = Schema.Struct({
   contextId: BrowserContextId,
   threadId: BrowserThreadId,
+  freshPicture: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type BrowserContextInspectCommand = typeof BrowserContextInspectCommand.Type;
 

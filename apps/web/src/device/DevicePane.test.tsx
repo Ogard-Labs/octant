@@ -668,8 +668,11 @@ describe.each(HOSTS)("DevicePane on a $hostPlatform host", (host) => {
       checks: [{ id: "sdk", label: "Android SDK found", state: "waiting" }],
     });
 
+    // The explanation is an info tooltip on the pane bar, not a paragraph.
     expect(
-      screen.getByText(`Octant checks these on ${host.computer}. Nothing is installed for you.`),
+      screen.getByRole("button", {
+        name: `Octant checks these on ${host.computer}. Nothing is installed for you.`,
+      }),
     ).toBeVisible();
   });
 });

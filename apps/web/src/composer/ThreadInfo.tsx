@@ -1,4 +1,4 @@
-import { Info } from "lucide-react";
+import { Info } from "../ui/icons";
 import {
   createContext,
   useCallback,
@@ -12,6 +12,7 @@ import {
 } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
+import { useRegisterComposerMenuAction } from "./ComposerMenuActions";
 import { ThreadStatsBlock } from "../threadStats/ThreadStats";
 import { ThreadNotesRows } from "../threadNotes/ThreadNotes";
 
@@ -59,17 +60,6 @@ export function useThreadInfoAttention(key: string, needsPerson: boolean): void 
 export function ThreadInfo(props: {
   readonly children: ReactNode;
   /**
-   * Where the thread runs. A surface that names its Project in the row hangs
-   * the panel on that name, so the row has one control where it had a name and
-   * an info icon; without it the panel has its own small icon.
-   */
-  readonly place?: {
-    readonly label: string;
-    readonly content: ReactNode;
-    /** The tooltip: the full place when its words are cut to fit the row. */
-    readonly tooltip?: string;
-  };
-  /**
    * The thread whose recap and notes the panel shows, and how a note goes
    * into this thread's composer. Absent where the panel has no host thread.
    */
@@ -80,7 +70,6 @@ export function ThreadInfo(props: {
 }) {
   const [open, setOpen] = useState(false);
   const [flags, setFlags] = useState<ReadonlySet<string>>(() => new Set());
-  const { place } = props;
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const panelId = useId();
@@ -93,6 +82,14 @@ export function ThreadInfo(props: {
       return next;
     });
   }, []);
+  // In a thread's composer the panel is an item of the + menu, so the row
+  // under the box holds no icon for it. Where nothing offers that menu (the
+  // panel on its own) it keeps its own button.
+  const inMenu = useRegisterComposerMenuAction("thread-info", {
+    label: "Thread info",
+    icon: <Info aria-hidden="true" size={14} />,
+    onSelect: () => setOpen((value) => !value),
+  });
   const panel = useMemo<ThreadInfoPanel>(() => ({ open: () => setOpen(true), flag }), [flag]);
 
   useEffect(() => {
@@ -105,8 +102,20 @@ export function ThreadInfo(props: {
       if (target.closest(ROW_POPUP)) return;
       setOpen(false);
     };
+    // Opened from the + menu, focus is back on the plus, outside the panel:
+    // Escape closes the panel from there too.
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const target = event.target;
+      if (target instanceof Element && target.closest(ROW_POPUP)) return;
+      setOpen(false);
+    };
     document.addEventListener("pointerdown", closeOnOutsidePress);
-    return () => document.removeEventListener("pointerdown", closeOnOutsidePress);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePress);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
   }, [open]);
 
   return (
@@ -124,39 +133,28 @@ export function ThreadInfo(props: {
         }}
         ref={root}
       >
-        {/* The button is its icon alone: its two words made the line under
-            the card wrap in a split pane, and left the trailing control on a
-            line of its own. A waiting review still says so in words. */}
-        <OctantTooltip
-          align="start"
-          label={
-            place === undefined ? "Thread info" : (place.tooltip ?? `Thread info: ${place.label}`)
-          }
-          side="top"
-        >
-          <OctantButton
-            aria-controls={panelId}
-            aria-expanded={open}
-            aria-label={`${flags.size === 0 ? "Thread info" : "Thread info, review required"}${
-              place === undefined || place.label === "" ? "" : `: ${place.label}`
-            }`}
-            className={
-              place === undefined
-                ? "thread-info__trigger"
-                : "thread-info__trigger composer-place composer-place--control"
-            }
-            onClick={() => setOpen((value) => !value)}
-            ref={trigger}
-            size={place === undefined && flags.size === 0 ? "icon" : "sm"}
-            type="button"
-            variant="ghost"
-          >
-            {place === undefined ? <Info aria-hidden="true" size={16} /> : place.content}
-            {flags.size === 0 ? null : (
-              <span className="thread-info__attention">Review required</span>
-            )}
-          </OctantButton>
-        </OctantTooltip>
+        {inMenu && flags.size === 0 ? null : (
+          // A row waiting on the person must be seen without opening the menu,
+          // so the button comes back, in words, while one does.
+          <OctantTooltip align="start" label="Thread info" side="top">
+            <OctantButton
+              aria-controls={panelId}
+              aria-expanded={open}
+              aria-label={flags.size === 0 ? "Thread info" : "Thread info, review required"}
+              className="thread-info__trigger"
+              onClick={() => setOpen((value) => !value)}
+              ref={trigger}
+              size={flags.size === 0 ? "icon" : "sm"}
+              type="button"
+              variant="ghost"
+            >
+              {flags.size === 0 ? <Info aria-hidden="true" size={16} /> : null}
+              {flags.size === 0 ? null : (
+                <span className="thread-info__attention">Review required</span>
+              )}
+            </OctantButton>
+          </OctantTooltip>
+        )}
         <section
           aria-label="Thread info"
           className="thread-info__panel"

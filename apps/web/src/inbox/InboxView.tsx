@@ -2,7 +2,8 @@ import type { GithubCatalogueReadResponse } from "@octant/contracts";
 import type { PendingRequest, WaitingAsk } from "@octant/contracts/pending-requests";
 import type { GithubAssignedWorkPage } from "@octant/contracts";
 import type { AssignedLinearIssuesList } from "./loadAssignedLinearIssues";
-import { CircleDot, Folder, GitPullRequest, ListTodo, RefreshCw } from "lucide-react";
+import { CircleDot, Folder, ListTodo, RefreshCw } from "../ui/icons";
+import { pullRequestStateMark } from "../code/pullRequestState";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
 import { PendingRequestRow } from "../pendingRequests/PendingRequestRow";
@@ -27,7 +28,8 @@ import { useMinuteTick } from "../polling/useMinuteTick";
 import { InboxPlanUsageRows, useInboxPlanUsage } from "./InboxPlanUsage";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
-  ASSIGNED_WORK_CATEGORY_LABELS,
+  assignedWorkMeta,
+  assignedWorkState,
   INBOX_FILTERS,
   assignedWorkSeenKey,
   groupInboxByProject,
@@ -72,8 +74,8 @@ export interface InboxViewProps {
   readonly loadAssignedLinearIssues?: () => Promise<AssignedLinearIssuesList>;
   /** Opens the full Linear issue browser when the inbox list is incomplete. */
   readonly onOpenLinearIssues?: () => void;
-  /** The next step from an empty Inbox: see every thread on the Board. */
-  readonly onOpenBoard?: () => void;
+  /** The one action from an empty Inbox: start a thread in the current mode. */
+  readonly onStartThread?: () => void;
 }
 
 type GithubSection =
@@ -124,7 +126,7 @@ export function InboxView(props: InboxViewProps) {
         } else {
           setGithub({
             kind: "failed",
-            message: "GitHub returned a response Octant could not read. Refresh to try again.",
+            message: "Octant could not read GitHub's reply. Refresh to try again.",
           });
         }
       },
@@ -234,10 +236,11 @@ export function InboxView(props: InboxViewProps) {
   return (
     <Surface ariaLabel="Inbox" className="inbox-page">
       <SurfaceHeader
-        detail={inboxStateSentence(counts.all, counts.urgent, today.getTime())}
-        display
         onBack={props.onClose}
         title="Inbox"
+        {...(counts.all === 0
+          ? {}
+          : { detail: inboxStateSentence(counts.all, counts.urgent, today.getTime()) })}
         {...(externalSectionsPresent
           ? {
               actions: (
@@ -255,7 +258,7 @@ export function InboxView(props: InboxViewProps) {
             }
           : {})}
       />
-      <div className="inbox-page__cards">
+      <div className="inbox-page__cards" data-needs-you={groups.length === 0 ? "empty" : "waiting"}>
         <InboxCard
           actions={
             <OctantToggleGroup<InboxFilter>
@@ -280,9 +283,9 @@ export function InboxView(props: InboxViewProps) {
           {groups.length === 0 ? (
             <div className="inbox-card__empty" role="status">
               <p className="oct-row-detail">{activeFilter?.empty}</p>
-              {filter === "all" && props.onOpenBoard !== undefined ? (
-                <OctantButton onClick={props.onOpenBoard} size="sm" type="button" variant="ghost">
-                  Open the Board
+              {props.onStartThread !== undefined ? (
+                <OctantButton onClick={props.onStartThread} size="sm" type="button" variant="ghost">
+                  Start a thread
                 </OctantButton>
               ) : null}
             </div>
@@ -374,9 +377,7 @@ export function InboxView(props: InboxViewProps) {
           {loadGithub === undefined ? null : (
             <InboxCard label="GitHub">
               {github.kind === "loading" ? (
-                <p className="oct-row-detail inbox-card__note" role="status">
-                  Loading assigned work…
-                </p>
+                <InboxSkeletonRow label="Loading assigned work…" />
               ) : github.kind === "failed" ? (
                 <OctantAlert className="inbox-card__note" tone="warning">
                   {github.message}
@@ -389,20 +390,24 @@ export function InboxView(props: InboxViewProps) {
                 <>
                   {github.page.freshness.status === "stale" ? (
                     <p className="oct-row-detail inbox-card__note" role="status">
-                      Showing the last loaded list; GitHub could not be reached.
+                      Showing the last list. GitHub could not be reached.
                     </p>
                   ) : null}
                   <ul className="surface-list">
                     {github.page.items.map((item) => {
                       const key = assignedWorkSeenKey(item);
-                      const Icon = item.category === "issue" ? CircleDot : GitPullRequest;
+                      const state = assignedWorkState(item);
+                      const Icon =
+                        item.category === "issue"
+                          ? CircleDot
+                          : pullRequestStateMark(state.tone).Icon;
                       return (
                         <li
                           className="surface-row inbox-row"
                           key={`${item.owner}/${item.name}#${item.number}`}
                         >
                           <a
-                            className="inbox-view__row"
+                            className="inbox-view__row inbox-view__row--work"
                             data-unseen={seenKeys.has(key) ? undefined : "true"}
                             href={item.url}
                             onClick={() => markSeen(key)}
@@ -410,16 +415,20 @@ export function InboxView(props: InboxViewProps) {
                             target="_blank"
                           >
                             {seenKeys.has(key) ? null : <span className="sr-only">Unseen</span>}
-                            <span className="surface-row__copy">
-                              <span className="oct-row-label">
-                                <Icon aria-hidden="true" className="icon" size={14} />
-                                {item.title}
-                              </span>
-                              <span className="oct-meta">
-                                {ASSIGNED_WORK_CATEGORY_LABELS[item.category]} · {item.owner}/
-                                {item.name}#{item.number}
-                              </span>
+                            <span
+                              aria-label={state.label}
+                              className="work-list__state"
+                              data-pr-state={state.tone}
+                              data-state={state.tone}
+                              role="img"
+                            >
+                              <Icon aria-hidden="true" size={16} />
                             </span>
+                            <span className="surface-row__copy">
+                              <span className="oct-row-label">{item.title}</span>
+                              <span className="oct-meta">{assignedWorkMeta(item)}</span>
+                            </span>
+                            <span aria-hidden="true" className="inbox-view__unseen" />
                           </a>
                         </li>
                       );
@@ -432,9 +441,7 @@ export function InboxView(props: InboxViewProps) {
           {loadLinear === undefined ? null : (
             <InboxCard label="Linear">
               {linear.kind === "loading" ? (
-                <p className="oct-row-detail inbox-card__note" role="status">
-                  Loading assigned issues…
-                </p>
+                <InboxSkeletonRow label="Loading assigned issues…" />
               ) : linear.kind === "failed" ? (
                 <OctantAlert className="inbox-card__note" tone="warning">
                   {linear.message}
@@ -510,6 +517,19 @@ export function InboxView(props: InboxViewProps) {
 }
 
 /**
+ * A source still loading: one quiet row in the shape of a list row, so the card
+ * keeps its height when the rows arrive. The words stay for assistive technology.
+ */
+function InboxSkeletonRow(props: { readonly label: string }) {
+  return (
+    <div className="inbox-card__note" role="status">
+      <span className="sr-only">{props.label}</span>
+      <span aria-hidden="true" className="skeleton inbox-card__skeleton" />
+    </div>
+  );
+}
+
+/**
  * One raised card of the Inbox: its small label at the top in the meta ink,
  * with the card's own controls at the trailing edge of that row.
  */
@@ -520,7 +540,7 @@ function InboxCard(props: {
 }) {
   const headingId = useId();
   return (
-    <OctantCard aria-labelledby={headingId} className="inbox-card">
+    <OctantCard aria-labelledby={headingId} className="inbox-card outline-0">
       <div className="inbox-card__head">
         <h2 className="oct-section-label" id={headingId}>
           {props.label}
@@ -534,7 +554,9 @@ function InboxCard(props: {
 
 /**
  * The page's state in one line beside the title: today's date in the person's
- * locale and what waits. No greeting by time of day.
+ * locale and what waits. No greeting by time of day. An empty page has no such
+ * line: the card below already says nothing is there, so the header would say
+ * it twice.
  */
 export function inboxStateSentence(waiting: number, urgent: number, now: number): string {
   const date = new Intl.DateTimeFormat(undefined, {
@@ -543,11 +565,7 @@ export function inboxStateSentence(waiting: number, urgent: number, now: number)
     month: "long",
   }).format(now);
   const state =
-    waiting === 0
-      ? "Nothing is waiting on you."
-      : waiting === 1
-        ? "1 thread is waiting on you."
-        : `${waiting} threads are waiting on you.`;
+    waiting === 1 ? "1 thread is waiting on you." : `${waiting} threads are waiting on you.`;
   return urgent === 0 ? `${date} · ${state}` : `${date} · ${state} ${urgent} urgent.`;
 }
 

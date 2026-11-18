@@ -1,4 +1,4 @@
-import { Ellipsis, PanelLeft } from "lucide-react";
+import { Ellipsis, PanelLeft } from "../ui/icons";
 import {
   OctantMenuGroup,
   OctantMenuItem,
@@ -41,7 +41,7 @@ export function SidebarMore(props: SidebarMoreProps) {
             className="sidebar-rail__button window-no-drag"
           >
             <span aria-hidden="true" className="sidebar-rail__face">
-              <Ellipsis size={16} />
+              <Ellipsis aria-hidden="true" size={16} />
             </span>
           </OctantMenuTrigger>
         </OctantTooltip>

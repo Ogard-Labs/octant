@@ -8,7 +8,7 @@ import {
   Type,
   Undo2,
   X,
-} from "lucide-react";
+} from "../ui/icons";
 import { useState, type KeyboardEvent, type ReactNode } from "react";
 import { MARKUP_INKS, markupInk, type MarkupInkId } from "../theme/markupInk";
 import { OctantButton } from "../ui/base/OctantButton";

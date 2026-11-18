@@ -778,7 +778,13 @@ describe("useShellController", () => {
       }),
     );
 
-    expect(openDockBrowser).toHaveBeenCalledWith({ threadId: String(threadId), offered: true });
+    // The offer names its sessions, so the dock can tell a page it already
+    // shows from an agent's new one.
+    expect(openDockBrowser).toHaveBeenCalledWith({
+      threadId: String(threadId),
+      offered: true,
+      sessionIds: ["30000000-0000-4000-8000-000000000001"],
+    });
     expect(server.execute.mock.calls.length).toBe(executeCalls);
     expect(
       panes(result.current.workspace!.layouts.code).filter(
@@ -800,7 +806,13 @@ describe("useShellController", () => {
       }),
     );
 
-    expect(openDockBrowser).toHaveBeenCalledWith({ threadId: String(threadId), offered: true });
+    // The offer names its sessions, so the dock can tell a page it already
+    // shows from an agent's new one.
+    expect(openDockBrowser).toHaveBeenCalledWith({
+      threadId: String(threadId),
+      offered: true,
+      sessionIds: ["30000000-0000-4000-8000-000000000001"],
+    });
     const browserPanes = panes(result.current.workspace!.layouts.code).filter(
       (pane) => pane.surface.kind === "browser",
     );
@@ -1286,6 +1298,22 @@ describe("useShellController", () => {
     expect(String(result.current.workspace!.activePaneIds.code)).toBe(
       String(draftPanes[0]!.paneId),
     );
+  });
+
+  it("gives a new task the whole window when it is started from a split", async () => {
+    const { result } = await readyBoundCodeShell();
+    const secondThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000894");
+    await act(async () =>
+      result.current.pinInPane(mintedCodeThreadSurface(secondThreadId, "Second")),
+    );
+    expect(panes(result.current.workspace!.layouts.code)).toHaveLength(2);
+
+    await act(async () => result.current.openDraftThread("code"));
+
+    const shown = panes(result.current.workspace!.layouts.code);
+    expect(shown).toHaveLength(1);
+    expect(shown[0]!.surface).toMatchObject({ kind: "draft-thread", mode: "code" });
+    expect(result.current.announcement).toBe("New Code thread draft opened.");
   });
 
   it("rebinds the draft's pane when the thread minted from it opens", async () => {

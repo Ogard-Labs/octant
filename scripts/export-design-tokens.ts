@@ -596,7 +596,7 @@ export const GROUPS: ReadonlyArray<Group> = [
     pattern:
       /^--oct-(?:control-height(?:-sm)?|menu-row-h|menu-row-inset|menu-inset|nav-row-h|nav-inset|rail-button-h|rail-tab-h|title-rail-h|touch-min|avatar-[a-z]+|surface-header-h)$/,
   },
-  { id: "opacity", label: "Opacity", pattern: /^--oct-disabled-opacity$/ },
+  { id: "opacity", label: "Opacity", pattern: /^--oct-(disabled|window-inactive)-opacity$/ },
   { id: "radius", label: "Radii", pattern: /^--oct-radius-[a-z-]+$/ },
   { id: "icon", label: "Icon sizes", pattern: /^--oct-icon-[a-z]+$/ },
   {
