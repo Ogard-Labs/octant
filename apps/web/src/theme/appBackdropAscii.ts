@@ -17,6 +17,7 @@ import {
   readSidebarColumns,
   type ContentColumn,
 } from "./appBackdropColumn";
+import { DEFAULT_CHARACTER_LEVEL, DEFAULT_CHARACTER_SET } from "@octant/domain/theme-policy";
 import { displayPixelRatio, watchDisplayPixelRatio } from "./appBackdropPhoto";
 import { parseColor } from "./appBackdropPrint";
 
@@ -38,8 +39,6 @@ import { parseColor } from "./appBackdropPrint";
  * at about forty frames a second only while a ring is alive.
  */
 
-const GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-
 /** One cell in CSS pixels: a ten-pixel monospace glyph on a thirteen-pixel line. */
 export const CELL_WIDTH = 7;
 export const CELL_HEIGHT = 13;
@@ -53,6 +52,8 @@ export const CENTRE_SHARE = COLUMN_SHARE;
 /** Value noise below the first edge is empty, above the second it is full. */
 const PATCH_LOW = 0.52;
 const PATCH_HIGH = 0.82;
+/** Each density point moves both patch edges by this much, so more shows at higher density. */
+const DENSITY_STEP = 0.004;
 /** A pattern lasts this long and cross-fades into the next over the last part. */
 export const PATTERN_SECONDS = 20;
 export const FADE_SECONDS = 4;
@@ -82,6 +83,110 @@ const MAX_RATIO = 2;
 const MAX_PIXELS = 5_000_000;
 /** The ink is read again this many frames apart, so a theme change follows. */
 const INK_CHECK_FRAMES = 30;
+
+export interface AsciiFieldOptions {
+  /** The characters the field draws, one cell each. */
+  readonly characterSet: string;
+  /** 0..100: how much of the field shows. 50 is the default field. */
+  readonly density: number;
+  /** 0..100: how fast patches drift and glyphs change. 50 is the default; 0 is still. */
+  readonly speed: number;
+}
+
+export const DEFAULT_ASCII_OPTIONS: AsciiFieldOptions = {
+  characterSet: DEFAULT_CHARACTER_SET,
+  density: DEFAULT_CHARACTER_LEVEL,
+  speed: DEFAULT_CHARACTER_LEVEL,
+};
+
+/** The two noise edges that decide where patches show, for a density in 0..100. */
+export function patchThresholds(density: number): { readonly low: number; readonly high: number } {
+  const shift = (DEFAULT_CHARACTER_LEVEL - density) * DENSITY_STEP;
+  return { low: PATCH_LOW + shift, high: PATCH_HIGH + shift };
+}
+
+const STRENGTH_COLUMNS = 120;
+const STRENGTH_ROWS = 48;
+const STRENGTH_TIMES = [0, 5, 11, 17, 23, 31, 47];
+const strengthCache = new Map<number, number>();
+
+/**
+ * The average patch strength over a fixed grid of cells and moments for a
+ * density: how much of the field shows, on average. Density 50 is the
+ * reference the other densities are held to.
+ */
+export function meanStrength(density: number): number {
+  const known = strengthCache.get(density);
+  if (known !== undefined) return known;
+  const thresholds = patchThresholds(density);
+  let total = 0;
+  for (const t of STRENGTH_TIMES) {
+    for (let row = 0; row < STRENGTH_ROWS; row += 1) {
+      for (let column = 0; column < STRENGTH_COLUMNS; column += 1) {
+        total += patchStrength(column, row, t, thresholds);
+      }
+    }
+  }
+  const mean = total / (STRENGTH_TIMES.length * STRENGTH_ROWS * STRENGTH_COLUMNS);
+  strengthCache.set(density, mean);
+  return mean;
+}
+
+/** A denser field draws fainter, so its average ink never exceeds the default field's. */
+export function densityScale(density: number): number {
+  const mean = meanStrength(density);
+  if (!(mean > 0)) return 1;
+  return Math.min(1, meanStrength(DEFAULT_CHARACTER_LEVEL) / mean);
+}
+
+/**
+ * How much of the peak ink a set may use: a set that fills more of its cell
+ * than the default letters and digits draws fainter, so the field's average
+ * ink never exceeds the default field's. A set that fills less is not boosted.
+ */
+export function inkScale(defaultCoverage: number, setCoverage: number): number {
+  if (!(setCoverage > 0) || !(defaultCoverage > 0)) return 1;
+  return Math.min(1, defaultCoverage / setCoverage);
+}
+
+const coverageCache = new Map<string, number>();
+
+/**
+ * The share of a cell's pixels' alpha the set's glyphs ink, averaged over the set,
+ * each drawn once in one cell at ratio 1. Undefined where nothing can be drawn
+ * (no canvas), which scales nothing.
+ */
+function measureCoverage(characters: ReadonlyArray<string>): number | undefined {
+  const key = characters.join("");
+  const known = coverageCache.get(key);
+  if (known !== undefined) return known;
+  const probe = document.createElement("canvas");
+  probe.width = CELL_WIDTH;
+  probe.height = CELL_HEIGHT;
+  const probeContext = probe.getContext("2d", { willReadFrequently: true });
+  if (probeContext === null || typeof probeContext.getImageData !== "function") return undefined;
+  probeContext.fillStyle = "#000";
+  probeContext.font = `${FONT_SIZE}px ${FONT_FAMILY}`;
+  probeContext.textBaseline = "middle";
+  let total = 0;
+  for (const character of characters) {
+    probeContext.clearRect(0, 0, CELL_WIDTH, CELL_HEIGHT);
+    probeContext.fillText(character, 0, CELL_HEIGHT * 0.5, CELL_WIDTH);
+    const pixels = probeContext.getImageData(0, 0, CELL_WIDTH, CELL_HEIGHT).data;
+    let inked = 0;
+    for (let at = 3; at < pixels.length; at += 4) inked += (pixels[at] ?? 0) / 255;
+    total += inked / (CELL_WIDTH * CELL_HEIGHT);
+  }
+  const coverage = total / Math.max(1, characters.length);
+  coverageCache.set(key, coverage);
+  return coverage;
+}
+
+function peakScale(characters: ReadonlyArray<string>): number {
+  const set = measureCoverage(characters);
+  const reference = measureCoverage(Array.from(DEFAULT_CHARACTER_SET));
+  return set === undefined || reference === undefined ? 1 : inkScale(reference, set);
+}
 
 function smoothstep(low: number, high: number, value: number): number {
   const t = Math.min(1, Math.max(0, (value - low) / (high - low)));
@@ -127,7 +232,14 @@ function patternValue(pattern: number, column: number, row: number, t: number): 
  * patterns around a change are blended across the end of the first, so the
  * field never jumps.
  */
-export function patchStrength(column: number, row: number, t: number): number {
+export function patchStrength(
+  column: number,
+  row: number,
+  t: number,
+  thresholds: { readonly low: number; readonly high: number } = patchThresholds(
+    DEFAULT_CHARACTER_LEVEL,
+  ),
+): number {
   const phase = t / PATTERN_SECONDS;
   const index = Math.floor(phase);
   const within = (phase - index) * PATTERN_SECONDS;
@@ -138,7 +250,7 @@ export function patchStrength(column: number, row: number, t: number): number {
     const mix = smoothstep(0, 1, (within - fadeStart) / FADE_SECONDS);
     value = value * (1 - mix) + next * mix;
   }
-  return smoothstep(PATCH_LOW, PATCH_HIGH, value);
+  return smoothstep(thresholds.low, thresholds.high, value);
 }
 
 /** The backing-store ratio for a field of this CSS size on this display. */
@@ -153,6 +265,10 @@ interface Surface {
   readonly rows: number;
   readonly ratio: number;
   readonly glyphs: Uint8Array;
+  /** The cells' characters; replaced when the person's set changes. */
+  characters: ReadonlyArray<string>;
+  /** The ink peak's scale for this set, from its measured coverage. */
+  peak: number;
   readonly layer: HTMLCanvasElement;
   readonly mask: HTMLCanvasElement;
   readonly maskImage: ImageData;
@@ -167,6 +283,7 @@ function createSurface(
   height: number,
   ink: string,
   contentColumn: ReadonlyArray<ContentColumn>,
+  characters: ReadonlyArray<string>,
 ): Surface | undefined {
   const columns = Math.max(1, Math.ceil(width / CELL_WIDTH));
   const rows = Math.max(1, Math.ceil(height / CELL_HEIGHT));
@@ -189,7 +306,7 @@ function createSurface(
   for (let row = 0; row < rows; row += 1) {
     for (let column = 0; column < columns; column += 1) {
       const index = row * columns + column;
-      glyphs[index] = Math.floor(Math.random() * GLYPHS.length);
+      glyphs[index] = Math.floor(Math.random() * characters.length);
       shares[index] = columnShare((column + 0.5) * CELL_WIDTH, contentColumn, floor);
     }
   }
@@ -198,6 +315,8 @@ function createSurface(
     rows,
     ratio,
     glyphs,
+    characters,
+    peak: peakScale(characters),
     layer,
     mask,
     maskImage: maskContext.createImageData(columns, rows),
@@ -209,11 +328,12 @@ function createSurface(
 function paintCell(context: CanvasRenderingContext2D, surface: Surface, index: number) {
   const column = index % surface.columns;
   const row = Math.floor(index / surface.columns);
-  const glyph = GLYPHS.charAt(surface.glyphs[index] ?? 0);
+  const glyph = surface.characters[surface.glyphs[index] ?? 0] ?? "";
   const x = column * CELL_WIDTH * surface.ratio;
   const y = row * CELL_HEIGHT * surface.ratio;
   context.clearRect(x, y, CELL_WIDTH * surface.ratio, CELL_HEIGHT * surface.ratio);
-  context.fillText(glyph, x, y + CELL_HEIGHT * surface.ratio * 0.5);
+  // A wide glyph is squeezed into its cell instead of running into the next.
+  context.fillText(glyph, x, y + CELL_HEIGHT * surface.ratio * 0.5, CELL_WIDTH * surface.ratio);
 }
 
 function paintLayer(surface: Surface, layer: HTMLCanvasElement, ink: string) {
@@ -228,6 +348,9 @@ function paintLayer(surface: Surface, layer: HTMLCanvasElement, ink: string) {
   }
 }
 
+/** Stops the field; `redraw` draws a still field's one frame again from the current options. */
+export type AsciiFieldStop = (() => void) & { readonly redraw: () => void };
+
 /**
  * Draws the field into `canvas` and, when `animated`, keeps it moving until
  * the returned stop is called. A still field draws one frame and nothing more,
@@ -239,9 +362,10 @@ export function runAsciiField(
   canvas: HTMLCanvasElement,
   animated: boolean,
   ripplesWithin?: string,
-): () => void {
+  readOptions: () => AsciiFieldOptions = () => DEFAULT_ASCII_OPTIONS,
+): AsciiFieldStop {
   const context = canvas.getContext("2d");
-  if (context === null) return () => undefined;
+  if (context === null) return Object.assign(() => undefined, { redraw: () => undefined });
   let surface: Surface | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let idle: number | undefined;
@@ -262,6 +386,11 @@ export function runAsciiField(
   let fieldAlpha = new Float32Array(0);
   let fieldAt = Number.NEGATIVE_INFINITY;
   const crossed: number[] = [];
+  // The patches' own clock runs at the speed's pace, summed frame by frame so
+  // a speed change never makes them jump.
+  let patchClock = 0;
+  let lastSeconds: number | undefined;
+  let characters: ReadonlyArray<string> = Array.from(readOptions().characterSet);
 
   const readInk = () => getComputedStyle(canvas).color;
   const readAccent = () => {
@@ -298,10 +427,14 @@ export function runAsciiField(
       surface = undefined;
       return;
     }
-    surface = createSurface(canvas, rect.width, rect.height, readInk(), [
-      ...readContentColumns(canvas, rect.width),
-      ...readSidebarColumns(canvas),
-    ]);
+    surface = createSurface(
+      canvas,
+      rect.width,
+      rect.height,
+      readInk(),
+      [...readContentColumns(canvas, rect.width), ...readSidebarColumns(canvas)],
+      characters,
+    );
     if (surface !== undefined) paintLayer(surface, surface.layer, surface.ink);
     fieldAlpha = new Float32Array(surface === undefined ? 0 : surface.columns * surface.rows);
     fieldAt = Number.NEGATIVE_INFINITY;
@@ -309,19 +442,43 @@ export function runAsciiField(
     if (rings.length > 0) createAccent();
   };
 
+  // A new set repaints the glyph layer once; density and speed only change
+  // the frame maths below.
+  const adoptSet = (next: string) => {
+    if (surface === undefined || next === characters.join("")) return;
+    characters = Array.from(next);
+    surface.characters = characters;
+    surface.peak = peakScale(characters);
+    for (let index = 0; index < surface.glyphs.length; index += 1) {
+      surface.glyphs[index] = Math.floor(Math.random() * characters.length);
+    }
+    paintLayer(surface, surface.layer, surface.ink);
+    if (accentLayer !== undefined) paintLayer(surface, accentLayer, accentInk);
+    fieldAt = Number.NEGATIVE_INFINITY;
+  };
+
   const draw = (seconds: number) => {
     if (surface === undefined) return;
+    const options = readOptions();
+    adoptSet(options.characterSet);
+    const pace = options.speed / DEFAULT_CHARACTER_LEVEL;
+    if (lastSeconds !== undefined && seconds > lastSeconds) {
+      patchClock += (seconds - lastSeconds) * pace;
+    }
+    lastSeconds = seconds;
+    const thresholds = patchThresholds(options.density);
     const current = surface;
     const { columns, rows, maskImage, shares, glyphs } = surface;
     const bytes = maskImage.data;
     // The patches drift slowly, so a ring's faster frames keep the last ones.
     if (seconds - fieldAt >= FRAME_MS / 1000 - 0.005 || seconds < fieldAt) {
       fieldAt = seconds;
+      const peak = PEAK_ALPHA * surface.peak * densityScale(options.density);
       for (let row = 0; row < rows; row += 1) {
         for (let column = 0; column < columns; column += 1) {
           const index = row * columns + column;
           fieldAlpha[index] =
-            patchStrength(column, row, seconds) * (shares[index] ?? 1) * PEAK_ALPHA;
+            patchStrength(column, row, patchClock, thresholds) * (shares[index] ?? 1) * peak;
         }
       }
     }
@@ -369,11 +526,11 @@ export function runAsciiField(
         accentContext.textBaseline = "middle";
       }
       const swap = (index: number) => {
-        glyphs[index] = Math.floor(Math.random() * GLYPHS.length);
+        glyphs[index] = Math.floor(Math.random() * characters.length);
         paintCell(layerContext, current, index);
         if (accentContext !== null) paintCell(accentContext, current, index);
       };
-      const swaps = Math.ceil(glyphs.length * SWAP_SHARE);
+      const swaps = Math.ceil(glyphs.length * SWAP_SHARE * pace);
       for (let count = 0; count < swaps; count += 1) {
         swap(Math.floor(Math.random() * glyphs.length));
       }
@@ -526,7 +683,15 @@ export function runAsciiField(
   if (hasIdle) idle = window.requestIdleCallback(begin, { timeout: 600 });
   else idle = window.setTimeout(begin, 1);
 
-  return () => {
+  const redraw = () => {
+    if (stopped || animated || surface === undefined) return;
+    // A still field always draws at time zero, so the patch cache would keep
+    // the old density's strengths; forget it so the new density shows.
+    fieldAt = Number.NEGATIVE_INFINITY;
+    draw(0);
+  };
+
+  const stop = () => {
     stopped = true;
     halt();
     if (resizing !== undefined) clearTimeout(resizing);
@@ -542,4 +707,5 @@ export function runAsciiField(
     stopPixelRatio();
     delete canvas.dataset["ready"];
   };
+  return Object.assign(stop, { redraw });
 }

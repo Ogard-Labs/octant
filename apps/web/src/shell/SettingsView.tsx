@@ -3126,6 +3126,9 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
                         onChange={(appBackground) => {
                           void props.themeController?.applyPatch({ appBackground });
                         }}
+                        onPreview={(appBackground) => {
+                          props.themeController?.updateDraft({ appBackground });
+                        }}
                       />
                     </>
                   ) : null}

@@ -15,6 +15,10 @@ export const SCENE_LIST: ReadonlyArray<SceneMeta> = [
   { id: "home" },
   { id: "code-side-panel", narrow: true },
   { id: "settings-appearance" },
+  {
+    id: "settings-background-custom",
+    open: ".settings-app-background__customize > summary",
+  },
   { id: "settings-usage" },
   { id: "agents-table", narrow: true },
   { id: "artifacts-table", narrow: true },
