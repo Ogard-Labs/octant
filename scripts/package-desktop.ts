@@ -901,6 +901,10 @@ export function createPackagerOptions(
           extendInfo: {
             OctantDesktopEntryPolicy: "sealed-main-v1",
             ...(identity.flavor === "stable" ? { OctantHostLaunchPolicy: "host-only-v1" } : {}),
+            // The bundled Simulator accessibility and camera tools need
+            // macOS 15, so the app declares it rather than launching where
+            // they fail.
+            LSMinimumSystemVersion: "15.0",
             NSMicrophoneUsageDescription:
               "Octant uses the microphone to dictate a message when you press the microphone button.",
           },

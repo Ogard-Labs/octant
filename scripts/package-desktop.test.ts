@@ -189,6 +189,7 @@ describe("desktop packaging boundary", () => {
       extendInfo: {
         OctantDesktopEntryPolicy: "sealed-main-v1",
         OctantHostLaunchPolicy: "host-only-v1",
+        LSMinimumSystemVersion: "15.0",
         NSMicrophoneUsageDescription:
           "Octant uses the microphone to dictate a message when you press the microphone button.",
       },
@@ -222,6 +223,25 @@ describe("desktop packaging boundary", () => {
       prune: false,
       protocols: [{ name: "Octant Code links", schemes: ["octant"] }],
     });
+  });
+
+  it("declares macOS 15 as the minimum for both desktop apps and no other platform", () => {
+    const stable = createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0");
+    const nightly = createPackagerOptions(
+      "/tmp/stage",
+      "/tmp/out",
+      "0.1.0-preview.20261104.1",
+      undefined,
+      desktopIdentity("nightly"),
+    );
+    expect(stable.extendInfo).toMatchObject({ LSMinimumSystemVersion: "15.0" });
+    expect(nightly.extendInfo).toMatchObject({ LSMinimumSystemVersion: "15.0" });
+    expect(
+      createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0", DESKTOP_PACKAGE_TARGETS["linux-x64"]),
+    ).not.toHaveProperty("extendInfo");
+    expect(
+      createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0", DESKTOP_PACKAGE_TARGETS["win32-x64"]),
+    ).not.toHaveProperty("extendInfo");
   });
 
   it("seals both desktop entries while keeping each app's worker host tree physical", () => {

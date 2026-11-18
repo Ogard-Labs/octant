@@ -19776,6 +19776,9 @@ defers, and it owns the architectural rules behind it.
 
 **Where the release stands (2026-11-05).** The first release is the Apple
 Silicon technical preview with the provider-neutral plugin/skill marketplace.
+It needs macOS 15 Sequoia or later: the app bundle declares 15.0 because the
+bundled Simulator accessibility and camera tools need it, while the core
+helpers declare 14.0 and are covered by the app's floor.
 Builds of `main` are meant to publish daily on the `preview` ring as the second
 app Octant Nightly, and on-demand pre-releases of the next stable on the
 `candidate` ring as Octant's Preview channel, as GitHub pre-releases named
