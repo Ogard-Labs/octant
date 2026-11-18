@@ -5049,7 +5049,7 @@ thread's [guardrail level](#security-and-authority). New tasks may choose an app
   rule under [Security and authority](#security-and-authority). Every Project terminal
   binds all of the Project's folders that exist like the main folder, so the
   shell can move between them; the pick only chooses where it starts. The
-  header's action buttons and the start screen's quick tools offer the pick
+  header's action buttons offer the pick
   once a Project has an extra folder. A Code thread's terminal binds every
   Project folder that exists as a Project terminal does, and its start command
   may name an extra folder to start in, compared as the exact path the Project
