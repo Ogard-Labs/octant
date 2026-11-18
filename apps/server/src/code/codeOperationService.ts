@@ -426,6 +426,8 @@ export interface CodeOperationTerminalPort {
     }[];
     readonly launcher?: TerminalLauncher;
     readonly executionPolicy?: CodeThread["executionPolicy"];
+    /** The thread's resolved Strict value, passed on a host without Octant's sandbox. */
+    readonly strict?: boolean;
   }) => Promise<CodeOperationTerminalSnapshot>;
   readonly attach: (terminalId: string) => CodeOperationTerminalSnapshot;
   readonly observe?: (
@@ -3938,6 +3940,12 @@ export class CodeOperationService {
             : {}),
           ...(serverLogin === undefined ? {} : { server: serverLogin }),
           executionPolicy: thread.executionPolicy,
+          // Windows has no Octant sandbox for a thread terminal, so it opens
+          // there unconfined outside Strict and refuses under it; elsewhere it
+          // keeps the confinement it has at every setting.
+          ...(process.platform === "win32"
+            ? { strict: this.#options.threadStrict?.(thread) ?? true }
+            : {}),
         });
         owner.starting = starting;
         this.#terminalOwners.set(command.terminalId, owner);

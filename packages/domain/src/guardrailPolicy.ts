@@ -163,36 +163,33 @@ export function refusesFullAccessSandbox(input: {
 }
 
 /**
- * Why Octant's own terminals and commands cannot run below Full access on a
- * Windows host. Below Full access they run inside Octant's process sandbox, and
- * Windows has no sandbox Octant can use yet: its launcher is built but has not
- * run on a person's Windows machine. A provider turn is judged by
- * {@link hostProviderTurnRefusal} instead, since the provider's own approvals
- * hold it there.
+ * Why one of Octant's own terminals or commands refuses on a Windows host.
+ * Outside Strict they run there unconfined at every level, as a person's own
+ * terminal and a provider's own commands do in other agent workspaces on
+ * Windows, each command still asking as its level asks. Strict, and Full
+ * access with the sandbox kept, need Octant's sandbox, and Windows has none
+ * Octant can use yet: its launcher is built but has not run on a person's
+ * Windows machine. A provider turn is judged by {@link hostProviderTurnRefusal}.
  */
 export const WINDOWS_SANDBOX_MISSING_REASON =
-  "This needs Octant's process sandbox, which Windows does not have yet. On this computer Octant's own terminals and commands run only at Full access; switch the thread to Full access with the sandbox off, or run it on a Mac or Linux host.";
-
-/**
- * Whether a turn at `access` needs Octant's process sandbox: every level
- * below Full access, and Full access with the sandbox kept.
- */
-export function levelNeedsSandbox(access: ThreadAccess): boolean {
-  return access.executionPolicy !== "full-access" || access.fullAccessSandbox === true;
-}
+  "This needs Octant's sandbox, which Windows does not have yet. Under Strict, or with the sandbox kept at Full access, Octant's own terminals and commands do not run on this computer; turn Strict off (and Keep the sandbox off) for this thread, or run it on a Mac or Linux host.";
 
 /**
  * Why one of Octant's own terminals or commands at `access` refuses on this
- * host, or undefined when it may run. The caller passes the level the work runs at
- * (a turn's clamped level, not only the thread's stored one), and the host's
- * own platform.
+ * host, or undefined when it may run. The caller passes the level the work
+ * runs at (a turn's clamped level, not only the thread's stored one), the
+ * thread's resolved Strict value, and the host's own platform. A caller that
+ * cannot say whether the work is Strict gets Strict's answer.
  */
 export function hostSandboxRefusal(input: {
   readonly platform: string | undefined;
   readonly access: ThreadAccess;
+  readonly strict?: boolean | undefined;
 }): string | undefined {
-  return input.platform === "win32" &&
-    (input.access.strict === true || levelNeedsSandbox(input.access))
+  if (input.platform !== "win32") return undefined;
+  return input.strict !== false ||
+    input.access.strict === true ||
+    (input.access.executionPolicy === "full-access" && input.access.fullAccessSandbox === true)
     ? WINDOWS_SANDBOX_MISSING_REASON
     : undefined;
 }
@@ -211,11 +208,13 @@ export const WINDOWS_KEPT_SANDBOX_REFUSAL =
 
 /**
  * Why a Chat provider launch refuses on a Windows host. Chat has no folder or
- * shell, which a provider runtime is held to by Octant's sandbox; a provider's
- * own approvals do not remove its file and shell tools.
+ * shell. Codex (no execution environment), Claude (no file or shell tool) and
+ * Pi (no built-in tool) are configured that way natively and start there
+ * outside Strict; OpenCode and the ACP agents keep their own file and shell
+ * tools whatever they are told, so only Octant's sandbox holds them to it.
  */
 export const WINDOWS_CHAT_PROVIDER_REFUSAL =
-  "Chat keeps a provider without a folder or shell through Octant's sandbox, which Windows doesn't have yet. Use Work or Code, or an Octant Harness model, on this computer.";
+  "This provider keeps Chat without a folder or shell only inside Octant's sandbox, which Windows doesn't have yet. On this computer use Codex, Claude, Pi or an Octant Harness model for Chat, or this provider in Work or Code.";
 
 /**
  * Why a provider turn at `access` refuses on this host, or undefined when it
@@ -254,8 +253,14 @@ export function windowsProviderLaunch(input: {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly fullAccessSandbox?: boolean | undefined;
   readonly strict?: boolean | undefined;
+  /**
+   * Whether this provider's Chat launch has no file or shell tool by its own
+   * configuration, so Chat's rule holds without Octant's sandbox.
+   */
+  readonly chatWithoutFolderOrShell?: boolean | undefined;
 }): WindowsProviderLaunch {
-  if (input.mode === "chat") return { status: "refused", reason: WINDOWS_CHAT_PROVIDER_REFUSAL };
+  if (input.mode === "chat" && input.chatWithoutFolderOrShell !== true)
+    return { status: "refused", reason: WINDOWS_CHAT_PROVIDER_REFUSAL };
   if (input.strict === true) return { status: "refused", reason: WINDOWS_STRICT_REFUSAL };
   if (input.executionPolicy === "full-access") {
     return input.fullAccessSandbox === true

@@ -233,13 +233,41 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
-  it("lets a Windows operation on a Full access thread past the sandbox check", async () => {
-    const fixture = runtimeFixture({});
+  it("lets a Windows operation outside Strict past the sandbox check at Full access and below it", async () => {
+    for (const executionPolicy of ["full-access", "approval-gated", "auto-accept-edits"] as const) {
+      const fixture = runtimeFixture({ resolveStrict: () => false });
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy }));
+      vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+      try {
+        const outcome = await fixture.runtime
+          .execute(windowId, {
+            kind: "start-terminal",
+            threadId,
+            checkoutId,
+            operationId: operationId(1),
+            terminalId: operationId(2),
+            columns: 100,
+            rows: 30,
+            credentialRefs: [],
+          })
+          .then(
+            (result) => JSON.stringify(result),
+            (error: unknown) => JSON.stringify(error),
+          );
+        expect(outcome).not.toContain(WINDOWS_SANDBOX_MISSING_REASON);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    }
+  });
+
+  it("refuses a Windows operation on a thread whose Project or Settings make it Strict", async () => {
+    const fixture = runtimeFixture({ resolveStrict: () => true });
     fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
     vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
     try {
-      const outcome = await fixture.runtime
-        .execute(windowId, {
+      await expect(
+        fixture.runtime.execute(windowId, {
           kind: "start-terminal",
           threadId,
           checkoutId,
@@ -248,12 +276,10 @@ describe("CodeOperationRuntime", () => {
           columns: 100,
           rows: 30,
           credentialRefs: [],
-        })
-        .then(
-          (result) => JSON.stringify(result),
-          (error: unknown) => JSON.stringify(error),
-        );
-      expect(outcome).not.toContain(WINDOWS_SANDBOX_MISSING_REASON);
+        }),
+      ).rejects.toMatchObject({
+        failure: { category: "unavailable", message: WINDOWS_SANDBOX_MISSING_REASON },
+      });
     } finally {
       vi.unstubAllGlobals();
     }

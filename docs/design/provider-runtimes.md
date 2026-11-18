@@ -2080,11 +2080,13 @@ infers them from the driver kind.
 Octant's tools reach an ACP session only through the session MCP bridge, and
 only when the agent's `initialize` result advertises `mcpCapabilities.http`
 (or the profile names an exact release that accepts it unadvertised) and the
-host is macOS or Linux (Linux built under
+host is macOS, Linux or Windows (Linux built under
 [Provider reach Octant no longer narrows](../architecture.md#security-and-authority),
-maintainer decision, 2026-11-16). A Linux launch reaches the bridge on the
+maintainer decision, 2026-11-16; Windows under
+[Windows launches](#windows-launches)). A Linux launch reaches the bridge on the
 shared host network, or through the egress forwarder's loopback relay for
-the bridge's port alone when Network limits proxy it.
+the bridge's port alone when Network limits proxy it; a Windows launch has no
+Octant sandbox and reaches it directly.
 Otherwise the session reports app-managed tools `unsupported`,
 and a session that is offered tools is refused before `session/new` rather
 than started without them.
@@ -2456,10 +2458,19 @@ its status are in
   launch carries no sandbox settings at all (the SDK port refuses one that
   does): one asking for that sandbox with `failIfUnavailable` would leave
   every command unable to run.
-- **Refused by name:** Strict below Full access ("Strict needs a sandbox
+- **Chat** outside Strict starts unconfined on a family told natively that
+  it has no folder or shell (`chatWithoutFolderOrShell`): Codex with no
+  execution environment and its shell, image, plugin and app features off;
+  Pi with `--no-tools`, no extension and none of the person's resources; and
+  Claude with no file or shell tool in its session's tool list
+  (`claudeExecutionOptions` leaves out `Read`, `Grep`, `Glob`, `LS`, `Edit`,
+  `Write`, `NotebookEdit`, `Bash` and the task tools on Windows). OpenCode
+  and the ACP agents keep their own file and shell tools whatever they are
+  told, so their Chat launch is refused by name.
+- **Refused by name:** Strict at every level ("Strict needs a sandbox
   Windows doesn't have yet"), Full access with the sandbox kept, and a Chat
-  launch, whose no-folder, no-shell rule only Octant's sandbox holds. A
-  launch that does not carry its Strict value is Strict.
+  launch on OpenCode or an ACP agent. A launch that does not carry its Strict
+  value is Strict.
 - **Version and catalog reads.** An admitted launch reads its version
   unconfined. A read that serves no one thread (Codex's catalog lease,
   OpenCode's or an ACP agent's readiness check) runs unconfined only while the host's new
@@ -2475,9 +2486,12 @@ its status are in
 - **Stop and receipts.** Every family's stop ends the whole process tree with
   `taskkill /T /F`, and each launch keeps its ownership receipt (pid and
   creation time), as on every platform.
-- **Not on Windows:** ACP app-managed tools, which reach their bridge through
-  a loopback rule in Octant's sandbox; a Windows launch takes no egress proxy
-  or registered-server folder.
+- **App-managed tools.** OpenCode and the ACP agents are offered them as on
+  macOS and Linux (`appToolBridgeReachesLaunchOn`): a Windows launch has no
+  Octant sandbox, so it reaches the host's loopback tool bridge, opened only
+  with its per-bridge bearer token, directly.
+- **No wall.** A Windows launch takes no egress proxy or registered-server
+  folder, having no Octant sandbox to hold them to.
 
 ## Verification
 
