@@ -4,6 +4,7 @@ import {
   type ProviderInstance,
 } from "@octant/contracts";
 import { useRef, useState } from "react";
+import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
@@ -189,9 +190,9 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
         </SettingRow>
       ) : null}
       {problem === undefined ? null : (
-        <p className="provider-settings__field-guidance" role="alert">
+        <OctantAlert className="provider-settings__alert" tone="warning">
           {problem}
-        </p>
+        </OctantAlert>
       )}
       <div className="provider-card__edit-actions">
         <OctantButton
