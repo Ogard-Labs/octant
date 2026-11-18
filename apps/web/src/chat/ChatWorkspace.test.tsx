@@ -1140,25 +1140,31 @@ describe("ChatWorkspace", () => {
     vi.mocked(client.listToolApprovals).mockResolvedValue([approval]);
     const listToolApprovals = vi.mocked(client.listToolApprovals);
     const commits: Array<string> = [];
+    // A running turn's header shows a clock that commits once a second. Pin
+    // the clock so the only work left in the window is polling.
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse(now));
+    try {
+      render(
+        <Profiler id="chat-workspace" onRender={(_, phase) => commits.push(phase)}>
+          <ChatWorkspace
+            controller={controllerFixture({ activeView: viewWithAttempt("streaming") })}
+            extensionClient={client}
+            providerSnapshot={providerSnapshot()}
+          />
+        </Profiler>,
+      );
 
-    render(
-      <Profiler id="chat-workspace" onRender={(_, phase) => commits.push(phase)}>
-        <ChatWorkspace
-          controller={controllerFixture({ activeView: viewWithAttempt("streaming") })}
-          extensionClient={client}
-          providerSnapshot={providerSnapshot()}
-        />
-      </Profiler>,
-    );
+      await screen.findByRole("group", { name: "Extension tool approval" });
+      await waitFor(() => expect(listToolApprovals.mock.calls.length).toBeGreaterThan(2), {
+        timeout: 2_500,
+      });
+      const commitsAfterPolling = commits.length;
+      await new Promise((resolve) => setTimeout(resolve, 600));
 
-    await screen.findByRole("group", { name: "Extension tool approval" });
-    await waitFor(() => expect(listToolApprovals.mock.calls.length).toBeGreaterThan(2), {
-      timeout: 2_500,
-    });
-    const commitsAfterPolling = commits.length;
-    await new Promise((resolve) => setTimeout(resolve, 600));
-
-    expect(commits.length).toBe(commitsAfterPolling);
+      expect(commits.length).toBe(commitsAfterPolling);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("polls tool approvals rarely while no turn is running", async () => {

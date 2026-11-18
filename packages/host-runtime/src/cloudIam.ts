@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
 import { issuerRequestDeadline } from "./issuerRequest";
 import { sigV4Date, signSigV4 } from "./sigV4";
+import { stsAssumeRole, stsAssumeRoleWithWebIdentity } from "./awsSts";
 import {
   AWS_PROFILE_NAME_PATTERN,
   isAwsAccessKeyPair,
@@ -304,7 +305,10 @@ export function createCloudIamRuntime(options: {
   readonly now?: () => number;
   readonly sleep?: (ms: number) => Promise<void>;
   /** How the broker reads the person's AWS profile; absent, profile grants are unavailable. */
-  readonly profiles?: Omit<AwsProfilePorts, "mintSsoRoleCredentials" | "now">;
+  readonly profiles?: Omit<
+    AwsProfilePorts,
+    "mintSsoRoleCredentials" | "assumeRole" | "assumeRoleWithWebIdentity" | "now"
+  >;
 }): CloudIamRuntime {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const now = options.now ?? Date.now;
@@ -654,6 +658,8 @@ export function createCloudIamRuntime(options: {
         );
         return minted;
       },
+      assumeRole: (role) => stsAssumeRole(fetchImpl, now(), role),
+      assumeRoleWithWebIdentity: (role) => stsAssumeRoleWithWebIdentity(fetchImpl, role),
     });
   };
 
@@ -715,7 +721,8 @@ export function createCloudIamRuntime(options: {
     ) {
       const resolved = await resolveProfile(grant.source);
       if (resolved.kind === "refused") {
-        if (resolved.reason === "not-authorized") return { kind: "not-authorized" };
+        if (resolved.reason === "not-authorized" || resolved.reason === "role-refused")
+          return { kind: "not-authorized" };
         // The person signs in again with the AWS CLI; the grant itself stays.
         if (resolved.reason === "sso-sign-in-needed" || resolved.reason === "profile-missing")
           return { kind: "sign-in-again", reason: "expired" };

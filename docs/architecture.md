@@ -7644,8 +7644,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   renewal, the way the AWS CLI reads it (`AWS_CONFIG_FILE` and
   `AWS_SHARED_CREDENTIALS_FILE` honoured): shared-file keys, the single
   sign-on token `aws sso login` cached under `~/.aws/sso/cache`, then
-  `credential_process` run through the platform shell; a profile that only
-  assumes a role is refused as unsupported (not built yet). A key pair goes
+  `credential_process` run through the platform shell. A profile with a
+  `role_arn` first assumes that role at the token service (built): from its
+  `source_profile`'s credentials (chained up to five roles), from the
+  broker's environment for `credential_source = Environment`, or with its
+  `web_identity_token_file`, honouring `role_session_name`, `external_id`,
+  `duration_seconds` and `region`; the broker signs `AssumeRole` itself, and
+  a role asking for an MFA code is refused, as Connect has no place to type
+  one. A key pair goes
   to the broker's `/v1/cloud-iam/connect` route once and is kept there; the
   card warns that long-lived keys work until revoked. Either grant is cloud
   material the raw resolve refuses, and the server stores only the pointer
@@ -14874,8 +14880,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     allowed with a warning; a public address still needs HTTPS
     ([Native harness](#native-harness)).
   - **Bedrock request signing.** The designed "Use my AWS profile" is built,
-    and long-lived access keys are allowed with a warning (built; a profile
-    that only assumes a role is not read yet)
+    and long-lived access keys are allowed with a warning (built, a profile
+    that assumes a role included)
     ([Providers and model endpoints: Amazon Bedrock](design/model-endpoints.md#organization-sign-in-amazon-bedrock)).
   - **Unreviewed releases.** At Full access a provider release newer than
     the one a version pin was reviewed against is offered as "unverified"

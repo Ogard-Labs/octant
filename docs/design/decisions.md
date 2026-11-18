@@ -31,7 +31,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | ------------------------------------------------------------------------------------- | --------- | ------- | ------------ | ------------------- |
 | [Principles and hard lines](#principles-and-hard-lines)                               | 7         | 5       | 2            | 0                   |
 | [Guardrails and review](#guardrails-and-review)                                       | 9         | 3       | 6            | 0                   |
-| [Key providers](#key-providers)                                                       | 9         | 4       | 4            | 1                   |
+| [Key providers](#key-providers)                                                       | 9         | 5       | 3            | 1                   |
 | [Release scope](#release-scope)                                                       | 8         | 2       | 5            | 1                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 6       | 1            | 0                   |
 | [App-managed tools](#app-managed-tools)                                               | 6         | 4       | 2            | 0                   |
@@ -43,7 +43,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 5         | 3       | 2            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
-| [Providers](#providers)                                                               | 9         | 6       | 3            | 0                   |
+| [Providers](#providers)                                                               | 9         | 7       | 2            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 10        | 9       | 1            | 0                   |
 | [Native harness](#native-harness)                                                     | 7         | 5       | 2            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **281**   | **165** | **111**      | **5**               |
+| **All areas**                                                                         | **281**   | **167** | **109**      | **5**               |
 
 ## Principles and hard lines
 
@@ -449,15 +449,15 @@ Status: Built. Since: 2026-11-16. Detail: [Provider runtimes: Claude Code](provi
 
 ### Codex's own review runs in Octant
 
-Codex's built-in `/review` works in Octant: in Work and Code, at the thread's level, Octant starts Codex's review run (`review/start`) on the thread's checkout (maintainer decision, 2026-11-16).
+Codex's built-in `/review` works in Octant as it does in Codex on its own: in every Work and Code mode, Plan and Strict included, Octant starts Codex's review run (`review/start`) on the thread's checkout and never refuses it there (maintainer decisions, 2026-11-16 and 2026-11-18).
 
-- The run is read-only whatever the level, as Codex's own review is.
-- Its findings show in the thread as a review result, not as edits or a plan.
-- Plan and Chat do not start one.
-- Built: Codex's commands list `/review`, and a Work or Code turn opening with it starts the review on a thread of its own, started read-only with no approvals, because an inline review takes the sandbox of the thread it runs on; its findings read under a **Codex review** heading.
-- Codex's read-only sandbox can start only on a process outside Octant's profile, so a review is refused with a sentence under Strict and at Full access that keeps the sandbox, rather than run where it could write.
+- The review runs at the thread's level with no approvals, as Codex's own review agent does: outside Octant's sandbox in Codex's own read-only sandbox, inside it (Strict, Plan, Full access that keeps the sandbox) under Octant's sandbox, which keeps Plan read-only.
+- Its findings show in the thread as a review result, not as edits or a plan, and reach the session's own thread so a follow-up turn sees them.
+- What the turn carries (Octant's context, waiting messages, a handoff, attached images) reaches the session's thread before the review starts. A Codex release that cannot take it there still reviews, says so in the reply, and the driver sends it with the thread's next turn.
+- Chat, which has no Project, does not start one; only a release without `review/start` reports the review unsupported.
+- Built: Codex's commands list `/review`, a Work or Code turn opening with it starts the review on an ephemeral thread of its own, and its findings read under a **Codex review** heading.
 
-Status: Partly built. Since: 2026-11-16. Detail: [Provider runtimes: Codex](provider-runtimes.md#codex).
+Status: Built. Since: 2026-11-16. Detail: [Provider runtimes: Codex](provider-runtimes.md#codex).
 
 ### Codex loads its own Project configuration
 
@@ -1574,13 +1574,12 @@ Status: Partly built. Since: —; agent images in every mode 2026-11-07. Detail:
 Octant stops narrowing three kinds of provider reach that the provider itself allows (maintainer decision, 2026-11-16).
 
 - Ollama: a local-network or hosted address is allowed, and plain HTTP to a private-network address is allowed with a warning; a public address still needs HTTPS. Built: the host judges the address from its literal host (loopback, a private or overlay-network range, or an mDNS `.local` name), and Add endpoint shows the warning.
-- Bedrock request signing: the designed "Use my AWS profile" is built, and long-lived access keys are allowed with a warning. Built: the credential broker reads a named profile in place as the AWS CLI does (shared-file keys, the single sign-on token `aws sso login` cached, and `credential_process`) and keeps an entered key pair; Bedrock's sign-in panel offers both at a window on this host, the keys behind a warning, and the server stores only the pointer and journals only the reference. Not built yet: a profile that only assumes a role (`role_arn` with `source_profile`, or web identity) is refused as unsupported.
+- Bedrock request signing: the designed "Use my AWS profile" is built, and long-lived access keys are allowed with a warning. Built: the credential broker reads a named profile in place as the AWS CLI does (shared-file keys, the single sign-on token `aws sso login` cached, and `credential_process`) and keeps an entered key pair; Bedrock's sign-in panel offers both at a window on this host, the keys behind a warning, and the server stores only the pointer and journals only the reference. Built (maintainer request, 2026-11-18): a profile with a `role_arn` assumes the role as the AWS CLI does, from its `source_profile` (chained up to five roles), the broker's environment keys, or a web identity token file, honouring `role_session_name`, `external_id`, `duration_seconds` and `region`, with the role's credentials kept in the grant until near expiry; a role asking for an MFA code is refused with a sentence saying so, and instance or container metadata as a `credential_source` stays unsupported.
 - Version pins: at Full access a release newer than the one a pin was reviewed against is offered as "unverified" instead of losing the pinned features (Kimi Code's command inventory, OpenCode's Octant tools, an ACP probe's claims); below Full access the pin holds.
 - Built: a Kimi Code release whose command inventory differs from the reviewed one is offered as unverified (the runtime card names its new commands), refused below Full access, and run with its listed commands at Full access. OpenCode's Octant tools were already offered at Full access on any release that accepts their declaration, reported as `mixed`.
 - Built: an ACP probe's exact-release claims at Full access. A release newer than every release a claim was reviewed on keeps usage, forms, warm reuse and Octant's tools over an unadvertised HTTP transport at Full access, offered as unverified; the probe reports Full access's own value (`capabilities.atFullAccess`) wherever it differs from the other levels, the runtime card names what the release keeps, and below Full access the pin holds. Compaction and file review keep the pin at Full access too, since the host runs both on a session it resumes tool-free or under Plan.
-- Not built yet: a Bedrock profile that only assumes a role (above).
 
-Status: Partly built. Since: 2026-11-16. Detail: [Architecture: Security and authority, Provider reach Octant no longer narrows](../architecture.md#security-and-authority), [Native harness](../architecture.md#native-harness) and [Model endpoints: Amazon Bedrock](model-endpoints.md#organization-sign-in-amazon-bedrock).
+Status: Built. Since: 2026-11-16. Detail: [Architecture: Security and authority, Provider reach Octant no longer narrows](../architecture.md#security-and-authority), [Native harness](../architecture.md#native-harness) and [Model endpoints: Amazon Bedrock](model-endpoints.md#organization-sign-in-amazon-bedrock).
 
 ### Linux parity for provider tools
 
@@ -3164,7 +3163,7 @@ The Artifacts library is host-wide across Projects. It is the deliberate excepti
 - The server decides the library's scope. A paired device is clamped to the Projects its catalog allows.
 - Tags are the person's own labels, kept host-local. They never enter a Canvas version, a share, an export or sync.
 - A window on this host or a paired device changes tags (maintainer decision, 2026-11-12; not built yet: today only a window on this host).
-- The library also lists every page a thread published through Claude's `Artifact` tool, in one view across the person's Claude accounts, built from the journal alone (only pages published from Octant), with Source, kind (Claude's types beside Canvas's kinds) and account filters, versions for updated pages, and Copy into Canvas for an HTML snapshot (maintainer decision, 2026-11-16). Built: the listing (each Work turn's and Code thread's published steps, scoped by the thread's Project and clamped for a paired device), the Source, kind and account filters, versions, the snapshot read through the publishing thread's own read check (a window on this host only), Open on claude.ai, and the dock's Artifacts tool. Not built yet: Copy into Canvas, because the library has no thread context to import into.
+- The library also lists every page a thread published through Claude's `Artifact` tool, in one view across the person's Claude accounts, built from the journal alone (only pages published from Octant), with Source, kind (Claude's types beside Canvas's kinds) and account filters, versions for updated pages, and Copy into Canvas for an HTML snapshot (maintainer decision, 2026-11-16). Built: the listing (each Work turn's and Code thread's published steps, scoped by the thread's Project and clamped for a paired device), the Source, kind and account filters, versions, the snapshot read through the publishing thread's own read check (a window on this host only), Open on claude.ai, the dock's Artifacts tool, and Copy into Canvas, which creates the Canvas in the publishing thread's own Project and mode with that thread as its origin, reads the snapshot on the host under that thread's read check, and runs it through the HTML importer; like the snapshot, it is a window on this host's only.
 
 Status: Partly built. Since: —. Detail: [Canvas: Artifact library and tags](canvas.md#artifact-library-and-tags).
 
@@ -3173,6 +3172,7 @@ Status: Partly built. Since: —. Detail: [Canvas: Artifact library and tags](ca
 A person can bring one HTML page into a new Canvas. The import adds no authority and no network egress.
 
 - It runs under the create path's authority and is open to a local window and a paired device (maintainer decision, 2026-11-12). Built: a device the host's own person paired has no window context, so its request's workspace scope names the mode and Project, which the host checks is active and of that mode (a Chat thread's own Canvas in no Project stays owned by the thread it names) before the create is journaled as the device; the paired browser offers no create panel yet.
+- The artifact library's Copy into Canvas imports a Claude page's kept HTML snapshot through this same import, in the publishing thread's Project ([Artifact library and tags](#artifact-library-and-tags)).
 - Scripts, remote assets, external links and form destinations are taken out and reported. The page is at most 256 KiB.
 - The Canvas is marked outside content for every later reader, and the title is what the person typed, never the page's own.
 
