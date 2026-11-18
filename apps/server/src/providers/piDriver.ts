@@ -179,6 +179,10 @@ const capabilities = {
   // Pi's RPC `compact` compacts the session it holds in every mode, outside a
   // turn (Pi's RPC command reference).
   sessionCompaction: { chat: "supported", work: "supported", code: "supported" },
+  // A rewound Code thread continues a new session file copied through the
+  // last kept turn's entry, as Pi's own fork writes one (`forkPiSession`);
+  // the source file is never written.
+  sessionRollback: "supported",
 } as const;
 const MAX_REMEMBERED_TOOL_CALLS = 256;
 /** Pi's interface requests that expect no answer (`RpcExtensionUIRequest` in Pi's RPC types). */

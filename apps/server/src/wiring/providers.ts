@@ -15,6 +15,9 @@ import {
 import { randomUUID } from "node:crypto";
 import { bindGeneratedMcpSignInPolicy } from "../extensions/generatedMcpSignInPolicy";
 import { lstatSync, realpathSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import { acpRegistryAgent } from "@octant/plugin-host/acp-agents";
+import { installAcpAgent, makeAcpAgentInstallPorts } from "../providers/acpAgentInstall";
 import { homedir, tmpdir } from "node:os";
 import {
   makeAccountSessionCarrier,
@@ -1915,8 +1918,30 @@ export function wireProviders(deps: ProvidersDependencies) {
       }
       await credentialResolver.delete(instanceId);
     };
+    const acpAgentInstallPorts = makeAcpAgentInstallPorts({
+      fetchesAllowed: isMarketplaceFetchAllowed,
+    });
     const providerService = new ProviderService({
       latestNpmVersion: createProviderLatestVersionCheck({ isAllowed: isMarketplaceFetchAllowed }),
+      acpAgentInstall: {
+        install: (instance) =>
+          installAcpAgent(
+            {
+              configuration: instance.configuration,
+              listing:
+                instance.configuration.source.kind === "registry"
+                  ? acpRegistryAgent(instance.configuration.source.registryId)
+                  : undefined,
+              root: join(providerDataDirectory, "acp-agent-installs", instance.id),
+            },
+            acpAgentInstallPorts,
+          ),
+        remove: (instanceId) =>
+          rm(join(providerDataDirectory, "acp-agent-installs", instanceId), {
+            recursive: true,
+            force: true,
+          }),
+      },
       persistence,
       runtimeRegistry: providerRuntimeRegistry,
       isProviderExecutableAvailable,

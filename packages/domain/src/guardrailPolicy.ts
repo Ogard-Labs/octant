@@ -143,6 +143,7 @@ export function fullAccessSandboxSupported(driverKind: ProviderDriverKind): bool
     driverKind === "pi" ||
     driverKind === "opencode" ||
     isAcpAgentKind(driverKind) ||
+    driverKind === "acp-agent" ||
     isNativeHarnessDriverKind(driverKind)
   );
 }
@@ -210,8 +211,12 @@ export const WINDOWS_KEPT_SANDBOX_REFUSAL =
  * Why a Chat provider launch refuses on a Windows host. Chat has no folder or
  * shell. Codex (no execution environment), Claude (no file or shell tool) and
  * Pi (no built-in tool) are configured that way natively and start there
- * outside Strict; OpenCode and the ACP agents keep their own file and shell
- * tools whatever they are told, so only Octant's sandbox holds them to it.
+ * outside Strict. OpenCode's permission rules can deny its file and shell
+ * tools, but its command templates run shell substitutions and its plugins
+ * run code in its own process outside those rules; an ACP agent's client
+ * capabilities decide only whether it uses Octant's file and terminal
+ * methods, and no reviewed agent profile can be told to drop its own built-in
+ * file and shell tools. Only Octant's sandbox holds those two to Chat's rule.
  */
 export const WINDOWS_CHAT_PROVIDER_REFUSAL =
   "This provider keeps Chat without a folder or shell only inside Octant's sandbox, which Windows doesn't have yet. On this computer use Codex, Claude, Pi or an Octant Harness model for Chat, or this provider in Work or Code.";
@@ -602,7 +607,12 @@ export function chosenAutoReviewer(input: {
  * confirmation).
  */
 export function shieldRoutesApprovals(driverKind: ProviderDriverKind): boolean {
-  if (isNativeHarnessDriverKind(driverKind) || isAcpAgentKind(driverKind)) return true;
+  if (
+    isNativeHarnessDriverKind(driverKind) ||
+    isAcpAgentKind(driverKind) ||
+    driverKind === "acp-agent"
+  )
+    return true;
   return (
     driverKind === "claude" ||
     driverKind === "codex" ||

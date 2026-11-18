@@ -92,7 +92,12 @@ export interface ProviderCatalogViewProps {
   ) => Promise<boolean>;
 }
 
-const BUNDLED_LISTINGS = bundledProviderDriverCatalog();
+// The added ACP agents' driver is no provider to set up on its own: each agent
+// takes its own install, trust and enable steps under Providers › Any ACP
+// agent, so the catalog's "already installed and trusted" would mislead.
+const BUNDLED_LISTINGS = bundledProviderDriverCatalog().filter(
+  (listing) => listing.entry.driverKind !== "acp-agent",
+);
 
 /**
  * One catalog row. A bundled driver is keyed by its kind; an outside driver by

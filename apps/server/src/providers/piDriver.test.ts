@@ -862,6 +862,9 @@ describe("Pi provider driver", () => {
         userQuestions: "unsupported",
         nativeChildAgents: "unsupported",
         harnessAutoReview: "unsupported",
+        // A rewind continues a copy of the Pi session cut at the last kept
+        // turn's entry, so the rewind preview may promise a copy.
+        sessionRollback: "supported",
       },
     });
     expect(client.request.mock.calls.map(([type]) => type)).toEqual([

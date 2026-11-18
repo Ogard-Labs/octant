@@ -34,6 +34,8 @@ import { Schema } from "effect";
 import type {
   AcpAgentConfiguration,
   AcpAgentProviderInstance,
+  AddedAcpAgentConfiguration,
+  AddedAcpAgentProviderInstance,
   ChangeAcpAgentConfigurationCommand,
   CreateAcpAgentProviderCommand,
   ProviderRegistryCommand,
@@ -1096,6 +1098,93 @@ export function changeAcpAgentConfiguration(
   return {
     ...provider,
     configuration: normalizeAcpAgentConfiguration(configuration),
+    version: nextVersion(provider.version),
+    updatedAt,
+  };
+}
+
+export function isAddedAcpAgentInstance(
+  instance: ProviderInstance,
+): instance is AddedAcpAgentProviderInstance {
+  return instance.driverKind === "acp-agent";
+}
+
+/** The person's three steps for an added agent, as its record holds them. */
+export function addedAcpAgentSteps(instance: AddedAcpAgentProviderInstance): {
+  readonly installed: boolean;
+  readonly trusted: boolean;
+  readonly enabled: boolean;
+} {
+  return {
+    installed: instance.configuration.install !== undefined,
+    trusted: instance.configuration.trusted,
+    enabled: instance.enabled,
+  };
+}
+
+/**
+ * Adds an agent from the registry or a local command: nothing installed,
+ * untrusted and off, whatever the configuration it is handed says.
+ */
+export function createAddedAcpAgentProvider(input: {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: AddedAcpAgentConfiguration;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+}): AddedAcpAgentProviderInstance {
+  const { install: _install, ...configuration } = input.configuration;
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: "acp-agent",
+    configuration: { ...configuration, trusted: false },
+    enabled: false,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+/**
+ * Records where the install step put the agent's executable and how it was
+ * checked. A reinstall drops trust: the person trusts the bytes now on disk,
+ * not the ones before them, and an agent left on starts in Octant's sandbox.
+ */
+export function installAddedAcpAgent(
+  provider: AddedAcpAgentProviderInstance,
+  install: NonNullable<AddedAcpAgentConfiguration["install"]>,
+  updatedAt: UtcTimestamp,
+  activeSessionCount = 0,
+): AddedAcpAgentProviderInstance {
+  if (activeSessionCount > 0) {
+    reject("active-sessions", "Stop active sessions before reinstalling this agent.");
+  }
+  if (!install.executable.startsWith("/")) {
+    reject("invalid-binary-path", "The installed agent's executable must be absolute.");
+  }
+  return {
+    ...provider,
+    configuration: { ...provider.configuration, install, trusted: false },
+    version: nextVersion(provider.version),
+    updatedAt,
+  };
+}
+
+/** Trusts an installed agent or takes that trust back; neither changes `enabled`. */
+export function setAddedAcpAgentTrust(
+  provider: AddedAcpAgentProviderInstance,
+  trusted: boolean,
+  updatedAt: UtcTimestamp,
+): AddedAcpAgentProviderInstance {
+  if (trusted && provider.configuration.install === undefined) {
+    reject("invalid-configuration", "Install this agent before trusting it.");
+  }
+  return {
+    ...provider,
+    configuration: { ...provider.configuration, trusted },
     version: nextVersion(provider.version),
     updatedAt,
   };

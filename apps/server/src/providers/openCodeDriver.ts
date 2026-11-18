@@ -484,6 +484,12 @@ const capabilities = {
   // current model first (then the cursor's binding, then the session record),
   // and every prompt names it, so the session never silently runs the old one.
   modelSwitch: "supported",
+  // A rewound Code thread continues OpenCode's own fork of its session cut
+  // at the last kept turn's anchor (`forkOpenCodeSession`), which leaves the
+  // source and the files alone. OpenCode's revert route is not used: it also
+  // puts files back from OpenCode's own snapshots, which Octant's checkpoints
+  // already do when the person asks for files, and it changes the source.
+  sessionRollback: "supported",
   // One server process serves every thread, so killing it ends them all.
   forceStop: "unsupported",
   ...unsupportedChatCapabilities,

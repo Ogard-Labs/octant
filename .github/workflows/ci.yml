@@ -209,7 +209,7 @@ jobs:
           $env:OCTANT_FAKE_OPENCODE_EXE = "$env:RUNNER_TEMP/fake-opencode/opencode.exe"
           $env:OCTANT_FAKE_PI_EXE = "$env:RUNNER_TEMP/fake-pi/pi.exe"
           $env:OCTANT_FAKE_ACP_EXE = "$env:RUNNER_TEMP/fake-kilo/kilo.exe"
-          bun run test src/process/windowsProcessTree.test.ts src/code/terminalProcessPort.windows.test.ts src/code/terminalShell.test.ts src/harness/windowsFullAccessShell.test.ts src/providers/codexProcess.windows.test.ts src/providers/providerFamilies.windows.test.ts src/process/windowsProviderProgram.test.ts src/process/nodeOwnedProcessReceipt.windows.test.ts
+          bun run test src/process/windowsProcessTree.test.ts src/code/terminalProcessPort.windows.test.ts src/code/repositoryTestProcessPort.windows.test.ts src/code/languageServices.windows.test.ts src/code/terminalShell.test.ts src/harness/windowsFullAccessShell.test.ts src/providers/codexProcess.windows.test.ts src/providers/providerFamilies.windows.test.ts src/process/windowsProviderProgram.test.ts src/process/nodeOwnedProcessReceipt.windows.test.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   # The self-hostable share service (apps/share) ships as a Docker image. Build
