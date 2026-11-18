@@ -573,7 +573,9 @@ only that account's own merges, closures and releases. Each card is a
 date-bounded read per connected repository: merges and closures through
 GitHub's issue search, releases through the repository's own list. A
 release counts when that account created it and it was published inside
-the range. A card reads partial only when a repository could not be read
+the range. The release list is ordered by creation, so the walk stops 30
+days before the range begins, and a draft created earlier than that and
+published inside the range is not counted. A card reads partial only when a repository could not be read
 or a range holds more than 200 matches per repository, and it says so when
 its read is partial, stale or unavailable.
 
