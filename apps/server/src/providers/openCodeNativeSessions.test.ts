@@ -39,10 +39,13 @@ function fixture(
     readonly messages?: Readonly<Record<string, ReadonlyArray<string>>>;
     readonly held?: Set<string>;
     readonly forks?: false;
+    /** A message the source's own thread adds while the fork is being made. */
+    readonly appendedDuringFork?: string;
   } = {},
 ) {
   const sessions = options.sessions ?? [];
-  const messages = options.messages ?? {};
+  const messages: Record<string, ReadonlyArray<string>> = { ...options.messages };
+  const deleted: string[] = [];
   const held = options.held ?? new Set<string>();
   const forks: Array<{ readonly from: string; readonly before: string | undefined }> = [];
   const starts: OpenCodeProcessStartInput[] = [];
@@ -68,7 +71,12 @@ function fixture(
           },
           forkSession: async (id: string, before: string | undefined) => {
             forks.push({ from: id, before });
+            if (options.appendedDuringFork !== undefined)
+              messages[id] = [...(messages[id] ?? []), options.appendedDuringFork];
             return { id: `${id}-fork`, directory: projectRoot };
+          },
+          deleteSession: async (id: string) => {
+            deleted.push(id);
           },
         }),
   };
@@ -91,10 +99,10 @@ function fixture(
       roots.push(root);
       return client as OpenCodeClientPort;
     },
-    heldSessions: () => held,
+    sessionOwnership: { held: (kind) => (kind === "opencode" ? held : new Set()) },
     idleLeaseMs: 0,
   });
-  return { driver, forks, starts, roots, held };
+  return { driver, forks, starts, roots, held, deleted };
 }
 
 function nativeSessions(driver: ReturnType<typeof fixture>["driver"]) {
@@ -228,6 +236,30 @@ describe("OpenCode's own sessions", () => {
       { from: "ses_source", before: "msg_3" },
       { from: "ses_source", before: undefined },
     ]);
+  });
+
+  it("removes a whole-session fork and hands over as text when the source moved past the anchor while it was copied", async () => {
+    const { driver, forks, deleted } = fixture({
+      messages: { ses_source: ["msg_1", "msg_2"] },
+      appendedDuringFork: "msg_3",
+    });
+    const forkSession = driver.forkSession;
+    if (forkSession === undefined) throw new Error("OpenCode offers no fork");
+    expect(
+      await Effect.runPromise(
+        forkSession({
+          instanceId,
+          sessionId: forkedSessionId,
+          source: sourceCursor,
+          anchor: "msg_2",
+          projectRoot,
+          mode: "code",
+          modelId,
+        }),
+      ),
+    ).toBeUndefined();
+    expect(forks).toEqual([{ from: "ses_source", before: undefined }]);
+    expect(deleted).toEqual(["ses_source-fork"]);
   });
 
   it("hands a fork over as text for another folder or mode, an anchor OpenCode no longer holds, or a runtime that cannot fork", async () => {

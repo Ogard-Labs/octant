@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { decodeProviderInstanceId } from "@octant/contracts";
+import { decodeProviderDriverKind, decodeProviderInstanceId } from "@octant/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
-import { OpenCodeSessionHolds } from "./openCodeSessionHolds";
+import { JournalProviderSessionOwnership } from "./providerSessionHolds";
 
 const now = "2026-11-18T09:00:00.000Z";
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000a01");
@@ -60,8 +60,8 @@ const cursor = (value: string, instance?: string) => ({
       }),
 });
 
-describe("OpenCode session holds", () => {
-  it("holds every OpenCode session a journaled cursor names, for its own instance, including ones journaled after the first read", () => {
+describe("Provider session ownership from the journal", () => {
+  it("holds every session a journaled cursor of the kind names, for every instance of the kind, including ones journaled after the first read", () => {
     const connection = openStore();
     // A Code operation's session, and a Work thread's adopted session.
     insertEvent(connection, {
@@ -71,20 +71,19 @@ describe("OpenCode session holds", () => {
     insertEvent(connection, {
       thread: { adoptedSession: { resumeCursor: cursor("ses_work", instanceId) } },
     });
-    insertEvent(connection, { resumeCursor: cursor("ses_elsewhere", otherInstanceId) });
-    insertEvent(connection, { resumeCursor: { driverKind: "pi", value: "ses_pi" } });
-    const holds = new OpenCodeSessionHolds(connection);
-    expect([...holds.held(instanceId)].sort()).toEqual(["ses_code", "ses_work"]);
-    insertEvent(connection, { resumeCursor: cursor("ses_later", instanceId) });
-    expect(holds.held(instanceId).has("ses_later")).toBe(true);
-    expect([...holds.held(otherInstanceId)]).toEqual(["ses_elsewhere"]);
-  });
-
-  it("holds a cursor recorded before cursors named their instance for every instance", () => {
-    const connection = openStore();
+    // Another account of the same runtime shares its session store.
+    insertEvent(connection, { resumeCursor: cursor("ses_other_account", otherInstanceId) });
     insertEvent(connection, { resumeCursor: cursor("ses_unbound") });
-    const holds = new OpenCodeSessionHolds(connection);
-    expect(holds.held(instanceId).has("ses_unbound")).toBe(true);
-    expect(holds.held(otherInstanceId).has("ses_unbound")).toBe(true);
+    insertEvent(connection, { resumeCursor: { driverKind: "pi", value: "pi_session" } });
+    const ownership = new JournalProviderSessionOwnership(connection);
+    expect([...ownership.held(decodeProviderDriverKind("opencode"))].sort()).toEqual([
+      "ses_code",
+      "ses_other_account",
+      "ses_unbound",
+      "ses_work",
+    ]);
+    expect([...ownership.held(decodeProviderDriverKind("pi"))]).toEqual(["pi_session"]);
+    insertEvent(connection, { resumeCursor: cursor("ses_later", instanceId) });
+    expect(ownership.held(decodeProviderDriverKind("opencode")).has("ses_later")).toBe(true);
   });
 });

@@ -37,6 +37,7 @@ import type {
   ProviderConnection,
   ProviderDriver,
   ProviderSessionCompaction,
+  ProviderSessionOwnership,
 } from "@octant/provider-sdk/driver";
 import {
   renderProviderContextSections,
@@ -249,12 +250,12 @@ export interface OpenCodeDriverOptions {
   readonly clock?: () => string;
   readonly correlationId?: () => string;
   /**
-   * The OpenCode sessions the host's journal records an Octant thread holding
-   * for this instance, read at each call. Absent, the driver offers none of
-   * OpenCode's own sessions to start a thread from: without that record it
-   * could not keep two threads off one session.
+   * Which runtime sessions an Octant thread holds, the provider SDK's port
+   * the host hands every driver, read at each call. Absent, the driver offers
+   * none of OpenCode's own sessions to start a thread from: without that
+   * record it could not keep two threads off one session.
    */
-  readonly heldSessions?: () => ReadonlySet<string>;
+  readonly sessionOwnership?: ProviderSessionOwnership;
 }
 
 interface SessionState {
@@ -1760,16 +1761,16 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
     if (result._tag === "Left") throw result.left;
     return result.right;
   };
-  const heldSessions = options.heldSessions;
+  const sessionOwnership = options.sessionOwnership;
   return {
     kind: "opencode",
     conversationOwnership: "provider",
-    ...(heldSessions === undefined
+    ...(sessionOwnership === undefined
       ? {}
       : {
           nativeSessions: makeOpenCodeNativeSessions({
             instanceId: options.instanceId,
-            heldSessions,
+            heldSessions: () => sessionOwnership.held("opencode"),
             withClient: withSessionClient,
           }),
         }),

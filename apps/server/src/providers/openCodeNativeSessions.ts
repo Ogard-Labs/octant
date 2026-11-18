@@ -11,7 +11,9 @@
  * Which OpenCode sessions an Octant thread holds is the host's own journal:
  * every session an Octant thread starts, takes up or forks is recorded there
  * with its resume cursor, the adoption in one unit with the outside-content
- * mark. `heldSessions` reads that record. A session it names is never offered
+ * mark. `heldSessions` reads that record through the provider SDK's
+ * `ProviderSessionOwnership` port, for every OpenCode account, since they
+ * share one session store. A session it names is never offered
  * and never taken up a second time, so two threads never drive one session.
  * Between the driver's claim and the host's record, the claim is held here.
  */
@@ -220,8 +222,21 @@ export function forkOpenCodeSession(
         const after = await messageAfter(input.source.value, input.anchor);
         if (after.status === "missing") return undefined;
         const copied = await fork(input.source.value, after.next);
-        if (copied.id === input.source.value || !inFolder(copied.directory, input.projectRoot))
+        if (copied.id === input.source.value) return undefined;
+        const discard = async () => {
+          await client.deleteSession(copied.id).catch(() => undefined);
           return undefined;
+        };
+        if (!inFolder(copied.directory, input.projectRoot)) return discard();
+        // A whole-session fork ends at the anchor only while nothing follows
+        // it. The source may have moved on between the read and the fork (its
+        // own thread running a turn), so it is read again after the fork: a
+        // message after the anchor now means the copy may hold it too, and
+        // the copy is removed for the text handoff instead.
+        if (after.next === undefined) {
+          const again = await messageAfter(input.source.value, input.anchor).catch(() => undefined);
+          if (again?.status !== "found" || again.next !== undefined) return discard();
+        }
         return {
           driverKind: "opencode" as const,
           value: copied.id,

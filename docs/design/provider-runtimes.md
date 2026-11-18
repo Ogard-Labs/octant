@@ -1780,15 +1780,19 @@ as its own lease per folder so its confinement binds that folder. 1.x lists
 through `GET /session?directory=`, 2.x through `GET /api/session` with the
 folder as `directory` (opencode 2.0.22 and 2.2.0, `protocol/src/groups/session.ts`).
 
-Which OpenCode sessions an Octant thread holds is read from the host's own
-journal (`openCodeSessionHolds.ts`): every session an Octant thread starts,
-takes up or forks is journaled with its resume cursor (`driverKind:
-"opencode"`, the session id as its value, the instance in its binding), so
-any journaled cursor naming a session holds it for that instance, and a
-cursor older than its binding holds it for every instance. The record is the
-journal itself rather than a copy that could drift from it; it is read once
-and then from where the last read stopped, so a session a purged thread held
-stays held until the host restarts. The list offers the newest 50 sessions
+Which OpenCode sessions an Octant thread holds comes through the provider
+SDK's `ProviderSessionOwnership` port, which the host hands any driver that
+takes up its own sessions, first-party or not, and answers from its own
+journal (`providerSessionHolds.ts`): every session an Octant thread starts,
+takes up or forks is journaled with its resume cursor (its driver kind, the
+session id as its value), so any journaled cursor of the kind naming a
+session holds it. A session is held for every instance of the kind, not only
+the one whose thread holds it: two OpenCode accounts keep the person's one
+data folder, so a session one account's thread holds is not another's to
+take up. The record is the journal itself rather than a copy that could
+drift from it; it is read once per kind and then from where the last read
+stopped, so a session a purged thread held stays held until the host
+restarts. The list offers the newest 50 sessions
 whose folder is the thread's exactly, leaving out every held session and
 every session OpenCode started inside another (a subagent's or a fork's,
 which carries a parent), with the title OpenCode keeps for each. Adopting
@@ -1813,7 +1817,10 @@ fork, which copies a session's history before a message (1.x `POST
 `before`) and leaves the source alone: it finds the message after the anchor
 (1.x reads the session's messages, 2.x reads them newest first a page at a
 time, at most 50 pages of 200) and forks before it, or forks the whole
-session when the anchor is the newest message. Only a session this instance
+session when the anchor is the newest message. The source's own thread may
+add a message between that read and the fork, so a whole-session fork reads
+the source again afterwards, and a message after the anchor then removes the
+copy and sends the text handoff instead. Only a session this instance
 opened for the fork's own folder and mode is forked; another folder or mode,
 an anchor OpenCode no longer holds, or a runtime without the routes goes
 back with the text handoff. A rewind still sends the text handoff: OpenCode
