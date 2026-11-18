@@ -101,10 +101,10 @@ const ACTIVITY_CARDS: ReadonlyArray<ActivityCardMeta> = [
   {
     id: "activity-runs",
     card: "runs",
-    title: "Runs finished",
+    title: "Successful runs",
     icon: Activity,
-    explanation: "Finished runs in your threads, always recorded by Octant.",
-    emptyLabel: "No finished runs.",
+    explanation: "Completed turns and agent runs, always recorded by Octant.",
+    emptyLabel: "No successful runs.",
   },
 ];
 

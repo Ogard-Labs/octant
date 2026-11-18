@@ -191,7 +191,7 @@ describe("the Code Home activity panel", () => {
     render(<Harness read={source.read} />);
     const merged = await screen.findByRole("region", { name: "Pull requests merged" });
     expect(within(merged).getByText("+1 vs last week")).toBeInTheDocument();
-    const runs = screen.getByRole("region", { name: "Runs finished" });
+    const runs = screen.getByRole("region", { name: "Successful runs" });
     expect(within(runs).queryByText(/vs last week/)).toBeNull();
   });
 });
@@ -223,7 +223,7 @@ describe("Customize activity", () => {
     await screen.findByRole("region", { name: "Pull requests merged" });
     await user.click(await screen.findByRole("button", { name: "Customize activity" }));
     const dialog = await screen.findByRole("dialog", { name: "Customize activity" });
-    await user.click(within(dialog).getByRole("button", { name: "Move Runs finished up" }));
+    await user.click(within(dialog).getByRole("button", { name: "Move Successful runs up" }));
     await waitFor(() => {
       const titles = Array.from(
         document.querySelectorAll(".code-home-activity__grid .home-card__title"),
@@ -231,7 +231,7 @@ describe("Customize activity", () => {
       expect(titles).toEqual([
         "Pull requests merged",
         "Issues closed",
-        "Runs finished",
+        "Successful runs",
         "Releases published",
       ]);
     });
@@ -395,9 +395,9 @@ describe("the records drill-down", () => {
       query.kind === "page" && query.allFinished === true ? allView : runsView,
     );
     render(<Harness read={source.read} />);
-    const card = await screen.findByRole("region", { name: "Runs finished" });
+    const card = await screen.findByRole("region", { name: "Successful runs" });
     await user.click(within(card).getByRole("button", { name: "See all 1" }));
-    const dialog = await screen.findByRole("dialog", { name: /Runs finished/ });
+    const dialog = await screen.findByRole("dialog", { name: /Successful runs/ });
     expect(within(dialog).getByText("1 successful · 2 failed · 1 canceled")).toBeInTheDocument();
     expect(within(dialog).getByText("Fix the flaky test")).toBeInTheDocument();
 
@@ -487,9 +487,9 @@ describe("the records drill-down", () => {
       return Promise.resolve(runsView);
     };
     render(<Harness read={read} />);
-    const card = await screen.findByRole("region", { name: "Runs finished" });
+    const card = await screen.findByRole("region", { name: "Successful runs" });
     await user.click(within(card).getByRole("button", { name: "See all 1" }));
-    const dialog = await screen.findByRole("dialog", { name: /Runs finished/ });
+    const dialog = await screen.findByRole("dialog", { name: /Successful runs/ });
     await user.click(within(dialog).getByRole("button", { name: "Load more" }));
     await user.click(within(dialog).getByRole("switch", { name: "All finished" }));
     expect(await within(dialog).findByText("Failed run")).toBeInTheDocument();
@@ -575,9 +575,9 @@ describe("the records drill-down", () => {
     });
     const source = reads(() => runsView);
     render(<Harness onOpenThread={onOpenThread} read={source.read} />);
-    const card = await screen.findByRole("region", { name: "Runs finished" });
+    const card = await screen.findByRole("region", { name: "Successful runs" });
     await user.click(within(card).getByRole("button", { name: "See all 1" }));
-    const dialog = await screen.findByRole("dialog", { name: /Runs finished/ });
+    const dialog = await screen.findByRole("dialog", { name: /Successful runs/ });
     await user.click(within(dialog).getByRole("button", { name: "Open thread" }));
     expect(onOpenThread).toHaveBeenCalledWith("work", "10000000-0000-4000-8000-0000000000bb");
     expect(within(dialog).getByText(/run-2/)).toBeInTheDocument();
