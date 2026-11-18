@@ -7,6 +7,7 @@ import { withHandoverSummary } from "../agentRun/conversationHandoff";
 import { projectExtraFolderRoots, validateQuestionnaireAnswer } from "@octant/domain";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
+import type { AccountSessionCarrier } from "../providers/accountSessionCarry";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type {
   CodeProviderFileReviewRequest,
@@ -551,6 +552,11 @@ export interface CodeOperationRuntimeOptions {
    * model differs from its session's is refused as before.
    */
   readonly supportsModelSwitch?: (thread: CodeThread) => boolean;
+  /**
+   * Carries a thread's session to another account of the same provider on the
+   * first turn after a move; absent, every such move hands over as text.
+   */
+  readonly accountSessionCarrier?: AccountSessionCarrier;
   /**
    * Whether the thread's provider reports it can cut its own session back
    * (`sessionRollback`), which a rewind's preview names. A host that cannot
@@ -3817,6 +3823,73 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         return failStart(REWIND_HANDOFF_REFUSALS["handoff-unreadable"]);
       }
     }
+    // A thread the person moved to another account of the same provider takes
+    // its own session along when the provider's session files can be copied
+    // into the new account (maintainer decision, 2026-11-17): the new account
+    // resumes it under this turn's session, and no text goes. A copy that is
+    // not possible leaves the text handoff chosen above, with the reason on
+    // its record, and a recovered start that disclosed a carried session and
+    // can no longer carry it refuses rather than send something else.
+    const carrier = this.#options.accountSessionCarrier;
+    if (
+      carrier !== undefined &&
+      rewind === undefined &&
+      forkOrigin === undefined &&
+      !remoteThread &&
+      providerSwitch !== undefined &&
+      providerSwitch.resumeCursor !== undefined &&
+      command.toolCatalogHandoff !== true &&
+      // A session goes on under another model only where the provider carries
+      // it there, as a follow-up on the same account does.
+      (String(providerSwitch.modelId) === String(input.thread.modelId) ||
+        this.#options.supportsModelSwitch?.(input.thread) === true) &&
+      switchHandoff?.status === "ready" &&
+      switchHandoff.journaled !== "text" &&
+      carrier.sameProvider(providerSwitch.providerInstanceId, input.thread.providerInstanceId)
+    ) {
+      if (input.folderCurrent?.() === false || input.admissionCurrent?.() === false)
+        return refuseRevokedAdmission();
+      const carried = await carrier
+        .carry({
+          fromInstanceId: providerSwitch.providerInstanceId,
+          toInstanceId: input.thread.providerInstanceId,
+          resumeCursor: providerSwitch.resumeCursor,
+          sessionId: decodeProviderSessionId(input.sessionId),
+          projectRoot: input.providerRoot ?? input.checkoutRoot,
+          mode: "code",
+          modelId: input.thread.modelId,
+        })
+        .catch(() => ({ status: "text", cause: "session-not-copied" }) as const);
+      if (carried.status === "carried") {
+        resumeCursor = carried.resumeCursor;
+        switchHandoff = {
+          status: "ready",
+          blocks: [],
+          ...(switchHandoff.journaled === undefined
+            ? {
+                record: {
+                  kind: "context-handoff-attached",
+                  reason: "account-move-native-session",
+                  previousProviderInstanceId: providerSwitch.providerInstanceId,
+                  previousModelId: providerSwitch.modelId,
+                  previousSessionId: providerSwitch.sessionId,
+                  providerInstanceId: input.thread.providerInstanceId,
+                  modelId: input.thread.modelId,
+                  nativeSessionTransferred: true,
+                },
+              }
+            : { journaled: switchHandoff.journaled }),
+        };
+      } else if (switchHandoff.journaled === "native-session") {
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return failStart(PROVIDER_SWITCH_HANDOFF_REFUSALS["handoff-unreadable"]);
+      } else if (switchHandoff.record?.reason === "provider-switch") {
+        switchHandoff = {
+          ...switchHandoff,
+          record: { ...switchHandoff.record, accountMoveTextCause: carried.cause },
+        };
+      }
+    }
     // Otherwise the fork reads its source's conversation through the fork
     // point as text, journaled like a provider switch's handoff. A fork that
     // can do neither refuses rather than starting from nothing while its
@@ -3871,6 +3944,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         handoff === undefined ||
         handoff.record?.reason === "fork-native-session" ||
         handoff.record?.reason === "rewind-native-session" ||
+        handoff.record?.reason === "account-move-native-session" ||
         ("journaled" in handoff && handoff.journaled === "native-session")
       )
         continue;
@@ -4299,9 +4373,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       const leftSession =
         journaled.reason === "provider-switch" ||
         journaled.reason === "rewind" ||
-        journaled.reason === "rewind-native-session";
+        journaled.reason === "rewind-native-session" ||
+        journaled.reason === "account-move-native-session";
       const subject = leftSession
-        ? journaled.reason === "provider-switch"
+        ? journaled.reason === "provider-switch" ||
+          journaled.reason === "account-move-native-session"
           ? "switch"
           : "rewind"
         : "fork";
@@ -4329,7 +4405,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         return refused({ subject: "inherited", reason: "source-changed" });
       if (
         journaled.reason === "fork-native-session" ||
-        journaled.reason === "rewind-native-session"
+        journaled.reason === "rewind-native-session" ||
+        journaled.reason === "account-move-native-session"
       )
         return { status: "ready", blocks: [], journaled: "native-session" };
       try {
@@ -6214,7 +6291,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                   let event: HandoffAttached;
                   if (
                     record.reason === "fork-native-session" ||
-                    record.reason === "rewind-native-session"
+                    record.reason === "rewind-native-session" ||
+                    record.reason === "account-move-native-session"
                   )
                     event = record;
                   else {

@@ -396,7 +396,7 @@ export interface ProviderNativeSessions {
   readonly adopt: (input: {
     readonly instanceId: ProviderInstanceId;
     readonly projectRoot: string;
-    readonly mode: "work" | "code";
+    readonly mode: "chat" | "work" | "code";
     readonly sessionId: ProviderSessionId;
     readonly nativeSessionId: string;
     readonly modelId: ProviderModelId;

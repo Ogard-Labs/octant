@@ -5591,6 +5591,65 @@ describe("WorkTurnService", () => {
       expect(rebuilt.latestForThread(ids.thread)?.handoff).toEqual(expected);
     });
 
+    it("continues the provider's own session in the new account when its files are carried there", async () => {
+      const { fixture, run } = await movedFixture({
+        firstKeepsSession: true,
+        nextKeepsSession: true,
+        fixture: {
+          accountSessionCarrier: {
+            sameProvider: () => true,
+            carry: async (request) => ({
+              status: "carried",
+              resumeCursor: { ...request.resumeCursor, value: "carried-session" },
+            }),
+          },
+        },
+      });
+
+      await fixture.service.startFirstTurn(ids.window, followUpCommand());
+      await fixture.waitForIdle();
+
+      const second = run.mock.calls[1]?.[0];
+      expect(second?.providerSessionId).toBe(run.mock.calls[0]?.[0].providerSessionId);
+      expect(second?.resumeCursor?.value).toBe("carried-session");
+      expect(JSON.stringify(second?.context)).not.toContain(
+        "handed over because the thread moved to a different provider",
+      );
+      expect(acceptedEvents(fixture).at(-1)).toMatchObject({
+        handoff: {
+          reason: "account-move",
+          previousProviderInstanceId: ids.provider,
+          previousModelId: "model-a",
+          nativeSessionTransferred: true,
+        },
+      });
+    });
+
+    it("hands over as text and says why when the session cannot be carried to the new account", async () => {
+      const { fixture, run } = await movedFixture({
+        firstKeepsSession: true,
+        nextKeepsSession: true,
+        fixture: {
+          accountSessionCarrier: {
+            sameProvider: () => true,
+            carry: async () => ({ status: "text", cause: "provider-cannot-carry" }),
+          },
+        },
+      });
+
+      await fixture.service.startFirstTurn(ids.window, followUpCommand());
+      await fixture.waitForIdle();
+
+      expect(run.mock.calls[1]?.[0].resumeCursor).toBeUndefined();
+      expect(acceptedEvents(fixture).at(-1)).toMatchObject({
+        handoff: {
+          reason: "provider-switch",
+          nativeSessionTransferred: false,
+          accountMoveTextCause: "provider-cannot-carry",
+        },
+      });
+    });
+
     it("hands the conversation over even when the first provider is gone", async () => {
       const { fixture, run } = await movedFixture({
         firstKeepsSession: true,
@@ -6396,6 +6455,7 @@ function serviceFixture(
     readonly describeImages?: WorkTurnServiceDependencies["describeImages"];
     readonly supportsModelSwitch?: () => boolean;
     readonly conversationInputTransfer?: WorkTurnServiceDependencies["conversationInputTransfer"];
+    readonly accountSessionCarrier?: WorkTurnServiceDependencies["accountSessionCarrier"];
     readonly contextHarness?: ContextHarnessService;
     readonly contextFacts?: ProviderDriver["contextFacts"];
     readonly safeInputBudgetTokens?: number;
@@ -6580,6 +6640,9 @@ function serviceFixture(
       : { current: options.workingDirectoriesCurrent }),
   };
   const service = new WorkTurnService({
+    ...(options.accountSessionCarrier === undefined
+      ? {}
+      : { accountSessionCarrier: options.accountSessionCarrier }),
     ...(options.conversationInputTransfer === undefined
       ? {}
       : { conversationInputTransfer: options.conversationInputTransfer }),

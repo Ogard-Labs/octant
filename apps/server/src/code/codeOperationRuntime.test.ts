@@ -9633,6 +9633,84 @@ describe("provider switch handoff", () => {
     }
   });
 
+  it("continues the provider's own session in the new account when its files are carried there", async () => {
+    const drivers = twoHarnesses();
+    const carried: Array<{ readonly sessionId: string; readonly mode: string }> = [];
+    const fixture = runtimeFixture({
+      resolveProviderDriver: drivers.resolveProviderDriver,
+      accountSessionCarrier: {
+        sameProvider: () => true,
+        carry: async (request) => {
+          carried.push({ sessionId: String(request.sessionId), mode: request.mode });
+          return {
+            status: "carried",
+            resumeCursor: { ...request.resumeCursor, value: "carried-session" },
+          };
+        },
+      },
+    });
+    fixture.setThread(onProvider(providerInstance, "model-a"));
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      fixture.setThread(onProvider(harnessInstance, "model-a", 2));
+      await sendAfterSwitch(fixture);
+      const next = drivers.connection(harnessInstance);
+      await vi.waitFor(() => expect(next.send).toHaveBeenCalledOnce());
+      expect(carried).toEqual([{ sessionId: String(switchSession), mode: "code" }]);
+      expect(next.start).not.toHaveBeenCalled();
+      expect(vi.mocked(next.resume).mock.calls[0]?.[0].resumeCursor.value).toBe("carried-session");
+      expect(JSON.stringify(vi.mocked(next.send).mock.calls[0]?.[0].context ?? [])).not.toContain(
+        "First reply.",
+      );
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({
+        reason: "account-move-native-session",
+        previousProviderInstanceId: providerInstance,
+        previousModelId: "model-a",
+        nativeSessionTransferred: true,
+      });
+      expect(fixture.conversation().turns.at(-1)?.handoff).toMatchObject({
+        reason: "account-move-native-session",
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("hands over as text and says why when a moved session cannot be carried", async () => {
+    const drivers = twoHarnesses();
+    const fixture = runtimeFixture({
+      resolveProviderDriver: drivers.resolveProviderDriver,
+      accountSessionCarrier: {
+        sameProvider: () => true,
+        carry: async () => ({ status: "text", cause: "session-not-adopted" }),
+      },
+    });
+    fixture.setThread(onProvider(providerInstance, "model-a"));
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      fixture.setThread(onProvider(harnessInstance, "model-a", 2));
+      await sendAfterSwitch(fixture);
+      const next = drivers.connection(harnessInstance);
+      await vi.waitFor(() => expect(next.send).toHaveBeenCalledOnce());
+      expect(next.resume).not.toHaveBeenCalled();
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({
+        reason: "provider-switch",
+        nativeSessionTransferred: false,
+        accountMoveTextCause: "session-not-adopted",
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it("leads a provider switch with the limit rule's summary, and says so on the journal", async () => {
     const drivers = twoHarnesses();
     const fixture = runtimeFixture({
@@ -11724,6 +11802,7 @@ function runtimeFixture(options: {
     | "none";
   /** The limit rule's summary a provider switch leads with, when one waits. */
   handoverSummary?: Parameters<typeof createCodeOperationRuntime>[0]["handoverSummary"];
+  accountSessionCarrier?: Parameters<typeof createCodeOperationRuntime>[0]["accountSessionCarrier"];
   /** Whether the selector reports the thread as having taken in outside content. */
   externalContentIngested?: boolean;
   /** Reopen another fixture's journal and content, the way a restarted host does. */
@@ -12090,6 +12169,9 @@ function runtimeFixture(options: {
       ? {}
       : { providerSwitchContext: options.providerSwitchContext ?? selectConversation }),
     ...(options.handoverSummary === undefined ? {} : { handoverSummary: options.handoverSummary }),
+    ...(options.accountSessionCarrier === undefined
+      ? {}
+      : { accountSessionCarrier: options.accountSessionCarrier }),
     ...(options.forkContext === "none"
       ? {}
       : { forkContext: options.forkContext ?? selectForkConversation }),

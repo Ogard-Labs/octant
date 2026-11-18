@@ -13,6 +13,7 @@ import { ContextCompactionSettledRecord } from "./context";
 import {
   ContextHandoffMessages,
   ContextHandoffOmissions,
+  AccountMoveSessionHandoff,
   ProviderSwitchConversationHandoff,
   RewindConversationHandoff,
 } from "./contextHandoff";
@@ -243,6 +244,7 @@ export type WorkForkConversationHandoff = typeof WorkForkConversationHandoff.Typ
 /** What a Work turn started its session with that it did not write itself, by cause. */
 export const WorkTurnHandoff = Schema.Union(
   ProviderSwitchConversationHandoff,
+  AccountMoveSessionHandoff,
   RewindConversationHandoff,
   WorkForkConversationHandoff,
 );
