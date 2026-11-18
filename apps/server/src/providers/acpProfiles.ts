@@ -364,14 +364,13 @@ export function acpSubagentsRun(
  * Project, its `forbiddenRootEntries`, becomes readable once the Project is
  * trusted for the agent, which `projectCode` carries only in Work and Code
  * outside Plan (maintainer decision, 2026-11-14). The agent's own folder
- * trust, where it keeps one, still decides on top. `context` names the
- * Project's instruction text, which every runtime may read, so it comes with
- * any of the person's setup.
+ * trust, where it keeps one, still decides on top. A Project's instruction
+ * text is never among the entries held back: every runtime reads it in every
+ * mode (maintainer decision, 2026-11-18).
  */
 function releasesTrustedProject(
   rootEntries: ReadonlyArray<string>,
   options: {
-    readonly context?: ReadonlyArray<string>;
     readonly guards?: (setup: ProviderNativeSetup) => ReadonlyArray<string>;
     readonly hostEntries?: (setup: ProviderNativeSetup) => ReadonlyArray<string>;
     /** The guard that keeps the agent's own subagents off. */
@@ -386,11 +385,7 @@ function releasesTrustedProject(
         ? [options.subagentGuard]
         : []),
     ],
-    releasedRootEntries: setup.projectCode
-      ? rootEntries
-      : providerRunsAsItself(setup)
-        ? (options.context ?? [])
-        : [],
+    releasedRootEntries: setup.projectCode ? rootEntries : [],
     releasedHostEntries: options.hostEntries?.(setup) ?? [],
   });
 }
@@ -797,7 +792,6 @@ const vibeProfile: AcpProviderProfile = {
       VIBE_ENABLE_UPDATE_CHECKS: "false",
       VIBE_ENABLE_NOTIFICATIONS: "false",
       VIBE_ENABLE_CONNECTORS: "false",
-      VIBE_INCLUDE_PROJECT_CONTEXT: "false",
       VIBE_ENABLE_EXPERIMENTAL_HOOKS: "false",
       VIBE_EXPERIMENTAL_ENABLE_REGISTRY_SKILLS: "false",
       VIBE_VIBE_CODE_ENABLED: "false",
@@ -877,8 +871,8 @@ const vibeProfile: AcpProviderProfile = {
       ".vibe/tools",
     ],
     // The person's own Vibe setup, for a session that carries it. Project
-    // context is the Project's instruction text, which every runtime may read,
-    // so it comes with any of it. A trusted Project's `.vibe` entries become
+    // context is the Project's instruction text, which every runtime reads in
+    // every mode, so no guard holds it back. A trusted Project's `.vibe` entries become
     // readable again, and Vibe's own folder-trust list still decides whether
     // it loads them. Telemetry, update checks, notifications, the voice and
     // narrator features, and the keyring stay as above. Skills include the
@@ -891,7 +885,6 @@ const vibeProfile: AcpProviderProfile = {
     // opens and switches only on the modes Octant selects (maintainer
     // decisions, 2026-11-14).
     nativeSetup: (setup, launch) => {
-      const on = providerRunsAsItself(setup);
       const workOrCode = launch.mode === "work" || launch.mode === "code";
       // The person's own agents come with the subagents: a custom agent may
       // approve its own tools, as it does in Vibe itself (maintainer decision,
@@ -899,7 +892,6 @@ const vibeProfile: AcpProviderProfile = {
       const subagents = setup.subagents && launch.executionPolicy !== "plan" && workOrCode;
       return {
         releasedGuards: [
-          ...(on ? ["VIBE_INCLUDE_PROJECT_CONTEXT"] : []),
           ...(setup.skills
             ? [
                 "VIBE_SKILL_PATHS",
@@ -1502,13 +1494,10 @@ const qwenProfile: AcpProviderProfile = {
   },
 };
 
-const FX_WORKSPACE_DENIED_ENTRIES = [
-  ".fx.json",
-  ".mcp.json",
-  "AGENTS.md",
-  ".agents",
-  ".claude/skills",
-] as const;
+// The workspace `AGENTS.md` is the Project's instruction text, which every
+// runtime reads in every mode (maintainer decision, 2026-11-18), so it is not
+// held back.
+const FX_WORKSPACE_DENIED_ENTRIES = [".fx.json", ".mcp.json", ".agents", ".claude/skills"] as const;
 
 /**
  * fx has no profile-path variable: its settings, sessions, permission rules,
@@ -1578,13 +1567,11 @@ const fxProfile: AcpProviderProfile = {
     args: () => ["acp"],
     managedFiles: () => [],
     // `fx acp` merges the workspace `AGENTS.md`, approved project `.mcp.json`
-    // servers, project `.fx.json`, and workspace skill roots on its own. Octant
-    // admits none of those for fx, and a project `.mcp.json` would start
-    // executables outside the approval flow, so the root denies them.
+    // servers, project `.fx.json`, and workspace skill roots on its own. A
+    // project `.mcp.json` would start executables outside the approval flow,
+    // so the root denies the Project's code until the Project trusts fx.
     forbiddenRootEntries: FX_WORKSPACE_DENIED_ENTRIES,
-    // A trusted Project's own entries; the workspace `AGENTS.md` is the
-    // Project's instruction text and comes with any of the person's setup.
-    nativeSetup: releasesTrustedProject(FX_WORKSPACE_DENIED_ENTRIES, { context: ["AGENTS.md"] }),
+    nativeSetup: releasesTrustedProject(FX_WORKSPACE_DENIED_ENTRIES),
     confinement: { kind: "deny-default-seatbelt" },
   },
 };

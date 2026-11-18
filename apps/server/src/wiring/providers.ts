@@ -143,7 +143,6 @@ import { makePiProcessLive, type PiProcessPort } from "../providers/piProcess";
 import { createProviderRouteHandler } from "../providers/providerRoutes";
 import { ThreadNativeSetupStore } from "../providers/threadNativeSetupStore";
 import { readThreadProjectCode } from "../providers/threadProjectCode";
-import { hostProviderCliProjectTrust } from "../providers/providerCliProjectTrust";
 import { createDiscoveryRouteHandler } from "../providers/discoveryRoutes";
 import { createProviderFromDiscoveryCandidate } from "../providers/discoveryProviderCreate";
 import { makeDiscoveryService } from "../providers/discoveryService";
@@ -734,8 +733,6 @@ export function wireProviders(deps: ProvidersDependencies) {
     workThreadProjection,
     workRequestRuntime,
   } = deps;
-  // The trust a person already gave a Project's folder in Claude Code or Codex.
-  const providerCliProjectTrust = hostProviderCliProjectTrust();
   return Effect.gen(function* () {
     const codeThreadDrivers = new Map<
       string,
@@ -2081,7 +2078,6 @@ export function wireProviders(deps: ProvidersDependencies) {
               readCodeThread: (threadId) => persistence.readCodeThread(threadId),
               readProject: (projectId) => persistence.readProject(projectId),
               readProviderInstance: (id) => persistence.readProviderInstance(id),
-              readProviderCliTrust: providerCliProjectTrust,
               readStrict: (threadId) => deps.resolveThreadStrict(threadId),
             },
             request,

@@ -43,6 +43,7 @@ import {
   approvalRequestIsProjectConfined,
   codexExecutionSettings,
   codexReviewRequest,
+  codexStrictProjectConfigRefusal,
   CODEX_OCTANT_PROFILE,
   withHeldTurnInput,
   codexTurnExecutionSettings,
@@ -1291,7 +1292,12 @@ describe("Codex thread and turn lifecycle", () => {
       sandbox: "read-only",
       approvalsReviewer: "user",
       serviceTier: "fast",
-      config: { model_reasoning_effort: "low", web_search: "disabled", skills: { config: [] } },
+      config: {
+        model_reasoning_effort: "low",
+        web_search: "disabled",
+        skills: { config: [] },
+        projects: { [projectRoot]: { trust_level: "trusted" } },
+      },
     });
     expect(starts[1]?.input).toEqual({
       cwd: projectRoot,
@@ -1299,7 +1305,11 @@ describe("Codex thread and turn lifecycle", () => {
       approvalPolicy: "untrusted",
       sandbox: "read-only",
       approvalsReviewer: "user",
-      config: { web_search: "disabled", skills: { config: [] } },
+      config: {
+        web_search: "disabled",
+        skills: { config: [] },
+        projects: { [projectRoot]: { trust_level: "trusted" } },
+      },
     });
     await acquired.close();
   });
@@ -1915,6 +1925,9 @@ describe("Codex thread and turn lifecycle", () => {
     const workOff = {
       web_search: "disabled",
       skills: { config: [] },
+      // The Project the person added is trusted, so Codex reads its AGENTS.md
+      // and never records a trust decision of its own.
+      projects: { [projectRoot]: { trust_level: "trusted" } },
     };
     const f = fixture();
     const work = await acquireConnection(makeCodexDriver(f.options()), "work");
@@ -3149,7 +3162,12 @@ describe("Codex execution authority and approvals", () => {
         approvalPolicy,
         sandbox,
         approvalsReviewer: "user",
-        config: { web_search: "disabled", skills: { config: [] } },
+        config: {
+          web_search: "disabled",
+          skills: { config: [] },
+          // Plan records no trust; every other level tells Codex the Project is trusted.
+          ...(policy === "plan" ? {} : { projects: { [projectRoot]: { trust_level: "trusted" } } }),
+        },
       });
       await acquired.close();
     },
@@ -3332,13 +3350,14 @@ describe("Codex execution authority and approvals", () => {
       hooks: true,
       projectCode: true,
     } as const;
+    const extra = "/tmp/octant-codex-extra";
     const startWith = async (input: {
       readonly executionPolicy: "approval-gated" | "plan";
       readonly strict?: boolean;
       readonly projectCode: boolean;
     }) => {
       const f = fixture();
-      const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");
+      const acquired = await acquireConnection(makeCodexDriver(f.options()), "work", [extra]);
       await Effect.runPromise(
         acquired.connection.start({
           sessionId,
@@ -3352,22 +3371,95 @@ describe("Codex execution authority and approvals", () => {
       return f.calls.find(({ method }) => method === "thread/start")?.input;
     };
 
-    it("loads in a Project trusted for Codex outside Plan and Strict", async () => {
-      expect(
-        await startWith({ executionPolicy: "approval-gated", strict: false, projectCode: true }),
-      ).toMatchObject({ config: { projects: { [projectRoot]: { trust_level: "trusted" } } } });
-    });
-
     it.each([
-      ["under Strict", { executionPolicy: "approval-gated", projectCode: true }],
-      ["in Plan", { executionPolicy: "plan", strict: false, projectCode: false }],
+      ["outside Strict", { executionPolicy: "approval-gated", strict: false, projectCode: true }],
       [
-        "in a Project not trusted for Codex",
+        "for an account whose setup carries no Project code",
         { executionPolicy: "approval-gated", strict: false, projectCode: false },
       ],
-    ] as const)("is not trusted by Octant %s", async (_name, input) => {
-      const thread = await startWith(input);
-      expect(thread).not.toHaveProperty(["config", "projects"]);
+      ["under Strict", { executionPolicy: "approval-gated", projectCode: false }],
+    ] as const)(
+      "tells Codex the Project and its extra folders are trusted %s, so it never trusts them by itself",
+      async (_name, input) => {
+        expect(await startWith(input)).toMatchObject({
+          config: {
+            projects: {
+              [projectRoot]: { trust_level: "trusted" },
+              [extra]: { trust_level: "trusted" },
+            },
+          },
+        });
+      },
+    );
+
+    it("records no trust in Plan, whose read-only thread never trusts a folder by itself", async () => {
+      for (const strict of [false, undefined]) {
+        const thread = await startWith({
+          executionPolicy: "plan",
+          projectCode: false,
+          ...(strict === undefined ? {} : { strict }),
+        });
+        expect(thread).not.toHaveProperty(["config", "projects"]);
+        expect(JSON.stringify(thread)).not.toContain("untrusted");
+      }
+    });
+
+    it("refuses a Strict thread whose Project holds .codex/config.toml until the person allows the Project's code", () => {
+      const holds = (path: string) => path === join(projectRoot, ".codex", "config.toml");
+      const refusal = (input: {
+        readonly executionPolicy: "approval-gated" | "plan";
+        readonly strict?: boolean;
+        readonly projectCode?: boolean;
+        readonly exists?: (path: string) => boolean;
+      }) =>
+        codexStrictProjectConfigRefusal({
+          projectRoot,
+          mode: "code",
+          executionPolicy: input.executionPolicy,
+          strict: input.strict,
+          nativeSetup:
+            input.projectCode === undefined
+              ? undefined
+              : { ...trustedSetup, projectCode: input.projectCode },
+          exists: input.exists ?? holds,
+        });
+      expect(refusal({ executionPolicy: "approval-gated" })).toContain(".codex/config.toml");
+      expect(refusal({ executionPolicy: "approval-gated", projectCode: false })).toContain(
+        "Allow Project code",
+      );
+      // Confirmed, outside Strict, in Plan, or with no such file, it starts.
+      expect(refusal({ executionPolicy: "approval-gated", projectCode: true })).toBeUndefined();
+      expect(refusal({ executionPolicy: "approval-gated", strict: false })).toBeUndefined();
+      expect(refusal({ executionPolicy: "plan" })).toBeUndefined();
+      expect(refusal({ executionPolicy: "approval-gated", exists: () => false })).toBeUndefined();
+    });
+
+    it("fails the Strict session start in such a Project before any thread starts", async () => {
+      const root = mkdtempSync(join(tmpdir(), "octant-codex-strict-config-"));
+      try {
+        mkdirSync(join(root, ".codex"));
+        writeFileSync(join(root, ".codex", "config.toml"), 'model = "gpt-5.4"\n');
+        const f = fixture();
+        const scope = await Effect.runPromise(Scope.make());
+        const connection = await Effect.runPromise(
+          makeCodexDriver(f.options())
+            .acquire({ instanceId, projectRoot: root, mode: "code" })
+            .pipe(Effect.provideService(Scope.Scope, scope)),
+        );
+        const exit = await Effect.runPromiseExit(
+          connection.start({
+            sessionId,
+            modelId: "gpt-5.4" as never,
+            executionPolicy: "approval-gated",
+          }),
+        );
+        await Effect.runPromise(Scope.close(scope, Exit.void));
+        expect(Exit.isFailure(exit)).toBe(true);
+        expect(JSON.stringify(exit)).toContain("Allow Project code");
+        expect(f.calls.some(({ method }) => method === "thread/start")).toBe(false);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     });
   });
 

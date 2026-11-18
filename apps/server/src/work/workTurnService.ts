@@ -117,7 +117,6 @@ import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/
 import type { TurnImage, TurnImagesDescription } from "../harness/imageDescription";
 import type { TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNativeSetup";
-import type { ProviderCliProjectTrust } from "../providers/providerCliProjectTrust";
 import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
@@ -341,8 +340,6 @@ export interface WorkTurnServiceDependencies {
   readonly persistence: {
     readonly status: () => { readonly state: string; readonly integrity: string };
     readonly readProject: (projectId: ProjectId) => Project | undefined;
-    /** Whether the provider's own CLI already trusts a Project's folder; absent reads none. */
-    readonly readProviderCliTrust?: ProviderCliProjectTrust;
     /** The Project's memory, whose active entries every turn in it carries. */
     readonly readProjectMemory?: (projectId: ProjectId) => ProjectMemoryView;
     readonly readProviderInstance: (
