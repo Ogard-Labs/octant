@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SubagentsTray, ThreadSubagentsTray } from "./ComposerSubagentsTray";
@@ -290,11 +290,12 @@ describe("SubagentsTray", () => {
     expect(screen.queryByRole("group", { name: "Subagents" })).not.toBeInTheDocument();
   });
 
-  it("shows only recorded model, reason and update age without claiming total run time", () => {
+  it("shows only recorded model, reason and how long the subagent ran, never an update age", () => {
     vi.useFakeTimers({ now: Date.parse("2026-09-26T10:00:12.000Z"), shouldAdvanceTime: true });
     renderTray([
       {
         ...entry("a", "waiting"),
+        createdAt: "2026-09-26T09:58:48.000Z",
         recoveryReason: "Waiting for approval",
         route: {
           requestedProviderInstanceId: "provider-one",
@@ -308,11 +309,35 @@ describe("SubagentsTray", () => {
     ]);
     const recorded = screen.getByRole("button", { name: /^Task a\. Waiting/ });
     expect(recorded).toHaveTextContent("actual-model");
-    expect(recorded).toHaveTextContent("Updated 12s ago");
+    // Requested 09:58:48, still waiting at 10:00:12: it has run 1m 24s.
+    // Drawn once, in the trailing slot, and spoken through the label.
+    expect(recorded.textContent?.split("1m 24s")).toHaveLength(2);
+    expect(recorded).toHaveAccessibleName(expect.stringContaining("Ran 1m 24s"));
+    expect(recorded).not.toHaveTextContent(/Updated|ago/);
     expect(recorded).toHaveTextContent("Waiting for approval");
     expect(recorded).not.toHaveTextContent("requested-model");
     const unknown = screen.getByRole("button", { name: /^Task b\. Working/ });
-    expect(unknown).not.toHaveTextContent(/Updated|model|NaN/);
+    expect(unknown).not.toHaveTextContent(/Updated|ago|model|NaN/);
+  });
+
+  it("ticks a working subagent's run time and stops a finished one at its last update", async () => {
+    vi.useFakeTimers({ now: Date.parse("2026-09-26T10:01:00.000Z"), shouldAdvanceTime: true });
+    renderTray([
+      { ...entry("a", "running"), createdAt: "2026-09-26T10:00:00.000Z" },
+      {
+        ...entry("b", "failed"),
+        createdAt: "2026-09-26T09:50:00.000Z",
+        updatedAt: "2026-09-26T09:50:30.000Z",
+      },
+    ]);
+    const working = screen.getByRole("button", { name: /^Task a\. Working/ });
+    expect(working).toHaveTextContent("1m 00s");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(working).toHaveTextContent("1m 05s");
+    // A failed run is still listed as unresolved; its time stays where it stopped.
+    expect(screen.getByRole("button", { name: /^Task b\. Failed/ })).toHaveTextContent("30s");
   });
 
   it("asks to open the chosen subagent", async () => {

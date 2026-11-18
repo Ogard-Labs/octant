@@ -1422,7 +1422,7 @@ Project's quick tools (Terminal and Browser; a server Project's are its
 Terminal only); they never stand as a column
 beside the start screen ([Start screen: Welcome screen](start-screen.md#welcome-screen)). An available empty dock opens on a stack of fact cards (Environment with
 the local window's Remote access switch, Local servers, Context, Changes,
-Outputs, Background tasks, Running now; see [Right dock and bottom panel](#right-dock-and-bottom-panel));
+Outputs, Subagents, Running now; see [Right dock and bottom panel](#right-dock-and-bottom-panel));
 its header is an empty band as tall as the title rail, and the tools are opened
 from the **tool row**: at 961px and wider it stands outermost at the end of the
 title band, above the Environment section, and it is the focused thread's row.
@@ -3039,11 +3039,14 @@ opens Review, and the thread's pull request with its checks in words.
 **Outputs** lists the documents and Canvases the window knows the thread has
 (those it had when opened and those its turns wrote since, never a deleted
 file), newest first and at most five, each a row that opens it in Document or
-Canvas, with the count at the title's right. **Background tasks** lists the
+Canvas, with the count at the title's right. **Subagents** lists the
 runs the thread's agent handed work to, from the same read and cadence as the
-Environment tab's Subagents row: each running one a spinner, task, and age,
-with the running count at the title's right, and the finished ones folded under
-one "N finished" row; a row opens that run in Agents.
+Environment tab's Subagents row: each running one a spinner, task, and how long
+it has run, with the running count at the title's right, and the finished ones
+folded under one "N finished" row; each row shows its run time at the trailing
+edge in a fixed-width slot, by the same rule as the transcript's subagent rows
+([Thread view: Subagents in a thread](thread-view.md#subagents-in-a-thread)); a
+row opens that run in Agents.
 **Running now** lists the other threads the window knows are working (any
 mode, at most five, newest first, never the thread on screen), each a spinner,
 title, Project, and age, and opens that thread. Model and access are not

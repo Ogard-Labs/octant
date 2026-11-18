@@ -537,6 +537,19 @@
   overflow-wrap: anywhere;
 }
 
+/* How long the subagent ran, at the row's trailing edge in a slot of fixed
+   width, so the digits ticking and a finished child never move the task. */
+.composer-subagents__time {
+  flex: none;
+  min-width: 48px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: normal;
+  text-align: end;
+  white-space: nowrap;
+}
+
 .composer-subagents__task {
   color: var(--oct-fg);
   font-size: var(--oct-text-xs);

@@ -7,7 +7,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { OctantInput } from "../ui/base/OctantInput";
 import { observedChildUsageLine } from "./agentRunGraphFacts";
-import { subagentElapsedLabel, subagentStatusWord, SubagentStatusIcon } from "./subagentStatus";
+import { subagentStatusWord, SubagentStatusIcon } from "./subagentStatus";
 
 /** Selection keys never enter the managed run identifier or command paths. */
 export function observedChildSelectionId(child: AgentObservedChild): string {
@@ -194,7 +194,8 @@ function ObservedChildStop(props: {
  */
 export function ObservedChildRow(props: {
   readonly child: AgentObservedChild;
-  readonly now: number;
+  /** How long the child has run, by the shared run-time rule; the trailing slot. */
+  readonly runTime: string;
   /** The provider's display name, or its instance id when unknown. */
   readonly providerName: string;
   /** Present when the surface knows the instance, so its mark is drawn. */
@@ -206,20 +207,20 @@ export function ObservedChildRow(props: {
 }) {
   const child = props.child;
   const task = child.task ?? "Task unavailable";
-  const age = subagentElapsedLabel(child.firstObservedAt, props.now);
   const meta = [
     subagentStatusWord(child.lifecycleStatus),
     `Started by ${props.providerName}`,
     props.model ?? child.modelId ?? "Model unknown",
     observedChildUsageLine(child.usage),
-    age === "" ? undefined : `First seen ${age} ago`,
   ]
     .filter((part): part is string => part !== undefined)
     .join(" · ");
+  // The run time is drawn once, in the trailing slot, and spoken through the label.
+  const spoken = props.runTime === "" ? meta : `${meta} · Ran ${props.runTime}`;
   return (
     <>
       <OctantButton
-        aria-label={`${task}. ${meta}. Opens it in Agents.`}
+        aria-label={`${task}. ${spoken}. Opens it in Agents.`}
         className="composer-subagents__open"
         onClick={() => props.onOpen?.(observedChildSelectionId(child))}
         size="xs"
@@ -238,6 +239,9 @@ export function ObservedChildRow(props: {
           <span className="composer-subagents__reason">
             {child.finalSummary ?? (child.latestSummary || "No activity reported.")}
           </span>
+        </span>
+        <span aria-hidden="true" className="composer-subagents__time">
+          {props.runTime}
         </span>
       </OctantButton>
       <ObservedChildStop child={child} client={props.client} />

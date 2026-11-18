@@ -338,9 +338,11 @@ Task-plan completion is never counted as child completion. View all opens the
 full Agents list even when every child has finished. Expansion previews at most
 three active or unresolved children; longer history stays in Environment and
 Agents. Compact rows show task, semantic status, recorded model and available
-activity. Age is explicitly time since the last update or first observation,
-never inferred execution duration. Raw identifiers and workspace paths belong
-in details. Rows open the child in Agents. Only managed active children offer
+activity. Each row also shows how long the child has run, measured from its request (or
+first sight of a provider's own) to its last update and ticking while it works,
+the same rule as the transcript's row, at the trailing edge in a slot of fixed
+width: a finished child's time stops where it stopped. Raw identifiers and
+workspace paths belong in details. Rows open the child in Agents. Only managed active children offer
 Stop; Stop all asks first and names its managed scope. Headers and rows wrap at
 narrow widths, disclosures work with the keyboard and retain visible focus,
 and expanded lists have bounded height.
@@ -352,7 +354,10 @@ managed run's result once it has one, else its state), the model and effort as
 the picker names them ("Sonnet 5.5 High"; nothing when the run reported no
 model), how long it has run (from its request or first sight to its last
 update, ticking while it works), and its state mark at the trailing edge, in a
-slot that keeps its width so nothing moves when a run finishes. A subagent
+slot that keeps its width so nothing moves when a run finishes. The row is one
+button that opens the child in Agents, as the card's rows do: Enter or Space on
+it opens too, its name is the task and its state, and it keeps its look on
+hover and press. A subagent
 belongs to the turn that was running when it started, because the host links
 a subagent to its thread and not to a turn: a turn owns the span from its start
 to the next turn's. The rows and the composer's card read one shared summary

@@ -10,7 +10,7 @@ import {
   subagentNeedsReview,
   type AgentHierarchyInputEntry,
 } from "./buildAgentHierarchyModel";
-import { SubagentStatusIcon, subagentElapsedLabel, subagentStatusWord } from "./subagentStatus";
+import { SubagentStatusIcon, subagentStatusWord } from "./subagentStatus";
 import { AgentResultPreview, latestResultPacket } from "./AgentRunResults";
 import { ObservedChildRow, type ObservedChildClient } from "./ObservedChildActivity";
 import type { SubagentProviderIdentity } from "./AgentRunDependencyGraph";
@@ -19,6 +19,7 @@ import {
   buildSubagentRows,
   groupSubagentRows,
   isActiveSubagentRow,
+  subagentRunTime,
   type SubagentListItem,
   type SubagentRow,
 } from "./subagentRows";
@@ -287,7 +288,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
                     <ObservedChildRow
                       child={item.row.child}
                       {...(props.stopClient === undefined ? {} : { client: props.stopClient })}
-                      now={now}
+                      runTime={subagentRunTime(item.row, now)}
                       providerName={item.row.providerName}
                       model={item.row.model}
                       {...(item.row.driverKind === undefined
@@ -338,22 +339,24 @@ function SubagentTrayRow(props: {
   const { row } = props;
   const entry = row.entry;
   const word = subagentStatusWord(entry.lifecycleStatus);
-  const elapsed = subagentElapsedLabel(entry.updatedAt, props.now);
+  const ran = subagentRunTime(row, props.now);
   const meta = [
     word,
     subagentNeedsReview(entry) ? "Needs review" : undefined,
     row.providerName,
     row.model,
-    elapsed === "" ? undefined : `Updated ${elapsed} ago`,
   ]
     .filter((part) => part !== undefined)
     .join(" · ");
+  // The run time is drawn once, in the trailing slot; the slot is hidden from
+  // assistive technology, so the label carries it instead.
+  const spoken = ran === "" ? meta : `${meta} · Ran ${ran}`;
   const result = latestResultPacket(entry.resultPackets ?? []);
   const reason = entry.recoveryReason ?? entry.resultAcknowledgement.followUpReason;
   return (
     <li className="composer-subagents__row">
       <OctantButton
-        aria-label={`${entry.task}. ${meta}. ${reason === undefined ? "" : `${reason}. `}Opens it in Agents.`}
+        aria-label={`${entry.task}. ${spoken}. ${reason === undefined ? "" : `${reason}. `}Opens it in Agents.`}
         className="composer-subagents__open"
         onClick={() => props.onOpenSubagent?.(entry.runId)}
         size="xs"
@@ -374,6 +377,9 @@ function SubagentTrayRow(props: {
           {reason === undefined ? null : (
             <span className="composer-subagents__reason">{reason}</span>
           )}
+        </span>
+        <span aria-hidden="true" className="composer-subagents__time">
+          {ran}
         </span>
       </OctantButton>
       {entry.executionKind === "octant-managed" &&

@@ -27,6 +27,7 @@ import {
   groupSubagentRows,
   isActiveSubagentRow,
   nestSubagentRows,
+  subagentRunTime,
   type SubagentCompareGroup,
   type SubagentListItem,
   type SubagentRow,
@@ -438,7 +439,7 @@ function AgentHierarchySection(props: {
               {row.kind === "provider-started" ? (
                 <ObservedChildRow
                   child={row.child}
-                  now={Date.now()}
+                  runTime={subagentRunTime(row, Date.now())}
                   providerName={row.providerName}
                   model={row.model}
                   {...(row.driverKind === undefined ? {} : { driverKind: row.driverKind })}
