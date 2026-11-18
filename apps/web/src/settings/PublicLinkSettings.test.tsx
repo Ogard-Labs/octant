@@ -46,6 +46,14 @@ describe("PublicLinkSettings", () => {
     );
   });
 
+  it("opens the deployment recipe from search without enabling publishing", async () => {
+    const { fake, set } = client(settings());
+    render(<PublicLinkSettings client={fake} focusedSetting="public-link-setup" />);
+    expect(await screen.findByText(/docker compose -f apps\/share\/compose.yaml/)).toBeVisible();
+    expect(screen.getByRole("switch", { name: "Public links" })).not.toBeChecked();
+    expect(set).not.toHaveBeenCalled();
+  });
+
   it("turns public links on from the version the person read", async () => {
     const user = userEvent.setup();
     const { fake, set } = client(settings({ version: 3 }), () => ({
