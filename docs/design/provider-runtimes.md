@@ -1897,8 +1897,23 @@ the source again afterwards, and a message after the anchor then removes the
 copy and sends the text handoff instead. Only a session this instance
 opened for the fork's own folder and mode is forked; another folder or mode,
 an anchor OpenCode no longer holds, or a runtime without the routes goes
-back with the text handoff. A rewind still sends the text handoff: OpenCode
-reports `sessionRollback` unsupported, and changing that is its own step.
+back with the text handoff.
+
+A Code rewind continues the same kind of copy: OpenCode reports
+`sessionRollback` supported, and the rewound thread's next turn resumes
+OpenCode's fork of the kept turn's session cut at that turn's anchor, under
+the same folder and mode checks, so the removed turns never reach the model
+and the source session stays as it was. A kept turn with no anchor, or a
+copy that fails, goes back with the text handoff. Rationale: OpenCode's own
+undo (1.x and 2.x `POST /session/{id}/revert` with a `messageID`, and
+`unrevert`) is not used. It rolls the session back in place and also puts
+files back from OpenCode's own snapshots (the session's `revert.snapshot`
+and `diff`), while a rewind's files come back only through Octant's
+checkpoints, and only when the person chose files; a second restore beside
+the checkpoint's would disagree with the journal, and a conversation-only
+rewind would change files. Rolling the source back in place would also
+change a session that earlier turns' anchors and a fork made from it still
+name.
 
 ## Pi
 
@@ -2003,8 +2018,17 @@ source is never written. Only a session this instance opened for the fork's
 own folder, mode and model is copied (Pi keeps the model a session was opened
 with and refuses a resume onto another); any other fork, an anchor the file
 no longer holds, a file over 64 MB, or a fork session that already has a
-history goes back with the text handoff. A rewind still sends the text
-handoff, since Pi reports `sessionRollback` unsupported.
+history goes back with the text handoff.
+
+A Code rewind continues the same kind of copy: Pi reports `sessionRollback`
+supported, and the rewound thread's next turn resumes a new session file
+copied through the kept turn's anchor entry, under the same folder, mode and
+model checks. Pi's own way back in a session (moving the leaf to an earlier
+entry of its tree) changes the source session, which earlier turns' anchors
+and any fork made from it still name, so it is not used; the source file is
+never written. A kept turn with no anchor, a thread now on another model, or
+a copy that fails goes back with the text handoff. Files come back only
+through Octant's checkpoints, as for every provider.
 
 ## ACP agents
 
