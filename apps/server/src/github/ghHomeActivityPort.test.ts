@@ -317,7 +317,7 @@ describe("GhHomeActivityPort", () => {
   it("keeps every query constant's braces balanced", () => {
     const source = readFileSync(new URL("./ghHomeActivityPort.ts", import.meta.url), "utf8");
     const queries = [...source.matchAll(/const \w+_QUERY\s*=\s*\n?\s*"([^"]+)";/g)].map(
-      (match) => match[1],
+      (match) => match[1] ?? "",
     );
     expect(queries.length).toBeGreaterThan(0);
     for (const query of queries) {

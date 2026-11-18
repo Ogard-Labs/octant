@@ -433,7 +433,7 @@ describe("createCodeHomeForgeRead", () => {
       refresh: true,
     });
     expect(observe).toHaveBeenCalledTimes(4);
-    expect(again.status).toBe("ready");
+    if (again.status !== "ready") throw new Error(`expected a ready read, got ${again.status}`);
     expect(again.records[0]?.record).toMatchObject({ number: 55 });
   });
 
