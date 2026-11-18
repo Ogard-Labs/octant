@@ -6,7 +6,7 @@ import type {
   GithubAuthenticationState,
   GithubCapabilityKind,
 } from "@octant/contracts";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
@@ -188,7 +188,7 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
       >
         <div className="setgroup">
           <SettingRow
-            description="Set up, refresh scopes, or move the credential to secure storage."
+            description="Set up, refresh access, or move the sign-in to secure storage."
             label="Connection"
             labelledBySection
             scope="host"
@@ -276,8 +276,8 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
                   : "Log out of GitHub?"
               }
             >
-              Logging out removes the credential from this host only. It does not revoke
-              Octant&apos;s GitHub authorization.
+              Logging out removes the sign-in from this host only. It does not revoke Octant&apos;s
+              GitHub authorization.
             </OctantConfirmDialog>
           ) : null}
         </OctantDialogPresence>
@@ -348,7 +348,7 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
         {credentialRemovable ? (
           <div className="setgroup">
             <SettingRow
-              description="Removes the credential from this host. It stays authorized on GitHub until you revoke it there."
+              description="Removes the sign-in from this host. It stays authorized on GitHub until you revoke it there."
               label="Log out"
               labelledBySection
               scope="host"

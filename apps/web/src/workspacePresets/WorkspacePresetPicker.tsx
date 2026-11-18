@@ -2,7 +2,15 @@ import type {
   WorkspacePreset,
   WorkspacePresetSkillReport,
 } from "@octant/contracts/workspace-presets";
-import { LayoutTemplate } from "lucide-react";
+import {
+  Code2,
+  Files,
+  Globe,
+  type IconComponent,
+  LayoutTemplate,
+  MessageSquare,
+  SquareTerminal,
+} from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -15,6 +23,20 @@ export interface WorkspacePresetPickerProps {
   readonly onApply: (preset: WorkspacePreset) => void;
 }
 
+/** The words and tool glyph a person knows each pane by, never its raw id. */
+const PANE_FACES: Readonly<Record<WorkspacePreset["panes"][number], PaneFace>> = {
+  "code-overview": { label: "Overview", Icon: Code2 },
+  browser: { label: "Browser", Icon: Globe },
+  "side-chat": { label: "Side chat", Icon: MessageSquare },
+  files: { label: "Files", Icon: Files },
+  "code-terminal": { label: "Terminal", Icon: SquareTerminal },
+};
+
+interface PaneFace {
+  readonly label: string;
+  readonly Icon: IconComponent;
+}
+
 /**
  * The workspace presets this host offers, and what each one opens.
  *
@@ -25,28 +47,43 @@ export interface WorkspacePresetPickerProps {
  */
 export function WorkspacePresetPicker(props: WorkspacePresetPickerProps) {
   return (
-    <section aria-label="Set up this workspace" className="workspace-presets">
-      <header className="workspace-presets__header">
-        <LayoutTemplate aria-hidden="true" size={14} />
-        <span>Set up this workspace</span>
-      </header>
-      <ul className="workspace-presets__list">
+    <section aria-label="Set up this workspace" className="empty-start__group">
+      <h3 className="oct-section-label empty-start__label">Set up this workspace</h3>
+      <ul className="empty-start__rows">
         {props.presets.map((preset) => (
-          <li className="workspace-presets__entry" key={String(preset.id)}>
-            <div>
-              <strong>{preset.displayName}</strong>
-              <p>{preset.summary}</p>
-              <p className="workspace-presets__panes">Opens: {preset.panes.join(", ")}</p>
-            </div>
+          <li key={String(preset.id)}>
+            {/* The whole row is the control, as the template row under it is. A
+                small outlined "Apply" pill at the row's end was one more shape
+                on a page of rows, and a far smaller thing to hit. */}
             <OctantButton
               aria-label={`Apply ${preset.displayName}`}
+              className="empty-start__row empty-start__row--preset empty-start__row--action"
               disabled={props.busy}
               onClick={() => props.onApply(preset)}
-              size="sm"
               type="button"
-              variant="secondary"
+              variant="bare"
             >
-              Apply
+              <LayoutTemplate aria-hidden="true" className="empty-start__icon" size={16} />
+              <span className="empty-start__text">
+                <span className="empty-start__name">{preset.displayName}</span>
+                <span className="empty-start__summary">{preset.summary}</span>
+                <span className="empty-start__opens">
+                  <span>Opens:</span>
+                  {preset.panes.map((pane, index) => {
+                    const face = PANE_FACES[pane];
+                    return (
+                      <span className="empty-start__pane" key={pane}>
+                        {index === 0 ? null : <span aria-hidden="true">·</span>}
+                        <face.Icon aria-hidden={true} size={12} />
+                        {face.label}
+                      </span>
+                    );
+                  })}
+                </span>
+              </span>
+              <span aria-hidden="true" className="empty-start__apply">
+                Apply
+              </span>
             </OctantButton>
           </li>
         ))}

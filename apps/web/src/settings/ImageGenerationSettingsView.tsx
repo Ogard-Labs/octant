@@ -90,7 +90,7 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
                 </OctantButton>
               )
             }
-            detail="No image providers are enabled. Add a dedicated provider or custom endpoint below."
+            detail="No image provider is on. Add a provider or custom endpoint below."
             title="No eligible provider yet"
             tone="page"
           />
@@ -100,13 +100,13 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
         <>
           {hasImageProvider ? null : (
             <p className="settings-state settings-state--empty" role="status">
-              No image providers are enabled. Add a dedicated provider or custom endpoint below.
+              No image provider is on. Add a provider or custom endpoint below.
             </p>
           )}
           {imageProviderSettings}
           <SettingsSection
             title="Custom image sources"
-            description="Connect an OpenAI-compatible image API's provider and model, such as Recraft, to use as a custom image source."
+            description="Connect an OpenAI-compatible image API, such as Recraft, as a custom image source."
           >
             <div className="setgroup">
               <SettingRow
@@ -303,7 +303,7 @@ function ImageProviderCreateForm(props: { readonly controller: ProviderControlle
       busy={controller.busy}
       credentialManagementAvailable={controller.credentialManagementAvailable}
       heading="Connect an image provider"
-      hint="Use an OpenAI, Gemini, Black Forest Labs, or Ideogram image API. Credentials stay in the host's secure store."
+      hint="Use an OpenAI, Gemini, Black Forest Labs, or Ideogram image API. Keys stay in the host's secure store."
       initialProviderType="openai-image"
       onCreate={controller.create}
       onCreateAnthropicCompatible={controller.createAnthropicCompatible}

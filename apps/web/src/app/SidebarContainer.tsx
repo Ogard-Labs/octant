@@ -190,8 +190,6 @@ export interface SidebarContainerProps {
   };
   readonly sidebarRail: boolean;
   readonly sidebarRailBeside: boolean;
-  /** Plan usage rings for the icon rail. */
-  readonly railUsage?: ReactNode;
   /** The update card at the sidebar's foot; the rail never draws it. */
   readonly whatsNew: WhatsNewController;
   readonly sidebarTileCounts: ReturnType<typeof countSidebarTiles>;
@@ -260,7 +258,6 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     sidebarRail,
     sidebarRailBeside,
     homeActive,
-    railUsage,
     whatsNew,
     sidebarTileCounts,
     threadErrorMessage,
@@ -770,7 +767,6 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
         {...(sidebarRailBeside
           ? { railBeside: { onOpenActivity: () => openSidebarList("activity") } }
           : {})}
-        {...(railUsage === undefined ? {} : { railUsage })}
         {...(whatsNew.card === undefined
           ? {}
           : {

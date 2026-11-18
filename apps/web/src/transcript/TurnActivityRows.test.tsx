@@ -411,9 +411,9 @@ describe("TurnActivityRows", () => {
     };
     render(<TurnActivityRows activity={settled} running={false} settled />);
 
-    const fold = disclosure("2 tool calls · 1 file edited");
+    const fold = disclosure("2 tool calls: 1 command, 1 edit");
     expect(fold.open).toBe(false);
-    expect(screen.getByRole("button", { name: "2 tool calls · 1 file edited" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "2 tool calls: 1 command, 1 edit" })).toHaveAttribute(
       "aria-expanded",
       "false",
     );
@@ -434,7 +434,7 @@ describe("TurnActivityRows", () => {
     expect(screen.getByText("Check the failing suite first.")).toBeVisible();
     rerender(<TurnActivityRows activity={activity} running={false} settled />);
     expect(screen.getByText("Check the failing suite first.")).toBeVisible();
-    expect(disclosure("1 tool call").open).toBe(false);
+    expect(disclosure("1 tool call: 1 command").open).toBe(false);
   });
 
   it("keeps a waiting approval row visible outside the settled fold", () => {
@@ -464,7 +464,7 @@ describe("TurnActivityRows", () => {
     );
 
     expect(screen.getByRole("button", { name: "Apply the edit, waiting" })).toBeVisible();
-    const fold = disclosure("1 tool call");
+    const fold = disclosure("1 tool call: 1 read");
     expect(fold.open).toBe(false);
     expect(screen.getByText("ok")).not.toBeVisible();
   });
@@ -493,7 +493,7 @@ describe("TurnActivityRows", () => {
       </>,
     );
 
-    const folds = screen.getAllByRole("button", { name: "1 tool call" });
+    const folds = screen.getAllByRole("button", { name: /^1 tool call/ });
     await user.click(folds[0]!);
     expect(folds[0]!.closest("details")).toHaveProperty("open", true);
     expect(folds[1]!.closest("details")).toHaveProperty("open", false);
@@ -560,9 +560,9 @@ describe("a tool row that read outside content", () => {
         running
       />,
     );
-    const row = screen.getByRole("button", { name: /^web-fetch/ });
+    const row = screen.getByRole("button", { name: /^Web fetch/ });
     expect(row).toHaveAccessibleName(
-      "web-fetch, done, Outside content · instructions aimed at the agent, a false claim of authority",
+      "Web fetch, done, Outside content · instructions aimed at the agent, a false claim of authority",
     );
     const tag = within(row).getByText(/^Outside content ·/).parentElement;
     expect(tag).toHaveAttribute("data-quiet", "false");
@@ -579,7 +579,7 @@ describe("a tool row that read outside content", () => {
         running
       />,
     );
-    const tag = within(screen.getByRole("button", { name: /^web-fetch/ })).getByText(
+    const tag = within(screen.getByRole("button", { name: /^Web fetch/ })).getByText(
       "Outside content · instructions aimed at the agent",
     ).parentElement;
     expect(tag).toHaveAttribute("data-quiet", "true");
@@ -591,7 +591,7 @@ describe("a tool row that read outside content", () => {
 
   it("marks a plain outside read quietly with no finding", () => {
     render(<TurnActivityRows activity={rows({ labels: [] })} running />);
-    const tag = within(screen.getByRole("button", { name: /^web-fetch/ })).getByText(
+    const tag = within(screen.getByRole("button", { name: /^Web fetch/ })).getByText(
       "Outside content",
     ).parentElement;
     expect(tag).toHaveAttribute("data-quiet", "true");
@@ -613,7 +613,7 @@ describe("the Reply detail level", () => {
       },
     ],
   };
-  const fold = "2 tool calls · 1 file edited";
+  const fold = "2 tool calls: 1 command, 1 edit";
 
   function atLevel(level: ReplyDetailLevel, node: ReactNode) {
     return <ReplyDetailContext.Provider value={level}>{node}</ReplyDetailContext.Provider>;
@@ -848,5 +848,117 @@ describe("a tool row's kept input and output", () => {
     await userEvent.click(screen.getByRole("button", { name: "Bash, done" }));
     expect(screen.getByText("exit 0")).toBeVisible();
     expect(screen.queryByText(/kept/)).toBeNull();
+  });
+});
+
+describe("activity row marks and names", () => {
+  it("leads each row with an icon for its kind and ends it with a reserved status slot", () => {
+    render(<TurnActivityRows activity={mixed} running={false} />);
+    const bash = disclosure("Bash, done");
+    const read = disclosure("Read, failed");
+    expect(bash.querySelector("svg.turn-activity__kind-icon")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+    expect(bash.querySelector("svg.turn-activity__kind-icon")).not.toBe(
+      read.querySelector("svg.turn-activity__kind-icon"),
+    );
+    expect(disclosure("Thinking").querySelector("svg.turn-activity__kind-icon")).not.toBeNull();
+    for (const row of [bash, read]) {
+      expect(
+        row.querySelector(".turn-activity__status svg.turn-activity__status-icon"),
+      ).not.toBeNull();
+    }
+  });
+
+  it("never shows a raw internal tool name", () => {
+    render(
+      <TurnActivityRows
+        activity={{
+          reasoning: "",
+          rows: [{ kind: "tool", id: "p", toolName: "provider-tool", state: "completed" }],
+        }}
+        running={false}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Provider tool, done" })).toBeInTheDocument();
+    expect(screen.queryByText("provider-tool")).not.toBeInTheDocument();
+  });
+
+  it("says how long thinking took when the turn recorded it", () => {
+    render(
+      <TurnActivityRows
+        activity={{ reasoning: "Weighing options.", rows: [], reasoningMs: 12_000 }}
+        running={false}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Thought for 12s" })).toBeInTheDocument();
+  });
+});
+
+describe("the tool list", () => {
+  const ran: TurnActivity = {
+    reasoning: "",
+    rows: [
+      ...["a", "b", "c"].map((id) => ({
+        kind: "tool" as const,
+        id,
+        toolName: "Bash",
+        state: "completed" as const,
+        summary: `npm test ${id}\nmore output`,
+        durationMs: 3_200,
+      })),
+      { kind: "tool", id: "r", toolName: "Read", state: "completed", summary: "src/app/main.ts" },
+      { kind: "tool", id: "e", toolName: "Edit", state: "running", summary: "src/app/main.ts" },
+      { kind: "tool", id: "s", toolName: "Grep", state: "completed" },
+      { kind: "tool", id: "w", toolName: "WebFetch", state: "completed" },
+      { kind: "tool", id: "m", toolName: "mcp__x__y", state: "completed" },
+    ],
+  };
+
+  it("names what ran by kind in the folded group's accessible name and shows marks with counts", () => {
+    render(
+      <TurnActivityRows
+        activity={{ ...ran, rows: ran.rows.slice(0, 4) }}
+        running={false}
+        settled
+      />,
+    );
+    const group = screen.getByRole("button", { name: "4 tool calls: 3 commands, 1 read" });
+    expect(group.querySelectorAll(".turn-activity__kind-count")).toHaveLength(2);
+    expect(group).toHaveTextContent("3");
+  });
+
+  it("shows at most four kinds in the group and says how many more there were", () => {
+    render(
+      <TurnActivityRows
+        activity={{ ...ran, rows: ran.rows.filter((row) => row.id !== "e") }}
+        running={false}
+        settled
+      />,
+    );
+    const group = screen.getByRole("button", { name: /^7 tool calls: 3 commands/ });
+    const counts = group.querySelectorAll(".turn-activity__kind-count");
+    expect(counts).toHaveLength(5);
+    expect(counts[4]).toHaveTextContent("+1");
+  });
+
+  it("gives each call one row with its first line and its duration, and keeps its mark reserved", () => {
+    const { container } = render(<TurnActivityRows activity={ran} running />);
+    const row = container.querySelector('details[data-kind="tool"]') as HTMLElement;
+    expect(row.querySelector(".turn-activity__preview--call")).toHaveAttribute(
+      "data-preview",
+      "npm test a",
+    );
+    expect(row.querySelector(".turn-activity__duration")).toHaveTextContent("3.2 s");
+    const file = disclosure("Read, done");
+    expect(file.querySelector(".turn-activity__preview--call")).toHaveAttribute(
+      "data-preview",
+      "main.ts",
+    );
+    // A call with nothing to preview still draws the slot and the status mark.
+    const bare = disclosure("Grep, done");
+    expect(bare.querySelector(".turn-activity__preview--call")).not.toHaveAttribute("data-preview");
+    expect(bare.querySelector(".turn-activity__status svg")).not.toBeNull();
   });
 });

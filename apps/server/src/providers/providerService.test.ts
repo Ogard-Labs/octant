@@ -4004,6 +4004,83 @@ describe("ProviderService", () => {
     expect(JSON.stringify(failure)).not.toContain("aggregateId");
   });
 
+  describe("legacy default names", () => {
+    const codexNamed = (displayName: string, overrides: Record<string, unknown> = {}) =>
+      provider({
+        displayName,
+        driverKind: "codex",
+        configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
+        ...overrides,
+      });
+    const namesOf = (fixture: ReturnType<typeof serviceFixture>) =>
+      fixture.persistence.readProviderInstances().map((item) => item.displayName);
+    const renameEvents = (fixture: ReturnType<typeof serviceFixture>) =>
+      // Read through JSON: the fixture's append is typed for the payloads its
+      // own tests read, not for the envelope.
+      JSON.parse(JSON.stringify(fixture.append.mock.calls)).flatMap(
+        ([request]: ReadonlyArray<{
+          readonly events: ReadonlyArray<{ readonly eventName: string }>;
+        }>) => request?.events.map((event) => event.eventName) ?? [],
+      );
+
+    it("renames an account saved as Codex CLI to Codex on start and journals a rename", async () => {
+      const fixture = serviceFixture({ instances: [codexNamed("Codex CLI")] });
+      await fixture.service.renameLegacyDefaultNames(windowId);
+      expect(namesOf(fixture)).toEqual(["Codex"]);
+      expect(renameEvents(fixture)).toEqual(["provider.instance-renamed@1"]);
+    });
+
+    it("renames an account saved as OpenCode CLI to OpenCode", async () => {
+      const fixture = serviceFixture({ instances: [provider({ displayName: "OpenCode CLI" })] });
+      await fixture.service.renameLegacyDefaultNames(windowId);
+      expect(namesOf(fixture)).toEqual(["OpenCode"]);
+    });
+
+    it("leaves a typed name and the same name on another driver untouched", async () => {
+      const fixture = serviceFixture({
+        instances: [
+          codexNamed("My Codex CLI"),
+          provider({ id: otherId, displayName: "Codex CLI" }),
+        ],
+      });
+      await fixture.service.renameLegacyDefaultNames(windowId);
+      expect(namesOf(fixture)).toEqual(["My Codex CLI", "Codex CLI"]);
+      expect(fixture.append).not.toHaveBeenCalled();
+    });
+
+    it("renames nothing on a second start", async () => {
+      const fixture = serviceFixture({ instances: [codexNamed("Codex CLI")] });
+      await fixture.service.renameLegacyDefaultNames(windowId);
+      await fixture.service.renameLegacyDefaultNames(windowId);
+      expect(fixture.append).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps a name a person renamed back to Codex CLI", async () => {
+      const fixture = serviceFixture({
+        instances: [codexNamed("Codex CLI")],
+        renamedInstanceIds: [instanceId],
+      });
+      await fixture.service.renameLegacyDefaultNames(windowId);
+      expect(namesOf(fixture)).toEqual(["Codex CLI"]);
+      expect(fixture.append).not.toHaveBeenCalled();
+    });
+
+    it("skips an account whose new name another account already holds without failing", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        const fixture = serviceFixture({
+          instances: [codexNamed("Codex CLI"), codexNamed("Codex", { id: otherId })],
+        });
+        await expect(fixture.service.renameLegacyDefaultNames(windowId)).resolves.toBeUndefined();
+        expect(namesOf(fixture)).toEqual(["Codex CLI", "Codex"]);
+        expect(fixture.append).not.toHaveBeenCalled();
+        expect(warn).toHaveBeenCalledTimes(1);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  });
+
   it("persists permission defaults and reads the authoritative projection", async () => {
     const fixture = serviceFixture();
     await expect(
@@ -5719,6 +5796,8 @@ function serviceFixture(
     readonly isProviderExecutableAvailable?: (instance: ProviderInstance) => boolean;
     readonly runCliUpdate?: ProviderServiceOptions["runCliUpdate"];
     readonly latestNpmVersion?: ProviderServiceOptions["latestNpmVersion"];
+    /** Accounts whose journal already holds a rename event. */
+    readonly renamedInstanceIds?: ReadonlyArray<string>;
   } = {},
 ) {
   let instances = [...(options.instances ?? [])];
@@ -5755,7 +5834,11 @@ function serviceFixture(
     };
   });
   const persistenceBase = {
-    journal: { append },
+    journal: {
+      append,
+      firstAggregateEvent: (input: { readonly aggregateId: string }) =>
+        options.renamedInstanceIds?.includes(input.aggregateId) === true ? {} : undefined,
+    },
     readProviderInstance: (id: typeof instanceId) => instances.find((item) => item.id === id),
     readProviderInstances: () => instances,
     readProviderDefaults: () => defaults,

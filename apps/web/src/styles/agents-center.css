@@ -93,9 +93,35 @@
   min-width: 0;
 }
 
-.agents-center__rows {
+/* The table drops columns by the list's own width, not the window's: the list
+   shares the window with a detail pane. */
+.agents-center__list-pane {
+  container-type: inline-size;
+}
+
+/* The list is one table: the agent (its task, where it ran and on what), its
+   status, when it started, how long it ran, and what it used. Every row
+   shares the head's columns and the trailing columns have fixed widths, so a
+   status changing or a figure ticking changes a cell's words, never a column. */
+.agents-table {
+  --agents-columns: minmax(0, 1fr) 7rem 5.5rem 5rem 6rem 12rem;
+}
+
+.agents-table__head {
   display: grid;
-  gap: 0.5rem;
+  grid-template-columns: var(--agents-columns);
+  align-items: center;
+  column-gap: var(--oct-space-4);
+  height: var(--oct-space-8);
+  padding-inline: var(--oct-space-3);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.agents-center__rows {
+  display: flex;
+  flex-direction: column;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -103,34 +129,164 @@
 
 .agents-center-row {
   display: grid;
-  gap: 0.35rem;
-  padding: 0.75rem;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
+  grid-template-columns: var(--agents-columns);
+  align-items: center;
+  column-gap: var(--oct-space-4);
+  min-height: 3rem;
+  padding-inline: var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-hairline);
 }
 
+.agents-center-row:hover {
+  background: var(--oct-wash-hover);
+}
+
+/* The open button spans every column but the actions, so a click anywhere on
+   the row's facts opens the run while "Open thread" and "Acknowledge" stay
+   their own controls. */
 .agents-center-row__open {
-  text-align: left;
-  padding: 0;
+  grid-column: 1 / span 5;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  /* The shared button recipe gives a button one line's height; a row of two
+     lines needs its own. */
+  height: auto;
+  min-height: 0;
+  min-width: 0;
+  padding-block: var(--oct-space-2);
+  /* The button's inline padding and border would push its subgrid cells off
+     the column head's edges (measured 9px right, then 6px left, 2026-11-17),
+     and a subgrid keeps its own gap, which the recipe sets to 4px. */
+  padding-inline: 0;
+  border-width: 0;
+  column-gap: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: default;
+}
+
+.agents-center-row__agent,
+.agents-center-row__status,
+.agents-center-row__figure {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.agents-center-row__task,
+.agents-center-row__where {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agents-center-row__task {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-base);
   font-weight: var(--oct-weight-medium);
 }
 
-.agents-center-row__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-sm);
+.agents-center-row__where {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.agents-center-row__provider {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.agents-center-row__state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
+  white-space: nowrap;
+}
+
+.agents-center-row__dot {
+  flex: none;
+  width: var(--oct-space-2);
+  height: var(--oct-space-2);
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--oct-fg) 22%, transparent);
+}
+
+.agents-center-row__dot[data-tone="active"] {
+  background: color-mix(in oklab, var(--oct-fg) 45%, transparent);
+}
+
+.agents-center-row__dot[data-tone="success"] {
+  background: var(--oct-success);
+}
+
+.agents-center-row__dot[data-tone="failure"] {
+  background: var(--oct-danger);
+}
+
+.agents-center-row__figure {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The second line keeps its height when empty, so a row with nothing to add
+   is as tall as one that has it. */
+.agents-center-row__quiet {
+  min-height: 1lh;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
 }
 
 .agents-center-row__actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--oct-space-1);
+}
+
+/* "Open thread" shows while the pointer is on the row or focus is inside it,
+   and always on touch. It keeps its space (opacity, not display) so nothing
+   moves, and stays focusable so keyboard focus is what reveals it. */
+.agents-center-row__open-thread {
+  opacity: 0;
+}
+
+.agents-center-row:hover .agents-center-row__open-thread,
+.agents-center-row:focus-within .agents-center-row__open-thread {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .agents-center-row__open-thread {
+    opacity: 1;
+  }
+}
+
+/* In a narrow list the run time and usage give way first: the task, status,
+   start and the row's actions are what a row must keep. */
+@container (max-width: 620px) {
+  .agents-table {
+    --agents-columns: minmax(0, 1fr) 6.5rem 5rem 11rem;
+  }
+
+  .agents-table__head > :nth-child(4),
+  .agents-table__head > :nth-child(5),
+  .agents-center-row__open > :nth-child(4),
+  .agents-center-row__open > :nth-child(5) {
+    display: none;
+  }
+
+  .agents-center-row__open {
+    grid-column: 1 / span 3;
+  }
 }
 
 .agents-center-graph {

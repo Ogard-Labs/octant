@@ -95,7 +95,7 @@ function renderGroup(
 ) {
   const load = options.load ?? vi.fn(async () => view());
   const refresh = options.refresh ?? vi.fn(async () => view());
-  render(
+  const { unmount } = render(
     <EnvironmentPullRequests
       enabled
       load={load}
@@ -108,7 +108,7 @@ function renderGroup(
   );
   const group = screen.getByRole("button", { name: /Pull requests/ });
   if (group.getAttribute("aria-expanded") !== "true") fireEvent.click(group);
-  return { load, refresh };
+  return { load, refresh, unmount };
 }
 
 describe("EnvironmentPullRequests", () => {
@@ -118,7 +118,7 @@ describe("EnvironmentPullRequests", () => {
     expect(load).toHaveBeenCalledWith({ version: 1 });
     // Rows another connected Project owns stay on the complete overview.
     expect(screen.queryByText(/#4 Another Project's pull request/)).not.toBeInTheDocument();
-    expect(screen.getByText(/in this Project \(octant\/octant\)\./)).toBeVisible();
+    expect(screen.getByText(/octant\/octant\. /)).toBeVisible();
   });
 
   it("marks the pull request linked to the active thread", async () => {
@@ -149,9 +149,13 @@ describe("EnvironmentPullRequests", () => {
     );
   });
 
-  it("keeps an authoritative empty result explicit", async () => {
+  it("says None for an authoritative empty result without a sentence that repeats it", async () => {
     renderGroup({ load: vi.fn(async () => view({ rows: [] })) });
-    expect(await screen.findByText(/No open or draft pull requests/)).toBeVisible();
+    await waitFor(() =>
+      expect(document.querySelector(".environment-group__summary")).toHaveTextContent("None"),
+    );
+    // The value already says it, so the body does not say it again.
+    expect(screen.queryByText(/No open or draft pull requests/)).not.toBeInTheDocument();
   });
 
   it("reports a successful refresh that found no pull requests, not a missing snapshot", async () => {
@@ -163,10 +167,9 @@ describe("EnvironmentPullRequests", () => {
         }),
       ),
     });
-    expect(await screen.findByText(/0 pull requests in this Project/)).toBeVisible();
-    expect(screen.getByText(/Last successful refresh/)).toBeVisible();
+    expect(await screen.findByText(/Last successful refresh/)).toBeVisible();
     expect(screen.queryByText(/No GitHub snapshot yet/)).not.toBeInTheDocument();
-    expect(screen.getByText(/No open or draft pull requests/)).toBeVisible();
+    expect(screen.queryByText(/Not refreshed yet/)).not.toBeInTheDocument();
   });
 
   it("labels a stale snapshot rather than presenting it as current", async () => {
@@ -186,8 +189,9 @@ describe("EnvironmentPullRequests", () => {
     expect(await screen.findByText(/#12 List active pull requests/)).toBeVisible();
   });
 
-  it("says so when the Project is not on GitHub", async () => {
+  it("leaves the whole Pull requests row and its all-pull-requests button out when the Project is not on GitHub", async () => {
     renderGroup({
+      onOpenAll: vi.fn(),
       load: vi.fn(async () =>
         view({
           projects: [{ kind: "unconnected", projectId: projectA, projectName: "Octant" }],
@@ -195,12 +199,31 @@ describe("EnvironmentPullRequests", () => {
         }),
       ),
     });
-    expect(await screen.findByText("This Project is not on GitHub.")).toBeVisible();
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /Pull requests/ })).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText("Pull requests")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /All pull requests/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Refresh pull requests" })).not.toBeInTheDocument();
   });
 
   it("reports a failed snapshot read", async () => {
     renderGroup({ load: vi.fn(async () => Promise.reject(new Error("offline"))) });
     expect(await screen.findByText("The pull-request list could not be read.")).toBeVisible();
+  });
+
+  it("keeps the all-pull-requests row last and reachable while the list loads and after a failed read", async () => {
+    const onOpenAll = vi.fn();
+    const loading = renderGroup({ onOpenAll, load: () => new Promise<never>(() => {}) });
+    const row = screen.getByRole("button", { name: /All pull requests/ });
+    expect(row.parentElement?.lastElementChild).toBe(row);
+    fireEvent.click(row);
+    expect(onOpenAll).toHaveBeenCalledOnce();
+    loading.unmount();
+
+    renderGroup({ onOpenAll, load: vi.fn(async () => Promise.reject(new Error("offline"))) });
+    await screen.findByText("The pull-request list could not be read.");
+    const afterFailure = screen.getByRole("button", { name: /All pull requests/ });
+    expect(afterFailure.parentElement?.lastElementChild).toBe(afterFailure);
   });
 });

@@ -93,9 +93,7 @@ describe("ImageGenerationSettingsView", () => {
     );
     expect(screen.getByText("No eligible provider yet")).toBeVisible();
     expect(
-      screen.getByText(
-        "No image providers are enabled. Add a dedicated provider or custom endpoint below.",
-      ),
+      screen.getByText("No image provider is on. Add a provider or custom endpoint below."),
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Add image provider" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
@@ -112,9 +110,7 @@ describe("ImageGenerationSettingsView", () => {
         settings={{ customSources: [] }}
       />,
     );
-    expect(
-      screen.getByText(/Connect an OpenAI-compatible image API's provider and model/),
-    ).toBeVisible();
+    expect(screen.getByText(/Connect an OpenAI-compatible image API/)).toBeVisible();
     expect(screen.getByText(/Saved profiles in Image generator/)).toBeVisible();
   });
 
@@ -188,7 +184,7 @@ describe("ImageGenerationSettingsView", () => {
       />,
     );
 
-    expect(screen.queryByText(/No image providers are enabled/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No image provider is on/)).not.toBeInTheDocument();
     expect(screen.getByText(/Add an OpenAI-compatible custom endpoint above/)).toBeVisible();
     expect(screen.queryByRole("button", { name: "Add image source" })).not.toBeInTheDocument();
   });

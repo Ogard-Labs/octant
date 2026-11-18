@@ -1,25 +1,49 @@
-/* The start screen's question: the mark close above it, then one sentence in
-   the primary ink at regular weight. It is a prompt to answer, not a headline,
-   so it wears neither the page title's weight nor any accent in any style. The
-   selector is longer than the hero role's own so it wins whichever stylesheet
-   loads last. The approved size is 24px on a 30px line; the type scale has no
-   24px step, so the nearest token (26px) carries it on the same 30px line. */
+/* The start screen's question: one sentence in the primary ink at regular
+   weight. It is a prompt to answer, not a headline, so it wears neither the
+   page title's weight nor any accent in any style, and it is set at a window
+   title's size (20px on a 26px line) at every width. At 26px under a logo it
+   read as a web page's hero; before that the approved size was 24px, which
+   the type scale has no step for. The selector is longer than the hero role's
+   own so it wins whichever stylesheet loads last. */
 .oct-title.oct-title--hero.welcome__question {
   color: var(--oct-fg);
-  font-size: var(--oct-text-2xl);
+  font-size: var(--oct-text-xl);
   font-weight: var(--oct-weight-regular);
   letter-spacing: -0.012em;
-  line-height: calc(30 * var(--oct-text-step));
+  line-height: calc(26 * var(--oct-text-step));
 }
 
-/* The mark sits two pixels nearer the question than the heading's usual gap. */
+/* With a Project named the question stays on one line: the words before and
+   after the name keep their size and the name alone gives way to an ellipsis,
+   so a long name never makes the heading taller and nothing below moves. */
+.oct-title.oct-title--hero.welcome__question.welcome__question--project {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  max-width: min(100%, 52ch);
+  white-space: pre;
+}
+
+/* The heading grid sizes its column to the widest child; a one-line question
+   would then widen it past the page instead of letting the name truncate. */
+.welcome__heading:has(.welcome__question--project) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.welcome__question-lead,
+.welcome__question-tail {
+  flex: none;
+}
+
+.welcome__project {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A caller's own mark (a coordinator's) sits two pixels nearer its heading
+   than the heading's usual gap. */
 svg.welcome__mark {
   margin-bottom: calc(var(--oct-space-2) - 2px);
-}
-
-@media (max-width: 760px) {
-  .oct-title.oct-title--hero.welcome__question {
-    font-size: var(--oct-text-xl);
-    line-height: 1.25;
-  }
 }

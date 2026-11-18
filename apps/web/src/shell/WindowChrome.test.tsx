@@ -45,23 +45,43 @@ it("moves the Nightly identity into the collapsed window's measured leading cont
   expect(screen.queryByLabelText("Octant Nightly")).not.toBeInTheDocument();
 });
 
+it("offers a slot for the focused pane's tool buttons at its end in a wide window, and none in a narrow one", () => {
+  const wide = renderChrome();
+  const slot = wide.container.querySelector(".window-chrome__pane-tools");
+  expect(slot).not.toBeNull();
+  // Last in the trailing cluster: nothing that comes and goes beside the row
+  // stands between it and the bar's end, so nothing moves it.
+  expect(wide.container.querySelector(".window-chrome__trailing")?.lastElementChild).toBe(slot);
+  wide.unmount();
+
+  const narrow = renderChrome({ isNarrow: true });
+  expect(narrow.container.querySelector(".window-chrome__pane-tools")).toBeNull();
+});
+
 function renderChrome(overrides: Partial<React.ComponentProps<typeof WindowChrome>> = {}) {
   const props: React.ComponentProps<typeof WindowChrome> = {
     activeSurface: "Welcome to Code",
-    bottomPanelAvailable: true,
-    bottomPanelExpanded: false,
     dockAvailable: false,
     dockExpanded: false,
     dockLabel: "Right sidebar",
     hostBridge: hostBridge(),
     isNarrow: false,
     material: "opaque",
-    onToggleBottomPanel: vi.fn(),
     onToggleDock: vi.fn(),
     ...overrides,
   };
   return { ...render(<WindowChrome {...props} />), props };
 }
+
+it("keeps every control of the trailing cluster no-drag on its own box", () => {
+  const { container } = renderChrome({ dockAvailable: true, isNarrow: true });
+  const cluster = container.querySelector(".window-chrome__trailing");
+  const buttons = [...(cluster?.querySelectorAll("button") ?? [])];
+  expect(buttons.length).toBeGreaterThan(0);
+  // The dock header's drag rectangles come later in the document and would
+  // outrank a no-drag rectangle that only an ancestor supplied.
+  for (const button of buttons) expect(button.closest(".window-no-drag")).not.toBeNull();
+});
 
 const rootStyles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8")
   .replace('@import "./styles/shell.css";', "")
@@ -161,31 +181,6 @@ function atRuleBlock(atRule: string, source = styles): string {
 }
 
 describe("WindowChrome", () => {
-  it("marks the dock toggle with one quiet dot, described in words, while the agent's Browser is active", () => {
-    const { rerender, props } = renderChrome({ dockAvailable: true });
-    const toggle = screen.getByRole("button", { name: "Open Right sidebar" });
-    expect(toggle).not.toHaveAttribute("aria-description");
-    expect(toggle).not.toHaveAttribute("data-activity");
-
-    rerender(<WindowChrome {...props} dockBrowserActive />);
-    const marked = screen.getByRole("button", { name: "Open Right sidebar" });
-    expect(marked).toHaveAccessibleDescription("Browser is active");
-    expect(marked).toHaveAttribute("data-activity", "browser");
-    // A dot, not a count: nothing is added to the button's text.
-    expect(marked).toHaveTextContent("");
-    expect(shellStyles).toMatch(
-      /\.window-chrome__button\[data-activity="browser"\]::after\s*\{[^}]*width:\s*6px/,
-    );
-  });
-
-  it("never marks the narrow window's overflow button: the modal dock draws no card for the dot to promise", () => {
-    const { rerender, props } = renderChrome({ dockAvailable: true, isNarrow: true });
-    rerender(<WindowChrome {...props} dockBrowserActive />);
-    expect(screen.getByRole("button", { name: "More window actions" })).not.toHaveAttribute(
-      "data-activity",
-    );
-  });
-
   it("offers Back and Forward beside Show sidebar while the sidebar is hidden, off at either end", async () => {
     const user = userEvent.setup();
     const history = {
@@ -339,7 +334,7 @@ describe("WindowChrome", () => {
     // one rule, so the two cannot drift into two looks.
     const pressed = cssRule('.window-chrome__button[data-dock-tools-shown="true"]');
     expect(pressed).toContain("background: var(--octant-control);");
-    expect(pressed).toContain("box-shadow: var(--octant-shadow-control-pressed);");
+    expect(pressed).not.toContain("box-shadow");
     expect(shellStyles).toMatch(
       /\.window-chrome__button\[aria-expanded="true"\],\s*\.window-chrome__button\[aria-pressed="true"\],\s*\.window-chrome__button\[data-dock-tools-shown="true"\] \{/,
     );
@@ -415,12 +410,10 @@ describe("WindowChrome", () => {
     // where .mode[aria-current="page"] uses the shadcn-projected neutral fill.
     const systemStyles = readFileSync(resolve(process.cwd(), "src/styles/octant.css"), "utf8");
     const activeMode = systemStyles.match(/\.mode\[aria-current="page"\]\s*{[^}]*}/)?.[0] ?? "";
-    // The current mode wears the selection fill and a hairline edge, the same
-    // two marks the thread tab strip gives the tab in front; the hover state
+    // The current mode wears the selection fill alone, flat; the hover state
     // is the softer ink wash, so pointing never looks like being there.
     expect(activeMode).toContain("var(--oct-selection)");
-    // The edge is the raised tile's lit rim, still without a hue.
-    expect(activeMode).toContain("box-shadow: var(--octant-shadow-selected);");
+    expect(activeMode).not.toContain("box-shadow");
     expect(activeMode).not.toMatch(/--octant-accent|purple/i);
     // The Project header is a quiet section label, so its active state is
     // carried by ink alone rather than a filled chip.
@@ -448,13 +441,22 @@ describe("WindowChrome", () => {
     // heavier than the 400 thread titles filed under it.
     expect(projectName).toContain("font-weight: var(--oct-weight-medium);");
     expect(projectName).not.toMatch(/text-transform|letter-spacing|mono/);
-    expect(cssRule('.sidebar-navigation__thread-status[data-activity="idle"]')).toContain(
-      "opacity: 0;",
+    // A thread row spends colour on its state word and the Project's mark only:
+    // the working word takes the accent, the waiting one the warning tone, and
+    // the title is the strongest ink in the row.
+    expect(cssRule('.sidebar-navigation__thread-state[data-activity="working"]')).toContain(
+      "var(--octant-accent-text)",
     );
-    // The mark fills a destination's icon slot, so a thread's title starts in
-    // the same text column as "Inbox" and "Board".
-    expect(cssRule(".sidebar-navigation__thread-provider")).toContain("width: var(--oct-icon-md);");
+    expect(cssRule('.sidebar-navigation__thread-state[data-activity="attention"]')).toContain(
+      "var(--oct-warn-fg)",
+    );
+    expect(cssRule(".sidebar-navigation__thread-title")).toContain("color: var(--oct-fg);");
+    expect(cssRule(".sidebar-navigation__thread-title")).toContain(
+      "font-weight: var(--oct-weight-medium);",
+    );
+    // The provider's mark sits small at the end of the row's last line.
     expect(cssRule(".sidebar-navigation__thread-provider")).toContain("opacity: 0.78;");
+    expect(cssRule(".sidebar-navigation__thread-provider")).toContain("margin-inline-start: auto;");
     expect(cssRule('.sidebar-navigation__thread[aria-current="page"]')).not.toContain(
       "var(--oct-accent)",
     );
@@ -465,9 +467,7 @@ describe("WindowChrome", () => {
     expect(sectionLabel).toContain("letter-spacing: 0;");
     expect(sectionLabel).toContain("text-transform: none;");
     expect(sectionLabel).not.toContain("mono");
-    expect(cssRule(".sidebar-navigation__thread-status")).toContain(
-      "color: var(--octant-text-secondary);",
-    );
+    expect(cssRule(".sidebar-navigation__thread-state")).toContain("color: var(--oct-fg-2);");
   });
 
   it("shows an empty Project section's add control without waiting for a hover", () => {
@@ -547,15 +547,15 @@ describe("WindowChrome", () => {
     const surface = readFileSync(resolve(process.cwd(), "src/styles/surface.css"), "utf8");
     const ground =
       surface.match(/\.app-backdrop\[data-placement="welcome"\]\s*\{[^}]+\}/)?.[0] ?? "";
-    const canvas = cssRule(".draft-thread__canvas");
+    const lifted = surface.match(/\.welcome-stage > :not\(\.app-backdrop\)\s*\{[^}]+\}/)?.[0] ?? "";
 
-    // The ground paints at the shared level, so the start screen takes one of
-    // its own. Without it the dither's dots landed over the greeting and over
-    // the suggestion cards, which reads as the cards being see-through; at
-    // -1 the ground disappeared behind the workspace fill instead.
-    expect(ground).not.toContain("z-index");
-    expect(canvas).toContain("position: relative;");
-    expect(canvas).toContain("z-index: 1;");
+    // The ground is one layer in the frame under the panes, and the start
+    // screen's own content takes a level above the stage's. Sharing a level
+    // with the content painted the dither's dots over the greeting and over
+    // the suggestion cards, which reads as the cards being see-through.
+    expect(ground).toContain("z-index: -1;");
+    expect(lifted).toContain("position: relative;");
+    expect(lifted).toContain("z-index: 1;");
   });
 
   it("keeps semantic shell borders and controls restrained", () => {
@@ -636,8 +636,9 @@ describe("WindowChrome", () => {
     expect(cssRule(".octant-dialog__popup")).toContain(
       "max-width: min(var(--octant-dialog-width, 420px), calc(100vw - 48px))",
     );
-    // 12px now arrives as the system radius token (--oct-radius-md: 12px).
-    expect(cssRule(".octant-dialog__popup")).toContain("border-radius: var(--oct-radius-md)");
+    // The dialog's paint (fill, corner, shadow) is the shared float rule in
+    // components.css; sizing is all this rule keeps.
+    expect(cssRule(".octant-dialog__popup")).not.toContain("border-radius");
     expect(cssRule(".octant-dialog__popup")).not.toContain("height: 100%");
     expect(cssRule(".octant-dialog__popup")).not.toContain("border-left: 1px solid");
     // The wash behind a modal is the system scrim token rather than a literal.
@@ -648,20 +649,19 @@ describe("WindowChrome", () => {
   });
 
   it("gives every popup one lit edge and the floating fill", () => {
-    // The overlay shadow carries the popup's whole edge in both themes: the
-    // brightest rim along its top, then one hairline outside it. A popup that
-    // also set a border showed two edges, and the strong border made a menu's
-    // heavier than a dialog's.
+    // The overlay shadow carries the popup's whole edge in both themes: one
+    // hairline outside it and one soft drop. A popup that also set a border
+    // showed two edges, and the strong border made a menu's heavier than a
+    // dialog's.
     const overlays = [...styles.matchAll(/--octant-shadow-overlay:\s*([^;]+);/g)].map(
       (match) => match[1] ?? "",
     );
     expect(overlays.length).toBeGreaterThanOrEqual(2);
     for (const overlay of overlays) {
-      expect(overlay).toContain("inset 0 1px 0 var(--octant-rim-float)");
-      expect(overlay).toMatch(/(^|,)\s*0 0 0 0\.5px rgb\(/);
+      expect(overlay).not.toContain("inset");
+      expect(overlay).toMatch(/^0 0 0 1px rgb\(/);
       expect(overlay).not.toContain("--octant-border-strong");
     }
-    expect(cssRule(".octant-menu__popup")).not.toMatch(/border:\s*1px/);
     // A sheet's loading state is on the sheet's own fill and in its own box:
     // the page colour at the window's height was a black panel in Settings'
     // sheet while it loaded.
@@ -684,20 +684,14 @@ describe("WindowChrome", () => {
 
   it("keeps the opaque utility dock and accessibility fallbacks", () => {
     // --oct-bg is the bridge's alias for the opaque --octant-workspace ground,
-    // so the dock and dialog stay workspace-opaque under every theme.
+    // so the dock stays workspace-opaque under every theme.
     expect(cssRule(".right-utility-dock")).toContain("background: var(--oct-bg);");
-    expect(cssRule(".octant-dialog__popup")).toContain("background: var(--oct-bg);");
-    // The Environment's boundary is its header card now, not the checkout block:
-    // a wash of the ink over the dock, with no ring (increased contrast adds one).
-    expect(cssRule(".thread-environment-dock__header")).toContain(
-      "background: var(--environment-card-fill);",
-    );
-    expect(cssRule(".thread-environment-dock__header")).not.toContain("border:");
-    // The meta line mixes the branch with the folder; only the folder is an
-    // identifier, so only it takes the identifier face.
-    expect(cssRule(".thread-environment-dock__place", 1)).toContain(
-      "font-family: var(--oct-font-mono);",
-    );
+    expect(cssRule(".octant-dialog__popup")).not.toContain("background");
+    // The Environment is a flat list: its head has no card fill and no ring, and
+    // the muted path after the project's name is the only thing in the line that
+    // is not the name.
+    expect(cssRule(".thread-environment-dock__header")).not.toMatch(/background|border/);
+    expect(cssRule(".environment-row__path")).toContain("color: var(--oct-meta);");
 
     expect(styles).toContain("@media (min-width: 681px) and (max-width: 960px)");
     expect(cssRule(".workspace")).toContain("min-width: 0;");
@@ -706,14 +700,15 @@ describe("WindowChrome", () => {
     expect(styles).toContain("@media (max-width: 680px)");
     expect(styles).not.toContain(".project-memory-inspector--narrow");
     expect(styles).toContain("@media (prefers-reduced-motion: reduce)");
-    expect(styles).toContain(".workspace-split__resize::before,");
+    // The divider's line answers the pointer at once, so reduced motion has
+    // nothing of its to switch off.
+    expect(cssRule(".workspace-split__resize::before")).not.toContain("transition");
     expect(styles).toContain(".project-memory-inspector *");
     expect(styles).toContain("@media (prefers-reduced-transparency: reduce)");
     expect(styles).toContain(".shell--material-translucent.shell-frame > .sidebar");
     expect(increasedContrastRules()).toContain(".environment-checkout");
     const environmentContrast = increasedContrastRules(environmentStyles);
-    expect(environmentContrast).toContain(".thread-environment-dock__header");
-    expect(environmentContrast).toContain(".environment-card__rows");
+    expect(environmentContrast).toMatch(/\.environment-card\s+\+\s+\.environment-card/);
     expect(
       cssRule('html[data-octant-increased-contrast="true"] .project-row[data-active="true"]'),
     ).toContain("background: var(--octant-control-hover);");
@@ -730,7 +725,7 @@ describe("WindowChrome", () => {
       "background: transparent;",
     );
     expect(cssRule(".shell--sidebar-collapsed .workspace-pane__header")).toContain(
-      "padding-left: var(--octant-window-chrome-leading-width",
+      "--pane-header-start: var(--octant-window-chrome-leading-width",
     );
     expect(
       cssRule('html[data-octant-increased-contrast="true"] .workspace-pane[data-active="true"]'),
@@ -748,19 +743,26 @@ describe("WindowChrome", () => {
       expect(styles).toContain(selector);
     }
     const row = cssRule(".environment-row");
-    expect(row).not.toContain("background");
-    // An open row's body starts under the row's label, past its icon tile.
-    expect(cssRule(".environment-group__body")).toContain("var(--environment-tile-size)");
+    expect(row).not.toMatch(/background:\s+(?!transparent)/);
+    // The detail is plain muted text: no chip fill, no border, whole value kept.
+    expect(cssRule(".environment-row__detail")).not.toMatch(/background|border/);
+    expect(cssRule(".environment-row__detail")).toContain("white-space: nowrap;");
+    // A row is filled only by the pointer, never at rest and never on click.
+    expect(cssRule("button.environment-group__header:hover")).toContain(
+      "background: var(--octant-control-hover);",
+    );
+    // An open row's body starts under the row's label, past its icon.
+    expect(cssRule(".environment-group__body")).toContain("var(--environment-icon-size)");
     expect(cssRule(".environment-git-group__error")).toContain("color: var(--oct-muted);");
     expect(cssRule(".environment-git-group__error")).not.toMatch(/warn|yellow/i);
     expect(styles).not.toContain(".thread-environment-disclosure");
     expect(styles).not.toContain(".thread-environment-summary");
   });
 
-  it("makes room for thread row actions only while they show, and bounds the context menu", () => {
-    // DESIGN.md: hover-only actions take no width until their row is hovered
-    // or focused. Reserved at all times, the room left the age and the status
-    // dot floating 56px short of the row's end.
+  it("keeps a thread row's trailing slots fixed while its actions show, and bounds the context menu", () => {
+    // DESIGN.md principle 7: hovering a row moved the provider mark left and
+    // narrowed the title. The end of the row is [title] [age or actions, 50px]
+    // [provider mark] at rest and on hover, so no hover rule may add padding.
     const row = ".sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)";
     for (const shown of [
       ":hover",
@@ -768,10 +770,12 @@ describe("WindowChrome", () => {
       ':has([aria-expanded="true"])',
       ":has([data-popup-open])",
     ]) {
-      expect(cssRule(`${row}${shown} > .sidebar-navigation__thread`)).toContain(
-        "padding-inline-end: 56px;",
-      );
+      expect(styles).not.toContain(`${row}${shown}\n  > .sidebar-navigation__thread {`);
     }
+    expect(cssRule(`${row} .sidebar-navigation__thread-when`)).toContain("inline-size: 50px;");
+    expect(cssRule(".sidebar-navigation__thread-actions")).toContain("right: 40px;");
+    // At rest the only room kept is for the one always-visible overflow action
+    // on a coarse pointer.
     // At rest the only room kept is for the one always-visible overflow action
     // on a coarse pointer.
     expect(cssRule(`${row} > .sidebar-navigation__thread`)).not.toContain("56px");
@@ -804,10 +808,10 @@ describe("WindowChrome", () => {
     expect(cssRule('html[data-octant-native-host="true"]')).toContain("background: transparent;");
     expect(cssRule(".shell.shell-frame")).toContain("background: var(--octant-window-surface);");
     expect(cssRule(".shell.shell--material-translucent")).toContain(
-      "--octant-window-surface: var(--octant-sidebar-translucent);",
+      "--octant-window-surface: var(--octant-workspace-translucent);",
     );
     expect(cssRule(".shell.shell--material-translucent")).toContain(
-      "--octant-sheet-surface: var(--octant-workspace-translucent);",
+      "--octant-panel-surface: transparent;",
     );
     expect(cssRule('html[data-octant-native-host="true"]')).toContain("overflow: clip;");
     expect(cssRule(".shell.shell-frame--standalone")).toContain("position: fixed;");
@@ -838,9 +842,12 @@ describe("WindowChrome", () => {
     // Opaque unless transparency is allowed; then the ground shows faintly.
     // It takes the sheet's colour, so a thread on a black ground is not a
     // black hole inside the grey sheet.
-    expect(flattened).toContain("--octant-thread-veil: var(--octant-sheet-surface);");
+    // Under Glass the sheet is clear, so the veil is the window's one coat.
     expect(flattened).toContain(
-      "--octant-thread-veil: color-mix(in srgb, var(--octant-sheet-surface) 80%, transparent);",
+      "--octant-thread-veil: var(--octant-veil-surface, var(--octant-sheet-surface));",
+    );
+    expect(flattened).toContain(
+      "--octant-thread-veil: color-mix( in srgb, var(--octant-veil-surface, var(--octant-sheet-surface)) var(--octant-reading-surface-keep, 94%), transparent );",
     );
     // The thread's own container stays clear under the veil and under Glass,
     // or it paints a solid slab over both.
@@ -861,7 +868,7 @@ describe("WindowChrome", () => {
     ];
     const flattened = styles.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, " ");
     const veiled =
-      /\.shell--app-backdrop\.shell-frame :is\( (\.workspace-pane:not\([^)]*\), \.primary-workspace-layer > :is\([^)]*\)) \) \{ --octant-thread-veil: var\(--octant-sheet-surface\);/.exec(
+      /\.shell--app-backdrop\.shell-frame :is\( (\.workspace-pane:not\([^)]*\), \.primary-workspace-layer > :is\([^)]*\)) \) \{ --octant-thread-veil: var\(--octant-veil-surface, var\(--octant-sheet-surface\)\);/.exec(
         flattened,
       )?.[1] ?? "";
     expect(veiled).toContain(
@@ -872,34 +879,27 @@ describe("WindowChrome", () => {
     }
   });
 
-  it("keeps glass on input surfaces without enclosing agent replies", () => {
+  it("keeps glass on input surfaces over a ground and washes under window glass, without enclosing agent replies", () => {
     const systemStyles = readFileSync(resolve(process.cwd(), "src/styles/octant.css"), "utf8")
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/\s+/g, " ");
-    const glass =
+    const ground =
       systemStyles.match(
-        /@media \(prefers-reduced-transparency: no-preference\) \{ html:not\(\[data-octant-reduced-transparency="true"\]\) :is\(\.shell--app-backdrop, \.shell--material-translucent\) :is\(\.turn-user \.bubble, \.composer:not\(\.composer--carded\)\) \{([^}]*)\}/,
+        /\.shell--app-backdrop:not\(\.shell--material-translucent\) :is\(\.turn-user \.bubble, \.composer:not\(\.composer--carded\)\) \{([^}]*)\}/,
       )?.[1] ?? "";
     // The floor goes under the tint, as on Zen's cards: without it body text
     // over a white photo falls under 3:1.
-    expect(glass).toContain("background-color: var(--oct-glass-floor);");
-    expect(glass).toContain("background-image: linear-gradient(var(--oct-glass-thick)");
-    expect(glass).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
-    // The composer's box is the glass surface, with the glass stroke as its
-    // ring; the frame around it and its rows draws nothing.
-    const surface =
-      systemStyles.match(
-        /html:not\(\[data-octant-reduced-transparency="true"\]\) :is\(\.shell--app-backdrop, \.shell--material-translucent\) \.thread-composer__surface \{([^}]*)\}/,
-      )?.[1] ?? "";
-    expect(surface).toContain("background-color: var(--oct-glass-floor);");
-    expect(surface).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
-    expect(surface).toContain("box-shadow: var(--octant-shadow-md);");
-    expect(surface).not.toContain("--oct-glass-stroke");
+    expect(ground).toContain("background-color: var(--oct-glass-floor);");
+    expect(ground).toContain("background-image: linear-gradient(var(--oct-glass-thick)");
+    expect(ground).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
     expect(systemStyles).not.toMatch(/\.composer-frame[^{]*\{[^}]*(background|box-shadow)/);
-    // Under Window glass the box is a step lighter than the glass around
-    // it: the floor made it the darker of the two.
+    // Under window glass the box is the control wash and the message and notice
+    // are the card wash, none with a blur.
     expect(systemStyles).toMatch(
-      /\.shell--material-translucent \.thread-composer__surface \{ background: var\(--octant-control\); \}/,
+      /\.shell--material-translucent :is\(\.thread-composer__surface, \.composer:not\(\.composer--carded\)\) \{ background: var\(--octant-control\); backdrop-filter: none;/,
+    );
+    expect(systemStyles).toMatch(
+      /\.shell--material-translucent \.turn-user \.bubble \{ background: var\(--octant-card\); backdrop-filter: none;/,
     );
   });
 
@@ -949,57 +949,10 @@ describe("WindowChrome", () => {
     );
   });
 
-  it("exposes exactly one wide utility dock toggle only when a real surface is available", () => {
-    const { props, rerender } = renderChrome({
-      dockAvailable: true,
-    });
-
-    const dock = screen.getByRole("button", { name: "Open Right sidebar" });
-    expect(dock).toHaveAttribute("title", "Open Right sidebar");
-    expect(dock).toHaveAttribute("aria-expanded", "false");
-    expect(dock).toHaveAttribute("aria-controls", "right-utility-dock");
-    expect(dock).toHaveAttribute("data-dock-opener", "true");
-
-    dock.click();
-    expect(props.onToggleDock).toHaveBeenCalledWith(dock);
-
-    rerender(<WindowChrome {...props} dockAvailable dockExpanded />);
-    expect(screen.getByRole("button", { name: "Close Right sidebar" })).toHaveAttribute(
-      "aria-expanded",
-      "true",
-    );
-
-    rerender(<WindowChrome {...props} dockAvailable={false} />);
+  it("draws no panel toggle in the wide title bar, because every tool opens from the thread header", () => {
+    renderChrome({ dockAvailable: true });
+    expect(screen.queryByRole("button", { name: /bottom panel/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Right sidebar/i })).not.toBeInTheDocument();
-  });
-
-  it("draws the tool buttons before the bottom panel and dock toggles, and not at narrow widths", () => {
-    const dockTools = {
-      buttons: [
-        {
-          id: "files" as const,
-          label: "Files",
-          pressed: true,
-          open: false,
-          press: { kind: "close" as const, tabIds: ["files"] },
-          tabIds: ["files"],
-          menu: [],
-        },
-      ],
-      more: [],
-    };
-    const { props, rerender } = renderChrome({
-      dockAvailable: true,
-      dockTools,
-      onToggleDockTool: vi.fn(),
-    });
-    const tools = screen.getByRole("toolbar", { name: "Tools" });
-    const bottom = screen.getByRole("button", { name: "Open bottom panel" });
-    const dock = screen.getByRole("button", { name: "Open Right sidebar" });
-    expect(tools.compareDocumentPosition(bottom) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(bottom.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-
-    rerender(<WindowChrome {...props} isNarrow />);
     expect(screen.queryByRole("toolbar", { name: "Tools" })).not.toBeInTheDocument();
   });
 
@@ -1024,10 +977,9 @@ describe("WindowChrome", () => {
     expect(overflow).toHaveFocus();
   });
 
-  it("keeps workspace actions quiet without duplicating sidebar identity or the page title", async () => {
-    const user = userEvent.setup();
+  it("keeps workspace actions quiet without duplicating sidebar identity or the page title", () => {
     const bridge = hostBridge();
-    const { container, props } = renderChrome({ hostBridge: bridge });
+    const { container } = renderChrome({ hostBridge: bridge });
 
     expect(container.querySelector("[data-traffic-light-safe-space]")).not.toBeInTheDocument();
     expect(container.querySelector(".window-chrome__leading")).not.toBeInTheDocument();
@@ -1043,13 +995,6 @@ describe("WindowChrome", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
     expect(screen.queryByRole("button", { name: "Open Zen" })).not.toBeInTheDocument();
-    const bottomPanel = screen.getByRole("button", { name: "Open bottom panel" });
-    expect(bottomPanel).toHaveAttribute("aria-controls", "bottom-utility-panel");
-    expect(bottomPanel).toHaveClass("window-no-drag");
-    bottomPanel.focus();
-    await user.keyboard("{Enter}");
-    expect(props.onToggleBottomPanel).toHaveBeenCalledWith(bottomPanel);
-
     expect(screen.queryByRole("group", { name: "Window controls" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Minimize window" })).not.toBeInTheDocument();
 
@@ -1062,7 +1007,7 @@ describe("WindowChrome", () => {
 
   it("uses disclosure keyboard behavior for narrow overflow actions", async () => {
     const user = userEvent.setup();
-    const { container, props } = renderChrome({ isNarrow: true });
+    const { container, props } = renderChrome({ isNarrow: true, dockAvailable: true });
 
     expect(screen.queryByRole("button", { name: "Open Zen" })).not.toBeInTheDocument();
 
@@ -1075,27 +1020,27 @@ describe("WindowChrome", () => {
     expect(overflow).toHaveAttribute("aria-expanded", "true");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(container.querySelector(".window-chrome__disclosure")).toBeInTheDocument();
-    const openBottomPanel = screen.getByRole("button", { name: "Open bottom panel" });
-    expect(openBottomPanel).toHaveFocus();
+    const openDock = screen.getByRole("button", { name: "Open Right sidebar" });
+    expect(openDock).toHaveFocus();
 
     await user.keyboard("{Escape}");
     expect(overflow).toHaveAttribute("aria-expanded", "false");
     expect(overflow).toHaveFocus();
 
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("button", { name: "Open bottom panel" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Open Right sidebar" })).toHaveFocus();
     await user.keyboard("{Enter}");
-    expect(props.onToggleBottomPanel).toHaveBeenCalledOnce();
+    expect(props.onToggleDock).toHaveBeenCalledOnce();
     expect(overflow).toHaveAttribute("aria-expanded", "false");
     expect(overflow).toHaveFocus();
   });
 
   it("resets disclosure state and focus across narrow-wide-narrow transitions", async () => {
     const user = userEvent.setup();
-    const { props, rerender } = renderChrome({ isNarrow: true });
+    const { props, rerender } = renderChrome({ isNarrow: true, dockAvailable: true });
 
     await user.click(screen.getByRole("button", { name: "More window actions" }));
-    expect(screen.getByRole("button", { name: "Open bottom panel" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Open Right sidebar" })).toHaveFocus();
 
     rerender(<WindowChrome {...props} isNarrow={false} />);
     expect(screen.queryByRole("button", { name: "More window actions" })).not.toBeInTheDocument();
@@ -1104,12 +1049,12 @@ describe("WindowChrome", () => {
     rerender(<WindowChrome {...props} isNarrow />);
     const overflow = screen.getByRole("button", { name: "More window actions" });
     expect(overflow).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("button", { name: "Open bottom panel" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open Right sidebar" })).not.toBeInTheDocument();
     expect(document.body).toHaveFocus();
 
     overflow.focus();
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("button", { name: "Open bottom panel" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Open Right sidebar" })).toHaveFocus();
   });
 
   it("keeps the browser sidebar opener clear of native titlebar spacing", async () => {
@@ -1170,22 +1115,20 @@ describe("WindowChrome", () => {
       },
     );
 
-    const reserveFor = (dockAvailable: boolean): string => {
+    const reserveFor = (withChanges: boolean): string => {
       const surface = document.createElement("div");
       surface.className = "shell-frame";
       document.body.appendChild(surface);
       const { unmount } = render(
         <WindowChrome
           activeSurface="Welcome to Code"
-          bottomPanelAvailable
-          bottomPanelExpanded={false}
-          dockAvailable={dockAvailable}
+          dockAvailable
           dockExpanded={false}
           dockLabel="Right sidebar"
           isNarrow={false}
           material="opaque"
-          onToggleBottomPanel={vi.fn()}
           onToggleDock={vi.fn()}
+          {...(withChanges ? { changes: { updating: true, onOpen: vi.fn() } } : {})}
         />,
         { container: surface.appendChild(document.createElement("div")) },
       );
@@ -1195,10 +1138,10 @@ describe("WindowChrome", () => {
       return reserve;
     };
 
-    // A thread that renders the dock toggle needs a wider band than one that
-    // does not; a constant reserve is wrong for one of them by construction.
-    expect(reserveFor(false)).toBe("40px");
-    expect(reserveFor(true)).toBe("80px");
+    // A start screen that draws the changes count needs a wider band than one
+    // that does not; a constant reserve is wrong for one of them by construction.
+    expect(reserveFor(false)).toBe("");
+    expect(reserveFor(true)).toBe("40px");
 
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -1388,12 +1331,14 @@ describe("WindowChrome", () => {
     const nativeCollapsed = cssRule(
       'html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__header',
     );
-    expect(nativeCollapsed).toContain("padding-left: var(--octant-window-chrome-leading-width");
+    expect(nativeCollapsed).toContain(
+      "--pane-header-start: var(--octant-window-chrome-leading-width",
+    );
     expect(
       cssRule(
         '.shell--sidebar-collapsed .workspace-split[data-orientation="horizontal"] > :last-child .workspace-pane__header',
       ),
-    ).toContain("padding-left: var(--oct-space-3)");
+    ).toContain("--pane-header-start: var(--oct-space-3)");
   });
 
   it("keeps the window controls above the pane header rather than tied with it", () => {
@@ -1451,27 +1396,15 @@ describe("WindowChrome", () => {
     expect(covered).toEqual(expect.arrayContaining(railClasses));
   });
 
-  it("keeps the native drag overlay away from split-pane pointer controls", () => {
-    const rule = cssRule(
-      'html[data-octant-native-host="true"] .shell-frame:has(.workspace-pane__header) .shell-frame__native-drag-strip',
-    );
-    expect(rule).toContain(
-      "right: calc(100% - var(--octant-rail-offset, 0px) - var(--octant-rendered-sidebar-width))",
-    );
-  });
-
-  it("leaves native dragging to the shell strip so pointer controls have no nested drag region", () => {
+  it("leaves native dragging to the shell's band layer so pointer controls have no nested drag region", () => {
     const { container } = render(
       <WindowChrome
         activeSurface="Welcome to Code"
-        bottomPanelAvailable
-        bottomPanelExpanded={false}
         dockAvailable={false}
         dockExpanded={false}
         dockLabel="Right sidebar"
         isNarrow={false}
         material="opaque"
-        onToggleBottomPanel={vi.fn()}
         onToggleDock={vi.fn()}
       />,
     );
@@ -1486,9 +1419,7 @@ describe("WindowChrome", () => {
     );
     expect(cssRule(".window-chrome__drag-space")).toContain("pointer-events: none;");
     expect(container.querySelectorAll(".window-drag-region")).toHaveLength(0);
-    for (const control of screen.getAllByRole("button")) {
-      expect(control).toHaveClass("window-no-drag");
-    }
+    expect(container.querySelector(".window-chrome__trailing")).toHaveClass("window-no-drag");
     expect(screen.queryByRole("button", { name: "Minimize window" })).not.toBeInTheDocument();
   });
 });

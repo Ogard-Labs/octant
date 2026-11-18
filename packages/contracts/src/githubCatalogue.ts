@@ -237,6 +237,8 @@ export const GithubAssignedWorkItem = Schema.Struct({
   author: safeText(128),
   updatedAt: isoTimestamp,
   url: githubUrl,
+  /** Set only on a draft pull request; absent from an older host's items. */
+  draft: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type GithubAssignedWorkItem = typeof GithubAssignedWorkItem.Type;
 

@@ -161,7 +161,8 @@ describe("buildAgentHierarchyModel", () => {
 
   it("explains an empty thread when posture is Off", () => {
     const model = buildAgentHierarchyModel({ entries: [], creationPosture: "off" });
-    expect(model.emptyReason).toMatch(/Off/i);
+    expect(model.empty?.title).toMatch(/Off/i);
+    expect(model.empty?.detail).toBe("Turn them on in Settings.");
   });
 
   it("presents honest pool route receipt data without inventing routing", () => {

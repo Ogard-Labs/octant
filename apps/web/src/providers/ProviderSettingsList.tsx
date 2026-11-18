@@ -24,7 +24,7 @@ import {
   subscriptionDescriptorIdOf,
   supportsProviderCliUpdate,
 } from "@octant/domain";
-import { CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "../ui/icons";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ProviderToolVerification } from "./ProviderToolVerification";
 import { AccountSignIn } from "./AccountSignIn";
@@ -940,6 +940,9 @@ function ProviderRow(props: ProviderRowProps) {
     (setupGuidance !== null && setupGuidance !== undefined);
   const label = driverLabel(props.instance.driverKind);
   const providerTags = props.instance.dataTags ?? [];
+  // A command-line provider is named by its provider alone ("Codex", not
+  // "Codex CLI"), so its grey label is just that name, and it is hidden when
+  // the account already carries it.
   const runtimeLabel = isClaude
     ? "Agent SDK"
     : acpInstance !== undefined
@@ -947,7 +950,7 @@ function ProviderRow(props: ProviderRowProps) {
       : isPi || isOhMyPi
         ? "RPC"
         : isCli || isCodex
-          ? "CLI"
+          ? ""
           : isImageProfile
             ? "Image"
             : "HTTP";

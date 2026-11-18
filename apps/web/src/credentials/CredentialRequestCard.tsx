@@ -1,6 +1,6 @@
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { useEffect, useId, useRef, useState } from "react";
-import { Check, Eye, EyeOff, LockKeyhole } from "lucide-react";
+import { Check, Eye, EyeOff, LockKeyhole } from "../ui/icons";
 import type {
   CredentialRequestAnswer,
   CredentialRequestFailure,

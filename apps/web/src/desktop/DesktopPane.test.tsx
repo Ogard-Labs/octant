@@ -161,6 +161,9 @@ describe("Desktop pane", () => {
   it("starts a desktop, shows it live, and sends the person's click on the screen", async () => {
     const { client, requests, frame } = fakeClient({ overview: overviewOf([]) });
     render(<DesktopPane client={client} threadId={threadId} />);
+    // The start card's title is its pane bar, and the explanation is an info tooltip.
+    expect(await screen.findByRole("heading", { name: "Start a desktop" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /throwaway Linux desktop/ })).toBeVisible();
     fireEvent.click(await screen.findByRole("button", { name: "Start desktop" }));
     const picture = await screen.findByRole("img", { name: "Desktop live screen" });
     expect(frame).toHaveBeenCalledWith({ threadId, leaseId, viewId }, expect.anything());

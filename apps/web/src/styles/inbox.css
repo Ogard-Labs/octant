@@ -17,6 +17,13 @@
   --oct-surface-measure: 980px;
 }
 
+/* A wide pane has room for two columns, so the measure opens to hold them. */
+@media (min-width: 1200px) {
+  .inbox-page {
+    --oct-surface-measure: 1240px;
+  }
+}
+
 .inbox-page > .surface__inner {
   margin-inline: var(--oct-surface-gutter) auto;
   /* The cards ask this box, not the window, how wide they may be. */
@@ -37,11 +44,20 @@
   gap: var(--oct-space-4);
 }
 
-@container inbox-cards (min-width: 720px) {
+/* From a pane of about 900px: Needs you takes a 560px column on the left and
+   the sources (GitHub, Linear, plan usage) stack on the right. Below that the
+   cards are one column. */
+@container inbox-cards (min-width: 900px) {
   .inbox-page__cards {
-    /* The list a person came for takes the wider column. At one to two its
-       filter chips wrapped to a second row and long titles to three lines. */
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-columns: 560px minmax(0, 1fr);
+  }
+}
+
+/* A Needs you card with nothing in it is one quiet line, and the sources take
+   the page's full width under it instead of leaving the wide column empty. */
+@container inbox-cards (min-width: 900px) {
+  .inbox-page__cards[data-needs-you="empty"] {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -58,10 +74,6 @@
   justify-content: space-between;
   gap: var(--oct-space-1) var(--oct-space-3);
   padding: 0 var(--oct-space-4);
-}
-
-.inbox-card__head > .oct-section-label {
-  color: var(--oct-meta);
 }
 
 .inbox-card__body {
@@ -94,6 +106,12 @@
   padding: var(--oct-space-1) var(--oct-space-2);
 }
 
+.inbox-card__skeleton {
+  display: block;
+  height: 12px;
+  border-radius: var(--oct-radius-sm);
+}
+
 .inbox-card__empty {
   display: flex;
   flex-wrap: wrap;
@@ -117,12 +135,15 @@
 }
 
 .inbox-card .inbox-row:has(> :not(.inbox-view__row)) {
-  padding: var(--oct-space-2) var(--oct-space-3);
+  padding: var(--oct-space-2);
 }
 
 .inbox-card .inbox-row:hover,
 .inbox-card .inbox-row:has(.inbox-view__row:focus-visible) {
   background: var(--oct-fg-soft);
+}
+.inbox-card .inbox-row:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
 }
 
 .inbox-card .inbox-row--static:hover {
@@ -144,7 +165,7 @@
   width: 100%;
   height: auto;
   min-height: 0;
-  padding: var(--oct-space-2) var(--oct-space-3);
+  padding: var(--oct-space-2);
   border: 0;
   border-radius: var(--oct-radius-sm);
   background: none;
@@ -187,6 +208,45 @@
   align-items: center;
   gap: var(--oct-space-2);
   margin: var(--oct-space-2) 0 var(--oct-space-1);
-  padding: 0 var(--oct-space-3);
+  padding: 0 var(--oct-space-2);
   font: inherit;
+}
+
+/* An assigned-work row reads like a pull request list row: the state glyph in
+   the list's own colours, the copy, then a fixed slot for the unseen dot, so
+   reading an item changes a colour and moves nothing. */
+.inbox-view__row--work {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--oct-space-2);
+}
+
+.inbox-view__row--work .surface-row__copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.inbox-view__unseen {
+  display: flex;
+  width: 6px;
+  /* The title line's height, so the dot sits on its centre like the glyph. */
+  height: calc(var(--oct-text-sm) * 1.3);
+  flex: none;
+  align-items: center;
+}
+
+.inbox-view__unseen::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: none;
+}
+
+.inbox-view__row--work[data-unseen="true"] .inbox-view__unseen::after {
+  background: var(--oct-accent);
+}
+
+.inbox-view__row--work[data-unseen="true"] .oct-row-label::after {
+  content: none;
 }

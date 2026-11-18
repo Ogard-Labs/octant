@@ -3,7 +3,7 @@ import { SidebarBackgroundListResult, SidebarBackgroundMetadata } from "@octant/
 import { decodeHostAnswer } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { BackgroundImageLibrary } from "../settings/AppBackgroundSettings";
-import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
+import type { GlassRefusalReason, OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
 
 export function useResolvedMaterial(
   preference: "opaque" | "system",
@@ -137,6 +137,44 @@ export function useHostReportedSidebarVibrancy(hostBridge: OctantHostBridge | un
 }
 
 /**
+ * Why the host will not draw Glass right now, or null when it has no objection
+ * (or has said nothing yet, which a host that never reports it keeps).
+ */
+export function useHostReportedGlassRefusal(
+  hostBridge: OctantHostBridge | undefined,
+): GlassRefusalReason | null {
+  const [refusal, setRefusal] = useState<GlassRefusalReason | null>(null);
+  useEffect(() => {
+    setRefusal(null);
+    if (hostBridge === undefined || hostBridge.subscribeResolvedGlassRefusal === undefined) return;
+    return hostBridge.subscribeResolvedGlassRefusal(setRefusal);
+  }, [hostBridge]);
+  return refusal;
+}
+
+/**
+ * The sentence Settings shows beside the Glass control while Glass is
+ * chosen but the window is opaque. It always names the reason.
+ */
+export function glassOffNote(refusal: GlassRefusalReason | null, hostPresent: boolean): string {
+  if (!hostPresent) {
+    return "Glass is off because a browser window has no material to frost.";
+  }
+  switch (refusal) {
+    case "unsupported-platform":
+      return "Glass is off because this system has no window material.";
+    case "reduced-transparency":
+      return "Glass is off because macOS Reduce transparency is on.";
+    case "increased-contrast":
+      return "Glass is off because macOS Increase contrast is on.";
+    case "thermal-pressure":
+      return "Glass is off because this Mac is under thermal pressure.";
+    case null:
+      return "Glass is off because the desktop app has not applied it yet.";
+  }
+}
+
+/**
  * Whether the host window is in macOS full screen. A full-screen window has no
  * titlebar or traffic lights, so the hidden-inset strip the renderer reserves
  * for them would be dead space there. False on hosts that never report it.
@@ -149,6 +187,20 @@ export function useHostFullScreen(hostBridge: OctantHostBridge | undefined): boo
     return hostBridge.subscribeWindowFullScreen(setFullScreen);
   }, [hostBridge]);
   return fullScreen;
+}
+
+/**
+ * Whether the desktop window is the one in front. A browser tab, or a host
+ * that does not say, counts as in front: nothing there is ever greyed.
+ */
+export function useHostWindowActive(hostBridge: OctantHostBridge | undefined): boolean {
+  const [active, setActive] = useState(true);
+  useEffect(() => {
+    setActive(true);
+    if (hostBridge?.subscribeWindowActive === undefined) return;
+    return hostBridge.subscribeWindowActive(setActive);
+  }, [hostBridge]);
+  return active;
 }
 
 export function useSidebarVibrancySupported(hostBridge: OctantHostBridge | undefined): boolean {
@@ -388,6 +440,19 @@ export function useBackgroundImageLibrary(
           throw new Error(message);
         }
         return decodeHostAnswer(SidebarBackgroundMetadata)(await response.json());
+      },
+      remove: async (backgroundId: string) => {
+        const response = await fetch(
+          new URL(`/api/theme/sidebar-backgrounds/${encodeURIComponent(backgroundId)}`, serverUrl),
+          { method: "DELETE", headers: headers(), redirect: "error" },
+        );
+        if (response.ok) return;
+        const body: unknown = await response.json().catch(() => undefined);
+        throw new Error(
+          typeof body === "object" && body !== null && "message" in body
+            ? String((body as { message: unknown }).message)
+            : `The photo could not be removed (${String(response.status)}).`,
+        );
       },
     };
   }, [fetcher, serverUrl, windowCapability]);

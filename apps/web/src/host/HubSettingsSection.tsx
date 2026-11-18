@@ -1268,7 +1268,7 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
         ) : null}
         <div className="setgroup">
           <SettingRow
-            description="Turn this computer into the hub for your own devices. It needs the remote listener on a Tailscale or private LAN address. Off by default."
+            description="Make this computer the hub for your devices. It needs the remote listener on a Tailscale or private network address. Off by default."
             label="Act as hub"
             scope="host"
             settingId="hub-role"
@@ -1362,7 +1362,7 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
                       ]}
                     />
                     <p className="settings-section-line">
-                      Approve only if the comparison code matches the one on the device.
+                      Approve only if the code matches the one on the device.
                     </p>
                     <div className="host-settings__controls">
                       <OctantButton
@@ -1562,7 +1562,7 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
         <SettingsSection title="Moved threads">
           <div className="setgroup">
             <SettingRow
-              description="Let your other computers move a thread to this hub before they shut down. Every move still needs your Touch ID on an owner device this hub lists. On by default."
+              description="Let your other computers move a thread to this hub before they shut down. Each move still needs Touch ID on an owner device. On by default."
               label="Accept moved threads"
               scope="host"
               settingId="hub-accept-moved-threads"
@@ -2125,7 +2125,7 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
                   <div className="setgroup">
                     {AUTO_APPLY_KINDS.map((entry) => (
                       <SettingRow
-                        description="Apply this kind of offer the moment it arrives, exactly as Apply does and never more. Off by default. A routine and an endpoint always ask."
+                        description="Apply this kind of offer as soon as it arrives. Same as Apply, nothing more. Off by default. Routines and endpoints always ask."
                         key={entry.kind}
                         label={entry.label}
                         scope="host"
@@ -2264,7 +2264,7 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
         <SettingsSection title="Tailscale certificate">
           <div className="setgroup">
             <SettingRow
-              description="Lets a browser on your tailnet open this computer's web app without a warning. Off by default."
+              description="Lets a browser on your Tailscale network open this computer's web app without a warning. Off by default."
               label="Use a Tailscale certificate"
               scope="host"
               settingId="hub-tailscale-certificate"

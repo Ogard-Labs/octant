@@ -120,10 +120,12 @@ function radiusOnScale(value: string): boolean {
 }
 
 // Recipe controls take their height in rem so they grow with the interface
-// size, rounded to a whole 2px. At the 13px root DESIGN.md allows 20, 24, 28
-// and 32px; a recipe asking for another height is off the control scale.
+// size, rounded to a whole 2px. At the default root (14px, the default
+// interface size) DESIGN.md allows 20, 24, 28 and 32px; a recipe asking for
+// another height is off the control scale. Measured at the former 13px root,
+// the check passed recipes that drew 26 and 30px controls at the default.
 const CONTROL_HEIGHT_PX = [20, 24, 28, 32];
-const ROOT_PX = 13;
+const ROOT_PX = 14;
 const RECIPE_SOURCE = /(?:^|\/)ui\/(?:base|shadcn)\/(?:.+\/)?[^/]+\.tsx$/;
 const FIXED_SIZE_UTILITY = /(?<![\w-])(?:h|size)-\[([^\]\s]+)\]/g;
 // `rounded-[…]` and `rounded-(--token)`; Tailwind writes a space as `_`, and a
@@ -231,7 +233,7 @@ function measurePx(text: string): number | null {
   return Number(measure[1]) * (measure[2] === "rem" ? ROOT_PX : 1);
 }
 
-/** CSS `round(strategy?, value, interval)` at the 13px root. Null when the
+/** CSS `round(strategy?, value, interval)` at the default root. Null when the
  * expression cannot be evaluated here (a `var()`, a `calc()`, no interval). */
 function roundedPx(expression: string): number | null {
   const call = /^round\(([^()]*)\)$/.exec(expression);
@@ -436,6 +438,24 @@ function resolvedSelector(headers: ReadonlyArray<string>): string {
   return resolved;
 }
 
+// A menu, popover, select, combobox or disclosure is the one float,
+// and its corner is the large radius. Only the rule whose subject is the popup
+// counts: a descendant of one keeps its own corner.
+const FLOAT_SUBJECT =
+  /\[data-slot=["'](?:dropdown-menu|context-menu|popover|select|combobox)-content["']\]|\.(?:window-chrome__disclosure|workspace-disclosure)(?![\w-])/;
+const FLOAT_RADIUS = /^var\(\s*--oct-radius-lg\s*\)$/;
+
+function isFloatSubject(header: string): boolean {
+  return header.split(",").some((selector) => {
+    const compound =
+      selector
+        .trim()
+        .split(/[\s>+~]+/)
+        .pop() ?? "";
+    return FLOAT_SUBJECT.test(compound);
+  });
+}
+
 function repaintedPrimitive(
   header: string,
   primitiveClasses: ReadonlyMap<string, string>,
@@ -609,6 +629,14 @@ export function findStylesheetFindings(
       }
       if (!isToken && RADIUS_PROPERTY.test(name) && !radiusOnScale(value)) {
         push("radius-token", `${property} ${value} is not a radius token`);
+      }
+      if (
+        !isToken &&
+        name === "border-radius" &&
+        !FLOAT_RADIUS.test(value.trim()) &&
+        isFloatSubject(resolvedSelector(headers))
+      ) {
+        push("radius-token", `${property} ${value} on a floating surface is not --oct-radius-lg`);
       }
       if (!isToken && !exempt && SPACING_PROPERTY.test(name) && !spacingOnScale(value)) {
         push("spacing-scale", `${property} ${value} is off the 4px spacing scale`);

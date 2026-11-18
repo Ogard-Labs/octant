@@ -1,9 +1,13 @@
-import { GitBranch } from "lucide-react";
+import { Folder, GitBranch } from "../ui/icons";
+import { EnvironmentCard, EnvironmentRow } from "./EnvironmentGroup";
+import { EnvironmentContextSection } from "./EnvironmentContextSection";
+import { EnvironmentFoldScope } from "./environmentSections";
 import { DockModuleBoundary } from "../shell/DockModuleBoundary";
+import { OutsideContentRow } from "../composer/OutsideContentNotice";
 import { EnvironmentSuggestedTasks } from "../followUps/FollowUpSuggestionChips";
 import type { EnvironmentCompactIdentity } from "@octant/contracts";
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { LocalServerGroupCounts } from "./localServerGroups";
 
@@ -12,6 +16,8 @@ export interface ThreadEnvironmentSummaryFacts {
   readonly branch?: string;
   /** The checkout's folder on disk, shown under the name. */
   readonly path?: string;
+  /** What kind of checkout the branch is on: a worktree, the main folder or a shared one. */
+  readonly checkout?: string;
   readonly changes?: "clean" | "dirty";
   readonly workingLocation?: string;
   readonly runningServerCount?: number;
@@ -20,6 +26,10 @@ export interface ThreadEnvironmentSummaryFacts {
 
 export interface ThreadEnvironmentPanelProps {
   readonly summary: ThreadEnvironmentSummaryFacts;
+  /** The mode the thread is in; a person's folded sections are remembered per mode. */
+  readonly mode?: "chat" | "work" | "code";
+  /** The Project's name, said by the Environment section when it is folded. */
+  readonly projectName?: string | undefined;
   readonly open: boolean;
   readonly active?: boolean;
   /**
@@ -29,9 +39,9 @@ export interface ThreadEnvironmentPanelProps {
    */
   readonly headerContent?: ReactNode;
   /**
-   * The Computer card: where the thread runs, and the one place it moves to
-   * another of the person's computers. It comes first, above the header card,
-   * because where a thread runs is what a move changes.
+   * The computer row: where the thread runs, and the one place it moves to
+   * another of the person's computers. It is the first row of the first
+   * section, because where a thread runs is what a move changes.
    */
   readonly computer?: ReactNode;
   readonly children?: ReactNode;
@@ -57,14 +67,22 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
   // Environment arrive on different renders. A single lookup left the panel
   // inline above the transcript, or portalled into a detached element and so
   // invisible. Follow whatever host the document currently holds.
+  // The host last handed to React. The observer below fires for every change
+  // anywhere in the page, a streamed reply included, and telling React "the
+  // same host" each time still cost a render of this panel now and then: a
+  // slowed run measured one extra commit in eight streamed events.
+  const knownHost = useRef<Element | null>(null);
   useEffect(() => {
     if (!shown) {
+      knownHost.current = null;
       setDockHost(null);
       return;
     }
     const sync = () => {
       const next = document.querySelector("[data-octant-environment-dock]");
-      setDockHost((current) => (current === next ? current : next));
+      if (knownHost.current === next) return;
+      knownHost.current = next;
+      setDockHost(next);
     };
     sync();
     const observer = new MutationObserver(sync);
@@ -79,50 +97,56 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
       className="thread-environment-dock"
       data-environment-status={props.summary.identity.status}
     >
-      {/* The dock strip's tab already says Environment; the header card names
-          what the thread works in — the name on its own line, then where:
-          the branch and the folder — and holds what that checkout has
-          changed. It had carried the name, the branch and a Changes chip, and
-          the section under it then listed the branch and the repository
-          again. */}
-      {props.computer === undefined ? null : (
-        <div className="thread-environment-dock__computer">{props.computer}</div>
-      )}
+      {/* The strip is named Environment; its first section names where the
+          thread runs and what it works in (the computer, the folder with its
+          path, then the branch) and what that checkout has changed, as rows. */}
       <header className="thread-environment-dock__header">
         <h2 className="visually-hidden">Environment</h2>
         {/* The whole summary stays one sentence for assistive technology;
             the visible parts are its layout. */}
         <span className="visually-hidden">{sentence}</span>
-        <div className="thread-environment-dock__identity" title={sentence}>
-          <span aria-hidden="true" className="thread-environment-dock__name">
-            {props.summary.identity.label}
-          </span>
-          {headline.branch === undefined && headline.place === undefined ? null : (
-            <span aria-hidden="true" className="thread-environment-dock__meta">
-              {headline.branch === undefined ? null : (
-                <span className="thread-environment-dock__branch">
-                  <GitBranch aria-hidden="true" size={12} />
-                  <span>{headline.branch}</span>
-                </span>
-              )}
-              {headline.branch === undefined || headline.place === undefined ? null : (
-                <span className="thread-environment-dock__separator">·</span>
-              )}
-              {headline.place === undefined ? null : (
-                <span className="thread-environment-dock__place">{headline.place}</span>
-              )}
-            </span>
+        <EnvironmentCard
+          caption="Environment"
+          foldId="environment"
+          summary={props.projectName ?? "This computer"}
+        >
+          {/* The computer is the section's first row, not a section of its own:
+              a label over one row, then a hairline, spent 68px on one fact. */}
+          {props.computer === undefined ? null : (
+            <div className="thread-environment-dock__computer">{props.computer}</div>
           )}
-        </div>
+          <EnvironmentRow
+            icon={Folder}
+            label={props.summary.identity.label}
+            path={headline.place}
+            title={sentence}
+          />
+          {headline.branch === undefined ? null : (
+            <EnvironmentRow
+              detail={props.summary.checkout}
+              icon={GitBranch}
+              label={headline.branch}
+              title={headline.branch}
+            />
+          )}
+        </EnvironmentCard>
+        <EnvironmentContextSection />
         {props.headerContent}
       </header>
       <div className="thread-environment-dock__body">
         <EnvironmentSuggestedTasks />
+        <OutsideContentRow />
         {props.children}
       </div>
     </section>
   );
-  const isolated = <DockModuleBoundary>{content}</DockModuleBoundary>;
+  const isolated = (
+    <DockModuleBoundary>
+      <EnvironmentFoldScope {...(props.mode === undefined ? {} : { mode: props.mode })}>
+        {content}
+      </EnvironmentFoldScope>
+    </DockModuleBoundary>
+  );
   return dockHost === null ? isolated : createPortal(isolated, dockHost);
 }
 

@@ -621,6 +621,43 @@ export class ProviderService implements ProviderServiceApi {
     }
   }
 
+  /**
+   * Drops "CLI" from the two default names older installs saved: an account
+   * named exactly "Codex CLI" on the codex driver, or "OpenCode CLI" on the
+   * opencode driver, becomes "Codex" / "OpenCode" through the same rename a
+   * person's Settings edit uses. An account whose name was ever changed by a
+   * rename is left alone, so a person who renames it back keeps their choice,
+   * and a name another account already holds is skipped. A refused rename is
+   * logged once and never fails startup.
+   */
+  async renameLegacyDefaultNames(authenticatedWindowId: WindowId): Promise<void> {
+    for (const instance of this.#persistence.readProviderInstances()) {
+      const newName =
+        instance.driverKind === "codex" && instance.displayName === "Codex CLI"
+          ? "Codex"
+          : instance.driverKind === "opencode" && instance.displayName === "OpenCode CLI"
+            ? "OpenCode"
+            : undefined;
+      if (newName === undefined) continue;
+      try {
+        const renamedBefore = this.#persistence.journal.firstAggregateEvent({
+          aggregateType: "provider-instance",
+          aggregateId: instance.id,
+          kind: "provider.instance-renamed@1",
+        });
+        if (renamedBefore !== undefined) continue;
+        await this.execute(authenticatedWindowId, {
+          kind: "rename-provider",
+          instanceId: instance.id,
+          expectedVersion: instance.version,
+          displayName: newName,
+        });
+      } catch (error) {
+        console.warn("A saved provider name was not shortened; it keeps its name.", error);
+      }
+    }
+  }
+
   async smokeTurn(
     _authenticatedWindowId: WindowId,
     inputInstanceId: unknown,

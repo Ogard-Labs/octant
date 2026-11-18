@@ -33,7 +33,7 @@ export function ComputerUseSettingsView(props: {
     <section aria-label="Computer use" id="settings-computer-use">
       <SettingsSection
         title="Plugin"
-        description="While this is on, agents on a supported provider can use apps on this Mac when a task needs them. Each app asks you first."
+        description="While on, agents on a supported provider can use apps on this Mac. Each app asks you first."
       >
         <div className="setgroup">
           <SettingRow
@@ -62,7 +62,7 @@ export function ComputerUseSettingsView(props: {
       />
       <SettingsSection
         title="Driver and updates"
-        description="Which driver build Octant runs, and when it looks for a newer one."
+        description="Which driver version Octant runs, and when it checks for updates."
       >
         <div className="setgroup">
           <SettingRow

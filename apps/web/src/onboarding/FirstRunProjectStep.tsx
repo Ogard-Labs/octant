@@ -1,5 +1,5 @@
 import type { ProjectId } from "@octant/contracts/projects";
-import { FolderPlus } from "lucide-react";
+import { FolderPlus } from "../ui/icons";
 import { SettingRow } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";

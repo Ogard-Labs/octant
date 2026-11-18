@@ -3,6 +3,7 @@ import {
   browserPageToShow,
   buildDockToolButtons,
   type DockToolButtonsInput,
+  ENVIRONMENT_NO_ROOM_BESIDE_TOOL,
 } from "./dockToolButtonsModel";
 
 const tool = (id: DockToolButtonsInput["surfaces"][number]["id"]) => ({
@@ -35,6 +36,112 @@ function input(overrides: Partial<DockToolButtonsInput> = {}): DockToolButtonsIn
 const byId = (model: ReturnType<typeof buildDockToolButtons>, id: string) =>
   [...model.buttons, ...model.more].find((button) => button.id === id);
 
+describe("a new Code task's Project tool buttons", () => {
+  const awaiting = [
+    { id: "terminal", label: "Terminal" },
+    { id: "browser", label: "Browser" },
+    { id: "files", label: "Files" },
+  ] as const;
+  const draft = (quickTools?: DockToolButtonsInput["quickTools"]) =>
+    buildDockToolButtons({
+      ...input({ surfaces: [] }),
+      awaitingThread: awaiting,
+      ...(quickTools === undefined ? {} : { quickTools }),
+    });
+
+  it("enables Project terminal and Project browser once a Project is chosen and leaves the rest waiting", () => {
+    const model = draft({ tools: ["terminal", "browser"] });
+    expect(byId(model, "terminal")).toMatchObject({
+      label: "Project terminal",
+      pressed: false,
+      press: { kind: "quick-open", tool: "terminal" },
+    });
+    expect(byId(model, "browser")).toMatchObject({
+      label: "Project browser",
+      press: { kind: "quick-open", tool: "browser" },
+    });
+    expect(byId(model, "files")?.disabledReason).toBe("Available once the task starts");
+  });
+
+  it("reads the open Project tool as pressed and closes the dock on the next press", () => {
+    const model = draft({ tools: ["terminal", "browser"], open: "terminal" });
+    expect(byId(model, "terminal")).toMatchObject({
+      pressed: true,
+      press: { kind: "quick-close" },
+    });
+    expect(byId(model, "browser")?.pressed).toBe(false);
+  });
+
+  it("offers only the terminal for a Project on a server", () => {
+    const model = draft({ tools: ["terminal"] });
+    expect(byId(model, "terminal")?.press.kind).toBe("quick-open");
+    expect(byId(model, "browser")?.press.kind).toBe("refused");
+  });
+
+  it("keeps every button waiting when no Project is chosen", () => {
+    const model = draft();
+    expect(byId(model, "terminal")?.press.kind).toBe("refused");
+    expect(byId(model, "browser")?.press.kind).toBe("refused");
+  });
+});
+
+describe("moving a tool between the side and the bottom panel by menu", () => {
+  const shownReview = {
+    tabs: [{ id: "review", surface: "review" as const }],
+    shownTabIds: ["review"],
+  };
+
+  it("offers Move to bottom panel on a shown tool the panel accepts", () => {
+    const model = buildDockToolButtons(input({ ...shownReview, bottomAccepts: ["review"] }));
+    expect(byId(model, "review")?.menu.map((item) => item.value)).toContain("to-bottom");
+    expect(byId(model, "review")?.menu.find((item) => item.value === "to-bottom")?.label).toBe(
+      "Move to bottom panel",
+    );
+  });
+
+  it("does not offer it where the drag is not available or the panel does not take the tool", () => {
+    const refused = buildDockToolButtons(input({ ...shownReview, bottomAccepts: ["files"] }));
+    expect(byId(refused, "review")?.menu.map((item) => item.value)).not.toContain("to-bottom");
+    const none = buildDockToolButtons(input(shownReview));
+    expect(byId(none, "review")?.menu.map((item) => item.value)).not.toContain("to-bottom");
+    const narrow = buildDockToolButtons(
+      input({ ...shownReview, bottomAccepts: ["review"], narrow: true }),
+    );
+    expect(byId(narrow, "review")?.menu.map((item) => item.value)).not.toContain("to-bottom");
+  });
+
+  it("moves only a tool's own first tab below, and never the Browser", () => {
+    // The panel holds one of each tool: from a second Terminal the move would
+    // start another shell below and close the first one beside.
+    const second = buildDockToolButtons(
+      input({
+        tabs: [{ id: "second-shell", surface: "terminal" as const }],
+        shownTabIds: ["second-shell"],
+        bottomAccepts: ["terminal", "browser"],
+      }),
+    );
+    expect(byId(second, "terminal")?.menu.map((item) => item.value)).not.toContain("to-bottom");
+    // Closing the Browser's tab beside ends the thread's session.
+    const browser = buildDockToolButtons(
+      input({
+        tabs: [{ id: "browser", surface: "browser" as const }],
+        shownTabIds: ["browser"],
+        bottomAccepts: ["terminal", "browser"],
+      }),
+    );
+    expect(byId(browser, "browser")?.menu.map((item) => item.value)).not.toContain("to-bottom");
+  });
+
+  it("offers Move to the side on a tool the bottom panel holds", () => {
+    const model = buildDockToolButtons(
+      input({ bottomHeld: ["terminal"], bottomActive: "terminal", bottomPresentedOpen: true }),
+    );
+    expect(byId(model, "terminal")?.menu.find((item) => item.value === "to-side")?.label).toBe(
+      "Move to the side",
+    );
+  });
+});
+
 describe("the title band's tool buttons", () => {
   it("lists the dedicated tools in band order and leaves the rest to More", () => {
     const model = buildDockToolButtons(input());
@@ -48,6 +155,24 @@ describe("the title band's tool buttons", () => {
     expect(model.more.map((button) => button.id)).toEqual(["plan", "tests"]);
   });
 
+  it("lists a tool that has no use here as a disabled button with its reason", () => {
+    const model = buildDockToolButtons(
+      input({
+        surfaces: [tool("environment"), tool("ios-simulator")],
+        unavailable: { "ios-simulator": "This Project has no iOS app" },
+      }),
+    );
+    const simulator = byId(model, "ios-simulator");
+    expect(simulator?.disabledReason).toBe("This Project has no iOS app");
+    expect(simulator?.press).toEqual({ kind: "refused" });
+    expect(byId(model, "environment")?.disabledReason).toBeUndefined();
+    const enabled = buildDockToolButtons(
+      input({ surfaces: [tool("environment"), tool("ios-simulator")] }),
+    );
+    expect(byId(enabled, "ios-simulator")?.disabledReason).toBeUndefined();
+    expect(byId(enabled, "ios-simulator")?.press).not.toEqual({ kind: "refused" });
+  });
+
   it("leaves out a tool the thread cannot use", () => {
     const model = buildDockToolButtons(
       input({ surfaces: [tool("environment"), tool("files"), tool("side-chat")] }),
@@ -58,6 +183,61 @@ describe("the title band's tool buttons", () => {
 
   it("offers nothing when no tool is available", () => {
     expect(buildDockToolButtons(input({ surfaces: [] }))).toEqual({ buttons: [], more: [] });
+  });
+
+  it("opens and closes Environment as a section of its own, with nothing to arrange", () => {
+    const closed = byId(buildDockToolButtons(input({ environmentSection: true })), "environment");
+    expect(closed?.press).toEqual({ kind: "open-section" });
+    expect(closed?.pressed).toBe(false);
+    // Open, it reads pressed whatever tool is in front and whatever the tiles hold.
+    const open = byId(
+      buildDockToolButtons(
+        input({
+          environmentSection: true,
+          tabs: [
+            { id: "environment", surface: "environment" },
+            { id: "files", surface: "files" },
+          ],
+          shownTabIds: ["files"],
+          activeTabId: "files",
+        }),
+      ),
+      "environment",
+    );
+    expect(open?.pressed).toBe(true);
+    expect(open?.press).toEqual({ kind: "close", tabIds: ["environment"] });
+    expect(open?.menu).toEqual([{ value: "close", label: "Close Environment" }]);
+  });
+
+  it("refuses Environment, and says why, while the section has given way to a tool in a narrow window", () => {
+    const gaveWay = byId(
+      buildDockToolButtons(
+        input({
+          environmentSection: true,
+          environmentGaveWay: { open: true },
+          tabs: [{ id: "files", surface: "files" }],
+          shownTabIds: ["files"],
+          activeTabId: "files",
+        }),
+      ),
+      "environment",
+    );
+    // Not on screen, so not pressed; still open behind the pane, so the dot.
+    expect(gaveWay).toMatchObject({
+      pressed: false,
+      open: true,
+      press: { kind: "refused" },
+      disabledReason: ENVIRONMENT_NO_ROOM_BESIDE_TOOL,
+      menu: [],
+    });
+    const closed = byId(
+      buildDockToolButtons(
+        input({ environmentSection: true, environmentGaveWay: { open: false } }),
+      ),
+      "environment",
+    );
+    expect(closed).toMatchObject({ pressed: false, open: false });
+    expect(closed?.disabledReason).toBe(ENVIRONMENT_NO_ROOM_BESIDE_TOOL);
   });
 
   it("opens an unopened tool beside the focused tile", () => {

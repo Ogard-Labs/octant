@@ -4,7 +4,7 @@ import {
   parseThreadMentionToken,
   type ThreadMentionToken,
 } from "@octant/domain";
-import { Hash, MessagesSquare, X } from "lucide-react";
+import { Hash, MessagesSquare, X } from "../ui/icons";
 import { useState, type KeyboardEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 
@@ -155,7 +155,7 @@ export function ThreadMentionTypeahead(props: {
         <p className="thread-mention__empty" role="status">
           {props.busy === true
             ? "Searching threads you can open…"
-            : "No matching thread you can open. Leaving this as ordinary text."}
+            : "No thread you can open matches. Kept as plain text."}
         </p>
       ) : (
         <ul

@@ -140,6 +140,64 @@ describe("SideChatWorkspaceTab", () => {
     });
   });
 
+  it("says what the Side Chat can read until the first message, and never again after it", async () => {
+    const empty = render(
+      <SideChatWorkspaceTab
+        chatClient={chatClientStub()}
+        chatReadCursorStore={readCursorStore}
+        tab={sideChatTab()}
+        threadMentionClient={mentionClientStub()}
+      />,
+    );
+    expect(await screen.findByText(/Ask about this thread: its conversation/)).toBeVisible();
+    empty.unmount();
+
+    const started = chatClientStub({
+      thread: vi.fn(async () => {
+        const prompt = {
+          contentId: "00000000-0000-4000-8000-000000000402",
+          role: "user" as const,
+          body: "What changed?",
+          digest: "a".repeat(64),
+          byteLength: 13,
+        };
+        return decodeChatThreadView({
+          ...sidecarView(),
+          turns: [
+            {
+              id: "00000000-0000-4000-8000-000000000401",
+              threadId: sidecarThreadId,
+              sequence: 1,
+              userMessageRef: {
+                contentId: prompt.contentId,
+                digest: prompt.digest,
+                byteLength: prompt.byteLength,
+              },
+              attachmentIds: [],
+              attempts: [],
+              createdAt: now,
+            },
+          ],
+          contents: [prompt],
+        });
+      }),
+    });
+    render(
+      <SideChatWorkspaceTab
+        chatClient={started}
+        chatReadCursorStore={readCursorStore}
+        tab={sideChatTab()}
+        threadMentionClient={mentionClientStub()}
+      />,
+    );
+    await waitFor(() => expect(started.thread).toHaveBeenCalledWith(sidecarThreadId));
+    await screen.findByRole("region", { name: "Chat workspace" });
+    // Only once the thread's own message is on screen is the view loaded; the
+    // notice was absent before that for a different reason.
+    await screen.findByText("What changed?");
+    expect(screen.queryByText(/Ask about this thread/)).toBeNull();
+  });
+
   it("renders the sidecar without it appearing in any ordinary Chat listing", async () => {
     const chatClient = chatClientStub();
     render(
@@ -291,7 +349,7 @@ it("returns one selected finished answer to the source's editable saved draft wi
   await screen.findByText("Chosen answer");
   await user.click(screen.getByRole("button", { name: "Reply actions" }));
   await user.click(await screen.findByRole("menuitem", { name: "Use in source draft" }));
-  await screen.findByText(/Added to the source’s saved draft/);
+  await screen.findByText(/Added to the saved draft/);
   expect(prepare).toHaveBeenCalledWith(
     expect.objectContaining({
       kind: "prepare-side-chat-return",
@@ -449,7 +507,7 @@ it("bounds a held prepare read, permits explicit retry and suppresses its late a
       deadline();
     });
     expect(prepare.mock.calls[0]![1].aborted).toBe(true);
-    expect(await screen.findByText(/This reply could not be added/)).toBeVisible();
+    expect(await screen.findByText(/Could not add this reply to the draft/)).toBeVisible();
     expect(composerThreadDrafts.read("work", sourceThreadId)).toBeUndefined();
     await act(async () => {
       held.resolve(result);
@@ -460,7 +518,7 @@ it("bounds a held prepare read, permits explicit retry and suppresses its late a
     const retry = await screen.findByRole("menuitem", { name: "Use in source draft" });
     expect(retry).not.toHaveAttribute("aria-disabled", "true");
     await user.click(retry);
-    await screen.findByText(/Added to the source’s saved draft/);
+    await screen.findByText(/Added to the saved draft/);
     expect(prepare).toHaveBeenCalledTimes(2);
     expect(composerThreadDrafts.read("work", sourceThreadId)?.text).toBe("Chosen returned answer");
   } finally {

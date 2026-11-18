@@ -3,7 +3,7 @@ import type {
   ComposerPoolCandidateView,
   ComposerPoolModel,
 } from "@octant/domain/composer-pool-policy";
-import { Layers } from "lucide-react";
+import { Layers } from "../ui/icons";
 import { useId, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
@@ -169,7 +169,6 @@ export function ComposerPoolControl(props: ComposerPoolControlProps) {
         onOpenChange={handleOpenChange}
         open={open}
         side="top"
-        sideOffset={6}
         title="Multi-model pool editor"
         trigger={
           <>

@@ -792,6 +792,22 @@ export function guardrailScopeOf(input: {
 export const APPROVAL_POSTURE_CHANGED_MESSAGE =
   "This thread's permissions changed since this was asked, so it asks again.";
 
+/** Why an answer to an ask that nothing waits on any more is refused. */
+export const APPROVAL_NOT_WAITING_MESSAGE =
+  "This request is no longer waiting for an answer. It was answered, withdrawn, or its turn ended.";
+
+/** Why an answer to a question that nothing waits on any more is refused. */
+export const QUESTION_NOT_WAITING_MESSAGE =
+  "This question is no longer waiting for an answer. It was answered, withdrawn, or its turn ended.";
+
+/** Why an allow is refused while the thread or its turn is in Plan. */
+export const APPROVAL_REFUSED_IN_PLAN_MESSAGE =
+  "Plan can't approve this. Deny it, or leave Plan and send a new message.";
+
+/** Why an answer is refused when the provider session that asked is gone. */
+export const APPROVAL_SESSION_GONE_MESSAGE =
+  "The provider session that asked is no longer connected, so the answer could not be delivered.";
+
 /**
  * The posture a pending approval is asked under, as one comparable value: the
  * mode, who answers prompts, the Full access sandbox, how long a grant lasts,

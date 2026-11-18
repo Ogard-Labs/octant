@@ -360,10 +360,14 @@ export const SidebarRowProperties = Schema.Struct({
 }).annotations(strict);
 export type SidebarRowProperties = typeof SidebarRowProperties.Type;
 
-/** Each view starts showing exactly what it showed before it could be told otherwise. */
+/**
+ * Each view starts showing a short age beside the title: Activity is the view
+ * that answers what happened lately, so it carries the age too. A saved choice
+ * always wins over these defaults.
+ */
 export const DEFAULT_SIDEBAR_ROW_PROPERTIES: SidebarRowProperties = {
   projects: { project: false, branch: true, pullRequest: true, lastUpdated: true, status: true },
-  activity: { project: true, branch: false, pullRequest: false, lastUpdated: false, status: true },
+  activity: { project: true, branch: false, pullRequest: false, lastUpdated: true, status: true },
 };
 
 /** How the Code sidebar offers its saved project views: a dropdown or inline icon buttons. */
@@ -780,6 +784,12 @@ export const ShellSettings = Schema.Struct({
    */
   sidebarCountTiles: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   /**
+   * Whether the spend ceiling row shows on threads and Projects. A ceiling that
+   * is set always shows, so this only hides the way to set the first one. A
+   * store persisted before the setting shipped decodes to off.
+   */
+  spendCeilingShown: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
    * The sidebar's thread filter: an icon that opens a field, or a field that
    * is always there. A store persisted before the choice decodes to the icon.
    */
@@ -1009,7 +1019,7 @@ export const ShellSettings = Schema.Struct({
     default: () => "small" as const,
   }),
   transcriptWidth: Schema.optionalWith(TranscriptWidth, {
-    default: () => "narrow" as const,
+    default: () => "medium" as const,
   }),
   /**
    * How the plan-usage bars above the composer are drawn. A store persisted
@@ -1560,6 +1570,14 @@ export type ShellBootstrap = typeof ShellBootstrap.Type;
 
 const ModeOperationFields = { mode: OctantMode } as const;
 
+/**
+ * The surface takes the whole window: every other pane of the mode's layout
+ * closes in the same step. A new task asks for this, so a person who starts
+ * one from a split is not handed half a window and a thread they did not ask
+ * to keep beside it.
+ */
+const OpensAlone = Schema.optional(Schema.Literal(true));
+
 export const WorkspaceOperation = Schema.Union(
   /**
    * Open a surface: if the same surface is already visible in some pane, that
@@ -1572,11 +1590,13 @@ export const WorkspaceOperation = Schema.Union(
     ...ModeOperationFields,
     paneId: PaneId,
     surface: WorkspaceTab,
+    alone: OpensAlone,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("switch-project-surface"),
     ...ModeOperationFields,
     surface: WorkspaceTab,
+    alone: OpensAlone,
   }).annotations(strict),
   /**
    * A center drop: the named pane's surface is replaced outright. When the

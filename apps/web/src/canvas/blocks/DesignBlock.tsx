@@ -18,7 +18,7 @@ import {
   RotateCcw,
   Square,
   X,
-} from "lucide-react";
+} from "../../ui/icons";
 import {
   CANVAS_DESIGN_HEARTBEAT_INTERVAL_MS,
   CANVAS_DESIGN_VIEWPORT,

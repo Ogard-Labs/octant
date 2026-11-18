@@ -1,4 +1,5 @@
 import {
+  ACP_AGENT_KINDS,
   decodeDiscoverySnapshot,
   decodeProviderInstance,
   decodeProviderInstanceId,
@@ -8,12 +9,13 @@ import {
   type ProviderObservedState,
   type ProviderRegistrySnapshot,
 } from "@octant/contracts";
+import { implicitClaudeAccountOwnerId, implicitCodexAccountOwnerId } from "@octant/domain";
 import type { ProviderClient } from "@octant/client-runtime/provider-client";
 import type { HostPlatform } from "@octant/contracts/host";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { ReactElement, ReactNode } from "react";
+import { useState, type ReactElement, type ReactNode } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderCreateForm } from "./ProviderSettingsConfiguration";
@@ -99,6 +101,66 @@ function renderImageProviderCreation(
   );
   fireEvent.click(screen.getByRole("button", { name: "Add image provider" }));
   return result;
+}
+
+/**
+ * The page's former inline create form, for the tests of what that form submits
+ * (the page itself now opens a wizard). It sits where the page put it.
+ */
+function InlineCreateView(props: ProviderSettingsViewProps) {
+  return (
+    <ProviderSettingsList
+      {...props}
+      discoverySnapshot={props.discoverySnapshot}
+      createForm={
+        <ProviderCreateForm
+          {...props}
+          allowedProviderTypes={[
+            "opencode",
+            "codex",
+            "claude",
+            "pi",
+            "oh-my-pi",
+            ...ACP_AGENT_KINDS,
+          ]}
+          claudeHostProfileTaken={implicitClaudeAccountOwnerId(props.instances) !== undefined}
+          codexHostProfileTaken={implicitCodexAccountOwnerId(props.instances) !== undefined}
+          heading="Agent runtime"
+        />
+      }
+    />
+  );
+}
+
+/** A page whose host adds the account it is asked to create, as the real one does. */
+function GrowingSettings(props: {
+  readonly base: ProviderSettingsViewProps;
+  readonly template: ProviderInstance;
+}) {
+  const [instances, setInstances] = useState(props.base.instances);
+  const grow = (name: string) =>
+    setInstances((current) => [
+      ...current,
+      decodeProviderInstance({
+        ...props.template,
+        id: decodeProviderInstanceId(`80000000-0000-4000-8000-0000000001${current.length + 10}`),
+        displayName: name,
+      }),
+    ]);
+  return (
+    <ProviderSettingsView
+      {...props.base}
+      instances={instances}
+      onCreate={async (kind, name, binary, accent) => {
+        grow(name);
+        return props.base.onCreate(kind, name, binary, ...(accent === undefined ? [] : [accent]));
+      }}
+      onCreateClaude={async (name, configuration, credential) => {
+        grow(name);
+        return props.base.onCreateClaude(name, configuration, credential);
+      }}
+    />
+  );
 }
 
 describe("ProviderSettingsView", () => {
@@ -199,36 +261,19 @@ describe("ProviderSettingsView", () => {
     expect(screen.queryByRole("article", { name: "GPT Image" })).not.toBeInTheDocument();
   });
 
-  it("keeps manual provider setup behind an advanced disclosure", async () => {
+  it("opens a wizard from Add provider manually instead of expanding a form down the page", async () => {
     const user = userEvent.setup();
     renderProviderSettings(<ProviderSettingsView {...fixture()} />);
-    const disclosure = screen.getByRole("button", { name: "Add provider manually" });
-    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Provider type")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Display name for Existing CLI")).not.toBeInTheDocument();
-    await user.click(disclosure);
-    expect(disclosure).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("heading", { name: "Agent runtime" })).toBeVisible();
-    await user.click(screen.getByRole("combobox", { name: "Provider type" }));
-    // The list opens on the next frame; asking at once failed about half the runs.
-    expect(await screen.findByRole("option", { name: "Codex CLI" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Qwen Code ACP" })).toBeInTheDocument();
-    for (const elsewhere of [
-      "OpenAI-compatible HTTP",
-      "Anthropic-compatible HTTP",
-      "Azure AI Foundry",
-      "Ollama native HTTP",
-      "OpenAI Image",
-      "Gemini Image",
-    ]) {
-      expect(screen.queryByRole("option", { name: elsewhere })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add provider manually" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add provider account" });
+    expect(within(dialog).getByRole("radio", { name: /^OpenCode/ })).toBeVisible();
+    expect(within(dialog).getByRole("radio", { name: /^Qwen Code/ })).toBeVisible();
+    for (const elsewhere of [/^OpenAI-compatible/, /^Ollama/, /^Gemini Image/]) {
+      expect(within(dialog).queryByRole("radio", { name: elsewhere })).not.toBeInTheDocument();
     }
-    await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: "Details for Existing CLI" }));
-    const configure = screen.getByRole("button", { name: "Configure Existing CLI" });
-    expect(configure).toHaveAttribute("aria-controls");
-    await user.click(configure);
-    expect(screen.getByLabelText("Display name for Existing CLI")).toBeVisible();
   });
 
   it("uses presentation-only probe facts for row geometry when authority is empty", () => {
@@ -247,7 +292,7 @@ describe("ProviderSettingsView", () => {
   it("omits provider metadata when the driver label is already the display name", () => {
     renderProviderSettings(<ProviderSettingsView {...fixture({ instance: cliNamedProvider() })} />);
 
-    const row = screen.getByRole("article", { name: "Codex CLI" });
+    const row = screen.getByRole("article", { name: "Codex" });
     expect(row.querySelector(".prov-observation > .prov-meta")).toBeNull();
   });
 
@@ -307,8 +352,8 @@ describe("ProviderSettingsView", () => {
   it("creates, edits, toggles, probes, and removes through accessible controls", async () => {
     const user = userEvent.setup();
     const props = fixture();
-    renderExpanded(<ProviderSettingsView {...props} />);
-    expect(screen.getByLabelText("Provider type")).toHaveTextContent("OpenCode CLI");
+    renderExpanded(<InlineCreateView {...props} />);
+    expect(screen.getByLabelText("Provider type")).toHaveTextContent("OpenCode");
     await user.type(screen.getByLabelText("Provider name"), "OpenCode local");
     await user.type(screen.getByLabelText("OpenCode binary"), "/opt/homebrew/bin/opencode");
     await user.click(screen.getByRole("button", { name: "Add OpenCode" }));
@@ -384,9 +429,9 @@ describe("ProviderSettingsView", () => {
   it("creates Codex from the shared accessible provider form", async () => {
     const user = userEvent.setup();
     const props = fixture();
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<InlineCreateView {...props} />);
 
-    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Codex CLI");
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Codex");
     await user.type(screen.getByLabelText("Provider name"), "Codex local");
     await user.type(screen.getByLabelText("Codex binary"), "/opt/homebrew/bin/codex");
     await user.click(screen.getByRole("button", { name: "Add Codex" }));
@@ -397,7 +442,7 @@ describe("ProviderSettingsView", () => {
   it("creates Kimi Code from the shared form without credential controls", async () => {
     const user = userEvent.setup();
     const props = fixture();
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<InlineCreateView {...props} />);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Kimi Code ACP");
     const form = screen.getByRole("form", { name: "Add Kimi Code provider" });
@@ -418,7 +463,7 @@ describe("ProviderSettingsView", () => {
   it("creates Devin from the shared form with provider-owned subscription authentication", async () => {
     const user = userEvent.setup();
     const props = fixture();
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<InlineCreateView {...props} />);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Devin ACP");
     const form = screen.getByRole("form", { name: "Add Devin provider" });
@@ -442,7 +487,7 @@ describe("ProviderSettingsView", () => {
   it("creates Pi from the shared form with provider-owned authentication and no secret controls", async () => {
     const user = userEvent.setup();
     const props = fixture();
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<InlineCreateView {...props} />);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Pi RPC");
     const form = screen.getByRole("form", { name: "Add provider" });
@@ -458,7 +503,7 @@ describe("ProviderSettingsView", () => {
   it("creates Oh My Pi from the shared form as distinct from Pi with no secret controls", async () => {
     const user = userEvent.setup();
     const props = fixture();
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<InlineCreateView {...props} />);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Oh My Pi");
     const form = screen.getByRole("form", { name: "Add provider" });
@@ -478,7 +523,7 @@ describe("ProviderSettingsView", () => {
   it("creates Kilo from the shared form with provider-owned authentication and no secret controls", async () => {
     const user = userEvent.setup();
     const props = fixture();
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<InlineCreateView {...props} />);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Kilo ACP");
     const form = screen.getByRole("form", { name: "Add Kilo provider" });
@@ -596,7 +641,7 @@ describe("ProviderSettingsView", () => {
   it("creates Claude with explicit subscription or write-only API-key authentication", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: claudeProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<InlineCreateView {...props} />);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
     const create = screen.getByRole("form", { name: "Add Claude provider" });
@@ -640,7 +685,7 @@ describe("ProviderSettingsView", () => {
   it("creates a Claude account with a name and accent and no free-text directory field", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: claudeProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<InlineCreateView {...props} />);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
     const create = screen.getByRole("form", { name: "Add Claude provider" });
@@ -668,7 +713,7 @@ describe("ProviderSettingsView", () => {
   it("clears the Claude create fields after a successful add so the next account starts blank", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: claudeProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<InlineCreateView {...props} />);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
     const create = screen.getByRole("form", { name: "Add Claude provider" });
@@ -688,7 +733,7 @@ describe("ProviderSettingsView", () => {
   it("shows a read-only account directory and no free-text directory when adding another Claude account", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: claudeProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<InlineCreateView {...props} />);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
     const create = screen.getByRole("form", { name: "Add Claude provider" });
@@ -701,30 +746,32 @@ describe("ProviderSettingsView", () => {
     expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
   });
 
-  it("adds another Claude account from the Claude card with the form ready to name it", async () => {
+  it("adds another Claude account from the Claude card in a wizard that starts on Claude", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: claudeProvider() });
-    renderProviderSettings(<ProviderSettingsView {...props} />);
+    renderProviderSettings(<GrowingSettings base={props} template={claudeProvider()} />);
 
-    expect(screen.queryByLabelText("Provider type")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Details for Claude local" }));
     await user.click(screen.getByRole("button", { name: "Add account for Claude local" }));
 
-    // The form stands under the list, so the provider's page gives way to it.
-    expect(screen.queryByRole("button", { name: "Back to providers" })).toBeNull();
-    const create = screen.getByRole("form", { name: "Add Claude provider" });
-    expect(within(create).getByRole("combobox", { name: "Provider type" })).toHaveTextContent(
-      "Claude Agent SDK",
+    // The page stays where it is: the wizard opens over it.
+    const dialog = await screen.findByRole("dialog", { name: "Add provider account" });
+    expect(within(dialog).getByRole("radio", { name: /^Claude/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
     );
-    const name = within(create).getByLabelText("Provider name");
-    expect(name).toHaveValue("Claude local (2)");
-    expect(name).toHaveFocus();
-    expect(within(create).getByLabelText("Claude binary")).toHaveValue("/opt/homebrew/bin/claude");
-    expect(within(create).getByLabelText("Account directory")).toHaveValue(
-      "~/.claude-accounts/<assigned on create>",
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    expect(within(dialog).getByRole("radio", { name: /^Claude subscription/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
     );
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    expect(within(dialog).getByLabelText("Provider name")).toHaveValue("Claude local (2)");
+    await user.click(within(dialog).getByRole("button", { name: "Advanced" }));
+    expect(within(dialog).getByText("/opt/homebrew/bin/claude")).toBeVisible();
+    expect(within(dialog).getByLabelText("Account directory")).toHaveAttribute("readonly");
 
-    await user.click(within(create).getByRole("button", { name: "Add Claude" }));
+    await user.click(within(dialog).getByRole("button", { name: "Add Claude" }));
     expect(props.onCreateClaude).toHaveBeenLastCalledWith(
       "Claude local (2)",
       {
@@ -734,10 +781,7 @@ describe("ProviderSettingsView", () => {
       },
       expect.objectContaining({ value: "" }),
     );
-    // The new account exists, so the suggested name is not offered a second time.
-    await waitFor(() => {
-      expect(screen.queryByRole("form", { name: "Add Claude provider" })).not.toBeInTheDocument();
-    });
+    expect(await within(dialog).findByText(/is added\. Sign in, then check/)).toBeVisible();
   });
 
   it("signs a Claude account in from its card and takes a pasted code", async () => {
@@ -837,27 +881,121 @@ describe("ProviderSettingsView", () => {
     expect(props.onProbe).toHaveBeenCalledWith(props.instances[0]?.id, { quiet: true });
   });
 
-  it("adds another Codex account from the Codex card through the same form", async () => {
+  it("adds another Codex account from the Codex card through the same wizard", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: codexProvider() });
-    renderProviderSettings(<ProviderSettingsView {...props} />);
+    renderProviderSettings(<GrowingSettings base={props} template={codexProvider()} />);
 
     await user.click(screen.getByRole("button", { name: "Details for Codex local" }));
     await user.click(screen.getByRole("button", { name: "Add account for Codex local" }));
 
-    const create = screen.getByRole("form", { name: "Add provider" });
-    expect(within(create).getByRole("combobox", { name: "Provider type" })).toHaveTextContent(
-      "Codex CLI",
+    const dialog = await screen.findByRole("dialog", { name: "Add provider account" });
+    expect(within(dialog).getByRole("radio", { name: /^Codex/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
     );
-    expect(within(create).getByLabelText("Provider name")).toHaveValue("Codex local (2)");
-    expect(within(create).getByLabelText("Codex binary")).toHaveValue("/opt/homebrew/bin/codex");
-
-    await user.click(within(create).getByRole("button", { name: "Add Codex" }));
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    expect(within(dialog).getByLabelText("Provider name")).toHaveValue("Codex local (2)");
+    await user.click(within(dialog).getByRole("button", { name: "Add Codex" }));
     expect(props.onCreate).toHaveBeenCalledWith(
       "codex",
       "Codex local (2)",
       "/opt/homebrew/bin/codex",
     );
+    const command = await within(dialog).findByLabelText("Account sign-in command");
+    expect(command).toHaveAttribute("readonly");
+    expect((command as HTMLInputElement).value).toContain("'/opt/homebrew/bin/codex' login");
+    expect(within(dialog).getByRole("button", { name: "Copy sign-in command" })).toBeVisible();
+  });
+
+  it("walks OpenCode through the same steps as Claude and shows the host's reason on a failed check", async () => {
+    const user = userEvent.setup();
+    const props = fixture();
+    renderProviderSettings(<ProviderSettingsView {...props} />);
+    await user.click(screen.getByRole("button", { name: "Add provider manually" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add provider account" });
+    await user.click(within(dialog).getByRole("radio", { name: /^OpenCode/ }));
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    expect(within(dialog).getByRole("radio", { name: /^OpenCode login/ })).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    await user.clear(within(dialog).getByLabelText("Provider name"));
+    await user.click(within(dialog).getByRole("button", { name: "Add OpenCode" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Provider name is required.");
+    await user.type(within(dialog).getByLabelText("Provider name"), "OpenCode local");
+    await user.click(within(dialog).getByRole("button", { name: "Add OpenCode" }));
+    expect(props.onCreate).toHaveBeenCalledWith(
+      "opencode",
+      "OpenCode local",
+      "/opt/homebrew/bin/opencode",
+    );
+  });
+
+  it("asks for the binary under Advanced when none was detected", async () => {
+    const user = userEvent.setup();
+    const props = fixture();
+    renderProviderSettings(<ProviderSettingsView {...props} />);
+    await user.click(screen.getByRole("button", { name: "Add provider manually" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add provider account" });
+    await user.click(within(dialog).getByRole("radio", { name: /^Pi/ }));
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    await user.click(within(dialog).getByRole("button", { name: "Add Pi" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(
+      "Pi binary is required. Enter its path under Advanced.",
+    );
+    await user.type(within(dialog).getByLabelText("Pi binary"), "/usr/local/bin/pi");
+    await user.click(within(dialog).getByRole("button", { name: "Add Pi" }));
+    expect(props.onCreate).toHaveBeenCalledWith("pi", "Pi", "/usr/local/bin/pi");
+  });
+
+  it("keeps the wizard dialog the same element and size on every step", async () => {
+    const user = userEvent.setup();
+    renderProviderSettings(<ProviderSettingsView {...fixture()} />);
+    await user.click(screen.getByRole("button", { name: "Add provider manually" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add provider account" });
+    const classes = dialog.className;
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    expect(screen.getByRole("dialog", { name: "Add provider account" })).toBe(dialog);
+    expect(dialog.className).toBe(classes);
+    const styles = readFileSync(
+      resolve(process.cwd(), "src/providers/wizard/add-provider-wizard.css"),
+      "utf8",
+    );
+    expect(styles).toMatch(/\.add-provider-wizard\s*\{[^}]*height:\s*min\(520px/);
+    expect(styles).toMatch(/--octant-dialog-width:\s*560px/);
+    expect(styles).toMatch(/\.add-provider-wizard__body\s*\{[^}]*overflow-y:\s*auto/);
+  });
+
+  it("adds nothing when the wizard is cancelled before the details are submitted", async () => {
+    const user = userEvent.setup();
+    const props = fixture();
+    renderProviderSettings(<ProviderSettingsView {...props} />);
+    await user.click(screen.getByRole("button", { name: "Add provider manually" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add provider account" });
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(props.onCreate).not.toHaveBeenCalled();
+    expect(props.onCreateClaude).not.toHaveBeenCalled();
+    expect(props.onCreateAcpAgent).not.toHaveBeenCalled();
+  });
+
+  it("says why a provider that needs a key cannot be added where keys cannot be stored", async () => {
+    const user = userEvent.setup();
+    renderProviderSettings(
+      <ProviderSettingsView {...fixture({ credentialManagementAvailable: false })} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Add provider manually" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add provider account" });
+    await user.click(within(dialog).getByRole("radio", { name: /^Claude/ }));
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    await user.click(within(dialog).getByRole("radio", { name: /^Anthropic API key/ }));
+    expect(within(dialog).getByLabelText("Anthropic API key")).toBeDisabled();
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("this browser cannot store one");
   });
 
   it("suggests the next free number when a second account already exists", async () => {
@@ -923,7 +1061,7 @@ describe("ProviderSettingsView", () => {
 
   it("hides the Claude sign-in command until the binary path is absolute", async () => {
     const user = userEvent.setup();
-    renderExpanded(<ProviderSettingsView {...fixture()} />);
+    renderExpanded(<InlineCreateView {...fixture()} />);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
     const create = screen.getByRole("form", { name: "Add Claude provider" });
@@ -940,7 +1078,7 @@ describe("ProviderSettingsView", () => {
   it("creates Mistral Vibe with API-key authentication only", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: vibeProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<InlineCreateView {...props} />);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Mistral Vibe ACP");
     const create = screen.getByRole("form", { name: "Add Mistral Vibe provider" });
@@ -1034,7 +1172,7 @@ describe("ProviderSettingsView", () => {
     }) => {
       const user = userEvent.setup();
       const props = fixture();
-      renderExpanded(<ProviderSettingsView {...props} />);
+      renderExpanded(<InlineCreateView {...props} />);
 
       await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), typeLabel);
       const createForm = screen.getByRole("form", { name: formName });
@@ -1061,7 +1199,7 @@ describe("ProviderSettingsView", () => {
   it("creates a browser Claude API-key profile while keeping secret entry disabled", async () => {
     const user = userEvent.setup();
     const props = fixture({ credentialManagementAvailable: false });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<InlineCreateView {...props} />);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
     const create = screen.getByRole("form", { name: "Add Claude provider" });
@@ -1099,32 +1237,32 @@ describe("ProviderSettingsView", () => {
       const client = controllerClient();
       render(<ControllerBackedProviderSettings client={client} host={host} />);
       await user.click(await screen.findByRole("button", { name: "Add provider manually" }));
-      await screen.findByLabelText("Provider type");
-
-      await chooseSelectFieldOption(
-        user,
-        screen.getByLabelText("Provider type"),
-        "Claude Agent SDK",
-      );
-      const create = screen.getByRole("form", { name: "Add Claude provider" });
-      await user.type(within(create).getByLabelText("Provider name"), "Claude key");
-      await user.type(within(create).getByLabelText("Claude binary"), "/usr/local/bin/claude");
-      await chooseSelectFieldOption(
-        user,
-        within(create).getByLabelText("Claude authentication"),
-        "Anthropic API key",
-      );
-      const apiKey = within(create).getByLabelText("Anthropic API key");
+      const dialog = await screen.findByRole("dialog", { name: "Add provider account" });
+      await user.click(within(dialog).getByRole("radio", { name: /^Claude/ }));
+      await user.click(within(dialog).getByRole("button", { name: "Next" }));
+      await user.click(within(dialog).getByRole("radio", { name: /^Anthropic API key/ }));
+      const apiKey = within(dialog).getByLabelText("Anthropic API key");
       await user.type(apiKey, "private-value");
-      await user.click(within(create).getByRole("button", { name: "Add Claude" }));
+      await user.click(within(dialog).getByRole("button", { name: "Next" }));
+      await user.clear(within(dialog).getByLabelText("Provider name"));
+      await user.type(within(dialog).getByLabelText("Provider name"), "Claude key");
+      await user.click(within(dialog).getByRole("button", { name: "Advanced" }));
+      await user.type(within(dialog).getByLabelText("Claude binary"), "/usr/local/bin/claude");
+      await user.click(within(dialog).getByRole("button", { name: "Add Claude" }));
 
       await waitFor(() => expect(apiKey).toHaveValue(""));
       expect(addProviderApiKey).toHaveBeenCalledWith(expect.any(String), "private-value");
       expect(document.body.textContent).not.toContain("private-value");
       if (outcome === "failure") {
-        expect(screen.getByRole("alert")).toHaveTextContent(
-          "The provider was created, but its credential could not be stored.",
-        );
+        expect(
+          screen
+            .getAllByRole("alert")
+            .some((alert) =>
+              alert.textContent?.includes(
+                "The provider was created, but its credential could not be stored.",
+              ),
+            ),
+        ).toBe(true);
       }
     },
   );
@@ -1140,7 +1278,8 @@ describe("ProviderSettingsView", () => {
     );
 
     const card = screen.getByRole("article", { name: "Codex local" });
-    expect(within(card).getByText("Codex CLI")).toBeVisible();
+    expect(within(card).getByText("Codex", { selector: ".prov-meta" })).toBeVisible();
+    expect(within(card).queryByText(/\bCLI$/)).toBeNull();
     expect(within(card).getByText(/codex login/i)).toBeVisible();
     expect(within(card).getByLabelText("Account directory")).toHaveValue("~/.codex");
     expect(within(card).getByText(/Remember for this Project/)).toHaveTextContent(/one-shot/i);
@@ -1246,7 +1385,7 @@ describe("ProviderSettingsView", () => {
   it("names the CLI update once, for a provider whose own name already ends in CLI", () => {
     renderExpanded(
       <ProviderSettingsView
-        {...fixture({ instance: cliNamedProvider() })}
+        {...fixture({ instance: cliNamedProvider("Codex CLI") })}
         onUpdateProviderCli={vi.fn(async () => true)}
       />,
     );
@@ -2918,9 +3057,9 @@ describe("ProviderSettingsView", () => {
   it("keeps OpenCode creation behavior unchanged when switching provider types", async () => {
     const user = userEvent.setup();
     const props = fixture();
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<InlineCreateView {...props} />);
 
-    expect(screen.getByLabelText("Provider type")).toHaveTextContent("OpenCode CLI");
+    expect(screen.getByLabelText("Provider type")).toHaveTextContent("OpenCode");
     await user.type(screen.getByLabelText("Provider name"), "OpenCode local");
     await user.type(screen.getByLabelText("OpenCode binary"), "/opt/homebrew/bin/opencode");
     await user.click(screen.getByRole("button", { name: "Add OpenCode" }));
@@ -3920,7 +4059,7 @@ describe("ProviderSettingsView", () => {
           async () =>
             ({
               kind: "refused",
-              message: "The chosen file did not answer Codex CLI's version check.",
+              message: "The chosen file did not answer Codex's version check.",
             }) as const,
         )}
       />,
@@ -3930,7 +4069,7 @@ describe("ProviderSettingsView", () => {
     await user.click(within(card).getByRole("button", { name: /^Use the one found at/ }));
 
     expect(
-      await within(card).findByText("The chosen file did not answer Codex CLI's version check."),
+      await within(card).findByText("The chosen file did not answer Codex's version check."),
     ).toBeVisible();
   });
 
@@ -4780,7 +4919,7 @@ describe.each([
   it("gives a browser only the key setup for the host's own platform when adding Claude", async () => {
     const user = userEvent.setup();
     renderExpanded(
-      <ProviderSettingsView {...fixture({ credentialManagementAvailable: false })} />,
+      <InlineCreateView {...fixture({ credentialManagementAvailable: false })} />,
       platform.host,
     );
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
@@ -5745,10 +5884,10 @@ function provider(patch: Partial<ProviderInstance> = {}): ProviderInstance {
   });
 }
 
-function cliNamedProvider(): ProviderInstance {
+function cliNamedProvider(displayName = "Codex"): ProviderInstance {
   return decodeProviderInstance({
     ...provider(),
-    displayName: "Codex CLI",
+    displayName,
     driverKind: "codex",
     configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
   });
@@ -6133,7 +6272,7 @@ function discoverySnapshot(patch: Partial<DiscoverySnapshot> = {}): DiscoverySna
 function codexCandidate(): DiscoverySnapshot["candidates"][number] {
   return {
     driverKind: "codex",
-    displayName: "Codex CLI",
+    displayName: "Codex",
     // Homebrew installs the CLI through a `bin/codex` symlink; the scan probes
     // the realpath, so the canonical path and the discovered spelling differ.
     binaryPath: "/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js",
@@ -6148,7 +6287,7 @@ function codexCandidate(): DiscoverySnapshot["candidates"][number] {
 function scannedCodexCandidate(): DiscoverySnapshot["candidates"][number] {
   return {
     driverKind: "codex",
-    displayName: "Codex CLI",
+    displayName: "Codex",
     binaryPath: "/Users/example/.local/share/codex/versions/0.49.1/codex",
     discoveredPath: "/Users/example/.local/bin/codex",
     version: "codex-cli 0.49.1",

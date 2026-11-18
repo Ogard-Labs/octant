@@ -64,7 +64,7 @@ const CodeProjectPullRequests = lazy(() =>
   })),
 );
 import type { RepositoryIssueRow } from "../github/readIssuesAcrossRepositories";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "../ui/icons";
 
 const GitHubIssueBrowser = lazy(() =>
   import("../github/GitHubIssueBrowser").then((module) => ({
@@ -119,6 +119,9 @@ export interface WorkspaceRailLayersProps {
   readonly onOpenCodeBoardThread: (target: CodeThreadOpenTarget) => void;
   readonly onOpenWorkBoardThread: (target: WorkThreadOpenTarget) => void;
   readonly onSelectProjectPullRequest?: (row: CodeProjectPullRequestRow) => void;
+  /** Reads a pull request beside the list; without it a row opens in the dock. */
+  readonly renderProjectPullRequestDetail?: (row: CodeProjectPullRequestRow) => ReactNode;
+  readonly githubViewerLogin?: string;
   readonly pullRequestBackgroundRefresh?: {
     readonly enabledFor: (projectId: ProjectId) => boolean;
     readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
@@ -191,7 +194,9 @@ export interface WorkspaceRailLayersProps {
   readonly loadAssignedGithubWork?: () => Promise<GithubCatalogueReadResponse>;
   readonly loadAssignedLinearIssues?: () => Promise<AssignedLinearIssuesList>;
   readonly onOpenLinearIssues?: () => void;
-  readonly onOpenBoard?: () => void;
+  readonly onStartThread?: () => void;
+  /** The current Project's one GitHub remote, which the Issues page opens on. */
+  readonly projectRepository?: { readonly owner: string; readonly name: string };
 }
 
 export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
@@ -229,7 +234,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               {...(props.onOpenLinearIssues === undefined
                 ? {}
                 : { onOpenLinearIssues: props.onOpenLinearIssues })}
-              {...(props.onOpenBoard === undefined ? {} : { onOpenBoard: props.onOpenBoard })}
+              {...(props.onStartThread === undefined ? {} : { onStartThread: props.onStartThread })}
             />
           </LazyRailSurface>
         </div>
@@ -254,6 +259,9 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
             <GitHubIssueBrowser
               client={props.githubClient}
               onClose={props.onCloseGithubIssues}
+              {...(props.projectRepository === undefined
+                ? {}
+                : { projectRepository: props.projectRepository })}
               {...(props.onStartThreadFromIssue === undefined
                 ? {}
                 : { onStartThread: props.onStartThreadFromIssue })}
@@ -289,9 +297,14 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               {...(props.agentForgeChoices === undefined
                 ? {}
                 : { agentForgeChoices: props.agentForgeChoices })}
-              {...(props.onSelectProjectPullRequest === undefined
+              {...(props.renderProjectPullRequestDetail === undefined
+                ? props.onSelectProjectPullRequest === undefined
+                  ? {}
+                  : { onSelectRow: props.onSelectProjectPullRequest }
+                : { renderDetail: props.renderProjectPullRequestDetail })}
+              {...(props.githubViewerLogin === undefined
                 ? {}
-                : { onSelectRow: props.onSelectProjectPullRequest })}
+                : { viewerLogin: props.githubViewerLogin })}
               {...(props.selectedProjectPullRequestKey === undefined
                 ? {}
                 : { selectedRowKey: props.selectedProjectPullRequestKey })}
@@ -439,6 +452,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               narrow={props.isNarrow}
               onClose={props.onCloseAgentsCenter}
               onOpenThread={props.onOpenAgentsThread}
+              {...(props.onStartThread === undefined ? {} : { onStartThread: props.onStartThread })}
               {...(props.onOpenAgentsCanvas === undefined
                 ? {}
                 : { onOpenCanvas: props.onOpenAgentsCanvas })}

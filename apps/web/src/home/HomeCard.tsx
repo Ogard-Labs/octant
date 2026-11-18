@@ -1,7 +1,7 @@
 import { useId } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCard, OctantCardContent, OctantCardHeader } from "../ui/base/OctantCard";
-import type { HomeCardDefinition } from "./homeCards";
+import type { HomeGridCardDefinition } from "./homeCards";
 
 /**
  * One card's chrome: icon, title, and count in the header, then its body or one
@@ -9,7 +9,7 @@ import type { HomeCardDefinition } from "./homeCards";
  * mounted and reads nothing. A card that hides when empty leaves the grid
  * instead of showing its line.
  */
-export function HomeCard(props: { readonly definition: HomeCardDefinition }) {
+export function HomeCard(props: { readonly definition: HomeGridCardDefinition }) {
   const { definition } = props;
   const content = definition.useContent();
   const titleId = useId();
@@ -20,7 +20,7 @@ export function HomeCard(props: { readonly definition: HomeCardDefinition }) {
   return (
     <OctantCard
       aria-labelledby={titleId}
-      className="home-card"
+      className="home-card outline-0"
       data-card={definition.id}
       // The cards stand on the start screen's ground beside the composer, so
       // they wear its material. With the plain card fill the ground's

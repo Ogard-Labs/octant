@@ -1,4 +1,4 @@
-import { FolderOpen, MessageSquare } from "lucide-react";
+import { FolderOpen, MessageSquare } from "../ui/icons";
 import { createContext, useContext } from "react";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import type { WorkKind } from "./workKind";

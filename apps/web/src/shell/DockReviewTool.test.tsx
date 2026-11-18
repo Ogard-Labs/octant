@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MonacoDiffRuntime } from "../code/MonacoEditorAdapter";
 import type { CodeThreadView } from "@octant/contracts/code";
 import { DockReviewTool } from "./DockReviewTool";
+import { chooseReviewView, reviewViewIsOn } from "../code/reviewMenuTestHelpers";
 
 const DIFF = [
   "diff --git a/src/index.ts b/src/index.ts",
@@ -38,8 +39,7 @@ const RUN_DIFF = [
  * side-by-side layout; the stacked default has no separate file navigation.
  */
 async function chooseSideBySide() {
-  const control = await screen.findByRole("button", { name: "Side by side" });
-  if (control.getAttribute("aria-pressed") !== "true") await userEvent.setup().click(control);
+  if (!(await reviewViewIsOn("Side by side"))) await chooseReviewView("Side by side");
 }
 
 describe("Review beside the active thread", () => {
@@ -58,7 +58,7 @@ describe("Review beside the active thread", () => {
       within(files)
         .getAllByRole("button")
         .map((entry) => entry.textContent),
-    ).toEqual(["src/index.tsmodified+1−1", "README.mdadded+1−0"]);
+    ).toEqual(["Mmodified: src/index.ts+1−1", "Aadded: README.md+1−0"]);
     expect(screen.getByRole("heading", { name: "Local changes" })).toBeVisible();
     await waitFor(() =>
       expect(fixture.options?.original).toBe("const answer = 41;\nexport { answer };"),
@@ -73,8 +73,48 @@ describe("Review beside the active thread", () => {
     await chooseSideBySide();
     await screen.findByRole("navigation", { name: "Changed files" });
     await waitFor(() => expect(fixture.options?.renderSideBySide).toBe(true));
-    await user.click(screen.getByRole("button", { name: "Unified" }));
-    expect(screen.queryByRole("navigation", { name: "Changed files" })).not.toBeInTheDocument();
+    await chooseReviewView("Unified");
+    expect(screen.getByRole("navigation", { name: "Changed files" })).toBeInTheDocument();
+  });
+
+  it("puts the diff controls in one toolbar row and the counts in one status row", async () => {
+    render(<DockReviewTool {...bound()} loadRuntime={runtime().loadRuntime} />);
+    expect(await screen.findByRole("button", { name: "More review actions" })).toBeVisible();
+    // Layout and whitespace are reached from the menu, not drawn on the bar.
+    for (const name of ["Unified", "Side by side", "Ignore whitespace"])
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh review" })).toBeVisible();
+    expect(await screen.findByText(/2 files changed/)).toBeVisible();
+    expect(screen.getByRole("button", { name: /Checkout changes only/ })).toBeInTheDocument();
+  });
+
+  it("states checks and findings as quiet status, with no empty-state paragraphs", async () => {
+    render(<DockReviewTool {...bound()} loadRuntime={runtime().loadRuntime} />);
+    expect(await screen.findByText("No findings")).toBeVisible();
+    expect(screen.getByText("No tests run")).toBeVisible();
+    for (const text of [/No local findings/, /No recorded test result/, /GitHub review mutation/])
+      expect(screen.queryByText(text)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Refresh findings and checks" })).toBeNull();
+  });
+
+  it("names the checks and findings in words a narrow tile can hide", async () => {
+    render(<DockReviewTool {...bound()} loadRuntime={runtime().loadRuntime} />);
+    const findings = (await screen.findByText("No findings")).closest(".review-status-chip");
+    expect(findings).toHaveAttribute("title", "No findings");
+    expect(screen.getByText("No tests run").closest(".review-status-chip")).toHaveAttribute(
+      "title",
+      expect.stringContaining("No tests run"),
+    );
+    expect(screen.getByText("No findings")).toHaveClass("review-status-chip__words");
+  });
+
+  it("takes the diff to a file chosen in the changed-files list", async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    render(<DockReviewTool {...bound()} loadRuntime={runtime().loadRuntime} />);
+    const files = await screen.findByRole("navigation", { name: "Changed files" });
+    await userEvent.setup().click(within(files).getByRole("button", { name: /README\.md/ }));
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
   });
 
   it("shows a compact clean state when the checkout and run have nothing to compare", async () => {
@@ -428,7 +468,7 @@ it("refuses receipt navigation whose recorded checkout is no longer current", ()
       }}
     />,
   );
-  expect(screen.getByText(/earlier checkout binding/)).toBeVisible();
+  expect(screen.getByText(/belongs to an earlier checkout/)).toBeVisible();
   expect(props.client.executeOperation).not.toHaveBeenCalled();
 });
 

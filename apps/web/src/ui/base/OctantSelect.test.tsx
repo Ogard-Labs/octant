@@ -131,4 +131,26 @@ describe("OctantSelectField", () => {
     );
     consoleError.mockRestore();
   });
+
+  it("says why an option is disabled on a second line in the option itself", async () => {
+    const user = userEvent.setup();
+    render(
+      <OctantSelectField
+        aria-label="Host"
+        options={[
+          { id: "a", label: "This computer" },
+          { disabled: true, disabledReason: "Offline since 9:41", id: "b", label: "Studio" },
+        ]}
+        value="a"
+      />,
+    );
+    await user.click(screen.getByRole("combobox", { name: "Host" }));
+    // Named by its label alone; the reason is its description.
+    const option = await screen.findByRole("option", { name: "Studio" });
+    expect(option).toHaveAccessibleDescription("Offline since 9:41");
+    expect(option).toHaveAttribute("aria-disabled", "true");
+    expect(option).toHaveTextContent("Offline since 9:41");
+    expect(option.querySelector(".oct-menu-detail")).toHaveTextContent("Offline since 9:41");
+    expect(option).not.toHaveAttribute("title");
+  });
 });

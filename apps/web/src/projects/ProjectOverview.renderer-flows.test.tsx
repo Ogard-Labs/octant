@@ -50,7 +50,7 @@ describe("ProjectOverview renderer flows", () => {
     expect(screen.getByText("Repository moved.")).toBeVisible();
     expect(screen.queryByText("Available")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Choose new root" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Archive Project" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "More Project actions" })).not.toBeInTheDocument();
   });
 
   it("uses compact flat workspace controls without dashboard cards or capability claims", () => {
@@ -79,11 +79,11 @@ describe("ProjectOverview renderer flows", () => {
     expect(styles).not.toMatch(/\.project-(?:binding|memory-summary|empty-state)(?:\W|$)/);
 
     expect(within(overview!).getByText("Code Project")).toBeVisible();
-    expect(within(overview!).getByText(project.binding.canonicalRoot)).toBeVisible();
+    expect(within(overview!).getAllByText(project.binding.canonicalRoot)[0]).toBeVisible();
     expect(within(overview!).getByText("Relink required")).toBeVisible();
     expect(within(overview!).getByText("Repository moved.")).toBeVisible();
     expect(within(overview!).getByRole("button", { name: "Choose new root" })).toBeVisible();
-    expect(within(overview!).getByRole("button", { name: "Archive Project" })).toBeVisible();
+    expect(within(overview!).getByRole("button", { name: "More Project actions" })).toBeVisible();
     for (const heading of within(overview!).getAllByRole("heading")) {
       expect(Number(heading.tagName.slice(1))).toBeLessThanOrEqual(2);
     }

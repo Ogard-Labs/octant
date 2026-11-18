@@ -119,12 +119,62 @@ describe("WorkThreadEnvironment", () => {
     expect(screen.getByText("Work · No folder Project")).toBeVisible();
   });
 
-  it("keeps the unattended-work controls behind a disclosure instead of on the transcript", async () => {
+  it("shows no goal group until the task has a goal, and offers Set a goal in the plus menu", async () => {
     const goalClient = {
-      read: vi.fn(async () => ({ goal: null })),
+      read: vi.fn(async () => ({ goal: null, history: [] })),
       execute: vi.fn(),
     };
+    const automationClient = {
+      list: vi.fn(async () => ({ kind: "automation-list" as const, items: [] })),
+    };
     const user = userEvent.setup();
+    render(
+      <WorkThreadEnvironment
+        automationClient={automationClient as never}
+        environmentOpen
+        goalClient={goalClient as never}
+        projects={[workProject()]}
+        tab={workTab()}
+        threadClient={threadClient()}
+      >
+        <div />
+      </WorkThreadEnvironment>,
+    );
+    await openEnvironment();
+
+    await waitFor(() => expect(goalClient.read).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: /^Goal/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Goal" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Keep working on this unattended")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add a routine" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Set a goal…" }));
+
+    expect(await screen.findByRole("region", { name: "Goal" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Goal/ })).toBeVisible();
+    expect(screen.getByLabelText("Goal objective")).toBeVisible();
+  });
+
+  it("shows the goal group, with one heading, when the task already has a goal", async () => {
+    const goalClient = {
+      read: vi.fn(async () => ({
+        goal: {
+          id: "00000000-0000-4000-8000-000000000206",
+          threadId,
+          revisionId: "00000000-0000-4000-8000-000000000207",
+          objective: "Ship the brief",
+          status: "active",
+          budget: {},
+          usage: { tokensUsed: 0, elapsedMs: 0, turnsUsed: 0 },
+          evidence: [],
+          createdAt: "2026-08-01T00:00:00.000Z",
+          updatedAt: "2026-08-01T00:00:00.000Z",
+          version: 1,
+        },
+        history: [],
+      })),
+      execute: vi.fn(),
+    };
     render(
       <WorkThreadEnvironment
         environmentOpen
@@ -138,12 +188,9 @@ describe("WorkThreadEnvironment", () => {
     );
     await openEnvironment();
 
-    // A task with no Goal shows no Goal form and asks the host for nothing.
-    expect(screen.queryByRole("region", { name: "Goal" })).not.toBeInTheDocument();
-    expect(goalClient.read).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: /^Keep working on this unattended/ }));
     expect(await screen.findByRole("region", { name: "Goal" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Goal" })).toBeVisible();
+    expect(screen.queryByText("Keep working on this unattended")).not.toBeInTheDocument();
   });
 
   it("submits a bounded relative working directory through the focused Change working folder flow", async () => {

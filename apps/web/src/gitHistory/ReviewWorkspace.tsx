@@ -1,5 +1,6 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { lazy, Suspense, useMemo, useState } from "react";
+import { ReviewDiffShownContext, ReviewToolbarSlotContext } from "../code/reviewToolbarSlot";
 import { createGitHistoryClient } from "@octant/client-runtime/git-history-client";
 import type { DockReviewToolProps } from "../shell/DockReviewTool";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
@@ -50,6 +51,7 @@ function BoundReview(props: DockReviewToolProps) {
   const [view, setView] = useState("changes");
   const [openedHistory, setOpenedHistory] = useState(false);
   const [openedLocal, setOpenedLocal] = useState(false);
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
   const reader = useMemo(
     () =>
       props.serverUrl === undefined || props.windowCapability === undefined
@@ -83,60 +85,67 @@ function BoundReview(props: DockReviewToolProps) {
     },
   ]);
   return (
-    <div className="git-history">
-      {hosted !== undefined ? null : (
-        <div className="git-history__toolbar">
-          <OctantToggleGroup
-            aria-label="Review view"
-            value={[view]}
-            onValueChange={(values) => {
-              const selected = values[0];
-              if (selected) select(selected);
-            }}
-          >
-            <OctantToggleGroupItem value="changes">Working tree</OctantToggleGroupItem>
-            <OctantToggleGroupItem value="local">Local commits</OctantToggleGroupItem>
-            <OctantToggleGroupItem value="history">History</OctantToggleGroupItem>
-          </OctantToggleGroup>
+    <ReviewToolbarSlotContext.Provider value={hosted !== undefined ? undefined : slot}>
+      <div className="git-history">
+        {hosted !== undefined ? null : (
+          <div className="git-history__toolbar git-history__toolbar--tab-bar">
+            <OctantToggleGroup
+              aria-label="Review view"
+              value={[view]}
+              onValueChange={(values) => {
+                const selected = values[0];
+                if (selected) select(selected);
+              }}
+            >
+              <OctantToggleGroupItem value="changes">Working tree</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="local">Local commits</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="history">History</OctantToggleGroupItem>
+            </OctantToggleGroup>
+            {view === "changes" ? (
+              <div className="git-history__toolbar-actions" ref={setSlot} />
+            ) : null}
+          </div>
+        )}
+        <div className="git-history__list git-history__list--changes" hidden={view !== "changes"}>
+          <Suspense fallback={<OctantEmpty state="loading" title="Loading changes" />}>
+            <ReviewDiffShownContext.Provider value={view === "changes"}>
+              <WorkingTree {...props} />
+            </ReviewDiffShownContext.Provider>
+          </Suspense>
         </div>
-      )}
-      <div className="git-history__list git-history__list--changes" hidden={view !== "changes"}>
-        <Suspense fallback={<OctantEmpty state="loading" title="Loading changes" />}>
-          <WorkingTree {...props} />
-        </Suspense>
+        {openedLocal ? (
+          <div className="git-history__list" hidden={view !== "local"}>
+            {reader === undefined || props.checkoutId === undefined ? (
+              <OctantEmpty
+                state="neutral"
+                title="Local commits are unavailable"
+                message="Reconnect to this checkout to see its local commits."
+              />
+            ) : (
+              <LocalCommitsPanel
+                reader={reader}
+                threadId={props.threadId}
+                checkoutId={props.checkoutId}
+              />
+            )}
+          </div>
+        ) : null}
+        {openedHistory ? (
+          <div className="git-history__list" hidden={view !== "history"}>
+            {reader === undefined || props.checkoutId === undefined ? (
+              <OctantEmpty
+                state="neutral"
+                title="History is unavailable"
+                message="Reconnect to this checkout to browse its history."
+              />
+            ) : (
+              <Suspense fallback={<OctantEmpty state="loading" title="Loading history" />}>
+                <History reader={reader} threadId={props.threadId} checkoutId={props.checkoutId} />
+              </Suspense>
+            )}
+          </div>
+        ) : null}
       </div>
-      {openedLocal ? (
-        <div className="git-history__list" hidden={view !== "local"}>
-          {reader === undefined || props.checkoutId === undefined ? (
-            <OctantEmpty
-              state="neutral"
-              title="Local commits are unavailable"
-              message="Reconnect to this checkout to see its local commits."
-            />
-          ) : (
-            <LocalCommitsPanel
-              reader={reader}
-              threadId={props.threadId}
-              checkoutId={props.checkoutId}
-            />
-          )}
-        </div>
-      ) : null}
-      {openedHistory ? (
-        <div className="git-history__list" hidden={view !== "history"}>
-          {reader === undefined || props.checkoutId === undefined ? (
-            <OctantEmpty
-              state="neutral"
-              title="History is unavailable"
-              message="Reconnect to this checkout to browse its history."
-            />
-          ) : (
-            <Suspense fallback={<OctantEmpty state="loading" title="Loading history" />}>
-              <History reader={reader} threadId={props.threadId} checkoutId={props.checkoutId} />
-            </Suspense>
-          )}
-        </div>
-      ) : null}
-    </div>
+    </ReviewToolbarSlotContext.Provider>
   );
 }

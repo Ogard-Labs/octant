@@ -1,4 +1,8 @@
-import { decodeWorkspaceOperation, type WindowWorkspace } from "@octant/contracts";
+import {
+  decodeWorkspaceOperation,
+  decodeWorkspaceTab,
+  type WindowWorkspace,
+} from "@octant/contracts";
 import { applyWorkspaceOperation } from "@octant/domain/shell-policy";
 import { describe, expect, it } from "vitest";
 import { chatShellBootstrap } from "../App.test-fixtures";
@@ -32,19 +36,19 @@ function open(workspace: WindowWorkspace, index: number): WindowWorkspace {
 }
 
 /** Opens threads in order, each through `rememberWorkspaceContent`, and returns the tab titles. */
-function tabsAfter(opens: ReadonlyArray<number>, preview: ReadonlySet<string>) {
+function tabsAfter(opens: ReadonlyArray<number>) {
   let workspace = chatShellBootstrap().workspace;
   let tabs: ReturnType<typeof rememberWorkspaceContent> = new Map();
   for (const index of opens) {
     const next = open(workspace, index);
-    tabs = rememberWorkspaceContent(tabs, workspace, next, preview);
+    tabs = rememberWorkspaceContent(tabs, workspace, next);
     workspace = next;
   }
   return [...tabs.values()].flat().map((tab) => tab.title);
 }
 
-describe("opening threads into a pane's tabs", () => {
-  it("restores kept references in order only in the same authority context and omits temporary previews", () => {
+describe("what a pane keeps in its row", () => {
+  it("restores a kept reference only in the same authority context and omits a temporary preview", () => {
     const first = open(chatShellBootstrap().workspace, 0);
     const second = open(first, 1);
     const tabs = rememberWorkspaceContent(
@@ -52,10 +56,12 @@ describe("opening threads into a pane's tabs", () => {
       first,
       second,
     );
-    const encoded = encodeWorkspaceContent(second, tabs, new Set([THREADS[1]]));
+    const kept = encodeWorkspaceContent(second, tabs, new Set());
     expect(
-      [...decodeWorkspaceContent(encoded, second).values()].flat().map((tab) => tab.title),
-    ).toEqual(["Thread 0"]);
+      [...decodeWorkspaceContent(kept, second).values()].flat().map((tab) => tab.title),
+    ).toEqual(["Thread 1"]);
+    const previewed = encodeWorkspaceContent(second, tabs, new Set([THREADS[1]]));
+    expect([...decodeWorkspaceContent(previewed, second).values()].flat()).toEqual([]);
     const moved = {
       ...second,
       contextByMode: {
@@ -63,7 +69,7 @@ describe("opening threads into a pane's tabs", () => {
         chat: { ...second.contextByMode.chat, boundRoot: "/another/root" },
       },
     };
-    expect([...decodeWorkspaceContent(encoded, moved).values()].flat()).toEqual([]);
+    expect([...decodeWorkspaceContent(kept, moved).values()].flat()).toEqual([]);
     expect([...decodeWorkspaceContent("invalid", second).values()]).toEqual([]);
     expect(
       [
@@ -76,20 +82,73 @@ describe("opening threads into a pane's tabs", () => {
     expect(second.layouts.chat).toEqual(open(first, 1).layouts.chat);
   });
 
-  it("lets a single-clicked thread take over the open tab instead of adding one", () => {
-    expect(tabsAfter([0, 1, 2], new Set(THREADS))).toEqual(["Thread 2"]);
+  it("keeps one conversation: the thread the pane shows and no other", () => {
+    expect(tabsAfter([0, 1, 2])).toEqual(["Thread 2"]);
+    expect(tabsAfter([0, 1, 0])).toEqual(["Thread 0"]);
   });
 
-  it("keeps a kept thread's tab and opens the next one beside it", () => {
-    // Thread 0 was double-clicked (kept); 1 and 2 were single-clicked.
-    expect(tabsAfter([0, 1, 2], new Set([THREADS[1], THREADS[2]]))).toEqual([
-      "Thread 0",
-      "Thread 2",
-    ]);
+  it("keeps the conversation in the row when a canvas opens over it", () => {
+    const first = open(chatShellBootstrap().workspace, 0);
+    const pane = first.layouts.chat;
+    if (pane.kind !== "pane") throw new Error("Expected one Chat pane.");
+    const withCanvas = applyWorkspaceOperation(
+      first,
+      decodeWorkspaceOperation({
+        kind: "open-surface",
+        mode: "chat",
+        paneId: String(pane.paneId),
+        surface: {
+          kind: "canvas",
+          id: "00000000-0000-4000-8000-000000000930",
+          mode: "chat",
+          title: "Plan",
+          canvasId: "00000000-0000-4000-8000-000000000931",
+          projectId: null,
+        },
+      }),
+    );
+    const row = rememberWorkspaceContent(
+      rememberWorkspaceContent(new Map(), first, first),
+      first,
+      withCanvas,
+    );
+    expect([...row.values()].flat().map((tab) => tab.title)).toEqual(["Thread 0", "Plan"]);
   });
 
-  it("keeps every tab opened from anywhere else", () => {
-    expect(tabsAfter([0, 1, 2], new Set())).toEqual(["Thread 0", "Thread 1", "Thread 2"]);
+  it("keeps a canvas beside the conversation, where it stood, when another thread opens", () => {
+    const first = open(chatShellBootstrap().workspace, 0);
+    const pane = first.layouts.chat;
+    if (pane.kind !== "pane") throw new Error("Expected one Chat pane.");
+    const canvas = decodeWorkspaceTab({
+      kind: "canvas",
+      id: "00000000-0000-4000-8000-000000000920",
+      mode: "chat",
+      title: "Plan",
+      canvasId: "00000000-0000-4000-8000-000000000921",
+      projectId: null,
+    });
+    const row = new Map([[pane.paneId, [pane.surface, canvas]]]);
+    const second = open(first, 1);
+    expect(
+      [...rememberWorkspaceContent(row, first, second).values()].flat().map((tab) => tab.title),
+    ).toEqual(["Thread 1", "Plan"]);
+  });
+
+  it("prunes a restored row that still holds several conversations", () => {
+    const first = open(chatShellBootstrap().workspace, 0);
+    const second = open(first, 1);
+    const third = open(second, 2);
+    const pane = third.layouts.chat;
+    const earlier = [first, second].map((workspace) => {
+      const layout = workspace.layouts.chat;
+      if (layout.kind !== "pane") throw new Error("Expected one Chat pane.");
+      return layout.surface;
+    });
+    if (pane.kind !== "pane") throw new Error("Expected one Chat pane.");
+    const stored = new Map([[pane.paneId, [...earlier, pane.surface]]]);
+    expect(
+      [...rememberWorkspaceContent(stored, third, third).values()].flat().map((tab) => tab.title),
+    ).toEqual(["Thread 2"]);
   });
 });
 

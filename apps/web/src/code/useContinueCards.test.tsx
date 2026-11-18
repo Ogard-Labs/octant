@@ -2,6 +2,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { CodeBoardCard, CodeBoardView } from "@octant/contracts";
 import { useContinueCards } from "./useContinueCards";
+import { useContinueRows } from "../home/useStartListRows";
 
 function card(title: string, lastMeaningfulActivityAt: string): CodeBoardCard {
   return { title, lastMeaningfulActivityAt } as unknown as CodeBoardCard;
@@ -21,6 +22,42 @@ function titles(cards: ReadonlyArray<CodeBoardCard>): ReadonlyArray<string> {
 }
 
 describe("the threads a Code start screen offers to continue", () => {
+  it("holds the section as loading on every frame until the board's answer lands, never as an empty section", async () => {
+    let resolve: (value: CodeBoardView) => void = () => undefined;
+    const loadBoard = vi.fn(
+      () =>
+        new Promise<CodeBoardView>((done) => {
+          resolve = done;
+        }),
+    );
+    const frames: Array<string> = [];
+    const { result } = renderHook(() => {
+      const cards = useContinueCards(loadBoard, 0);
+      const read = useContinueRows({ continueCards: cards });
+      frames.push(read.status === "ready" ? `ready:${String(read.rows.length)}` : read.status);
+      return read;
+    });
+    expect(result.current.status).toBe("loading");
+    resolve(
+      view([
+        {
+          threadId: "thread-1",
+          title: "Newest",
+          lastMeaningfulActivityAt: "2026-09-08T09:00:00.000Z",
+          changedFiles: { kind: "unavailable" },
+          worktree: { kind: "unavailable" },
+          executing: false,
+          status: "ready",
+        } as unknown as CodeBoardCard,
+      ]),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    // Every frame before the rows is the loading placeholder; none is a ready, empty list.
+    expect(frames).not.toContain("ready:0");
+    expect(frames.at(-1)).toBe("ready:1");
+    expect(new Set(frames.slice(0, -1))).toEqual(new Set(["loading"]));
+  });
+
   it("offers the six most recently active threads, newest first", async () => {
     const loadBoard = vi.fn(async () =>
       view([

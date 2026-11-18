@@ -11,7 +11,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { Globe2, Slash, SlidersHorizontal, X } from "lucide-react";
+import { Globe2, Slash, SlidersHorizontal, X } from "../ui/icons";
 import type { ChatAttachmentId } from "@octant/contracts/chat";
 import { clipboardHasImage, collectPastedImages } from "./composerImagePaste";
 import {
@@ -1047,7 +1047,7 @@ function composeStatus(input: {
   } else if (input.isSending) {
     // The Stop control already says a response is running.
     progress = {
-      text: "Response is streaming. Submit to add a message to the host queue.",
+      text: "Response is streaming. Sending adds your message to the queue.",
       quiet: true,
     };
   } else if (input.sendDisabledReason !== undefined) {

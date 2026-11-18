@@ -36,7 +36,7 @@ page outline's links into it, and a deep link to a setting inside it, open it
 first. Opened, it lists every
 bundled provider driver in the Model endpoints row style. Agent runtimes and
 model endpoints are two sections. A row is one link named with its state
-("Codex CLI, off. Open setup") and shows the mark, the name, "Agent runtime ·
+("Codex, off. Open setup") and shows the mark, the name, "Agent runtime ·
 Bundled" or "Model endpoint · Bundled", and the state in words beside the same
 dot shapes. The states are Ready, Sign in to use, Partly working, Checking…,
 Not checked yet, Found, not added, Not looked for yet, Not on this host, Not
@@ -303,15 +303,41 @@ control supplies its accessible name.
 ### Additional CLI accounts
 
 Every Claude and Codex provider card offers Add account in its details, beside
-Check connection. It opens the same manual form that Add provider manually
-opens, expanded, with that driver chosen, the card's binary path filled in, and
-a suggested name ("<card name> (2)", the next free number) focused for editing.
-It adds no route and no authority: the host still assigns the account directory
-and the form shows the sign-in guidance for an additional account. A created
-account closes the form again, so the suggested name is not offered twice.
+Check connection, and the Providers page keeps Add provider manually. Both open
+one wizard, in place, as a dialog over the page (maintainer request,
+2026-11-14): the page does not scroll to a form. The dialog is 560px wide and
+520px high on every step, never resizes between steps, and scrolls its steps
+inside; Back, Next and Cancel sit in a fixed footer, and a step indicator is
+at the top. A refusal or validation message has a reserved slot above the
+footer, so saying it moves nothing.
 
-Every Claude Code subscription card and every Codex card also offers **Sign
-in** beside Check connection. The host runs the account's own sign-in command,
+1. **Provider.** Cards with icon, name and a one-line description for every
+   agent runtime the page offers, saying whether the host found it. A card
+   that cannot be added here says why on the card. Opened from a card's Add
+   account, the card's provider is chosen.
+2. **Sign-in.** The provider's existing authentication choices as radio cards
+   (a subscription or the provider's own login, or an API key), each saying
+   what will happen. An API key goes only through the existing secret-store
+   path: it is read from the field when the account is created and never kept
+   in page state.
+3. **Details.** The name (suggested as "<card name> (2)", the next free
+   number), the accent for Claude and Codex, and under Advanced the detected
+   binary with Change… and the read-only account directory the host assigns.
+   Add at the end of this step is the only step that creates the account,
+   through the same create commands as before; Cancel before it adds nothing.
+4. **Connect.** For Claude and Codex the exact sign-in command for the new
+   account (naming the directory the host assigned) with a copy button, and for
+   other runtimes the provider's sign-in guidance; Check connection shows the
+   host's own answer inline, ready or the refusal reason and next step.
+5. **Done.** A summary, and Finish.
+
+The wizard adds no route and no authority. It covers the agent runtimes the
+Providers page offers; HTTP model endpoints keep Octant Harness › Model
+endpoints, and image profiles keep Image generation. Cards for other drivers,
+and the single runtime card on a provider's own page, have no Add account.
+
+Every Claude subscription card and every Codex card also offers **Sign in**
+beside Check connection. The host runs the account's own sign-in command,
 which opens the browser; the card then says to finish signing in there, offers
 the sign-in page again, and checks every two seconds until the CLI is done,
 when it says Signed in and checks the connection. A Claude card also takes the
@@ -319,14 +345,6 @@ code a Claude sign-in page shows when the browser could not reach the CLI. A
 failed sign-in shows the CLI's own last line. The same account steps work from
 the person's own terminal on the host with `octant account add`, `list`,
 `sign-in`, `status` and `remove`; Octant's own terminals do not carry them.
-Cards for other drivers, and the single runtime card on a provider's own
-page, have no Add account.
-
-The manual Claude and Codex account forms give the account directory, accent
-and sign-in guidance full-width setting rows. The compact provider/name/binary
-fields may share columns; account rows must not become cells in that row.
-When the Settings pane is narrow, controls stack below their labels and help,
-keeping every input and the submit action reachable without horizontal clipping.
 
 ### Claude artifacts
 

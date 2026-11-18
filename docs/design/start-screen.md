@@ -53,117 +53,215 @@ a host whose setting is off has memory on.
 
 ### Layout
 
-There are two start screens. **New task**, in every mode, is the question in
-the middle of the page and the composer docked at its foot, and nothing else;
-Chat and Work add their starter chips only before the mode's first thread.
-**Code Home** is where Code lands with nothing chosen (the Code welcome tab):
-the question and the composer, then Code's prompt suggestions, the card area,
-and [Code agent home](#code-agent-home). With those the page scrolls and the
-composer sits under the question. Switching to Code opens no draft of its own,
+Chat, Work and Code share one start screen, a top-anchored column: the
+question, the composer directly under it, then the mode's own prompt
+suggestions (Code's four cards; Chat's starter chips only before its first
+thread; Work has none) and [the list](#the-list). The page scrolls. **Home** is
+where a mode lands with nothing chosen (its welcome tab), and a **New task** is
+the same page with its Project named in the question. The question and the
+composer stand at one height and one width in every mode, on Home and in a
+draft, so pressing New task, choosing a Project or switching mode moves nothing
+(a draft's pane starts under its own header, so its column starts one title
+band lower). One stylesheet rule places the column for all three. Once a thread
+exists its composer is docked at the pane's foot. Earlier, Chat and Work put
+the question mid-page over a composer docked at the foot, and Code did not;
+that left two layouts, and a Code draft's bare question over a docked composer
+threw the composer down the page when a Project was chosen (maintainer request,
+2026-11-16: the Code layout is used for all three).
+Switching to a mode opens no draft of its own,
 and a New task draft left with no text or images counts as nothing chosen:
-switching to Code gives its pane back to Code Home, while a draft with text
-stays as New task. Neither screen has tabs or action tiles:
+switching to the mode gives its pane back to Home, while a draft with text
+stays as New task. No start screen has tabs or action tiles:
 adding a folder lives in the composer's Project picker, a terminal in the
 workspace tools, and what is running or waiting for review in the sidebar.
 
-### Card area
+### The list
 
-The card area is a ghost **Customize** button right-aligned under the composer
-(icon at the 14px step and the label), then a grid of cards, two columns and one
-under 560px. The card area, the suggestions and everything below end on the
-composer's own edges at every reading width, and cards in a row share the
-row's height; a fixed narrower measure under a wide composer, with each card at
-its own height, read as two unrelated ragged stacks. A card uses the glass card recipe (`OctantCard` `variant="glass"`: the glass
-ring, no shadow, the composer's material; the opaque card fill under reduced
-transparency) at a compact 12px rhythm. Its header is an icon at the
-16px step in secondary ink, the title as a section label, and a count as
-tabular meta text; its body is rows or one quiet line in the detail step. No
-card has a hue of its own: a state is carried by wording and weight, and the
-accent and status roles colour its marks as they do elsewhere. A row is a bare card-shaped button whose face
-fills at 5% ink on hover and focus, the provider mark and a row label on its
-first line, and a mono meta line for what is happening. The Customize panel is a
-popover at most 340px wide: one row per card with a drag grip, the icon, the
-title, up and down icon buttons, and a switch, then **Reset to default**; a
-dragged row marks its drop target with a hairline above it. **Needs you**
-comes first and leaves the grid while nothing waits: each row is the provider
-mark (or the mode's glyph), the thread title, "Waiting 4m" with a pause glyph
-at the 12px step, the Project as meta text, and the request text clamped to two
-lines, with small buttons below (Approve filled, Deny ghost; a question's
-choices as outline buttons with a leading number, then a ghost Reply…; a
-decision's options as full-width buttons with the recommended one first, a
-trailing "Recommended" in meta text rather than a hue, and the option's detail
-as a second meta line; a decision also shows its why as a meta paragraph under
-the ask, an "Urgent" tag in the warning role beside the wait when the agent
-marked it urgent, and an **Add note** control; when a second opinion exists, a meta line inside the recommended
-option's button naming the asking model and, inside the option the reviewer backs, a line naming the
-reviewer's model and its one-sentence reason, each led by a 12px provider mark, and a
-"Second opinion differs" tag in the warning role beside Urgent when the two options differ).
-Rows
-are told apart by a hairline, never a tinted fill, and the waiting state is a
-glyph and words with no hue. **Working now**
-lists up to five rows of threads and agent runs in progress, each with the
-provider mark, the title, a time, and a one-line step; like Needs you it leaves
-the grid while nothing runs. A running tool is shown in mono
-(`Command: bun run test`); a turn waiting on the person is plain prose. A turn's
-time says "Running 12m" from the start time the host reports, and "Active 4m
-ago" only for a host that reports none; a fact the host does not report is left
-out rather than invented. **Pull requests** lists up to six rows on a Code
-start screen, in Waiting on your review and Yours. Each row is the title, a
-short repository and number, and the words for checks and review — never
-colour alone. It is absent when that read is not allowed. It never says
-"Nothing is waiting on you." for a list it has not seen: a failed read says it
-could not read, and until a refresh has reached every connected Project the
-quiet line says so, with an **Open Pull requests** link under it. A snapshot
-whose latest refresh failed carries its age as meta text. **CI failures**
-lists up to five failing checks from that same read, the check name, the
-repository or branch, and how long ago it failed. It is absent when nothing is
-failing, and absent when that read is not allowed. **Start a fix** opens a
-draft; it does not send. Code's five prompt
-suggestions are one compact row of label-only chips directly under the composer
-they fill in, above the cards (under the cards they were a screen away from
-the box they act on), and
-Work's Write, Learn, Plan, and Explore starters use the same chip (the outline
-button: hairline, resting fill, hover and focus fill); the prompt rides as the
-chip's tooltip and description and fills the composer when chosen, nothing more.
+Under the composer a start screen (Home and New task, in every mode) shows
+**one calm list**, not a wall of cards. The list, the suggestions and everything
+below end on the composer's own edges at every reading width. Its sections come
+in a fixed order and each is drawn only while it has rows:
+
+1. **Needs you**: the approvals, questions and asks a provider waits on (each
+   row answers where it is listed, as in [Needs you](#needs-you)), pull
+   requests whose review is asked of the person, and what is assigned to them
+   (GitHub issues, Linear issues).
+2. **In progress**: threads and agent runs running now, then the dev servers
+   listening in the person's Code Projects.
+3. **Your pull requests**: the person's own open pull requests, with the state of
+   the checks at the title's edge when it needs saying.
+4. **Continue**: the latest threads and where each stands (Code reads the
+   Board; Chat and Work read their recent threads).
+5. **Open issues**: GitHub and Linear issues nobody has picked up (Code only).
+
+Each item appears **once** across the sections. Items are matched by identity
+(a pull request by repository and number, a thread by its id; a request waiting
+on a thread stands for that thread), the sections claim them in the order above,
+and Needs you wins. Matching runs before the five-row limit, so a row the limit
+hides still keeps its item out of a later section.
+
+A section header is the title in 12px meta ink with its count right-aligned; the
+first header also carries a small **…** menu with **Customize**. Header and rows
+share one grid: the heading's left edge is the glyph column's left edge, and the
+count, a row's status word and a self-drawn row's actions all end at one right
+edge, a 24px gutter in from the list's edge, which holds only the menu. Every
+header keeps the same slots (title, a 12px busy mark, count, menu), so nothing
+shifts when a section starts or stops updating. Rows have no card
+behind them (a wash on hover and focus only) and sections are told apart by
+space, not boxes. A row is the Pull requests list's row: a state glyph at the
+16px step, the title at the 13px detail step, and one meta line at 12px
+(`repository · #number · age`, a thread's Project and branch, a service's port
+and Project). A pull request names its author only when it is someone else's, and
+no row says what its section already says ("Your pull request"). A state needing
+the person is one word at the title's edge ("Failing", "Waiting"); the glyph's
+colour is never its only carrier. At most **five** rows show per section; when
+more exist the section ends in a **See all** link to the full page (Needs you the
+Inbox, In progress the Running view, Your pull requests the Pull requests page,
+Open issues the Issues page).
+
+A source that has not looked or failed is said in one quiet line under the list
+(or, when nothing else is there, instead of "Nothing waiting on you"): the
+list never claims silence for a read it did not make. When every section is
+empty the list is one quiet line with a next step, "Nothing waiting on you. Start
+a thread above."
+
+**Loading and the cache.** Nothing moves while the list loads (principle 7). A
+row is one fixed height (52px) whether it is a skeleton, a stored row or a live
+one, and every section is laid out from the first frame in the fixed order:
+
+- **Stored answer.** The last settled list for this host and Project is kept in
+  the client (`localStorage`, one key, schema-versioned, at most 8 host and
+  Project entries and 48,000 characters, titles and meta already shown only; an
+  entry of another version, malformed or from a blocked or full store is ignored)
+  and painted on the first frame, with the same row count, See all line and, for
+  a self-drawn row, its measured height. Stored rows are inert (no row opens, See
+  all is disabled) and say nothing alarming; a 12px spinner in each updating
+  section's heading is the only sign. A section is replaced in place, row slots
+  keeping their height, as soon as every source that feeds it has answered; the
+  settled list is stored again.
+- **First start.** With nothing stored, Needs you, Your pull requests and
+  Continue (where a source feeds them) draw their heading and skeleton rows
+  (four, five for Your pull requests) with the same spinner. Once, when the rows
+  land, the sections below shift; the composer and anything above never do.
+- **Order and collapse.** A section sits where the order puts it and goes live
+  when its own sources have answered, so a fast section does not wait for a slow
+  one, and a slow one keeps its slot. A section that comes back empty collapses
+  only when nothing is drawn after it; otherwise it keeps its heading and one
+  quiet line, "Nothing right now.", for that visit. A source silent for 5 seconds
+  is no longer waited for.
+
+The ground behind the content column (the ASCII, pixel and picture grounds) keeps
+a fifth of its strength, a sixth on a light page, so the list sits on calm
+ground; it is back at full strength 140px past the column's edges.
+
+### Cards
+
+A card that does not belong in the list keeps the glass card recipe
+(`OctantCard` `variant="glass"`) in a grid of two columns, one under 560px, under
+the list: **CI failures**, **Handovers** and **Computers**, each leaving the grid
+while it has nothing to show. When the window has no list sources the Customize
+menu stands alone above the grid. Needs you, Working now, Running services and
+Pull requests are cards of the registry (so Customize still switches them) that
+give their rows to the list instead of drawing a frame.
+
+#### Needs you
+
+Needs you rows keep the answer controls specified for the card before the list
+existed: the provider mark or the mode's glyph, the thread title, "Waiting 4m"
+at the 12px step, the Project as meta text and the request text clamped to two
+lines, with small buttons below (Approve filled, Deny ghost; a question's choices
+as outline buttons with a leading number, then a ghost Reply…; a decision's
+options as full-width buttons with the recommended one first, a trailing
+"Recommended" in meta text rather than a hue, and the option's detail as a second
+meta line; a decision also shows its why as a meta paragraph under the ask, an
+"Urgent" tag in the warning role beside the wait when the agent marked it urgent,
+and an **Add note** control; when a second opinion exists, a meta line inside the
+recommended option's button naming the asking model and, inside the option the
+reviewer backs, a line naming the reviewer's model and its one-sentence reason,
+each led by a 12px provider mark, and a "Second opinion differs" tag in the
+warning role beside Urgent when the two options differ). Rows are told apart by a
+hairline, never a tinted fill, and the waiting state is a glyph and words with no
+hue.
+
+#### Working now and Running services
+
+In progress rows are the title, the Project, the latest step (a running tool as
+`Command: bun run test`, a turn waiting on the person as plain prose) and a time:
+"Running 12m" from the start time the host reports, "Active 4m" only for a host
+that reports none; a fact the host does not report is left out rather than
+invented. A listening server keeps its row from the Running services card, with
+**Open** and **Stop** (confirmed where Octant does not own the server) and the
+live-open choices for another computer's server. A host that could not look says
+so under the list.
+
+#### Pull requests
+
+Pull requests give Needs you the ones whose review is asked of the person and
+Your pull requests the person's own, from the cached snapshot. It is absent when
+that read is not allowed. A failed read says it could not read, and until a
+refresh has reached every connected Project the line under the list says so, with
+an **Open Pull requests** link. A snapshot whose latest refresh failed says when
+it last succeeded.
+
+#### CI failures
+
+CI failures lists up to five failing checks from that same read: the check name,
+the repository or branch, and how long ago it failed. It is absent when nothing
+is failing, and absent when that read is not allowed. **Start a fix** opens a
+draft; it does not send.
+
+#### Suggestions
+
+Code's four prompt suggestions are one line of cards directly under the composer
+they fill in, above the list, on the composer's edges: the suggestion card (the
+card fill, one hairline, `--oct-radius-md`, 12px padding) with a 16px glyph in
+the accent on top, the label (14/500, one line) and one line in the muted ink
+saying what the agent will do (two lines at most). As label-only chips they were
+four grey words, and what each would do was only in a tooltip (maintainer
+request, 2026-11-16). Four stand on one line; under 664px of column they stand
+two by two, never three and one, and the cards of a row share one height. The
+full prompt rides as the card's tooltip and description and fills the composer
+when chosen, nothing more. Once the person has typed, the cards go out of sight
+and out of reach but keep their room, so the list under them never moves
+(principle 7); cleared, they are back where they were.
+
+Work's Write, Learn, Plan, and Explore starters are chips
+(`StartSuggestionChip`: a borderless 28px chip with 12px text, a resting ink
+fill of 4% and a deeper one, 8%, on hover and keyboard focus); the prompt fills
+the composer when chosen, nothing more.
 
 ### Code agent home
 
-Under the Code composer the start screen is an agent home rather than a
-blank prompt: the suggested prompts as one row of label-only outline chips
-(see [Card area](#card-area)); then
-three sections that share one card grid (Continue's rows share one card), two
-across at the composer's width. Each card opens with a badge naming what it
-is (Issue, Pull request, Review requested, Linear, or a thread's delivery
-state: Running, PR #n, Merged, Done, Waiting), the repository or identifier
-in mono, and the age at the trailing edge; then the title and one line of
-facts. Up next holds what is in flight for the person (review requests,
-their own open pull requests, assigned GitHub issues, assigned Linear
-issues), each badge naming why it is there, and says "You're all caught up"
-in a panel when empty, with Open Inbox at the section's trailing edge. Start
-something new holds open GitHub and Linear issues nobody has picked up, with
-Browse all issues beside it. Continue holds the latest Board cards: the badge
-is the thread's own state (Running, Done, Waiting, In progress, Ready) with
-changed lines, and the facts line names the Project, the branch (marked
-worktree when managed), the linked pull request with its number and state as
-a chip, and the provider last. Picking an item fills the prompt and attaches
-the issue as the thread's Create from context.
+Under the Code composer the start screen is an agent home rather than a blank
+prompt: the suggested prompts as one line of cards (see
+[Suggestions](#suggestions)), then [the list](#the-list). Code adds to it what is
+assigned to the person (review requests and assigned issues under Needs you, the
+person's own pull requests under Your pull requests when the Pull requests read
+has not seen them), the latest Board cards under Continue (the row's trailing
+word is the thread's own state: Running, Done, Waiting, In progress, Ready; its
+meta line names the Project and the branch), and open issues nobody has picked up
+under Open issues with **See all** to the Issues page. Picking an assigned or
+open issue fills the prompt and attaches it as the thread's Create from context;
+picking a pull request from the Pull requests read opens it.
 
 ## Card area behavior
 
-Under the composer, Code Home carries the card area; New task has none. The
-area is a **Customize** control on the
-right, then cards in a grid (two columns, one at phone width). The composer paints first; the area mounts on the frame after the
-first commit, and each card begins its reads only then, so a start screen never
-waits on a card. A card that is off or unavailable is never mounted and reads
-nothing.
+Under the composer, every start screen carries the list and the cards. The composer paints first; the area mounts on the frame
+after the first commit, and each card begins its reads only then, so a start
+screen never waits on a card. A card that is off or unavailable is never mounted
+and reads nothing.
 
 ### Card registry
 
 The cards come from a small renderer registry (`apps/web/src/home`). A card is a
-value: `id`, `title`, `icon`, `defaultOn`, `available`, an optional
-`hideWhenEmpty`, one `emptyLabel`, and a `useContent` hook returning `loading`
-or `ready` with a count and a body. A `ready` result may replace the empty line
-for a card that could not look, and may add one link after it. The shell builds the list and hands it to the
+value: `id`, `title`, `icon`, `defaultOn`, `available`, and either a
+`useContent` hook (a grid card: an optional `hideWhenEmpty`, one `emptyLabel`,
+and a result of `loading` or `ready` with a count and a body, which may replace
+the empty line for a card that could not look and may add one link after it) or
+a `useListRows` hook (a list card: `loading` or `ready` with rows tagged by
+section, links for See all, and an optional caveat). Rows from sources that are
+not cards (assigned work, the threads to continue, open issues) join the list
+through the same shape and are not listed in Customize. The shell builds the list and hands it to the
 frame, which knows nothing about any card: a new card is a new definition, with
 no change to the frame, Customize, or the stored setting. `available: false`
 (no GitHub connection, insecure token storage, no client in this window) hides
@@ -174,8 +272,9 @@ card spans the row.
 
 ### Customize
 
-Customize is a small panel: one switch per available card, a drag handle, and up
-and down buttons for the keyboard, with each change stored at once, and **Reset
+Customize is the **…** menu at the end of the list's first header: a small
+panel with one switch per available card, a drag handle, and up and down buttons
+for the keyboard, with each change stored at once, and **Reset
 to default**. The choice is the `homeCards` shell setting: `order` (card ids in
 the requested order; cards it does not name follow in registry order) and
 `visibility` (an entry only where the person moved away from a card's default,
@@ -500,18 +599,24 @@ composer `/` list never carries it.
 
 ## Welcome screen
 
-Chat, Work, and Code open on the same screen: one question in the middle of
-the page and one raised composer docked at its foot, where it stays once the
-thread starts, so the first message is typed where every later one is. Above
-the question sits the Octant aperture mark (`icons.svg#aperture`) at 22px,
-drawn in the primary ink and set 2px closer to the question than the
-heading's usual gap. The hero asks "What are we building today?" (the hero
-role: regular weight, -0.012em tracking, the primary ink in every style and
-never the accent). The approved size is 24px on a 30px line; the type scale
-has no 24px step and `ui:check` refuses a raw size, so the nearest token,
-`--oct-text-2xl` (26px), carries it on the 30px line, and phone width uses 20px.
-One quiet line under it, at the detail step in muted ink, says
-"Pick a project, or just start typing". The start screen names no time of day
+Chat, Work, and Code open on the same screen: one question at the top of a
+column with one soft composer directly under it, then the mode's list; once a
+thread starts, its composer is docked at the pane's foot. No mark stands over
+the question. The hero asks "What are we building today?"
+(the hero role: regular weight, -0.012em tracking, the primary ink in every
+style and never the accent) at a window title's size, `--oct-text-xl` (20px)
+on a 26px line, at every width. Until 2026-11-16 the Octant aperture stood
+above it at 22px and the question was 26px (24px approved, which the type
+scale has no step for); a logo over a large centred headline read as a web
+page's hero, and the app's mark is already in the Dock and the window
+(maintainer request).
+With a Project chosen the question names it, "What should we work on in
+{Project}?", on one line: a long name truncates with an ellipsis and the full
+name is its title, and choosing another Project changes the words in place
+without moving anything below.
+On Code and Work one quiet line under it, at the detail step in muted ink,
+says "Pick a project, or just start typing"; Chat's start screen is the
+heading alone, and its composer's placeholder carries the sentence. The start screen names no time of day
 and counts nothing: what is running and what waits for review live in the
 sidebar. Once a Code start screen has a Project chosen, its quick tools are
 the Project's own Terminal and Browser (a server Project's Terminal only) as plain rows in the right dock's body,
@@ -530,20 +635,20 @@ start screen's composer asks "Ask anything…", and the message field keeps its
 accessible name.
 
 The question belongs to a new task only. When the same composer serves a
-decision, such as reviewing a planner's proposal, the caller replaces the mark,
-question, and quiet line with a heading that names the decision ("Review the
+decision, such as reviewing a planner's proposal, the caller replaces the
+question and quiet line with a heading that names the decision ("Review the
 planner's proposal") and the proposal's title, set at the dialog's top-left with
 the fixed proposal text directly under them in the composer. Rendered review
 showed the question above a fixed proposal read as an invitation to write a
 different task.
 
-**New task**, in every mode, is the question and the composer and nothing
-else; Chat and Work add one row of outline starter chips only before the
-mode's first thread. **Code Home** is where Code lands with nothing chosen:
-the same question and composer, then Code's prompt suggestions, the card area
-(a **Customize** control and the cards, on by default), and Code's agent home
-(Up next and Continue). There the page scrolls and the composer sits under
-the question. The cards appear on no other start screen. Neither screen has
+**Home** is where a mode lands with nothing chosen, and a **New task** is the
+same page with its Project named: the same question and composer in every
+mode, then the mode's prompt suggestions (Code's cards; Chat's one row of
+outline starter chips only before its first thread; Work has none) and the
+card area (the list and the cards, on by default), with Code's agent home
+(assigned work and Continue inside the list). The page scrolls and the
+composer sits under the question. No start screen has
 tabs or action tiles: adding a folder lives in the composer's Project picker. Their anatomy is in
 [Start screen: presentation](#presentation); their
 behavior is in [Workspace](workspace.md#start-screen-cards).
@@ -556,8 +661,30 @@ the person a next step. In light the card is workspace white on the
 as a sunken field. Code welcome keeps one stable question while Project and
 Environment sit on the context row above the composer
 (`.composer-tray--start`, rendered before the card inside `.composer-stack`),
-on the page ground with no band chrome. The base-branch chip joins that row
-once a Project is chosen. Environment is the
+on the page ground with no band chrome. The **Where** chip joins that row
+once a Project is chosen, beside the Project chip and drawn the same way: a
+quiet chip with its icon, its words and a chevron. It names the branch, such
+as `main`, or `New worktree · from main`. It opens a plain menu of 28px rows,
+"Where this thread works" (maintainer decision, 2026-11-17, after comparing a
+clickable prototype of two directions): a radio pair (arrow keys move, Escape
+closes and returns focus to the chip), **This checkout** "on <branch>" with
+the folder's path as its tooltip and **New worktree** "own branch"; then
+**Branch** (a fact for this checkout) or **Start from ›** (the base-branch
+list, opening beside the row); **Subfolder ›** (the working-folder field in a
+pop-out beside the row, which keeps what was typed when it closes); **Remember
+for this Project** as a check, where it can be recorded; and **Worktree
+options…**, a small dialog with "Start from origin", the Remote, what the
+source resolved to and the branch name the host will create, reachable once
+New worktree is chosen. The menu keeps one size in both states: the branch row
+swaps its words, never its place. It hangs above the chip, aligned to its
+start. Every start-row popup (base-branch list, Project, Create from…) keeps a
+fixed frame: the list scrolls inside, skeleton rows while loading, lists read
+before it opens ([DESIGN.md](../../DESIGN.md) principle 7). A chip's native
+tooltip is not shown while its popup is open, so it never covers the popup's
+first rows. Choosing only sets the draft's workspace; the worktree is
+created with the thread. The chip's width may follow the choice; nothing else
+in the row moves when the panel opens. Existing worktrees are not offered: the
+host cannot start a new thread in one. Work keeps its working-folder chip. Environment is the
 create-facing presentation of Octant's authoritative host federation: its
 dropdown selects This computer, devbox, or another healthy capable host without
 creating a second environment model. Every create composer shows Environment
@@ -572,29 +699,29 @@ beside the Project. Access is
 a titled menu in the row under the prompt card, and carries the
 "Remember for this Project" switch.
 
-The Code start screen's agent home (suggested prompts, Up next, Start something
-new, and Continue) is laid out in
+The Code start screen's agent home (suggested prompts and the list) is laid out in
 [Start screen: Code agent home](#code-agent-home). The start screen has no image-generation control: a job needs a thread to
 land in, and the Image generator surface serves everything else. Attaching an
 image is a composer affordance and is available here.
 
-## Usage-limit warning
+## Plan usage line
 
-**Usage-limit warning.** On a start screen, when the chosen account has a window
-that is spent or at 80% used (the same levels the meters colour), a warning
-callout takes the full row above the context chips, in the row above the
-card: which account, that it has
-reached or is close to its usage limit, and the reset time the provider gave.
-For each other ready account that has room (an observed window below the near
-level; an account with no observed window is never offered as having room) up to
-three `Use <account>` buttons follow, each choosing that account and its model
-(the current model when it lists it) exactly as the model menu would. Nothing
-switches on its own and the warning never blocks sending: the provider's own
-limit decides whether a turn runs. The model menu's rail lists accounts with
-room first and the ones at their limit last, in the person's own order within
-each, and marks a limited account with the danger dot and "Usage limit reached"
-(a near one with the warning dot and "Near usage limit"); a readiness problem
-takes the dot first.
+**Plan usage line.** On a start screen the chosen account's plan usage is one
+quiet line of text at the right of the context chips, in the meta ink with
+tabular figures: every observed window with the share left and the time to its
+reset ("100% 4h 59m · 70% 1d 19h"). A window at 80% used or more takes the
+warning ink, and one that is spent takes the danger ink and reads "limit" in
+place of nothing but its figure ("0% limit 2h 26m"), so the standing is never
+colour alone; each part's tooltip and accessible name give the window and its
+standing in words ("5-hour window, codex: 8% left, close to its limit, resets
+in 3h 17m"). No notice floats above the box, because one covered the heading on
+a centred composer: the line alone says it, in the space it already holds, so
+nothing moves when a window nears or reaches its limit. The line offers no other
+account and never blocks sending: the provider's own limit decides whether a
+turn runs. The model menu's rail lists accounts with room first and the ones at
+their limit last, in the person's own order within each, and marks a limited
+account with the danger dot and "Usage limit reached" (a near one with the
+warning dot and "Near usage limit"); a readiness problem takes the dot first.
 
 ## First run
 
@@ -630,10 +757,9 @@ Navigator's models in a section of Settings › Octant Harness. No display name 
 compact recent-task rows and their status and Git cues.
 Empty Code entry offers folder setup and a direct route to Code settings; opening
 that setting never turns on projectless threads.
-A Work or Code pane with no thread and no Project asks one centred question
-("Pick a folder to work in"), says in one sentence what choosing a folder
-means, and offers Choose a folder… as the primary action with starting
-without one beside it; once a Project exists the new task leads instead.
+A Work or Code pane with no thread and no Project is Home like any other: the
+composer's Project picker offers adding a folder, and a provider that is not
+ready shows **Set up a provider** in the composer's model control.
 
 First run is a four-step wizard with a progress rail: Providers, Project, Model,
 and Mode, in that order, followed by an uncounted readiness view titled Your first
@@ -672,6 +798,6 @@ owns its behavior.
   `workingNow.test.ts`, `pullRequests.test.ts`, and `ciFailures.test.ts`.
 - Tabs and Stop: `apps/web/src/home/HomeComposerTabs.test.tsx`,
   `RunningTab.test.tsx`, and `stopRunningRow.test.ts`.
-- Code agent home: `apps/web/src/code/CodeHome.test.tsx`.
+- The list: `apps/web/src/home/homeListModel.test.ts`, `homeListRows.test.ts` and `HomeDashboard.test.tsx`.
 - Render changed cards at desktop and phone width with and without data, and
   with the read refused.

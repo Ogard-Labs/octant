@@ -28,11 +28,7 @@ import {
   type ProviderModelId,
   type ProviderObservedState,
 } from "@octant/contracts";
-import {
-  implicitClaudeAccountOwnerId,
-  implicitCodexAccountOwnerId,
-  isImageProfileDriverKind,
-} from "@octant/domain";
+import { isImageProfileDriverKind } from "@octant/domain";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { SettingsSection } from "../settings/primitives";
@@ -40,10 +36,8 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OpenCodeManagedUpdate } from "./OpenCodeManagedUpdate";
 import type { ProviderKeyHost } from "./providerKeyHost";
-import {
-  ProviderCreateForm,
-  type ProviderCreateProviderType,
-} from "./ProviderSettingsConfiguration";
+import type { ProviderCreateProviderType } from "./ProviderSettingsConfiguration";
+import { AddProviderWizard } from "./wizard/AddProviderWizard";
 import { ProviderSettingsList } from "./ProviderSettingsList";
 import { isModelEndpointDriverKind } from "./providerSettingsPresentation";
 import type { ModelToolVerification, TransientProviderCredential } from "./useProviderController";
@@ -321,11 +315,14 @@ const GENERAL_PROVIDER_TYPES: ReadonlyArray<ProviderCreateProviderType> = [
   ...ACP_AGENT_KINDS,
 ];
 
-interface AddAccountRequest {
+/** The wizard is open: from a card (with its provider) or from "Add provider manually". */
+interface AddWizardRequest {
   readonly sequence: number;
-  readonly providerType: "claude" | "codex";
-  readonly displayName: string;
-  readonly binaryPath: string;
+  readonly preset?: {
+    readonly providerType: "claude" | "codex";
+    readonly displayName: string;
+    readonly binaryPath: string;
+  };
 }
 
 /**
@@ -356,7 +353,7 @@ function suggestedAccountName(
 }
 
 export function ProviderSettingsView(props: ProviderSettingsViewProps) {
-  const [addAccount, setAddAccount] = useState<AddAccountRequest | undefined>(undefined);
+  const [wizard, setWizard] = useState<AddWizardRequest | undefined>(undefined);
   const [detailOpen, setDetailOpen] = useState(false);
   const noteDetail = useCallback(
     (name: string | undefined) => setDetailOpen(name !== undefined),
@@ -366,13 +363,6 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
   useEffect(() => {
     onCheckLatestVersions?.();
   }, [instances, onCheckLatestVersions]);
-  // A card's "Add account" opens the same manual form for its driver. A created
-  // account closes it again, so the suggested name is not offered twice.
-  const created = async (operation: Promise<boolean>) => {
-    const ok = await operation;
-    if (ok) setAddAccount(undefined);
-    return ok;
-  };
   // The settings shell already renders the pane's title and description;
   // repeating an identity heading here read as three titles
   // in a row, so the pane goes straight to the person's providers and their
@@ -407,43 +397,36 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         busy={props.busy}
         onAddAccount={(source) => {
           if (source.driverKind !== "claude" && source.driverKind !== "codex") return;
-          setAddAccount((current) => ({
+          setWizard((current) => ({
             sequence: (current?.sequence ?? 0) + 1,
-            providerType: source.driverKind,
-            displayName: suggestedAccountName(props.instances, source),
-            binaryPath: source.configuration.binaryPath,
+            preset: {
+              providerType: source.driverKind,
+              displayName: suggestedAccountName(props.instances, source),
+              binaryPath: source.configuration.binaryPath,
+            },
           }));
         }}
         createForm={
-          <ProviderCreateForm
-            key={addAccount?.sequence ?? "manual"}
-            allowedProviderTypes={GENERAL_PROVIDER_TYPES}
-            {...(addAccount === undefined
-              ? {}
-              : {
-                  initialProviderType: addAccount.providerType,
-                  initialDisplayName: addAccount.displayName,
-                  initialBinaryPath: addAccount.binaryPath,
-                  openWithNameFocused: true,
-                })}
-            busy={props.busy}
-            claudeHostProfileTaken={implicitClaudeAccountOwnerId(props.instances) !== undefined}
-            codexHostProfileTaken={implicitCodexAccountOwnerId(props.instances) !== undefined}
-            heading="Agent runtime"
-            hint="Installed runtimes are detected automatically. Use this for an unusual executable location or a runtime the scan missed. Model endpoints such as OpenAI-compatible APIs are added under Octant Harness › Model endpoints."
-            credentialManagementAvailable={props.credentialManagementAvailable}
-            onCreate={(...args) => created(props.onCreate(...args))}
-            onCreateAnthropicCompatible={props.onCreateAnthropicCompatible}
-            onCreateAzureFoundry={props.onCreateAzureFoundry}
-            onCreateClaude={(...args) => created(props.onCreateClaude(...args))}
-            onCreateAcpAgent={props.onCreateAcpAgent}
-            onCreateOllama={props.onCreateOllama}
-            onCreateOpenAiCompatible={props.onCreateOpenAiCompatible}
-            onCreateOpenAiImage={props.onCreateOpenAiImage}
-            onCreateGeminiImage={props.onCreateGeminiImage}
-            onCreateBflImage={props.onCreateBflImage}
-            onCreateIdeogramImage={props.onCreateIdeogramImage}
-          />
+          <section className="provider-settings__manual">
+            <div className="provider-settings__create-heading">
+              <h3>Agent runtime</h3>
+              <p className="provider-settings__hint">
+                Installed runtimes are detected automatically. Use this for an unusual executable
+                location or a runtime the scan missed. Model endpoints such as OpenAI-compatible
+                APIs are added under Octant Harness › Model endpoints.
+              </p>
+            </div>
+            <OctantButton
+              aria-haspopup="dialog"
+              className="window-no-drag"
+              onClick={() => setWizard({ sequence: (wizard?.sequence ?? 0) + 1 })}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Add provider manually
+            </OctantButton>
+          </section>
         }
         credentialManagementAvailable={props.credentialManagementAvailable}
         defaults={props.defaults}
@@ -568,6 +551,25 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
         onChangeBinary={props.onChangeBinary}
       />
+      {wizard === undefined ? null : (
+        <AddProviderWizard
+          key={wizard.sequence}
+          busy={props.busy}
+          credentialManagementAvailable={props.credentialManagementAvailable}
+          discoverySnapshot={props.discoverySnapshot}
+          instances={props.instances}
+          {...(props.message === undefined ? {} : { message: props.message })}
+          observedByInstance={props.observedByInstance}
+          onClose={() => setWizard(undefined)}
+          onCreate={props.onCreate}
+          onCreateAcpAgent={props.onCreateAcpAgent}
+          onCreateClaude={props.onCreateClaude}
+          onProbe={props.onProbe}
+          {...(wizard.preset === undefined ? {} : { preset: wizard.preset })}
+          probingIds={props.probingIds}
+          providerTypes={GENERAL_PROVIDER_TYPES}
+        />
+      )}
     </div>
   );
 }

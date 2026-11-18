@@ -1,5 +1,5 @@
 import type { SidebarDestinationCustomization } from "@octant/contracts/shell";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField, type OctantSelectOption } from "../ui/base/OctantSelect";
 import { IconButton } from "./IconButton";

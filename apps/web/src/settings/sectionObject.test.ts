@@ -28,26 +28,26 @@ describe("a settings section", () => {
     expect(styles).not.toMatch(/border-inline:\s*1px solid/);
   });
 
-  it("groups a section's rows in one raised card: the card radius, the raised fill, and the card shadow that draws its edge", () => {
+  it("groups a section's rows in one flat card: the card radius, the card fill, and one hairline outline", () => {
     const flat = styles.replace(/\s+/g, " ");
     const card =
       /\.settings-view \.settings-card-section--open > :is\(\.setgroup, \.settings-fact-list, \.settings-panel__body\) \{([^}]*)\}/.exec(
         flat,
       )?.[1] ?? "";
     expect(card).toMatch(/background:\s*var\(--oct-settings-card-fill\)/);
-    // The edge, the light on the top edge and the short shadow are the one
-    // token's. The clear outline is what forced colours draw in their place; it is
-    // drawn inside the box and takes no room, where a border put every row's
-    // 16px inset at 17px from the card's edge.
+    // The edge is one hairline outline, drawn inside the box so it takes no
+    // room, where a border put every row's 16px inset at 17px from the edge.
     expect(card).toMatch(/border:\s*0;/);
-    expect(card).toMatch(/outline:\s*1px solid transparent/);
+    expect(card).toMatch(/outline:\s*1px solid var\(--oct-hairline\)/);
     expect(card).toMatch(/outline-offset:\s*-1px/);
     expect(card).toMatch(/border-radius:\s*var\(--oct-radius-md\)/);
-    expect(card).toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
+    expect(card).not.toMatch(/box-shadow/);
     // Menus and popovers inside a row have to escape the card, so it never clips.
     expect(card).toMatch(/overflow:\s*visible/);
     expect(card).not.toMatch(/overflow:\s*hidden/);
-    expect(flat).toMatch(/--oct-settings-card-fill: var\(--octant-card\)/);
+    expect(flat).toMatch(
+      /--oct-settings-card-fill: color-mix\(in srgb, var\(--octant-text-primary\) 2%, transparent\)/,
+    );
   });
 
   it("rounds the first and last row to the card instead of clipping them", () => {

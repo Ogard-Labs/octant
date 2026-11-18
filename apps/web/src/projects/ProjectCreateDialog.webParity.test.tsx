@@ -69,7 +69,7 @@ describe("ProjectCreateDialog web folder parity", () => {
       />,
     );
 
-    expect(screen.getByText(/Folder selection is unavailable/i)).toBeVisible();
+    expect(screen.getByText(/cannot pick a folder here/i)).toBeVisible();
     expect(screen.queryByLabelText("Project name")).toBeNull();
   });
 

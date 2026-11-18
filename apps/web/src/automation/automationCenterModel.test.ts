@@ -252,7 +252,7 @@ describe("buildAutomationDraft", () => {
     expect(result.kind).toBe("invalid");
     if (result.kind !== "invalid") return;
     expect(result.issues).toContain(
-      "Full access profiles are not eligible for automations. Choose an approval-gated profile.",
+      "Automations cannot use Full access. Pick a profile that asks first.",
     );
   });
 

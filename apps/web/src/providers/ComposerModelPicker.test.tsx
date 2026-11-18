@@ -8,7 +8,7 @@ import {
   type ProviderObservedState,
 } from "@octant/contracts";
 import { buildModelPickerGroups } from "@octant/domain";
-import { act, fireEvent, render, renderHook, screen, within } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useDraftModelOptions } from "./useDraftModelOptions";
@@ -25,7 +25,6 @@ import {
   ComposerContextMeterProvider,
 } from "../context/composerContextMeterScope";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
-import { ComposerUsageWarning } from "../usage/ComposerUsageWarning";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
 import { ModelToolVerificationContext } from "./ModelToolVerificationContext";
 
@@ -147,39 +146,6 @@ describe("ComposerModelPicker", () => {
     ]);
   });
 
-  it("warns that the chosen account is at its limit and switches only when the person picks another", async () => {
-    const onSelect = vi.fn();
-    render(
-      <PlanUsageProvider barStyle="smooth" client={usageClient()}>
-        <ComposerUsageWarning
-          groups={groups()}
-          onSelect={onSelect}
-          selectedProviderInstanceId={String(providerA)}
-        />
-      </PlanUsageProvider>,
-    );
-    const warning = await screen.findByRole("alert");
-    expect(warning).toHaveTextContent("Local OpenCode has reached its usage limit.");
-    expect(warning).toHaveTextContent(/Resets in 3h/);
-    expect(onSelect).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "Use Remote Claude" }));
-    expect(onSelect).toHaveBeenCalledWith({ providerInstanceId: providerB, modelId: modelThree });
-  });
-
-  it("stays quiet when the chosen account has room", async () => {
-    render(
-      <PlanUsageProvider barStyle="smooth" client={usageClient()}>
-        <ComposerUsageWarning
-          groups={groups()}
-          onSelect={vi.fn()}
-          selectedProviderInstanceId={String(providerB)}
-        />
-      </PlanUsageProvider>,
-    );
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
   it("selects advertised lead and sidekick pairings and remembers speed beside effort", async () => {
     const configured = fusionGroups();
     const onSelect = vi.fn();
@@ -201,8 +167,7 @@ describe("ComposerModelPicker", () => {
     await user.click(screen.getByRole("combobox", { name: "Sidekick" }));
     await user.click(await screen.findByRole("option", { name: "Luna High" }));
     expect(onSelect).toHaveBeenLastCalledWith({ providerInstanceId: providerA, modelId: "pair-c" });
-    await user.click(screen.getByRole("combobox", { name: "Speed" }));
-    await user.click(await screen.findByRole("option", { name: "Fast" }));
+    await user.click(screen.getByRole("button", { name: "Fast" }));
     expect(onModelOptionChange).toHaveBeenLastCalledWith("speed", "fast");
     expect(
       readRememberedModelOptions(configured, {
@@ -233,9 +198,8 @@ describe("ComposerModelPicker", () => {
         modelId: decodeProviderModelId("pair-b"),
       }),
     ).toEqual({ thought_level: "high", speed: "fast" });
-    await user.click(screen.getByRole("combobox", { name: "Speed" }));
-    await user.click(await screen.findByRole("option", { name: "Default" }));
-    expect(onModelOptionChange).toHaveBeenLastCalledWith("speed", undefined);
+    await user.click(screen.getByRole("button", { name: "Standard" }));
+    expect(onModelOptionChange).toHaveBeenLastCalledWith("speed", "standard");
   });
 
   it.each(["confirmed", "refused"] as const)(
@@ -266,8 +230,8 @@ describe("ComposerModelPicker", () => {
       await user.click(await screen.findByRole("option", { name: "Frontier B" }));
       expect(screen.getByRole("combobox", { name: "Lead" })).toBeDisabled();
       expect(screen.getByRole("combobox", { name: "Sidekick" })).toBeDisabled();
-      expect(screen.getByRole("combobox", { name: "Speed" })).toBeDisabled();
-      fireEvent.keyDown(screen.getByRole("slider"), { key: "End" });
+      expect(screen.getByRole("button", { name: "Fast" })).toBeDisabled();
+      await user.click(screen.getByRole("button", { name: "High" }));
       expect(onModelOptionChange).not.toHaveBeenCalled();
       await user.click(screen.getByRole("combobox", { name: "Sidekick" }));
       expect(onSelect).toHaveBeenCalledTimes(1);
@@ -853,61 +817,9 @@ describe("ComposerModelPicker", () => {
     expect(within(menu).queryByRole("button", { name: "All" })).not.toBeInTheDocument();
   });
 
-  it("draws the selected model's reasoning level and reports the chosen level", async () => {
+  it("draws the selected model's reasoning level as a segment and reports the chosen level", async () => {
     const user = userEvent.setup();
     const onModelOptionChange = vi.fn();
-    const view = (effortValue?: string) =>
-      render(
-        <ComposerModelPicker
-          groups={groups()}
-          modelOptions={[
-            {
-              id: "effort",
-              displayName: "Effort",
-              values: ["low", "medium", "high"],
-              ...(effortValue === undefined ? {} : { value: effortValue }),
-            },
-          ]}
-          onModelOptionChange={onModelOptionChange}
-          onSelect={vi.fn()}
-          selectedModelId={modelOne}
-          selectedProviderInstanceId={providerA}
-        />,
-      );
-    view("medium");
-
-    await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    const level = await screen.findByRole("slider", { name: "Effort level" });
-    // Default is the first stop; the model's three declared levels fill the
-    // rest, so the knob starts at stop 2 of 4 and reads the level it sits on.
-    expect(level).toHaveAttribute("aria-valuenow", "2");
-    expect(level).toHaveAttribute("aria-valuemax", "3");
-    expect(level).toHaveAttribute("aria-valuetext", "Medium");
-
-    // jsdom does not implement native range keyboard/drag defaults; the real
-    // app smoke covers those gestures, while this proves the resulting value.
-    fireEvent.change(level, { target: { value: "3" } });
-    expect(onModelOptionChange).toHaveBeenLastCalledWith("effort", "high");
-    expect(readLastModelChoice()).toEqual({ providerInstanceId: providerA, modelId: modelOne });
-    fireEvent.change(level, { target: { value: "0" } });
-    expect(onModelOptionChange).toHaveBeenLastCalledWith("effort", undefined);
-    await user.click(screen.getByRole("button", { name: "Reset reasoning to provider default" }));
-    expect(onModelOptionChange).toHaveBeenLastCalledWith("effort", undefined);
-    onModelOptionChange.mockClear();
-    fireEvent.pointerDown(level);
-    fireEvent.change(level, { target: { value: "1" } });
-    fireEvent.change(level, { target: { value: "3" } });
-    expect(level).toHaveAttribute("aria-valuetext", "High");
-    expect(onModelOptionChange).not.toHaveBeenCalled();
-    fireEvent.pointerUp(level);
-    expect(onModelOptionChange).toHaveBeenCalledExactlyOnceWith("effort", "high");
-    // The thread's saved level arrives later; until it does, the knob stays
-    // where it was let go rather than jumping back to the old level.
-    expect(level).toHaveAttribute("aria-valuetext", "High");
-  });
-
-  it("exposes the reasoning range and current level without extra endpoint labels", async () => {
-    const user = userEvent.setup();
     render(
       <ComposerModelPicker
         groups={groups()}
@@ -919,7 +831,7 @@ describe("ComposerModelPicker", () => {
             value: "medium",
           },
         ]}
-        onModelOptionChange={vi.fn()}
+        onModelOptionChange={onModelOptionChange}
         onSelect={vi.fn()}
         selectedModelId={modelOne}
         selectedProviderInstanceId={providerA}
@@ -927,10 +839,28 @@ describe("ComposerModelPicker", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    const slider = await screen.findByRole("slider", { name: "Effort level" });
-    expect(slider).toHaveAttribute("aria-valuemin", "0");
-    expect(slider).toHaveAttribute("aria-valuemax", "3");
-    expect(slider).toHaveAttribute("aria-valuetext", "Medium");
+    const levels = await screen.findByRole("group", { name: "Effort level" });
+    expect(
+      within(levels)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["Low", "Medium", "High"]);
+    expect(within(levels).getByRole("button", { name: "Medium" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.click(within(levels).getByRole("button", { name: "High" }));
+    expect(onModelOptionChange).toHaveBeenLastCalledWith("effort", "high");
+    expect(readLastModelChoice()).toEqual({ providerInstanceId: providerA, modelId: modelOne });
+    // The chosen level shows at once, before the saved value comes back.
+    expect(within(levels).getByRole("button", { name: "High" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    // A second press on the chosen level returns to the provider default.
+    await user.click(within(levels).getByRole("button", { name: "High" }));
+    expect(onModelOptionChange).toHaveBeenLastCalledWith("effort", undefined);
   });
 
   it("spells out a provider's extra-high level instead of capitalising its id", async () => {
@@ -949,13 +879,13 @@ describe("ComposerModelPicker", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    expect(await screen.findByRole("slider", { name: "Effort level" })).toHaveAttribute(
-      "aria-valuetext",
-      "Extra high",
+    expect(await screen.findByRole("button", { name: "Extra high" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
     );
   });
 
-  it("reads the knob's level from the thread's stored effort", async () => {
+  it("reads the chosen segment from the thread's stored effort", async () => {
     const user = userEvent.setup();
     const renderView = (effortValue: string) =>
       render(
@@ -978,17 +908,11 @@ describe("ComposerModelPicker", () => {
 
     const { unmount } = renderView("high");
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    expect(screen.getByRole("slider", { name: "Effort level" })).toHaveAttribute(
-      "aria-valuetext",
-      "High",
-    );
+    expect(screen.getByRole("button", { name: "High" })).toHaveAttribute("aria-pressed", "true");
     unmount();
     renderView("medium");
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    expect(screen.getByRole("slider", { name: "Effort level" })).toHaveAttribute(
-      "aria-valuetext",
-      "Medium",
-    );
+    expect(screen.getByRole("button", { name: "Medium" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("keeps explicitly chosen models in Recent across picker remounts", async () => {
@@ -1039,7 +963,7 @@ describe("ComposerModelPicker", () => {
     expect(screen.getByRole("searchbox", { name: "Search models" })).toBeVisible();
   });
 
-  it("keeps the level control out when no reasoning option is declared", async () => {
+  it("keeps the reasoning row, disabled with its reason, when the model has no levels", async () => {
     const user = userEvent.setup();
     render(
       <ComposerModelPicker
@@ -1053,10 +977,261 @@ describe("ComposerModelPicker", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    await screen.findByRole("dialog", { name: "Choose provider and model" });
-    expect(screen.queryByRole("slider", { name: /level$/i })).not.toBeInTheDocument();
+    const levels = await screen.findByRole("group", { name: "Reasoning level" });
+    const reason = within(levels).getByRole("button", {
+      name: "This model has no reasoning levels.",
+    });
+    expect(reason).toBeDisabled();
+  });
+
+  it("chooses Standard or Fast from the footer and shows the chosen tier at once", async () => {
+    const user = userEvent.setup();
+    const onModelOptionChange = vi.fn();
+    render(
+      <ComposerModelPicker
+        groups={groups()}
+        modelOptions={[{ id: "service-tier", displayName: "Service tier", values: ["fast"] }]}
+        onModelOptionChange={onModelOptionChange}
+        onSelect={vi.fn()}
+        selectedModelId={modelOne}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const tier = await screen.findByRole("group", { name: "Service tier" });
+    expect(within(tier).getByRole("button", { name: "Standard" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await user.click(within(tier).getByRole("button", { name: "Fast" }));
+    expect(onModelOptionChange).toHaveBeenLastCalledWith("service-tier", "fast");
+    expect(within(tier).getByRole("button", { name: "Fast" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await user.click(within(tier).getByRole("button", { name: "Standard" }));
+    expect(onModelOptionChange).toHaveBeenLastCalledWith("service-tier", undefined);
+  });
+
+  it("keeps the tier row, disabled with its reason, when the model has no faster tier", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerModelPicker
+        groups={groups()}
+        onModelOptionChange={vi.fn()}
+        onSelect={vi.fn()}
+        selectedModelId={modelOne}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    expect(
+      await screen.findByRole("button", { name: "This model has no faster tier." }),
+    ).toBeDisabled();
   });
 });
+
+describe("ComposerModelPicker shortcuts and long lists", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("shows the first rows, numbers them, and reveals the rest behind Show more", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerModelPicker
+        groups={longGroups(12)}
+        onSelect={vi.fn()}
+        selectedModelId={decodeProviderModelId("long-1")}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const list = await screen.findByRole("listbox", { name: "Models" });
+    expect(within(list).getAllByRole("option")).toHaveLength(5);
+    const hints = Array.from(list.querySelectorAll("kbd")).map((hint) => hint.textContent);
+    expect(hints).toEqual(["⌘1", "⌘2", "⌘3", "⌘4", "⌘5"]);
+
+    await user.click(within(list).getByRole("button", { name: "Show more" }));
+    expect(within(list).getAllByRole("option")).toHaveLength(12);
+    // Only nine rows carry a digit.
+    expect(list.querySelectorAll("kbd")).toHaveLength(9);
+    expect(within(list).queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(list).getByRole("option", { name: "Model 6" })).toHaveFocus(),
+    );
+  });
+
+  it("chooses the numbered row with command and a digit only while the picker is open", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(
+      <ComposerModelPicker
+        groups={longGroups(12)}
+        onSelect={onSelect}
+        selectedModelId={decodeProviderModelId("long-1")}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+    await user.keyboard("{Meta>}2{/Meta}");
+    expect(onSelect).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await screen.findByRole("listbox", { name: "Models" });
+    await user.keyboard("{Meta>}3{/Meta}");
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith({
+      providerInstanceId: providerA,
+      modelId: decodeProviderModelId("long-3"),
+    });
+  });
+
+  it("marks the chosen model with a check and no selected fill, before its digit hint", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <ComposerModelPicker
+        groups={longGroups(12)}
+        onSelect={vi.fn()}
+        selectedModelId={decodeProviderModelId("long-2")}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const list = await screen.findByRole("listbox", { name: "Models" });
+    const chosen = within(list).getByRole("option", { name: "Model 2" });
+    expect(chosen.querySelector(".composer-model-picker__model-check")).not.toBeNull();
+    expect(chosen.querySelector("kbd")?.previousElementSibling).toBe(
+      chosen.querySelector(".composer-model-picker__model-check"),
+    );
+    expect(list.querySelectorAll(".composer-model-picker__model-check")).toHaveLength(1);
+    expect(list.querySelector('[class*="--selected"]')).toBeNull();
+    expect(container.ownerDocument.querySelector('[class*="row--selected"]')).toBeNull();
+  });
+
+  it("draws the model search as the shared filled field", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerModelPicker
+        groups={longGroups(12)}
+        onSelect={vi.fn()}
+        selectedModelId={decodeProviderModelId("long-1")}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const search = await screen.findByRole("searchbox", { name: "Search models" });
+    expect(search.closest("label")).toHaveClass("octant-popover-search");
+  });
+
+  it("shows all six reasoning levels in full", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerModelPicker
+        groups={groups()}
+        modelOptions={[
+          {
+            id: "effort",
+            displayName: "Effort",
+            values: ["low", "medium", "high", "xhigh", "max", "ultra"],
+            value: "high",
+          },
+        ]}
+        onModelOptionChange={vi.fn()}
+        onSelect={vi.fn()}
+        selectedModelId={modelOne}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const levels = await screen.findByRole("group", { name: "Effort level" });
+    expect(
+      within(levels)
+        .getAllByRole("button")
+        .map((segment) => segment.textContent),
+    ).toEqual(["Low", "Medium", "High", "Extra high", "Max", "Ultra"]);
+  });
+
+  it("sends a typed letter to the search field from anywhere in the picker", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerModelPicker
+        groups={longGroups(12)}
+        onSelect={vi.fn()}
+        selectedModelId={decodeProviderModelId("long-1")}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const list = await screen.findByRole("listbox", { name: "Models" });
+    within(list).getAllByRole("option")[1]?.focus();
+    await user.keyboard("l1");
+    const search = screen.getByRole("searchbox", { name: "Search models" });
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("l1");
+    // A search lists every match without a fold.
+    expect(within(list).queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
+  });
+
+  it("walks the rows with the arrows and returns to the search field from the first", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerModelPicker
+        groups={longGroups(12)}
+        onSelect={vi.fn()}
+        selectedModelId={decodeProviderModelId("long-1")}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const search = await screen.findByRole("searchbox", { name: "Search models" });
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("option", { name: "Model 1" })).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(search).toHaveFocus();
+  });
+
+  it("keeps the same rows beneath the list on every tab and after Show more", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerModelPicker
+        groups={longGroups(12)}
+        modelOptions={[
+          { id: "effort", displayName: "Effort", values: ["low", "high"] },
+          { id: "service-tier", displayName: "Service tier", values: ["fast"] },
+        ]}
+        onModelOptionChange={vi.fn()}
+        onSelect={vi.fn()}
+        selectedModelId={decodeProviderModelId("long-1")}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const menu = await screen.findByRole("dialog", { name: "Choose provider and model" });
+    const settings = () => within(menu).getByRole("group", { name: "Model settings" });
+    const before = settings();
+    for (const tab of ["Favorites", "Recent", "Local OpenCode"]) {
+      await user.click(within(menu).getByRole("option", { name: tab }));
+      expect(settings()).toBe(before);
+      expect(within(before).getByRole("group", { name: "Effort level" })).toBeVisible();
+      expect(within(before).getByRole("group", { name: "Service tier" })).toBeVisible();
+    }
+    await user.click(within(menu).getByRole("button", { name: "Show more" }));
+    expect(settings()).toBe(before);
+  });
+});
+
+function longGroups(count: number) {
+  const instances = [instance("opencode", providerA, "Local OpenCode")];
+  const models = Array.from({ length: count }, (_, index) =>
+    model(decodeProviderModelId(`long-${index + 1}`), `Model ${index + 1}`),
+  );
+  return buildModelPickerGroups({
+    instances,
+    observedByInstance: new Map([[providerA, observation(providerA, models)]]),
+    mode: "chat",
+  });
+}
 
 /** A host that last saw the first account out of its five-hour window and the second with room. */
 function usageClient(): ProviderUsageLimitsClient {

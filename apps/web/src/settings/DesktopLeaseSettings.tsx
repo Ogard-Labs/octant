@@ -91,7 +91,7 @@ export function DesktopLeaseSettings(props: {
   return (
     <SettingsSection
       title="Disposable desktops"
-      description="What every thread on this host follows when it starts a disposable desktop."
+      description="Rules for every thread that starts a disposable desktop."
     >
       <div className="setgroup">
         <SettingRow
@@ -112,7 +112,7 @@ export function DesktopLeaseSettings(props: {
         <SettingRow
           settingId="desktop-leases-per-thread"
           label="Desktops per thread"
-          description="How many desktops one thread may hold at once. Lowering it ends none that are running."
+          description="How many desktops one thread may hold. Lowering it ends none already running."
           scope="host"
           focused={props.focusedSetting === "desktop-leases-per-thread"}
         >
@@ -128,7 +128,7 @@ export function DesktopLeaseSettings(props: {
         <SettingRow
           settingId="desktop-leases-on-host"
           label="Desktops on this host"
-          description="How many desktops may run on this host itself at once, across every thread. Desktops in a cloud account don't count."
+          description="How many desktops may run on this host itself at once, across all threads. Cloud desktops don't count."
           scope="host"
           focused={props.focusedSetting === "desktop-leases-on-host"}
         >

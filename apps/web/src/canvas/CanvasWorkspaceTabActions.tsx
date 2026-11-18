@@ -4,7 +4,7 @@ import type {
   CanvasContextSelectionId,
 } from "@octant/contracts/canvasContext";
 import type { WorkspaceTab } from "@octant/contracts/shell";
-import { LayoutGrid, Paperclip } from "lucide-react";
+import { LayoutGrid, Paperclip } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface CanvasWorkspaceTabActionsProps {

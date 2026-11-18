@@ -340,7 +340,7 @@ export function HostSettingsSection({
 
       {status.memory === undefined ? null : (
         <SettingsSection
-          description="When the host counts its own size as low memory and frees idle work."
+          description="When the host counts itself as low on memory and frees idle work."
           title="Memory"
         >
           <HostMemoryLimits client={client} memory={status.memory} onSaved={() => void refresh()} />
@@ -364,7 +364,7 @@ export function HostSettingsSection({
       <SettingsSection title="Lifecycle">
         <div className="setgroup">
           <SettingRow
-            description="Stop or restart Octant's background service on the selected host."
+            description="Stop or restart Octant's background service on the chosen computer."
             label="Background service"
             scope="host"
             settingId="host-lifecycle"
@@ -551,7 +551,7 @@ export function HostDataSettingsSection({
 
       <SettingsPanel
         title="Recovery"
-        description="Restore replaces the live store and runs only while the host is offline."
+        description="Restore replaces the live data and runs only while the host is offline."
       >
         <div className="settings-panel__stack">
           <div className="host-settings__controls">
@@ -732,7 +732,7 @@ function ThreadRetentionPanel({
   return (
     <SettingsPanel
       title="Thread retention"
-      description="Set retention windows or permanently purge selected thread history."
+      description="Set how long history is kept, or permanently delete chosen thread history."
       tone="danger"
     >
       <div className="settings-panel__stack" id="settings-thread-retention">
@@ -904,8 +904,8 @@ function ThreadRetentionPanel({
         </div>
         {breakpointCleanup?.store === breakpointStore && breakpointCleanup.threadIds.length > 0 ? (
           <SettingsState kind="error">
-            Thread history was purged, but saved breakpoint configuration could not be removed.
-            Check this browser's device storage, then retry cleanup.
+            Thread history was deleted, but saved breakpoint settings could not be removed. Check
+            this browser's device storage, then retry cleanup.
             <OctantButton
               type="button"
               variant="secondary"

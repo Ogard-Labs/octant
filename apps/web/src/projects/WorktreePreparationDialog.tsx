@@ -101,9 +101,7 @@ export function WorktreePreparationDialog(props: {
           result.kind === "project-terminal-refused" ? result.message : "Setup is unavailable.",
         );
     } catch {
-      setFailure(
-        "The reply was lost. Inspect the recorded status before deciding what to do; nothing was retried.",
-      );
+      setFailure("The reply was lost. Check the status before you decide. Nothing was retried.");
     } finally {
       setBusy(false);
       setRefresh((current) => current + 1);
@@ -167,8 +165,8 @@ export function WorktreePreparationDialog(props: {
               </p>
               <p>{preparation.reason}</p>
               <p>
-                The first agent task waits for setup or your explicit Skip. Setup uses task access,
-                has a ten minute limit, and never replays after restart.
+                The first agent task waits for setup, or until you Skip. Setup uses task access, has
+                a ten minute limit, and never replays after restart.
               </p>
             </>
           )}

@@ -116,7 +116,7 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
     return (
       <div className="settings-section-stack" id="settings-secret-stores">
         <SettingsSection
-          description="Linking a secret store happens in the Octant app on the host machine."
+          description="Link a secret store in the Octant app on the host computer."
           title="Linked secret stores"
         />
       </div>
@@ -167,7 +167,7 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
   return (
     <div className="settings-section-stack" id="settings-secret-stores">
       <SettingsSection
-        description="Link a password manager you already use. Octant keeps an item's address and asks the manager for the key each time; it never stores, logs, or shows the key."
+        description="Link a password manager you already use. Octant keeps only an item's address and asks the manager for the key each time. It never stores, logs, or shows the key."
         title="Linked secret stores"
       >
         {view === undefined ? (

@@ -20,7 +20,7 @@ const appStyles = [
 ].join("\n");
 
 describe("ThemeTypographyProvider", () => {
-  it("projects the platform face at the compact size by default", () => {
+  it("projects the platform face at 14px by default", () => {
     const rendered = render(
       <ThemeTypographyProvider>
         <div />
@@ -30,7 +30,7 @@ describe("ThemeTypographyProvider", () => {
     expect(document.documentElement.style.getPropertyValue("--octant-ui-font-family")).toBe(
       "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     );
-    expect(document.documentElement.style.getPropertyValue("--octant-ui-font-size")).toBe("13px");
+    expect(document.documentElement.style.getPropertyValue("--octant-ui-font-size")).toBe("14px");
     expect(document.documentElement.style.getPropertyValue("--octant-editor-font-size")).toBe(
       "13px",
     );

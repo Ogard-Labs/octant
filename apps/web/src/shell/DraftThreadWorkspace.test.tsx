@@ -4,8 +4,8 @@ import {
   decodeProviderInstanceId,
   decodeProviderModelId,
 } from "@octant/contracts";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { Activity } from "lucide-react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import { Activity } from "../ui/icons";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -199,7 +199,6 @@ describe("DraftThreadWorkspace", () => {
         mode="code"
         projects={projects}
         projectId={codeProjectId}
-        startPresentation="home"
         coordinator={{ projectId: codeProjectId, onCancel: () => {}, onChoicesChange: vi.fn() }}
       />,
     );
@@ -210,7 +209,7 @@ describe("DraftThreadWorkspace", () => {
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
   it("keeps the context chips in the tray above the composer card with model controls below the prompt", () => {
-    const { container } = render(<DraftThreadWorkspace {...baseProps} startPresentation="home" />);
+    const { container } = render(<DraftThreadWorkspace {...baseProps} />);
     const composer = container.querySelector(".composer");
     const contextBar = container.querySelector(".composer-tray");
     expect(
@@ -362,7 +361,9 @@ describe("DraftThreadWorkspace", () => {
           projects={projects}
         />,
       );
-      expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
+      expect(
+        screen.getByRole("heading", { name: /^What should we work on in .+\?$/ }),
+      ).toBeVisible();
       expect(screen.getByRole("textbox", { name: /message|prompt|describe/i })).toBeVisible();
       expect(screen.queryByRole("group", { name: "Quick actions" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /Add a folder|Open terminal/ })).toBeNull();
@@ -395,7 +396,6 @@ describe("DraftThreadWorkspace", () => {
         onAttachFolder={vi.fn()}
         projectId={workProjectId}
         projects={projects}
-        startPresentation="home"
       />,
     );
 
@@ -406,7 +406,7 @@ describe("DraftThreadWorkspace", () => {
     expect(composer.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("shows the card area and its Customize control under the Code composer on Home, and none on New task", async () => {
+  it("shows the card area and its Customize control under the Code composer", async () => {
     const homeStart = {
       cards: [
         {
@@ -422,14 +422,13 @@ describe("DraftThreadWorkspace", () => {
       cardCustomization: { order: [], visibility: [] },
       onCardCustomizationChange: vi.fn(),
     };
-    const view = render(
+    render(
       <DraftThreadWorkspace
         {...baseProps}
         homeStart={homeStart}
         mode="code"
         projectId={codeProjectId}
         projects={projects}
-        startPresentation="home"
       />,
     );
 
@@ -437,25 +436,11 @@ describe("DraftThreadWorkspace", () => {
     const cards = await screen.findByRole("region", { name: "Home cards" });
     expect(composer.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole("button", { name: /Customize/ })).toBeVisible();
-    view.unmount();
-
-    render(
-      <DraftThreadWorkspace
-        {...baseProps}
-        homeStart={homeStart}
-        mode="code"
-        projectId={codeProjectId}
-        projects={projects}
-      />,
-    );
-    expect(screen.getByRole("textbox", { name: "First message" })).toBeVisible();
-    expect(screen.queryByRole("region", { name: "Home cards" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Customize/ })).not.toBeInTheDocument();
   });
 
-  it("shows only the question and the composer on New task, in every mode", () => {
+  it("puts the question, the composer and the list in one column, in every mode", async () => {
     for (const mode of ["chat", "work", "code"] as const) {
-      const { unmount } = render(
+      const { container, unmount } = render(
         <DraftThreadWorkspace
           {...baseProps}
           mode={mode}
@@ -463,35 +448,39 @@ describe("DraftThreadWorkspace", () => {
           recentThreads={[{ id: "thread-a", title: "Latency telemetry", onOpen: vi.fn() }]}
         />,
       );
-      expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
-      expect(screen.getByRole("textbox", { name: "First message" })).toBeVisible();
+      const column = container.querySelector(".welcome");
+      const children = Array.from(column?.children ?? []);
+      expect(children[0]).toHaveClass("welcome__heading");
+      expect(children[0]).toContainElement(
+        screen.getByRole("heading", { name: "What are we building today?" }),
+      );
+      expect(children[1]).toHaveClass("composer-stack");
+      expect(children[1]).toContainElement(screen.getByRole("textbox", { name: "First message" }));
+      const list = await screen.findByText("Latency telemetry");
+      expect(container.querySelector(".welcome > .home-start")).toContainElement(list);
       expect(screen.queryByRole("group", { name: "Suggested actions" })).not.toBeInTheDocument();
-      expect(screen.queryByText("Latency telemetry")).not.toBeInTheDocument();
       unmount();
     }
   });
 
-  it("renders intent cards for the active mode", () => {
-    const { container } = render(<DraftThreadWorkspace {...baseProps} startPresentation="home" />);
-    expect(screen.getByRole("group", { name: "Suggested actions" })).toBeVisible();
-    expect(screen.getByText("Explain a concept")).toBeVisible();
-    expect(screen.getByText("Draft text")).toBeVisible();
-    expect(screen.getByText("Brainstorm ideas")).toBeVisible();
-    const composer = container.querySelector(".draft-thread__composer");
-    const suggestions = container.querySelector(".draft-thread__intent-cards");
-    expect(composer?.compareDocumentPosition(suggestions!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-  });
+  it("shows Chat's starter ideas on a new chat until Chat has a thread, and fills the composer from one", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<DraftThreadWorkspace {...baseProps} projects={projects} />);
+    const ideas = screen.getByRole("group", { name: "Starter ideas" });
+    await user.click(within(ideas).getByRole("button", { name: "Plan" }));
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
+      "Turn this goal into a practical plan with clear next steps.",
+    );
+    expect(baseProps.onCreateThread).not.toHaveBeenCalled();
 
-  it("hides starter actions when recent work already gives the screen a next step", () => {
-    render(
+    rerender(
       <DraftThreadWorkspace
         {...baseProps}
+        projects={projects}
         recentThreads={[{ id: "thread-a", title: "Latency telemetry", onOpen: vi.fn() }]}
-        startPresentation="home"
       />,
     );
-
-    expect(screen.queryByRole("group", { name: "Suggested actions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Starter ideas" })).not.toBeInTheDocument();
   });
 
   it("offers the threads this mode already has and opens the one chosen", async () => {
@@ -504,11 +493,10 @@ describe("DraftThreadWorkspace", () => {
           { id: "thread-a", title: "Latency telemetry", detail: "2 hours ago", onOpen },
           { id: "thread-b", title: "Cache hit ratio", onOpen: vi.fn() },
         ]}
-        startPresentation="home"
       />,
     );
 
-    expect(screen.getByText("Latency telemetry")).toBeVisible();
+    expect(await screen.findByText("Latency telemetry")).toBeVisible();
     expect(screen.getByText("2 hours ago")).toBeVisible();
 
     await user.click(screen.getByText("Latency telemetry"));
@@ -518,23 +506,6 @@ describe("DraftThreadWorkspace", () => {
   it("leaves the start screen to the prompt when the mode has no threads yet", () => {
     render(<DraftThreadWorkspace {...baseProps} recentThreads={[]} />);
     expect(screen.queryByText("Continue")).not.toBeInTheDocument();
-  });
-
-  it("fills the composer when an intent card is clicked", async () => {
-    const user = userEvent.setup();
-    render(<DraftThreadWorkspace {...baseProps} startPresentation="home" />);
-    await user.click(screen.getByText("Explain a concept"));
-    const textarea = screen.getByRole("textbox", { name: "First message" });
-    expect(textarea).toHaveValue("Explain a concept: ");
-  });
-
-  it("does not overwrite existing prompt text when an intent card is clicked", async () => {
-    const user = userEvent.setup();
-    render(<DraftThreadWorkspace {...baseProps} startPresentation="home" />);
-    const textarea = screen.getByRole("textbox", { name: "First message" });
-    await user.type(textarea, "My custom prompt");
-    await user.click(screen.getByText("Explain a concept"));
-    expect(textarea).toHaveValue("My custom prompt");
   });
 
   it("disables the send button when the prompt is empty", () => {
@@ -621,7 +592,6 @@ describe("DraftThreadWorkspace", () => {
         onCreateCodeThread={onCreateCodeThread}
         projectId={"20000000-0000-4000-8000-000000000001" as never}
         projects={projects}
-        startPresentation="home"
       />,
     );
 
@@ -635,7 +605,8 @@ describe("DraftThreadWorkspace", () => {
     expect(onCreateCodeThread.mock.calls[0]?.[0]).not.toHaveProperty("issueContext");
   });
 
-  it("shows project context in the context strip", () => {
+  it("shows project context in the context strip", async () => {
+    const user = userEvent.setup();
     render(
       <DraftThreadWorkspace
         {...baseProps}
@@ -646,9 +617,14 @@ describe("DraftThreadWorkspace", () => {
         approvalLabel="Approval gated"
       />,
     );
-    expect(screen.getByText("my-repo")).toBeVisible();
-    // The branch context now lives on the branch selector trigger.
-    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("feature/test");
+    expect(screen.getAllByText("my-repo").length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("heading", { name: "What should we work on in my-repo?" }),
+    ).toBeVisible();
+    // A draft opened for a branch starts a worktree from it, and the Where chip says so.
+    await user.click(screen.getByRole("button", { name: /^Where this thread works/ }));
+    expect(screen.getByRole("button", { name: /^Start from/ })).toHaveTextContent("feature/test");
+    await user.keyboard("{Escape}");
     expect(screen.getByRole("button", { name: /^Mode:/ })).toHaveAccessibleName("Mode: Ask first");
   });
 
@@ -804,12 +780,12 @@ describe("DraftThreadWorkspace", () => {
       </ServerCodeProjectsContext.Provider>,
     );
     expect(screen.getByRole("button", { name: "Project: Service" })).toBeVisible();
-    expect(screen.getByText("devbox:/home/build/service")).toBeVisible();
+    expect(screen.getByTitle("On a server: devbox:/home/build/service")).toBeVisible();
     // A server thread starts in its folder unless the person picks a worktree there.
-    expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent("Current checkout");
-    expect(
-      screen.queryByText("The selected Project is unavailable. Choose another Project."),
-    ).toBeNull();
+    expect(screen.getByRole("button", { name: /^Where this thread works/ })).not.toHaveTextContent(
+      "New worktree",
+    );
+    expect(screen.queryByText("That Project is unavailable. Pick another.")).toBeNull();
   });
 
   it("offers a Work Project on a server in a Work draft, and only there", async () => {
@@ -1172,10 +1148,11 @@ describe("DraftThreadWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(screen.getByRole("option", { name: /Octant/ }));
-    const workspace = screen.getByRole("button", { name: "Workspace" });
-    expect(workspace).toHaveTextContent("Managed worktree");
+    const workspace = screen.getByRole("button", { name: /^Where this thread works/ });
+    expect(workspace).toHaveTextContent("New worktree");
     await user.click(workspace);
-    await user.click(await screen.findByRole("menuitemradio", { name: "Current checkout" }));
+    await user.click(await screen.findByRole("radio", { name: /This checkout/ }));
+    await user.keyboard("{Escape}");
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix search");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
 
@@ -1210,8 +1187,10 @@ describe("DraftThreadWorkspace", () => {
     );
     const draft = screen.getByRole("textbox", { name: "First message" });
     await user.type(draft, "Fix search without losing this draft");
-    await user.click(screen.getByRole("button", { name: /^Working folder:/ }));
-    const subfolder = await screen.findByLabelText("Subfolder within working folder");
+    await user.click(screen.getByRole("button", { name: /^Where this thread works/ }));
+    // The subfolder is edited in a pop-out beside the menu's row.
+    await user.click(screen.getByRole("button", { name: /^Subfolder/ }));
+    const subfolder = await screen.findByLabelText("Subfolder");
     await user.clear(subfolder);
     await user.type(subfolder, "src");
     await user.clear(subfolder);
@@ -1224,14 +1203,16 @@ describe("DraftThreadWorkspace", () => {
     expect(onCreateCodeThread).not.toHaveBeenCalled();
     expect(onCreateThread).not.toHaveBeenCalled();
     expect(draft).toHaveValue("Fix search without losing this draft");
-    // The chip keeps saying what was typed, and the field still holds it.
-    const chip = screen.getByRole("button", { name: /^Working folder:.*not a usable subfolder$/ });
-    expect(chip).toHaveTextContent("../outside · not usable");
-    // Pressing send closed the popup; the rejected entry is still there when
-    // it opens again.
-    expect(screen.queryByLabelText("Subfolder within working folder")).toBeNull();
+    // The chip says in words that the subfolder is refused, and the field
+    // still holds what was typed.
+    const chip = screen.getByRole("button", { name: /^Where this thread works/ });
+    expect(chip).toHaveTextContent("subfolder not usable");
+    // The menu is closed; the rejected entry is still there when the
+    // Subfolder pop-out opens again.
+    expect(chip).toHaveAttribute("aria-expanded", "false");
     await user.click(chip);
-    const reopened = await screen.findByLabelText("Subfolder within working folder");
+    await user.click(screen.getByRole("button", { name: /^Subfolder/ }));
+    const reopened = await screen.findByLabelText("Subfolder");
     expect(reopened).toHaveValue("../outside");
 
     await user.clear(reopened);
@@ -1564,7 +1545,7 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue("Keep this draft");
   });
 
-  it("shows the Create from Issues tab when issues-read is available", async () => {
+  it("shows the Create from GitHub tab when issues-read is available", async () => {
     const user = userEvent.setup();
     render(
       <DraftThreadWorkspace
@@ -1584,7 +1565,7 @@ describe("DraftThreadWorkspace", () => {
       />,
     );
     await user.click(await screen.findByRole("button", { name: "Create from…" }));
-    expect(screen.getByRole("tab", { name: "Issues" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "GitHub" })).toBeVisible();
   });
 
   it("hides Create from when the GitHub plugin is disabled", async () => {
@@ -1825,7 +1806,7 @@ describe("Chat draft reasoning", () => {
             }),
             runtime: "provider",
             readiness: "ready",
-            driverLabel: "Codex CLI",
+            driverLabel: "Codex",
             endpointHost: undefined,
             executionHost: "This computer",
             sections: [
@@ -1861,9 +1842,12 @@ describe("Chat draft reasoning", () => {
       />,
     );
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    const effort = screen.getByRole("slider", { name: "Effort level" });
-    fireEvent.change(effort, { target: { value: "2" } });
-    expect(effort).toHaveAttribute("aria-valuetext", "High");
+    const effort = screen.getByRole("group", { name: "Effort level" });
+    await user.click(within(effort).getByRole("button", { name: "High" }));
+    expect(within(effort).getByRole("button", { name: "High" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     await user.keyboard("{Escape}");
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Hello");
     await user.click(screen.getByRole("button", { name: "Create thread" }));

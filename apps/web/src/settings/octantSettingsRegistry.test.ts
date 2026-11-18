@@ -266,9 +266,9 @@ describe("octantSettingsRegistry", () => {
     expect(material?.nativeRequired).toBeUndefined();
   });
 
-  it("keeps Usage opaque and registers the Chat and Code setup destinations", () => {
+  it("registers only the spend ceiling switch in Usage, and the Chat and Code setup destinations", () => {
     const usage = octantSettingsRegistry.sections.find((s) => s.id === "usage");
-    expect(usage?.settings).toEqual([]);
+    expect(usage?.settings.map((setting) => setting.id)).toEqual(["spend-ceiling-shown"]);
     const providers = octantSettingsRegistry.sections.find((s) => s.id === "providers");
     expect(providers?.settings.map((setting) => setting.id)).toEqual([
       "automatic-model-judge",
@@ -469,6 +469,8 @@ const UNLISTED_SETTING_ROWS = new Set([
  * named here, which opens the page that lists the items.
  */
 const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
+  "appearance.custom.*.*": "appearance.custom",
+  "appearance.custom.*.contrast": "appearance.custom",
   "resource-*": "resource-limits",
   "provider-*-display-name": "provider-display-name",
   "provider-*-binary-path": "provider-binary-path",

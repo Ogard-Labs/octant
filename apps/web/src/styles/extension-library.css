@@ -28,9 +28,8 @@
 
 .library__search-input {
   width: 100%;
-  height: 40px;
+  height: var(--oct-settings-control-height);
   padding-left: calc(var(--oct-space-3) + 16px + var(--oct-space-2));
-  font-size: var(--oct-text-sm);
 }
 
 .library__filters {

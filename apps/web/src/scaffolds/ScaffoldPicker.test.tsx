@@ -1,5 +1,5 @@
 import { decodeScaffoldEntry } from "@octant/contracts/scaffolds";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ScaffoldPicker } from "./ScaffoldPicker";
@@ -53,19 +53,94 @@ function picker(overrides: Partial<Parameters<typeof ScaffoldPicker>[0]> = {}) {
   return { onStart };
 }
 
+/** Opens the one row's menu and returns the template rows in it. */
+async function openTemplates(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: /^Start from a template/ }));
+  return screen.findByRole("menu");
+}
+
 describe("choosing a scaffold to start a project from", () => {
-  it("says which scaffold this machine cannot run, and why", () => {
+  it("keeps the templates in one row that names them, and names the one chosen", async () => {
+    const user = userEvent.setup();
     picker();
 
-    expect(screen.getByRole("button", { name: /Native Swift package/ })).toBeDisabled();
-    expect(screen.getByText(/Needs swift, which is not on this machine/)).toBeInTheDocument();
+    // One row on the page, not one for each template.
+    const row = screen.getByRole("button", { name: "Start from a template" });
+    expect(row).toHaveTextContent("Web app or Native Swift package");
+    expect(screen.queryByRole("heading", { name: "Start from a template" })).toBeNull();
+    expect(screen.queryByText(/which is not on this machine/)).toBeNull();
+
+    const menu = await openTemplates(user);
+    await user.click(within(menu).getByRole("menuitem", { name: "Web app" }));
+    expect(
+      screen.getByRole("button", { name: "Start from a template: Web app" }),
+    ).toHaveTextContent("Web app");
+    expect(screen.getByLabelText("New directory")).toBeVisible();
+
+    // The same choice takes it back.
+    await user.click(within(await openTemplates(user)).getByRole("menuitem", { name: "Web app" }));
+    expect(screen.queryByLabelText("New directory")).toBeNull();
+  });
+
+  it("says on the row when no template can run here, and still opens to say what each needs", async () => {
+    const user = userEvent.setup();
+    picker({ runnable: new Map() });
+
+    expect(screen.getByRole("button", { name: "Start from a template" })).toHaveTextContent(
+      "None can run on this machine yet. Open to see what each needs.",
+    );
+    const menu = await openTemplates(user);
+    expect(within(menu).getByRole("menuitem", { name: "Web app" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
+  it("takes the form away when the chosen template can no longer run", async () => {
+    const user = userEvent.setup();
+    const onStart = vi.fn();
+    const props = { busy: false, entries: [webApp, nativeApp], onStart };
+    const { rerender } = render(
+      <ScaffoldPicker {...props} runnable={new Map([["web-app", true]])} />,
+    );
+    await user.click(within(await openTemplates(user)).getByRole("menuitem", { name: "Web app" }));
+    expect(screen.getByLabelText("New directory")).toBeVisible();
+
+    rerender(<ScaffoldPicker {...props} runnable={new Map()} />);
+    expect(screen.queryByLabelText("New directory")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start it" })).toBeNull();
+  });
+
+  it("says in the menu which template this machine cannot run, and why", async () => {
+    const user = userEvent.setup();
+    picker();
+
+    const menu = await openTemplates(user);
+    const native = within(menu).getByRole("menuitem", { name: "Native Swift package" });
+    // The reason is the row's quiet second line, not a warning: the row is
+    // already disabled, and nothing here is the person's to fix.
+    expect(native).toHaveAttribute("aria-disabled", "true");
+    expect(native).toHaveAccessibleDescription("Needs swift, which is not on this machine.");
+    expect(native).not.toHaveTextContent("A Swift package the Apple toolchain builds directly");
+  });
+
+  it("gives each kind of project its own glyph and says what it is", async () => {
+    const user = userEvent.setup();
+    picker();
+
+    const menu = await openTemplates(user);
+    const web = within(menu).getByRole("menuitem", { name: "Web app" });
+    const native = within(menu).getByRole("menuitem", { name: "Native Swift package" });
+    expect(web.querySelector(".octant-icon-globe")).not.toBeNull();
+    expect(native.querySelector(".octant-icon-code2")).not.toBeNull();
+    expect(web).toHaveAccessibleDescription("A browser app with a dev server and a build.");
   });
 
   it("shows the exact command before it is started", async () => {
     const user = userEvent.setup();
     picker();
 
-    await user.click(screen.getByRole("button", { name: /Web app/ }));
+    await user.click(within(await openTemplates(user)).getByRole("menuitem", { name: "Web app" }));
     await user.type(screen.getByLabelText("New directory"), "storefront");
 
     expect(
@@ -78,7 +153,7 @@ describe("choosing a scaffold to start a project from", () => {
     const user = userEvent.setup();
     const { onStart } = picker();
 
-    await user.click(screen.getByRole("button", { name: /Web app/ }));
+    await user.click(within(await openTemplates(user)).getByRole("menuitem", { name: "Web app" }));
     expect(screen.getByRole("button", { name: "Start it" })).toBeDisabled();
 
     await user.type(screen.getByLabelText("New directory"), "storefront");

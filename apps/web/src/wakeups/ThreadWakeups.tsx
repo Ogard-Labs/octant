@@ -1,4 +1,4 @@
-import { AlarmClock } from "lucide-react";
+import { AlarmClock } from "../ui/icons";
 import type { ThreadWakeup, ThreadWakeupMode } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {

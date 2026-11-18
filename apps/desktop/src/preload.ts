@@ -77,6 +77,7 @@ import type {
   RemoteMintedPairingTicket,
   RemotePendingPairingRequest,
   RemotePairingTicketSourceClass,
+  GlassRefusalReason,
   ResolvedSidebarMaterial,
   SettlePairedComputerOutcome,
   SidebarMaterialPreference,
@@ -130,6 +131,13 @@ export interface RemoteHostIdentityRotationResult {
   readonly fingerprint: string;
 }
 type MaterialListener = (event: unknown, material: unknown) => void;
+
+const GLASS_REFUSAL_REASONS: ReadonlyArray<GlassRefusalReason> = [
+  "unsupported-platform",
+  "reduced-transparency",
+  "increased-contrast",
+  "thermal-pressure",
+];
 type DeepLinkListener = (event: unknown, target: unknown) => void;
 
 const OWNER_UNLOCK_REFUSALS: ReadonlySet<string> = new Set([
@@ -254,6 +262,10 @@ export interface OctantHostBridge {
   readonly attachBrowserSurface: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
   readonly updateBrowserSurfaceBounds: (request: BrowserSurfaceRequest) => Promise<void>;
   readonly detachBrowserSurface: (request: Omit<BrowserSurfaceRequest, "bounds">) => Promise<void>;
+  /** A small display-only picture of this window's own Browser page, or nothing. */
+  readonly captureBrowserSurfacePreview: (
+    request: Omit<BrowserSurfaceRequest, "bounds">,
+  ) => Promise<string | undefined>;
   readonly commandBrowserSurface: (
     request: Omit<BrowserSurfaceRequest, "bounds"> & {
       readonly command: "back" | "forward" | "reload" | "stop";
@@ -411,8 +423,13 @@ export interface OctantHostBridge {
     listener: (material: ResolvedSidebarMaterial) => void,
   ) => () => void;
   readonly subscribeWindowFullScreen: (listener: (fullScreen: boolean) => void) => () => void;
+  /** Whether this window is the one in front; false while another window or app is. */
+  readonly subscribeWindowActive: (listener: (active: boolean) => void) => () => void;
   readonly subscribeResolvedSidebarVibrancy: (
     listener: (vibrancy: "sidebar" | null) => void,
+  ) => () => void;
+  readonly subscribeResolvedGlassRefusal: (
+    listener: (refusal: GlassRefusalReason | null) => void,
   ) => () => void;
   readonly subscribeCodeDeepLinks: (listener: (target: unknown) => void) => () => void;
   readonly subscribeOpenSettings: (listener: () => void) => () => void;
@@ -656,6 +673,13 @@ export function createHostBridge(
     detachBrowserSurface: (request: Omit<BrowserSurfaceRequest, "bounds">) => {
       validateBrowserSurfaceIdentity(request);
       return invoke(IPC_CHANNELS.browserSurfaceDetach, request);
+    },
+    captureBrowserSurfacePreview: async (request: Omit<BrowserSurfaceRequest, "bounds">) => {
+      validateBrowserSurfaceIdentity(request);
+      const picture: unknown = await ipc.invoke(IPC_CHANNELS.browserSurfacePreview, request);
+      return typeof picture === "string" && picture.startsWith("data:image/jpeg;base64,")
+        ? picture
+        : undefined;
     },
     commandBrowserSurface: (
       request: Omit<BrowserSurfaceRequest, "bounds"> & {
@@ -1137,6 +1161,13 @@ export function createHostBridge(
       ipc.on(IPC_CHANNELS.windowFullScreen, receive);
       return () => ipc.removeListener(IPC_CHANNELS.windowFullScreen, receive);
     },
+    subscribeWindowActive: (listener: (active: boolean) => void) => {
+      const receive: MaterialListener = (_event, active) => {
+        if (typeof active === "boolean") listener(active);
+      };
+      ipc.on(IPC_CHANNELS.windowActive, receive);
+      return () => ipc.removeListener(IPC_CHANNELS.windowActive, receive);
+    },
     subscribeResolvedMaterial: (listener: (material: ResolvedSidebarMaterial) => void) => {
       const receive: MaterialListener = (_event, material) => {
         if (material === "opaque" || material === "translucent") listener(material);
@@ -1150,6 +1181,17 @@ export function createHostBridge(
       };
       ipc.on(IPC_CHANNELS.resolvedSidebarVibrancy, receive);
       return () => ipc.removeListener(IPC_CHANNELS.resolvedSidebarVibrancy, receive);
+    },
+    subscribeResolvedGlassRefusal: (listener: (refusal: GlassRefusalReason | null) => void) => {
+      const receive: MaterialListener = (_event, refusal) => {
+        if (refusal === null) listener(null);
+        else {
+          const reason = GLASS_REFUSAL_REASONS.find((candidate) => candidate === refusal);
+          if (reason !== undefined) listener(reason);
+        }
+      };
+      ipc.on(IPC_CHANNELS.resolvedGlassRefusal, receive);
+      return () => ipc.removeListener(IPC_CHANNELS.resolvedGlassRefusal, receive);
     },
     subscribeBrowserSurfaceState: (listener: (state: BrowserSurfaceState) => void) => {
       const receive: MaterialListener = (_event, value) => {

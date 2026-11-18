@@ -1,4 +1,4 @@
-import type { ReactElement, ReactNode } from "react";
+import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import {
   Tooltip,
   TooltipPopup,
@@ -18,27 +18,118 @@ export interface OctantTooltipProps {
    * `--oct-fg` text disappears against the inverted ground.
    */
   readonly surface?: "inverted" | "card";
+  /**
+   * A one-word chip for the rail: it opens beside the control, centred on it,
+   * and stays small so it covers as little of the sidebar as it must.
+   */
+  readonly compact?: boolean;
+  /**
+   * The key that does what the control does, as a quiet key cap after the
+   * label. It is a hint for a sighted reader: the control's own name stays the
+   * accessible name.
+   */
+  readonly shortcut?: string | undefined;
 }
 
-/** Opaque, collision-aware tooltip for compact shell controls. */
+/**
+ * How focus last arrived: by a pointer press, by a key that moves focus, or by
+ * a key that acts (Escape, Enter, Space), which is how a sheet or a menu hands
+ * focus back to its trigger. Only the key that moves focus earns a tooltip.
+ */
+let lastInput: "pointer" | "navigation" | "action" = "action";
+const NAVIGATION_KEYS = new Set([
+  "Tab",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+]);
+let watchers = 0;
+const onPointerDown = () => {
+  lastInput = "pointer";
+};
+const onKeyDown = (event: KeyboardEvent) => {
+  lastInput = NAVIGATION_KEYS.has(event.key) ? "navigation" : "action";
+};
+
+function useWatchInputModality(): void {
+  useEffect(() => {
+    if (watchers === 0) {
+      window.addEventListener("pointerdown", onPointerDown, true);
+      window.addEventListener("keydown", onKeyDown, true);
+    }
+    watchers += 1;
+    return () => {
+      watchers -= 1;
+      if (watchers === 0) {
+        window.removeEventListener("pointerdown", onPointerDown, true);
+        window.removeEventListener("keydown", onKeyDown, true);
+      }
+    };
+  }, []);
+}
+
+/**
+ * Opaque, collision-aware tooltip for compact shell controls. It opens on
+ * hover (after the shared delay) and on keyboard focus-visible, never on focus
+ * a click or a sheet's return of focus caused, and it closes on pointer leave,
+ * on a press and on Escape. Left to the library, focus handed back to the rail's
+ * Settings button after the sheet closed opened a tooltip that pointer leave
+ * could not close, and it covered the account row.
+ */
 export function OctantTooltip(props: OctantTooltipProps) {
+  useWatchInputModality();
+  const [open, setOpen] = useState(false);
+  // Escape closes it from wherever focus is; a press and pointer leave are
+  // the library's own closes (closeOnClick and the hover hook).
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", close, true);
+    return () => window.removeEventListener("keydown", close, true);
+  }, [open]);
   return (
-    <Tooltip>
-      <TooltipTrigger closeOnClick delay={350} render={props.children} />
+    <Tooltip
+      onOpenChange={(next, details) => {
+        if (next && details.reason === "trigger-focus" && lastInput !== "navigation") return;
+        setOpen(next);
+      }}
+      open={open}
+    >
+      {/* Half a second: a pointer crossing a row of icon buttons on its way
+          somewhere else names none of them. At 150ms every button it passed
+          flashed its label, which is how a web page behaves and not a
+          desktop app. */}
+      <TooltipTrigger closeOnClick delay={500} render={props.children} />
       <TooltipPortal>
         <TooltipPositioner
           align={props.align ?? "center"}
           className="octant-tooltip__positioner"
           side={props.side ?? "bottom"}
-          sideOffset={8}
+          sideOffset={props.compact === true ? 6 : 8}
         >
           <TooltipPopup
-            className={
-              props.surface === "card" ? "octant-tooltip octant-tooltip--card" : "octant-tooltip"
-            }
+            className={[
+              "octant-tooltip",
+              props.surface === "card" ? "octant-tooltip--card" : "",
+              props.compact === true ? "octant-tooltip--compact" : "",
+            ]
+              .filter((name) => name !== "")
+              .join(" ")}
             role="tooltip"
           >
             {props.label}
+            {props.shortcut === undefined ? null : (
+              <kbd aria-hidden="true" className="octant-tooltip__key">
+                {props.shortcut}
+              </kbd>
+            )}
           </TooltipPopup>
         </TooltipPositioner>
       </TooltipPortal>

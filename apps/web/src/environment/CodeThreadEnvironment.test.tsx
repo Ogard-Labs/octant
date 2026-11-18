@@ -4,6 +4,7 @@ import {
   decodeCodeOperationId,
   decodeCodeThreadId,
   decodeProjectId,
+  decodeThreadBoardPullRequestSummaries,
   decodeWorkspaceTab,
   decodeWorkspaceTabId,
   type CodeEnvironmentObservation,
@@ -19,6 +20,7 @@ import { decodeProjectExtraFolder } from "@octant/contracts/projects";
 import { describe, expect, it, vi } from "vitest";
 import { CodeCheckoutBar } from "../code/CodeCheckoutBar";
 import { CodeThreadEnvironment } from "./CodeThreadEnvironment";
+import { ThreadActivityPreviewContext } from "../threadActivity/ThreadActivityEnvironment";
 
 const codeProjectId = decodeProjectId("00000000-0000-4000-8000-000000000901");
 const tabId = decodeWorkspaceTabId("30000000-0000-4000-8000-00000000000a");
@@ -361,7 +363,7 @@ describe("CodeThreadEnvironment", () => {
     expect(screen.queryByRole("button", { name: "Open Environment" })).not.toBeInTheDocument();
   });
 
-  it("holds only environment-scoped groups, leaving the thread's own surfaces to the dock", async () => {
+  it("holds no thread surface that belongs to the dock, and no Local servers row while nothing is running", async () => {
     render(
       <CodeThreadEnvironment
         environmentOpen
@@ -374,7 +376,6 @@ describe("CodeThreadEnvironment", () => {
     );
     await openEnvironment();
 
-    expect(screen.getByRole("button", { name: /^Local servers/ })).toBeVisible();
     expect(screen.queryByRole("button", { name: /^Files/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Plan/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Publish/ })).not.toBeInTheDocument();
@@ -445,6 +446,49 @@ describe("CodeThreadEnvironment", () => {
     expect(queryProjectPullRequests).toHaveBeenCalledWith({ version: 1 });
   });
 
+  it("lists this thread's pull requests in the Changes card and counts them in its folded summary", async () => {
+    const onOpenThreadPullRequest = vi.fn();
+    const threadPullRequests = decodeThreadBoardPullRequestSummaries({
+      items: [
+        {
+          identity: {
+            projectId: String(codeProjectId),
+            repositoryOwner: "acme",
+            repositoryName: "repo",
+            number: 12,
+          },
+          title: "Deliver the change",
+          state: "merged",
+          checks: "passing",
+          review: "approved",
+          mergeability: "mergeable",
+          freshness: "fresh",
+          readyToMerge: false,
+        },
+      ],
+      hiddenCount: 0,
+    });
+    render(
+      <CodeThreadEnvironment
+        environmentOpen
+        onOpenThreadPullRequest={onOpenThreadPullRequest}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+        threadPullRequests={threadPullRequests}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+    const changes = screen.getByRole("group", { name: "Changes" });
+    fireEvent.click(within(changes).getByRole("button", { name: /^Pull request 12/ }));
+    expect(onOpenThreadPullRequest).toHaveBeenCalledTimes(1);
+    // Folded, the section still says there is one.
+    fireEvent.click(within(changes).getByRole("button", { name: /^Changes/ }));
+    expect(within(changes).getByText(/· 1 PR$/)).toBeInTheDocument();
+  });
+
   it("opens Review from View changes without leaving the thread surface", async () => {
     const onOpenChanges = vi.fn();
     render(
@@ -464,7 +508,7 @@ describe("CodeThreadEnvironment", () => {
     expect(screen.getByTestId("code-workspace-content")).toBeVisible();
   });
 
-  it("names the checkout, its branch, and its folder once, above the changes", async () => {
+  it("leads with the thread's place as rows: the Project with its folder, the branch with its checkout kind", async () => {
     render(
       <CodeThreadEnvironment
         environmentOpen
@@ -477,10 +521,13 @@ describe("CodeThreadEnvironment", () => {
     );
     await openEnvironment();
     const header = screen.getByRole("region", { name: "Environment details" });
-    expect(within(header).getByText("feature/issue-204")).toBeVisible();
+    expect(header.querySelector(".environment-card__caption")).toHaveTextContent("Environment");
     expect(within(header).getByText("~/Dev/Repos/octant/.worktrees/issue-204")).toBeVisible();
-    expect(screen.getAllByText("feature/issue-204")).toHaveLength(1);
-    expect(screen.getByTitle(readyObservation().worktreeRoot)).toHaveTextContent("issue-204");
+    const branch = within(header).getByText("feature/issue-204").closest(".environment-row");
+    expect(branch).toHaveTextContent("feature/issue-204Worktree");
+    expect(screen.getByTitle(readyObservation().worktreeRoot)).toHaveTextContent(
+      "Worktree…/.worktrees/issue-204",
+    );
   });
 
   it("reports an unavailable identity when no project is bound to the tab", () => {
@@ -569,6 +616,34 @@ describe("CodeThreadEnvironment", () => {
         }),
       { timeout: 5_000 },
     );
+  });
+
+  it("changes what the task delivers from one Delivers row's menu, with the version it read", async () => {
+    const user = userEvent.setup();
+    const onExecute = vi.fn(async () => ({ kind: "thread-updated" as const }));
+    render(
+      <CodeThreadEnvironment
+        deliveryOutcome="opened-pr"
+        environmentOpen
+        onExecute={onExecute as never}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+
+    await user.click(await screen.findByRole("button", { name: "Delivers, Opened PR" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Local change" }));
+
+    expect(onExecute).toHaveBeenCalledWith({
+      kind: "confirm-code-delivery-outcome",
+      threadId: codeThreadId,
+      expectedVersion: 1,
+      outcomeKind: "local-implementation",
+    });
   });
 
   it("keeps keyboard focus on the Working folder row when applying re-reads the checkout", async () => {
@@ -725,6 +800,204 @@ describe("CodeThreadEnvironment", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("shows Local servers only while a server runs, and says nothing running when none does", async () => {
+    const serverClient = (currentCheckout: ReadonlyArray<unknown>) => ({
+      execute: vi.fn(
+        async (command: LocalServerCommand) =>
+          ({
+            kind: "local-servers-listed",
+            requestId: command.requestId,
+            snapshot: {
+              threadId: codeThreadId,
+              projectId: codeProjectId,
+              currentCheckout,
+              other: [],
+              observedAt: "2026-08-14T08:00:00.000Z",
+            },
+          }) as unknown as LocalServerCommandResult,
+      ),
+    });
+    const idle = serverClient([]);
+    const first = render(
+      <CodeThreadEnvironment
+        environmentOpen
+        localServerClient={idle as never}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+    await waitFor(() => expect(idle.execute).toHaveBeenCalled());
+    expect(screen.queryByText("Local servers")).not.toBeInTheDocument();
+    first.unmount();
+
+    const busy = serverClient([
+      {
+        listenerId: "lsn_0123456789abcdef0123456789abcdef",
+        port: 5173,
+        url: "http://127.0.0.1:5173/",
+        processName: "node",
+        workingDirectory: "/Users/example/code/octant",
+        attribution: "current-checkout",
+        startSource: "octant",
+        bindScope: "loopback",
+        health: "listening",
+        openAvailable: true,
+        stop: { status: "available", confirmationRequired: false },
+      },
+    ]);
+    render(
+      <CodeThreadEnvironment
+        environmentOpen
+        localServerClient={busy as never}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    expect(await screen.findByRole("button", { name: /^Local servers/ })).toBeVisible();
+  });
+
+  it("keeps the Local servers row with its error when the first read fails", async () => {
+    const failing = {
+      execute: vi.fn(async () => {
+        throw new Error("The server list could not be read.");
+      }),
+    };
+    render(
+      <CodeThreadEnvironment
+        environmentOpen
+        localServerClient={failing as never}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    expect(await screen.findByRole("button", { name: /^Local servers/ })).toBeVisible();
+    expect(await screen.findByRole("alert")).toBeVisible();
+  });
+
+  it("draws the Computer use row only while a session exists", async () => {
+    const renderWith = (available: boolean) =>
+      render(
+        <ThreadActivityPreviewContext.Provider
+          value={{ available, hidden: false, setHidden: vi.fn() }}
+        >
+          <CodeThreadEnvironment
+            environmentOpen
+            project={codeProject()}
+            projectClient={projectClient(readyObservation())}
+            tab={codeTab()}
+          >
+            <div />
+          </CodeThreadEnvironment>
+        </ThreadActivityPreviewContext.Provider>,
+      );
+    const none = renderWith(false);
+    await openEnvironment();
+    expect(screen.queryByText("Computer use")).not.toBeInTheDocument();
+    none.unmount();
+    renderWith(true);
+    await openEnvironment();
+    expect(screen.getByText("Computer use")).toBeVisible();
+  });
+
+  describe("the Changes section", () => {
+    const detachedClean = (): CodeEnvironmentObservation => ({
+      ...readyObservation(),
+      branch: { kind: "detached", oid: "0123456789abcdef0123456789abcdef01234567" },
+      changes: "clean",
+    });
+    const unavailable = (): CodeEnvironmentObservation => ({
+      status: "unavailable",
+      projectId: codeProjectId,
+      projectName: "Octant",
+      observedAt: "2026-07-23T20:00:00.000Z" as CodeEnvironmentObservation["observedAt"],
+      reason: "The checkout is not reachable.",
+    });
+    async function renderChanges(observation: CodeEnvironmentObservation, extra = {}) {
+      render(
+        <CodeThreadEnvironment
+          environmentOpen
+          onCreatePullRequest={vi.fn()}
+          onNewThreadInProject={vi.fn()}
+          onOpenGit={vi.fn()}
+          onOpenWorktrees={vi.fn()}
+          project={codeProject()}
+          projectClient={projectClient(observation)}
+          tab={codeTab()}
+          {...extra}
+        >
+          <div />
+        </CodeThreadEnvironment>,
+      );
+      await openEnvironment();
+      await screen.findByRole("button", { name: "More for changes" });
+    }
+
+    it("offers Commit or push and Create pull request on a checkout with changes on a branch", async () => {
+      await renderChanges(readyObservation());
+      expect(screen.getByRole("button", { name: "Commit or push" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Create pull request" })).toBeVisible();
+    });
+
+    it("offers neither row on a clean detached checkout or one that cannot be read", async () => {
+      const clean = render(
+        <CodeThreadEnvironment
+          environmentOpen
+          onCreatePullRequest={vi.fn()}
+          onOpenGit={vi.fn()}
+          project={codeProject()}
+          projectClient={projectClient(detachedClean())}
+          tab={codeTab()}
+        >
+          <div />
+        </CodeThreadEnvironment>,
+      );
+      await openEnvironment();
+      await screen.findByText("No uncommitted changes");
+      expect(screen.queryByRole("button", { name: "Commit or push" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Create pull request" })).not.toBeInTheDocument();
+      clean.unmount();
+      render(
+        <CodeThreadEnvironment
+          environmentOpen
+          onCreatePullRequest={vi.fn()}
+          onOpenGit={vi.fn()}
+          project={codeProject()}
+          projectClient={projectClient(unavailable())}
+          tab={codeTab()}
+        >
+          <div />
+        </CodeThreadEnvironment>,
+      );
+      await screen.findByText("Repository unavailable");
+      expect(screen.queryByRole("button", { name: "Commit or push" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Create pull request" })).not.toBeInTheDocument();
+    });
+
+    it("keeps New task and Worktrees in a menu on the title row that does not fold the section", async () => {
+      const user = userEvent.setup();
+      await renderChanges(readyObservation());
+      expect(screen.queryByRole("button", { name: "Worktrees" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "New task in this Project" })).toBeNull();
+      const section = screen.getByRole("button", { name: /^Changes/ });
+      expect(section).toHaveAttribute("aria-expanded", "true");
+      await user.click(screen.getByRole("button", { name: "More for changes" }));
+      expect(await screen.findByRole("menuitem", { name: "Worktrees" })).toBeVisible();
+      expect(screen.getByRole("menuitem", { name: "New task in this Project" })).toBeVisible();
+      await user.keyboard("{Escape}");
+      expect(section).toHaveAttribute("aria-expanded", "true");
+    });
   });
 
   it("lists the Project's extra folders from home, and shows nothing when it has none", async () => {

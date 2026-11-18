@@ -47,37 +47,62 @@ function panel(overrides: Partial<Parameters<typeof ProductFeedbackPanel>[0]> = 
     .mockResolvedValue(true);
   const onCancel = vi.fn();
   const onDiscard = vi.fn();
-  const onTogglePointing = vi.fn();
   const onUpdate = vi
     .fn<Parameters<typeof ProductFeedbackPanel>[0]["onUpdate"]>()
     .mockResolvedValue(true);
-  const onRefresh = vi.fn();
   const view = render(
     <ProductFeedbackPanel
       busy={false}
       onCancel={onCancel}
       onDiscard={onDiscard}
       onSubmit={onSubmit}
-      onTogglePointing={onTogglePointing}
+      listOpen
       pending={[]}
       crops={{}}
       preview={undefined}
       previewExpired={false}
       onUpdate={onUpdate}
-      onRefresh={onRefresh}
       pointing={false}
       {...overrides}
     />,
   );
-  return { onSubmit, onCancel, onDiscard, onTogglePointing, onUpdate, onRefresh, view };
+  return { onSubmit, onCancel, onDiscard, onUpdate, view };
 }
 
 describe("pointing at the running product", () => {
-  it("asks the user to tap the thing they mean once pointing is on", () => {
-    panel({ pointing: true });
+  it("draws nothing while no note is being written and the list of notes is closed", () => {
+    const { view } = panel({ pending: [note], listOpen: false });
 
-    expect(screen.getByRole("button", { name: "Cancel pointing" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Tap the thing you mean");
+    expect(view.container).toBeEmptyDOMElement();
+  });
+
+  it("keeps the height it had when pointing began, so the page above cannot move", () => {
+    const bounds = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue(DOMRect.fromRect({ x: 0, y: 0, width: 300, height: 180 }));
+    try {
+      const props = {
+        busy: false,
+        pending: [],
+        crops: {},
+        preview: preview(),
+        previewExpired: false,
+        listOpen: false,
+        onSubmit: vi.fn().mockResolvedValue(true),
+        onCancel: vi.fn(),
+        onDiscard: vi.fn(),
+        onUpdate: vi.fn().mockResolvedValue(true),
+      };
+      const view = render(<ProductFeedbackPanel {...props} pointing={false} />);
+      const sheet = screen.getByRole("region", { name: "Notes on this page" });
+      expect(sheet.style.height).toBe("");
+      view.rerender(<ProductFeedbackPanel {...props} pointing />);
+      expect(sheet.style.height).toBe("180px");
+      view.rerender(<ProductFeedbackPanel {...props} pointing={false} />);
+      expect(sheet.style.height).toBe("");
+    } finally {
+      bounds.mockRestore();
+    }
   });
 
   it("writes a note about the spot the user marked", async () => {
@@ -96,10 +121,9 @@ describe("pointing at the running product", () => {
     expect(screen.getByRole("button", { name: "Leave the note" })).toBeDisabled();
   });
 
-  it("says the notes travel with the next message", () => {
+  it("names a note's element the way a person would recognise it", () => {
     panel({ pending: [note] });
 
-    expect(screen.getByText("1 note goes with your next message")).toBeInTheDocument();
     // The element is named the way a person would recognise it, not by selector.
     expect(screen.getByRole("heading", { name: "Save changes" })).toBeVisible();
   });
@@ -115,11 +139,6 @@ describe("pointing at the running product", () => {
     expect(onDiscard).toHaveBeenCalledWith(note);
   });
 
-  it("reports the host's refusal where the user is looking", () => {
-    panel({ message: "There is nothing at that spot to point at." });
-
-    expect(screen.getByRole("status")).toHaveTextContent("There is nothing at that spot");
-  });
   it("keeps the comment after a refused save and an explicit recapture", async () => {
     const onSubmit = vi
       .fn<Parameters<typeof ProductFeedbackPanel>[0]["onSubmit"]>()
@@ -135,9 +154,8 @@ describe("pointing at the running product", () => {
       onSubmit,
       onCancel: vi.fn(),
       onDiscard: vi.fn(),
-      onTogglePointing: vi.fn(),
+      listOpen: true,
       onUpdate: vi.fn().mockResolvedValue(true),
-      onRefresh: vi.fn(),
     };
     const view = render(<ProductFeedbackPanel {...props} />);
     fireEvent.change(screen.getByRole("textbox", { name: "What is wrong with this?" }), {
@@ -200,9 +218,8 @@ describe("pointing at the running product", () => {
       onSubmit: vi.fn().mockResolvedValue(true),
       onCancel: vi.fn(),
       onDiscard: vi.fn(),
-      onTogglePointing: vi.fn(),
+      listOpen: true,
       onUpdate,
-      onRefresh: vi.fn(),
     };
     const view = render(<ProductFeedbackPanel {...props} />);
     fireEvent.change(screen.getByRole("textbox", { name: `Edit note: ${note.comment}` }), {

@@ -1302,6 +1302,16 @@ export const AutomationSummary = Schema.Struct({
   nextDueAt: Schema.NullOr(UtcTimestamp),
   fileSource: Schema.optional(AutomationFileSourceSummary),
   latestRunLifecycle: Schema.optional(AutomationRunLifecycle),
+  /**
+   * The last runs (at most seven), oldest first so a row of small blocks reads
+   * left to right in time. `at` is when the run started. The list page shows
+   * these as a pass/fail strip without a request per routine.
+   */
+  recentRuns: Schema.optional(
+    Schema.Array(
+      Schema.Struct({ lifecycle: AutomationRunLifecycle, at: UtcTimestamp }).annotations(strict),
+    ).pipe(Schema.maxItems(7)),
+  ),
   /** See {@link AutomationDefinition}'s `originThreadId`. */
   originThreadId: Schema.optional(AutomationThreadId),
   /** Present when the routine is a follow-up in its origin thread. */
@@ -1482,6 +1492,20 @@ export const AutomationListResponse = Schema.Struct({
   historyUnavailable: Schema.optional(Schema.Literal(true)),
   nextCursor: Schema.optional(
     Schema.String.pipe(Schema.maxLength(MAX_AUTOMATION_QUERY_CURSOR_LENGTH)),
+  ),
+  /**
+   * Counts over every Automation the caller may see on this host for the
+   * queried mode and Project, not just this page, so the header stays true
+   * while the list pages. `succeeded` counts runs that completed.
+   */
+  totals: Schema.optional(
+    Schema.Struct({
+      automations: nonNegativeInteger,
+      enabled: nonNegativeInteger,
+      windowDays: Schema.Literal(30),
+      runs: nonNegativeInteger,
+      succeeded: nonNegativeInteger,
+    }).annotations(strict),
   ),
 }).annotations(strict);
 export type AutomationListResponse = typeof AutomationListResponse.Type;

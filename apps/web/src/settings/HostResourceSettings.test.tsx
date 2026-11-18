@@ -59,6 +59,34 @@ describe("computer resource settings", () => {
       view.unmount();
     },
   );
+  it("draws its rows from the first frame with nothing to read or press, so the page holds still", async () => {
+    let answer: (value: ReturnType<typeof decodeAgentRunPolicySettings>) => void = () => undefined;
+    const current = vi.fn(
+      () =>
+        new Promise<ReturnType<typeof decodeAgentRunPolicySettings>>((done) => {
+          answer = done;
+        }),
+    );
+    render(<HostResourceSettings client={{ current, update: vi.fn() }} />);
+
+    const group = screen.getByRole("group", { name: "Computer resource limits" });
+    expect(screen.getByRole("heading", { name: "Computer resources" })).toBeVisible();
+    expect(screen.getByText("Concurrent commands")).toBeVisible();
+    expect(group).toBeDisabled();
+    expect(group).toHaveAttribute("data-loading", "true");
+    expect(screen.getByText("Reading the host's load…")).toBeVisible();
+
+    answer(
+      decodeAgentRunPolicySettings({
+        creationPosture: "off",
+        version: 2,
+        updatedAt: "2026-11-12T12:00:00.000Z",
+      }),
+    );
+    await waitFor(() => expect(group).not.toHaveAttribute("data-loading"));
+    expect(group).toBeEnabled();
+  });
+
   it("makes a failed load retryable instead of presenting unsaved defaults", async () => {
     const current = vi.fn().mockRejectedValue(new Error("offline"));
     render(<HostResourceSettings client={{ current, update: vi.fn() }} />);

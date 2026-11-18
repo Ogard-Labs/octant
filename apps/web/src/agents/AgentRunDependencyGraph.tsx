@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
-import { ProviderGlyph } from "../providers/ProviderGlyph";
+import { SubagentProviderMark } from "./subagentProviders";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { AgentRunGraphRow } from "./buildAgentHierarchyModel";
 import { layoutAgentRunLayers, type AgentRunLayerEdge } from "./layoutAgentRunLayers";
@@ -15,6 +15,8 @@ import {
 export interface SubagentProviderIdentity {
   readonly driverKind: string;
   readonly displayName: string;
+  /** Model display names by model id, as the picker shows them. */
+  readonly models?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -168,13 +170,15 @@ function GraphCard(props: {
       {row.model === undefined ? null : (
         <span className="agent-run-graph__model">
           {provider === undefined ? null : (
-            <ProviderGlyph
-              displayName={provider.displayName}
+            <SubagentProviderMark
               driverKind={provider.driverKind}
+              providerName={provider.displayName}
               size={12}
             />
           )}
-          <span className="agent-run-graph__model-name">{row.model}</span>
+          <span className="agent-run-graph__model-name">
+            {provider?.models?.get(row.model) ?? row.model}
+          </span>
         </span>
       )}
       <span className="agent-run-graph__meta">{how.join(" · ")}</span>

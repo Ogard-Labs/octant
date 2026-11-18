@@ -4,7 +4,7 @@ import {
   type ApprovedWorkingFolder,
   type ThreadWorkingFolderChoice,
 } from "@octant/contracts";
-import { ChevronDown, FolderTree } from "lucide-react";
+import { ChevronDown, FolderTree } from "../ui/icons";
 import { useId, useState, useEffect } from "react";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -21,6 +21,11 @@ export function ApprovedWorkingFolderControl(props: {
   readonly value: ThreadWorkingFolderChoice;
   readonly onChange: (choice: ThreadWorkingFolderChoice) => void;
   readonly code: boolean;
+  /**
+   * Draw the fields in place with a "Subfolder" label, for a panel that is
+   * already the popup, instead of a chip that opens them.
+   */
+  readonly inline?: boolean;
   readonly onValidityChange?: (valid: boolean) => void;
 }) {
   const id = useId();
@@ -46,6 +51,70 @@ export function ApprovedWorkingFolderControl(props: {
       : shown === "."
         ? selected.label
         : `${selected.label} / ${shown}`;
+  // The note under the field. Inline, in the Where panel, it is one line in one
+  // slot, so a refusal takes the slot's place instead of adding a block.
+  const note =
+    !valid && props.inline === true
+      ? "Use . or a relative subfolder without .. before starting."
+      : selected === undefined
+        ? "Working folder unavailable. Choose a current Project folder."
+        : selected.kind === "extra" && props.code
+          ? "Shared folder, outside the helper's worktree. Git, changed files and Review cover the Code checkout only."
+          : props.inline === true
+            ? "Use . for the whole folder, or a path inside it."
+            : "Provider, terminal, saved actions and new Work artifacts use this folder. Choose another root in a new task.";
+  const fields = (
+    <div className="working-directory-control">
+      {props.inline === true && props.folders.length < 2 ? null : (
+        <OctantSelectField
+          aria-label="Task working folder"
+          value={props.value.workingFolderId}
+          options={props.folders.map((folder) => ({ id: folder.id, label: folder.label }))}
+          onValueChange={(value) => {
+            const folder = props.folders.find((candidate) => candidate.id === value);
+            if (folder === undefined) return;
+            updateValidity(true);
+            setRejected(undefined);
+            props.onChange({
+              workingFolderId: folder.id,
+              workingDirectory: decodeThreadWorkingDirectory("."),
+            });
+          }}
+        />
+      )}
+      <label htmlFor={id}>
+        {props.inline === true ? "Subfolder" : "Subfolder within working folder"}
+      </label>
+      <OctantInput
+        id={id}
+        key={String(props.value.workingFolderId)}
+        defaultValue={shown}
+        onChange={(event) => {
+          try {
+            const directory = decodeThreadWorkingDirectory(event.currentTarget.value);
+            props.onChange({ ...props.value, workingDirectory: directory });
+            updateValidity(true);
+            setRejected(undefined);
+            event.currentTarget.setCustomValidity("");
+          } catch {
+            updateValidity(false);
+            setRejected(event.currentTarget.value);
+            event.currentTarget.setCustomValidity("Use . or a relative subfolder without ..");
+          }
+        }}
+      />
+      {!valid && props.inline !== true ? (
+        <OctantAlert tone="danger">Before you start, use . or a subfolder without ..</OctantAlert>
+      ) : null}
+      <small
+        {...(!valid && props.inline === true ? { "data-invalid": true, role: "alert" } : {})}
+        title={note}
+      >
+        {note}
+      </small>
+    </div>
+  );
+  if (props.inline === true) return fields;
   return (
     <OctantPopover
       className="working-folder-popover"
@@ -69,54 +138,7 @@ export function ApprovedWorkingFolderControl(props: {
           : `Working folder: ${chipLabel}, not a usable subfolder`
       }
     >
-      <div className="working-directory-control">
-        <OctantSelectField
-          aria-label="Task working folder"
-          value={props.value.workingFolderId}
-          options={props.folders.map((folder) => ({ id: folder.id, label: folder.label }))}
-          onValueChange={(value) => {
-            const folder = props.folders.find((candidate) => candidate.id === value);
-            if (folder === undefined) return;
-            updateValidity(true);
-            setRejected(undefined);
-            props.onChange({
-              workingFolderId: folder.id,
-              workingDirectory: decodeThreadWorkingDirectory("."),
-            });
-          }}
-        />
-        <label htmlFor={id}>Subfolder within working folder</label>
-        <OctantInput
-          id={id}
-          key={String(props.value.workingFolderId)}
-          defaultValue={shown}
-          onChange={(event) => {
-            try {
-              const directory = decodeThreadWorkingDirectory(event.currentTarget.value);
-              props.onChange({ ...props.value, workingDirectory: directory });
-              updateValidity(true);
-              setRejected(undefined);
-              event.currentTarget.setCustomValidity("");
-            } catch {
-              updateValidity(false);
-              setRejected(event.currentTarget.value);
-              event.currentTarget.setCustomValidity("Use . or a relative subfolder without ..");
-            }
-          }}
-        />
-        {!valid ? (
-          <OctantAlert tone="danger">
-            Use . or a relative subfolder without .. before starting this task.
-          </OctantAlert>
-        ) : null}
-        <small>
-          {selected === undefined
-            ? "Working folder unavailable. Choose a current Project folder."
-            : selected.kind === "extra" && props.code
-              ? "Shared folder: outside the child worktree. Git, changed files and Review cover the Code checkout only."
-              : "Provider, terminal, saved actions and new Work artifacts use this folder. Choose another root in a new task."}
-        </small>
-      </div>
+      {fields}
     </OctantPopover>
   );
 }

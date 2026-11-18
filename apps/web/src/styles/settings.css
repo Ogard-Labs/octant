@@ -1,3 +1,6 @@
+/* The frame clips rather than hides its overflow: a box with overflow hidden
+   can still be scrolled by scrollIntoView, and a section jump slid the whole
+   sheet up, rail and title with it. Only the navigation list and the page scroll. */
 .settings-view {
   display: grid;
   width: 100%;
@@ -6,7 +9,7 @@
   min-width: 0;
   min-height: 0;
   grid-template-columns: var(--octant-sidebar-width, 248px) minmax(0, 1fr);
-  overflow: hidden;
+  overflow: clip;
   color: var(--octant-text-primary);
   background: var(--octant-app-background);
   font-family: var(--oct-font-display);
@@ -14,8 +17,9 @@
   --oct-settings-reading-width: 920px;
   --oct-settings-control: 180px;
   --oct-settings-control-height: 28px;
-  /* The raised card every surface draws: one step above the page. */
-  --oct-settings-card-fill: var(--octant-card);
+  /* A group card is the page with a 2% wash of ink over it and one hairline,
+     so it reads as a quiet region of the page, not a raised object. */
+  --oct-settings-card-fill: color-mix(in srgb, var(--octant-text-primary) 2%, transparent);
   --oct-settings-tile-fill: color-mix(in oklab, var(--oct-fg) 8%, transparent);
   --oct-settings-row-inset: 16px;
 }
@@ -29,7 +33,7 @@
   min-width: 0;
   min-height: 0;
   flex-direction: column;
-  overflow: hidden;
+  overflow: clip;
   background: var(--octant-sidebar-opaque);
   border-right: 1px solid var(--octant-border);
 }
@@ -69,11 +73,12 @@
   background: transparent;
 }
 
-/* The narrow navigation is a drawer over the page, so it keeps a blur over
-   the text it covers. */
+/* The narrow navigation is a drawer over the page, so under Glass it is a
+   dense float: a blur cannot hide the page's sharp text on a translucent
+   window. */
 .shell--material-translucent .settings-view__sidebar {
-  background: var(--octant-window-surface);
-  backdrop-filter: blur(22px) saturate(125%);
+  background: var(--octant-float-glass);
+  backdrop-filter: none;
 }
 
 /* A section card is the same step of ink over the sheet as every card under
@@ -81,13 +86,13 @@
 html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
   .shell--material-translucent
   .settings-view {
-  --oct-settings-card-fill: var(--octant-card);
+  --oct-settings-card-fill: color-mix(in srgb, var(--octant-text-primary) 2%, transparent);
 }
 
 .settings-view__sidebar-titlebar,
 .settings-view__workspace-titlebar {
-  height: 44px;
-  min-height: 44px;
+  height: var(--oct-title-rail-h);
+  min-height: var(--oct-title-rail-h);
 }
 
 /* Settings takes the window's frame and sheet (see shell.css): the
@@ -161,7 +166,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   flex: 1 1 auto;
   flex-direction: column;
   padding: 8px 12px 12px;
-  overflow: hidden;
+  overflow: clip;
 }
 
 .settings-view__navigation-scroll {
@@ -191,8 +196,8 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: 44px minmax(0, 1fr);
-  overflow: hidden;
+  grid-template-rows: var(--oct-title-rail-h) minmax(0, 1fr);
+  overflow: clip;
   background: var(--octant-app-background);
 }
 
@@ -248,7 +253,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   gap: var(--oct-space-1);
   margin: 0;
   color: var(--octant-text-secondary);
-  font-size: var(--oct-text-detail);
+  font-size: var(--oct-text-xs);
   line-height: 1.45;
   white-space: nowrap;
 }
@@ -263,18 +268,34 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   flex: 0 0 auto;
 }
 
-/* Plain text links to the page's own sections. Providers & Models has ten:
-   as chips they took two tall rows before the first control, and a row that
-   scrolled sideways with no scrollbar cut "Model endpoints" off at the edge
-   with no sign more followed. Short text links wrap onto a second line
-   instead, which costs one text line, not a row of chips. */
+/* "On this page": one line of quiet chips, never wrapped. The slot is a fixed
+   28px on every page that has one, so chips arriving as sections mount move
+   nothing. A row longer than the page scrolls sideways under a fade at the edge
+   that has more; the section the reader is in is marked as the page scrolls. */
+.settings-view__outline {
+  height: 28px;
+  min-width: 0;
+}
+
 .settings-view__outline ul {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--oct-space-1) var(--oct-space-4);
+  height: 100%;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--oct-space-1);
   margin: 0;
   padding: 0;
+  overflow-x: auto;
   list-style: none;
+  scrollbar-width: none;
+}
+
+.settings-view__outline ul::-webkit-scrollbar {
+  display: none;
+}
+
+.settings-view__outline[data-more="true"] ul {
+  mask-image: linear-gradient(to right, black calc(100% - 32px), transparent);
 }
 
 .settings-view__outline li {
@@ -282,15 +303,59 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 }
 
 .settings-view__outline-link {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  padding: 0 var(--oct-space-3);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-fill-4);
   color: var(--octant-text-secondary);
-  font-size: var(--oct-text-detail);
-  line-height: 1.45;
+  font-size: var(--oct-text-xs);
+  line-height: 1;
   text-decoration: none;
   white-space: nowrap;
 }
 
 .settings-view__outline-link:hover {
+  background: var(--oct-fill-3);
   color: var(--octant-text-primary);
+}
+.settings-view__outline-link:active {
+  background: var(--oct-wash-pressed);
+}
+
+.settings-view__outline-link[aria-current="location"] {
+  background: var(--oct-fill-2);
+  color: var(--octant-text-primary);
+}
+
+/* Buttons on a Settings page are never plain text. An action with words is a
+   button with a fill at rest (the ghost recipe's fill is a hover fill, so on
+   this surface it rests on the chip fill); only an inline link in a sentence is
+   text, in the accent ink with an underline when pointed at. A section's own
+   collapse toggle is its heading and keeps no fill. */
+.settings-view
+  [data-slot="button"][data-variant="ghost"]:not([data-size^="icon"]):not(
+    .settings-collapse__toggle
+  ) {
+  background: var(--oct-fill-4);
+}
+
+.settings-view
+  [data-slot="button"][data-variant="ghost"]:not([data-size^="icon"]):not(
+    .settings-collapse__toggle
+  ):hover {
+  background: var(--oct-fill-3);
+}
+.settings-view
+  [data-slot="button"][data-variant="ghost"]:not([data-size^="icon"]):not(
+    .settings-collapse__toggle
+  ):active {
+  background: var(--oct-wash-pressed);
+}
+
+.settings-view [data-slot="button"][data-variant="link"] {
+  color: var(--oct-accent);
 }
 
 /* The Saved mark has a slot of its own width, so it arriving and leaving moves
@@ -682,6 +747,19 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 /* SettingGroup's optional description; the divider under it comes from the
    first row's own border-top, so the note draws none of its own. */
+/* A group whose values are still being read keeps its rows and hides only
+   their controls, so the rows stand where they will and no value that was
+   never saved is shown. */
+.setgroup[data-loading="true"] .setrow-control {
+  visibility: hidden;
+}
+
+/* The load readings are three lines once read; the room is held from the
+   first frame so the rows under them do not step down when they arrive. */
+.host-resources__readings {
+  min-height: 3lh;
+}
+
 .setgroup-note {
   margin: 0;
   padding: 0 0 12px;
@@ -712,7 +790,8 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="browser-hub-code"],
 .setrow[data-setting-id="browser-hub-claim"],
 .setrow[data-setting-id="skill-folders-added"],
-.setrow[data-setting-id="sandbox-policy-add-folder"] {
+.setrow[data-setting-id="sandbox-policy-add-folder"],
+.setrow:has(> .setrow-control .settings-accent) {
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -731,7 +810,8 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="browser-hub-code"] > .setrow-control,
 .setrow[data-setting-id="browser-hub-claim"] > .setrow-control,
 .setrow[data-setting-id="skill-folders-added"] > .setrow-control,
-.setrow[data-setting-id="sandbox-policy-add-folder"] > .setrow-control {
+.setrow[data-setting-id="sandbox-policy-add-folder"] > .setrow-control,
+.setrow:has(> .setrow-control .settings-accent) > .setrow-control {
   grid-column: 1;
   grid-row: auto;
   justify-self: stretch;
@@ -856,6 +936,9 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .settings-search-results__option:hover {
   background: var(--octant-control-hover);
+}
+.settings-search-results__option:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--octant-control-pressed);
 }
 
 .settings-search-results__label {
@@ -1238,7 +1321,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-disclosure--section > summary {
   width: 100%;
   justify-content: space-between;
-  min-height: 52px;
+  min-height: var(--oct-settings-section-row-h, 52px);
   padding-block: 12px;
   border-top: 1px solid var(--oct-hairline);
 }
@@ -1365,7 +1448,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow {
   column-gap: 24px;
   min-height: 44px;
-  padding: 12px 0;
+  padding: var(--oct-settings-row-pad, 12px) 0;
   font-family: var(--oct-font-display);
 }
 
@@ -1393,9 +1476,9 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .setrow-hint {
   max-width: 62ch;
-  color: var(--octant-text-secondary);
+  color: var(--oct-meta);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-detail);
+  font-size: var(--oct-text-xs);
   line-height: var(--oct-line-detail);
 }
 
@@ -1445,10 +1528,22 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   font-size: var(--oct-text-xs);
 }
 
+/* A row's trailing control is one size on every page. Measured 1440x900: the
+   select, input and text area classes drew 12.92px on Appearance, Chat, Code
+   and Octant Harness while the same controls on Memory and Host drew 14px, and
+   plain recipe fields drew 15.08px. Every Settings field and select reads at
+   the detail size, the one buttons already use. The plain recipe selectors
+   carry no weight from the page's own class, so a field with a size of its
+   own (the sheet's search field) keeps it. */
 .settings-view__select,
 .settings-view__text-input,
-.settings-view__textarea {
-  font-size: var(--oct-text-xs);
+.settings-view__textarea,
+:where(.settings-view) input[data-slot="input"],
+:where(.settings-view) input[role="combobox"],
+:where(.settings-view) textarea[data-slot="textarea"],
+.settings-view .octant-number-field__input,
+.settings-view .octant-number-stepper__input {
+  font-size: var(--oct-text-detail);
 }
 
 /* A picker chooses from a known list, so it takes the column. Free text does
@@ -1578,13 +1673,15 @@ textarea.settings-view__text-input {
   text-align: center;
   border-radius: var(--oct-radius-md);
   cursor: default;
-  transition: background-color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
 /* A card-shaped button: the bare variant draws nothing, so the card takes the
    ghost hover fill and the secondary selected fill itself. */
 .settings-scheme__card:hover {
   background: var(--muted);
+}
+.settings-scheme__card:active:not(:has(:is(button, a, [role="button"]):active)) {
+  background: var(--oct-wash-pressed);
 }
 
 .settings-scheme__card[aria-checked="true"] {
@@ -2701,9 +2798,8 @@ html[data-octant-increased-contrast="true"]
   color: var(--octant-accent-foreground);
 }
 
-/* The photo in use is a small frame beside two icon buttons, upload and
-   library; the library opens as a popover grid whose pictures reuse the
-   preset swatch as a radio, sized for a picture. */
+/* The photo in use is a small frame beside the upload button; the photos on
+   this host sit in a gallery row under it. */
 .settings-app-background__photo {
   display: inline-flex;
   align-items: center;
@@ -2723,24 +2819,77 @@ html[data-octant-increased-contrast="true"]
 }
 
 .settings-app-background__thumb img,
-.settings-view__preset-swatch--photo img {
+.settings-app-background__tile-pick img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.settings-app-background__grid {
+/* The gallery holds its height from the first paint: a head line of 20px and
+   one row of 48px tiles with room for the selection ring, whether the list has
+   loaded, is empty, or holds one photo or thirty. Too many photos scroll
+   sideways inside the row instead of wrapping to a second one. */
+.settings-app-background__gallery {
   display: grid;
-  grid-template-columns: repeat(3, 64px);
   gap: var(--oct-space-2);
-  padding: var(--oct-space-1);
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border-top: 1px solid var(--oct-hairline);
 }
 
-.settings-view__preset-swatch--photo {
-  width: 64px;
-  height: 40px;
-  min-height: 0;
+.settings-app-background__gallery-head {
+  display: flex;
+  height: 20px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  font-size: var(--oct-text-xs);
+}
+
+.settings-app-background__gallery-title {
+  color: var(--octant-text-secondary);
+}
+
+.settings-app-background__gallery-status {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--octant-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-app-background__gallery-status[data-tone="done"] {
+  color: var(--octant-text-primary);
+}
+
+.settings-app-background__gallery-row {
+  display: flex;
+  height: 56px;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding-inline: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.settings-app-background__gallery-empty {
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+.settings-app-background__tile {
+  position: relative;
+  flex: none;
+  width: 80px;
+  height: 48px;
+}
+
+.settings-app-background__tile-pick {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -2788,26 +2937,69 @@ html[data-octant-increased-contrast="true"]
 .settings-view .composer-model-picker__trigger {
   width: 100%;
   justify-content: space-between;
+  /* The composer draws it at the small step; in a row it is the row's control
+     and reads at the same size as the select beside it (12.92 against 14). */
+  font-size: var(--oct-text-detail);
 }
 
 /* Provider card details moved from styles.css. */
 .provider-card {
   border-radius: var(--oct-radius-md);
-  transition:
-    border-color var(--oct-motion-fast) ease,
-    background-color var(--oct-motion-fast) ease;
+  background: var(--octant-control);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+/* The photo in use wears a ring drawn over its picture, inside the tile. */
+.settings-app-background__tile-pick[aria-checked="true"]::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 2px var(--octant-text-primary),
+    inset 0 0 0 3px var(--octant-surface, var(--oct-bg));
+  content: "";
+  pointer-events: none;
+}
+
+.settings-app-background__tile-remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 20px;
+  height: 20px;
+  opacity: 0;
+}
+
+/* The mark carries the paint: the button stays the shared recipe's. */
+.settings-app-background__tile-remove-mark {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  color: var(--octant-text-primary);
+  background: color-mix(in oklab, var(--oct-bg) 80%, transparent);
+  border-radius: var(--oct-radius-sm);
+}
+
+.settings-app-background__tile:hover .settings-app-background__tile-remove,
+.settings-app-background__tile:focus-within .settings-app-background__tile-remove {
+  opacity: 1;
+}
+
+.settings-app-background__tile-confirm {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 2px;
+  background: color-mix(in oklab, var(--oct-bg) 86%, transparent);
+  border-radius: var(--oct-radius-sm);
 }
 
 .provider-card:hover {
   border-color: var(--octant-border-strong);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .workspace-pane__grip,
-  .provider-card {
-    animation: none;
-    transition: none;
-  }
 }
 
 .provider-card__edit label {
@@ -3042,8 +3234,8 @@ html[data-octant-increased-contrast="true"]
 .settings-view .settings-card-section.settings-card-section--open > h2,
 .settings-view .settings-card-section.settings-card-section--open > .settings-section-head > h2 {
   padding: 0;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-sm);
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-snug);
   line-height: var(--oct-line-label);
@@ -3062,7 +3254,7 @@ html[data-octant-increased-contrast="true"]
   padding: 0 0 var(--oct-space-3);
   line-height: var(--oct-line-detail);
   color: var(--octant-text-secondary);
-  font-size: var(--oct-text-detail);
+  font-size: var(--oct-text-xs);
 }
 
 /* The grouped card. A row list, a fact list, and a panel body are the three
@@ -3072,16 +3264,13 @@ html[data-octant-increased-contrast="true"]
   > :is(.setgroup, .settings-fact-list, .settings-panel__body) {
   overflow: visible;
   background: var(--oct-settings-card-fill);
-  /* A raised card: its edge, the light its top catches and a short shadow
-     come from the one token. The edge is a clear outline drawn inside the
-     box, and stays, because forced colours drop every shadow and would leave
-     the card with no edge. It is an outline and not a border so it takes no
-     room: a border put the rows' 16px inset at 17px from the card's edge. */
+  /* A flat card: one hairline drawn inside the box, so it survives forced
+     colours. It is an outline and not a border so it takes no room: a border
+     put the rows' 16px inset at 17px from the card's edge. */
   border: 0;
-  outline: 1px solid transparent;
-  outline-offset: -1px;
   border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-hairline);
+  outline-offset: -1px;
 }
 
 html[data-octant-increased-contrast="true"]
@@ -3839,7 +4028,7 @@ html[data-octant-increased-contrast="true"]
 
 /* Settings as a sheet over the app. The sheet is the floating surface, so
    the rail and the page are clear on it and divided by one line, and a
-   section's card steps up from the sheet's own fill. The page's window
+   section's card is the sheet with a 2% wash of ink over it. The page's window
    chrome (the traffic-light inset, the bordered workspace panel, "Back to
    app") belongs to Settings as a whole window and is not drawn here. */
 .settings-view.settings-view--sheet {
@@ -3848,7 +4037,7 @@ html[data-octant-increased-contrast="true"]
   height: 100%;
   grid-template-columns: 232px minmax(0, 1fr);
   background: transparent;
-  --oct-settings-card-fill: var(--octant-float-control);
+  --oct-settings-card-fill: color-mix(in srgb, var(--octant-text-primary) 2%, transparent);
   --oct-settings-gutter: var(--oct-space-8);
 }
 
@@ -4022,6 +4211,114 @@ html[data-octant-increased-contrast="true"]
   color: var(--oct-fg-2);
   font-size: var(--oct-text-detail);
   overflow-wrap: anywhere;
+}
+
+/* A number in a Settings row is a plain field, right-aligned with its unit
+   inside it. The minus and plus beside it made every numeric row louder than
+   its label; the arrow keys step it. */
+.octant-number-field {
+  display: inline-flex;
+  width: 88px;
+  height: var(--oct-settings-control-height, 28px);
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  background: var(--background);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-md);
+}
+
+.octant-number-field:focus-within {
+  background: var(--octant-control-hover);
+}
+
+.octant-number-field__input {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  appearance: textfield;
+  background: transparent;
+  color: var(--foreground);
+  font-size: var(--oct-text-sm);
+  text-align: right;
+}
+
+.octant-number-field__suffix {
+  color: var(--muted-foreground);
+  font-size: var(--oct-text-xs);
+}
+
+.octant-number-field__input::-webkit-inner-spin-button,
+.octant-number-field__input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+/* A scan finding or an error is its own 12px line under the provider's name,
+   in the meta ink, in the name's column, so it never wraps beside the row's actions ("Use it" and the
+   switch keep their place). */
+.settings-view .provlist > .provrow > .prov-main > .provider-settings__scan-note {
+  min-width: 0;
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-line-detail);
+}
+
+/* A preset choice leads with a small window drawn from the preset's tokens. */
+.settings-preset-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-3);
+}
+
+.settings-preset-choice > .settings-view__select {
+  width: var(--oct-settings-control);
+}
+
+.settings-preset-swatch {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 28px;
+  overflow: hidden;
+  background: var(--swatch-page);
+  border: 1px solid var(--swatch-edge);
+  border-radius: var(--oct-radius-sm);
+}
+
+.settings-preset-swatch > span {
+  position: absolute;
+}
+
+.settings-preset-swatch__band {
+  inset: 0 0 auto;
+  height: 5px;
+  background: var(--swatch-band);
+}
+
+.settings-preset-swatch__sidebar {
+  inset: 5px auto 0 0;
+  width: 12px;
+  background: var(--swatch-sidebar);
+}
+
+.settings-preset-swatch__card {
+  top: 9px;
+  left: 16px;
+  width: 22px;
+  height: 11px;
+  background: var(--swatch-card);
+  border-radius: 2px;
+}
+
+.settings-preset-swatch__accent {
+  right: 4px;
+  bottom: 3px;
+  width: 8px;
+  height: 4px;
+  background: var(--swatch-accent);
+  border-radius: 2px;
 }
 
 /* Show workers: two checkboxes in one row, stacked on a narrow control column. */

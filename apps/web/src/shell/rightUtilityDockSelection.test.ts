@@ -9,6 +9,8 @@ import {
   hideUtilityTile,
   isUtilityToolMinimised,
   minimiseUtilityTool,
+  previewUtilityCardPage,
+  announcedBrowserSessionsHeld,
   offeredBrowserStaysMinimised,
   minimisedUtilityTabIds,
   MINIMISABLE_DOCK_SURFACES,
@@ -16,6 +18,7 @@ import {
   openThreadUtilityTab,
   openUtilityTabBesideState,
   openUtilityTabState,
+  placeUtilityTile,
   shownTileColumns,
   readBottomPanelToolPresentation,
   readUtilityDockOpen,
@@ -30,6 +33,7 @@ import {
   shownUtilityTabIds,
   showUtilityTabAlone,
   showUtilityTabBelow,
+  showUtilityTabStacked,
   showUtilityTabBeside,
   withoutTileLayout,
   type ThreadUtilityDockState,
@@ -359,6 +363,16 @@ describe("dock tool tiles", () => {
   function columnsOf(state: ThreadUtilityDockState): ReadonlyArray<ReadonlyArray<string>> {
     return (state.layout?.columns ?? []).map((column) => column.tiles.map((tile) => tile.tabId));
   }
+  it("stacks a pressed tool under the focused tile and makes a column only when that one is full", () => {
+    let state = showUtilityTabStacked(opened("files", "canvas"), "files");
+    expect(columnsOf(state)).toEqual([["canvas", "files"]]);
+    state = openUtilityTabBesideState(state, "plan", "plan", "stacked");
+    expect(columnsOf(state)).toEqual([["canvas", "files", "plan"]]);
+    // Three tiles are a column's cap: the next tool goes beside.
+    state = openUtilityTabBesideState(state, "ios-simulator", "ios-simulator", "stacked");
+    expect(columnsOf(state)).toEqual([["canvas", "files", "plan"], ["ios-simulator"]]);
+  });
+
   /** Plan on the left; Files above Canvas on the right; Canvas focused. */
   function twoColumns() {
     let state = opened("ios-simulator", "canvas", "files", "plan");
@@ -780,6 +794,55 @@ describe("dock tool tiles", () => {
     expect(moveUtilityTile(sided, "files", "up")).toBe(sided);
   });
 
+  it("gives a pane moved within its own column an equal share of it", () => {
+    let state = showUtilityTabStacked(opened("files", "canvas"), "files");
+    expect(columnsOf(state)).toEqual([["canvas", "files"]]);
+    state = placeUtilityTile(state, "files", "canvas", "top");
+    expect(columnsOf(state)).toEqual([["files", "canvas"]]);
+    expect(state.layout?.columns[0]?.tiles.map((tile) => tile.share)).toEqual([0.5, 0.5]);
+  });
+
+  it("drops a tile on another tile's edge, changing only the columns that lose or gain a tile", () => {
+    const sided = twoColumnsForMoves();
+    expect(columnsOf(sided)).toEqual([["canvas"], ["files", "plan"]]);
+    expect(columnsOf(placeUtilityTile(sided, "plan", "canvas", "bottom"))).toEqual([
+      ["canvas", "plan"],
+      ["files"],
+    ]);
+    const moved = placeUtilityTile(sided, "plan", "files", "top");
+    expect(columnsOf(moved)).toEqual([["canvas"], ["plan", "files"]]);
+    // Neither column's width share changes.
+    expect(moved.layout?.columns.map((column) => column.share)).toEqual(
+      sided.layout?.columns.map((column) => column.share),
+    );
+    sharesAddUp(moved);
+    expect(moved.active).toBe("plan");
+    // Left of the right column's tile is the left column.
+    expect(columnsOf(placeUtilityTile(sided, "files", "plan", "left"))).toEqual([
+      ["files", "canvas"],
+      ["plan"],
+    ]);
+    // A drop on itself changes nothing.
+    expect(placeUtilityTile(sided, "plan", "plan", "left")).toBe(sided);
+  });
+
+  it("makes a second column from a drop on a side edge and refuses what the caps refuse", () => {
+    const stacked = showUtilityTabBelow(opened("files", "canvas"), "files");
+    const beside = placeUtilityTile(stacked, "files", "canvas", "right");
+    expect(columnsOf(beside)).toEqual([["canvas"], ["files"]]);
+    expect(beside.layout?.columns.map((column) => column.share)).toEqual([0.5, 0.5]);
+    expect(columnsOf(placeUtilityTile(stacked, "files", "canvas", "left"))).toEqual([
+      ["files"],
+      ["canvas"],
+    ]);
+    let full = selectUtilityTabState(opened("files", "canvas", "plan", "terminal"), "files");
+    full = showUtilityTabBelow(full, "canvas");
+    full = showUtilityTabBelow(full, "plan");
+    full = showUtilityTabBeside(full, "terminal");
+    expect(columnsOf(full)).toEqual([["files", "canvas", "plan"], ["terminal"]]);
+    expect(placeUtilityTile(full, "terminal", "files", "top")).toBe(full);
+  });
+
   it("collapses to one column when the only tile of a column moves across", () => {
     const sided = showUtilityTabBeside(opened("files", "canvas"), "files");
     expect(columnsOf(sided)).toEqual([["canvas"], ["files"]]);
@@ -844,6 +907,25 @@ describe("dock tool tiles", () => {
 });
 
 describe("minimised dock tools", () => {
+  it("makes another page the one a minimised Browser's card stands for, and shows nothing", () => {
+    const pageOne = "10000000-0000-4000-8000-000000000001";
+    const pageTwo = "10000000-0000-4000-8000-000000000002";
+    let state: ThreadUtilityDockState = { tabs: [] };
+    state = addUtilityTabState(state, "browser", pageOne);
+    state = addUtilityTabState(state, "browser", pageTwo);
+    const parked = minimiseUtilityTool(state, pageTwo);
+    expect(parked.lastBrowser).toBe(pageTwo);
+    const next = previewUtilityCardPage(parked, pageOne);
+    expect(next.lastBrowser).toBe(pageOne);
+    // The Browser is still a card: nothing is shown and nothing is closed.
+    expect(next.minimised).toEqual(parked.minimised);
+    expect(next.layout).toEqual(parked.layout);
+    expect(next.tabs).toEqual(parked.tabs);
+    // The same page again, or a tab that is no Browser page, changes nothing.
+    expect(previewUtilityCardPage(next, pageOne)).toBe(next);
+    expect(previewUtilityCardPage(next, "missing")).toBe(next);
+  });
+
   const pageOne = "10000000-0000-4000-8000-000000000001";
   const pageTwo = "10000000-0000-4000-8000-000000000002";
   const shellTab = "10000000-0000-4000-8000-000000000003";
@@ -1377,3 +1459,33 @@ function memoryStorage(): Storage {
     },
   } as unknown as Storage;
 }
+
+describe("a Browser session announced for a thread whose dock already shows it", () => {
+  const page = { id: "page-1", surface: "browser", browserContextId: "context-1" } as const;
+
+  it("is held when the page the person opened is the session announced", () => {
+    // Opening a local server from a Browser tab binds that tab to its page,
+    // and the page is then announced like an agent's session.
+    expect(announcedBrowserSessionsHeld({ tabs: [page], active: "page-1" }, ["context-1"])).toBe(
+      true,
+    );
+  });
+
+  it("is not held for a session no tab is bound to, so the shared Browser tab opens for it", () => {
+    expect(announcedBrowserSessionsHeld({ tabs: [page], active: "page-1" }, ["context-2"])).toBe(
+      false,
+    );
+    expect(
+      announcedBrowserSessionsHeld({ tabs: [page], active: "page-1" }, ["context-1", "context-2"]),
+    ).toBe(false);
+    // A tab not yet bound to a page holds nothing.
+    expect(
+      announcedBrowserSessionsHeld({ tabs: [{ id: "new", surface: "browser" }] }, ["context-1"]),
+    ).toBe(false);
+  });
+
+  it("is not held when the announcement names no session", () => {
+    expect(announcedBrowserSessionsHeld({ tabs: [page] }, undefined)).toBe(false);
+    expect(announcedBrowserSessionsHeld({ tabs: [page] }, [])).toBe(false);
+  });
+});

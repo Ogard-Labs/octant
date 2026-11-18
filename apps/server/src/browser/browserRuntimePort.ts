@@ -54,6 +54,8 @@ export interface BrowserRuntimeObservation {
   readonly snapshot?: string;
   readonly snapshotRefs?: ReadonlyArray<BrowserPageSnapshotRef>;
   readonly screenshotDataUrl?: string;
+  /** Only the person's preview read fills this; it is never put in a tool result. */
+  readonly faviconDataUrl?: string;
   readonly viewport?: { readonly width: number; readonly height: number };
   /** Only a resize fills this: what the page reports about its device now. */
   readonly emulation?: BrowserEmulationReport;

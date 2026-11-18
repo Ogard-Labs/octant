@@ -84,7 +84,7 @@ export function refusalClause(reason: ContextCompactionRefusalReason): string {
     case "provider-unavailable":
       return "the provider is unavailable";
     case "spend-ceiling-reached":
-      return "a spend limit has been reached";
+      return "a spend ceiling has been reached";
     case "mode-disabled":
       return "this mode is turned off";
     case "remote-client":

@@ -11,7 +11,7 @@ import type {
   CanvasRefreshSkillOption,
 } from "@octant/contracts/canvas-refresh";
 import type { CanvasSkillContribution } from "@octant/contracts/canvas-skill";
-import { Ban, Check, LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
+import { Ban, Check, LoaderCircle, RefreshCw, TriangleAlert } from "../ui/icons";
 import { useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";

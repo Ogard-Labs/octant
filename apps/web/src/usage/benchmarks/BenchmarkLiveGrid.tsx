@@ -6,8 +6,8 @@ import {
   CircleX,
   LoaderCircle,
   SkipForward,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "../../ui/icons";
 import type {
   BenchmarkCell,
   BenchmarkCellMetrics,
@@ -25,7 +25,7 @@ import {
   type ContenderNames,
 } from "./benchmarkPresentation";
 
-const CELL_STATE_ICONS: Readonly<Record<BenchmarkCellState, LucideIcon>> = {
+const CELL_STATE_ICONS: Readonly<Record<BenchmarkCellState, IconComponent>> = {
   queued: CircleDashed,
   running: LoaderCircle,
   answered: CircleCheck,

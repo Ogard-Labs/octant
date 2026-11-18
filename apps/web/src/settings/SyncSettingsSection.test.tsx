@@ -67,9 +67,7 @@ describe("SyncSettingsSection", () => {
   it("says store setup happens on the host when this client is not on it", () => {
     render(<SyncSettingsSection client={undefined} folderBrowse={undefined} />);
     expect(
-      screen.getByText(
-        "Choosing a store and turning sync on happen in the Octant app on the host machine.",
-      ),
+      screen.getByText("Choose a store and turn sync on in the Octant app on the host computer."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   });
@@ -92,7 +90,7 @@ describe("SyncSettingsSection", () => {
     // The switch says what sync does once this computer belongs to a replica.
     expect(
       screen.getByText(
-        "Once this computer belongs to a replica, sync on copies artifact versions and comments to the store and brings in your other computers'.",
+        "Once this computer has joined, sync copies artifact versions and comments to the store and brings in your other computers'.",
       ),
     ).toBeVisible();
     // Focusable while off, with its reason announced.
