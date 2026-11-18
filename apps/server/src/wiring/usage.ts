@@ -86,27 +86,33 @@ export function wireUsage(deps: UsageDependencies) {
     evidenceRoute ??= Promise.all([
       import("../validationEvidenceRoutes"),
       import("../validation/validationEvidenceLoader"),
-    ]).then(([routes, loader]) =>
-      routes.createValidationEvidenceRouteHandler({
-        windowAuthorityStore,
-        authorize: (windowId, authority) => {
-          const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
-          const context = workspace?.contextByMode[authority.mode];
-          return (
-            workspace !== undefined &&
-            context !== undefined &&
-            authority.projectId !== undefined &&
-            windowAdmitsProject(workspace, authority.mode, authority.projectId) &&
-            String(context.host) === String(authority.hostId)
-          );
-        },
-        maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
-        loadSnapshot: loader.createValidationEvidenceLoader({
-          connection: persistence.connection,
-          clock: () => new Date().toISOString(),
+    ])
+      .then(([routes, loader]) =>
+        routes.createValidationEvidenceRouteHandler({
+          windowAuthorityStore,
+          authorize: (windowId, authority) => {
+            const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
+            const context = workspace?.contextByMode[authority.mode];
+            return (
+              workspace !== undefined &&
+              context !== undefined &&
+              authority.projectId !== undefined &&
+              windowAdmitsProject(workspace, authority.mode, authority.projectId) &&
+              String(context.host) === String(authority.hostId)
+            );
+          },
+          maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+          loadSnapshot: loader.createValidationEvidenceLoader({
+            connection: persistence.connection,
+            clock: () => new Date().toISOString(),
+          }),
         }),
-      }),
-    );
+      )
+      // A failed construction must not memoize its rejection: the next call retries.
+      .catch((error: unknown) => {
+        evidenceRoute = undefined;
+        throw error;
+      });
     return (await evidenceRoute)(request);
   };
   const validationEventStore = new ValidationEventStore({
