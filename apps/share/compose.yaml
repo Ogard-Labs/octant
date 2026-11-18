@@ -1,0 +1,36 @@
+name: octant-share
+services:
+  share:
+    build:
+      context: ../..
+      dockerfile: apps/share/Dockerfile
+    environment:
+      OCTANT_SHARE_PUBLIC_ORIGIN: https://${SHARE_DOMAIN:?Set the viewer domain}
+      OCTANT_SHARE_USERCONTENT_ORIGIN: https://${CONTENT_DOMAIN:?Set a separate content domain}
+      OCTANT_SHARE_TRUST_PROXY: "1"
+      OCTANT_SHARE_ABUSE_CONTACT: ${OCTANT_SHARE_ABUSE_CONTACT:-}
+      OCTANT_SHARE_OPERATOR_TOKEN: ${OCTANT_SHARE_OPERATOR_TOKEN:-}
+    volumes:
+      - share-data:/data
+    restart: unless-stopped
+
+  proxy:
+    image: caddy:2-alpine
+    environment:
+      SHARE_DOMAIN: ${SHARE_DOMAIN:?Set the viewer domain}
+      CONTENT_DOMAIN: ${CONTENT_DOMAIN:?Set a separate content domain}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - certificates:/data
+      - caddy-config:/config
+    depends_on:
+      - share
+    restart: unless-stopped
+
+volumes:
+  share-data:
+  certificates:
+  caddy-config:

@@ -33,6 +33,30 @@ describe("remote setup", () => {
     expect(open).toHaveBeenCalledTimes(3);
   });
 
+  it.each([
+    ["tailscale-setup", "Get Tailscale", "https://tailscale.com/download"],
+    ["cloudflare-setup", "Open Cloudflare Zero Trust", "https://one.dash.cloudflare.com/"],
+  ])(
+    "opens the provider instructions from a %s search result",
+    async (focusedSetting, name, url) => {
+      const open = vi.fn();
+      const browser = vi.fn(async () => {});
+      render(
+        <RemoteSetupGuide
+          externalUrlHost={{ openBrowserExternal: browser }}
+          canConfigureHost
+          onContinue={open}
+          focusedSetting={focusedSetting}
+        />,
+      );
+      const action = screen.getByRole("button", { name });
+      expect(action).toBeVisible();
+      await userEvent.click(action);
+      expect(browser).toHaveBeenCalledWith(url);
+      expect(open).not.toHaveBeenCalled();
+    },
+  );
+
   it("focuses the real journey choices from the searchable checks setting", () => {
     render(
       <RemoteSetupGuide
