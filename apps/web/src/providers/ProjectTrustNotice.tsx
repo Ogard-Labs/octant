@@ -87,6 +87,12 @@ export function useProjectTrustNotice(input: {
   readonly threadId: string;
   readonly projectId: ProjectId | undefined;
   readonly providerInstanceId: ProviderInstanceId | undefined;
+  /**
+   * The thread's Strict as it resolves now. The host's answer depends on it,
+   * so a change reads the answer again: turning Strict on must show the
+   * prompt a refused Codex start points to, and turning it off must drop it.
+   */
+  readonly strict: boolean;
 }): ComposerNoticeItem | undefined {
   const services = useThreadNativeSetupServices();
   const readProjectCode = services?.readProjectCode;
@@ -103,8 +109,8 @@ export function useProjectTrustNotice(input: {
   >(undefined);
   const [dismissed, setDismissed] = useState<ReadonlyArray<string>>(readDismissed);
   const [pending, setPending] = useState(false);
-  const { projectId, providerInstanceId, threadId, mode } = input;
-  const scope = `${threadId}:${String(providerInstanceId)}`;
+  const { projectId, providerInstanceId, threadId, mode, strict } = input;
+  const scope = `${threadId}:${String(providerInstanceId)}:${strict ? "strict" : "open"}`;
 
   useEffect(() => {
     if (readProjectCode === undefined || projectId === undefined) return;
@@ -120,7 +126,8 @@ export function useProjectTrustNotice(input: {
     return () => {
       current = false;
     };
-    // The trust list is read again so a trust given elsewhere settles the answer.
+    // The trust list and Strict are read again so a trust given elsewhere, or
+    // Strict turned on or off, settles the answer.
   }, [readProjectCode, projectId, providerInstanceId, threadId, mode, scope, trustedKey]);
 
   const projectCode: ThreadProjectCode =

@@ -899,11 +899,22 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     props.providerGroups,
     thread?.providerInstanceId,
   );
+  const trustNoticeProject = props.projects?.find(
+    (entry) => entry.type === "work" && String(entry.id) === String(thread?.projectId),
+  );
   const projectTrustNotice = useProjectTrustNotice({
     mode: "work",
     threadId: String(props.threadId),
     projectId: thread?.projectId,
     providerInstanceId: thread?.providerInstanceId,
+    strict:
+      thread?.strict ??
+      (thread?.fullAccessSandbox === true && thread.access === "full-access"
+        ? true
+        : resolveStrict({
+            project: trustNoticeProject?.type === "work" ? trustNoticeProject : undefined,
+            settings: { defaultStrict: props.workDefaultStrict },
+          })),
   });
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),

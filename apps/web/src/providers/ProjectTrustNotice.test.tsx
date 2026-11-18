@@ -54,12 +54,13 @@ function services(input: {
   return { host, setProjectNativeProviders };
 }
 
-function Thread() {
+function Thread({ strict = true }: { readonly strict?: boolean }) {
   const notice = useProjectTrustNotice({
     mode: "code",
     threadId,
     projectId,
     providerInstanceId: claudeId,
+    strict,
   });
   return <ComposerNoticeCard idPrefix="composer" notices={notice === undefined ? [] : [notice]} />;
 }
@@ -143,6 +144,42 @@ describe("the Strict Project code prompt in a thread", () => {
     await waitFor(() =>
       expect(setProjectNativeProviders).toHaveBeenCalledWith(projectId, KEY_PROVIDER_DRIVER_KINDS),
     );
+  });
+
+  it("reads the answer again when the thread's Strict turns on or off", async () => {
+    let strictNow = false;
+    const host: ThreadNativeSetupServices = {
+      ...services({}).host,
+      readProjectCode: vi.fn(async () =>
+        strictNow
+          ? untrusted
+          : ({ status: "trusted", provider: "claude", found: ["settings"] } as const),
+      ),
+    };
+    const view = render(
+      <ThreadNativeSetupProvider services={host}>
+        <Thread strict={false} />
+      </ThreadNativeSetupProvider>,
+    );
+    await waitFor(() => expect(host.readProjectCode).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(/Strict holds this Project/)).toBeNull();
+
+    strictNow = true;
+    view.rerender(
+      <ThreadNativeSetupProvider services={host}>
+        <Thread strict />
+      </ThreadNativeSetupProvider>,
+    );
+    expect(await screen.findByRole("button", { name: "Allow Project code" })).toBeTruthy();
+
+    strictNow = false;
+    view.rerender(
+      <ThreadNativeSetupProvider services={host}>
+        <Thread strict={false} />
+      </ThreadNativeSetupProvider>,
+    );
+    await waitFor(() => expect(screen.queryByText(/Strict holds this Project/)).toBeNull());
+    expect(host.readProjectCode).toHaveBeenCalledTimes(3);
   });
 
   it("shows the words without Allow in a window that cannot change the Project's trust", async () => {
