@@ -1,4 +1,4 @@
-import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
+import { DEFAULT_THEME_SETTINGS, type ThemeSettings } from "@octant/contracts/theme";
 import type { ProjectId } from "@octant/contracts/projects";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import type { ReactNode } from "react";
@@ -70,11 +70,11 @@ const PROJECT_SELECTION = {
   displayName: "Octant",
 };
 
-function themeController(): ThemeController {
+function themeController(settings: ThemeSettings = DEFAULT_THEME_SETTINGS): ThemeController {
   return {
     status: "ready",
-    settings: DEFAULT_THEME_SETTINGS,
-    draft: DEFAULT_THEME_SETTINGS,
+    settings,
+    draft: settings,
     version: 1,
     error: undefined,
     hasDraftChanges: false,
@@ -236,6 +236,33 @@ const RENDERERS: ReadonlyArray<{ readonly id: string; readonly render: () => Rea
         settings={defaultShellSettings()}
         sidebarVibrancySupported
         themeController={themeController()}
+      />
+    ),
+  },
+  {
+    // The character field's Customize fold, open, with a set of its own.
+    id: "settings-background-custom",
+    render: () => (
+      <SettingsView
+        initialDeepLink={{ section: "appearance", setting: "app-background" }}
+        nativeBoundsAvailable
+        onResetLayout={noop}
+        onResetNativeBounds={noop}
+        onSearchChange={noop}
+        onSettingsChange={noop}
+        search=""
+        settings={defaultShellSettings()}
+        sidebarVibrancySupported
+        themeController={themeController({
+          ...DEFAULT_THEME_SETTINGS,
+          appBackground: {
+            ...DEFAULT_THEME_SETTINGS.appBackground,
+            kind: "characters",
+            characterSet: "·•●",
+            characterDensity: 70,
+            characterSpeed: 30,
+          },
+        })}
       />
     ),
   },
