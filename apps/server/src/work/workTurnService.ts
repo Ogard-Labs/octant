@@ -118,7 +118,6 @@ import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/
 import type { TurnImage, TurnImagesDescription } from "../harness/imageDescription";
 import type { TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNativeSetup";
-import type { ProviderCliProjectTrust } from "../providers/providerCliProjectTrust";
 import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
@@ -342,8 +341,6 @@ export interface WorkTurnServiceDependencies {
   readonly persistence: {
     readonly status: () => { readonly state: string; readonly integrity: string };
     readonly readProject: (projectId: ProjectId) => Project | undefined;
-    /** Whether the provider's own CLI already trusts a Project's folder; absent reads none. */
-    readonly readProviderCliTrust?: ProviderCliProjectTrust;
     /** The Project's memory, whose active entries every turn in it carries. */
     readonly readProjectMemory?: (projectId: ProjectId) => ProjectMemoryView;
     readonly readProviderInstance: (
@@ -2838,6 +2835,18 @@ export class WorkTurnService {
   endTurnForLevelChange(threadId: WorkThreadId): void {
     const running = this.#runningAccess.get(String(threadId));
     if (running !== undefined) this.#controllers.get(running.requestId)?.abort();
+  }
+
+  /**
+   * The thread's running turn entered Plan in place: its session's driver
+   * now holds it to Plan, so every check that reads the running turn's level
+   * reads Plan too. Narrowing only; nothing widens a running turn.
+   */
+  enteredPlanInPlace(threadId: WorkThreadId): void {
+    const running = this.#runningAccess.get(String(threadId));
+    if (running === undefined) return;
+    const { fullAccessSandbox: _sandbox, ...rest } = running;
+    this.#runningAccess.set(String(threadId), { ...rest, access: "plan" });
   }
 
   /** The access the thread's running turn holds; undefined when none runs. */

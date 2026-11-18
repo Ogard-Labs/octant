@@ -17,7 +17,11 @@ import {
   useComposerSlashCommands,
   composerProviderCommands,
 } from "../../composer/useComposerSlashCommands";
-import { ComposerAtTypeahead, useComposerAtMenu } from "../../composer/useComposerAtMenu";
+import {
+  ComposerAtTypeahead,
+  composerProviderMentions,
+  useComposerAtMenu,
+} from "../../composer/useComposerAtMenu";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
 import type { CodeCheckoutId, CodeRepositoryId } from "@octant/contracts/code";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
@@ -325,6 +329,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     ...(storedExtensionReceipts.length === 0 ? {} : { initialReceipts: storedExtensionReceipts }),
   });
   const atMenu = useComposerAtMenu({
+    provider: composerProviderMentions(providerGroups, props.selectedProviderInstanceId),
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,

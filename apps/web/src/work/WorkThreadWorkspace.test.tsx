@@ -1941,6 +1941,7 @@ describe("WorkThreadWorkspace", () => {
     );
 
     const entry = await screen.findByRole("article", { name: "Subagent results" });
+    await userEvent.click(within(entry).getByRole("button", { name: "Show result" }));
     expect(
       within(entry).getByRole("article", { name: "Research subagent finished" }),
     ).toHaveTextContent("MATRIX-A3");

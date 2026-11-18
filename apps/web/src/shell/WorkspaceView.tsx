@@ -1210,7 +1210,11 @@ function PaneSubagents(props: {
     return <>{props.children}</>;
   }
   return (
-    <ThreadSubagentsProvider client={client} threadId={String(props.surface.threadId)}>
+    <ThreadSubagentsProvider
+      client={client}
+      onOpenSubagent={props.props.onOpenSubagent}
+      threadId={String(props.surface.threadId)}
+    >
       {props.children}
     </ThreadSubagentsProvider>
   );

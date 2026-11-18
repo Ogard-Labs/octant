@@ -24,6 +24,7 @@ import type {
 import { Effect, type Scope } from "effect";
 import {
   HOST_PASSTHROUGH_VARIABLES,
+  acpExactReleaseClaim,
   acpSubagentsRun,
   type AcpProviderProfile,
   type AcpSessionMode,
@@ -1215,6 +1216,7 @@ function acquireConnection(
   profile: AcpProviderProfile,
   launch: AcpLaunchSpec,
   version: string,
+  executionPolicy: ProviderExecutionPolicy,
   options: Required<Pick<AcpProcessOptions, "shutdownTimeoutMs" | "startupTimeoutMs">> &
     Pick<AcpProcessOptions, "onDiagnostic" | "stderrBytes">,
   clientCapabilities: AcpClientCapabilities | undefined,
@@ -1320,8 +1322,7 @@ function acquireConnection(
         {
           ...(clientCapabilities ?? { readTextFile: false, writeTextFile: false, terminal: false }),
           ...(profile.kind === "mistral-vibe" &&
-          version === "3.0.3" &&
-          profile.elicitationVersions?.includes(version) === true
+          acpExactReleaseClaim(profile.elicitationVersions, version, executionPolicy) !== "absent"
             ? { elicitationForm: true }
             : {}),
         },
@@ -1514,6 +1515,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
             profile,
             launch,
             probe.version,
+            input.executionPolicy,
             {
               shutdownTimeoutMs,
               startupTimeoutMs,

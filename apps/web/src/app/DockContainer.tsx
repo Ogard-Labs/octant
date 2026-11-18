@@ -556,7 +556,6 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
             ? undefined
             : writtenDocumentsByThread.get(dockThreadKey)?.documents
         }
-        now={now}
         onOpenDocument={actions.openWrittenDocument}
         onOpenRemoteAccessSettings={() => void actions.openSettings({ section: "remote-access" })}
         onOpenSubagent={actions.openSubagent}

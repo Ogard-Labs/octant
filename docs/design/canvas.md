@@ -2252,7 +2252,9 @@ artifact format and copies no other product's identifiers.
   context and is refused. The paired browser offers **Import HTML…** in a
   Chat thread's Canvas tools to a device that acts as the host's person, on
   its own: a device's plain create is not built, so no create draft is
-  shown beside it.
+  shown beside it. The phone offers the same import from a Chat thread's
+  Views and panes, from a file or pasted markup with an optional title, and
+  shows the host's summary of what was taken out or its refusal.
 - **Bounds and refusals.** The page is at most 256 KiB of UTF-8
   (`CANVAS_HTML_IMPORT_MAX_BYTES`), checked on the host; a body past the
   route's 1 MiB read is answered as too large too. What survives the import

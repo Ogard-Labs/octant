@@ -205,7 +205,11 @@ import {
   useComposerSlashCommands,
   composerProviderCommands,
 } from "../composer/useComposerSlashCommands";
-import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
+import {
+  ComposerAtTypeahead,
+  composerProviderMentions,
+  useComposerAtMenu,
+} from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
 
 export type CodeAttachmentClient = Pick<
@@ -720,6 +724,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const pathMentionListId = `code-path-mentions-${String(props.threadId)}`;
   const pathMentionOpen = pathMentions.open && !mention.open;
   const atMenu = useComposerAtMenu({
+    provider: composerProviderMentions(props.providerGroups, view?.thread.providerInstanceId),
     textarea: () => textareaRef.current,
     draft,
     onDraftChange: (next) => {
@@ -759,6 +764,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     threadId: String(props.threadId),
     projectId: view?.thread.projectId,
     providerInstanceId: view?.thread.providerInstanceId,
+    strict:
+      view?.thread.strict ??
+      (view?.thread.fullAccessSandbox === true && view.thread.executionPolicy === "full-access"
+        ? true
+        : props.strictDefault === true),
   });
   const threadCanvases = useThreadCanvasCards({
     client: view === undefined ? undefined : props.canvasClient,

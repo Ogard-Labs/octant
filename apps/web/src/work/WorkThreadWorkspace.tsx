@@ -223,7 +223,11 @@ import {
   useComposerSlashCommands,
   composerProviderCommands,
 } from "../composer/useComposerSlashCommands";
-import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
+import {
+  ComposerAtTypeahead,
+  composerProviderMentions,
+  useComposerAtMenu,
+} from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
 
 /** Only the person's messages carry a time here; the rows after one share it. */
@@ -910,11 +914,22 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     props.providerGroups,
     thread?.providerInstanceId,
   );
+  const trustNoticeProject = props.projects?.find(
+    (entry) => entry.type === "work" && String(entry.id) === String(thread?.projectId),
+  );
   const projectTrustNotice = useProjectTrustNotice({
     mode: "work",
     threadId: String(props.threadId),
     projectId: thread?.projectId,
     providerInstanceId: thread?.providerInstanceId,
+    strict:
+      thread?.strict ??
+      (thread?.fullAccessSandbox === true && thread.access === "full-access"
+        ? true
+        : resolveStrict({
+            project: trustNoticeProject?.type === "work" ? trustNoticeProject : undefined,
+            settings: { defaultStrict: props.workDefaultStrict },
+          })),
   });
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
@@ -1486,6 +1501,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   });
   const fileMentionOpen = fileMentions.open && !mention.open;
   const atMenu = useComposerAtMenu({
+    provider: composerProviderMentions(props.providerGroups, thread?.providerInstanceId),
     textarea: () => textareaRef.current,
     draft: composerDraft.text,
     onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),

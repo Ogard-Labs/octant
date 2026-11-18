@@ -2,10 +2,16 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
+import { OctantButton } from "../ui/base/OctantButton";
 import { readableModelId } from "../providers/providerModelLabel";
 import { isActiveAgentHierarchyStatus } from "./buildAgentHierarchyModel";
 import { SubagentProviderMark, useSubagentProviders } from "./subagentProviders";
-import { buildSubagentRows, type SubagentRow } from "./subagentRows";
+import {
+  buildSubagentRows,
+  subagentRunTime,
+  subagentStartedAt,
+  type SubagentRow,
+} from "./subagentRows";
 import { SubagentStatusIcon, subagentStatusWord } from "./subagentStatus";
 import { useChildRunStatus, type ChildRunStatusController } from "./useChildRunStatus";
 import "./agent-hierarchy.css";
@@ -20,16 +26,33 @@ export const ThreadSubagentsContext = createContext<ChildRunStatusController | u
   undefined,
 );
 
+/**
+ * Opens a subagent's conversation in Agents by its row id: the run id for one
+ * Octant started, the observation's selection id for a provider's own. The
+ * pane passes the handler the composer's card already uses, so a transcript
+ * row and a card row open a child the same way.
+ */
+export const ThreadSubagentOpenContext = createContext<((id: string) => void) | undefined>(
+  undefined,
+);
+
 export function ThreadSubagentsProvider(props: {
   readonly client: AgentRunClient;
   readonly threadId: string;
+  readonly onOpenSubagent?: ((id: string) => void) | undefined;
   readonly children: ReactNode;
 }) {
   const subagents = useChildRunStatus({
     client: props.client,
     parentThreadId: decodeAgentRunParentThreadId(props.threadId),
   });
-  return <ThreadSubagentsContext value={subagents}>{props.children}</ThreadSubagentsContext>;
+  return (
+    <ThreadSubagentsContext value={subagents}>
+      <ThreadSubagentOpenContext value={props.onOpenSubagent}>
+        {props.children}
+      </ThreadSubagentOpenContext>
+    </ThreadSubagentsContext>
+  );
 }
 
 /**
@@ -41,13 +64,6 @@ export interface TurnSubagentWindow {
   readonly from: string;
   /** Absent for the thread's latest turn, which owns everything after it. */
   readonly until?: string;
-}
-
-/** When a subagent started: the run's request, or the first sight of a provider's own. */
-export function subagentStartedAt(row: SubagentRow): string {
-  return row.kind === "octant-started"
-    ? (row.entry.createdAt ?? row.updatedAt)
-    : row.child.firstObservedAt;
 }
 
 export function subagentRowsInWindow(
@@ -108,18 +124,6 @@ export function subagentLatestLine(row: SubagentRow): string {
   return line ?? subagentStatusWord(row.lifecycleStatus);
 }
 
-/** "5m 21s", "17s", "1h 4m": how long the subagent ran, or has run so far. */
-export function subagentRunLabel(row: SubagentRow, now: number): string {
-  const started = Date.parse(subagentStartedAt(row));
-  const ended = isActiveAgentHierarchyStatus(row.lifecycleStatus) ? now : Date.parse(row.updatedAt);
-  const seconds = Math.max(0, Math.floor((ended - started) / 1_000));
-  if (!Number.isFinite(seconds)) return "";
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-}
-
 /** The task's first line, the row's name, as the agent that started it put it. */
 function subagentName(row: SubagentRow): string {
   return (
@@ -139,6 +143,7 @@ function subagentName(row: SubagentRow): string {
  */
 export function TurnSubagentRows(props: { readonly window: TurnSubagentWindow }) {
   const subagents = useContext(ThreadSubagentsContext);
+  const onOpen = useContext(ThreadSubagentOpenContext);
   const providers = useSubagentProviders();
   const rows =
     subagents === undefined || subagents.status !== "ready"
@@ -160,22 +165,18 @@ export function TurnSubagentRows(props: { readonly window: TurnSubagentWindow })
         const name = subagentName(row);
         const latest = subagentLatestLine(row);
         const model = subagentModelLabel(row);
-        const ran = subagentRunLabel(row, now);
+        const ran = subagentRunTime(row, now);
         const status = subagentStatusWord(row.lifecycleStatus);
-        return (
-          <li
-            aria-label={[
-              name,
-              model === "" ? row.providerName : `${row.providerName} ${model}`,
-              status,
-              ran,
-            ]
-              .filter((part) => part !== "")
-              .join(", ")}
-            className="turn-subagents__row"
-            data-status={row.lifecycleStatus}
-            key={row.id}
-          >
+        const label = [
+          name,
+          model === "" ? row.providerName : `${row.providerName} ${model}`,
+          status,
+          ran,
+        ]
+          .filter((part) => part !== "")
+          .join(", ");
+        const content = (
+          <>
             <span aria-hidden="true" className="turn-subagents__mark">
               <SubagentProviderMark
                 driverKind={row.driverKind}
@@ -198,6 +199,28 @@ export function TurnSubagentRows(props: { readonly window: TurnSubagentWindow })
             <span aria-hidden="true" className="turn-subagents__status">
               <SubagentStatusIcon lifecycleStatus={row.lifecycleStatus} />
             </span>
+          </>
+        );
+        return (
+          <li
+            className="turn-subagents__row"
+            data-status={row.lifecycleStatus}
+            key={row.id}
+            {...(onOpen === undefined ? { "aria-label": label } : {})}
+          >
+            {onOpen === undefined ? (
+              content
+            ) : (
+              <OctantButton
+                aria-label={label}
+                className="turn-subagents__open"
+                onClick={() => onOpen(row.id)}
+                type="button"
+                variant="bare"
+              >
+                {content}
+              </OctantButton>
+            )}
           </li>
         );
       })}

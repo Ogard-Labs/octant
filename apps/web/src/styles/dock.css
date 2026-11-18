@@ -423,6 +423,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A run time keeps one width while it ticks and when the run finishes. */
+.dock-card__time {
+  justify-content: flex-end;
+  min-width: 48px;
+}
+
 .dock-card__meta + .dock-card__meta {
   margin-inline-start: var(--oct-space-2);
 }

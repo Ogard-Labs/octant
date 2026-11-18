@@ -30,6 +30,7 @@ export const SCENE_LIST: ReadonlyArray<SceneMeta> = [
   { id: "project-picker", open: "button[aria-label^='Project:']" },
   { id: "mode-picker", open: "button[aria-haspopup='menu']" },
   { id: "rail" },
+  { id: "subagent-progress", narrow: true },
 ];
 
 /** The two window sizes a scene is drawn at. */

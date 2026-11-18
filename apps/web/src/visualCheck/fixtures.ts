@@ -24,6 +24,9 @@ import {
   AUTOMATION_UI_TEST_IDS,
   automationSummaryFixture,
 } from "../automation/automationTestFixtures";
+import type { AgentHierarchyInputEntry } from "../agents/buildAgentHierarchyModel";
+import { buildChildRunStatusSummary } from "../agents/buildChildRunStatusSummary";
+import type { ChildRunStatusController } from "../agents/useChildRunStatus";
 import type { AutomationEditorCatalog } from "../automation/automationCenterModel";
 import { automationWorkDraftFixture } from "../automation/automationTestFixtures";
 
@@ -606,4 +609,114 @@ export function localUsageHistoryFixture(): LocalUsageHistoryResponse {
       },
     ],
   });
+}
+
+// --- Subagent progress -----------------------------------------------------
+
+const SUBAGENT_RUN_PREFIX = "0b9d3f40-5a52-4a1e-8c11-00000000000";
+
+function subagentEntry(
+  index: number,
+  fields: {
+    readonly role: string;
+    readonly task: string;
+    readonly lifecycleStatus: "running" | "completed";
+    readonly createdAt: string;
+    readonly updatedAt: string;
+  },
+): AgentHierarchyInputEntry {
+  return {
+    runId: `${SUBAGENT_RUN_PREFIX}${index}`,
+    executionKind: "octant-managed",
+    usageQuality: "provider-reported",
+    resultAcknowledgement: { required: false, acknowledged: false },
+    version: 2,
+    ...fields,
+  };
+}
+
+/** The first turn started at 08:50; every run below began after it. */
+export const SUBAGENT_TURN_STARTED_AT = "2026-08-18T08:50:00.000Z";
+
+/** One working (3m 30s so far at the fixed clock) and one finished (48s) child. */
+export const SUBAGENT_ROW_ENTRIES: ReadonlyArray<AgentHierarchyInputEntry> = [
+  subagentEntry(1, {
+    role: "research",
+    task: "Map where the composer reads its subagents",
+    lifecycleStatus: "running",
+    createdAt: "2026-08-18T08:56:30.000Z",
+    updatedAt: "2026-08-18T08:59:50.000Z",
+  }),
+  subagentEntry(2, {
+    role: "review",
+    task: "Check the retry button against the design",
+    lifecycleStatus: "completed",
+    createdAt: "2026-08-18T08:52:00.000Z",
+    updatedAt: "2026-08-18T08:52:48.000Z",
+  }),
+];
+
+/** A finished child whose generation-1 delivery shows as a quiet line, worked 1m 12s. */
+export const SUBAGENT_RESULT_ENTRY: AgentHierarchyInputEntry = subagentEntry(3, {
+  role: "research",
+  task: "List the call sites of the retry policy",
+  lifecycleStatus: "completed",
+  createdAt: "2026-08-18T08:53:00.000Z",
+  updatedAt: "2026-08-18T08:54:12.000Z",
+});
+
+export const SUBAGENT_RESULT_DELIVERY = [
+  "A subagent you delegated has finished.",
+  "",
+  "Subagent: research (6e1c0f3a-1111-4a7b-9c11-aaaaaaaaaaaa/haiku)",
+  `Run: ${SUBAGENT_RUN_PREFIX}3 (generation 1)`,
+  "Task: List the call sites of the retry policy",
+  "",
+  "Result:",
+  "Four call sites, all in the server's agent run package.",
+].join("\n");
+
+/** Three working children, the first with a title long enough to be cut at 760. */
+export const SUBAGENT_TRAY_ENTRIES: ReadonlyArray<AgentHierarchyInputEntry> = [
+  subagentEntry(4, {
+    role: "research",
+    task: "Trace how the folded composer card decides which working subagents to name in its head, and report every place that reads the parent summary",
+    lifecycleStatus: "running",
+    createdAt: "2026-08-18T08:50:30.000Z",
+    updatedAt: "2026-08-18T08:59:00.000Z",
+  }),
+  subagentEntry(5, {
+    role: "implementation",
+    task: "Add the run-time slot",
+    lifecycleStatus: "running",
+    createdAt: "2026-08-18T08:54:00.000Z",
+    updatedAt: "2026-08-18T08:59:00.000Z",
+  }),
+  subagentEntry(6, {
+    role: "review",
+    task: "Review the diff",
+    lifecycleStatus: "running",
+    createdAt: "2026-08-18T08:57:00.000Z",
+    updatedAt: "2026-08-18T08:59:00.000Z",
+  }),
+];
+
+/** A host read that has answered with these children and nothing else. */
+export function subagentsRead(
+  entries: ReadonlyArray<AgentHierarchyInputEntry>,
+): ChildRunStatusController {
+  return {
+    status: "ready",
+    entries,
+    observations: [],
+    observationsTruncated: false,
+    summary: buildChildRunStatusSummary(entries),
+    reconnecting: false,
+    busy: false,
+    errorMessage: undefined,
+    stopAll: async () => false,
+    cancelRun: async () => false,
+    acknowledge: async () => undefined,
+    refresh: () => undefined,
+  };
 }
