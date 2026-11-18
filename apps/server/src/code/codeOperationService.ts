@@ -588,6 +588,8 @@ export interface CodeOperationRepositoryTestPort {
     readonly executionPolicy: CodeThread["executionPolicy"];
     readonly checkoutRoot: string;
     readonly environment: Readonly<Record<string, string | undefined>>;
+    /** The thread's resolved Strict value, passed on a host without Octant's sandbox. */
+    readonly strict?: boolean;
   }) => Promise<CodeRepositoryTestRun>;
   readonly cancel: (input: {
     readonly testRunId: string;
@@ -612,6 +614,7 @@ export interface CodeOperationScaffoldPort {
     readonly checkoutId: CodeThread["checkoutId"];
     readonly executionPolicy: CodeThread["executionPolicy"];
     readonly checkoutRoot: string;
+    readonly strict?: boolean;
   }) => Promise<
     | { readonly status: "ran"; readonly run: ScaffoldRun }
     | { readonly status: "refused"; readonly message: string }
@@ -3975,12 +3978,7 @@ export class CodeOperationService {
             : {}),
           ...(serverLogin === undefined ? {} : { server: serverLogin }),
           executionPolicy: thread.executionPolicy,
-          // Windows has no Octant sandbox for a thread terminal, so it opens
-          // there unconfined outside Strict and refuses under it; elsewhere it
-          // keeps the confinement it has at every setting.
-          ...(process.platform === "win32"
-            ? { strict: this.#options.threadStrict?.(thread) ?? true }
-            : {}),
+          ...this.#windowsStrict(thread),
         });
         owner.starting = starting;
         this.#terminalOwners.set(command.terminalId, owner);
@@ -4152,6 +4150,7 @@ export class CodeOperationService {
           executionPolicy: thread.executionPolicy,
           checkoutRoot: root.checkoutRoot,
           environment: root.environment,
+          ...this.#windowsStrict(thread),
         });
         if (
           run.id !== command.testRunId ||
@@ -4232,6 +4231,7 @@ export class CodeOperationService {
           checkoutId: checkout.id,
           executionPolicy: thread.executionPolicy,
           checkoutRoot: root.checkoutRoot,
+          ...this.#windowsStrict(thread),
         });
         if (outcome.status === "refused") {
           return this.#failed(command.operationId, "invalid", outcome.message);
@@ -6976,6 +6976,18 @@ export class CodeOperationService {
       state: "unavailable",
       browserGrant,
     });
+  }
+
+  /**
+   * The thread's resolved Strict value for a launch on Windows, which has no
+   * Octant sandbox: a terminal, test or scaffold runs there unconfined outside
+   * Strict and refuses under it. Elsewhere the launch keeps the confinement it
+   * has at every setting, so nothing is passed.
+   */
+  #windowsStrict(thread: CodeThread): { readonly strict?: boolean } {
+    return process.platform === "win32"
+      ? { strict: this.#options.threadStrict?.(thread) ?? true }
+      : {};
   }
 
   #failed(

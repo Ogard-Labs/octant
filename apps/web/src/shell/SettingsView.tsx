@@ -3114,6 +3114,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
     <section aria-label="Appearance" className="settings-section-stack" id="settings-appearance">
       {props.themeController !== undefined ? (
         <ThemeAppearanceEditor
+          photoLibrary={props.backgroundImageLibrary}
           afterScheme={
             <>
               {windowSection}

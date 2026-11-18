@@ -73,3 +73,30 @@ export function windowsSystemProgram(
     name,
   );
 }
+
+/**
+ * Stops a launch's whole tree and answers whether that is confirmed: the tree
+ * stop ran (or found the root already gone) and the root's exit was seen
+ * within `waitMs`. Anything else is `uncertain`, and the caller keeps the
+ * launch's ownership receipt, so a restarted host still finds and stops a
+ * tree a failed stop left running.
+ */
+export async function stopWindowsTreeConfirmed(
+  pid: number,
+  exited: Promise<void>,
+  stop: (pid: number) => Promise<WindowsProcessTreeStop>,
+  waitMs: number,
+): Promise<"stopped" | "uncertain"> {
+  const stopped = await stop(pid).catch(() => "failed" as const);
+  if (stopped === "failed") return "uncertain";
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const ended = await Promise.race([
+    exited.then(() => true),
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), waitMs);
+      timer.unref?.();
+    }),
+  ]);
+  if (timer !== undefined) clearTimeout(timer);
+  return ended ? "stopped" : "uncertain";
+}

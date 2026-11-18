@@ -147,7 +147,7 @@ export function createCodeDebugAgentTools(
   const allowlist = options.thread.toolConstraints ?? [];
   if (!isToolAllowedByAllowlist(allowlist, CODE_DEBUG_TOOL_NAME)) return undefined;
   if (options.thread.executionPolicy === "plan") return undefined;
-  if (!options.debug.offersSessions) return undefined;
+  if (!options.debug.offersSessions(options.thread.id)) return undefined;
 
   const caller: CodeDebugCaller = { scopeId: options.windowId, principal: "agent" };
   const scope = { threadId: options.thread.id, checkoutId: options.thread.checkoutId };
@@ -875,7 +875,8 @@ const REFUSAL_MESSAGES: Readonly<Record<CodeDebugRefusalReason, string>> = {
   "checkout-mismatch": "This thread's window is now on another checkout.",
   "checkout-unavailable": "This thread's checkout is unavailable right now.",
   "no-debug-adapter": "No debug adapter that is installed and switched on runs this configuration.",
-  "unsupported-platform": "Debug sessions run only on macOS and Linux hosts.",
+  "unsupported-platform":
+    "Debug sessions run on macOS and Linux, and on Windows only outside Strict, which needs a sandbox Windows does not have yet.",
   "mode-prohibited": "Only a Code thread debugs a program.",
   "plan-read-only": "Plan is read-only, so it runs and debugs no program.",
   "local-host-required": "Only this host's own windows and this thread's agent debug a program.",

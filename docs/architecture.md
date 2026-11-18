@@ -6932,13 +6932,11 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
     `.vibe/hooks.toml`, `.vibe/plugins`, `.vibe/tools`, and `.vibe/agents`.
     OpenCode's `opencode.jsonc`, `opencode.json`, `.opencode/opencode.jsonc`,
     and `.opencode/opencode.json` (maintainer decision, 2026-11-14). Codex
-    lists none, because Octant's trust loads none of its Project
-    configuration (Codex's own folder trust decides it), and any other
-    provider answers none. Decided (maintainer decision, 2026-11-16; designed,
-    not built): in a Project trusted for Codex, outside Plan and Strict, Codex
-    loads its own Project configuration as it does on its own, and Codex then
-    lists its entries here
-    ([Provider runtimes: Codex](design/provider-runtimes.md#codex)).
+    lists `.codex/config.toml`: in a Project trusted for Codex, outside Plan
+    and Strict, Codex loads its own Project configuration as it does on its
+    own (maintainer decision, 2026-11-16; built,
+    [Provider runtimes: Codex](design/provider-runtimes.md#codex)). Any other
+    provider answers none.
     Untrusted Project code shows one quiet notice card above the thread's
     composer ([Thread view](design/thread-view.md#project-trust-prompt)):
     **Trust for <provider>** sends the same `change-project-native-providers`
@@ -11653,7 +11651,7 @@ launch's tool bridge through the loopback relay.
 (`skill-instructions`, `mcp-server`, `mcp-tool`, `mcp-prompt`, `mcp-resource`,
 `hook`, `app`, `agent`, `apple-development-adapter`, `board`, `integration`,
 `ui-surface`, `appearance-pack`, `preview-viewer`, `provider-driver`, `replica-store`,
-`desktop-provider`, `theme`, `language-server` and `debug-adapter` (Code only)), composer addressing
+`desktop-provider`, `theme`, `ground`, `language-server` and `debug-adapter` (Code only)), composer addressing
 (`@plugin`, `@plugin/component`, `$skill`), and the activation ladder. The
 manifest and component schemas themselves (`ExtensionPackageManifest`,
 component kinds, declared capabilities, and renderer contribution points)
@@ -13674,6 +13672,25 @@ selections, so turning the plugin back on restores the theme. _Rationale:_ rewri
 would lose the person's choice to a reversible switch, and the default is
 already what a missing preset draws.
 
+**Character grounds as plugin contributions** (maintainer request, 2026-11-18;
+built). A plugin may also offer character grounds as data only: a component of
+kind `ground` whose `ground` field holds `characterSet` and optionally
+`characterDensity`, `characterSpeed` and `characterPattern`, validated by the
+same schemas as the person's stored ground (`@octant/contracts/theme`). Like a
+theme, the component declares no capability, entry point, configuration or
+content reference; a `ground` field on any other kind, a missing one on this
+kind, a colour, an image, an emoji set, a speed past 100, or any other field is
+refused at decode. `@octant/plugin-host/grounds` lists the grounds of
+effective components only (installed, trusted and enabled at the plugin and
+the component), under a host-assigned id. The renderer reads them from the
+same extension snapshot as the themes and shows them in the Customize fold's
+starter menu under "From plugins". Picking one copies its values into the
+person's own ground and saves once, so the saved ground never refers to the
+plugin: switching the plugin off or removing it takes its grounds out of the
+menu and leaves a copy already picked as it is. _Rationale:_ a saved reference
+would dangle, and a theme declaration that also carried a ground would tie a
+field to a set of colours.
+
 The first-party manifests have one definition,
 `@octant/plugin-host/first-party-plugins`, which the server and the renderer
 both read; it also marks which of them are switchable. A switchable plugin's
@@ -14945,16 +14962,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   **Plan and Chat tool parity** (maintainer decision, 2026-11-16; partly
   built). Plan and Chat keep their rules (Plan writes nothing, Chat has no
   folder), and inside those rules a provider keeps what it offers on its own:
-  - **Read-only MCP servers in Plan** (designed, not built). A server's own
-    `readOnlyHint` is the server's claim and is never trusted. The person may
-    mark one MCP server "Read-only — allowed in Plan", per server and per
-    host, from the Settings surfaces that manage MCP servers today; the mark
-    is journaled, and a tool's `readOnlyHint` may pre-suggest the mark in the
-    dialog but never sets it. In Plan the tools of a marked server are offered
-    and run under the thread's ask rules; an unmarked server stays withheld,
-    as every server is in Plan today. It is to be wired for every provider
-    whose MCP servers Octant controls: Claude Code, Codex and OpenCode at
-    least. Until built, Plan starts no MCP server but Octant's own.
+  - **Read-only MCP servers in Plan** (built for Claude Code, Codex and
+    OpenCode; the full rule, and why a `readOnlyHint` never pre-suggests the
+    mark, is in the second **Plan and Chat tool parity** entry below).
   - **Provider memory, read-only** (built for Claude Code and Codex). Claude
     Code loads its memory in Plan and Chat with the account's memory setting
     on: the account's `CLAUDE.md` (in Chat the only instruction file, since
@@ -15022,8 +15032,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     the person may answer exactly those calls, once each. A hosted (HTTP)
     server works in Plan; one that runs on this computer may not start where
     Plan's sandbox starts no program (OpenCode on macOS), which the Settings
-    page says. Not built: a tool's `readOnlyHint` pre-suggesting the mark,
-    since Octant does not connect to a provider's own servers to read it.
+    page says. A tool's `readOnlyHint` pre-suggesting the mark has no place
+    to appear, and stays unbuilt until one exists. Octant never connects to a
+    provider's own servers to read it, and keeps not connecting. The servers
+    Octant does connect to (installed MCP extensions and connectors) carry no
+    mark, because in Plan each of their calls is put to the person.
   - **Provider memory, read-only** (built for Claude Code and Codex). Claude
     Code loads its memory in Plan and Chat with the account's memory setting
     on: the account's `CLAUDE.md` (in Chat the only instruction file, since
@@ -15863,10 +15876,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `workspace-write`, with the approval policies above. That lease is keyed on
   Strict as well as root, mode and posture, so it never serves a Strict
   session. Plan and Chat stay in Octant's read-only profile at every Strict
-  value, and Strict keeps Octant's profile as described here. The
-  workspace-write policy a turn sends takes no deny rules, so Octant's
-  protected paths are not Codex deny rules (not built yet: a named Codex
-  permissions profile could carry them). Inside Octant's profile approving a
+  value, and Strict keeps Octant's profile as described here. From Codex
+  0.169.0, outside Windows, that sandbox runs as a named Codex permissions
+  profile carrying other providers' sign-ins as Codex deny rules, since the
+  built-in workspace-write policy has no deny field
+  ([Provider runtimes: Codex](design/provider-runtimes.md#codex)). Inside Octant's profile approving a
   command no longer lifts any sandbox: it runs inside Octant's profile. Under that
   profile a Codex command cannot read `HOME` outside the root and the account
   home, and cannot write the account home's configuration, `.env`, rules,
@@ -16429,7 +16443,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   | `nativeSetup.skills`          | `supported`; a Project's skills only in a trusted Project                                                                          | `supported`; no Project skill switched off by path                                                       | `supported`; `.claude` and `.agents` skills, the `skill` permission asked                                                                         | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `nativeSetup.toolServers`     | `supported`; the account's servers, connectors, and plugins, a Project's `.mcp.json` held until trusted                            | `supported`; the person's servers and plugins stay on in Chat                                            | `supported`; the MCP servers in the person's own OpenCode configuration, their tools following the level                                          | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, connectors included                                                                       | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `nativeSetup.hooks`           | `supported`                                                                                                                        | `supported`; the account home's hooks were never switched off                                            | `unsupported`                                                                                                                                     | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
-  | `nativeSetup.projectCode`     | `supported`; also starts the Project's MCP servers                                                                                 | `unsupported`; Codex's own folder trust decides                                                          | `unsupported`; project configuration and plugins stay off                                                                                         | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, under its own folder trust                                                                | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `nativeSetup.projectCode`     | `supported`; also starts the Project's MCP servers                                                                                 | `supported` outside Plan and Strict in a Project trusted for Codex; loads `.codex/config.toml`           | `unsupported`; project configuration and plugins stay off                                                                                         | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, under its own folder trust                                                                | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
 
   Which driver kinds each column covers, and how each may be used in a mode, as
   `providerCatalogCapabilities` in `@octant/domain` holds it. A runtime's Work and
@@ -19833,8 +19847,12 @@ workspaces there):
   (`Read`, `Grep`, `Glob`, `LS`, `Edit`, `Write`, `NotebookEdit`, `Bash`
   and its task tools are left out of the session's tool list), where
   elsewhere those tools ask and are declined inside Octant's sandbox.
-  OpenCode and the ACP agents keep their own file and shell tools whatever
-  they are told, so a Chat thread on them stays refused on Windows with the
+  OpenCode's permission rules can deny its file and shell tools, but its
+  command templates run shell substitutions and its plugins run code in its
+  own process outside those rules; an ACP agent's client capabilities decide
+  only whether it may use Octant's file and terminal methods, and no
+  reviewed agent profile can be told to drop its own built-in file and shell
+  tools. So a Chat thread on them stays refused on Windows with the
   reason ("This provider keeps Chat without a folder or shell only inside
   Octant's sandbox, which Windows doesn't have yet."). Chat under Strict is
   refused like every Strict launch there.
@@ -20058,7 +20076,8 @@ deliverable and keeps every gate above:
    - **Process-tree stop.** Windows has no process groups, and
      `ChildProcess.kill` there ends only the root. Every stop that signals a
      process group elsewhere (each provider family's runtime, owned-process
-     receipts, agent runs, terminals) ends the whole tree on Windows with
+     receipts, agent runs, terminals, repository tests and scaffolds,
+     language servers and debug sessions) ends the whole tree on Windows with
      `System32\taskkill.exe /PID <pid> /T /F`, run by absolute path through no
      shell (`process/windowsProcessTree.ts`). Rationale: the launcher's
      `--full-access` job object would end a tree that re-parented itself too,
@@ -20124,18 +20143,37 @@ deliverable and keeps every gate above:
      Command Prompt batch script), read from the same setting. Under Strict
      or with the sandbox kept a command is refused when it runs, with the
      reason, and nothing starts.
-   - **Not yet on Windows.** These run on macOS and Linux and are
-     unavailable on Windows: language servers, a Project's
-     [own toolchain copy](design/language-services.md#user-added-servers) among them, and the
-     [agent debug tool](design/language-services.md#agent-debug-tool-rules),
-     whose launch policies admit only a Seatbelt or Bubblewrap capsule
-     (`unsupported-platform`) and whose capsule ports have no unconfined
-     Windows form yet; repository tests and scaffolds, whose runner starts
-     every command through the confinement port and owned process groups,
-     neither of which has a Windows form, so a run reports unavailable; a
-     Chat thread on OpenCode or an ACP agent (above); and every launch under
-     Strict at any level or with the sandbox kept, until the confinement
-     launcher has run a real provider on a person's Windows machine.
+   - **Tests, scaffolds, language servers and debug sessions** (since
+     2026-11-18; before then each was refused on Windows, its runner or
+     launch policy admitting only a Seatbelt or Bubblewrap capsule and owned
+     process groups) run unconfined outside Strict, as a thread terminal
+     does, and are refused under Strict with the reason. A repository test
+     or scaffold starts the program it names with no shell, a bare name
+     found on `Path` with `PATHEXT`'s extensions and an npm `.cmd` shim
+     read for the program it starts (as above), with the Windows names a
+     program needs in its environment, and ends its whole tree on timeout
+     or cancellation. A scaffold's generator counts as installed when
+     `Path` holds it under one of `PATHEXT`'s extensions (`bunx.exe`), as
+     Windows finds it. A
+     [language server](design/language-services.md#launch-classes), a
+     Project's own toolchain copy among them, starts for a thread outside
+     Strict (`decideLanguageServerLaunch` answers confinement `none`);
+     `repo-tooling` still needs the person's start and approval and gets no
+     egress proxy, having no wall to hold it to, and a crash restart is
+     held to the watched thread's Strict value as it is then. A
+     [debug session](design/language-services.md#approval-and-starting),
+     the agent's `octant_debug` tool included, starts after the level's
+     confirmation on the open network, its child connecting on loopback,
+     and ends when Strict turns on. Each keeps its receipt, private cache
+     or state folder, and the tree stop. A server's or session's receipt
+     (and a session's state folder) goes only once the tree stop ran and the
+     root was seen to exit (`stopWindowsTreeConfirmed`); a failed or
+     unconfirmed stop keeps them, so a restarted host still stops the tree,
+     and the stop is tried again when the root exits.
+   - **Not yet on Windows.** A Chat thread on OpenCode or an ACP agent
+     (above), and every launch under Strict at any level or with the
+     sandbox kept, until the confinement launcher has run a real provider
+     on a person's Windows machine.
      A provider that starts no local process before its
      turn (an Octant Harness model over an endpoint) runs turns there
      outside Strict, at Full access and below it, with Octant's own file
@@ -20163,9 +20201,14 @@ deliverable and keeps every gate above:
      ACP runtimes compiled the same way start at Full access and below it
      outside Strict (Pi in Chat too) with an unconfined version read, the
      Kilo agent answering ACP's `initialize`, are stopped with their tree, and
-     are refused under Strict, a Kilo Chat thread by Chat's reason. Chat on
+     are refused under Strict, a Kilo Chat thread by Chat's reason; a
+     repository test outside Strict runs a real program and returns its output
+     and exit code, and a timed-out one is ended with the program it started;
+     and a language server and a debug adapter start unconfined, answer on
+     their pipes and are stopped. Chat on
      Codex and Claude, the harness shell's level routing and app-managed tools
-     on Windows are tested on Linux CI with the host's platform set to
+     on Windows, and the language server, debug and test launch policies under
+     Strict, are tested on Linux CI with the host's platform set to
      Windows. A whole Work, Code or Chat turn through a real provider on a
      person's Windows machine has not run.
 4. The `octant` CLI on Windows: native host paths, a browser opener that runs

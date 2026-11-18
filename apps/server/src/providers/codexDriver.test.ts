@@ -43,6 +43,7 @@ import {
   approvalRequestIsProjectConfined,
   codexExecutionSettings,
   codexReviewRequest,
+  CODEX_OCTANT_PROFILE,
   withHeldTurnInput,
   codexTurnExecutionSettings,
   makeCodexClient,
@@ -3283,6 +3284,151 @@ describe("Codex execution authority and approvals", () => {
       await acquired.close();
     },
   );
+
+  describe("Codex's own sandbox under Octant's permissions profile", () => {
+    const extra = "/tmp/octant-codex-extra";
+    // The host resolves the list; the driver reads no protected-file state.
+    const protectedSignIns = () => [
+      "/home/person/.claude/.credentials.json",
+      "/home/person/.codex/auth.json",
+      "/data/providers",
+    ];
+    const run = async (input: {
+      readonly strict?: boolean;
+      readonly version?: string;
+      readonly resume?: true;
+    }) => {
+      const f = fixture({ version: input.version ?? "0.169.0" });
+      const acquired = await acquireConnection(
+        makeCodexDriver(
+          f.options({
+            platform: "darwin",
+            protectedSignIns,
+            openEnvironment: { CODEX_HOME: "/data/providers/codex-account" },
+          }),
+        ),
+        "code",
+        [extra],
+      );
+      const posture = {
+        sessionId,
+        executionPolicy: "approval-gated" as const,
+        ...(input.strict === undefined ? {} : { strict: input.strict }),
+      };
+      await Effect.runPromise(
+        input.resume === true
+          ? acquired.connection.resume({
+              ...posture,
+              resumeCursor: { driverKind: "codex", value: "thread-existing" },
+            })
+          : acquired.connection.start({ ...posture, modelId: "gpt-5.4" as never }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "go", attachments: [], tools: [] }),
+      );
+      await acquired.close();
+      return {
+        thread: f.calls.find(({ method }) => ["thread/start", "thread/resume"].includes(method))
+          ?.input,
+        turn: f.calls.find(({ method }) => method === "turn/start")?.input,
+      };
+    };
+
+    it("refuses other providers' sign-ins inside Codex's own sandbox outside Strict", async () => {
+      const { thread, turn } = await run({ strict: false });
+      expect(thread).toMatchObject({ permissions: CODEX_OCTANT_PROFILE });
+      expect(thread).not.toHaveProperty("sandbox");
+      expect(thread).toMatchObject({
+        config: {
+          permissions: {
+            [CODEX_OCTANT_PROFILE]: {
+              extends: ":workspace",
+              filesystem: {
+                [projectRoot]: "write",
+                [extra]: "write",
+                "/home/person/.claude/.credentials.json": "deny",
+                "/home/person/.codex/auth.json": "deny",
+                "/data/providers": "deny",
+                // The account's own home stays reachable inside Octant's folder.
+                "/data/providers/codex-account": "write",
+              },
+            },
+          },
+        },
+      });
+      // Each turn restates the profile instead of the built-in sandbox, which
+      // would replace it.
+      expect(turn).toMatchObject({ permissions: CODEX_OCTANT_PROFILE });
+      expect(turn).not.toHaveProperty("sandboxPolicy");
+    });
+
+    it("restates the profile when a thread is resumed outside Strict", async () => {
+      const { thread } = await run({ strict: false, resume: true });
+      expect(thread).toMatchObject({
+        threadId: "thread-existing",
+        permissions: CODEX_OCTANT_PROFILE,
+        config: { permissions: { [CODEX_OCTANT_PROFILE]: { extends: ":workspace" } } },
+      });
+    });
+
+    it("keeps Octant's profile under Strict and the built-in sandbox before profiles", async () => {
+      for (const input of [{}, { strict: false, version: "0.168.0" }]) {
+        const { thread, turn } = await run(input);
+        expect(thread).not.toHaveProperty("permissions");
+        expect(JSON.stringify(thread)).not.toContain(CODEX_OCTANT_PROFILE);
+        expect(turn).toHaveProperty("sandboxPolicy");
+        expect(turn).not.toHaveProperty("permissions");
+      }
+    });
+  });
+
+  describe("Codex's own Project configuration", () => {
+    const trustedSetup = {
+      subagents: true,
+      webTools: true,
+      skills: true,
+      toolServers: true,
+      hooks: true,
+      projectCode: true,
+    } as const;
+    const startWith = async (input: {
+      readonly executionPolicy: "approval-gated" | "plan";
+      readonly strict?: boolean;
+      readonly projectCode: boolean;
+    }) => {
+      const f = fixture();
+      const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId: "gpt-5.4" as never,
+          executionPolicy: input.executionPolicy,
+          ...(input.strict === undefined ? {} : { strict: input.strict }),
+          nativeSetup: { ...trustedSetup, projectCode: input.projectCode },
+        }),
+      );
+      await acquired.close();
+      return f.calls.find(({ method }) => method === "thread/start")?.input;
+    };
+
+    it("loads in a Project trusted for Codex outside Plan and Strict", async () => {
+      expect(
+        await startWith({ executionPolicy: "approval-gated", strict: false, projectCode: true }),
+      ).toMatchObject({ config: { projects: { [projectRoot]: { trust_level: "trusted" } } } });
+    });
+
+    it.each([
+      ["under Strict", { executionPolicy: "approval-gated", projectCode: true }],
+      ["in Plan", { executionPolicy: "plan", strict: false, projectCode: false }],
+      [
+        "in a Project not trusted for Codex",
+        { executionPolicy: "approval-gated", strict: false, projectCode: false },
+      ],
+    ] as const)("is not trusted by Octant %s", async (_name, input) => {
+      const thread = await startWith(input);
+      expect(thread).not.toHaveProperty(["config", "projects"]);
+    });
+  });
 
   it.each(["approval-gated", "auto-accept-edits"] as const)(
     "runs %s in Codex's own workspace-write sandbox outside Strict and in Octant's profile under Strict",

@@ -78,10 +78,21 @@ export interface DebugSessionStartRequest {
   readonly debugPorts: 0 | 1;
   /** The adapter's declared `runtimes`; `native` marks one that debugs native code. */
   readonly adapterRuntimes: ReadonlyArray<string>;
+  /**
+   * The thread's resolved Strict value. Read on Windows only, where a session
+   * runs unconfined outside Strict; a request that does not say counts as
+   * Strict.
+   */
+  readonly strict?: boolean | undefined;
 }
 
 export interface DebugSessionLaunchShape {
-  readonly confinement: "seatbelt" | "bubblewrap";
+  /**
+   * `none` on Windows outside Strict: Windows has no sandbox Octant can use
+   * yet, so the adapter and program run with the person's own reach, as a
+   * thread terminal there does, and nothing claims a wall.
+   */
+  readonly confinement: "seatbelt" | "bubblewrap" | "none";
   /** The adapter launches the program as its own child in the same capsule. */
   readonly capsule: "adapter-and-program";
   readonly checkout: "read-write";
@@ -118,7 +129,8 @@ export type DebugSessionStartDecision =
 export function decideDebugSessionStart(
   request: DebugSessionStartRequest,
 ): DebugSessionStartDecision {
-  if (request.platform !== "macos" && request.platform !== "linux") {
+  const windows = request.platform === "windows" && request.strict === false;
+  if (request.platform !== "macos" && request.platform !== "linux" && !windows) {
     return { status: "refused", reason: "unsupported-platform" };
   }
   // Debugging native code on macOS needs the program's task port, which no
@@ -158,12 +170,15 @@ export function decideDebugSessionStart(
   return {
     status: "launch",
     shape: {
-      confinement: linux ? "bubblewrap" : "seatbelt",
+      confinement: windows ? "none" : linux ? "bubblewrap" : "seatbelt",
       capsule: "adapter-and-program",
       checkout: "read-write",
       writes: "checkout-and-session-state",
       execution: "confined-as-terminal",
-      network: request.posture === "full-access" ? "allow" : "proxied-under-thread-rules",
+      // Windows has no egress proxy to hold a session to the thread's rules;
+      // the confirmation above is what a level below Full access asks there.
+      network:
+        windows || request.posture === "full-access" ? "allow" : "proxied-under-thread-rules",
       debugPort:
         request.debugPorts === 0
           ? "none"

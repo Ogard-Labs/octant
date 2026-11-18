@@ -417,6 +417,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "background characters ascii letters glyphs symbols custom pattern",
         },
         {
+          id: settingId("app-background-character-pattern"),
+          label: "Character pattern",
+          scope: "app",
+          keywords:
+            "background characters pattern blotches currents rings all in turn shape ascii glyphs custom",
+        },
+        {
           id: settingId("app-background-character-density"),
           label: "Character density",
           scope: "app",

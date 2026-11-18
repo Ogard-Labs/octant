@@ -1,6 +1,6 @@
 import { access, lstat, mkdir } from "node:fs/promises";
 import { constants } from "node:fs";
-import { delimiter, join } from "node:path";
+import { delimiter, join, win32 } from "node:path";
 
 /**
  * A directory name a scaffold may be asked about.
@@ -57,21 +57,36 @@ export async function makeScaffoldDirectory(input: {
  *
  * Resolved by looking along `PATH` rather than by running anything: asking a
  * generator whether it exists would already be the run the user has not
- * approved yet.
+ * approved yet. On Windows a tool is found as Windows finds it, by name with
+ * each `PATHEXT` extension (`bunx.exe`, `npx.cmd`), as the test and scaffold
+ * runner then starts it; the bare name alone is never a program there.
  */
 export async function resolveAvailableTools(
   tools: ReadonlyArray<string>,
   environmentPath: string | undefined = process.env["PATH"],
+  host: { readonly platform: NodeJS.Platform; readonly pathExtensions?: string | undefined } = {
+    platform: process.platform,
+    pathExtensions: process.env["PATHEXT"],
+  },
 ): Promise<ReadonlyArray<string>> {
-  const directories = (environmentPath ?? "").split(delimiter).filter((entry) => entry.length > 0);
+  const onWindows = host.platform === "win32";
+  const directories = (environmentPath ?? "")
+    .split(onWindows ? win32.delimiter : delimiter)
+    .filter((entry) => entry.length > 0);
+  const extensions = (host.pathExtensions ?? ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .filter((extension) => extension.startsWith("."));
   const found = await Promise.all(
     tools.map(async (tool) => {
+      const names = onWindows ? extensions.map((extension) => tool + extension) : [tool];
       for (const directory of directories) {
-        try {
-          await access(join(directory, tool), constants.X_OK);
-          return tool;
-        } catch {
-          continue;
+        for (const name of names) {
+          try {
+            await access(join(directory, name), constants.X_OK);
+            return tool;
+          } catch {
+            continue;
+          }
         }
       }
       return undefined;
